@@ -20,8 +20,16 @@
  * reference implementation of exactly this operation; the platform image
  * carries `openssh-client` for it.
  *
- * The scan connects to the address the egress guard PINNED, never to the name
- * — resolving twice would reopen the DNS-rebind window the guard just closed.
+ * Which floor this applies, and why it is not the platform's usual one: the
+ * host has to be reachable by the integration RUNNER, whose CONNECT egress
+ * listener takes no operator allowlist at all. So the gate here is bare
+ * `resolveAndCheckHost` — the very predicate that listener uses — and NOT
+ * `checkEgressHost`, which honours `EGRESS_ALLOW_INTERNAL_HOSTS`. Going
+ * through the looser one would create connections that pass the form and then
+ * fail every single run.
+ *
+ * The scan connects to the address that gate PINNED, never to the name
+ * — resolving twice would reopen the DNS-rebind window the gate just closed.
  * One consequence worth knowing: for a name behind several A records this
  * pins the key of the host that answered. A later connection reaching a
  * different backend fails closed on the key mismatch, which is the correct
@@ -29,7 +37,7 @@
  * shared host key (or a connection per host).
  */
 
-import { checkEgressHost } from "./egress-host-guard.ts";
+import { resolveAndCheckHost, type HostResolver } from "@appstrate/core/ssrf";
 import { fingerprintPublicKey } from "./openssh-key.ts";
 import { logger } from "./logger.ts";
 
@@ -70,6 +78,8 @@ export type SshHostKeyScan =
 export interface ScanSshHostKeyOptions {
   /** Test seam — defaults to spawning the real `ssh-keyscan`. */
   runKeyscan?: (args: string[]) => Promise<{ stdout: string; stderr: string; code: number }>;
+  /** Test seam — defaults to the system resolver, as the runner's listener uses. */
+  resolveHost?: HostResolver;
 }
 
 async function spawnKeyscan(
@@ -124,12 +134,23 @@ export async function scanSshHostKey(
     return { ok: false, reason: "unreachable", detail: "port must be between 1 and 65535" };
   }
 
-  // Same floor as every other platform egress: private, loopback, link-local
-  // and cloud-metadata addresses are refused, after resolution so a name
-  // cannot point at one. An SSH key would otherwise be a pivot into the
-  // network the platform itself sits on.
-  const gate = await checkEgressHost(host);
+  // The runner's floor, not the platform's: private, loopback, link-local and
+  // cloud-metadata addresses are refused after resolution (so a name cannot
+  // point at one), with no operator allowlist — see the note at the top. An
+  // SSH key would otherwise be a pivot into the network the platform sits on.
+  const gate = await resolveAndCheckHost(host, {
+    ...(opts.resolveHost ? { resolve: opts.resolveHost } : {}),
+  });
   if (gate.blocked) {
+    // A name that resolves nowhere is a typo, not a blocked target: saying
+    // "blocked" there sends the user hunting for a firewall rule.
+    if (gate.reason === "resolution-failed") {
+      return {
+        ok: false,
+        reason: "unreachable",
+        detail: gate.detail ?? "the host name does not resolve",
+      };
+    }
     return {
       ok: false,
       reason: "blocked-host",

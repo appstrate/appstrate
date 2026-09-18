@@ -11401,12 +11401,12 @@ export interface operations {
                         };
                         /** @description Present when the auth declares `_meta["dev.appstrate/provisioning"]`: the material the platform minted that must now reach the target host. Public halves only — the private key is sealed in the connection's envelope and is never returned. Shown once; nothing persists it. */
                         provisioned?: {
-                            kind: string;
                             /** @description `SHA256:…` of the TARGET's host key, for the user to compare against their own machine. */
                             host_fingerprint: string;
-                            public_key: string;
                             /** @description A shell block to paste on the target host. */
                             install_command: string;
+                            /** @description The shell block that undoes the install. Deleting the connection destroys the private half and nothing else — the platform cannot reach the target to take its key out of `authorized_keys`. */
+                            revoke_command: string;
                         };
                     };
                 };

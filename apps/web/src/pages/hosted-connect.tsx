@@ -47,10 +47,9 @@ type Phase = "loading" | "form" | "submitting" | "done" | "provisioned" | "error
  * the private half never leaves the server.
  */
 interface Provisioned {
-  kind: string;
   host_fingerprint: string;
-  public_key: string;
   install_command: string;
+  revoke_command: string;
 }
 
 export function HostedConnectPage() {
@@ -90,6 +89,16 @@ export function HostedConnectPage() {
     };
   }, []);
 
+  /** Tell whatever opened this window that the connection now exists. */
+  const announceConnected = () => {
+    if (!context) return;
+    publishConnectCompletion(
+      { ok: true, packageId: context.package_id },
+      window.opener as Window | null,
+      window.location.origin,
+    );
+  };
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     // A missing CSRF nonce means the page session is broken (cookie cleared or
@@ -106,15 +115,13 @@ export function HostedConnectPage() {
         params: { header: { "x-connect-csrf": context.csrf } },
         body: { credentials: values },
       });
-      publishConnectCompletion(
-        { ok: true, packageId: context.package_id },
-        window.opener as Window | null,
-        window.location.origin,
-      );
-
       // A provisioning auth hands back material the user must now install on
-      // their own machine. Closing the window on a timer would take it away
-      // before they could read it, so that path stops here and waits.
+      // their own machine, and this page holds the only copy — nothing
+      // persists it and no endpoint re-serves it. The completion signal is
+      // therefore WITHHELD here: the opener (`useHostedConnectPopup`) closes
+      // this window the instant it sees `ok: true`, which would take the block
+      // away before it could be read. It is announced on the user's own
+      // "I installed the key" instead.
       const minted = (data as { provisioned?: Provisioned } | undefined)?.provisioned;
       if (minted) {
         setProvisioned(minted);
@@ -122,6 +129,7 @@ export function HostedConnectPage() {
         return;
       }
 
+      announceConnected();
       setPhase("done");
       // Close the popup/tab after a short confirmation, mirroring the OAuth page.
       setTimeout(() => {
@@ -191,9 +199,7 @@ export function HostedConnectPage() {
                       .catch(() => setCopied(false));
                   }}
                 >
-                  {t(copied ? "integration.connect.provisioned.copied" : "common.copy", {
-                    defaultValue: copied ? "Copié" : "Copier",
-                  })}
+                  {copied ? t("integration.connect.provisioned.copied") : t("btn.copy")}
                 </Button>
               </div>
               <pre className="bg-muted/40 max-h-80 overflow-auto rounded-md border p-3 font-mono text-[11px] leading-relaxed whitespace-pre">
@@ -213,16 +219,32 @@ export function HostedConnectPage() {
               </p>
             </div>
 
+            <details className="space-y-1">
+              <summary className="cursor-pointer text-xs font-semibold">
+                {t("integration.connect.provisioned.revokeLabel")}
+              </summary>
+              <p className="text-muted-foreground text-xs">
+                {t("integration.connect.provisioned.revokeHint")}
+              </p>
+              <pre className="bg-muted/40 mt-1 max-h-48 overflow-auto rounded-md border p-3 font-mono text-[11px] leading-relaxed whitespace-pre">
+                {provisioned.revoke_command}
+              </pre>
+            </details>
+
             <Button
               type="button"
               className="w-full"
+              data-testid="provisioned-done"
               onClick={() => {
+                // Announcing only now is what kept this window open long
+                // enough to read: the opener closes it on this signal.
+                announceConnected();
+                setPhase("done");
                 try {
                   window.close();
                 } catch {
-                  /* not a popup — nothing to close */
+                  /* not a popup — the confirmation stays visible */
                 }
-                setPhase("done");
               }}
             >
               {t("integration.connect.provisioned.doneBtn")}

@@ -18,13 +18,13 @@
   "setup_guide": {
     "steps": [
       {
-        "label": "Créez un compte Unix dédié sur le serveur cible — pas root, et idéalement sans shell interactif. C'est lui qui portera la clé, et le rayon d'action de l'agent est celui de ce compte."
+        "label": "Créez un compte Unix dédié sur le serveur cible — pas root. Laissez-lui un shell POSIX (/bin/sh) : un forced command SSH passe par le shell de login, donc un compte en nologin refuserait tous les verbes. Ce qui restreint la clé, c'est restrict + command=, pas l'absence de shell. Le rayon d'action de l'agent est celui de ce compte."
       },
       {
         "label": "Indiquez ci-dessous l'hôte, le port et ce compte. Appstrate génère la paire de clés lui-même : rien à coller, et la clé privée n'est ni affichée ni saisie nulle part — elle naît chiffrée dans le trousseau."
       },
       {
-        "label": "À la création, une commande d'installation s'affiche. Collez-la sur le serveur : elle installe la clé publique avec restrict + command= et dépose le dispatcher, qui n'exécute que les verbes de la liste. Elle imprime aussi l'empreinte de l'hôte — comparez-la avec celle affichée à l'écran."
+        "label": "À la création, une commande d'installation s'affiche. Collez-la sur le serveur : elle installe la clé publique avec restrict + command= et dépose le dispatcher, qui n'exécute que les verbes de la liste et le sous-système sftp en lecture seule. Elle imprime aussi l'empreinte de l'hôte — comparez-la avec celle affichée à l'écran. Le même écran donne la commande de retrait : gardez-la, supprimer la connexion dans Appstrate ne retire pas la clé de votre serveur."
       }
     ]
   },
@@ -40,39 +40,46 @@
             "private_key": {
               "type": "string",
               "title": "Clé privée Appstrate",
-              "description": "Générée par la plateforme, jamais saisie ni affichée. Livrée au seul runner @appstrate/ssh-mcp, en fichier 0600 ; elle n'entre jamais dans le conteneur de l'agent."
+              "description": "Générée par la plateforme, jamais saisie ni affichée. Livrée au seul runner @appstrate/ssh-mcp, en fichier 0600 ; elle n'entre jamais dans le conteneur de l'agent.",
+              "pattern": "^-----BEGIN OPENSSH PRIVATE KEY-----"
             },
             "host": {
               "type": "string",
               "title": "Hôte",
-              "description": "Nom DNS ou adresse IP publique du serveur. Une adresse privée est refusée : l'egress du runner ne la laisse pas passer."
+              "description": "Nom DNS ou adresse IP publique du serveur. Une adresse privée est refusée : l'egress du runner ne la laisse pas passer.",
+              "pattern": "^[A-Za-z0-9]([A-Za-z0-9.:-]{0,253}[A-Za-z0-9])?$"
             },
             "port": {
               "type": "string",
               "title": "Port SSH",
-              "default": "22"
+              "default": "22",
+              "pattern": "^[0-9]{1,5}$"
             },
             "user": {
               "type": "string",
               "title": "Compte Unix sur la cible",
-              "description": "Le compte dédié qui portera la clé — pas root. Ce que l'agent peut faire, c'est ce que ce compte peut faire."
+              "description": "Le compte dédié qui portera la clé — pas root. Ce que l'agent peut faire, c'est ce que ce compte peut faire.",
+              "pattern": "^[a-z_][a-z0-9_-]{0,31}$"
             },
             "host_key": {
               "type": "string",
               "title": "Clé publique de l'hôte",
-              "description": "Relevée par la plateforme à la création et épinglée. C'est l'identité du SERVEUR, pas la vôtre. Tout changement refuse la connexion — il n'y a pas d'acceptation à la première connexion, personne ne signe dans un run autonome."
+              "description": "Relevée par la plateforme à la création et épinglée. C'est l'identité du SERVEUR, pas la vôtre. Tout changement refuse la connexion — il n'y a pas d'acceptation à la première connexion, personne ne signe dans un run autonome.",
+              "pattern": "^(ssh-ed25519|ssh-rsa) [A-Za-z0-9+/]+=*$"
             },
             "allowed_verbs": {
               "type": "string",
               "title": "Verbes autorisés",
               "default": "[\"hostname\", \"uptime\", \"disk_usage\"]",
-              "description": "Tableau JSON de noms. Seul le NOM part sur le fil : c'est le dispatcher installé sur la cible qui décide ce qu'il exécute, jamais une commande envoyée d'ici. La commande d'installation générée implémente hostname, uptime, disk_usage, memory et whoami."
+              "description": "Tableau JSON de noms. Seul le NOM part sur le fil : c'est le dispatcher installé sur la cible qui décide ce qu'il exécute, jamais une commande envoyée d'ici. La commande d'installation générée implémente hostname, uptime, disk_usage, memory et whoami. Un tableau vide — ou ce champ effacé — n'autorise AUCUN verbe.",
+              "pattern": "^\\[\\s*(\"[a-z][a-z0-9_]{0,31}\"\\s*(,\\s*\"[a-z][a-z0-9_]{0,31}\"\\s*)*)?\\]$"
             },
             "read_only": {
               "type": "string",
               "title": "Lecture seule",
               "default": "1",
-              "description": "Refuse ssh_write_file côté serveur. Défense en profondeur : la barrière qui compte est le compte Unix sur la cible."
+              "description": "Refuse ssh_write_file côté serveur, et fait poser `sftp-server -R` par la commande d'installation. Défense en profondeur : la barrière qui compte est le compte Unix sur la cible.",
+              "pattern": "^[01]$"
             }
           }
         }
@@ -85,13 +92,27 @@
           }
         },
         "env": {
-          "SSH_PRIVATE_KEY_PATH": { "value": "/run/secrets/ssh_key" },
-          "SSH_HOST": { "value": "{$credential.host}" },
-          "SSH_PORT": { "value": "{$credential.port}" },
-          "SSH_USER": { "value": "{$credential.user}" },
-          "SSH_HOST_KEY": { "value": "{$credential.host_key}" },
-          "SSH_ALLOWED_VERBS": { "value": "{$credential.allowed_verbs}" },
-          "SSH_READ_ONLY": { "value": "{$credential.read_only}" }
+          "SSH_PRIVATE_KEY_PATH": {
+            "value": "/run/secrets/ssh_key"
+          },
+          "SSH_HOST": {
+            "value": "{$credential.host}"
+          },
+          "SSH_PORT": {
+            "value": "{$credential.port}"
+          },
+          "SSH_USER": {
+            "value": "{$credential.user}"
+          },
+          "SSH_HOST_KEY": {
+            "value": "{$credential.host_key}"
+          },
+          "SSH_ALLOWED_VERBS": {
+            "value": "{$credential.allowed_verbs}"
+          },
+          "SSH_READ_ONLY": {
+            "value": "{$credential.read_only}"
+          }
         }
       },
       "_meta": {

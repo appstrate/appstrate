@@ -3,9 +3,15 @@
 /**
  * `scanSshHostKey` decides three things: whether the target is allowed to be
  * reached at all, which key to keep when the server offers several, and how
- * each failure reads. The first is exercised against the real egress guard —
- * a stubbed guard would test the stub — and the rest through the `runKeyscan`
- * seam, so no test here needs a server.
+ * each failure reads. The first is exercised against the real SSRF floor —
+ * a stubbed floor would test the stub — and the rest through the `runKeyscan`
+ * and `resolveHost` seams, so no test here needs a server.
+ *
+ * Which floor, and why it is the point of this file: the host has to be
+ * reachable by the integration RUNNER, whose CONNECT egress listener honours
+ * NO operator allowlist. So `EGRESS_ALLOW_INTERNAL_HOSTS` must NOT open this
+ * path — a connection created on the looser floor passes the form and then
+ * fails every single run.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -76,14 +82,56 @@ describe("scanSshHostKey — egress floor", () => {
     if (!res.ok) expect(res.reason).toBe("blocked-host");
   });
 
-  it("lets the operator allowlist through — the documented LAN opt-in", async () => {
+  it("refuses a loopback literal the operator allowlists", async () => {
     const scanner = stubScanner(`127.0.0.1 ${ED25519}`);
-    // The harness's own preload already trusts 127.0.0.1, which is what makes
-    // this the positive control for the three refusals above: same address,
-    // opposite verdict, and the only difference is the allowlist.
+    // The harness's own preload already trusts 127.0.0.1 — and that must not
+    // matter here. `checkEgressHost` would let this through; the runner would
+    // not, so this path uses the bare resolving floor instead.
     const res = await scanSshHostKey("127.0.0.1", 22, { runKeyscan: scanner.run });
-    expect(res.ok).toBe(true);
-    if (res.ok) expect(res.hostKey).toBe(ED25519);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe("blocked-host");
+    expect(scanner.calls).toHaveLength(0);
+  });
+
+  /**
+   * The case a no-DNS blocklist structurally cannot see, and the one an
+   * operator actually writes: `EGRESS_ALLOW_INTERNAL_HOSTS` holds HOSTNAMES
+   * (docs/ENV.md), and a hostname trips no literal check. Only the resolving
+   * gate can refuse it — and only if it ignores the allowlist.
+   */
+  it("refuses an allowlisted NAME that resolves to a private address", async () => {
+    const scanner = stubScanner(`nas.internal.example ${ED25519}`);
+    const prev = process.env.EGRESS_ALLOW_INTERNAL_HOSTS;
+    process.env.EGRESS_ALLOW_INTERNAL_HOSTS = "nas.internal.example";
+    resetEnvCache();
+    try {
+      const res = await scanSshHostKey("nas.internal.example", 22, {
+        runKeyscan: scanner.run,
+        resolveHost: async () => ["10.4.5.6"],
+      });
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.reason).toBe("blocked-host");
+      expect(scanner.calls).toHaveLength(0);
+    } finally {
+      if (prev === undefined) delete process.env.EGRESS_ALLOW_INTERNAL_HOSTS;
+      else process.env.EGRESS_ALLOW_INTERNAL_HOSTS = prev;
+      resetEnvCache();
+    }
+  });
+
+  it("reads a name that does not resolve as unreachable, not as blocked", async () => {
+    // "Blocked" sends someone hunting for a firewall rule; a typo is a typo.
+    const res = await scanSshHostKey("nope.example.test", 22, {
+      runKeyscan: stubScanner("").run,
+      resolveHost: async () => {
+        throw new Error("queryA ENOTFOUND nope.example.test");
+      },
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.reason).toBe("unreachable");
+      expect(res.detail).toMatch(/ENOTFOUND/);
+    }
   });
 });
 
@@ -98,34 +146,25 @@ describe("scanSshHostKey — port validation", () => {
 });
 
 /**
- * The selection and failure paths need a host that survives the egress guard.
- * `EGRESS_ALLOW_INTERNAL_HOSTS` is the operator's own escape hatch for exactly
- * this — a host declared trusted skips resolution — so these drive it through
- * the real guard rather than mocking the guard away.
+ * The selection and failure paths need a host that survives the SSRF floor.
+ * Since that floor no longer takes an operator escape hatch, they drive it
+ * through the `resolveHost` seam with a publicly-routable answer — the real
+ * gate still runs, only the DNS lookup is supplied.
  */
 describe("scanSshHostKey — key selection", () => {
-  const allowed = "ssh-target.internal";
-  // `getEnv()` memoises, so setting the variable is not enough on its own —
-  // the cache has to be dropped on the way in AND on the way out, or the
-  // allowlist leaks into whatever runs next in this process.
-  const withAllowlist = async <T>(fn: () => Promise<T>): Promise<T> => {
-    const prev = process.env.EGRESS_ALLOW_INTERNAL_HOSTS;
-    process.env.EGRESS_ALLOW_INTERNAL_HOSTS = allowed;
-    resetEnvCache();
-    try {
-      return await fn();
-    } finally {
-      if (prev === undefined) delete process.env.EGRESS_ALLOW_INTERNAL_HOSTS;
-      else process.env.EGRESS_ALLOW_INTERNAL_HOSTS = prev;
-      resetEnvCache();
-    }
-  };
+  const allowed = "ssh-target.example";
+  /** What the stubbed resolver answers, and therefore what the scan must dial. */
+  const PINNED = "203.0.113.24";
+  const withResolver = <T>(fn: (resolveHost: () => Promise<string[]>) => Promise<T>): Promise<T> =>
+    fn(async () => [PINNED]);
 
   it("keeps ed25519 when the server offers both, and drops the host column", async () => {
     const scanner = stubScanner(
       `# ${allowed}:22 SSH-2.0-OpenSSH_9.7\n${allowed} ${RSA}\n${allowed} ${ED25519}\n`,
     );
-    const res = await withAllowlist(() => scanSshHostKey(allowed, 22, { runKeyscan: scanner.run }));
+    const res = await withResolver((resolveHost) =>
+      scanSshHostKey(allowed, 22, { runKeyscan: scanner.run, resolveHost }),
+    );
     expect(res.ok).toBe(true);
     if (res.ok) {
       expect(res.hostKey).toBe(ED25519);
@@ -135,42 +174,49 @@ describe("scanSshHostKey — key selection", () => {
 
   it("falls back to rsa when ed25519 is not offered", async () => {
     const scanner = stubScanner(`${allowed} ${RSA}\n`);
-    const res = await withAllowlist(() => scanSshHostKey(allowed, 22, { runKeyscan: scanner.run }));
+    const res = await withResolver((resolveHost) =>
+      scanSshHostKey(allowed, 22, { runKeyscan: scanner.run, resolveHost }),
+    );
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.hostKey).toBe(RSA);
   });
 
   it("passes the port and a bounded timeout to the scanner", async () => {
     const scanner = stubScanner(`${allowed} ${ED25519}\n`);
-    await withAllowlist(() => scanSshHostKey(allowed, 2222, { runKeyscan: scanner.run }));
+    await withResolver((resolveHost) =>
+      scanSshHostKey(allowed, 2222, { runKeyscan: scanner.run, resolveHost }),
+    );
     const argv = scanner.calls[0]!;
     expect(argv).toContain("-p");
     expect(argv[argv.indexOf("-p") + 1]).toBe("2222");
     expect(argv).toContain("-T");
-    // The target is the last argument, and it is never shell-interpolated.
-    expect(argv[argv.length - 1]).toBe(allowed);
+    // The target is the last argument, it is the address the gate PINNED (not
+    // the name — resolving twice reopens the rebind window), and it is never
+    // shell-interpolated.
+    expect(argv[argv.length - 1]).toBe(PINNED);
   });
 
   it("reports an unreachable host distinctly from a host that answered", async () => {
     const empty = stubScanner("", "", 0);
-    const unreachable = await withAllowlist(() =>
-      scanSshHostKey(allowed, 22, { runKeyscan: empty.run }),
+    const unreachable = await withResolver((resolveHost) =>
+      scanSshHostKey(allowed, 22, { runKeyscan: empty.run, resolveHost }),
     );
     expect(unreachable.ok).toBe(false);
     if (!unreachable.ok) expect(unreachable.reason).toBe("unreachable");
 
     // Answered, but with nothing we are willing to pin (e.g. ssh-dss only).
     const dssOnly = stubScanner(`${allowed} ssh-dss AAAAB3NzaC1kc3MAAACB\n`);
-    const noKey = await withAllowlist(() =>
-      scanSshHostKey(allowed, 22, { runKeyscan: dssOnly.run }),
+    const noKey = await withResolver((resolveHost) =>
+      scanSshHostKey(allowed, 22, { runKeyscan: dssOnly.run, resolveHost }),
     );
     expect(noKey.ok).toBe(false);
     if (!noKey.ok) expect(noKey.reason).toBe("no-key");
   });
 
   it("does not read a missing scanner binary as an unreachable server", async () => {
-    const res = await withAllowlist(() =>
+    const res = await withResolver((resolveHost) =>
       scanSshHostKey(allowed, 22, {
+        resolveHost,
         runKeyscan: async () => {
           throw new Error("spawn ssh-keyscan ENOENT");
         },

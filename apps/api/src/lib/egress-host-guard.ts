@@ -23,11 +23,9 @@ import { isAllowedInternalIdpHost } from "@appstrate/connect";
  *
  * Lower-level primitive; most callers should use {@link checkEgressUrl}, which
  * layers URL parse + scheme floor on top so the whole egress decision lives in
- * one place. Exported for the one egress site that is NOT a URL fetch: the SSH
- * host-key scan (`lib/ssh-host-key.ts`), where there is no scheme to floor and
- * the caller owns the socket, so it needs the host gate on its own.
+ * one place.
  */
-export async function checkEgressHost(hostname: string): Promise<ResolvedHostCheck> {
+async function checkEgressHost(hostname: string): Promise<ResolvedHostCheck> {
   if (isAllowedInternalIdpHost(hostname)) {
     return { blocked: false, pinnedAddress: hostname };
   }

@@ -52,6 +52,8 @@ import { tmpdir, homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { proxyUrlFromEnv } from "./proxy-connect.ts";
+
 // ──────────────────────────── configuration ───────────────────────────
 
 export interface SshConfig {
@@ -108,6 +110,16 @@ function required(env: NodeJS.ProcessEnv, name: string): string {
   return v.trim();
 }
 
+/**
+ * A verb NAME. Enforced here and not only where the credential was written,
+ * because design rule 2 is a property of this server: whatever the connection
+ * carries, what leaves this process must be a bare token. A credential created
+ * outside the hosted form — the programmatic `connect/fields` import, a
+ * restored fixture — would otherwise be able to put a shell string in
+ * `SSH_ALLOWED_VERBS` and have `ssh_exec` hand it to the remote login shell.
+ */
+const VERB_NAME_RE = /^[a-z][a-z0-9_]{0,31}$/;
+
 function parseVerbs(raw: string | undefined): string[] {
   if (raw === undefined || raw.trim() === "") return [];
   let parsed: unknown;
@@ -119,7 +131,15 @@ function parseVerbs(raw: string | undefined): string[] {
   if (!Array.isArray(parsed) || !parsed.every((v) => typeof v === "string")) {
     throw new Error("SSH_ALLOWED_VERBS must be a JSON array of strings");
   }
-  return parsed;
+  const bad = (parsed as string[]).filter((v) => !VERB_NAME_RE.test(v));
+  if (bad.length > 0) {
+    throw new Error(
+      `SSH_ALLOWED_VERBS carries ${bad.map((v) => JSON.stringify(v)).join(", ")}, which is not a ` +
+        "verb name (lowercase letters, digits and _ only). A verb is a NAME the target resolves, " +
+        "never a command rendered here.",
+    );
+  }
+  return parsed as string[];
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): SshConfig {
@@ -127,7 +147,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SshConfig {
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
     throw new Error(`SSH_PORT must be a TCP port (got: ${env.SSH_PORT})`);
   }
-  const proxy = env.HTTPS_PROXY ?? env.https_proxy ?? null;
+  // Same reader as the ProxyCommand helper: two readers of one signal drift,
+  // and this one drifting means no ProxyCommand and a DIRECT dial that skips
+  // the sidecar's SSRF floor entirely.
+  const proxy = proxyUrlFromEnv(env);
   return {
     host: required(env, "SSH_HOST"),
     port,
@@ -136,7 +159,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SshConfig {
     hostKey: parseHostKey(required(env, "SSH_HOST_KEY")),
     verbs: parseVerbs(env.SSH_ALLOWED_VERBS),
     readOnly: env.SSH_READ_ONLY === "1" || env.SSH_READ_ONLY === "true",
-    proxyUrl: proxy && proxy.trim() !== "" ? proxy.trim() : null,
+    proxyUrl: proxy,
   };
 }
 
@@ -478,6 +501,14 @@ function sshFailure(what: string, res: RunResult): Error {
     hint = "\nhint: the target rejected the key — check authorized_keys on the dedicated account.";
   } else if (/CONNECT refused by proxy/i.test(tail)) {
     hint = "\nhint: the egress proxy refused the target (private address or blocked host).";
+  } else if (what === "sftp" && /connection closed/i.test(tail)) {
+    // sshd routes the sftp SUBSYSTEM through the account's forced command. A
+    // dispatcher with no sftp arm refuses it and the session dies before a
+    // single packet — which reads as a dead host unless it is named.
+    hint =
+      "\nhint: the target's forced command has no sftp arm, so the subsystem is refused before " +
+      "the session opens. Re-run the install block the connect screen printed — the current one " +
+      "execs `sftp-server -R` for this case.";
   }
   return new Error(`${what} failed (exit ${res.code}): ${tail}${hint}`);
 }

@@ -208,6 +208,35 @@ describe("loadConfig / parseHostKey", () => {
   it("treats an empty verb list as no verbs", () => {
     expect(loadConfig({ ...ENV, SSH_ALLOWED_VERBS: "" }).verbs).toEqual([]);
   });
+
+  /**
+   * Design rule 2 — "there is no free-form command tool" — is a property of
+   * THIS server, so it has to hold whatever wrote the credential. The hosted
+   * form's provisioner validates verb names, but the programmatic
+   * `connect/fields` import does not run one: without this check a bag created
+   * there could put a shell string in SSH_ALLOWED_VERBS and `ssh_exec` would
+   * hand it, verbatim, to the remote login shell.
+   */
+  it.each(['["rm -rf /"]', '["uptime; id"]', '["Hostname"]', '["../../etc"]', '["a b"]'])(
+    "refuses %s: a verb is a NAME, never a command",
+    (allowed) => {
+      expect(() => loadConfig({ ...ENV, SSH_ALLOWED_VERBS: allowed })).toThrow(/not a\s+verb name/);
+    },
+  );
+
+  /**
+   * One reader of the proxy signal, shared with the ProxyCommand helper. Two
+   * readers drift, and this one drifting means no ProxyCommand and a DIRECT
+   * dial that skips the sidecar's SSRF floor entirely.
+   */
+  it.each(["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"])(
+    "picks the proxy up from %s, exactly as the ProxyCommand helper does",
+    (name) => {
+      const cfg = loadConfig({ ...ENV, [name]: "http://sidecar:39472" });
+      expect(cfg.proxyUrl).toBe("http://sidecar:39472");
+      expect(cfg.proxyUrl).toBe(proxyUrlFromEnv({ [name]: "http://sidecar:39472" }));
+    },
+  );
 });
 
 describe("renderKnownHosts", () => {

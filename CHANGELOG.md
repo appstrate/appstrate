@@ -19,8 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `/run/secrets/ssh_key`, `0600`); it never enters the agent container.
 
   There is deliberately **no free-form command tool**. `ssh_exec` sends the bare
-  NAME of a verb from the connection's closed allowlist and the target's
-  forced-command dispatcher decides what it means — SSH `exec` runs through the
+  NAME of a verb from the connection's closed allowlist — a shape the server
+  re-checks itself, so the rule holds whatever wrote the credential — and the
+  target's forced-command dispatcher decides what it means — SSH `exec` runs through the
   remote login shell, so any string rendered on this side would be shell input
   on the far side, and a command allowlist over a shell string cannot be made to
   hold (Teleport has no per-command SSH policy either; it brokers hosts and
@@ -32,7 +33,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
   The server shells out to the `ssh`/`sftp` clients the bun runner image already
   bakes in, and reaches a proxied target through an OpenSSH `ProxyCommand` that
-  speaks HTTP CONNECT to the sidecar's egress listener. A target on a private
+  speaks HTTP CONNECT to the sidecar's egress listener. A forced command
+  intercepts the sftp SUBSYSTEM too, so the generated dispatcher carries an arm
+  for it that execs `sftp-server -R`; without one the session is refused before
+  a packet and the three file tools die on an opaque "Connection closed". A target on a private
   address is refused by the SSRF floor on that path — a public VPS works, a LAN
   box does not, and that is a decision, not a bug (#1228). Per-connection host
   scoping of the egress listener is #1458.
@@ -52,22 +56,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
   After creation the connect page shows the one block to paste on the target —
   it installs the public key with `restrict` + `command=`, writes the
-  forced-command dispatcher with an exact-match arm per allowed verb, and
-  prints the host's own fingerprint so it can be compared against the pinned
-  one shown on screen. That comparison is the only step that can catch a
+  forced-command dispatcher (an exact-match arm per allowed verb, plus the sftp
+  subsystem in read-only mode) at a path carrying that key's own fingerprint so
+  a second connection to the same host cannot widen the first one's verb list,
+  and prints the host's own fingerprint — of the key type actually pinned — so
+  it can be compared against the one shown on screen. The same screen carries
+  the block that REMOVES the key: deleting the connection destroys the private
+  half and nothing else, because the platform cannot reach the target. That comparison is the only step that can catch a
   machine-in-the-middle on the platform's scan, and it costs one glance in a
   terminal the user is already in.
 
   The mechanism is generic, not SSH-specific: an auth opts in with
-  `_meta["dev.appstrate/provisioning"]` (AFPS §10) and the platform fills the
-  credentials it declares. The server strips provisioned names from the request
-  body, so a crafted submit cannot supply its own key.
+  `_meta["dev.appstrate/provisioning"]` (AFPS §10), declaring in `provides` the
+  names the platform owns — one declaration, read by the form to hide those
+  fields and checked server-side against the kind's floor. The hosted form
+  strips them from the request body, so a crafted submit cannot supply its own
+  key. The programmatic `connect/fields` import runs no provisioner by design
+  (the caller already holds the credential), which is why the shape constraints
+  the SSH runtime depends on live in `credentials.schema` — validated on both
+  doors — rather than in the provisioner.
 
   A target the RUNNER could not reach is refused at the form rather than
-  persisted: the platform's egress guard honours `EGRESS_ALLOW_INTERNAL_HOSTS`
-  while the runner's CONNECT floor has no allowlist at all, and creating a
-  connection on the looser of the two would have produced runs that always
-  fail. The platform image gains `openssh-client` for the one `ssh-keyscan`
+  persisted: the platform's usual egress guard honours
+  `EGRESS_ALLOW_INTERNAL_HOSTS` while the runner's CONNECT floor has no
+  allowlist at all, and creating a connection on the looser of the two would
+  have produced runs that always fail. So the host-key scan applies the bare
+  resolving floor — the very predicate the runner's listener uses — and not
+  that guard. A literal check alone would not have done it: the allowlist holds
+  hostNAMES, and a name never trips a no-DNS blocklist. The platform image gains `openssh-client` for the one `ssh-keyscan`
   call; it never opens an SSH session.
 
 ### Fixed

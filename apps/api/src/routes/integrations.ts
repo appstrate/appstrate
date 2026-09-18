@@ -698,6 +698,17 @@ export function createIntegrationsRouter() {
   // credential it already holds; the connection is created directly. No hosted
   // form, no end-user interaction. The interactive path is the Connect portal
   // (`connect/session`) — use that whenever a human/agent supplies the secret.
+  //
+  // This door deliberately runs NO provisioner: there is nothing to mint for a
+  // credential the caller already has, and a `private_key` arriving here is
+  // the caller's own by definition. Which means an invariant an integration's
+  // RUNTIME depends on cannot live in `services/connect/provisioning.ts` — it
+  // would hold on the hosted form and nowhere else. It belongs in the auth's
+  // `credentials.schema`, which `FieldsStrategy` validates on BOTH doors:
+  // `@appstrate/ssh` carries `pattern` for exactly that reason (the Unix
+  // account is concatenated into ssh's destination argument, a verb name must
+  // never be a shell string), and `@appstrate/ssh-mcp` re-checks the verb
+  // shape on the way out.
   router.post(
     "/:packageId{@[^/]+/[^/]+}/auths/:authKey/connect/fields",
     requirePermission("integrations", "connect"),
@@ -1080,7 +1091,9 @@ export function createIntegrationsRouter() {
       // and the target's host key). Runs BEFORE `complete` so the provisioned
       // values are persisted in the same envelope as the submitted ones, and
       // so a provisioning failure (unreachable host, blocked address) is a 400
-      // on the form instead of a connection nobody can use.
+      // on the form instead of a connection nobody can use. This is the ONLY
+      // door that provisions — see the note on `connect/fields` for what that
+      // means for any invariant the runtime depends on.
       const provisioned = await provisionCredentials(auth, body.credentials, {
         integrationId: claims.package_id,
       });

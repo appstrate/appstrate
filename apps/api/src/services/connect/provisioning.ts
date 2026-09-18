@@ -13,13 +13,30 @@
  *
  * Shape: an auth opts in with
  *
- *     "_meta": { "dev.appstrate/provisioning": { "kind": "ssh_keypair" } }
+ *     "_meta": {
+ *       "dev.appstrate/provisioning": {
+ *         "kind": "ssh_keypair",
+ *         "provides": ["private_key", "host_key", "read_only"]
+ *       }
+ *     }
  *
- * (AFPS §10 vendor extension). The registry below maps a `kind` to a function
- * that takes the submitted fields and returns the credentials to persist plus
- * the material to SHOW once. Provisioned names are merged over the submitted
- * bag, so a client cannot supply its own `private_key` and have it kept.
+ * (AFPS §10 vendor extension). `provides` is the ONE declaration of which
+ * names the platform owns: the connect form reads it to hide those fields, and
+ * {@link readProvisioning} checks it covers the kind's floor, so a manifest
+ * that under-declares fails loudly instead of putting a mintable secret back
+ * in front of the user. The registry below maps a `kind` to a function that
+ * takes the submitted fields and returns the credentials to persist plus the
+ * material to SHOW once. Provisioned names are merged over the submitted bag,
+ * so a client cannot supply its own `private_key`.
+ *
+ * What provisioning does NOT bound: the shape of the fields the user DOES
+ * supply. Those constraints live in the manifest's `credentials.schema`
+ * (`pattern`), because that schema is validated by `FieldsStrategy` on EVERY
+ * path that creates a connection — including the programmatic
+ * `POST .../connect/fields` import, which never runs a provisioner.
  */
+
+import { createHash } from "node:crypto";
 
 import { invalidRequest } from "../../lib/errors.ts";
 import { generateOpenSshEd25519KeyPair } from "../../lib/openssh-key.ts";
@@ -38,14 +55,17 @@ export interface ProvisionResult {
 }
 
 export interface ProvisionDisplay {
-  /** Short heading key the SPA localises (`integration.connect.provisioned.*`). */
-  kind: string;
   /** `SHA256:…` of the TARGET's host key, for the user to compare. */
   host_fingerprint: string;
-  /** The `authorized_keys` line the platform minted the private half of. */
-  public_key: string;
   /** A single shell block to paste on the target; installs the key + dispatcher. */
   install_command: string;
+  /**
+   * The block that undoes it. Deleting the connection destroys the private
+   * half here and nothing else: the platform cannot reach the target to take
+   * its own key out of `authorized_keys`, so the only way that line ever goes
+   * away is someone pasting this.
+   */
+  revoke_command: string;
 }
 
 /** The submitted, not-yet-persisted credential bag. */
@@ -76,8 +96,16 @@ const DEFAULT_VERBS: Record<string, string> = {
 /** A verb name on the wire. Strict, because it is interpolated into a script. */
 const VERB_NAME_RE = /^[a-z][a-z0-9_]{0,31}$/;
 
+/**
+ * Parse the connection's verb allowlist.
+ *
+ * An absent or empty value means NO verbs, never "all of them". Emptying a
+ * permission field has to narrow it: the connect form seeds the manifest's
+ * declared default, so someone who clears that box is asking for less, and a
+ * caller that omits the field entirely has declared nothing to allow.
+ */
 function parseVerbs(raw: unknown): string[] {
-  if (raw === undefined || raw === null || raw === "") return Object.keys(DEFAULT_VERBS);
+  if (raw === undefined || raw === null || raw === "") return [];
   let parsed: unknown;
   if (typeof raw === "string") {
     try {
@@ -115,47 +143,131 @@ function parseVerbs(raw: unknown): string[] {
 }
 
 /**
+ * Where a target keeps the public half of the host key we pinned. Enumerated
+ * rather than derived: this path is interpolated into a script that runs as
+ * root, and the set is exactly what {@link scanSshHostKey} can return.
+ */
+const HOST_KEY_PUB_FILE: Record<string, string> = {
+  "ssh-ed25519": "/etc/ssh/ssh_host_ed25519_key.pub",
+  "ssh-rsa": "/etc/ssh/ssh_host_rsa_key.pub",
+};
+
+function hostKeyPubFile(hostKey: string): string {
+  const type = hostKey.trim().split(/\s+/)[0] ?? "";
+  const path = HOST_KEY_PUB_FILE[type];
+  if (!path) throw invalidRequest(`unsupported host key type: ${type}`);
+  return path;
+}
+
+/** The base64 field of an `authorized_keys` line — unique per key, and `grep -F`-safe. */
+function publicKeyBase64(publicKey: string): string {
+  return publicKey.trim().split(/\s+/)[1] ?? "";
+}
+
+/**
  * Render the one block the user pastes on the target. Everything
- * interpolated is either platform-minted (the key) or has been validated
- * against a strict character class (the account, the verbs), so nothing here
- * can carry shell syntax across.
+ * interpolated is either platform-minted (the key, the dispatcher path, the
+ * host-key file) or has been validated against a strict character class (the
+ * account, the verbs), so nothing here can carry shell syntax across.
  *
  * It ends by printing the host fingerprint: the user is already in a session
  * on that machine, authenticated by their own `known_hosts`, so comparing it
  * with what the connect screen shows costs one glance and is the only step
  * that can catch a machine-in-the-middle on the platform's scan.
  */
-function renderInstallCommand(user: string, publicKey: string, verbs: string[]): string {
+function renderInstallCommand(
+  user: string,
+  publicKey: string,
+  verbs: string[],
+  hostKeyPub: string,
+  dispatchPath: string,
+): string {
   const cases = verbs.map((verb) => `    ${verb}) ${DEFAULT_VERBS[verb]} ;;`).join("\n");
 
   return [
     `# Paste as root (or with sudo) on the target.`,
     `set -eu`,
-    `install -d -m 700 -o ${user} -g ${user} ~${user}/.ssh`,
+    ``,
+    `# A forced command runs through the account's LOGIN SHELL, so an account`,
+    `# set to nologin refuses every verb — and it would only surface mid-run, as`,
+    `# a verb that ran and produced nothing. Refuse here instead. What restricts`,
+    `# this key is restrict + command=, not the absence of a shell.`,
+    `login_shell=$(getent passwd ${user} 2>/dev/null | cut -d: -f7)`,
+    `[ -n "\${login_shell:-}" ] || login_shell=$(awk -F: -v u=${user} '$1==u{print $7}' /etc/passwd)`,
+    `case "\${login_shell:-}" in`,
+    `  */nologin|*/false)`,
+    `    echo "appstrate: le compte ${user} a pour shell \${login_shell}." >&2`,
+    `    echo "  Un forced command SSH passe par le shell de login : aucun verbe ne s'exécuterait." >&2`,
+    `    echo "  Donnez-lui /bin/sh, puis rejouez ce bloc." >&2`,
+    `    exit 1 ;;`,
+    `esac`,
+    ``,
+    `# The account's real primary group — assuming a group named after the user`,
+    `# breaks on every box where it is not.`,
+    `group=$(id -gn ${user})`,
+    `install -d -m 700 -o ${user} -g "$group" ~${user}/.ssh`,
     ``,
     `# The forced command. It NEVER executes what the client asked for: the`,
     `# request arrives in SSH_ORIGINAL_COMMAND and is matched, exactly, against`,
     `# this closed list. Matching by prefix would let "uptime; rm -rf /" through.`,
-    `cat > /usr/local/bin/appstrate-dispatch <<'DISPATCH'`,
+    `#`,
+    `# The path carries THIS key's fingerprint, so a second Appstrate connection`,
+    `# to the same host installs its own dispatcher instead of overwriting this`,
+    `# one — one connection's verb list can never widen another's.`,
+    `cat > ${dispatchPath} <<'DISPATCH'`,
     `#!/bin/sh`,
     `case "\${SSH_ORIGINAL_COMMAND:-}" in`,
     cases,
+    `    # sshd routes the sftp SUBSYSTEM through this same forced command,`,
+    `    # handing it the subsystem line from sshd_config. With no arm for it the`,
+    `    # session dies and every file tool fails with "Connection closed".`,
+    `    # -R is sftp-server's read-only mode: the connection is read_only on the`,
+    `    # platform side and the target enforces that rather than trusting it.`,
+    `    */sftp-server|internal-sftp|sftp-server)`,
+    `        for candidate in /usr/lib/openssh/sftp-server /usr/lib/ssh/sftp-server \\`,
+    `                         /usr/libexec/openssh/sftp-server /usr/libexec/sftp-server; do`,
+    `            [ -x "$candidate" ] && exec "$candidate" -R`,
+    `        done`,
+    `        echo "appstrate-dispatch: sftp-server introuvable sur cette machine" >&2; exit 3 ;;`,
     `    "") echo "appstrate-dispatch: no verb supplied" >&2; exit 2 ;;`,
     `    *)  echo "appstrate-dispatch: refused verb: \${SSH_ORIGINAL_COMMAND}" >&2; exit 42 ;;`,
     `esac`,
     `DISPATCH`,
-    `chmod 0755 /usr/local/bin/appstrate-dispatch`,
+    `chmod 0755 ${dispatchPath}`,
     ``,
     `# restrict turns off port forwarding, agent forwarding, X11 and pty.`,
-    `printf '%s\\n' 'restrict,command="/usr/local/bin/appstrate-dispatch" ${publicKey}' \\`,
+    `printf '%s\\n' 'restrict,command="${dispatchPath}" ${publicKey}' \\`,
     `  >> ~${user}/.ssh/authorized_keys`,
-    `chown ${user}:${user} ~${user}/.ssh/authorized_keys`,
+    `chown ${user}:"$group" ~${user}/.ssh/authorized_keys`,
     `chmod 600 ~${user}/.ssh/authorized_keys`,
     ``,
     `echo`,
-    `echo "empreinte de cet hôte :"`,
-    `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub | awk '{print "  " $2}'`,
-    `echo "  ↳ comparez-la avec celle affichée dans Appstrate"`,
+    `if [ -r ${hostKeyPub} ]; then`,
+    `  echo "empreinte de cet hôte :"`,
+    `  ssh-keygen -lf ${hostKeyPub} | awk '{print "  " $2}'`,
+    `  echo "  ↳ comparez-la avec celle affichée dans Appstrate"`,
+    `else`,
+    `  echo "ATTENTION: ${hostKeyPub} est illisible — la clé est installée, mais" >&2`,
+    `  echo "  l'empreinte n'a pas pu être imprimée. Comparez-la à la main avec :" >&2`,
+    `  echo "    ssh-keygen -lf ${hostKeyPub}" >&2`,
+    `fi`,
+  ].join("\n");
+}
+
+/**
+ * Render the block that takes this key back off the target. Matched on the
+ * key's own base64 (`grep -F`, so none of its characters are a pattern), which
+ * is what makes it remove exactly this connection's line and no other.
+ */
+function renderRevokeCommand(user: string, publicKey: string, dispatchPath: string): string {
+  return [
+    `# Paste as root (or with sudo) on the target AFTER deleting the connection`,
+    `# in Appstrate. Deleting it destroys the private half here and nothing`,
+    `# else — the platform cannot reach your machine to take its key out.`,
+    `tmp=$(mktemp)`,
+    `grep -vF '${publicKeyBase64(publicKey)}' ~${user}/.ssh/authorized_keys > "$tmp" || :`,
+    `cat "$tmp" > ~${user}/.ssh/authorized_keys`,
+    `rm -f "$tmp" ${dispatchPath}`,
   ].join("\n");
 }
 
@@ -192,11 +304,13 @@ async function provisionSshKeyPair(
 
   const verbs = parseVerbs(fields["allowed_verbs"]);
 
-  // The runner's CONNECT egress applies a LITERAL floor with no operator
-  // allowlist (`isBlockedHost`), while the platform's own guard honours
-  // EGRESS_ALLOW_INTERNAL_HOSTS. Refusing here on the stricter of the two
-  // keeps a connection from being created that every run would then fail to
-  // use — the failure belongs at the form, where someone can read it.
+  // Mirror the RUNNER's egress floor, which is what actually has to reach this
+  // host: `isBlockedHost` for a literal here, and the same resolve-and-check
+  // inside `scanSshHostKey` — deliberately WITHOUT the operator's
+  // EGRESS_ALLOW_INTERNAL_HOSTS allowlist, which the runner's CONNECT listener
+  // does not honour. Creating a connection on the looser of the two floors
+  // produces runs that always fail; the failure belongs at the form, where
+  // someone can read it.
   if (isBlockedHost(host)) {
     throw invalidRequest(
       "runs cannot reach this host: it is a private, loopback or link-local address, " +
@@ -209,12 +323,17 @@ async function provisionSshKeyPair(
     const detail = scan.detail ? ` (${scan.detail})` : "";
     throw invalidRequest(
       scan.reason === "blocked-host"
-        ? `the host key could not be read: the address is blocked${detail}`
+        ? "runs cannot reach this host: it resolves to a private, loopback or link-local " +
+            `address, which the integration runner's egress refuses${detail}`
         : `the host key could not be read from ${host}:${port}${detail}`,
     );
   }
 
   const keyPair = generateOpenSshEd25519KeyPair(`appstrate ${ctx.integrationId}`);
+  // One dispatcher per KEY, not per host: two connections to the same machine
+  // must not share (and silently widen) a verb list.
+  const keyId = createHash("sha256").update(keyPair.publicKey).digest("hex").slice(0, 12);
+  const dispatchPath = `/usr/local/bin/appstrate-dispatch-${keyId}`;
 
   return {
     credentials: {
@@ -225,14 +344,20 @@ async function provisionSshKeyPair(
       host_key: scan.hostKey,
       allowed_verbs: JSON.stringify(verbs),
       // Read-only is the floor the SERVER applies; the target's own dispatcher
-      // is the boundary that matters, and it runs nothing that writes.
+      // is the boundary that matters, and it runs nothing that writes (its
+      // sftp arm execs `sftp-server -R`).
       read_only: "1",
     },
     display: {
-      kind: "ssh_keypair",
       host_fingerprint: scan.fingerprint,
-      public_key: keyPair.publicKey,
-      install_command: renderInstallCommand(user, keyPair.publicKey, verbs),
+      install_command: renderInstallCommand(
+        user,
+        keyPair.publicKey,
+        verbs,
+        hostKeyPubFile(scan.hostKey),
+        dispatchPath,
+      ),
+      revoke_command: renderRevokeCommand(user, keyPair.publicKey, dispatchPath),
     },
   };
 }
@@ -243,26 +368,50 @@ const PROVISIONERS: Record<string, Provisioner> = {
   ssh_keypair: provisionSshKeyPair,
 };
 
-/** Credential names a provisioner owns — never read from the request body. */
-const PROVISIONED_FIELDS: Record<string, readonly string[]> = {
+/**
+ * The credential names a kind's provisioner OWNS, whatever its manifest says.
+ * The manifest's `provides` is the single declaration everything reads — this
+ * is the floor it must cover, so a manifest that forgets one cannot quietly
+ * turn a minted secret back into a field the user is asked to type.
+ */
+const REQUIRED_PROVIDES: Record<string, readonly string[]> = {
   ssh_keypair: ["private_key", "host_key", "read_only"],
 };
 
+export interface ProvisioningDeclaration {
+  kind: string;
+  /** Names never read from the request body: the manifest's list, plus the floor. */
+  provides: readonly string[];
+}
+
 /**
- * Read `_meta["dev.appstrate/provisioning"].kind` off an auth block, or null
- * when the auth provisions nothing. Throws on a declared-but-unknown kind: a
+ * Read `_meta["dev.appstrate/provisioning"]` off an auth block, or null when
+ * the auth provisions nothing. Throws on a declared-but-unknown kind — a
  * manifest asking for a provisioner this build does not have must fail loudly
- * rather than silently fall back to "the user types it".
+ * rather than silently fall back to "the user types it" — and on a `provides`
+ * that does not cover the kind's floor, which would put a mintable secret back
+ * on the form.
  */
-export function provisioningKind(auth: unknown): string | null {
+export function readProvisioning(auth: unknown): ProvisioningDeclaration | null {
   const meta = (auth as { _meta?: Record<string, unknown> } | null)?._meta;
-  const block = meta?.["dev.appstrate/provisioning"] as { kind?: unknown } | undefined;
+  const block = meta?.["dev.appstrate/provisioning"] as
+    { kind?: unknown; provides?: unknown } | undefined;
   if (!block) return null;
   const kind = block.kind;
   if (typeof kind !== "string" || !(kind in PROVISIONERS)) {
     throw invalidRequest(`unknown credential provisioning kind: ${String(kind)}`);
   }
-  return kind;
+  const declared = Array.isArray(block.provides)
+    ? block.provides.filter((p): p is string => typeof p === "string")
+    : [];
+  const missing = (REQUIRED_PROVIDES[kind] ?? []).filter((name) => !declared.includes(name));
+  if (missing.length > 0) {
+    throw invalidRequest(
+      `the '${kind}' provisioning declaration must list ${missing.join(", ")} in \`provides\` — ` +
+        "the connect form reads that list to hide the fields the platform mints",
+    );
+  }
+  return { kind, provides: [...new Set([...declared, ...(REQUIRED_PROVIDES[kind] ?? [])])] };
 }
 
 /**
@@ -274,12 +423,12 @@ export async function provisionCredentials(
   fields: SubmittedFields,
   ctx: ProvisionContext,
 ): Promise<ProvisionResult | null> {
-  const kind = provisioningKind(auth);
-  if (!kind) return null;
-  const provisioner = PROVISIONERS[kind]!;
+  const declaration = readProvisioning(auth);
+  if (!declaration) return null;
+  const provisioner = PROVISIONERS[declaration.kind]!;
   const result = await provisioner(fields, ctx);
   // Defence in depth: whatever the client sent for a provisioned name is
   // dropped, not merged, so a crafted body cannot smuggle in its own key.
-  for (const name of PROVISIONED_FIELDS[kind] ?? []) delete fields[name];
+  for (const name of declaration.provides) delete fields[name];
   return result;
 }
