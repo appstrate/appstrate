@@ -18,16 +18,19 @@
  * have traded a real permission bit for a workaround.
  *
  * Deliberately minimal: regular files and directories, no symlinks, no PAX
- * extensions, no long-name (`prefix` field) support beyond the 100-byte `name`
- * — the caller rejects anything longer. Everything this writer emits is
- * reproducible byte-for-byte from its inputs.
+ * extensions. Paths use the USTAR `name` + `prefix` pair, so up to 255 bytes
+ * split on a `/` boundary. Beyond that the format itself has no answer without
+ * PAX, and {@link buildUstar} throws rather than truncate — nothing upstream
+ * bounds a `delivery.files` path, so this limit is real and must be loud.
+ * Everything this writer emits is reproducible byte-for-byte from its inputs.
  */
 
 const BLOCK_SIZE = 512;
 const NAME_FIELD = 100;
+const PREFIX_FIELD = 155;
 
 export interface UstarEntry {
-  /** Archive-relative path, no leading `/`. Max 100 bytes (UTF-8). */
+  /** Archive-relative path, no leading `/`. Max 255 bytes (UTF-8, see above). */
   path: string;
   /** POSIX mode bits, e.g. 0o400. */
   mode: number;
@@ -56,11 +59,37 @@ function writeAscii(block: Uint8Array, offset: number, text: string, width: numb
   block.set(bytes, offset);
 }
 
-function buildHeader(entry: UstarEntry, size: number): Uint8Array {
-  const name = entry.type === "directory" ? entry.path.replace(/\/*$/, "") + "/" : entry.path;
-  if (new TextEncoder().encode(name).length > NAME_FIELD) {
-    throw new Error(`ustar: path exceeds ${NAME_FIELD} bytes: ${name}`);
+/**
+ * Split a path across the USTAR `prefix` + `name` fields.
+ *
+ * An extractor rebuilds the path as `prefix + "/" + name`, so the split must
+ * fall on a `/` boundary, with at most 155 bytes before it and 100 after. We
+ * take the LAST boundary that satisfies both, which keeps as much of the path
+ * as possible in `prefix` and leaves `name` short.
+ */
+export function splitUstarPath(path: string): { name: string; prefix: string } {
+  const encoder = new TextEncoder();
+  if (encoder.encode(path).length <= NAME_FIELD) return { name: path, prefix: "" };
+
+  for (let i = path.lastIndexOf("/"); i > 0; i = path.lastIndexOf("/", i - 1)) {
+    const prefix = path.slice(0, i);
+    const name = path.slice(i + 1);
+    if (
+      encoder.encode(prefix).length <= PREFIX_FIELD &&
+      encoder.encode(name).length <= NAME_FIELD &&
+      name.length > 0
+    ) {
+      return { name, prefix };
+    }
   }
+  throw new Error(
+    `ustar: path cannot be split into ${PREFIX_FIELD}-byte prefix + ${NAME_FIELD}-byte name: ${path}`,
+  );
+}
+
+function buildHeader(entry: UstarEntry, size: number): Uint8Array {
+  const full = entry.type === "directory" ? entry.path.replace(/\/*$/, "") + "/" : entry.path;
+  const { name, prefix } = splitUstarPath(full);
 
   const block = new Uint8Array(BLOCK_SIZE);
   writeAscii(block, 0, name, NAME_FIELD);
@@ -77,6 +106,9 @@ function buildHeader(entry: UstarEntry, size: number): Uint8Array {
   writeAscii(block, 156, entry.type === "directory" ? "5" : "0", 1);
   writeAscii(block, 257, "ustar\0", 6);
   writeAscii(block, 263, "00", 2);
+  // `prefix` sits AFTER the checksum field, so it must be written before the
+  // checksum is summed — an extractor validates the whole 512-byte block.
+  if (prefix !== "") writeAscii(block, 345, prefix, PREFIX_FIELD);
 
   let checksum = 0;
   for (const byte of block) checksum += byte;
