@@ -2,7 +2,7 @@
 
 Appstrate is an open-source platform for running autonomous AI agents in sandboxed Docker containers. A user signs up, connects OAuth/API key services (Gmail, ClickUp), clicks "Run", and the AI agent processes their data autonomously inside a temporary container. Agents can also be scheduled via cron, imported from ZIP files, and extended with agent skills.
 
-This is the single instruction file for this directory: every coding agent reads it, whichever filename it looks for. `CLAUDE.md` next to it is a one-line `@AGENTS.md` import and holds no content of its own — never add a rule there. Same rule in `apps/api`, `apps/web` and `apps/cli`.
+This is the single instruction file for this directory: every coding agent reads it, whichever filename it looks for. `CLAUDE.md` next to it is a one-line `@AGENTS.md` import and holds no content of its own — never add a rule there. Same rule in `apps/api`, `apps/web` and `apps/cli` — though `apps/cli/AGENTS.md` is a different kind of document: an operating manual for an agent driving a live instance, not conventions for changing the code there.
 
 > **Deep references** (read on demand, not loaded every session):
 >
@@ -15,7 +15,8 @@ This is the single instruction file for this directory: every coding agent reads
 > - Module authoring → `apps/api/src/modules/README.md`
 > - Quality-gate forensics (the knip false red, in full) → `docs/QUALITY_GATE.md`
 > - Test commands, tiers and helpers (full guide) → `.claude/skills/testing/SKILL.md`
-> - Per-area conventions → `apps/api/AGENTS.md`, `apps/web/AGENTS.md`, `apps/cli/AGENTS.md`
+> - Per-area conventions → `apps/api/AGENTS.md`, `apps/web/AGENTS.md`
+> - Driving a live instance from the CLI (not contributor conventions) → `apps/cli/AGENTS.md`
 
 ## Quick Start
 
@@ -24,6 +25,7 @@ This is the single instruction file for this directory: every coding agent reads
 **Tier 0 (zero-install — recommended for development):**
 
 ```sh
+bun install
 cp .env.example .env
 bun run dev                   # PGlite + filesystem + in-memory → :3000
 ```
@@ -39,20 +41,20 @@ bun run dev
 
 ### Commands
 
-| Command                  | Description                                                                                                                                       |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bun install`            | Install dependencies (use `--frozen-lockfile` in CI)                                                                                              |
-| `bun run dev`            | Start API (:3000) + Vite build --watch (turborepo)                                                                                                |
-| `bun test`               | Run all tests (bun:test framework, requires Docker)                                                                                               |
-| `bun run check`          | The quality gate. Its task list lives in § "Development Workflow" — that copy is the one kept in step with `package.json`; do not re-list it here |
-| `bun run build`          | Build everything (turbo build)                                                                                                                    |
-| `bun run db:generate`    | Generate Drizzle migrations from schema changes                                                                                                   |
-| `bun run db:migrate`     | Apply migrations manually (rarely needed — boot migrates on start)                                                                                |
-| `bun run verify:openapi` | Validate OpenAPI spec (structural + lint, 0 errors required)                                                                                      |
+| Command                  | Description                                                                                                                                                                                                    |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bun install`            | Install dependencies (use `--frozen-lockfile` in CI)                                                                                                                                                           |
+| `bun run dev`            | Start API (:3000) + Vite build --watch (turborepo)                                                                                                                                                             |
+| `bun test`               | Run all tests (bun:test framework, requires Docker)                                                                                                                                                            |
+| `bun run check`          | The quality gate — far more than the three turbo tasks the command line shows. Its task list lives in § "Development Workflow" — that copy is the one kept in step with `package.json`; do not re-list it here |
+| `bun run build`          | Build everything (turbo build)                                                                                                                                                                                 |
+| `bun run db:generate`    | Generate Drizzle migrations from schema changes                                                                                                                                                                |
+| `bun run db:migrate`     | Apply migrations manually (rarely needed — boot migrates on start)                                                                                                                                             |
+| `bun run verify:openapi` | Validate OpenAPI spec (structural + lint, 0 errors required)                                                                                                                                                   |
 
 ### Docker Compose (Tier 1-3)
 
-Every service in `docker-compose.dev.yml` sits behind a `profiles:` gate, so a bare `docker compose up -d` starts **nothing**. Use the tier scripts below, or pass `--profile` yourself.
+Every service in `docker-compose.dev.yml` sits behind a `profiles:` gate, so a bare `docker compose up -d` starts **nothing**. Use the tier scripts below, or pass the profile yourself (`minimal` | `standard` | `full`).
 
 - **`docker-compose.dev.yml`** — Development services with profiles:
   - `bun run docker:dev:minimal` — Tier 1: PostgreSQL only
@@ -151,7 +153,7 @@ Loaded only when working there — each is the copy that gets updated:
 
 - **`apps/api/AGENTS.md`** — backend conventions: multi-tenant filtering, request pipeline, route guards, RBAC, rate limiting, package versioning, Zod/AJV validation, and the headless platform (spaces, end-users, webhooks, idempotency, API versioning, OpenAPI spec).
 - **`apps/web/AGENTS.md`** — `apps/web` + `packages/ui` conventions: i18n, Tailwind 4, typed API client, React Query keys, SSE hooks, feature gating, Rules-of-React gate.
-- **`apps/cli/AGENTS.md`** — driving an Appstrate instance from the CLI (end-user agent quickstart).
+- **`apps/cli/AGENTS.md`** — the odd one out: an operating manual for an agent driving a live instance, not conventions for changing `apps/cli` itself.
 - **`apps/api/src/modules/README.md`** — module authoring: lifecycle, permissions, hooks, database ownership rules.
 
 ## Architecture
@@ -284,7 +286,7 @@ Tier 0 (zero-install) requires only Bun.
 
 ### Backend Patterns
 
-- Auth: cookie session + `X-Org-Id` / `X-Space-Id`, API key (`ask_*`) tried first — § Stack has the full rule
+- Auth: cookie session + `X-Org-Id` / `X-Space-Id`, API key (`ask_*`) tried first — § "Stack — Critical Constraints" has the full rule
 - Request pipeline: error handler -> Request-Id -> CORS -> health -> auth -> org context -> routes
 - Route guards (`middleware/guards.ts`): `requireAgent()`, `requireOrgAgent()`, `requirePackageInOrg()`, `requireMutableAgent()`, `apiKeyOrgScopeGuard()`/`pinnedSpaceScopeGuard()`. RBAC is `requirePermission(resource, action)` (`middleware/require-permission.ts`) — there is **no** `requireAdmin()` / `requireOwner()`
 - Rate limiting: Redis-backed, keyed by `method:path:identity`
@@ -309,7 +311,7 @@ Core schema: `packages/db/src/schema/` (Drizzle, barrel via `schema/index.ts`) �
 ## Development Workflow
 
 - **New API route**: route file in `routes/` + OpenAPI path file in `openapi/paths/` + wire in `index.ts`. Run `bun run verify:openapi`, then `bun run generate:api` to refresh the SPA's generated types (`verify:api-types` in `check` fails otherwise). Every 2xx JSON response must declare a schema (verify-openapi step 6).
-- **DB migration (core)**: edit the domain file under `packages/db/src/schema/<domain>.ts` (the barrel is `packages/db/src/schema/index.ts` — nothing is defined there) → `bun run db:generate` (needs `DATABASE_URL` for drizzle-kit). Applied automatically at boot (PGlite + PostgreSQL) — no manual `db:migrate`.
+- **DB migration (core)**: edit the domain file under `packages/db/src/schema/<domain>.ts` (the barrel is `packages/db/src/schema/index.ts` — nothing is defined there) → `bun run db:generate` (needs `DATABASE_URL` for drizzle-kit). Applied automatically at boot (PGlite + PostgreSQL).
 - **Module tables**: there are none separately — a module's tables live in the core schema (`packages/db/src/schema/<domain>.ts`) and migrate with core. No per-module migration step. The one exception is `packages/module-ee`, which keeps a drizzle tree of its OWN and self-migrates its seven `ee_*` tables into the platform database at `init()`, under its own journal `drizzle.ee_migrations` — the platform's `drizzle.__drizzle_migrations` is untouched. That is the escape hatch of `apps/api/src/modules/README.md` § "Database ownership rules" (rule 4), for tables the Apache-2.0 core schema must not carry.
 - **Quality gate**: `bun run check` — 21 task names, not 2: `turbo typecheck lint format:check` plus
   `verify:openapi`, `verify:api-types`, `verify:type-coverage`, `verify:compose-defaults`,
