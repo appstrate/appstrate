@@ -973,6 +973,25 @@ export const integrationsPaths = {
                   display_name: { type: "string" },
                   icon: { type: ["string", "null"] },
                   auth: { type: "object", additionalProperties: true },
+                  setup_guide: {
+                    type: ["object", "null"],
+                    description:
+                      "AFPS §7.10 publisher setup steps, rendered above the form so the instructions reach the person being asked for a credential.",
+                    properties: {
+                      steps: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          required: ["label"],
+                          properties: {
+                            label: { type: "string" },
+                            url: { type: "string" },
+                          },
+                        },
+                      },
+                    },
+                    additionalProperties: true,
+                  },
                   connection_id: { type: ["string", "null"] },
                   csrf: { type: ["string", "null"] },
                 },
@@ -1027,6 +1046,25 @@ export const integrationsPaths = {
                 properties: {
                   ok: { type: "boolean" },
                   connection: integrationConnectionSchema,
+                  provisioned: {
+                    type: "object",
+                    description:
+                      'Present when the auth declares `_meta["dev.appstrate/provisioning"]`: the material the platform minted that must now reach the target host. Public halves only — the private key is sealed in the connection\'s envelope and is never returned. Shown once; nothing persists it.',
+                    required: ["kind", "host_fingerprint", "public_key", "install_command"],
+                    properties: {
+                      kind: { type: "string" },
+                      host_fingerprint: {
+                        type: "string",
+                        description:
+                          "`SHA256:…` of the TARGET's host key, for the user to compare against their own machine.",
+                      },
+                      public_key: { type: "string" },
+                      install_command: {
+                        type: "string",
+                        description: "A shell block to paste on the target host.",
+                      },
+                    },
+                  },
                 },
               },
             },

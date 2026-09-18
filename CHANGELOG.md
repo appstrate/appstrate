@@ -41,6 +41,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   declaring `entry_point: "./server.js"` could not be imported at all (#1461),
   and `delivery.files` landed unreadable in every runner image (#1462).
 
+- **Connecting an SSH host asks for three fields, not a private key.** The
+  platform mints the ed25519 pair itself and reads the target's host key, so
+  the form asks only for what nobody else can know — host, port, account. The
+  private half is generated straight into the credential envelope: never
+  displayed, never typed, never readable again. A pasted key is almost always
+  the user's PERSONAL key, already installed on ten other machines, so the
+  blast radius of an Appstrate credential used to leave Appstrate; a minted
+  pair is used nowhere else.
+
+  After creation the connect page shows the one block to paste on the target —
+  it installs the public key with `restrict` + `command=`, writes the
+  forced-command dispatcher with an exact-match arm per allowed verb, and
+  prints the host's own fingerprint so it can be compared against the pinned
+  one shown on screen. That comparison is the only step that can catch a
+  machine-in-the-middle on the platform's scan, and it costs one glance in a
+  terminal the user is already in.
+
+  The mechanism is generic, not SSH-specific: an auth opts in with
+  `_meta["dev.appstrate/provisioning"]` (AFPS §10) and the platform fills the
+  credentials it declares. The server strips provisioned names from the request
+  body, so a crafted submit cannot supply its own key.
+
+  A target the RUNNER could not reach is refused at the form rather than
+  persisted: the platform's egress guard honours `EGRESS_ALLOW_INTERNAL_HOSTS`
+  while the runner's CONNECT floor has no allowlist at all, and creating a
+  connection on the looser of the two would have produced runs that always
+  fail. The platform image gains `openssh-client` for the one `ssh-keyscan`
+  call; it never opens an SSH session.
+
+### Fixed
+
+- **The hosted connect form showed raw field names.** It derived inputs from
+  the credential property NAMES only, so `title`, `description` and `default`
+  declared in a manifest reached nobody — every integration that documented its
+  fields still presented `snake_case` keys with no explanation, and a declared
+  default was neither shown nor submitted. The form now renders all three, and
+  seeds the defaults it displays. It also renders the manifest's AFPS §7.10
+  `setup_guide`, which until now appeared only on the integration detail page —
+  everywhere except the surface actually asking someone for a credential.
+
 ## [1.0.0-beta.59] - 2026-09-18
 
 ### Added

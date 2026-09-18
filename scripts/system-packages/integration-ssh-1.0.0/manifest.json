@@ -18,13 +18,13 @@
   "setup_guide": {
     "steps": [
       {
-        "label": "Générer une paire DÉDIÉE sur votre poste : ssh-keygen -t ed25519 -f appstrate_ssh -N \"\" — ne réutilisez jamais votre clé personnelle, elle est déjà installée ailleurs."
+        "label": "Créez un compte Unix dédié sur le serveur cible — pas root, et idéalement sans shell interactif. C'est lui qui portera la clé, et le rayon d'action de l'agent est celui de ce compte."
       },
       {
-        "label": "Sur le serveur cible, ajouter la clé publique à ~/.ssh/authorized_keys d'un compte dédié, en restreignant ce qu'elle peut faire : restrict,command=\"/usr/local/bin/appstrate-dispatch\" ssh-ed25519 AAAA… — le dispatcher n'exécute que des verbes d'une liste fermée, jamais la commande reçue."
+        "label": "Indiquez ci-dessous l'hôte, le port et ce compte. Appstrate génère la paire de clés lui-même : rien à coller, et la clé privée n'est ni affichée ni saisie nulle part — elle naît chiffrée dans le trousseau."
       },
       {
-        "label": "Relever la clé publique de l'hôte : ssh-keyscan -t ed25519 -p 22 <hôte> — coller la ligne entière dans « Clé publique de l'hôte ». Elle est épinglée ; tout changement refuse la connexion."
+        "label": "À la création, une commande d'installation s'affiche. Collez-la sur le serveur : elle installe la clé publique avec restrict + command= et dépose le dispatcher, qui n'exécute que les verbes de la liste. Elle imprime aussi l'empreinte de l'hôte — comparez-la avec celle affichée à l'écran."
       }
     ]
   },
@@ -39,40 +39,40 @@
           "properties": {
             "private_key": {
               "type": "string",
-              "title": "Clé privée",
-              "description": "Contenu du fichier de clé privée OpenSSH (commence par -----BEGIN OPENSSH PRIVATE KEY-----). Générez une paire dédiée à Appstrate."
+              "title": "Clé privée Appstrate",
+              "description": "Générée par la plateforme, jamais saisie ni affichée. Livrée au seul runner @appstrate/ssh-mcp, en fichier 0600 ; elle n'entre jamais dans le conteneur de l'agent."
             },
             "host": {
               "type": "string",
               "title": "Hôte",
-              "description": "Nom DNS ou adresse IP publique du serveur."
+              "description": "Nom DNS ou adresse IP publique du serveur. Une adresse privée est refusée : l'egress du runner ne la laisse pas passer."
             },
             "port": {
               "type": "string",
-              "title": "Port",
+              "title": "Port SSH",
               "default": "22"
             },
             "user": {
               "type": "string",
-              "title": "Utilisateur",
-              "description": "Compte Unix dédié sur la cible — pas root, et idéalement sans shell interactif."
+              "title": "Compte Unix sur la cible",
+              "description": "Le compte dédié qui portera la clé — pas root. Ce que l'agent peut faire, c'est ce que ce compte peut faire."
             },
             "host_key": {
               "type": "string",
               "title": "Clé publique de l'hôte",
-              "description": "Ligne complète imprimée par `ssh-keyscan -t ed25519 -p <port> <hôte>`. Obligatoire : aucune acceptation à la première connexion, personne ne signe dans un run autonome."
+              "description": "Relevée par la plateforme à la création et épinglée. C'est l'identité du SERVEUR, pas la vôtre. Tout changement refuse la connexion — il n'y a pas d'acceptation à la première connexion, personne ne signe dans un run autonome."
             },
             "allowed_verbs": {
               "type": "string",
               "title": "Verbes autorisés",
-              "default": "[]",
-              "description": "Tableau JSON de noms, ex. [\"hostname\", \"disk_usage\"]. Seul le nom part sur le fil ; c'est le `command=` de la cible qui décide ce qu'il exécute."
+              "default": "[\"hostname\", \"uptime\", \"disk_usage\"]",
+              "description": "Tableau JSON de noms. Seul le NOM part sur le fil : c'est le dispatcher installé sur la cible qui décide ce qu'il exécute, jamais une commande envoyée d'ici. La commande d'installation générée implémente hostname, uptime, disk_usage, memory et whoami."
             },
             "read_only": {
               "type": "string",
               "title": "Lecture seule",
               "default": "1",
-              "description": "1 pour refuser ssh_write_file côté serveur. Défense en profondeur : la barrière qui compte est le compte Unix sur la cible."
+              "description": "Refuse ssh_write_file côté serveur. Défense en profondeur : la barrière qui compte est le compte Unix sur la cible."
             }
           }
         }
@@ -97,6 +97,10 @@
       "_meta": {
         "dev.appstrate/auth": {
           "required": true
+        },
+        "dev.appstrate/provisioning": {
+          "kind": "ssh_keypair",
+          "provides": ["private_key", "host_key", "read_only"]
         }
       }
     }

@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "../components/spinner";
 import { CredentialFields } from "../components/integration-connect/credential-fields";
+import { initialCredentialValues } from "../components/integration-connect/credential-schema";
+import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
 import { IntegrationIcon } from "../components/integration-icon";
 import { client, type paths } from "../api/client";
 import { publishConnectCompletion } from "../lib/connect-completion";
@@ -37,13 +39,27 @@ type ConnectContext = Omit<
   "auth"
 > & { auth: IntegrationManifestAuth };
 
-type Phase = "loading" | "form" | "submitting" | "done" | "error";
+type Phase = "loading" | "form" | "submitting" | "done" | "provisioned" | "error";
+
+/**
+ * Material the platform minted that has to reach the target host. Returned
+ * once by `/connect/submit`; nothing persists it, and nothing here is secret —
+ * the private half never leaves the server.
+ */
+interface Provisioned {
+  kind: string;
+  host_fingerprint: string;
+  public_key: string;
+  install_command: string;
+}
 
 export function HostedConnectPage() {
   const { t } = useTranslation("settings");
   const [phase, setPhase] = useState<Phase>("loading");
   const [context, setContext] = useState<ConnectContext | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
+  const [provisioned, setProvisioned] = useState<Provisioned | null>(null);
+  const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Technical reason behind a context-load failure (HTTP status or network
   // error). Shown under the generic body so an invalid/expired link, a removed
@@ -57,7 +73,11 @@ export function HostedConnectPage() {
         // Non-2xx throws via the client middleware, so `data` is defined here.
         const { data } = await client.GET("/api/integrations/connect/context");
         if (cancelled) return;
-        setContext(data as ConnectContext);
+        const ctx = data as ConnectContext;
+        setContext(ctx);
+        // Seed the defaults the manifest declares, so a value the user can see
+        // in the form is a value the form will actually submit.
+        setValues(initialCredentialValues(ctx.auth));
         setPhase("form");
       } catch (err) {
         if (cancelled) return;
@@ -82,7 +102,7 @@ export function HostedConnectPage() {
     setError(null);
     try {
       // Non-2xx throws `ApiError` (RFC 9457 `detail`) via the client middleware.
-      await client.POST("/api/integrations/connect/submit", {
+      const { data } = await client.POST("/api/integrations/connect/submit", {
         params: { header: { "x-connect-csrf": context.csrf } },
         body: { credentials: values },
       });
@@ -91,6 +111,17 @@ export function HostedConnectPage() {
         window.opener as Window | null,
         window.location.origin,
       );
+
+      // A provisioning auth hands back material the user must now install on
+      // their own machine. Closing the window on a timer would take it away
+      // before they could read it, so that path stops here and waits.
+      const minted = (data as { provisioned?: Provisioned } | undefined)?.provisioned;
+      if (minted) {
+        setProvisioned(minted);
+        setPhase("provisioned");
+        return;
+      }
+
       setPhase("done");
       // Close the popup/tab after a short confirmation, mirroring the OAuth page.
       setTimeout(() => {
@@ -108,7 +139,9 @@ export function HostedConnectPage() {
 
   return (
     <div className="bg-background text-foreground flex min-h-screen items-center justify-center p-4">
-      <div className="w-full max-w-md space-y-6">
+      {/* The install block is a shell script — wrapping it into a 28rem column
+          would make it unreadable, so that one phase gets a wider page. */}
+      <div className={`w-full space-y-6 ${phase === "provisioned" ? "max-w-2xl" : "max-w-md"}`}>
         {phase === "loading" && (
           <div className="flex justify-center py-12">
             <Spinner />
@@ -124,6 +157,76 @@ export function HostedConnectPage() {
             {errorDetail && (
               <p className="text-muted-foreground/60 font-mono text-xs">{errorDetail}</p>
             )}
+          </div>
+        )}
+
+        {phase === "provisioned" && provisioned && (
+          <div className="space-y-5" data-testid="connect-provisioned">
+            <div>
+              <h1 className="text-lg font-semibold">
+                {t("integration.connect.provisioned.title")}
+              </h1>
+              <p className="text-muted-foreground mt-1 text-sm">
+                {t("integration.connect.provisioned.body")}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold">
+                  {t("integration.connect.provisioned.installLabel")}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  data-testid="copy-install-command"
+                  onClick={() => {
+                    void navigator.clipboard
+                      .writeText(provisioned.install_command)
+                      .then(() => setCopied(true))
+                      // Clipboard access can be denied (permissions, insecure
+                      // context). The block is selectable either way, so the
+                      // failure only costs the confirmation.
+                      .catch(() => setCopied(false));
+                  }}
+                >
+                  {t(copied ? "integration.connect.provisioned.copied" : "common.copy", {
+                    defaultValue: copied ? "Copié" : "Copier",
+                  })}
+                </Button>
+              </div>
+              <pre className="bg-muted/40 max-h-80 overflow-auto rounded-md border p-3 font-mono text-[11px] leading-relaxed whitespace-pre">
+                {provisioned.install_command}
+              </pre>
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-xs font-semibold">
+                {t("integration.connect.provisioned.fingerprintLabel")}
+              </span>
+              <p className="font-mono text-xs break-all" data-testid="host-fingerprint">
+                {provisioned.host_fingerprint}
+              </p>
+              <p className="text-muted-foreground text-xs">
+                {t("integration.connect.provisioned.fingerprintHint")}
+              </p>
+            </div>
+
+            <Button
+              type="button"
+              className="w-full"
+              onClick={() => {
+                try {
+                  window.close();
+                } catch {
+                  /* not a popup — nothing to close */
+                }
+                setPhase("done");
+              }}
+            >
+              {t("integration.connect.provisioned.doneBtn")}
+            </Button>
           </div>
         )}
 
@@ -150,6 +253,9 @@ export function HostedConnectPage() {
               <p className="text-muted-foreground text-sm">
                 {t("integration.connect.modal.subtitle", { type: context.auth.type })}
               </p>
+              {context.setup_guide?.steps && context.setup_guide.steps.length > 0 && (
+                <SetupGuideSteps steps={context.setup_guide.steps} />
+              )}
               <CredentialFields auth={context.auth} values={values} onChange={setValues} />
               {error && <p className="text-sm text-red-400">{error}</p>}
               <Button type="submit" className="w-full" disabled={phase === "submitting"}>

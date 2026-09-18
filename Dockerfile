@@ -155,8 +155,16 @@ COPY --from=build /app/system-packages ./system-packages
 COPY --from=build /app/LICENSE /app/NOTICE ./
 COPY --from=build --chown=bun:bun /app/packages/module-ee/LICENSE ./packages/module-ee/LICENSE
 
-# su-exec for lightweight privilege drop in entrypoint
-RUN apk add --no-cache su-exec
+# su-exec for lightweight privilege drop in entrypoint.
+#
+# openssh-client is here for ONE call: `ssh-keyscan`, which reads a target's
+# host key when an @appstrate/ssh connection is created so the key can be
+# pinned before any agent runs (apps/api/src/lib/ssh-host-key.ts). The platform
+# never opens an SSH SESSION — that happens in the integration runner, from its
+# own image. Deriving the key exchange in TypeScript was the alternative and
+# was rejected: a few hundred lines of protocol whose failure mode is refusing
+# the sshd a customer actually runs.
+RUN apk add --no-cache su-exec openssh-client
 
 # Entrypoint: detects Docker socket GID and adds bun to that group before exec
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh

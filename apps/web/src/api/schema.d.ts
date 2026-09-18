@@ -11268,6 +11268,15 @@ export interface operations {
                         auth: {
                             [key: string]: unknown;
                         };
+                        /** @description AFPS §7.10 publisher setup steps, rendered above the form so the instructions reach the person being asked for a credential. */
+                        setup_guide?: ({
+                            steps?: {
+                                label: string;
+                                url?: string;
+                            }[];
+                        } & {
+                            [key: string]: unknown;
+                        }) | null;
                         connection_id?: string | null;
                         csrf?: string | null;
                     };
@@ -11389,6 +11398,15 @@ export interface operations {
                             createdAt: string;
                             /** Format: date-time */
                             updatedAt: string;
+                        };
+                        /** @description Present when the auth declares `_meta["dev.appstrate/provisioning"]`: the material the platform minted that must now reach the target host. Public halves only — the private key is sealed in the connection's envelope and is never returned. Shown once; nothing persists it. */
+                        provisioned?: {
+                            kind: string;
+                            /** @description `SHA256:…` of the TARGET's host key, for the user to compare against their own machine. */
+                            host_fingerprint: string;
+                            public_key: string;
+                            /** @description A shell block to paste on the target host. */
+                            install_command: string;
                         };
                     };
                 };

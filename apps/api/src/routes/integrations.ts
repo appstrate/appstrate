@@ -92,6 +92,7 @@ import {
   usesAutoProvisionedClient,
 } from "../services/integration-connections.ts";
 import { resolveStrategy } from "../services/connect/registry.ts";
+import { provisionCredentials } from "../services/connect/provisioning.ts";
 import { createConnectRunExecutor } from "../services/connect/connect-run-launcher.ts";
 import { getCurrentScopesGranted } from "../services/integration-scope-resolver.ts";
 import { isUserConnectionCreationBlocked } from "../services/integration-connection-resolver.ts";
@@ -1046,6 +1047,11 @@ export function createIntegrationsRouter() {
       display_name: manifest.display_name ?? claims.package_id,
       icon: manifest.icon ?? null,
       auth,
+      // AFPS §7.10 publisher instructions. The integration detail page has
+      // shown these since they existed; the hosted form — the surface where
+      // someone is ACTUALLY being asked to produce a credential — did not, so
+      // the guidance reached everyone except the person who needed it.
+      setup_guide: manifest.setup_guide ?? null,
       connection_id: claims.connection_id ?? null,
       csrf: claims.csrf ?? null,
     });
@@ -1070,6 +1076,18 @@ export function createIntegrationsRouter() {
       if (auth.type === "oauth2") {
         throw invalidRequest("This integration uses OAuth — open the connect link instead");
       }
+      // Credentials the platform derives rather than asks for (an SSH key pair
+      // and the target's host key). Runs BEFORE `complete` so the provisioned
+      // values are persisted in the same envelope as the submitted ones, and
+      // so a provisioning failure (unreachable host, blocked address) is a 400
+      // on the form instead of a connection nobody can use.
+      const provisioned = await provisionCredentials(auth, body.credentials, {
+        integrationId: claims.package_id,
+      });
+      const credentials = provisioned
+        ? { ...body.credentials, ...provisioned.credentials }
+        : body.credentials;
+
       const conn = await resolveStrategy(auth, {
         connectToolExecutor: createConnectRunExecutor(),
       }).complete(
@@ -1080,10 +1098,18 @@ export function createIntegrationsRouter() {
           authKey: claims.auth_key,
           ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
         },
-        { kind: "fields", credentials: body.credentials },
+        { kind: "fields", credentials },
       );
       clearConnectPageCookie(c);
-      return c.json({ ok: true, connection: conn });
+      // `provisioned.display` is the half that must reach the target host — a
+      // public key and a fingerprint, never a secret. It is returned once,
+      // here, because nothing persists it: the private half is already sealed
+      // in the connection's envelope and is never readable again.
+      return c.json({
+        ok: true,
+        connection: conn,
+        ...(provisioned ? { provisioned: provisioned.display } : {}),
+      });
     } catch (err) {
       if (err instanceof ApiError) throw err;
       logger.error("Hosted connect submit failed", { err: String(err) });
