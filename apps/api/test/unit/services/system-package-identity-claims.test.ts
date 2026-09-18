@@ -248,6 +248,19 @@ const CASES: Record<string, Case> = {
     accountId: "doe@email.com",
     source_doc: "learn.microsoft.com/linkedin — sign-in-with-linkedin-v2",
   },
+  "@appstrate/mcpemails": {
+    authKey: "oauth",
+    // `sub` is the only claim always present: the upstream userinfo endpoint
+    // adds `email`/`email_verified` only when the token carries `openid` or
+    // `email`, so the account key reads the id, not the address.
+    source: {
+      sub: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      email: "pierre@example.com",
+      email_verified: true,
+    },
+    accountId: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    source_doc: "github.com/Albretsen/MCPEmails — apps/web/app/api/oauth/userinfo/route.ts",
+  },
   "@appstrate/microsoft-outlook": {
     authKey: "primary",
     source: {
