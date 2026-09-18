@@ -40,6 +40,7 @@ bun run dev
   - `bun run docker:dev` — Tier 3: PostgreSQL + Redis + MinIO
 - **`docker-compose.yml`** — Self-hosting / production (images from GHCR)
 - **`docker:prod`** script — `docker compose --profile prod up -d` (full stack)
+- **`deploy/docker-compose.yml`** — the deployment that runs `app.appstrate.com`, driven by Coolify. NOT a template and not merged with `examples/self-hosting/`: its service names are wired to live domains, so renaming one deletes the routing. Moved here from the retired `appstrate/cloud` repository; see `deploy/README.md`.
 
 ## Stack — Critical Constraints
 
