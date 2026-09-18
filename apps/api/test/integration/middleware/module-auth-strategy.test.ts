@@ -10,18 +10,28 @@
  *   3. Requests NOT matching the strategy fall through to core auth
  *   4. Core API key auth (Bearer ask_) still works when strategies don't claim
  *   5. A strategy-set `endUser` flows through to `c.get("endUser")`
+ *   6. A strategy that misdeclares its `principal` is a 500, not a bucket
  *
  * This is the key validation that Phase 0's extension point is wired
  * correctly from contract → loader → middleware → route.
  */
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
+import { expectProblem } from "../../helpers/assertions.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { db } from "@appstrate/db/client";
 import { endUsers } from "@appstrate/db/schema";
 import { prefixedId } from "@appstrate/db/ids";
-import type { AppstrateModule, AuthStrategy } from "@appstrate/core/module";
+import type { AppstrateModule, AuthResolution, AuthStrategy } from "@appstrate/core/module";
+
+/**
+ * Tokens that resolve to the `"valid"` shape carrying ONE deliberate defect in
+ * its principal declaration. `principal` is required and must agree with
+ * `endUser`, so the type system refuses each of them — which is precisely why
+ * the pipeline's own runtime check has to be what answers.
+ */
+const MISDECLARED = ["no-kind", "kind-without-enduser", "enduser-without-kind"] as const;
 
 // Test context is seeded once per test so the stub strategy can resolve to
 // real DB rows. We capture it via a module-level reference because the
@@ -50,11 +60,12 @@ const stubStrategy: AuthStrategy = {
         deferOrgResolution: true,
       };
     }
-    if (token !== "valid" && token !== "admin") return null;
+    const misdeclared = MISDECLARED.find((t) => t === token);
+    if (token !== "valid" && token !== "admin" && !misdeclared) return null;
     if (!currentCtx) {
       throw new Error("currentCtx not seeded — test setup bug");
     }
-    return {
+    const resolution: AuthResolution = {
       user: {
         id: currentCtx.user.id,
         email: currentCtx.user.email,
@@ -64,6 +75,9 @@ const stubStrategy: AuthStrategy = {
       orgSlug: currentCtx.org.slug,
       orgRole: "admin",
       authMethod: "stub-strategy",
+      // "valid" models a ceiling-limited credential (refused a role preview,
+      // 403 on org:delete); "admin" models the external identity the endUser
+      // block below carries — the two must agree.
       principal: token === "admin" ? "end_user" : "delegate",
       spaceId: currentCtx.defaultSpaceId,
       permissions: ["runs:read", "runs:write", "runs:cancel", "agents:read", "end-users:read"],
@@ -78,6 +92,22 @@ const stubStrategy: AuthStrategy = {
             }
           : undefined,
     };
+    if (!misdeclared) return resolution;
+    const defect: Record<string, unknown> =
+      misdeclared === "no-kind"
+        ? { principal: undefined }
+        : misdeclared === "kind-without-enduser"
+          ? { principal: "end_user", endUser: undefined }
+          : {
+              principal: "user",
+              endUser: {
+                id: "eu_stub_contract",
+                spaceId: currentCtx.defaultSpaceId,
+                name: "Contract",
+                email: "contract@test.com",
+              },
+            };
+    return { ...resolution, ...defect } as unknown as AuthResolution;
   },
 };
 
@@ -229,6 +259,35 @@ describe("module auth strategy pipeline", () => {
         body: JSON.stringify({ name: "Renamed By Owner" }),
       });
       expect(res.status).toBe(200);
+    });
+  });
+
+  // ── The principal contract: a misdeclared kind fails loud ──────────────────
+  //
+  // The kind is DECLARED now, not inferred from the transport, so a missing or
+  // self-contradictory declaration is a programming error with no safe default:
+  // bucketing it is how a server-minted bearer once stopped being its user.
+  // The positive control is the suite's first test — the well-declared
+  // `delegate` (`"valid"`) reaching `/api/agents` with a 200.
+  describe("a strategy that misdeclares its principal", () => {
+    const request = (token: string) =>
+      app.request("/api/agents", {
+        headers: { "X-Test-Strategy": token, "X-Space-Id": currentCtx!.defaultSpaceId },
+      });
+
+    it("500s a resolution that declares no kind at all", async () => {
+      await expectProblem(await request("no-kind"), 500, { code: "internal_error" });
+    });
+
+    it("500s either half of an `end_user` disagreement", async () => {
+      await expectProblem(await request("kind-without-enduser"), 500, { code: "internal_error" });
+      await expectProblem(await request("enduser-without-kind"), 500, { code: "internal_error" });
+    });
+
+    it("tells the caller nothing about the throw", async () => {
+      const body = await expectProblem(await request("no-kind"), 500, { code: "internal_error" });
+      expect(body.detail).toBe("An internal error occurred");
+      expect(JSON.stringify(body)).not.toContain("stub-test-strategy");
     });
   });
 });
