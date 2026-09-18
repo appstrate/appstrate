@@ -105,23 +105,35 @@ export function usePermissions() {
 }
 
 /**
- * The caller's standing in the space they are currently IN, in the shape the
- * activation verdict reads (`maySetPackageActive`). Activating a package is
- * judged in the TARGET space and nowhere else, and owning that space is its own
- * authorization — neither fact survives the org∪space union `can` computes, so
- * the row itself travels.
+ * The caller's standing in ONE named space, in the shape the activation verdict
+ * reads (`maySetPackageActive`). Activating a package is judged in the TARGET
+ * space and nowhere else, and owning that space is its own authorization —
+ * neither fact survives the org∪space union `can` computes, so the row itself
+ * travels.
  *
- * `undefined` while `GET /api/spaces` is in flight, or for a space this caller
- * does not reach: both read as "not yet", never as a refusal.
+ * Any space, not only the current one: a surface may ask about a space the
+ * caller is not standing in (the share dialog asks about a package's HOME), and
+ * `can` would answer for the wrong one. The array is safe to read that way
+ * because the server already unions the org half into every row
+ * (`effectiveInSpace`, `apps/api/src/lib/view-as.ts`) — so for the current
+ * space this agrees with `can` by construction.
+ *
+ * `undefined` while `GET /api/spaces` is in flight, for no space at all, or for
+ * a space this caller does not reach: all three read as "not yet", never as a
+ * refusal.
  */
-export function useCurrentSpaceGrant(): SpaceGrant | undefined {
-  const spaceId = useCurrentSpaceId();
+export function useSpaceGrant(spaceId: string | null | undefined): SpaceGrant | undefined {
   const { data: spaces } = useSpaces();
-  const space = spaces?.find((s) => s.id === spaceId);
+  const space = spaceId ? spaces?.find((s) => s.id === spaceId) : undefined;
   if (!space) return undefined;
   return {
     permissions: space.permissions,
     personal: space.personal,
     access: space.access,
   };
+}
+
+/** {@link useSpaceGrant} for the space the caller is currently in. */
+export function useCurrentSpaceGrant(): SpaceGrant | undefined {
+  return useSpaceGrant(useCurrentSpaceId());
 }
