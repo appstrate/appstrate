@@ -346,7 +346,7 @@ export async function extractBundle(bytes: Uint8Array, namespace: string): Promi
  * second positional argument instead. Unit tests still override `createClient`
  * / `createSseClient` to exercise the per-request Bearer injection +
  * 401-refresh-retry closure without standing up a real MCP server. See
- * CLAUDE.md "Mocking Policy".
+ * AGENTS.md "Mocking Policy".
  */
 export interface ConnectRemoteHttpDeps {
   createClient?: typeof createMcpHttpClient;

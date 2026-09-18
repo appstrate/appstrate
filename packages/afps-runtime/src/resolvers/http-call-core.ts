@@ -150,8 +150,8 @@ export const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024;
 
 // ─── Zod schemas for api_call arguments ──────────────────────────────────────
 // Single source of truth: derive the JSON schema surfaced to the LLM and the
-// runtime validation in execute() from these definitions. Aligned with CLAUDE.md:
-// "All route request bodies validated with Zod .safeParse()."
+// runtime validation in execute() from these definitions. Aligned with `apps/api/AGENTS.md`
+// § "Validation (Zod)": every JSON body is read through a schema, never cast.
 
 const fromFileBodySchema = z.object({
   fromFile: z.string().describe("Workspace-relative path to a file to send as the request body"),

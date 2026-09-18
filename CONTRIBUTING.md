@@ -85,7 +85,7 @@ stamps disagree.
 | ------------------------------ | -------------------------------------------------------------- |
 | `bun run setup`                | One-command dev bootstrap (first time)                         |
 | `bun run dev`                  | Start API + web (turbo, hot-reload)                            |
-| `bun run check`                | The full quality gate — 18 tasks, listed in `CLAUDE.md`        |
+| `bun run check`                | The full quality gate — task list in `AGENTS.md`               |
 | `bun test`                     | All tests (~11,400 `it()` across ~875 files) — requires Docker |
 | `bun test apps/api/test/unit/` | Unit tests only (fast, no DB)                                  |
 | `bun run build`                | Build frontend + shared packages                               |
@@ -214,7 +214,7 @@ makes every merge to `main` invalidate every open PR's status.
 - No unrelated changes bundled
 - New features include tests
 - API changes include OpenAPI spec updates
-- A change to a request the SPA sends includes a test that pins the emitted payload (see `apps/web/CLAUDE.md`, Tests) — the typed client checks shapes, not values
+- A change to a request the SPA sends includes a test that pins the emitted payload (see `apps/web/AGENTS.md`, Tests) — the typed client checks shapes, not values
 
 ## Contributor License Agreement (CLA)
 

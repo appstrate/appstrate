@@ -1,6 +1,6 @@
 ---
 name: testing
-description: How to run and write tests in the Appstrate monorepo — bun:test commands and tiers (Docker services, DinD opt-in via TEST_DOCKER=1, Tier-0 PGlite path), the bunfig.toml preload that auto-discovers built-in and workspace modules, test directory layout, naming and isolation conventions, the zero-footprint invariant, and the test helpers (getTestApp, authHeaders, truncateAll, seed factories, SSE and OAuth mocks). Use when running the suite, adding a test, adding a module's test wiring, or debugging test setup and DB isolation. The no-mock.module() rule lives in the root CLAUDE.md and always applies.
+description: How to run and write tests in the Appstrate monorepo — bun:test commands and tiers (Docker services, DinD opt-in via TEST_DOCKER=1, Tier-0 PGlite path), the bunfig.toml preload that auto-discovers built-in and workspace modules, test directory layout, naming and isolation conventions, the zero-footprint invariant, and the test helpers (getTestApp, authHeaders, truncateAll, seed factories, SSE and OAuth mocks). Use when running the suite, adding a test, adding a module's test wiring, or debugging test setup and DB isolation. The no-mock.module() rule lives in the root AGENTS.md and always applies.
 ---
 
 # Testing
@@ -44,7 +44,7 @@ Adding a built-in module is mechanical: drop a directory with `index.ts` and `te
 | Auth in tests | Real Better Auth sign-up → session cookie (not mock auth)           |
 | DB cleanup    | `DELETE FROM` in FK-safe order (not `TRUNCATE` — avoids deadlocks)  |
 
-Instead of `mock.module()` (banned, see root `CLAUDE.md`), use dependency injection: optional `deps` parameter with production defaults, constructor injection, or function-parameter injection (runtime-pi pattern). For middleware that calls services (e.g. `requireAgent` → `getPackage`), use integration tests with real DB instead of mocking the service layer.
+Instead of `mock.module()` (banned, see root `AGENTS.md`), use dependency injection: optional `deps` parameter with production defaults, constructor injection, or function-parameter injection (runtime-pi pattern). For middleware that calls services (e.g. `requireAgent` → `getPackage`), use integration tests with real DB instead of mocking the service layer.
 
 ## Helpers (`apps/api/test/helpers/`)
 
