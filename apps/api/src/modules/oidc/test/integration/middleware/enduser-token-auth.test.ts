@@ -434,14 +434,24 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       scope: "openid",
     });
 
-    // Hit an org-scoped route (not space-scoped). Profile route works for any
-    // authenticated user.
-    const res = await app.request("/api/profile", {
+    // Hit an org-scoped route (not space-scoped). The org listing answers to
+    // any authenticated caller, and a delegate sees the org it is bound to.
+    const res = await app.request("/api/orgs", {
       headers: {
         Authorization: `Bearer ${token}`,
       },
     });
-    expect(res.status).toBe(200);
+    expect(res.status, await res.clone().text()).toBe(200);
+    const listed = (await res.json()) as { data: Array<{ id: string }> };
+    expect(listed.data.map((o) => o.id)).toEqual([orgId]);
+
+    // NOT `/api/profile`: the identity record is first-party, and a dashboard
+    // token is a third-party delegate. A client granted `profile` reads those
+    // claims from the OIDC module's own `/api/auth/oauth2/userinfo`.
+    const profile = await app.request("/api/profile", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(profile.status).toBe(403);
   });
 
   it("a dashboard token without the scope is refused on an org-PATH route", async () => {

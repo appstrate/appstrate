@@ -1782,7 +1782,7 @@ export interface paths {
         };
         /**
          * Organization library — the placement map (owners and admins)
-         * @description Returns every package the organization can see (org-owned + system), grouped by type, each carrying its `placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there (`via`: home, shared, system) and whether that space runs it (`state`: active, inactive, none). Members, guests and API keys cannot access this administrative endpoint. Ephemeral packages are excluded. The spaces list and the placements include only spaces the caller can enter, and each package type also requires that type's read permission in the space. Acting on the map is the same pair of doors as anywhere else: `POST /api/spaces/{spaceId}/packages` activates a package in a space — creating the offer that places it when the caller holds `<type>:share` in its home — and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}` deactivates it there.
+         * @description Returns every package the organization can see (org-owned + system), grouped by type, each carrying its `placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there (`via`: home, shared, system) and whether that space runs it (`state`: active, inactive, none). Members, guests and delegated credentials cannot access this administrative endpoint. Ephemeral packages are excluded. The spaces list and the placements include only spaces the caller can enter, and each package type also requires that type's read permission in the space. Acting on the map is the same pair of doors as anywhere else: `POST /api/spaces/{spaceId}/packages` activates a package in a space — creating the offer that places it when the caller holds `<type>:share` in its home — and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}` deactivates it there.
          */
         get: operations["getLibrary"];
         put?: never;
@@ -1896,7 +1896,7 @@ export interface paths {
         };
         /**
          * List the caller's connections across every org/space
-         * @description Unified user-scope view of the caller's integration connections under a single shape, grouped by source package. For interactive user credentials (cookie session, dashboard/instance JWT) it crosses orgs/spaces by design — does NOT require `X-Org-Id`. For an API key the list is scoped to the key's bound organization and space only.
+         * @description Unified user-scope view of the caller's integration connections under a single shape, grouped by source package. For the user's own credential (cookie session, CLI or instance token) it crosses orgs/spaces by design — does NOT require `X-Org-Id`. For a delegated or end-user credential the list is scoped to its bound organization, and to its space when it pins one.
          */
         get: operations["listMyConnections"];
         put?: never;
@@ -1919,7 +1919,7 @@ export interface paths {
         post?: never;
         /**
          * Delete one of the caller's own connections (destructive)
-         * @description Removes the `integration_connections` row globally. ON DELETE CASCADE vacates every reference (admin pins, member pins, run snapshots, schedule overrides). Intent is destructive: 'I never want to use this credential anywhere again'. Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins`). With an API key, only connections inside the key's bound organization and space can be deleted (204 with no effect otherwise).
+         * @description Removes the `integration_connections` row globally. ON DELETE CASCADE vacates every reference (admin pins, member pins, run snapshots, schedule overrides). Intent is destructive: 'I never want to use this credential anywhere again'. Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins`). With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) can be deleted (204 with no effect otherwise).
          */
         delete: operations["deleteMyConnection"];
         options?: never;
@@ -1984,7 +1984,7 @@ export interface paths {
         };
         /**
          * List orgs the authenticated caller belongs to
-         * @description Returns every org the caller can access. Cookie sessions and OIDC dashboard JWTs see every org the user is a member of. API keys see only their bound org. OIDC end-user JWTs see the single org owning their space. **Does NOT require `X-Org-Id`** — this endpoint is the prerequisite to setting it.
+         * @description Returns every org the caller can access. The user's own credential (cookie session, CLI or instance token) sees every org they are a member of. A delegated credential — an API key, a third-party OAuth client — sees only its bound org, as does an OIDC end-user JWT (the org owning its space). **Does NOT require `X-Org-Id`** — this endpoint is the prerequisite to setting it.
          */
         get: operations["listMyOrgs"];
         put?: never;
@@ -3580,7 +3580,7 @@ export interface paths {
         put?: never;
         /**
          * Set an initial password
-         * @description Set a password for the current user when none exists yet (account created via social sign-in). Creates the email/password credential so the user can also sign in with email. Fails with 409 when a password is already set — use the Better Auth change-password flow instead. Session authentication only; API keys are rejected.
+         * @description Set a password for the current user when none exists yet (account created via social sign-in). Creates the email/password credential so the user can also sign in with email. Fails with 409 when a password is already set — use the Better Auth change-password flow instead. The user's own credential only (session, CLI or instance token); delegated credentials — API keys, third-party OAuth clients — and end-user tokens are refused.
          */
         post: operations["setProfilePassword"];
         delete?: never;
@@ -4249,7 +4249,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a space
-         * @description Delete a space and all associated end-users. The default space cannot be deleted; neither can a space with runs in progress (the delete cascade-drops `runs`, which would rip the rows out from under a live container), nor one that is the home of one or more packages (`packages.home_space_id`, the space whose `<type>:write` governs them): move those with `PUT /api/packages/{scope}/{name}/home` first. A personal space is not deletable here at all — it goes away through offboarding, once its owner has left the organization; a live personal space that is not the caller's own answers 404 rather than 409, and an API key is never its owner (a key carries its creator's authority, not their privacy), so it gets the 404 too.
+         * @description Delete a space and all associated end-users. The default space cannot be deleted; neither can a space with runs in progress (the delete cascade-drops `runs`, which would rip the rows out from under a live container), nor one that is the home of one or more packages (`packages.home_space_id`, the space whose `<type>:write` governs them): move those with `PUT /api/packages/{scope}/{name}/home` first. A personal space is not deletable here at all — it goes away through offboarding, once its owner has left the organization; a live personal space that is not the caller's own answers 404 rather than 409, and a delegated credential is never its owner (it carries its creator's authority, not their privacy), so it gets the 404 too.
          */
         delete: operations["deleteSpace"];
         options?: never;
@@ -4272,7 +4272,7 @@ export interface paths {
         put?: never;
         /**
          * Convert a personal space to a team space
-         * @description Turn an ORPHANED personal space — one whose owner has left the organization — into an ordinary team space: it stops belonging to them, the offboarding window (`orphaned_at`) is cleared, and its `visibility` stays `private`. This is what keeps what a departing member built, and the ONE way an administrator reaches what is inside a personal space; it is recorded in the audit log (`space.converted_to_team`). A LIVE personal space is refused — an active member's private workspace is not administrable — and refused as a **404** to anybody but its owner, because a 409 there would confirm that the id is somebody's personal space. Requires the org-level `spaces:write` (owner or admin); API keys are refused.
+         * @description Turn an ORPHANED personal space — one whose owner has left the organization — into an ordinary team space: it stops belonging to them, the offboarding window (`orphaned_at`) is cleared, and its `visibility` stays `private`. This is what keeps what a departing member built, and the ONE way an administrator reaches what is inside a personal space; it is recorded in the audit log (`space.converted_to_team`). A LIVE personal space is refused — an active member's private workspace is not administrable — and refused as a **404** to anybody but its owner, because a 409 there would confirm that the id is somebody's personal space. Requires the org-level `spaces:write` (owner or admin); delegated credentials are refused.
          */
         post: operations["convertSpaceToTeam"];
         delete?: never;
@@ -4436,7 +4436,7 @@ export interface paths {
         put?: never;
         /**
          * Sweep an orphaned personal space now
-         * @description Run the offboarding routine on an orphaned personal space immediately, instead of waiting for the rest of the 30-day window: every package the space HOMES is either re-homed to the organization's default space (when another space holds it) or deleted (when it lived only there), and the space is then deleted with its runs, files and sessions. A live personal space that is not the caller's own answers **404**, never 409: confirming that an id is somebody's personal space is itself a disclosure. Requires the org-level `spaces:delete` (owner or admin); API keys are refused. Recorded in the audit log (`space.swept`).
+         * @description Run the offboarding routine on an orphaned personal space immediately, instead of waiting for the rest of the 30-day window: every package the space HOMES is either re-homed to the organization's default space (when another space holds it) or deleted (when it lived only there), and the space is then deleted with its runs, files and sessions. A live personal space that is not the caller's own answers **404**, never 409: confirming that an id is somebody's personal space is itself a disclosure. Requires the org-level `spaces:delete` (owner or admin); delegated credentials are refused. Recorded in the audit log (`space.swept`).
          */
         post: operations["sweepPersonalSpace"];
         delete?: never;

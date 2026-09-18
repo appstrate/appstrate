@@ -273,7 +273,7 @@ export const spacesPaths = {
       tags: ["Spaces"],
       summary: "Delete a space",
       description:
-        "Delete a space and all associated end-users. The default space cannot be deleted; neither can a space with runs in progress (the delete cascade-drops `runs`, which would rip the rows out from under a live container), nor one that is the home of one or more packages (`packages.home_space_id`, the space whose `<type>:write` governs them): move those with `PUT /api/packages/{scope}/{name}/home` first. A personal space is not deletable here at all — it goes away through offboarding, once its owner has left the organization; a live personal space that is not the caller's own answers 404 rather than 409, and an API key is never its owner (a key carries its creator's authority, not their privacy), so it gets the 404 too.",
+        "Delete a space and all associated end-users. The default space cannot be deleted; neither can a space with runs in progress (the delete cascade-drops `runs`, which would rip the rows out from under a live container), nor one that is the home of one or more packages (`packages.home_space_id`, the space whose `<type>:write` governs them): move those with `PUT /api/packages/{scope}/{name}/home` first. A personal space is not deletable here at all — it goes away through offboarding, once its owner has left the organization; a live personal space that is not the caller's own answers 404 rather than 409, and a delegated credential is never its owner (it carries its creator's authority, not their privacy), so it gets the 404 too.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -305,7 +305,7 @@ export const spacesPaths = {
       tags: ["Spaces"],
       summary: "Convert a personal space to a team space",
       description:
-        "Turn an ORPHANED personal space — one whose owner has left the organization — into an ordinary team space: it stops belonging to them, the offboarding window (`orphaned_at`) is cleared, and its `visibility` stays `private`. This is what keeps what a departing member built, and the ONE way an administrator reaches what is inside a personal space; it is recorded in the audit log (`space.converted_to_team`). A LIVE personal space is refused — an active member's private workspace is not administrable — and refused as a **404** to anybody but its owner, because a 409 there would confirm that the id is somebody's personal space. Requires the org-level `spaces:write` (owner or admin); API keys are refused.",
+        "Turn an ORPHANED personal space — one whose owner has left the organization — into an ordinary team space: it stops belonging to them, the offboarding window (`orphaned_at`) is cleared, and its `visibility` stays `private`. This is what keeps what a departing member built, and the ONE way an administrator reaches what is inside a personal space; it is recorded in the audit log (`space.converted_to_team`). A LIVE personal space is refused — an active member's private workspace is not administrable — and refused as a **404** to anybody but its owner, because a 409 there would confirm that the id is somebody's personal space. Requires the org-level `spaces:write` (owner or admin); delegated credentials are refused.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -341,7 +341,7 @@ export const spacesPaths = {
       tags: ["Spaces"],
       summary: "Sweep an orphaned personal space now",
       description:
-        "Run the offboarding routine on an orphaned personal space immediately, instead of waiting for the rest of the 30-day window: every package the space HOMES is either re-homed to the organization's default space (when another space holds it) or deleted (when it lived only there), and the space is then deleted with its runs, files and sessions. A live personal space that is not the caller's own answers **404**, never 409: confirming that an id is somebody's personal space is itself a disclosure. Requires the org-level `spaces:delete` (owner or admin); API keys are refused. Recorded in the audit log (`space.swept`).",
+        "Run the offboarding routine on an orphaned personal space immediately, instead of waiting for the rest of the 30-day window: every package the space HOMES is either re-homed to the organization's default space (when another space holds it) or deleted (when it lived only there), and the space is then deleted with its runs, files and sessions. A live personal space that is not the caller's own answers **404**, never 409: confirming that an id is somebody's personal space is itself a disclosure. Requires the org-level `spaces:delete` (owner or admin); delegated credentials are refused. Recorded in the audit log (`space.swept`).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },

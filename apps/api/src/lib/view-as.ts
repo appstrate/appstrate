@@ -426,9 +426,11 @@ export function callerOrgRole(c: Context<AppEnv>, orgId = c.get("orgId")): OrgRo
  * creator's private drafts.
  *
  * A personal space is a member's private half, so it answers to that member's
- * own credential — `principalKind: "user"`, whatever the transport — and to nothing
- * else: a delegate (API key, OAuth dashboard client) carries the creator's
- * authority, not their privacy, and an end-user is not a member at all.
+ * own credential — `principalKind: "user"`, whatever the transport — and to
+ * nothing else: a delegate (API key, OAuth dashboard client) carries the
+ * creator's authority, not their privacy — its scope ceiling names permissions
+ * and can never name the person's private space, which is exactly why a
+ * third-party client is a delegate — and an end-user is not a member at all.
  *
  * Under a role preview it is `null`: a persona has no personal space, and
  * `X-View-As` cannot even name one ({@link validatePersonaSpace}). Answering

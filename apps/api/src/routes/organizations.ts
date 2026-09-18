@@ -28,7 +28,7 @@ import {
 } from "../services/organizations.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { toSlug, SLUG_REGEX } from "@appstrate/core/naming";
-import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
+import { ApiError, forbidden, invalidRequest, notFound, unauthorized } from "../lib/errors.ts";
 import {
   CURRENT_API_VERSION,
   isVersionSupported,
@@ -118,8 +118,13 @@ router.get("/", async (c) => {
   const user = c.get("user");
   // A delegate sees only its bound org — filter at the DB level so a
   // compromised key cannot cause enumeration queries across every org the
-  // creator belongs to.
-  const orgIdFilter = isUserPrincipal(c) ? undefined : c.get("orgId");
+  // creator belongs to. No binding is an auth-pipeline bug, and the unfiltered
+  // listing is the very enumeration above: fail closed.
+  const orgId = c.get("orgId");
+  if (!isUserPrincipal(c) && !orgId) {
+    throw unauthorized("Credential is missing its organization binding");
+  }
+  const orgIdFilter = isUserPrincipal(c) ? undefined : orgId;
   const orgs = await getUserOrganizations(user.id, orgIdFilter);
   // A persona naming an org this listing cannot place is refused, not ignored.
   await resolveListingViewAs(c, orgs);

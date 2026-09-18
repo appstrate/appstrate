@@ -7,13 +7,12 @@
  * "source" (the package they connect to).
  *
  * Scope depends on the caller's AUTHORITY, not just their identity:
- *   - Interactive user credentials (dashboard cookie session, OAuth
- *     dashboard/instance JWT) cross orgs and spaces — the connection
- *     list belongs to the user, not to any single org context.
- *   - An API key authenticates as its CREATOR but is bound to one org +
- *     one space; its listing is hard-scoped to that (org, space) pair
- *     at the SQL level so a leaked key can never enumerate the creator's
- *     connections in other orgs/spaces ({@link MeConnectionAuthority}).
+ *   - A `user` principal crosses orgs and spaces — the connection list
+ *     belongs to the person, not to any single org context.
+ *   - Every other kind authenticates as its issuer but is bound; its listing
+ *     is hard-scoped to that binding at the SQL level so a leaked credential
+ *     can never enumerate the issuer's connections elsewhere
+ *     ({@link MeConnectionAuthority}).
  */
 
 import { db } from "@appstrate/db/client";
@@ -46,15 +45,16 @@ import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
  * is made explicitly at the callsite and lands in the SQL `WHERE` — a caller
  * cannot "forget" to scope an API key.
  *
- *   - `user_global`: a `user` principal (cookie session, OAuth dashboard or
- *     instance token, chat loopback). Cross-org, cross-space by design — that
- *     is the dashboard connections-management feature.
- *   - `space_scoped`: a `delegate` (the API key). It authenticates as its
- *     creator, but its blast radius is one org + one space; the listing is
- *     filtered to that pair at the DB level.
+ *   - `user_global`: a `user` principal (cookie session, CLI or instance
+ *     token, chat loopback). Cross-org, cross-space by design — that is the
+ *     dashboard connections-management feature.
+ *   - `bound`: any other kind — an API key (org + space), a third-party OAuth
+ *     client (org only), an end-user token (org + space). Its blast radius is
+ *     its binding, and that binding lands in the WHERE clause. On `main` an
+ *     end-user token took the global view.
  */
 export type MeConnectionAuthority =
-  { kind: "user_global" } | { kind: "space_scoped"; orgId: string; spaceId: string };
+  { kind: "user_global" } | { kind: "bound"; orgId: string; spaceId?: string };
 
 /**
  * The integration ids ONE agent's draft manifest declares, projected as a
@@ -70,20 +70,22 @@ const declaredIntegrationIds = sql<string[]>`ARRAY(
 /**
  * Fetch every integration_connections row owned by the actor, joined with
  * its space + integration package. Cross-space, cross-org for a
- * `user_global` authority; pinned to the authority's (org, space)
- * pair for `space_scoped` callers.
+ * `user_global` authority; confined to the authority's org — and to its space
+ * when it pins one — for a `bound` caller.
  */
 async function listAllActorIntegrationConnections(
   actor: Actor,
   authority: MeConnectionAuthority,
 ): Promise<MeConnectionSourceGroup[]> {
   const ownerPredicate = actorFilter(actor, integrationConnections);
-  // Authority scope lands in the WHERE clause itself (not a post-filter):
-  // a space-scoped credential can only ever SELECT rows of its own
-  // (org, space) pair.
+  // Authority scope lands in the WHERE clause itself (not a post-filter): a
+  // bound credential can only ever SELECT rows inside its own binding.
   const authorityPredicates =
-    authority.kind === "space_scoped"
-      ? [eq(integrationConnections.spaceId, authority.spaceId), eq(spaces.orgId, authority.orgId)]
+    authority.kind === "bound"
+      ? [
+          eq(spaces.orgId, authority.orgId),
+          ...(authority.spaceId ? [eq(integrationConnections.spaceId, authority.spaceId)] : []),
+        ]
       : [];
 
   const rows = await db
@@ -244,10 +246,9 @@ async function listAllActorIntegrationConnections(
 
 /**
  * Unified user-scope listing of integration connection groups, sorted
- * alphabetically by display name. `authority` is required — the route
- * derives it from the authentication method so a space-bound
- * credential (API key) is scoped to its own (org, space) pair
- * while interactive user credentials keep the cross-org dashboard view.
+ * alphabetically by display name. `authority` is required — the route derives
+ * it from the principal's kind, so a bound credential is scoped to its own
+ * binding while a `user` principal keeps the cross-org dashboard view.
  */
 export async function listMeConnections(
   actor: Actor,
