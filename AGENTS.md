@@ -1,42 +1,85 @@
-# Appstrate — AI Agent Instructions
+# Appstrate — Developer Guide
 
-Appstrate is an open-source platform for running autonomous AI agents in sandboxed Docker containers. Users connect providers (Gmail, ClickUp, etc.), configure agents, and let AI agents process their data autonomously.
+Appstrate is an open-source platform for running autonomous AI agents in sandboxed Docker containers. A user signs up, connects OAuth/API key services (Gmail, ClickUp), clicks "Run", and the AI agent processes their data autonomously inside a temporary container. Agents can also be scheduled via cron, imported from ZIP files, and extended with agent skills.
 
-## Build & Development
+This is the single instruction file for this directory: every coding agent reads it, whichever filename it looks for. `CLAUDE.md` next to it is a one-line `@AGENTS.md` import and holds no content of its own — never add a rule there. Same rule in `apps/api`, `apps/web` and `apps/cli`.
 
-| Command                  | Description                                                                                                                                                |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bun install`            | Install dependencies (use `--frozen-lockfile` in CI)                                                                                                       |
-| `bun run dev`            | Start API (:3000) + Vite build --watch (turborepo)                                                                                                         |
-| `bun test`               | Run all tests (bun:test framework, requires Docker)                                                                                                        |
-| `bun run check`          | The quality gate — 20 task names, NOT 4. `CLAUDE.md` § "Development Workflow" lists them and says how to count the turbo fan-out; do not re-list them here |
-| `bun run build`          | Build everything (turbo build)                                                                                                                             |
-| `bun run db:generate`    | Generate Drizzle migrations from schema changes                                                                                                            |
-| `bun run db:migrate`     | Apply migrations manually (rarely needed — boot migrates on start)                                                                                         |
-| `bun run verify:openapi` | Validate OpenAPI spec (structural + lint, 0 errors required)                                                                                               |
+> **Deep references** (read on demand, not loaded every session):
+>
+> - Env vars → `docs/ENV.md` (authoritative: `@appstrate/env` Zod schema)
+> - AFPS integration model → `docs/architecture/INTEGRATIONS_RUNTIME.md`
+> - Sidecar protocol → `docs/architecture/SIDECAR.md`
+> - Run cost tracking → `docs/architecture/RUN_COST.md`
+> - Observability (OpenTelemetry) → `docs/architecture/OBSERVABILITY.md`
+> - Casing policy → `docs/CASING_CONVENTIONS.md`
+> - Module authoring → `apps/api/src/modules/README.md`
+> - Quality-gate forensics (the knip false red, in full) → `docs/QUALITY_GATE.md`
+> - Test commands, tiers and helpers (full guide) → `.claude/skills/testing/SKILL.md`
+> - Per-area conventions → `apps/api/AGENTS.md`, `apps/web/AGENTS.md`, `apps/cli/AGENTS.md`
 
-**Runtime**: Bun everywhere -- NOT Node.js. Bun auto-loads `.env`.
+## Quick Start
 
-### First-time Setup
+> **Self-hosting (production)?** Use the one-liner installer: `curl -fsSL https://get.appstrate.dev | bash`. See `examples/self-hosting/README.md`. The instructions below are for **development**.
 
-```sh
-bun install
-bun run setup     # copies .env, starts Docker infra, runs migrations, builds frontend
-bun run dev       # http://localhost:3000
-```
-
-Or manually:
+**Tier 0 (zero-install — recommended for development):**
 
 ```sh
 cp .env.example .env
-# Every service in docker-compose.dev.yml sits behind a `profiles:` gate, so a
-# bare `up -d` starts NOTHING. Use the tier scripts (or pass --profile yourself):
-bun run docker:dev            # Tier 3: PostgreSQL + Redis + MinIO (--profile full)
-# bun run docker:dev:minimal  # Tier 1: PostgreSQL only
-# bun run docker:dev:standard # Tier 2: PostgreSQL + Redis
-bun run build
-bun run dev                   # migrations are applied automatically at boot
+bun run dev                   # PGlite + filesystem + in-memory → :3000
 ```
+
+No Docker, no PostgreSQL, no Redis. After signup, the onboarding flow guides the user to create their first organization.
+
+**Tier 3 (full stack with Docker):**
+
+```sh
+bun run setup                 # Interactive tier selection, starts Docker, migrates DB, builds
+bun run dev
+```
+
+### Commands
+
+| Command                  | Description                                                                                                                                       |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bun install`            | Install dependencies (use `--frozen-lockfile` in CI)                                                                                              |
+| `bun run dev`            | Start API (:3000) + Vite build --watch (turborepo)                                                                                                |
+| `bun test`               | Run all tests (bun:test framework, requires Docker)                                                                                               |
+| `bun run check`          | The quality gate. Its task list lives in § "Development Workflow" — that copy is the one kept in step with `package.json`; do not re-list it here |
+| `bun run build`          | Build everything (turbo build)                                                                                                                    |
+| `bun run db:generate`    | Generate Drizzle migrations from schema changes                                                                                                   |
+| `bun run db:migrate`     | Apply migrations manually (rarely needed — boot migrates on start)                                                                                |
+| `bun run verify:openapi` | Validate OpenAPI spec (structural + lint, 0 errors required)                                                                                      |
+
+### Docker Compose (Tier 1-3)
+
+Every service in `docker-compose.dev.yml` sits behind a `profiles:` gate, so a bare `docker compose up -d` starts **nothing**. Use the tier scripts below, or pass `--profile` yourself.
+
+- **`docker-compose.dev.yml`** — Development services with profiles:
+  - `bun run docker:dev:minimal` — Tier 1: PostgreSQL only
+  - `bun run docker:dev:standard` — Tier 2: PostgreSQL + Redis
+  - `bun run docker:dev` — Tier 3: PostgreSQL + Redis + MinIO
+- **`docker-compose.yml`** — Self-hosting / production (images from GHCR)
+- **`docker:prod`** script — `docker compose --profile prod up -d` (full stack)
+- **`deploy/docker-compose.yml`** — the deployment that runs `app.appstrate.com`, driven by Coolify. NOT a template and not merged with `examples/self-hosting/`: its service names are wired to live domains, so renaming one deletes the routing. Moved here from the retired `appstrate/cloud` repository; see `deploy/README.md`.
+
+## Stack — Critical Constraints
+
+| Constraint     | Details                                                                                                                                                                                                                                                                                                      |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Runtime        | **Bun** everywhere — NOT node. Bun auto-loads `.env`                                                                                                                                                                                                                                                         |
+| API framework  | **Hono** — NOT `Bun.serve()` (need SSE via `streamSSE`, routing, middleware)                                                                                                                                                                                                                                 |
+| Docker client  | **`fetch()` + unix socket** — NOT dockerode (socket bugs with Bun). See `services/docker.ts`                                                                                                                                                                                                                 |
+| Database       | **PostgreSQL 16** + Drizzle ORM (postgres.js). PGlite (embedded WASM Postgres) when `DATABASE_URL` is absent                                                                                                                                                                                                 |
+| DB security    | **No RLS** — app-level security, all queries filter by `orgId` (+ `spaceId` for space-scoped resources)                                                                                                                                                                                                      |
+| Logging        | **`lib/logger.ts`** (JSON to stdout) — no `console.*` calls                                                                                                                                                                                                                                                  |
+| Auth           | **Better Auth** cookie sessions + `X-Org-Id` + `X-Space-Id` headers. Email/password + optional Google/GitHub social (opt-in via env). Optional email verification (opt-in via SMTP env). API key (`ask_` prefix) tried first, then cookie. `Appstrate-User` header for end-user impersonation (API key only) |
+| Validation     | **Zod 4** for all request body/query validation + JSONB safe narrowing. **AJV** only for dynamic manifest schemas                                                                                                                                                                                            |
+| Env validation | **`@appstrate/env`** (Zod schema) is the single source of truth — not `.env.example`. Full table: `docs/ENV.md`                                                                                                                                                                                              |
+| Redis          | **Redis 7+** — BullMQ scheduler, distributed rate limiting (`rate-limiter-flexible`), cancel Pub/Sub, OAuth PKCE state                                                                                                                                                                                       |
+| Storage        | **S3** (`@aws-sdk/client-s3`) via `@appstrate/core/storage-s3` — configurable endpoint for MinIO/R2                                                                                                                                                                                                          |
+| Frontend       | **React 19** + Vite + React Router v7 + React Query v5 + Zustand                                                                                                                                                                                                                                             |
+| Styling        | **Tailwind CSS 4** (`@tailwindcss/vite`, dark theme)                                                                                                                                                                                                                                                         |
+| Build          | **Turborepo** + Bun workspaces. Backend has no build step — Bun resolves `.ts` directly                                                                                                                                                                                                                      |
 
 ## Code Conventions
 
@@ -50,7 +93,9 @@ bun run dev                   # migrations are applied automatically at boot
 - **bun:test** with `it()` -- NOT `test()`, NOT vitest/jest
 - **File naming**: `*.test.ts` -- NOT `*.spec.ts`
 
-## Architecture
+## Navigating the Codebase
+
+Layout is discoverable (`ls`, workspace globs in the root `package.json`). What is not discoverable — the tree's intent, the import surface, and which guide owns which area — is below.
 
 ### Monorepo Structure (Turborepo + Bun workspaces)
 
@@ -86,64 +131,73 @@ appstrate/
 └── system-packages/          # System package `.afps` archives -- integrations + one mcp-server (`ls system-packages/` for today's set)
 ```
 
-### Stack
+### Workspace Imports
 
-| Layer      | Technology                                                        |
-| ---------- | ----------------------------------------------------------------- |
-| Runtime    | Bun                                                               |
-| API        | Hono (SSE, middleware, routing)                                   |
-| Database   | PostgreSQL 16 + Drizzle ORM (no RLS, app-level security by orgId) |
-| Auth       | Better Auth (cookie sessions) + API keys (`ask_*` prefix)         |
-| Frontend   | React 19 + Vite + React Router v7 + React Query v5 + Zustand      |
-| Styling    | Tailwind CSS 4 (`@tailwindcss/vite`, dark theme)                  |
-| Validation | Zod 4 (routes) + AJV (dynamic manifest schemas)                   |
-| Docker     | `fetch()` + unix socket (NOT dockerode)                           |
-| Scheduling | BullMQ (Redis-backed distributed cron)                            |
-| Storage    | S3 via `@appstrate/core/storage-s3` (MinIO/R2 compatible)         |
-| Build      | Turborepo + Bun workspaces                                        |
+Import from workspace packages using their published subpaths. **Core has no barrel** — import each module by subpath.
 
-## Important Patterns
+- `@appstrate/core/*` — validation, zip, naming, dependencies, integrity, semver, version-policy, system-packages, form, schemas, logger, env, storage, ssrf, dist-tags, module, permissions, runtime-tools-catalog, integration, mcp-server, sidecar-types
+- `@appstrate/db/schema` -- Drizzle schema. **Every** table lives here, including the ones a module reads/writes (`schema/oidc.ts`, `schema/webhooks.ts`, …). Modules own no schema, no migrations, no `schema.ts` of their own
+- `@appstrate/db/client` -- `db` + `listenClient`
+- `@appstrate/env` -- `getEnv()` (Zod-validated, cached, fail-fast)
+- `@appstrate/connect` -- OAuth2/PKCE, credential encryption (v1 envelope + multi-key keyring)
+- `@appstrate/afps-runtime` -- portable bundle loader + signing + sinks + Pi runner
+- `@appstrate/mcp-transport` -- MCP SDK adapter (createMcpServer, createInProcessPair, createMcpHttpClient)
+- `@appstrate/shared-types` -- Drizzle InferSelectModel re-exports
+- `@appstrate/emails` -- Email template rendering
 
-### API Routes
+### Per-area guides
 
-- **OpenAPI specs** in `apps/api/src/openapi/` are the source of truth. Never quote an endpoint count from memory — `bun run verify:openapi` prints the live `Code ⊆ Spec` figure
-- New route: create route file in `routes/` + OpenAPI path in `openapi/paths/` + wire in `index.ts`
-- All route bodies validated with `parseBody(schema, body)` from `lib/errors.ts`
-- Error responses follow RFC 9457 `application/problem+json`
-- `Request-Id` (`req_` prefix) on all responses
+Loaded only when working there — each is the copy that gets updated:
 
-### Database
+- **`apps/api/AGENTS.md`** — backend conventions: multi-tenant filtering, request pipeline, route guards, RBAC, rate limiting, package versioning, Zod/AJV validation, and the headless platform (spaces, end-users, webhooks, idempotency, API versioning, OpenAPI spec).
+- **`apps/web/AGENTS.md`** — `apps/web` + `packages/ui` conventions: i18n, Tailwind 4, typed API client, React Query keys, SSE hooks, feature gating, Rules-of-React gate.
+- **`apps/cli/AGENTS.md`** — driving an Appstrate instance from the CLI (end-user agent quickstart).
+- **`apps/api/src/modules/README.md`** — module authoring: lifecycle, permissions, hooks, database ownership rules.
 
-- **No RLS** -- all queries filter by `orgId` at the application level (multi-tenant)
-- Schema: `packages/db/src/schema/` (barrel: `packages/db/src/schema/index.ts`). Counts drift — derive them, don't quote them: `grep -c "= pgTable(" packages/db/src/schema/*.ts`
-- Modules own **no** tables. Every table a module reads/writes lives in the core schema and migrates with it
-- Migrations: edit the schema -> `bun run db:generate`. **Applied automatically at boot** (PGlite + PostgreSQL); `bun run db:migrate` is a manual escape hatch, not part of the normal loop
-- Service layer: function-based (no classes), `apps/api/src/services/state/` (runs, notifications, package-persistence) is the central data-access layer
+## Architecture
 
-### Backend Patterns
+```
+User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
+     |                                |
+     |-- Login/Signup --------------->|-- Better Auth (cookie session)
+     |-- / (Agent List) ------------->|-- GET /api/agents
+     |-- PUT .../input-settings ----->|-- schema.ts (AJV) → services/state/ (Drizzle)
+     |-- GET /api/integrations/ ----->|-- routes/integrations.ts → OAuth2 flow / API key
+     |      connect/start (browser),  |     storage
+     |      POST .../connect/submit   |
+     |-- POST /api/agents/{scope}/ -->|-- validate → create run → executeAgentInBackground()
+     |      {name}/run                |
+     |<-- SSE (replay + live) --------|-- subscribe to logs via pub/sub
+     |   Realtime (LISTEN/NOTIFY) ----|-- pg_notify on runs + run_logs → patches React Query cache
+     |   Scheduler (BullMQ + Redis) --|-- distributed cron, exactly-once, same execute path
+     |                                |
+     |   Docker network: appstrate-exec-{runId} (isolated bridge)
+     |   ┌─ Sidecar Container (alias "sidecar") ──────────────┐
+     |   │  RUN_TOKEN, PLATFORM_API_URL via env               │
+     |   │  /mcp (JSON-RPC stateless): run_history,           │
+     |   │    recall_memory, {ns}__api_call (cred injection), │
+     |   │    {ns}__{tool} (spawned integrations — one runner │
+     |   │    container per integration)                      │
+     |   ├─ Agent Container (Pi Coding Agent, Bun) ───────────┤
+     |   │  AGENT_PROMPT, LLM_*; SIDECAR_AUTH_TOKEN (sidecar- │
+     |   │  only bearer, NOT the run token); it + SIDECAR_URL │
+     |   │  deleted after bootstrap; NO RUN_TOKEN             │
+     |   └────────────────────────────────────────────────────┘
+```
 
-- No build step: backend ships as `.ts`, Bun resolves directly
-- Logging: `lib/logger.ts` (pino JSON) -- never `console.*`
-- Auth: Better Auth cookie sessions + `X-Org-Id` header for org context
-- API key auth (`ask_*` prefix) tried first, then cookie fallback
-- Request pipeline: error handler -> Request-Id -> CORS -> health -> auth -> org context -> routes
-- Route guards (`middleware/guards.ts`): `requireAgent()`, `requireOrgAgent()`, `requirePackageInOrg()`, `requireMutableAgent()`, `apiKeyOrgScopeGuard()`/`pinnedSpaceScopeGuard()`. RBAC is `requirePermission(resource, action)` (`middleware/require-permission.ts`) — there is **no** `requireAdmin()` / `requireOwner()`
-- Rate limiting: Redis-backed, keyed by `method:path:identity`
+Sidecar + agent setup run in parallel (`Promise.all`). Images pre-pulled at boot (`ensureImage`) and kept warm afterwards by the runtime-image warmer (`services/orchestrator/runtime-image-warmer.ts`: reconciles one `appstrate-imagepin-*` holder container per image, so host-level `docker image prune -a` can't put a cold pull back on the run-boot path). Full sidecar protocol: `docs/architecture/SIDECAR.md`.
 
-### Frontend Patterns
+The platform, `PI_IMAGE` and `SIDECAR_IMAGE` are a **version contract**, not three independent knobs: the agent runtime and the sidecar speak a wire protocol to each other, both speak a container boundary to the platform, and all of it changes in the same commit — a trio that disagrees boots fine then fails runs with an opaque upstream error naming none of the three (#1195 for the pair, #1177 for the platform boundary). Two guards, and they are complementary, not redundant. The env schema (`@appstrate/env`, via `findRuntimeImageTagMismatch` from `@appstrate/core/image-ref`) **fails boot** on a disagreement — a cross-field rule like the S3/APP_URL ones, not conditioned on `RUN_ADAPTER`. The two halves are not symmetric: `PI_IMAGE` and `SIDECAR_IMAGE` are always compared to each other literally (every compose file sets both from one `${APPSTRATE_VERSION}`, so any difference is a half-done edit), while the platform joins only when all three values are **release versions**. That predicate is the load-bearing part: the platform's version is `APP_VERSION`, baked into the image by the Dockerfile (`ARG` → `ENV`, fed by the release workflow's tag), i.e. a git ref name, so it can equal an image tag only in the one family (`{{version}}`) the two namespaces share. Comparing it against the other three families `release.yml` publishes for the same image (`latest` — the documented compat fallback —, `{{major}}.{{minor}}`, `sha-<sha>`) or against a non-release build stamp (`dev`, the ARG default and source-run fallback; `health-container-e2e`, what the health e2e job builds with, against `:local` images) does not detect skew, it makes the rule unsatisfiable. Any of those takes the platform out of the trio and the rule degrades to the pair rule, which is what keeps dev boxes, preview deployments, that CI job and `:latest` consumers booting. A digest-pinned ref (either half) is exempt outright. The cost of the predicate, deliberately accepted: both refs floating on `:latest` under a released platform is now accepted, because `APP_VERSION` reads the same whether the platform image was pulled by version tag or by `:latest` — that trio is byte-identical to the supported all-`:latest` deployment, and only the revision guard below can tell them apart. That guard is configuration-only: after the pre-pull, `services/orchestrator/runtime-image-pair.ts` **warns** when the two images on the host carry different `org.opencontainers.image.revision` stamps — _same tag, two builds_ (`:latest` rebuilt on one side only), which tag comparison structurally cannot see. `bun run docker:build:runtime` (alias `build-runtime`) builds BOTH images with the same stamp — there is deliberately no command that rebuilds one half.
 
-- i18next: `fr` (default) + `en`. The namespace list lives in `apps/web/CLAUDE.md` (first bullet) — it sits next to the `apps/web/src/locales/{lang}/` files it names, so it is the copy that gets updated when a namespace is added
-- **Typed API client only** — `apps/web/src/api/client.ts`: `$api.useQuery("get", "/api/end-users", { params })` / `$api.useMutation(...)` (openapi-react-query) and raw `client.GET(...)` (openapi-fetch), typed against `api/schema.d.ts` (regenerate with `bun run generate:api`). The legacy fetch barrel `api.ts` is **deleted** and its import specifiers are **banned by ESLint** (`eslint.config.mjs`) — code written against it will not lint
-- React Query keys: typed-client hooks use `[method, path, init]` (org/space scope rides in `init`). Run/schedule/package caches keep pinned legacy keys because the SSE patcher invalidates by those names
-- Feature gating: `useAppConfig()` reads `window.__APP_CONFIG__` (injected at serve time)
-- Always use `<Modal>` from `components/modal.tsx` for dialogs
+**Run liveness is two-phase** (`services/run-watchdog.ts`, same split as Kubernetes `startupProbe` vs `livenessProbe`): until the runner's first event the platform is provisioning and attests liveness on its behalf (`services/run-boot-heartbeat.ts`), bounded by `runs.boot_deadline_at` (`RUN_BOOT_DEADLINE_SECONDS`, default 300s); after it, the runner's own heartbeat owns liveness (`RUN_STALL_THRESHOLD_SECONDS`, default 60s). Each predicate finalises with its own error.
 
-### Docker Integration
+### AFPS Integrations (summary)
 
-- Docker client: `fetch()` + unix socket -- NOT dockerode (socket bugs with Bun)
-- Sidecars are spawned per-run; image pre-pull at orchestrator init absorbs cold-pull (20-45s) off the first run
-- Credential isolation: agent calls sidecar proxy, never sees raw credentials
-- Multiplexed stream headers: `[stream_type(1), 0(3), size(4)]` parsed in `streamLogs()`
+Outbound third-party API access flows through **integrations** (agent-driven connection model). An integration declares `source.kind: "local"` (sandboxed runner container per integration, `node|python|binary|uv`) or `"remote"` (Streamable HTTP / SSE MCP). Credentials injected sidecar-side (env-delivery or per-run MITM proxy), never read by the integration's MCP server. OAuth scopes inferred per-agent from `tools[]` selection.
+
+Agent manifest splits dependency from config: version on `dependencies.integrations.<id>` (flat semver), tool/scope/auth selection in top-level `integrations_configuration.<id>`. Single read/write path: `parseManifestIntegrations` / `writeManifestIntegrations` (`@appstrate/core/dependencies`).
+
+**Full detail** (runtime spawn, MITM, niveau-2 scope phases, remote HTTP, MCP transport retry): `docs/architecture/INTEGRATIONS_RUNTIME.md`. AFPS wire spec (canonical): <https://github.com/appstrate/afps-spec/blob/main/spec.md>.
 
 ### Agent runtime — MCP-only
 
@@ -154,6 +208,13 @@ appstrate/
 - Every route except `/health` requires the per-run `x-appstrate-sidecar-auth` token; deny-by-default middleware in `runtime-pi/sidecar/app.ts`
 - Zero-knowledge enforcement: after MCP bootstrap, `runtime-pi` deletes BOTH `process.env.SIDECAR_URL` and `process.env.SIDECAR_AUTH_TOKEN` — the URL removes the convenience, the token removes the capability
 - The legacy HTTP `/proxy` and `/run-history` routes are fully retired — runners 1.x are not compatible
+
+### Docker Integration
+
+- Docker client: `fetch()` + unix socket -- NOT dockerode (socket bugs with Bun)
+- Sidecars are spawned per-run; image pre-pull at orchestrator init absorbs cold-pull (20-45s) off the first run
+- Credential isolation: agent calls sidecar proxy, never sees raw credentials
+- Multiplexed stream headers: `[stream_type(1), 0(3), size(4)]` parsed in `streamLogs()`
 
 ### Memory model — `note` / `pin` / `recall_memory`
 
@@ -170,7 +231,167 @@ appstrate/
 - Endpoints: `GET /api/agents/:scope/:name/bundle` (export) + `POST /api/packages/import-bundle` (accepts `.afps-bundle` and legacy `.afps`)
 - Signature policy via `AFPS_SIGNATURE_POLICY` env (`off` | `warn` | `required`) and `AFPS_TRUST_ROOT` allowlist
 
+## Key Conventions & Gotchas
+
+### Casing conventions (snake_case wire / camelCase TS internal)
+
+Authoritative reference: **`docs/CASING_CONVENTIONS.md`**. TL;DR:
+
+- **Wire JSON** (HTTP, AFPS manifests, OpenAPI, OAuth2 fields, SQL columns) → **snake_case**
+- **Drizzle TS schema fields** → **camelCase** TS / **snake_case** SQL alias (`userId: text("user_id")`)
+- **TS internal** (args, vars, React props, Zustand state) → **camelCase**
+- **Universal DB-convention fields** (`id`, `*Id`, `createdAt`, `updatedAt`, `expiresAt`, `runNumber`, …) → **camelCase EVERYWHERE** (Drizzle, wire, OpenAPI, frontend)
+- **Better Auth tables** → camelCase TS (HARD framework blocker)
+- **Module hooks, logger fields, CloudEvents, webhook deliveries, BullMQ jobs, audit-log `after` payloads** → camelCase
+
+When in doubt: wire = snake_case, internal = camelCase. Audit: `/audit-casing` (6 parallel agents, 100% compliance check).
+
+**Package IDs in URL paths**: two shapes by rule — single package → `{scope}/{name}`, route referencing ≥2 packages → `{packageId}` (e.g. `/api/integrations/*`). Both resolve to the same `@scope/name` wire path. Always encode with `encodePackageIdPath` from `@appstrate/core/naming` — never `encodeURIComponent` on the whole id (it 404s the route regexes). Full rule: `docs/CASING_CONVENTIONS.md` → "Package identifiers in URL paths".
+
+### Module System
+
+Formalized system for optional features. Contract in `@appstrate/core/module` (published on npm) so external modules implement without depending on the API package. **Authoring guide + full lifecycle/permissions/hooks detail: `apps/api/src/modules/README.md`.**
+
+Essentials:
+
+- **Discovery**: loader resolves each `MODULES` specifier against `apps/api/src/modules/<id>/index.ts` first, then npm import. No registration table — drop a directory + add id to `MODULES`.
+- **Lifecycle**: core migrations (incl. all module tables) → discover built-ins → topological sort by `manifest.dependencies` → aggregate permissions → `init()` (workers only — no migrations) → `createRouter()` → running → `shutdown()`. All declared modules required; any failure is fatal.
+- **Modules own no tables**: a module is pure behavior — no module `schema.ts`, no per-module migration tree, no `__drizzle_migrations_<id>`. All OSS tables, including those a module reads/writes, live in the core schema (`packages/db/src/schema/`) and are created by the system migration pipeline at boot. **`apps/api/src/modules/README.md` § "Database ownership rules" owns this rule** — it states the four sub-rules (where a module's tables are defined, how Better Auth resolves them, why core never imports from a module, and the separate-journal escape hatch `@appstrate/module-ee` uses) next to the module contract they constrain, so that is the copy to read and to update.
+- **Built-in dirs** (`apps/api/src/modules/`): `webhooks` (clean `onRunStatusChange` boundary; tables `webhooks`/`webhook_deliveries` in core schema), `oidc` (end-user OAuth 2.1 IdP — reference consumer of `authStrategies()` / `betterAuthPlugins()`; its 10 OAuth/jwks tables live in core schema `schema/oidc.ts`), `core-providers` (openai/anthropic/openai-compatible model providers via `modelProviders()`, owns no tables), `mcp` (the platform REST API exposed as an inbound MCP server, one endpoint per org at `/api/mcp/o/:org` + RFC 9728 discovery; ~250 operations behind the three progressive-disclosure tools `search_operations`/`describe_operation`/`invoke_operation`, plus the `run_and_wait` shortcut and six file/package/identity helpers, dispatched in-process through the app so RBAC is the REST pipeline's; keeps its RFC 8707 audience allowlist live off `onOrgCreate`/`onOrgDelete`, owns no tables), `firecracker` (OPT-IN — NOT in the `MODULES` default; contributes a single `firecracker` execution backend via `orchestrators()` — an HTTP client to the `appstrate-runner` host daemon (`bun run firecracker:runner`) which embeds the in-process `FirecrackerOrchestrator` engine; platform reads only `FIRECRACKER_RUNNER_URL`/`_TOKEN`, the host-side `FIRECRACKER_*` vars are daemon-only, no tables/routes; see `docs/architecture/FIRECRACKER.md`). `@appstrate/module-codex` + `@appstrate/module-claude-code` (OPT-IN — NOT in the `MODULES` default; subscription grey-zone — both are agent-run **executable** on the single Pi engine via a provider-neutral sidecar bearer-swap, see `docs/architecture/SUBSCRIPTION_COMPLIANCE.md`) `@appstrate/module-observability` (OPT-IN — OpenTelemetry provider for the core telemetry façade `@appstrate/core/telemetry`; see `docs/architecture/OBSERVABILITY.md`) and `@appstrate/module-ee` (OPT-IN — Stripe billing, credit quotas, usage metering; the one **source-available** package here, `packages/module-ee/LICENSE`, and the one module with a migration tree of its own — its seven `ee_*` tables live in the platform database under the journal `drizzle.ee_migrations`; see `packages/module-ee/README.md`) are workspace modules under `packages/module-*`, resolved through `workspace:*`, not built-in dirs.
+
+- **Hooks vs Events**: a hook's dispatch mode is fixed by the contract **per hook name**, not by the call site — `packages/core/src/module.ts` splits the map in two and the platform's two dispatchers each accept only their own half. `callHook` runs `FirstMatchHooks` — `beforeUsage` alone, the admission gate over metered LLM usage on a surface (`run` | `chat`); the first module providing it answers and the rest are never consulted. `callAllHooks` runs `BroadcastHooks` — `beforeSignup`/`afterSignup`, called on **every** module in load order with errors **propagating**, so a throwing `beforeSignup` aborts user creation. Events (`emitEvent`) broadcast as well but are side-effect only (`onRunStatusChange`/`onRunConnectionMissing`/`onOrgCreate`/`onOrgDelete`) and a throwing handler is **isolated** — that isolation is the whole difference from a broadcast hook. Platform calls by name, never by module ID.
+- **Permissions**: RBAC co-owned by core + modules. Core catalog in `@appstrate/core/permissions`; role-grant matrix in `apps/api/src/lib/permissions.ts`. Modules extend via declaration merging on `ModuleResources` + `permissionsContribution()`. All three guards (`requirePermission`, `requireCorePermission`, `requireModulePermission`) delegate to `makePermissionGuard` in core.
+- **Disabling = zero footprint**: remove from `MODULES` → not imported/initialized; no tables/routes/middleware/flags/RBAC. Scheduling + provider management deliberately live in **core** (coupling with `runs` made module isolation cost more than it delivered).
+
+### Progressive Infrastructure
+
+Tiered model — every external dependency is optional with a built-in fallback. Adapters in `apps/api/src/infra/` with dynamic imports.
+
+| Component                     | When absent                     | Fallback                       | Tier |
+| ----------------------------- | ------------------------------- | ------------------------------ | ---- |
+| PostgreSQL (`DATABASE_URL`)   | PGlite (embedded WASM Postgres) | `./data/pglite/`               | 1+   |
+| Redis (`REDIS_URL`)           | In-memory adapters              | EventEmitter, Map, local queue | 2+   |
+| S3/MinIO (`S3_BUCKET`)        | Filesystem storage              | `./data/storage/`              | 3    |
+| Docker (`RUN_ADAPTER=docker`) | Bun subprocesses                | No container isolation         | 3    |
+
+Tier 0 (zero-install) requires only Bun.
+
+### API Routes
+
+- **OpenAPI specs** in `apps/api/src/openapi/` are the source of truth. Never quote an endpoint count from memory — `bun run verify:openapi` prints the live `Code ⊆ Spec` figure
+- All route bodies validated with `parseBody(schema, body)` from `lib/errors.ts`
+- Error responses follow RFC 9457 `application/problem+json`
+- `Request-Id` (`req_` prefix) on all responses
+
+### Backend Patterns
+
+- No build step: backend ships as `.ts`, Bun resolves directly
+- Logging: `lib/logger.ts` (pino JSON) -- never `console.*`
+- Auth: Better Auth cookie sessions + `X-Org-Id` header for org context
+- API key auth (`ask_*` prefix) tried first, then cookie fallback
+- Request pipeline: error handler -> Request-Id -> CORS -> health -> auth -> org context -> routes
+- Route guards (`middleware/guards.ts`): `requireAgent()`, `requireOrgAgent()`, `requirePackageInOrg()`, `requireMutableAgent()`, `apiKeyOrgScopeGuard()`/`pinnedSpaceScopeGuard()`. RBAC is `requirePermission(resource, action)` (`middleware/require-permission.ts`) — there is **no** `requireAdmin()` / `requireOwner()`
+- Rate limiting: Redis-backed, keyed by `method:path:identity`
+
+### Frontend Patterns
+
+- i18next: `fr` (default) + `en`. The namespace list lives in `apps/web/AGENTS.md` (first bullet) — it sits next to the `apps/web/src/locales/{lang}/` files it names, so it is the copy that gets updated when a namespace is added
+- **Typed API client only** — `apps/web/src/api/client.ts`: `$api.useQuery("get", "/api/end-users", { params })` / `$api.useMutation(...)` (openapi-react-query) and raw `client.GET(...)` (openapi-fetch), typed against `api/schema.d.ts` (regenerate with `bun run generate:api`). The legacy fetch barrel `api.ts` is **deleted** and its import specifiers are **banned by ESLint** (`eslint.config.mjs`) — code written against it will not lint
+- React Query keys: typed-client hooks use `[method, path, init]` (org/space scope rides in `init`). Run/schedule/package caches keep pinned legacy keys because the SSE patcher invalidates by those names
+- Feature gating: `useAppConfig()` reads `window.__APP_CONFIG__` (injected at serve time)
+- Always use `<Modal>` from `components/modal.tsx` for dialogs
+
+### Database
+
+Core schema: `packages/db/src/schema/` (Drizzle, barrel via `schema/index.ts`) — includes the tables modules read/write (e.g. `schema/oidc.ts`, `schema/webhooks.ts`). Modules own no separate schema, no migrations, no `schema.ts` of their own. Key headless tables: `spaces` (`spc_`), `endUsers` (`eu_`), `spacePackages`.
+
+- **No RLS** — all queries filter by `orgId` at the application level (+ `spaceId` for space-scoped resources)
+- Table counts drift — derive them, don't quote them: `grep -c "= pgTable(" packages/db/src/schema/*.ts`
+- Migrations are **applied automatically at boot** (PGlite + PostgreSQL); `bun run db:migrate` is a manual escape hatch, not part of the normal loop. Adding one: § "Development Workflow" below, and § "Migrations" for the `db:generate` TTY/index-collision trap
+- Service layer: function-based (no classes), `apps/api/src/services/state/` (runs, notifications, package-persistence) is the central data-access layer
+
+## Development Workflow
+
+- **New API route**: route file in `routes/` + OpenAPI path file in `openapi/paths/` + wire in `index.ts`. Run `bun run verify:openapi`, then `bun run generate:api` to refresh the SPA's generated types (`verify:api-types` in `check` fails otherwise). Every 2xx JSON response must declare a schema (verify-openapi step 6).
+- **DB migration (core)**: edit the domain file under `packages/db/src/schema/<domain>.ts` (the barrel is `packages/db/src/schema/index.ts` — nothing is defined there) → `bun run db:generate` (needs `DATABASE_URL` for drizzle-kit). Applied automatically at boot (PGlite + PostgreSQL) — no manual `db:migrate`.
+- **Module tables**: there are none separately — a module's tables live in the core schema (`packages/db/src/schema/<domain>.ts`) and migrate with core. No per-module migration step. The one exception is `packages/module-ee`, which keeps a drizzle tree of its OWN and self-migrates its seven `ee_*` tables into the platform database at `init()`, under its own journal `drizzle.ee_migrations` — the platform's `drizzle.__drizzle_migrations` is untouched. That is the escape hatch of `apps/api/src/modules/README.md` § "Database ownership rules" (rule 4), for tables the Apache-2.0 core schema must not carry.
+- **Quality gate**: `bun run check` — 21 task names, not 2: `turbo typecheck lint format:check` plus
+  `verify:openapi`, `verify:api-types`, `verify:type-coverage`, `verify:compose-defaults`,
+  `verify:release-version`, `verify:env-docs`, `verify:workflows`, `detect:breaking`,
+  `build:system-packages:check`, `lint:manifest-casing`, `conformance:check`,
+  `verify:module-isolation`, `verify:module-sql-boundary`, `verify:license-boundary`,
+  `typecheck:scripts`, `verify:module-contract`, `verify:dead-code`, `verify:no-migration-dml`.
+  turbo fans those out to **42** actual tasks (`typecheck` alone runs in 22 workspaces) — count them
+  with `bunx turbo run <the 21 names> --dry=json`, never by reading this line.
+  There is no `turbo check` task — the root script drives turbo directly.
+  `verify:workflows` is the newest and the narrowest: `actionlint` over `.github/workflows`, the
+  one language in this repo the gate used to skip entirely. It downloads a version-pinned,
+  SHA-256-verified binary on first run and caches it under `node_modules/.cache` — the npm package
+  named `actionlint` is an unrelated abandoned wasm build, not the linter. Its `shellcheck` and
+  `pyflakes` integrations are switched OFF on purpose so the verdict cannot depend on what happens
+  to be installed on the host; `scripts/verify-workflows.ts` states the full reasoning.
+  `verify:module-sql-boundary` is what enforces "a module never joins across the licence boundary"
+  (`apps/api/src/modules/README.md` rule 4): `@appstrate/module-ee` keeps its tables in the PLATFORM
+  database, so a `SELECT … FROM organizations` written there compiles and runs. The gate refuses any
+  import of the platform's drizzle schema from a module that owns a migration journal, and any table
+  named in that module's raw SQL that its own drizzle snapshot does not declare.
+- **Dead code**: `verify:dead-code` runs knip over every workspace and fails on an exported symbol
+  with no reader, a file nothing reaches, or a declared dependency nothing imports. `eslint`'s
+  `no-unused-vars` cannot see any of that — it only sees locals. Config and the reasoning behind
+  every entry/ignore: `knip.config.ts`. An entry must say _what reaches the file_; an ignore must
+  say _why the finding cannot be acted on_. Never un-export a symbol to quiet this gate, and add an
+  `ignore*` only where knip is structurally blind or the code is vendored in whole, with the
+  justification `knip.config.ts` demands at the call site — never to make a finding go away. What
+  is out of scope (the published packages), what knip derives on its own, and the ~161-finding
+  false red this section came out of: § **Quality Gate** below and `docs/QUALITY_GATE.md`.
+- **Tests**: `bun test` from root runs all packages in one process. See **Testing** below.
+
+## Quality Gate — and the signals it lies with
+
+`bun run check` is the gate. It is honest in CI and in a plain clone; several of
+its steps report false green or false red locally, and each one below has cost
+real time. Establish which you are looking at BEFORE changing code.
+
+The task list itself lives in § "Development Workflow" above — that copy sits next to the rest of
+the workflow and is the one kept in step with `package.json`. Two of its steps are recent enough to
+surprise you: `verify:release-version` fails when the `${APPSTRATE_VERSION:-…}` fallback baked into
+the shipped compose files falls behind the newest `v*` tag (it went twelve releases stale before the
+gate existed), and `verify:env-docs` fails when `docs/ENV.md` drifts from the `@appstrate/env` schema
+or `.env.example`. Both are release/ops correctness, not code style — do not "fix" either by editing
+the gate.
+
+**`verify:dead-code` (knip)** produced a ~161-finding false red on an untouched `main` until
+2026-08-23, and the failure mode is easy to re-introduce with one careless edit to `knip.config.ts`:
+declaring `entry` for a workspace **replaces** knip's filename defaults, so a workspace that declares
+one must carry every `exports` target, every `bin` target, and `main`/`module` if present —
+`manifestEntries(workspace)` derives that half; call it, never transcribe its output. The full
+forensics (what each knip version does and does not derive, which hypotheses were measured and
+refuted, and the two shapes of `ignore*` that qualify) live in **`docs/QUALITY_GATE.md`**.
+
+### Other false signals from the same chain
+
+| signal                                                  | why it lies                                                                                            | what to do instead                                                |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| `turbo` prints `Cached: N` for `typecheck`              | nothing was re-checked                                                                                 | `bunx tsc --noEmit -p <pkg>/tsconfig.json`, per package, no turbo |
+| `bunx turbo …` fails with `Could not resolve workspace` | it resolves a _global_ turbo, and rewrites `bun.lock` on the way                                       | `./node_modules/.bin/turbo`                                       |
+| a backgrounded `cmd > log; echo $?` reports 0           | that is the exit code of `echo`                                                                        | read the `Tasks: N/M` line in the log, not the reported status    |
+| `bun test` passes but types are broken                  | tests do not typecheck                                                                                 | re-run `tsc` after any mechanical rename                          |
+| `codecov/patch` is red                                  | coverage arrives from two jobs; the status is computed after the first and recomputed after the second | wait for the `integration` upload before drawing any conclusion   |
+| a PR shows "no checks reported"                         | usually `mergeable: CONFLICTING`, not a slow CI                                                        | `gh pr view <n> --json mergeable,mergeStateStatus`                |
+
+### Migrations
+
+`bun run db:generate` needs a TTY and collides on index numbers when two
+branches both add the next one. Hand-write the `.sql`, the `meta/_journal.json`
+entry and the `meta/NNNN_snapshot.json`, then prove the snapshot rather than
+trusting it: copy it aside and run `bunx drizzle-kit generate` — a correct
+snapshot yields `No schema changes, nothing to migrate`. Tier-0 tests replay the
+whole chain from `0000` under PGlite, so a malformed migration fails there
+loudly.
+
 ## Testing
+
+Full guide (commands and tiers, `bunfig.toml` preload and module auto-discovery, directory layout, conventions table, helpers): skill **`testing`** (`.claude/skills/testing/SKILL.md`).
 
 ### Running Tests
 
@@ -245,145 +466,16 @@ describe("GET /api/my-resource", () => {
 });
 ```
 
-## Quality Gate — and the signals it lies with
+### Mocking Policy — No `mock.module()`
 
-`bun run check` is the gate. It is honest in CI and in a plain clone; several of
-its steps report false green or false red locally, and each one below has cost
-real time. Establish which you are looking at BEFORE changing code.
-
-The task list itself lives in `CLAUDE.md` § "Development Workflow" — that copy
-sits next to the rest of the workflow and is the one kept in step with
-`package.json`. Two of its steps are recent enough to surprise you: `verify:release-version`
-fails when the `${APPSTRATE_VERSION:-…}` fallback baked into the shipped compose
-files falls behind the newest `v*` tag (it went twelve releases stale before the
-gate existed), and `verify:env-docs` fails when `docs/ENV.md` drifts from the
-`@appstrate/env` schema or `.env.example`. Both are release/ops correctness, not
-code style — do not "fix" either by editing the gate.
-
-### `verify:dead-code` (knip) — what it does and does not derive
-
-Fixed 2026-08-23. This section is kept because the failure mode is easy to
-re-introduce with one careless edit to `knip.config.ts`.
-
-Until then, `bun run check` failed locally on `//#verify:dead-code` with ~161
-"unused exports", ~284 "unused exported types" and 6 "unused files" — on an
-untouched `main` as well as on any branch. None of it was real, and because the
-`pre-push` hook runs `bun run check`, it blocked every local push.
-
-The cause was read out of knip 5.88.1's `dist/` — the version pinned when this
-was diagnosed. The pin is now **6.32.2**, and each claim below was re-verified
-against that `dist/`:
-
-- `ConfigurationChief.js` is the **only** place entry defaults are produced, and
-  they are filename patterns: `{index,cli,main}.{exts}` at the package root and
-  under `src/`. Still true at 6.32.2 (`defaultBaseFilenamePattern`,
-  `getDefaultWorkspaceConfig`, lines 17–29 — the line number moved from :27).
-- Declaring `entry` for a workspace **replaces** those filename defaults. Still
-  true at 6.32.2 — `getDefaultWorkspaceConfig` supplies them only when the
-  workspace config does not.
-- **No longer true at 6.32.2**: 5.88.1 read nothing from the package manifest,
-  so knip could not derive an entry from `exports` / `main` / `module`. 6.x does
-  — `getEntrySpecifiersFromManifest()` (`util/package-json.js`) walks `main`,
-  `module`, `browser`, `bin`, `types`/`typings` and the full `exports` map, and
-  `graph/build.js` adds each resolved file as a production entry. Do not act on
-  this by deleting `manifestEntries()` calls without measuring: the config's
-  explicit list is also what documents intent, and the gate is green as written.
-
-So under 5.88.1 knip never derived an entry from a package manifest, and a
-workspace that declared `entry` lost even the filename defaults. Every workspace
-here that declared one had silently lost its real entry points, and each loss
-cascaded: `packages/afps-runtime/bin/afps.ts` unreachable makes its whole
-`src/**` look dead, which was most of the 161.
-
-**The rule when you touch `knip.config.ts`:** a workspace that declares `entry`
-must carry every `exports` target, every `bin` target, and `main`/`module` if
-present. Those files are reached by npm consumers and by the `MODULES` loader
-resolving a specifier — neither of which knip can see. This half is no longer
-written by hand: `manifestEntries(workspace)` reads the `package.json` and
-derives it, so a manifest edit cannot silently desynchronise from the config.
-Call it, do not transcribe its output, and do not collapse it into a broad glob
-such as `src/*.ts!` — that is wider than the real export map and would hide a
-genuinely dead root-level file. The one workspace it cannot serve is `apps/cli`,
-whose `bin` points at a `dist/` build artifact absent from a clean checkout;
-its entries are hand-written and say so at the call site. What stays
-hand-written otherwise is the other half: the entries no manifest implies
-(Docker CMDs, glob-discovered fixtures, operator scripts), each still owing the
-"what reaches it" justification.
-
-**Never un-export a symbol to make this gate quiet.** If a finding survives a
-correct entry list, it is either real dead code or a symbol exported with no
-reader at all — fix it at the source, or report it.
-
-**An `ignore*` is not forbidden, but it is not a way out either.** Two shapes
-qualify, and nothing else. The first is a false positive knip _structurally
-cannot see_: a dynamic import, a binary invoked through `npx` or the shell, an
-optional peer behind a runtime feature check, a reader inside the declaring
-file itself, an npm contract, a wire format. The second is rarer and admits the
-finding is TRUE — the export really has no reader today — but the code is
-vendored in whole from an upstream generator, so pruning it buys nothing and
-fights the next vendor diff; `packages/ui`'s shadcn/ui families are the only
-instance, and even there only the `exports` issue is suppressed, never a
-component file nothing imports. Either way the reason travels with the entry,
-written at its call site in `knip.config.ts` — that file's rule 2 states the
-first shape; the second is argued at the `ignoreIssues` entry itself. The live
-carve-outs are `ignoreExportsUsedInFile`, `ignoreIssues`, `ignoreBinaries` and
-three `ignoreDependencies` blocks; read their prose before adding a fourth.
-They are deliberately NOT re-listed here — a second copy of that list would
-drift from the config, and the config is where the justification has to live
-anyway. What is forbidden is the other use: silencing a finding you have not
-explained.
-
-An earlier version of this section blamed `git worktree`, on the strength of one
-clone that came back clean. That was wrong. Measured and refuted since, each
-independently: worktree vs `git clone`, `--frozen-lockfile` vs a plain
-`bun install`, the knip version (5.88.1 on both sides at the time; the pin is
-6.32.2 today), the presence of a `.env`,
-the turbo cache (the task is `"cache": false`, and CI logs `cache bypass`), and
-the bun version (1.3.11 local vs the `packageManager`-pinned 1.3.14 — tested at
-1.3.14, identical output). CI was green throughout with the same config, and
-that divergence is still unexplained; it stopped mattering once the config was
-made correct rather than merely quiet on one machine.
-
-### Other false signals from the same chain
-
-| signal                                                  | why it lies                                                                                            | what to do instead                                                |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| `turbo` prints `Cached: N` for `typecheck`              | nothing was re-checked                                                                                 | `bunx tsc --noEmit -p <pkg>/tsconfig.json`, per package, no turbo |
-| `bunx turbo …` fails with `Could not resolve workspace` | it resolves a _global_ turbo, and rewrites `bun.lock` on the way                                       | `./node_modules/.bin/turbo`                                       |
-| a backgrounded `cmd > log; echo $?` reports 0           | that is the exit code of `echo`                                                                        | read the `Tasks: N/M` line in the log, not the reported status    |
-| `bun test` passes but types are broken                  | tests do not typecheck                                                                                 | re-run `tsc` after any mechanical rename                          |
-| `codecov/patch` is red                                  | coverage arrives from two jobs; the status is computed after the first and recomputed after the second | wait for the `integration` upload before drawing any conclusion   |
-| a PR shows "no checks reported"                         | usually `mergeable: CONFLICTING`, not a slow CI                                                        | `gh pr view <n> --json mergeable,mergeStateStatus`                |
-
-### Migrations
-
-`bun run db:generate` needs a TTY and collides on index numbers when two
-branches both add the next one. Hand-write the `.sql`, the `meta/_journal.json`
-entry and the `meta/NNNN_snapshot.json`, then prove the snapshot rather than
-trusting it: copy it aside and run `bunx drizzle-kit generate` — a correct
-snapshot yields `No schema changes, nothing to migrate`. Tier-0 tests replay the
-whole chain from `0000` under PGlite, so a malformed migration fails there
-loudly.
-
-## Workspace Imports
-
-Import from workspace packages using their published subpaths:
-
-- `@appstrate/core/*` -- validation, zip, naming, dependencies, integrity, semver, logger, storage, etc.
-- `@appstrate/db/schema` -- Drizzle schema. **Every** table lives here, including the ones a module reads/writes (`schema/oidc.ts`, `schema/webhooks.ts`, …). Modules own no schema, no migrations, no `schema.ts` of their own
-- `@appstrate/db/client` -- `db` + `listenClient`
-- `@appstrate/env` -- `getEnv()` (Zod-validated, cached, fail-fast)
-- `@appstrate/connect` -- OAuth2/PKCE, credential encryption (v1 envelope + multi-key keyring)
-- `@appstrate/afps-runtime` -- portable bundle loader + signing + sinks + Pi runner
-- `@appstrate/mcp-transport` -- MCP SDK adapter (createMcpServer, createInProcessPair, createMcpHttpClient)
-- `@appstrate/shared-types` -- Drizzle InferSelectModel re-exports
-- `@appstrate/emails` -- Email template rendering
+**Never use `mock.module()`.** It replaces the entire module globally and permanently within a test run, breaking other tests importing the same barrel. (Source of 37 hard-to-diagnose failures.) Use dependency injection instead — see the `testing` skill.
 
 ## Environment Variables
 
-**Do not copy an env table into this file.** Every hand-maintained copy of the
-env contract in this repo has drifted from the schema; the generator is
-authoritative and cheap to read:
+`getEnv()` from `@appstrate/env` (Zod-validated, cached, fail-fast at boot) is authoritative. **Full table: `docs/ENV.md`.**
+
+**Do not copy the full env table into this file.** Every hand-maintained copy of the env contract in
+this repo has drifted from the schema; the generator is authoritative and cheap to read:
 
 | Source                      | What it is                                                                                                                                        |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -391,13 +483,44 @@ authoritative and cheap to read:
 | `docs/ENV.md`               | Prose reference — one row per var, plus the handful of sidecar/module vars read straight from `process.env` and therefore absent from the schema. |
 | `.env.example`              | Operator contract — dev-ready values, commented by default.                                                                                       |
 
-Boot fails without: `BETTER_AUTH_SECRET`, `CONNECTION_ENCRYPTION_KEY`,
-`UPLOAD_SIGNING_SECRET`, `RUN_TOKEN_SECRET`, `CONNECT_SESSION_SECRET`.
+Required vars (boot fails without them):
+
+| Variable                    | Notes                                                                           |
+| --------------------------- | ------------------------------------------------------------------------------- |
+| `BETTER_AUTH_SECRET`        | Session signing secret                                                          |
+| `CONNECTION_ENCRYPTION_KEY` | 32 bytes base64. Primary key for new credential ciphertexts (v1 envelope)       |
+| `UPLOAD_SIGNING_SECRET`     | HMAC secret for FS upload-sink tokens (≥16 chars), rotates independently        |
+| `RUN_TOKEN_SECRET`          | HMAC secret for run bearer tokens (≥16 chars), rotates independently            |
+| `CONNECT_SESSION_SECRET`    | HMAC secret for hosted-connect-portal tokens (≥16 chars), rotates independently |
+
 Everything else has a schema default. To list the current key set:
 
 ```sh
 grep -oE '^    [A-Z][A-Z0-9_]*:' packages/env/src/index.ts | tr -d ' :' | sort
 ```
 
-`MODULES` is the var most often mis-quoted from memory — read its `.default(...)`
-in the schema rather than trusting any doc (including this one).
+Most-touched optional vars: `MODULES` (default `oidc,webhooks,mcp,core-providers,@appstrate/module-chat` — subscription modules `@appstrate/module-codex` + `@appstrate/module-claude-code` are opt-in), `DATABASE_URL`, `REDIS_URL`, `S3_BUCKET`, `RUN_ADAPTER` (default `process`; `docker` for containers), `APP_URL`, `TRUSTED_ORIGINS`, `TRUST_PROXY`. See `docs/ENV.md` for every documented var with defaults and full notes — most of them the `@appstrate/env` Zod schema's key set, the rest read straight from `process.env` by modules, the sidecar or the agent container. **Nothing recognises a renamed env var — not the platform, not the CLI.** `RETIRED_ENV_RENAMES`, its boot guard and the two RETIRED-name doc tables were all deleted under `docs/NO_TRANSITIONAL_CODE.md` §4. An `.env` carrying a pre-rename spelling has that key stripped as unknown and the setting falls back to its default, silently; correcting it is an operator task announced in the release notes. Do not re-add a rename table anywhere, the installer included — §4 records why the installer is not a loophole. `bun run verify:env-docs` (in `bun run check`) holds the documented table complete against both the schema and `.env.example` and prints the counts — read its success line, not this sentence.
+
+`MODULES` is the var most often mis-quoted from memory — read its `.default(...)` in the schema
+rather than trusting the line above, or any other doc.
+
+## Agent & Extension Gotchas
+
+- **Reference manifest**: system package ZIPs in `system-packages/`. Validation: `services/schema.ts`.
+- **JSON Schema `required`**: top-level `required: ["field1"]` array — NOT `required: true` on properties.
+- **Schema wrapper convention**: input/output use an AFPS wrapper — NOT raw JSON Schema. Structure: `{ schema: JSONSchemaObject, file_constraints?, ui_hints?, property_order? }` (snake_case, AFPS §3.4). `schema` member MUST be pure JSON Schema 2020-12. File fields: `{ type: "string", format: "uri", contentMediaType: "..." }` (single) or array of same (multiple) — NEVER `type: "file"`. Detect via `isFileField()` / `isMultipleFileField()` from `@appstrate/core/form`.
+- **Extension import**: `@earendil-works/pi-coding-agent` (NOT `pi-agent`).
+- **Extension `execute` signature**: `(_toolCallId, params, signal)` — `params` is the **second** arg.
+- **Extension return type**: `{ content: [{ type: "text", text: "..." }] }` — NOT a plain string.
+- **Skills**: YAML frontmatter (`name`, `description`) in `SKILL.md`, parsed with the **`yaml` library at the same major the skill runtime uses** (`@earendil-works/pi-coding-agent`) so the gate and the consumer never disagree. Both fields are REQUIRED on every path that WRITES skill content (editor create/save, publish, restore, ZIP/GitHub import, bundle/MCP import — ROOT package only) via `checkSkillMarkdown` (`@appstrate/afps-shared/companion-files`), wired once as `validateContent` on `CONFIG_BY_TYPE` and applied through `assertContentConforms` / `assertArchiveContentConforms` (`services/package-items/config.ts`): `name` is the bare [Agent Skills](https://agentskills.io/specification) slug (1-64 code points of lowercase `a-z`/`0-9`/`-`, no leading, trailing or doubled hyphen) written INLINE on one line, a DIFFERENT namespace from the `@scope/name` package id; `description` non-empty, ≤1024 code points; a leading BOM is refused — Pi strips one from 0.85 on, but a minted version is immutable and must load on every runtime image the platform ships, including the 0.84.x ones that read no frontmatter behind a BOM — so write paths starting from BYTES decode via `decodeSkillMarkdown`. READING stays lenient — `checkCompanionFiles` (the loader) still asks only for an inline `name`, because published bundles are immutable and a run must not fail on a skill nobody can fix; the gate must therefore accept a SUBSET of what the loader accepts, and `packages/runner-pi/test/skill-frontmatter-parity.test.ts` runs the real Pi loader to keep the asymmetry one-directional. Container path `.pi/skills/{id}/SKILL.md`.
+- **Proxy system**: org-level CRUD `/api/proxies` (admin). System proxies from `SYSTEM_PROXIES` env at boot. Agent override `GET/PUT /api/agents/{scope}/{name}/proxy`. Cascade: agent → org default → `PROXY_URL`.
+- **Space-scoped input defaults**: an agent's stored input values and its per-field locks live together in one jsonb column, `space_packages.input_settings` (`{ values, locked }`), per-space. Its single write path is `PUT /api/agents/{scope}/{name}/input-settings`; on the wire the pair is `{ values, locked_fields }`. `package_persistence` (memory archive + pinned slots) also space-scoped, row-partitioned by `(actor_type, actor_id)` (members + end-users never read each other's state).
+- **Run lifecycle**: `pending` → `running` → `success` | `failed` | `timeout` | `cancelled`. Transitions via `updateRun()` in `services/state/runs.ts`. `pg_notify` on every change → SSE. Concurrent runs per agent supported (`run-tracker.ts`).
+- **Enriched run responses**: `listRunsWithFilter`/`getRunFull` LEFT JOIN to add `user_name`, `end_user_name`, `api_key_name`, `schedule_name`. `EnrichedRun` (`@appstrate/shared-types`) is `RunWireDto` plus these. Frontend reads names directly — no separate lookups.
+- **Run trigger tracking**: `runs.apiKeyId` (FK → `api_keys.id`, ON DELETE SET NULL) records triggering key. With `userId`/`endUserId`/`scheduleId` → full trigger attribution.
+
+## Operational Notes & Known Limitations
+
+- **Run launch is not a streaming call** (limitation): `POST /api/agents/{scope}/{name}/run` (singular — `/runs` is the GET list) returns `201` with the **full run resource** (same shape as `GET /api/runs/{id}`) — not `202`, and there is no `runId` alias. Progress streams separately via the realtime SSE endpoint; no `stream` field exists in the launch body. Waiting for a terminal status is a separate, supported step, in two forms: `GET /api/runs/{id}?wait=<seconds|true>` long-polls server-side (`services/run-wait.ts`, capped at `MAX_WAIT_SECONDS` = 55 s, below the usual 60 s proxy idle timeout, and degrading to no-wait past the per-identity waiter cap), and the MCP module's `run_and_wait` tool owns launch-plus-wait in one call.
+- **Scheduler** (operational): Redis/BullMQ, distributed exactly-once, worker `{ concurrency: 10, limiter: { max: 30, duration: 60_000 } }` — a global abuse backstop, not a serialization mechanism (`services/scheduler.ts`; the old `concurrency: 1, max: 5/min` made every schedule on the instance share one serial ceiling). Synced from `package_schedules` table at boot.
+- **Orphan cleanup** (operational): on startup, orphaned runs (`running`/`pending`) marked `failed`; containers labeled `appstrate.managed=true` cleaned via `cleanupOrphanedContainers()` in `docker.ts`.
