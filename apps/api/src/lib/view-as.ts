@@ -46,6 +46,7 @@ import {
 } from "./space-role.ts";
 import { canGrantSpaceRole } from "./space-role-policy.ts";
 import { validateSpaceInOrg } from "./space-lookup.ts";
+import { isUserPrincipal } from "./principal.ts";
 import type { AppEnv } from "../types/index.ts";
 
 export interface ViewAsPersona {
@@ -275,8 +276,9 @@ async function resolvePersonaSpaceRole(
 }
 
 /**
- * Eligibility at the earliest point the header can be judged: a key or bearer carries its own
- * ceiling and no session to narrow. The marker goes on after the handler, or via `errorHandler`.
+ * A transport question, not an identity one: will the permission middleware honour the header?
+ * Only a session or a `deferOrgResolution` strategy resolves the org late enough to narrow, so the
+ * predicate stays transport-shaped. The marker goes on after the handler, or via `errorHandler`.
  */
 export function viewAsTransportGuard() {
   return async (c: Context<AppEnv>, next: Next) => {
@@ -424,12 +426,9 @@ export function callerOrgRole(c: Context<AppEnv>, orgId = c.get("orgId")): OrgRo
  * creator's private drafts.
  *
  * A personal space is a member's private half, so it answers to that member's
- * own credential and to nothing else: an API key is pinned to one space and
- * carries its creator's authority, not their privacy, and an end-user is not a
- * member at all. The `deferOrgResolution` strategies — the CLI device-flow
- * token and the MCP instance token — DO reach it: they are the human's own
- * credential by another transport, the same reading `viewAsTransportGuard`
- * takes, so "session-only" would be the wrong way to say this.
+ * own credential — `principal: "user"`, whatever the transport — and to nothing
+ * else: a delegate (API key, OAuth dashboard client) carries the creator's
+ * authority, not their privacy, and an end-user is not a member at all.
  *
  * Under a role preview it is `null`: a persona has no personal space, and
  * `X-View-As` cannot even name one ({@link validatePersonaSpace}). Answering
@@ -440,8 +439,7 @@ export function callerPersonalOwnerId(
   c: Context<AppEnv>,
   orgId: string | undefined = c.get("orgId"),
 ): string | null {
-  if (c.get("endUser")) return null;
-  if (c.get("authMethod") !== "session" && !c.get("deferOrgResolution")) return null;
+  if (!isUserPrincipal(c)) return null;
   if (orgId !== undefined && personaFor(c, orgId)) return null;
   return c.get("user")?.id ?? null;
 }

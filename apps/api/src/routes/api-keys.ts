@@ -71,13 +71,12 @@ export function createApiKeysRouter() {
   router.post("/", requirePermission("api-keys", "create"), async (c) => {
     const scope = getSpaceScope(c);
     const user = c.get("user");
-    // A personal space takes no keys (RBAC spec §3.6). An API key has no user:
-    // `resolveSpaceRole` answers on `owner_user_id === callerId`, and
-    // `callerPersonalOwnerId` is `null` under key auth precisely so a key does
-    // not inherit its creator's privacy — so a key minted here would 404 on
-    // every request it ever made. A 409 rather than a 404: the caller is the
-    // space's owner (nobody else reaches it at all), so naming the reason
-    // discloses nothing.
+    // A personal space takes no keys (RBAC spec §3.6). `resolveSpaceRole`
+    // answers on `owner_user_id === callerId`, and a key is a `delegate`
+    // principal, so `callerPersonalOwnerId` is `null` for it — a key minted
+    // here would 404 on every request it ever made. A 409 rather than a 404:
+    // the caller is the space's owner (nobody else reaches it at all), so
+    // naming the reason discloses nothing.
     if (c.get("space")?.ownerUserId) {
       throw conflict(
         "personal_space_takes_no_keys",

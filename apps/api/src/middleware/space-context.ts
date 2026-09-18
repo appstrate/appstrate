@@ -62,8 +62,10 @@ export function isSpaceScopedPath(path: string): boolean {
  * effective set there (RBAC spec §4.2). Exported so routers outside
  * `SPACE_SCOPED_PREFIXES` (the spaces router, module routes) reach the same
  * path. The principal is `c.get("user")`: the API key's CREATOR under key auth
- * and end-user impersonation, the subject otherwise (§7.1). A caller with no
- * `orgRole` (OIDC end-user token) keeps its strategy's fixed allowlist (§7.2).
+ * and end-user impersonation, the subject otherwise (§7.1). An `end_user`
+ * principal without an org role (OIDC end-user token) keeps its strategy's
+ * fixed allowlist (§7.2); under API-key impersonation it carries the creator's
+ * role and resolves like the key.
  *
  * @throws ApiError 403 `not_a_space_member` for `open`/`closed`, 404 for
  *   `private` — a private space does not exist for someone who is not in it.
@@ -72,16 +74,19 @@ export async function applySpacePermissions(
   c: Context<AppEnv>,
   space: SpaceContextRow,
 ): Promise<void> {
+  // An end-user belongs to a space, never to a person (RBAC spec §3.6): a
+  // personal space is a 404 for it whatever else it carries.
+  if (c.get("principal") === "end_user" && space.ownerUserId !== null) {
+    throw notFound(`Space '${space.id}' not found in this organization`);
+  }
   if (!c.get("orgRole")) {
-    // An orgRole-less principal — an OIDC end-user token — never reaches
-    // `resolveSpaceRole`, so the personal-space refusal cannot be left to the
-    // resolver for it: without this, such a token pinned to a personal space
-    // would keep its strategy's fixed allowlist and walk straight in. A 404,
-    // like every other refusal on a personal space (RBAC spec §3.6): an
-    // end-user belongs to a space, never to a person, so there is no reading
-    // under which it owns one.
-    if (space.ownerUserId !== null) {
-      throw notFound(`Space '${space.id}' not found in this organization`);
+    // Only an end-user token resolves without an org role — its strategy's
+    // fixed allowlist is the whole answer (§7.2). Anything else here is a
+    // pipeline bug, not a caller to accommodate.
+    if (c.get("principal") !== "end_user") {
+      throw new Error(
+        `applySpacePermissions: ${c.get("principal")} principal reached a space with no org role`,
+      );
     }
     return;
   }

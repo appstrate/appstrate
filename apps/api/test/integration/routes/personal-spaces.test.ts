@@ -631,18 +631,19 @@ describe("personal spaces — the write rules", () => {
     expect(created.status, await created.clone().text()).toBe(201);
   });
 
-  it("refuses a principal with no org role — the resolver is not the only gate", async () => {
-    // An OIDC end-user token carries no org role, so it never reaches
-    // `resolveSpaceRole`: `applySpacePermissions` returned early for it and the
-    // token kept its strategy's fixed allowlist inside a personal space. The
-    // refusal now sits on THIS side of that early return.
-    //
+  it("refuses an end_user principal here, and any other kind with no org role", async () => {
+    // An end-user carries no org role, so it never reaches `resolveSpaceRole`;
+    // the refusal is now on the DECLARED kind, on this side of that early
+    // return, and a missing role is no longer the proxy for "end-user" — every
+    // other principal arriving without one is a pipeline bug that says so.
     // Called directly rather than over HTTP: minting an end-user realm token
-    // pinned to a personal space needs the oidc module's own harness (and the
-    // route that would create such an end-user is the 409 above), so the seam
-    // itself is what is asserted.
+    // pinned to a personal space needs the oidc module's own harness.
     const space = await getDbRow(spaces, eq(spaces.id, personalId));
-    const values: Record<string, unknown> = { orgId: owner.orgId, user: member.user };
+    const values: Record<string, unknown> = {
+      orgId: owner.orgId,
+      user: member.user,
+      principal: "end_user",
+    };
     const stub = {
       get: (key: string) => values[key],
       set: (key: string, value: unknown) => {
@@ -654,10 +655,18 @@ describe("personal spaces — the write rules", () => {
     expect(values.permissions).toBeUndefined();
 
     // The positive control, same stub: a TEAM space still returns silently for
-    // an orgRole-less principal, whose permissions its strategy owns.
+    // an orgRole-less end-user, whose permissions its strategy owns.
     const team = await seedSpace({ orgId: owner.orgId, name: "Realm" });
-    await applySpacePermissions(stub, await getDbRow(spaces, eq(spaces.id, team.id)));
+    const teamRow = await getDbRow(spaces, eq(spaces.id, team.id));
+    await applySpacePermissions(stub, teamRow);
     expect(values.permissions).toBeUndefined();
+
+    // And the guard against the old `!orgRole` proxy returning: the same team
+    // space, a `user` principal with no role, is a bug rather than a caller.
+    values.principal = "user";
+    await expect(applySpacePermissions(stub, teamRow)).rejects.toThrow(
+      /reached a space with no org role/,
+    );
   });
 
   it("refuses a space_members write with 409", async () => {
@@ -932,10 +941,9 @@ describe("personal spaces — 404 before 409 on the three administrative acts", 
 
   it("answers 404 to an API KEY on its own creator's personal space", async () => {
     // The named 409 is reserved for a caller who can SEE the space, and a key
-    // cannot: it carries its creator's authority, not their privacy, so
-    // `callerPersonalOwnerId` is `null` for it and every other route 404s here.
-    // Reading the creator's id instead made `DELETE` the one route that
-    // confirmed the id was their personal space.
+    // cannot: it is a `delegate` principal, so `callerPersonalOwnerId` is `null`
+    // for it and every other route 404s here. Reading the creator's id instead
+    // made `DELETE` the one route that confirmed whose space the id was.
     const own = await ownPersonalSpace(owner);
     const key = await seedApiKey({
       orgId: owner.orgId,

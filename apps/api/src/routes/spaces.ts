@@ -387,10 +387,9 @@ export function createSpacesRouter() {
     // personal space in its own transaction; this is the net for a member
     // provisioned before the feature existed — `scripts/migration/0015` does
     // them in bulk, and this makes the script optional for anyone who logs in.
-    // Only for a principal that HAS one — a session, or the same human through
-    // a CLI device-flow / MCP instance token (`callerPersonalOwnerId`). An API
-    // key or an end-user must not create one for the key's creator behind
-    // their back. `ensurePersonalSpace` reads before it writes, so the common
+    // Only for a principal that HAS one — any `user` principal, whatever the
+    // transport (`callerPersonalOwnerId`). A delegate or an end-user must not
+    // create one for the credential's creator behind their back. `ensurePersonalSpace` reads before it writes, so the common
     // case costs one indexed lookup and no row lock.
     const personalOwnerId = callerPersonalOwnerId(c);
     if (personalOwnerId) await ensurePersonalSpaceFor(orgId, personalOwnerId);

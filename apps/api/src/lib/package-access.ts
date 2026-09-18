@@ -25,6 +25,7 @@ import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/
 import type { AppEnv } from "../types/index.ts";
 import type { SpaceScope } from "./scope.ts";
 import { callerPermissions, type Permission } from "./permissions.ts";
+import { isUserPrincipal } from "./principal.ts";
 import {
   callerOrgRole,
   callerPersonalOwnerId,
@@ -933,7 +934,8 @@ export async function assertForkSourceAccess(c: Context<AppEnv>, packageId: stri
     await assertPackageCopyAllowed(c, source, { orgId, accessible });
     return source;
   }
-  if (c.get("authMethod") !== "session" && !c.get("deferOrgResolution")) {
+  // Only the user themselves may invoke their membership in another organization.
+  if (!isUserPrincipal(c)) {
     throw notFound(`Package '${packageId}' not found`);
   }
   const membership = await getOrgMember(pkg.orgId, c.get("user").id);
