@@ -2,7 +2,7 @@
 
 The compose that runs `app.appstrate.com`. **No product code lives here**: `docker-compose.yml` pulls published images, and that is the whole directory.
 
-It used to be a repository of its own, `appstrate/cloud`, holding the billing module and a `Dockerfile` that layered it onto the OSS image. That module is now `packages/module-ee` and ships inside `ghcr.io/appstrate/appstrate` itself, inert until `MODULES` names it — one image, one tag, nothing to build. With nothing left to build, a separate repository bought only a second place to look, so the compose moved here and `appstrate/cloud` is archived.
+The billing module is `packages/module-ee`, and it ships inside `ghcr.io/appstrate/appstrate` itself, inert until `MODULES` names it. One image, one tag, nothing to build — which is why the deployment is one file in the monorepo rather than a repository of its own.
 
 ## Layout
 
@@ -36,13 +36,15 @@ Coolify's `docker_compose_domains` maps **these** service names to `app.appstrat
 
 Deployed by Coolify as a single `dockercompose` application resource. Its UUID is not written here on purpose: the UUID names the volumes, and a stale one in a document is worse than none — read it off the resource.
 
-Five facts worth writing down, because each one is easy to break:
+Facts worth writing down, because each one is easy to break:
 
 - **The volumes are keyed on the Coolify resource UUID**, not on this file's `name:` — `<uuid>_pgdata`, `<uuid>_redisdata`, `<uuid>_miniodata`. Coolify overrides the compose project name with the UUID (it passes `--project-name <uuid>`), so the UUID is what the data is attached to. Two consequences, in opposite directions: repointing an EXISTING resource at another repository moves no data, and standing up a NEW resource gives you empty volumes however faithfully you copy this file. A new resource is a data migration, not a configuration change.
 
-- **`name:` is inert under Coolify and load-bearing off it.** A raw `docker compose` run keys its volumes on it. It reads `appstrate-prod`, not `appstrate`, because `examples/self-hosting/docker-compose.yml` already claims that name and two compose files sharing a project name share its volumes. The top-level `volumes:` keys are load-bearing the same way, and under Coolify more so — `<uuid>_pgdata` derives from the key `pgdata`, so renaming it there orphans a volume rather than renaming one.
+- **`name:` is inert under Coolify and load-bearing off it.** A raw `docker compose` run keys its volumes on it. It reads `appstrate-prod`, not `appstrate`, because `examples/self-hosting/docker-compose.yml` claims that one and two compose files sharing a project name share its volumes. The top-level `volumes:` keys are load-bearing the same way, and under Coolify more so — `<uuid>_pgdata` derives from the key `pgdata`, so renaming it there orphans a volume rather than renaming one.
 
-- **Coolify injects every variable configured on the resource into every service**, whatever the `environment:` blocks in this file list. Measured 2026-09-18: `CONNECT_SESSION_SECRET` and `UPLOAD_SIGNING_SECRET` are hard-required by `packages/env/src/index.ts`, were absent from this compose for months, and production booted anyway. Those blocks are the contract for a **raw** `docker compose` run — which is who they are maintained for, and why they are kept complete even though production does not read them.
+- **Coolify injects every variable configured on the resource into every service**, whatever the `environment:` blocks in `docker-compose.yml` list. So those blocks are not production's contract — `.env.example` is, and the blocks are the contract for a **raw** `docker compose` run. That is who they are maintained for, and it is why a variable missing from them can go unnoticed here for months.
+
+- **A bare name in an `environment:` block is materialised as the empty string.** Coolify rewrites `- FOO` into `FOO: ''` in the compose it generates, so "unset, let the schema default apply" is a state that file cannot express. `verify:compose-defaults` (class 6) refuses one, and `env_file` is what delivers the operator's variables instead.
 
 - **Coolify regenerates `.env` from the resource's own environment configuration on every deploy.** A value written into the file on the server is gone at the next one. Edit the variables in Coolify, never the file.
 
