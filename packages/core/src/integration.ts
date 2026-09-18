@@ -1180,12 +1180,34 @@ export type ConnectionResolutionErrorCode =
   | "insufficient_scopes"
   | "auth_key_mismatch";
 
+/**
+ * One connection the caller may pick from on `must_choose_connection`.
+ *
+ * Carries what it takes to TELL the candidates apart, not just to name them.
+ * An id alone is opaque: a model reading the 412 has to fetch the connection
+ * list to learn which uuid is the account the user named before it can retry,
+ * and a human reading a log learns nothing at all. The resolver already holds
+ * the rows, so denormalizing the three distinguishing fields costs no query.
+ *
+ * `label` is user-given and may be null; `accountId` is the connect flow's own
+ * discriminator and is always set, so the pair always identifies the account.
+ */
+export interface ConnectionCandidate {
+  id: string;
+  /** User-given name, `null` when the connection was never labelled. */
+  label: string | null;
+  /** The auth's account discriminator (`sub` claim, email, host…). */
+  accountId: string;
+  /** True when the row is the calling actor's own, false when inherited via org sharing. */
+  ownedByActor: boolean;
+}
+
 /** One unresolved integration plus structured detail. */
 export interface ConnectionResolutionError {
   integrationId: string;
   code: ConnectionResolutionErrorCode;
-  /** Candidate connection ids when `code === "must_choose_connection"`. */
-  candidateConnectionIds?: string[];
+  /** The connections the caller may pick from when `code === "must_choose_connection"`. */
+  candidateConnections?: ConnectionCandidate[];
   /**
    * The connection the error is bound to:
    *   - `insufficient_scopes` → the under-scoped connection (target of OAuth upgrade).
