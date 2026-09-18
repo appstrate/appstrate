@@ -1,0 +1,309 @@
+# Appstrate — production Docker Compose
+#
+# This directory holds the DEPLOYMENT, not the product. Every service PULLS a
+# published image; nothing here is built. The billing module used to live in a
+# repository of its own (`appstrate/cloud`), layered onto the OSS image by a
+# Dockerfile — it now ships inside `ghcr.io/appstrate/appstrate` as
+# `packages/module-ee`, opt-in through `MODULES`, so one tag is the whole
+# deployment and the deployment is one file in this monorepo.
+#
+# Coolify:  resource `i52ng4cu0qbow9dabgt8b37i`, git_repository
+#           `appstrate/appstrate`, docker_compose_location
+#           `/deploy/docker-compose.yml`, watch_paths the same path.
+# Manual:   cp .env.example .env && docker compose up -d
+# Upgrade:  set APPSTRATE_VERSION, then `docker compose pull && up -d`.
+#
+# NOT the self-hosting example. `examples/self-hosting/docker-compose.yml`
+# teaches a stock install: different project name, different service names
+# (`postgres`, not `appstrate-postgres`) and an `internal: true` data network.
+# The two files overlap and are deliberately NOT merged — Coolify's
+# `docker_compose_domains` maps THESE service names to app.appstrate.com and
+# storage.appstrate.com, so renaming one deletes the routing, and an internal
+# network on `appstrate` would cut its egress to the model providers. Keep a
+# change that belongs in both in step by hand.
+#
+# WHAT THIS BLOCK CANNOT TELL YOU — under Coolify the `environment:` blocks
+# below are NOT the contract. Coolify injects every variable configured on the
+# resource into every service, whatever this file lists: measured 2026-09-18,
+# CONNECT_SESSION_SECRET and UPLOAD_SIGNING_SECRET are hard-required by
+# `packages/env/src/index.ts`, were absent from this file for months, and
+# production booted anyway. The blocks are the contract for a RAW
+# `docker compose` run, and that is who they are maintained for.
+#
+# Required environment variables:
+#   POSTGRES_PASSWORD, BETTER_AUTH_SECRET, CONNECTION_ENCRYPTION_KEY,
+#   RUN_TOKEN_SECRET, UPLOAD_SIGNING_SECRET, CONNECT_SESSION_SECRET,
+#   MINIO_ROOT_PASSWORD, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
+#   STRIPE_PRICE_ID_STARTER, STRIPE_PRICE_ID_PRO
+#
+# `name:` IS LOAD-BEARING off Coolify. Under Coolify the project is the
+# resource UUID and the volumes are `<uuid>_{pgdata,redisdata,miniodata}`, so
+# this value is inert there — but a raw `docker compose` run keys its volumes
+# on it, and renaming it would strand their data. It stays, `appstrate-cloud`
+# and all: the repository is gone, the volumes it named are not.
+#
+# The top-level `volumes:` keys are load-bearing the same way, and under
+# Coolify MORE so: `<uuid>_pgdata` is derived from the key `pgdata`. Renaming
+# one there does not rename a volume, it orphans it.
+
+name: appstrate-cloud
+
+services:
+  # ── Infrastructure ──────────────────────────────────────────────────
+
+  appstrate-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    mem_limit: 1g
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "work_mem=16MB"
+      - "-c"
+      - "synchronous_commit=off"
+      - "-c"
+      - "wal_level=minimal"
+      - "-c"
+      - "max_wal_senders=0"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "effective_cache_size=512MB"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-appstrate}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: appstrate
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-appstrate}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  appstrate-redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory-policy noeviction
+    restart: unless-stopped
+    mem_limit: 256m
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MinIO comes from quay.io, its own registry, NOT from Docker Hub. An
+  # anonymous `docker pull minio/minio:latest` there answers "pull access
+  # denied … repository does not exist or may require 'docker login'", which
+  # fails the whole `docker compose pull` and therefore the whole deploy.
+  # Official images (postgres, redis) are unaffected and stay on Docker Hub.
+  appstrate-minio:
+    image: quay.io/minio/minio:latest
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-appstrate}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  appstrate-minio-init:
+    image: quay.io/minio/mc:latest
+    restart: "no"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-appstrate}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      S3_BUCKET: ${S3_BUCKET:-appstrate}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        until mc alias set local http://appstrate-minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" 2>/dev/null; do sleep 1; done
+        mc mb "local/$$S3_BUCKET" --ignore-existing
+    depends_on:
+      appstrate-minio:
+        condition: service_healthy
+
+  # ── Migrations ──
+  #
+  # The platform's own schema. `@appstrate/module-ee` migrates its seven `ee_*`
+  # tables itself at `init()`, into this same database under its own journal
+  # (`drizzle.ee_migrations`) — so there is no second migrate service.
+
+  appstrate-migrate:
+    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-1.0.0-beta.58}
+    restart: "no"
+    command: ["bun", "packages/db/src/migrate.ts"]
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-appstrate}:${POSTGRES_PASSWORD}@appstrate-postgres:5432/appstrate
+    depends_on:
+      appstrate-postgres:
+        condition: service_healthy
+
+  # ── Runtime image pull (ensure images are cached before app starts) ──
+
+  appstrate-pi:
+    image: ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.58}
+    entrypoint: ["true"]
+    restart: "no"
+
+  appstrate-sidecar:
+    image: ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.58}
+    entrypoint: ["true"]
+    restart: "no"
+
+  # Per-integration MCP runner images. The sidecar `docker create`s one of
+  # these per local AFPS integration (resolved from RUNNER_IMAGE_* below).
+  # Pre-pulled so the first integration boot doesn't block on — or fail at —
+  # an on-demand pull.
+  appstrate-mcp-runner-node:
+    image: ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.58}
+    entrypoint: ["true"]
+    restart: "no"
+
+  appstrate-mcp-runner-python:
+    image: ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.58}
+    entrypoint: ["true"]
+    restart: "no"
+
+  appstrate-mcp-runner-bun:
+    image: ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.58}
+    entrypoint: ["true"]
+    restart: "no"
+
+  appstrate-mcp-runner-uv:
+    image: ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.58}
+    entrypoint: ["true"]
+    restart: "no"
+
+  appstrate-mcp-runner-binary:
+    image: ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.58}
+    entrypoint: ["true"]
+    restart: "no"
+
+  # ── Main application ────────────────────────────────────────────────
+
+  appstrate:
+    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-1.0.0-beta.58}
+    # Browser traffic is routed by the Coolify proxy to container port 3000 —
+    # no host port needed for that. The mapping below exists for the remote
+    # run-plane (RUN_ADAPTER=firecracker-remote): microVM guests have no DNS
+    # and reach the platform sink via an IPv4-literal host port
+    # (FIRECRACKER_RUNNER_PLATFORM_URL on the runner daemon). Defaults to
+    # loopback-only, so a stock deploy exposes nothing beyond the host —
+    # set PLATFORM_SINK_BIND to a private interface IP to serve guests.
+    ports:
+      - "${PLATFORM_SINK_BIND:-127.0.0.1}:${PLATFORM_SINK_PORT:-3310}:3000"
+    restart: unless-stopped
+    mem_limit: 8g
+    environment:
+      # ── Core ──
+      - PORT=3000
+      - APP_URL
+      - TRUSTED_ORIGINS=${TRUSTED_ORIGINS:-}
+      - COOKIE_DOMAIN=${COOKIE_DOMAIN:-}
+      - TRUST_PROXY
+      - LOG_LEVEL
+      - MODULES=${MODULES:-oidc,webhooks,core-providers,mcp,@appstrate/module-codex,@appstrate/module-claude-code,@appstrate/module-chat,@appstrate/module-ee}
+      # ── Auth / Crypto ──
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
+      - CONNECTION_ENCRYPTION_KEY=${CONNECTION_ENCRYPTION_KEY}
+      - RUN_TOKEN_SECRET=${RUN_TOKEN_SECRET}
+      - UPLOAD_SIGNING_SECRET=${UPLOAD_SIGNING_SECRET}
+      - CONNECT_SESSION_SECRET=${CONNECT_SESSION_SECRET}
+      # ── Database / Redis ──
+      # One database. `@appstrate/module-ee` opens THIS url — its `ee_*` tables
+      # live beside the platform's own. The former second database is moved
+      # across once, by `scripts/migration/0010-ee-tables-into-platform-db.ts`
+      # in the appstrate monorepo, and `CLOUD_DATABASE_URL` is deleted after.
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-appstrate}:${POSTGRES_PASSWORD}@appstrate-postgres:5432/appstrate
+      - REDIS_URL=redis://appstrate-redis:6379
+      # ── S3 Storage ──
+      - S3_BUCKET=${S3_BUCKET:-appstrate}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT=${S3_ENDPOINT:-http://appstrate-minio:9000}
+      - S3_PUBLIC_ENDPOINT
+      - USERCONTENT_URL
+      - FILE_RETENTION_DAYS
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-appstrate}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+      # ── Run / Sidecar ──
+      - RUN_ADAPTER=${RUN_ADAPTER:-docker}
+      - DOCKER_SOCKET=/var/run/docker.sock
+      - PLATFORM_API_URL=${PLATFORM_API_URL:-}
+      - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.58}
+      - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.58}
+      # ── MCP runner images (forwarded to sidecar, one per local AFPS integration) ──
+      - RUNNER_IMAGE_NODE=ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.58}
+      - RUNNER_IMAGE_PYTHON=ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.58}
+      - RUNNER_IMAGE_BUN=ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.58}
+      - RUNNER_IMAGE_UV=ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.58}
+      - RUNNER_IMAGE_BINARY=ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.58}
+      # ── System config (JSON arrays) ──
+      - SYSTEM_PROVIDER_KEYS
+      - SYSTEM_PROXIES
+      - PROXY_URL=${PROXY_URL:-}
+      - OIDC_INSTANCE_CLIENTS
+      - SYSTEM_INTEGRATIONS
+      - PLATFORM_RUN_LIMITS
+      # ── Social login (optional) ──
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      # ── SMTP (optional) ──
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      # ── Legal (optional) ──
+      - LEGAL_TERMS_URL=${LEGAL_TERMS_URL:-}
+      - LEGAL_PRIVACY_URL=${LEGAL_PRIVACY_URL:-}
+      # ── Billing (@appstrate/module-ee) / Stripe ──
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+      - STRIPE_PRICE_ID_STARTER=${STRIPE_PRICE_ID_STARTER}
+      - STRIPE_PRICE_ID_PRO=${STRIPE_PRICE_ID_PRO}
+      # The billing sweeper's four knobs. Bare passthrough, no default:
+      # `packages/module-ee/src/env.ts` owns them, and re-stating a value
+      # here is the drift `verify:compose-defaults` exists to catch.
+      - EE_RECONCILIATION_INTERVAL_SECONDS
+      - EE_RECONCILIATION_BATCH_SIZE
+      - EE_RECONCILIATION_REPLAY_WINDOW
+      - EE_RECONCILIATION_MAX_GAP_SECONDS
+      # ── Auth gates (optional, native to OSS — formerly cloud-only) ──
+      - AUTH_DISABLE_SIGNUP=${AUTH_DISABLE_SIGNUP:-}
+      - AUTH_DISABLE_ORG_CREATION=${AUTH_DISABLE_ORG_CREATION:-}
+      - AUTH_PLATFORM_ADMIN_EMAILS
+      - AUTH_ALLOWED_SIGNUP_DOMAINS
+      - AUTH_BOOTSTRAP_OWNER_EMAIL
+      - AUTH_BOOTSTRAP_ORG_NAME=${AUTH_BOOTSTRAP_ORG_NAME:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      appstrate-migrate:
+        condition: service_completed_successfully
+      appstrate-redis:
+        condition: service_healthy
+      appstrate-minio-init:
+        condition: service_completed_successfully
+      appstrate-pi:
+        condition: service_completed_successfully
+      appstrate-sidecar:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:

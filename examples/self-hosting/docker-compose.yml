@@ -8,6 +8,12 @@
 #   docker compose up -d
 #
 # See README.md in this directory for full documentation.
+#
+# NOT the production deployment. `deploy/docker-compose.yml` runs
+# app.appstrate.com under Coolify and is deliberately a separate file: its
+# service names are wired to live domains, so they cannot be renamed to match
+# the ones below. The two overlap — a change that belongs in both is carried
+# across by hand.
 
 name: appstrate
 
