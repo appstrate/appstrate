@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Agents can reach a host over SSH.** Two new system packages: the
+  `@appstrate/ssh` integration and the `@appstrate/ssh-mcp` local mcp-server it
+  backs (`source.kind: "local"`, the second first-party one after
+  `@appstrate/github-git`). One connection is one key, one host and one
+  capability profile — the key is the identity, and what it may do is enforced
+  on the TARGET by `restrict` + `command=` in `authorized_keys`, the only
+  boundary that stays true when the platform is wrong. The private key lives in
+  the keyring and is delivered to the runner as a file (`delivery.files`,
+  `/run/secrets/ssh_key`, `0600`); it never enters the agent container.
+
+  There is deliberately **no free-form command tool**. `ssh_exec` sends the bare
+  NAME of a verb from the connection's closed allowlist and the target's
+  forced-command dispatcher decides what it means — SSH `exec` runs through the
+  remote login shell, so any string rendered on this side would be shell input
+  on the far side, and a command allowlist over a shell string cannot be made to
+  hold (Teleport has no per-command SSH policy either; it brokers hosts and
+  records sessions). Read and write are separate tools, so an agent's
+  `toolAllowlist` can withhold `ssh_write_file` sidecar-side. Host keys are
+  pinned from the connection's `host_key` (`ssh-keyscan` line) with
+  `StrictHostKeyChecking=yes` against a per-process `known_hosts`; there is no
+  trust-on-first-use, because in an autonomous run nobody is there to accept.
+
+  The server shells out to the `ssh`/`sftp` clients the bun runner image already
+  bakes in, and reaches a proxied target through an OpenSSH `ProxyCommand` that
+  speaks HTTP CONNECT to the sidecar's egress listener. A target on a private
+  address is refused by the SSRF floor on that path — a public VPS works, a LAN
+  box does not, and that is a decision, not a bug (#1228). Per-connection host
+  scoping of the egress listener is #1458.
+
+  Two defects this surfaced were fixed on their own first: an mcp-server
+  declaring `entry_point: "./server.js"` could not be imported at all (#1461),
+  and `delivery.files` landed unreadable in every runner image (#1462).
+
 ## [1.0.0-beta.59] - 2026-09-18
 
 ### Added

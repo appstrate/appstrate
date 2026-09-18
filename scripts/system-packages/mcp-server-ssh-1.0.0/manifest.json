@@ -1,0 +1,50 @@
+{
+  "$schema": "https://schemas.afps.dev/v0/mcp-server.schema.json",
+  "name": "@appstrate/ssh-mcp",
+  "version": "1.0.0",
+  "type": "mcp-server",
+  "schema_version": "0.1",
+  "manifest_version": "0.3",
+  "display_name": "SSH (MCP server)",
+  "description": "Reach one host over SSH. Shells out to the `ssh` / `sftp` clients baked into the bun runner image; the private key is delivered to this process as a file and never enters the agent container. There is no free-form command tool: `ssh_exec` sends the NAME of a verb from a closed allowlist, and the target's own `command=` dispatcher decides what that name means. Host-key pinning is mandatory — the connection carries the host's public key and `StrictHostKeyChecking=yes` refuses anything else; there is no trust-on-first-use. Read and write are separate tools so a host can grant one without the other.",
+  "author": "Appstrate",
+  "license": "Apache-2.0",
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.ts",
+    "mcp_config": {
+      "command": "bun",
+      "args": ["server/index.ts"]
+    }
+  },
+  "tools": [
+    {
+      "name": "ssh_probe",
+      "description": "Connect, verify the pinned host key and authenticate, then report the effective policy (host, user, allowed verbs, read-only, how the host was reached). Executes nothing on the target and returns no remote data."
+    },
+    {
+      "name": "ssh_exec",
+      "description": "Run ONE pre-declared verb on the remote host. `verb` must be a name from the connection's allowlist; the bare name is what crosses the wire and the target's forced-command dispatcher resolves it. Arbitrary shell commands are not accepted."
+    },
+    {
+      "name": "ssh_read_file",
+      "description": "Read a remote file over SFTP (256 KiB cap, truncation flagged). Read-only — works against a target restricted to `internal-sftp -R`."
+    },
+    {
+      "name": "ssh_list_dir",
+      "description": "List a remote directory over SFTP. Entries are returned sorted by name. Read-only."
+    },
+    {
+      "name": "ssh_write_file",
+      "description": "Write a remote file over SFTP. Mutating — withhold this tool from an agent that must not write, and back that up with a read-only account on the target. Refused outright when the connection is marked read-only."
+    }
+  ],
+  "_meta": {
+    "dev.appstrate/mcp-server": {
+      "runtime": "bun"
+    },
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}

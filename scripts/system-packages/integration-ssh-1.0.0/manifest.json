@@ -1,0 +1,109 @@
+{
+  "name": "@appstrate/ssh",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "SSH",
+  "icon": "mdi:console-network",
+  "description": "Reach a host over SSH from an agent — a VPS, a NAS, a build box, anything with sshd and no HTTP API. One connection is one key, one host and one capability profile: the key is the identity, and what it may do is enforced on the target by `restrict` + `command=` in authorized_keys. The private key lives in the platform keyring and is delivered to the @appstrate/ssh-mcp runner as a file; it never reaches the agent container. Backs the local mcp-server, which shells out to the `ssh` / `sftp` clients of the bun runner image.",
+  "license": "Apache-2.0",
+  "keywords": ["ssh", "sftp", "remote", "server", "ops"],
+  "source": {
+    "kind": "local",
+    "server": {
+      "name": "@appstrate/ssh-mcp",
+      "version": "^1.0.0"
+    }
+  },
+  "setup_guide": {
+    "steps": [
+      {
+        "label": "Générer une paire DÉDIÉE sur votre poste : ssh-keygen -t ed25519 -f appstrate_ssh -N \"\" — ne réutilisez jamais votre clé personnelle, elle est déjà installée ailleurs."
+      },
+      {
+        "label": "Sur le serveur cible, ajouter la clé publique à ~/.ssh/authorized_keys d'un compte dédié, en restreignant ce qu'elle peut faire : restrict,command=\"/usr/local/bin/appstrate-dispatch\" ssh-ed25519 AAAA… — le dispatcher n'exécute que des verbes d'une liste fermée, jamais la commande reçue."
+      },
+      {
+        "label": "Relever la clé publique de l'hôte : ssh-keyscan -t ed25519 -p 22 <hôte> — coller la ligne entière dans « Clé publique de l'hôte ». Elle est épinglée ; tout changement refuse la connexion."
+      }
+    ]
+  },
+  "auths": {
+    "primary": {
+      "type": "custom",
+      "authorized_uris": ["ssh://**"],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "required": ["private_key", "host", "user", "host_key"],
+          "properties": {
+            "private_key": {
+              "type": "string",
+              "title": "Clé privée",
+              "description": "Contenu du fichier de clé privée OpenSSH (commence par -----BEGIN OPENSSH PRIVATE KEY-----). Générez une paire dédiée à Appstrate."
+            },
+            "host": {
+              "type": "string",
+              "title": "Hôte",
+              "description": "Nom DNS ou adresse IP publique du serveur."
+            },
+            "port": {
+              "type": "string",
+              "title": "Port",
+              "default": "22"
+            },
+            "user": {
+              "type": "string",
+              "title": "Utilisateur",
+              "description": "Compte Unix dédié sur la cible — pas root, et idéalement sans shell interactif."
+            },
+            "host_key": {
+              "type": "string",
+              "title": "Clé publique de l'hôte",
+              "description": "Ligne complète imprimée par `ssh-keyscan -t ed25519 -p <port> <hôte>`. Obligatoire : aucune acceptation à la première connexion, personne ne signe dans un run autonome."
+            },
+            "allowed_verbs": {
+              "type": "string",
+              "title": "Verbes autorisés",
+              "default": "[]",
+              "description": "Tableau JSON de noms, ex. [\"hostname\", \"disk_usage\"]. Seul le nom part sur le fil ; c'est le `command=` de la cible qui décide ce qu'il exécute."
+            },
+            "read_only": {
+              "type": "string",
+              "title": "Lecture seule",
+              "default": "1",
+              "description": "1 pour refuser ssh_write_file côté serveur. Défense en profondeur : la barrière qui compte est le compte Unix sur la cible."
+            }
+          }
+        }
+      },
+      "delivery": {
+        "files": {
+          "/run/secrets/ssh_key": {
+            "value": "{$credential.private_key}",
+            "mode": "0600"
+          }
+        },
+        "env": {
+          "SSH_PRIVATE_KEY_PATH": { "value": "/run/secrets/ssh_key" },
+          "SSH_HOST": { "value": "{$credential.host}" },
+          "SSH_PORT": { "value": "{$credential.port}" },
+          "SSH_USER": { "value": "{$credential.user}" },
+          "SSH_HOST_KEY": { "value": "{$credential.host_key}" },
+          "SSH_ALLOWED_VERBS": { "value": "{$credential.allowed_verbs}" },
+          "SSH_READ_ONLY": { "value": "{$credential.read_only}" }
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}
