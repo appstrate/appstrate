@@ -215,89 +215,64 @@ services:
       - "${PLATFORM_SINK_BIND:-127.0.0.1}:${PLATFORM_SINK_PORT:-3310}:3000"
     restart: unless-stopped
     mem_limit: 8g
+    # WHAT BELONGS HERE, AND WHY THE LIST IS SHORT
+    #
+    # Only values THIS FILE computes: a service hostname, an image ref bound to
+    # ${APPSTRATE_VERSION}, a mirror of the `ports:`/`volumes:` above, or one
+    # variable remapped onto another. Nothing an operator sets — those reach the
+    # container through `env_file` below, and listing them here is not merely
+    # redundant, it is HARMFUL.
+    #
+    # Coolify materialises EVERY key named in this block. A bare `- FOO` is
+    # rewritten into `FOO: ''` in the compose it generates, so "unset, let the
+    # Zod schema default apply" becomes "set to the empty string" — a state the
+    # schema never sees during a raw run and is not written to survive.
+    # Measured 2026-09-18, after it took production down: `EE_RECONCILIATION_
+    # BATCH_SIZE` arrived as `''`, `z.coerce.number("")` is 0, the module's own
+    # `.min(1)` refused it and the platform crash-looped. Of 19 names then in
+    # this block, 12 were unsafe that way — 7 refusing to boot and, worse, 4
+    # degrading in SILENCE: `EE_RECONCILIATION_INTERVAL_SECONDS` would have read
+    # 0 (metering paused) and `EE_RECONCILIATION_REPLAY_WINDOW` 0 (the replay
+    # window off, i.e. the silent revenue loss its own comment forbids
+    # optimising away). The `.min(1)` floor is the only reason any of it was
+    # visible.
+    #
+    # So: an operator-set variable is named here ONLY if this file has to
+    # compute its value. `deploy/.env.example` is the operator contract.
+    env_file:
+      - .env
     environment:
-      # ── Core ──
+      # ── Coupled to the YAML above ──
       - PORT=3000
-      - APP_URL
-      - TRUSTED_ORIGINS=${TRUSTED_ORIGINS:-}
-      - COOKIE_DOMAIN=${COOKIE_DOMAIN:-}
-      - TRUST_PROXY
-      - LOG_LEVEL
-      - MODULES=${MODULES:-oidc,webhooks,core-providers,mcp,@appstrate/module-codex,@appstrate/module-claude-code,@appstrate/module-chat,@appstrate/module-ee}
-      # ── Auth / Crypto ──
-      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
-      - CONNECTION_ENCRYPTION_KEY=${CONNECTION_ENCRYPTION_KEY}
-      - RUN_TOKEN_SECRET=${RUN_TOKEN_SECRET}
-      - UPLOAD_SIGNING_SECRET=${UPLOAD_SIGNING_SECRET}
-      - CONNECT_SESSION_SECRET=${CONNECT_SESSION_SECRET}
-      # ── Database / Redis ──
-      # One database. `@appstrate/module-ee` opens THIS url — its `ee_*` tables
-      # live beside the platform's own. The former second database is moved
-      # across once, by `scripts/migration/0010-ee-tables-into-platform-db.ts`
-      # in the appstrate monorepo, and `CLOUD_DATABASE_URL` is deleted after.
+      - DOCKER_SOCKET=/var/run/docker.sock
+      # ── Infra plumbing (refers to compose service hostnames) ──
       - DATABASE_URL=postgresql://${POSTGRES_USER:-appstrate}:${POSTGRES_PASSWORD}@appstrate-postgres:5432/appstrate
       - REDIS_URL=redis://appstrate-redis:6379
-      # ── S3 Storage ──
-      - S3_BUCKET=${S3_BUCKET:-appstrate}
-      - S3_REGION=${S3_REGION:-us-east-1}
       - S3_ENDPOINT=${S3_ENDPOINT:-http://appstrate-minio:9000}
-      - S3_PUBLIC_ENDPOINT
-      - USERCONTENT_URL
-      - FILE_RETENTION_DAYS
+      # AWS_* are the S3 client's names for the MinIO credentials — a remap this
+      # file performs, not a variable the operator sets twice.
       - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-appstrate}
       - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
-      # ── Run / Sidecar ──
+      # ── Intentional override (YAML default differs from the code default) ──
+      # RUN_ADAPTER: the code default is `process`, for OSS dev. A containerised
+      # deployment must run agents in Docker.
       - RUN_ADAPTER=${RUN_ADAPTER:-docker}
-      - DOCKER_SOCKET=/var/run/docker.sock
-      - PLATFORM_API_URL=${PLATFORM_API_URL:-}
+      # MODULES: the code default is the OSS set and does NOT name
+      # `@appstrate/module-ee`. This deployment is the one that bills, so it
+      # carries its own list. Drift here is what #513 was, so the value is
+      # deliberate and reviewed, not copied.
+      - MODULES=${MODULES:-oidc,webhooks,core-providers,mcp,@appstrate/module-codex,@appstrate/module-claude-code,@appstrate/module-chat,@appstrate/module-ee}
+      # ── Bound to ${APPSTRATE_VERSION} ──
+      # Without these the sidecar falls back to bare `appstrate-*:latest` tags
+      # and tries to pull them from Docker Hub, so every local integration dies
+      # at boot.
       - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.58}
       - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.58}
-      # ── MCP runner images (forwarded to sidecar, one per local AFPS integration) ──
       - RUNNER_IMAGE_NODE=ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.58}
       - RUNNER_IMAGE_PYTHON=ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.58}
       - RUNNER_IMAGE_BUN=ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.58}
       - RUNNER_IMAGE_UV=ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.58}
       - RUNNER_IMAGE_BINARY=ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.58}
-      # ── System config (JSON arrays) ──
-      - SYSTEM_PROVIDER_KEYS
-      - SYSTEM_PROXIES
-      - PROXY_URL=${PROXY_URL:-}
-      - OIDC_INSTANCE_CLIENTS
-      - SYSTEM_INTEGRATIONS
-      - PLATFORM_RUN_LIMITS
-      # ── Social login (optional) ──
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
-      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
-      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
-      # ── SMTP (optional) ──
-      - SMTP_HOST=${SMTP_HOST:-}
-      - SMTP_PORT
-      - SMTP_USER=${SMTP_USER:-}
-      - SMTP_PASS=${SMTP_PASS:-}
-      - SMTP_FROM=${SMTP_FROM:-}
-      # ── Legal (optional) ──
-      - LEGAL_TERMS_URL=${LEGAL_TERMS_URL:-}
-      - LEGAL_PRIVACY_URL=${LEGAL_PRIVACY_URL:-}
-      # ── Billing (@appstrate/module-ee) / Stripe ──
-      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
-      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
-      - STRIPE_PRICE_ID_STARTER=${STRIPE_PRICE_ID_STARTER}
-      - STRIPE_PRICE_ID_PRO=${STRIPE_PRICE_ID_PRO}
-      # The billing sweeper's four knobs. Bare passthrough, no default:
-      # `packages/module-ee/src/env.ts` owns them, and re-stating a value
-      # here is the drift `verify:compose-defaults` exists to catch.
-      - EE_RECONCILIATION_INTERVAL_SECONDS
-      - EE_RECONCILIATION_BATCH_SIZE
-      - EE_RECONCILIATION_REPLAY_WINDOW
-      - EE_RECONCILIATION_MAX_GAP_SECONDS
-      # ── Auth gates (optional, native to OSS — formerly cloud-only) ──
-      - AUTH_DISABLE_SIGNUP=${AUTH_DISABLE_SIGNUP:-}
-      - AUTH_DISABLE_ORG_CREATION=${AUTH_DISABLE_ORG_CREATION:-}
-      - AUTH_PLATFORM_ADMIN_EMAILS
-      - AUTH_ALLOWED_SIGNUP_DOMAINS
-      - AUTH_BOOTSTRAP_OWNER_EMAIL
-      - AUTH_BOOTSTRAP_ORG_NAME=${AUTH_BOOTSTRAP_ORG_NAME:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:

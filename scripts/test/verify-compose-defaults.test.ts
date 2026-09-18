@@ -309,3 +309,55 @@ describe("findPassThroughGaps", () => {
     expect(findPassThroughGaps(content, MODULE)).toEqual([]);
   });
 });
+
+/**
+ * `deploy/docker-compose.yml` runs under Coolify, and Coolify MATERIALISES every
+ * key the `environment:` block names: a bare `- FOO` becomes `FOO: ''` in the
+ * compose it generates. So the form this gate prescribes everywhere else —
+ * name the variable, omit the value, let the Zod schema's default apply — is not
+ * merely unnecessary there, it is unavailable: "unset" cannot be expressed.
+ *
+ * That took production down on 2026-09-18. `EE_RECONCILIATION_BATCH_SIZE`
+ * arrived as `''`, `z.coerce.number("")` is 0, the module's own `.min(1)`
+ * refused it and the platform crash-looped. Seven of the file's bare names would
+ * have refused to boot and four more would have degraded in SILENCE — a zero
+ * `EE_RECONCILIATION_INTERVAL_SECONDS` pauses metering, a zero
+ * `EE_RECONCILIATION_REPLAY_WINDOW` disables the scan that keeps usage from
+ * going unbilled. The `.min(1)` floor is the only reason any of it was visible.
+ *
+ * The fix was to stop passing operator variables through that block at all —
+ * `env_file` already delivers them, which is why production booted for months
+ * with two hard-required secrets absent from it. What remains is only what the
+ * file computes. This test holds that line: it is cheap to reintroduce a bare
+ * name while "tidying", and the failure it buys is a crash-loop at best.
+ */
+describe("deploy/docker-compose.yml under an orchestrator that materialises keys", () => {
+  const deployCompose = readFileSync(
+    join(import.meta.dir, "../../deploy/docker-compose.yml"),
+    "utf-8",
+  );
+
+  it("names no variable without a value", () => {
+    const bare = deployCompose
+      .split("\n")
+      .map((line, i) => [i + 1, line] as const)
+      .filter(([, line]) => /^\s+- [A-Z_][A-Z0-9_]*\s*$/.test(line))
+      .map(([n, line]) => `${n}: ${line.trim()}`);
+    expect(bare).toEqual([]);
+  });
+
+  it("delivers operator variables through env_file instead", () => {
+    expect(deployCompose).toContain("env_file:");
+  });
+
+  it("would catch a bare name if one came back", () => {
+    // The assertion above passes on an empty list, which is also what it would
+    // say about a file it failed to read. Prove the predicate fires.
+    const poisoned = deployCompose.replace(
+      "    environment:",
+      "    environment:\n      - LOG_LEVEL",
+    );
+    const bare = poisoned.split("\n").filter((line) => /^\s+- [A-Z_][A-Z0-9_]*\s*$/.test(line));
+    expect(bare).toHaveLength(1);
+  });
+});
