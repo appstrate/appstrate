@@ -21,7 +21,7 @@
  *         title: <human-readable>,
  *         message: <human-readable>,
  *         // optional smuggles:
- *         candidateConnections?: { id, label, accountId, ownedByActor }[],
+ *         candidate_connections?: { id, label, account_id, owned_by_actor }[],
  *         connection_id?, missing_scopes?, owned_by_actor?,
  *         auth_key?, required_scopes? }
  *     ] }

@@ -456,10 +456,10 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     // their ids: a caller with no picker — an API client, an MCP model reading
     // the 412 — chooses from the error alone instead of fetching the connection
     // list to learn which uuid is which account. The dashboard is not that
-    // caller: its
-    // modal embeds the shared picker, whose candidate list is a superset (it
-    // also offers the dead rows, with a renew button). That picker writes a
-    // member pin, so the next run skips this branch and resolves via layer 5.
+    // caller: its modal embeds the shared picker, whose candidate list is a
+    // superset (it also offers the dead rows, with a renew button). That picker
+    // writes a member pin, so the next run skips this branch and resolves via
+    // layer 5.
     return errorOf(args, {
       code: "must_choose_connection",
       message: `Multiple connections available for ${args.integrationId} — pick one.`,
