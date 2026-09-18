@@ -32,6 +32,8 @@ interface DockerCall {
   env: Record<string, string>;
   /** Contents of the `--env-file` at the moment docker was invoked, if any. */
   envFileBody?: string;
+  /** Bytes streamed on stdin (`docker cp -`). */
+  stdinBytes?: Uint8Array;
 }
 
 /**
@@ -39,13 +41,49 @@ interface DockerCall {
  * Restored in a `finally` — `bun test` runs every file in one process, so a
  * leaked stub would poison unrelated suites.
  */
+/**
+ * Minimal USTAR reader — just enough to assert what the adapter streamed.
+ * Deliberately independent of the writer under test: a reader that shared the
+ * writer's code could not catch a header the writer got wrong.
+ */
+function parseUstar(
+  bytes: Uint8Array,
+): Map<string, { content: Uint8Array; mode: number; uid: number; gid: number }> {
+  const out = new Map<string, { content: Uint8Array; mode: number; uid: number; gid: number }>();
+  const dec = new TextDecoder();
+  const field = (off: number, at: number, len: number) =>
+    dec
+      .decode(bytes.subarray(off + at, off + at + len))
+      .replace(/\0.*$/, "")
+      .trim();
+
+  for (let off = 0; off + 512 <= bytes.length;) {
+    const name = field(off, 0, 100);
+    if (name === "") break; // EOF blocks
+    const mode = parseInt(field(off, 100, 8) || "0", 8);
+    const uid = parseInt(field(off, 108, 8) || "0", 8);
+    const gid = parseInt(field(off, 116, 8) || "0", 8);
+    const size = parseInt(field(off, 124, 12) || "0", 8);
+    const typeflag = field(off, 156, 1);
+    const body = bytes.subarray(off + 512, off + 512 + size);
+    if (typeflag !== "5") out.set(name, { content: body, mode, uid, gid });
+    off += 512 + Math.ceil(size / 512) * 512;
+  }
+  return out;
+}
+
 async function withFakeDocker<T>(body: (calls: DockerCall[]) => Promise<T>): Promise<T> {
   const calls: DockerCall[] = [];
   const globalBun = globalThis as unknown as { Bun: { spawn: unknown } };
   const original = globalBun.Bun.spawn;
-  globalBun.Bun.spawn = (cmd: string[], opts: { env: Record<string, string> }) => {
+  globalBun.Bun.spawn = (cmd: string[], opts: { env: Record<string, string>; stdin?: unknown }) => {
     const args = cmd.slice(1);
     const call: DockerCall = { args, env: opts.env };
+    // `docker cp -` carries the staged tree as a USTAR archive on stdin; it is
+    // the only place the delivered bytes appear, so capture it here.
+    if (opts.stdin instanceof Uint8Array) {
+      call.stdinBytes = opts.stdin;
+    }
     // `docker create` reads the env-file synchronously and the adapter deletes
     // it the moment create returns — capture it here or never.
     const envFileIdx = args.indexOf("--env-file");
@@ -390,9 +428,26 @@ describe("docker adapter spawn — delivery.files copy", () => {
         (c) => c.args[0] === "cp" && c.args[2] === `${FAKE_CONTAINER_ID}:/`,
       );
       expect(mountCps).toHaveLength(1);
-      const stagedRoot = mountCps[0]!.args[1]!.replace(/\/\.$/, "");
-      expect(await readFile(join(stagedRoot, "run/creds/client.pem"), "utf8")).toBe("CERT");
-      expect(await readFile(join(stagedRoot, "run/creds/client.key"), "utf8")).toBe("KEY");
+      // The mirror rides stdin as a USTAR archive rather than a host path, so
+      // the entries can be re-owned to the runner uid — `docker cp <hostdir>`
+      // stamped them with the SIDECAR's uid, and an owner-only 0400 mode then
+      // locked the runner (uid 1001) out of its own credential.
+      expect(mountCps[0]!.args[1]).toBe("-");
+      const archive = parseUstar(mountCps[0]!.stdinBytes!);
+
+      const pem = archive.get("run/creds/client.pem");
+      const key = archive.get("run/creds/client.key");
+      expect(new TextDecoder().decode(pem!.content)).toBe("CERT");
+      expect(new TextDecoder().decode(key!.content)).toBe("KEY");
+
+      // The mode stays exactly what the manifest asked for: the bug was
+      // ownership, and widening 0400 would have been a workaround, not a fix.
+      expect(pem!.mode).toBe(0o400);
+      expect(key!.mode).toBe(0o400);
+      for (const entry of archive.values()) {
+        expect(entry.uid).toBe(1001);
+        expect(entry.gid).toBe(1001);
+      }
       await adapter.shutdown();
     });
   });
