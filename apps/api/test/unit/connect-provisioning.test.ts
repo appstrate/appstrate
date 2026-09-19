@@ -31,7 +31,7 @@ const SSH_AUTH = {
   _meta: {
     "dev.appstrate/provisioning": {
       kind: "ssh_keypair",
-      provides: ["private_key", "host_key", "read_only"],
+      provides: ["private_key", "read_only"],
     },
   },
 };
@@ -70,7 +70,7 @@ describe("readProvisioning", () => {
   it("reads the declared kind and the names the platform owns", () => {
     expect(readProvisioning(SSH_AUTH)).toEqual({
       kind: "ssh_keypair",
-      provides: ["private_key", "host_key", "read_only"],
+      provides: ["private_key", "read_only"],
     });
   });
 
@@ -88,7 +88,7 @@ describe("readProvisioning", () => {
     const auth = {
       _meta: { "dev.appstrate/provisioning": { kind: "ssh_keypair", provides: ["private_key"] } },
     };
-    expect(() => readProvisioning(auth)).toThrow(/must list host_key, read_only in `provides`/);
+    expect(() => readProvisioning(auth)).toThrow(/must list read_only in `provides`/);
   });
 });
 
@@ -105,9 +105,9 @@ describe("provisionCredentials — the runner floor is mirrored at the form", ()
     ).rejects.toThrow(/runs cannot reach this host/);
   });
 
-  // The NAME case — an allowlisted hostname resolving to a private address,
-  // which no literal check can see — lives with the resolving gate that has to
-  // refuse it: `ssh-host-key.test.ts`.
+  // Only literals are caught here. A NAME resolving to a private address
+  // reaches the runner's own CONNECT gate at run time — the platform resolves
+  // nothing, because it opens no socket to this host at any point.
   it("refuses a loopback literal even when the operator allowlists it", async () => {
     // The platform's own egress guard WOULD let this through. The runner's
     // would not, and the runner is what has to reach the host — so a
@@ -194,15 +194,13 @@ describe("provisionCredentials — input validation", () => {
 const HOST_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPBj/sOdBfKkpuneRA7h6SaW8fRXZly/zo3c50YJVhE9";
 const RSA_HOST_KEY = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDexample";
 
-const stubCtx = {
-  integrationId: "@appstrate/ssh",
-  scanHostKey: async () => ({
-    ok: true as const,
-    hostKey: HOST_KEY,
-    fingerprint: "SHA256:e9BAhcGr5z9zvM6nYcXrEt2BkBrTfpCQ/QSvw/h2INc",
-  }),
+const stubCtx = { integrationId: "@appstrate/ssh" };
+const base = {
+  host: "ssh.example.test",
+  user: "agent",
+  port: "2222",
+  host_key: HOST_KEY,
 };
-const base = { host: "ssh.example.test", user: "agent", port: "2222" };
 
 describe("provisionCredentials — what gets minted and rendered", () => {
   it("mints an OpenSSH private key and pins the scanned host key", async () => {
@@ -277,15 +275,8 @@ describe("provisionCredentials — what gets minted and rendered", () => {
     // would silently skip the only machine-in-the-middle check there is.
     const rsa = (await provisionCredentials(
       SSH_AUTH,
-      { ...base },
-      {
-        ...stubCtx,
-        scanHostKey: async () => ({
-          ok: true as const,
-          hostKey: RSA_HOST_KEY,
-          fingerprint: "SHA256:rsa",
-        }),
-      },
+      { ...base, host_key: RSA_HOST_KEY },
+      stubCtx,
     ))!;
     expect(installShell(rsa)).toContain("/etc/ssh/ssh_host_rsa_key.pub");
     expect(installShell(rsa)).not.toContain("ed25519_key.pub");
@@ -389,35 +380,55 @@ describe("provisionCredentials — what gets minted and rendered", () => {
     expect(revokeShell(res)).toMatch(/rm -f "\$tmp" \/usr\/local\/bin\/appstrate-dispatch-/);
   });
 
-  it("ignores a client-supplied private key, host key or read-only flag", async () => {
+  /**
+   * `provides` is the boundary, and it covers exactly what the platform MINTS.
+   * A client can send anything; the names on that list are dropped from the
+   * submitted bag before the merge, so no ordering of the composition can
+   * resurrect them.
+   *
+   * `host_key` is deliberately NOT on it — it is the user's to supply, read off
+   * the target from a session they authenticated. That is a smaller boundary
+   * than it looks: a bogus host key breaks only the connection that carries it,
+   * because a mismatch is what `StrictHostKeyChecking=yes` refuses at run time.
+   * A bogus PRIVATE key would be a credential the platform did not mint, which
+   * is the whole reason this list exists.
+   */
+  it("drops a client-supplied private key or read-only flag, and keeps the host key", async () => {
     const fields: Record<string, unknown> = {
       ...base,
       private_key: "-----BEGIN OPENSSH PRIVATE KEY-----\nattacker\n",
-      host_key: "ssh-ed25519 AAAAattacker",
       read_only: "0",
     };
     const res = (await provisionCredentials(SSH_AUTH, fields, stubCtx))!;
     expect(res.private_key).not.toContain("attacker");
-    expect(res.host_key).toBe(HOST_KEY);
     expect(res.read_only).toBe("1");
-    // Stripped from the submitted bag too, so a later merge cannot resurrect
-    // them whatever order the caller composes in.
     expect(fields.private_key).toBeUndefined();
-    expect(fields.host_key).toBeUndefined();
     expect(fields.read_only).toBeUndefined();
+
+    // Supplied, therefore honoured — and still in the bag, because nothing
+    // strips a name the platform does not own.
+    expect(res.host_key).toBe(HOST_KEY);
+    expect(fields.host_key).toBe(HOST_KEY);
   });
 
-  it("surfaces a failed scan as a form error, minting nothing", async () => {
+  /**
+   * The host key is the one field the platform refuses to guess. It decides
+   * which file the install block tells the user to read their fingerprint
+   * from, so an absent or unrecognised one must stop the mint rather than
+   * render a block that checks nothing.
+   */
+  it("mints nothing without a usable host key", async () => {
+    const { host_key: _dropped, ...noHostKey } = base;
+    await expect(provisionCredentials(SSH_AUTH, { ...noHostKey }, stubCtx)).rejects.toThrow(
+      /`host_key` is required/,
+    );
     await expect(
       provisionCredentials(
         SSH_AUTH,
-        { ...base },
-        {
-          integrationId: "@appstrate/ssh",
-          scanHostKey: async () => ({ ok: false as const, reason: "unreachable" as const }),
-        },
+        { ...base, host_key: "ecdsa-sha2-nistp256 AAAAE2VjZHNh" },
+        stubCtx,
       ),
-    ).rejects.toThrow(/host key could not be read from ssh\.example\.test:2222/);
+    ).rejects.toThrow(/unsupported host key type: ecdsa-sha2-nistp256/);
   });
 });
 

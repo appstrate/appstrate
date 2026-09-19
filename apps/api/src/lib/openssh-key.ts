@@ -31,7 +31,14 @@ function sshString(value: Buffer | string): Buffer {
   return Buffer.concat([len, bytes]);
 }
 
-/** The key types `ssh-keyscan` can emit — used to spot its host column. */
+/**
+ * Key types that can head a public-key line — used only to tell a bare
+ * `<type> <base64>` pair from a `known_hosts`/`ssh-keyscan` line whose first
+ * column is the host. Wider than anything the platform ACCEPTS as a host key
+ * (`hostKeyPubFile` takes two types, and the manifest `pattern` the same two):
+ * this regex decides where the base64 column is, not what is supported, and a
+ * user asked to produce a host key may well hand over an ecdsa line.
+ */
 const KEY_TYPE_RE = /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521))$/;
 
 function uint32(n: number): Buffer {

@@ -21,7 +21,10 @@
         "label": "Créez un compte Unix dédié sur le serveur cible — pas root. Laissez-lui un shell POSIX (/bin/sh) : un forced command SSH passe par le shell de login, donc un compte en nologin refuserait tous les verbes. Ce qui restreint la clé, c'est restrict + command=, pas l'absence de shell. Le rayon d'action de l'agent est celui de ce compte."
       },
       {
-        "label": "Indiquez ci-dessous l'hôte, le port et ce compte. Appstrate génère la paire de clés lui-même : rien à coller, et la clé privée n'est ni affichée ni saisie nulle part — elle naît chiffrée dans le trousseau."
+        "label": "Sur ce même serveur, relevez sa clé publique d'hôte : `awk '{print $1\" \"$2}' /etc/ssh/ssh_host_ed25519_key.pub` (ou `ssh_host_rsa_key.pub` sur un sshd trop ancien). C'est l'identité du SERVEUR. Appstrate ne va pas la chercher lui-même : un relevé à distance se fait sur une première connexion non authentifiée, exactement ce qu'un intercepteur sait répondre. Vous, vous êtes déjà sur la machine."
+      },
+      {
+        "label": "Indiquez ci-dessous l'hôte, le port, ce compte et la clé d'hôte relevée. Appstrate génère la paire de clés lui-même : la clé privée n'est ni affichée ni saisie nulle part — elle naît chiffrée dans le trousseau."
       }
     ]
   },
@@ -64,7 +67,7 @@
             "host_key": {
               "type": "string",
               "title": "Clé publique de l'hôte",
-              "description": "Relevée par la plateforme à la création et épinglée. C'est l'identité du SERVEUR, pas la vôtre. Tout changement refuse la connexion — il n'y a pas d'acceptation à la première connexion, personne ne signe dans un run autonome.",
+              "description": "Relevée par vous sur la machine, puis épinglée. C'est l'identité du SERVEUR, pas la vôtre. Tout changement refuse la connexion — il n'y a pas d'acceptation à la première connexion, personne ne signe dans un run autonome.",
               "pattern": "^(ssh-ed25519|ssh-rsa) [A-Za-z0-9+/]+=*$"
             },
             "allowed_verbs": {
@@ -121,7 +124,7 @@
         },
         "dev.appstrate/provisioning": {
           "kind": "ssh_keypair",
-          "provides": ["private_key", "host_key", "read_only"]
+          "provides": ["private_key", "read_only"]
         }
       }
     }

@@ -22,7 +22,7 @@ import type { IntegrationManifestAuth } from "../../../hooks/use-integrations.ts
 await i18nReady;
 await i18n.changeLanguage("fr");
 
-/** An auth shaped like @appstrate/ssh: four fields typed, three provisioned. */
+/** An auth shaped like @appstrate/ssh: five fields typed, two provisioned. */
 const SSH_AUTH = {
   type: "custom",
   credentials: {
@@ -43,7 +43,7 @@ const SSH_AUTH = {
   _meta: {
     "dev.appstrate/provisioning": {
       kind: "ssh_keypair",
-      provides: ["private_key", "host_key", "read_only"],
+      provides: ["private_key", "read_only"],
     },
   },
 } as unknown as IntegrationManifestAuth;
@@ -65,14 +65,14 @@ function inputTag(markup: string, field: string): string | null {
 describe("CredentialFields — provisioned credentials", () => {
   it("renders no input for a credential the platform mints", () => {
     const markup = html(SSH_AUTH);
-    for (const hidden of ["private_key", "host_key", "read_only"]) {
+    for (const hidden of ["private_key", "read_only"]) {
       expect(inputTag(markup, hidden)).toBeNull();
     }
   });
 
   it("still renders the fields only the user can answer", () => {
     const markup = html(SSH_AUTH);
-    for (const shown of ["host", "port", "user", "allowed_verbs"]) {
+    for (const shown of ["host", "port", "user", "host_key", "allowed_verbs"]) {
       expect(inputTag(markup, shown)).not.toBeNull();
     }
   });

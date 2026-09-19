@@ -4,12 +4,19 @@
  * Credential PROVISIONING — the credentials an integration's auth needs but
  * that the person connecting should never have to produce by hand.
  *
- * The hosted connect form asks for what only the user knows (which host, which
- * account) and the platform derives the rest. For SSH that is the whole key
- * pair and the target's host key: a user pasting a private key is almost
- * always pasting their PERSONAL key, already installed on ten other machines,
- * so the blast radius of an Appstrate credential leaves Appstrate. A minted
- * pair is used nowhere else and is never displayed, typed, or copied.
+ * The hosted connect form asks for what only the user knows and the platform
+ * mints the rest. For SSH that is the key pair, and nothing else: a user
+ * pasting a private key is almost always pasting their PERSONAL key, already
+ * installed on ten other machines, so the blast radius of an Appstrate
+ * credential leaves Appstrate. A minted pair is used nowhere else and is never
+ * displayed, typed, or copied.
+ *
+ * The line is "can the platform produce this better than the user can", not
+ * "can the platform produce it at all". The target's host key is the case
+ * that decides the difference: the platform CAN fetch it, and used to — but
+ * only over an unauthenticated first contact, which is the exact thing a
+ * machine-in-the-middle answers. The user reads it off the machine from a
+ * session they already authenticated. So it is asked for, not minted.
  *
  * Shape: an auth opts in with
  *
@@ -47,7 +54,6 @@ import {
   generateOpenSshEd25519KeyPair,
   publicKeyFromOpenSshPrivateKey,
 } from "../../lib/openssh-key.ts";
-import { scanSshHostKey, type SshHostKeyScan } from "../../lib/ssh-host-key.ts";
 import { isBlockedHost } from "@appstrate/afps-shared/ssrf";
 
 /**
@@ -309,16 +315,9 @@ function renderRevokeCommand(user: string, publicKey: string, dispatchPath: stri
 /** Unix account name — interpolated into the script, so kept deliberately narrow. */
 const USER_NAME_RE = /^[a-z_][a-z0-9_-]{0,31}$/;
 
-/**
- * Context a provisioner runs in. `scanHostKey` is a seam: the happy path
- * reaches a real server over the network, which no unit test can do, yet the
- * script this function renders is the artefact that ends up writing to a
- * customer's `authorized_keys`. It is overridable so that script can be
- * asserted without one.
- */
+/** Context a provisioner runs in. */
 export interface ProvisionContext {
   integrationId: string;
-  scanHostKey?: (host: string, port: number) => Promise<SshHostKeyScan>;
 }
 
 async function provisionSshKeyPair(
@@ -339,13 +338,12 @@ async function provisionSshKeyPair(
 
   const verbs = parseVerbs(fields["allowed_verbs"]);
 
-  // Mirror the RUNNER's egress floor, which is what actually has to reach this
-  // host: `isBlockedHost` for a literal here, and the same resolve-and-check
-  // inside `scanSshHostKey` — deliberately WITHOUT the operator's
+  // Mirror the RUNNER's egress floor — deliberately WITHOUT the operator's
   // EGRESS_ALLOW_INTERNAL_HOSTS allowlist, which the runner's CONNECT listener
   // does not honour. Creating a connection on the looser of the two floors
   // produces runs that always fail; the failure belongs at the form, where
-  // someone can read it.
+  // someone can read it. A literal only: this no longer resolves the name,
+  // because nothing here opens a socket any more.
   if (isBlockedHost(host)) {
     throw invalidRequest(
       "runs cannot reach this host: it is a private, loopback or link-local address, " +
@@ -353,16 +351,22 @@ async function provisionSshKeyPair(
     );
   }
 
-  const scan = await (ctx.scanHostKey ?? scanSshHostKey)(host, port);
-  if (!scan.ok) {
-    const detail = scan.detail ? ` (${scan.detail})` : "";
-    throw invalidRequest(
-      scan.reason === "blocked-host"
-        ? "runs cannot reach this host: it resolves to a private, loopback or link-local " +
-            `address, which the integration runner's egress refuses${detail}`
-        : `the host key could not be read from ${host}:${port}${detail}`,
-    );
-  }
+  // The host key is SUPPLIED, not scanned.
+  //
+  // The platform used to run `ssh-keyscan` here. That put an SSH client in
+  // every self-hosted image for one call, and — the part that actually
+  // decides it — a scan is an UNAUTHENTICATED first contact: precisely what a
+  // machine-in-the-middle answers. Its only defence was asking the user to
+  // compare two strings afterwards. The install block already prints this key
+  // from inside a session the user authenticated with their own
+  // `known_hosts`, so taking it from there instead removes the window rather
+  // than papering over it, and the comparison step stops being theatre.
+  //
+  // Shape is the manifest's job (`credentials.schema.pattern`, validated by
+  // `FieldsStrategy` on BOTH doors). What is checked here is only what this
+  // file is about to interpolate into a root script.
+  const hostKey = requiredString(fields, "host_key");
+  hostKeyPubFile(hostKey);
 
   const keyPair = generateOpenSshEd25519KeyPair(`appstrate ${ctx.integrationId}`);
 
@@ -374,7 +378,7 @@ async function provisionSshKeyPair(
     host,
     port: String(port),
     user,
-    host_key: scan.hostKey,
+    host_key: hostKey,
     allowed_verbs: JSON.stringify(verbs),
     // Read-only is the floor the SERVER applies; the target's own dispatcher
     // is the boundary that matters, and it runs nothing that writes (its
@@ -523,7 +527,9 @@ const PROVISIONERS: Record<string, Provisioner> = {
  * turn a minted secret back into a field the user is asked to type.
  */
 const REQUIRED_PROVIDES: Record<string, readonly string[]> = {
-  ssh_keypair: ["private_key", "host_key", "read_only"],
+  // NOT `host_key`: the user supplies it, read off the target from a session
+  // they authenticated themselves. Only what the platform actually mints.
+  ssh_keypair: ["private_key", "read_only"],
 };
 
 export interface ProvisioningDeclaration {
