@@ -6,6 +6,114 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Agents can reach a host over SSH.** Two new system packages: the
+  `@appstrate/ssh` integration and the `@appstrate/ssh-mcp` local mcp-server it
+  backs (`source.kind: "local"`, the second first-party one after
+  `@appstrate/github-git`). One connection is one key, one host and one
+  capability profile — the key is the identity, and what it may do is enforced
+  on the TARGET by `restrict` + `command=` in `authorized_keys`, the only
+  boundary that stays true when the platform is wrong. The private key lives in
+  the keyring and is delivered to the runner as a file (`delivery.files`,
+  `/run/secrets/ssh_key`, `0600`); it never enters the agent container.
+
+  There is deliberately **no free-form command tool**. `ssh_exec` sends the bare
+  NAME of a verb from the connection's closed allowlist — a shape the server
+  re-checks itself, so the rule holds whatever wrote the credential — and the
+  target's forced-command dispatcher decides what it means — SSH `exec` runs through the
+  remote login shell, so any string rendered on this side would be shell input
+  on the far side, and a command allowlist over a shell string cannot be made to
+  hold (Teleport has no per-command SSH policy either; it brokers hosts and
+  records sessions). Read and write are separate tools, so an agent's
+  `toolAllowlist` can withhold `ssh_write_file` sidecar-side. Host keys are
+  pinned from the connection's `host_key` with `StrictHostKeyChecking=yes`
+  against a per-process `known_hosts`; there is no trust-on-first-use, because
+  in an autonomous run nobody is there to accept.
+
+  The server shells out to the `ssh`/`sftp` clients the bun runner image already
+  bakes in, and reaches a proxied target through an OpenSSH `ProxyCommand` that
+  speaks HTTP CONNECT to the sidecar's egress listener. A forced command
+  intercepts the sftp SUBSYSTEM too, so the generated dispatcher carries an arm
+  for it that execs `sftp-server -R`; without one the session is refused before
+  a packet and the three file tools die on an opaque "Connection closed". A target on a private
+  address is refused by the SSRF floor on that path — a public VPS works, a LAN
+  box does not, and that is a decision, not a bug (#1228). Per-connection host
+  scoping of the egress listener is #1458.
+
+  Two defects this surfaced were fixed on their own first: an mcp-server
+  declaring `entry_point: "./server.js"` could not be imported at all (#1461),
+  and `delivery.files` landed unreadable in every runner image (#1462).
+
+- **Connecting an SSH host never asks for a private key.** The platform mints
+  the ed25519 pair itself, straight into the credential envelope: never
+  displayed, never typed, never readable again. A pasted key is almost always
+  the user's PERSONAL key, already installed on ten other machines, so the
+  blast radius of an Appstrate credential used to leave Appstrate; a minted
+  pair is used nowhere else.
+
+  The form asks for what only the user can answer — host, port, account, and
+  the target's own host key. The line is "can the platform produce this better
+  than the user can", not "can it produce it at all". The host key is the case
+  that decides the difference: the platform CAN fetch it, and an earlier cut of
+  this work did, with `ssh-keyscan`. But a scan is an unauthenticated first
+  contact — precisely what a machine-in-the-middle answers — while the user is
+  already on a shell there, creating the Unix account the guide asks for. So
+  they read it off the machine (`awk '{print $1" "$2}'
+/etc/ssh/ssh_host_ed25519_key.pub`) and the platform opens no SSH socket at
+  any point.
+
+  After creation the connect page shows the one block to paste on the target —
+  it installs the public key with `restrict` + `command=`, writes the
+  forced-command dispatcher (an exact-match arm per allowed verb, plus the sftp
+  subsystem in read-only mode) at a path carrying that key's own fingerprint so
+  a second connection to the same host cannot widen the first one's verb list,
+  and prints the host's own fingerprint — of the key type actually pinned — so
+  it can be compared against the one shown on screen. The same screen carries
+  the block that REMOVES the key: deleting the connection destroys the private
+  half and nothing else, because the platform cannot reach the target.
+
+  Nothing about either block is stored. Both are derived on demand from the
+  credential bundle the keyring already holds — an `openssh-key-v1` container
+  carries its own public half in the clear, and the fingerprint is a pure
+  function of the pinned host key — so `GET /api/me/connections/{id}/handoff`
+  rebuilds exactly what the connect screen showed, months later, by the same
+  function. A column would have bought a permanent migration for data that
+  cannot be missing, and a stored copy could drift from the key it claims to
+  remove.
+
+  The mechanism is generic, not SSH-specific: an auth opts in with
+  `_meta["dev.appstrate/provisioning"]` (AFPS §10), declaring in `provides` the
+  names the platform owns — one declaration, read by the form to hide those
+  fields and checked server-side against the kind's floor. The hosted form
+  strips them from the request body, so a crafted submit cannot supply its own
+  key. The programmatic `connect/fields` import runs no provisioner by design
+  (the caller already holds the credential), which is why the shape constraints
+  the SSH runtime depends on live in `credentials.schema` — validated on both
+  doors — rather than in the provisioner.
+
+  A target the RUNNER could not reach is refused at the form rather than
+  persisted: the platform's usual egress guard honours
+  `EGRESS_ALLOW_INTERNAL_HOSTS` while the runner's CONNECT floor has no
+  allowlist at all, and creating a connection on the looser of the two would
+  have produced runs that always fail. The form therefore applies the bare
+  floor — the predicate the runner's listener uses — and not that guard. It
+  checks literals only; a NAME resolving to a private address meets the
+  runner's own CONNECT gate at run time, which is the gate that was always
+  going to decide. The platform image gains nothing for any of this: it opens
+  no SSH socket, so it ships no SSH client.
+
+### Fixed
+
+- **The hosted connect form showed raw field names.** It derived inputs from
+  the credential property NAMES only, so `title`, `description` and `default`
+  declared in a manifest reached nobody — every integration that documented its
+  fields still presented `snake_case` keys with no explanation, and a declared
+  default was neither shown nor submitted. The form now renders all three, and
+  seeds the defaults it displays. It also renders the manifest's AFPS §7.10
+  `setup_guide`, which until now appeared only on the integration detail page —
+  everywhere except the surface actually asking someone for a credential.
+
 ### Security
 
 - **Removing a space member judges BOTH of its bounds under the membership

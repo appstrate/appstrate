@@ -4,6 +4,9 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "../components/spinner";
 import { CredentialFields } from "../components/integration-connect/credential-fields";
+import { initialCredentialValues } from "../components/integration-connect/credential-schema";
+import { HandoffSteps, type HandoffStep } from "../components/integration-connect/handoff-steps";
+import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
 import { IntegrationIcon } from "../components/integration-icon";
 import { client, type paths } from "../api/client";
 import { publishConnectCompletion } from "../lib/connect-completion";
@@ -37,13 +40,23 @@ type ConnectContext = Omit<
   "auth"
 > & { auth: IntegrationManifestAuth };
 
-type Phase = "loading" | "form" | "submitting" | "done" | "error";
+type Phase = "loading" | "form" | "submitting" | "done" | "provisioned" | "error";
+
+/**
+ * Material the platform minted that has to reach the target host. Returned
+ * once by `/connect/submit`; nothing persists it, and nothing here is secret —
+ * the private half never leaves the server.
+ */
+interface Provisioned {
+  steps: HandoffStep[];
+}
 
 export function HostedConnectPage() {
   const { t } = useTranslation("settings");
   const [phase, setPhase] = useState<Phase>("loading");
   const [context, setContext] = useState<ConnectContext | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
+  const [provisioned, setProvisioned] = useState<Provisioned | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Technical reason behind a context-load failure (HTTP status or network
   // error). Shown under the generic body so an invalid/expired link, a removed
@@ -57,7 +70,11 @@ export function HostedConnectPage() {
         // Non-2xx throws via the client middleware, so `data` is defined here.
         const { data } = await client.GET("/api/integrations/connect/context");
         if (cancelled) return;
-        setContext(data as ConnectContext);
+        const ctx = data as ConnectContext;
+        setContext(ctx);
+        // Seed the defaults the manifest declares, so a value the user can see
+        // in the form is a value the form will actually submit.
+        setValues(initialCredentialValues(ctx.auth));
         setPhase("form");
       } catch (err) {
         if (cancelled) return;
@@ -69,6 +86,16 @@ export function HostedConnectPage() {
       cancelled = true;
     };
   }, []);
+
+  /** Tell whatever opened this window that the connection now exists. */
+  const announceConnected = () => {
+    if (!context) return;
+    publishConnectCompletion(
+      { ok: true, packageId: context.package_id },
+      window.opener as Window | null,
+      window.location.origin,
+    );
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,15 +109,25 @@ export function HostedConnectPage() {
     setError(null);
     try {
       // Non-2xx throws `ApiError` (RFC 9457 `detail`) via the client middleware.
-      await client.POST("/api/integrations/connect/submit", {
+      const { data } = await client.POST("/api/integrations/connect/submit", {
         params: { header: { "x-connect-csrf": context.csrf } },
         body: { credentials: values },
       });
-      publishConnectCompletion(
-        { ok: true, packageId: context.package_id },
-        window.opener as Window | null,
-        window.location.origin,
-      );
+      // A provisioning auth hands back material the user must now install on
+      // their own machine, and this page holds the only copy — nothing
+      // persists it and no endpoint re-serves it. The completion signal is
+      // therefore WITHHELD here: the opener (`useHostedConnectPopup`) closes
+      // this window the instant it sees `ok: true`, which would take the block
+      // away before it could be read. It is announced on the user's own
+      // "I installed the key" instead.
+      const minted = (data as { provisioned?: Provisioned } | undefined)?.provisioned;
+      if (minted) {
+        setProvisioned(minted);
+        setPhase("provisioned");
+        return;
+      }
+
+      announceConnected();
       setPhase("done");
       // Close the popup/tab after a short confirmation, mirroring the OAuth page.
       setTimeout(() => {
@@ -108,7 +145,9 @@ export function HostedConnectPage() {
 
   return (
     <div className="bg-background text-foreground flex min-h-screen items-center justify-center p-4">
-      <div className="w-full max-w-md space-y-6">
+      {/* The install block is a shell script — wrapping it into a 28rem column
+          would make it unreadable, so that one phase gets a wider page. */}
+      <div className={`w-full space-y-6 ${phase === "provisioned" ? "max-w-2xl" : "max-w-md"}`}>
         {phase === "loading" && (
           <div className="flex justify-center py-12">
             <Spinner />
@@ -124,6 +163,40 @@ export function HostedConnectPage() {
             {errorDetail && (
               <p className="text-muted-foreground/60 font-mono text-xs">{errorDetail}</p>
             )}
+          </div>
+        )}
+
+        {phase === "provisioned" && provisioned && (
+          <div className="space-y-5" data-testid="connect-provisioned">
+            <div>
+              <h1 className="text-lg font-semibold">
+                {t("integration.connect.provisioned.title")}
+              </h1>
+              <p className="text-muted-foreground mt-1 text-sm">
+                {t("integration.connect.provisioned.body")}
+              </p>
+            </div>
+
+            <HandoffSteps steps={provisioned.steps} />
+
+            <Button
+              type="button"
+              className="w-full"
+              data-testid="provisioned-done"
+              onClick={() => {
+                // Announcing only now is what kept this window open long
+                // enough to read: the opener closes it on this signal.
+                announceConnected();
+                setPhase("done");
+                try {
+                  window.close();
+                } catch {
+                  /* not a popup — the confirmation stays visible */
+                }
+              }}
+            >
+              {t("integration.connect.provisioned.doneBtn")}
+            </Button>
           </div>
         )}
 
@@ -150,6 +223,9 @@ export function HostedConnectPage() {
               <p className="text-muted-foreground text-sm">
                 {t("integration.connect.modal.subtitle", { type: context.auth.type })}
               </p>
+              {context.setup_guide?.steps && context.setup_guide.steps.length > 0 && (
+                <SetupGuideSteps steps={context.setup_guide.steps} />
+              )}
               <CredentialFields auth={context.auth} values={values} onChange={setValues} />
               {error && <p className="text-sm text-red-400">{error}</p>}
               <Button type="submit" className="w-full" disabled={phase === "submitting"}>

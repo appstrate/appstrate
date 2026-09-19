@@ -2,6 +2,8 @@
 
 import { Fragment, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { $api } from "../../api/client";
+import { HandoffSteps } from "../../components/integration-connect/handoff-steps";
 import { Link } from "react-router-dom";
 import { Unplug, Pencil, Check, X } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -315,6 +317,34 @@ export function PreferencesConnectionsPage() {
     reused_by_agents: number;
   } | null>(null);
 
+  /**
+   * Everything the platform minted for this connection, derived server side
+   * from the credential bundle. Fetched only while the confirmation is open:
+   * it costs a decryption, so the list must not pay it for every row to serve
+   * the one row being acted on. Empty for a pasted credential, which left
+   * nothing on a target.
+   */
+  const handoff = $api.useQuery(
+    "get",
+    "/api/me/connections/{connectionId}/handoff",
+    { params: { path: { connectionId: confirmState?.connectionId ?? "" } } },
+    { enabled: !!confirmState, select: (e) => e.data },
+  );
+
+  /**
+   * Only what is due AT deletion. The endpoint also carries the block that
+   * INSTALLED the key, which has no business in a confirmation about removing
+   * it — and `deferred` is dropped on the way out because this is the moment
+   * those steps stop being "later".
+   */
+  const teardownSteps = useMemo(
+    () =>
+      (handoff.data ?? [])
+        .filter((step) => step.deferred)
+        .map((step) => ({ ...step, deferred: false })),
+    [handoff.data],
+  );
+
   const totalConnections = useMemo(
     () => (groups ?? []).reduce((s, g) => s + g.total_connections, 0),
     [groups],
@@ -439,7 +469,13 @@ export function PreferencesConnectionsPage() {
             { onSuccess: () => setConfirmState(null) },
           );
         }}
-      />
+      >
+        {teardownSteps.length > 0 && (
+          <div className="mt-4">
+            <HandoffSteps steps={teardownSteps} />
+          </div>
+        )}
+      </ConfirmModal>
     </>
   );
 }

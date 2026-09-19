@@ -1,0 +1,137 @@
+{
+  "name": "@appstrate/ssh",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "SSH",
+  "icon": "mdi:console-network",
+  "description": "Reach a host over SSH from an agent — a VPS, a NAS, a build box, anything with sshd and no HTTP API. One connection is one key, one host and one capability profile: the key is the identity, and what it may do is enforced on the target by `restrict` + `command=` in authorized_keys. The private key lives in the platform keyring and is delivered to the @appstrate/ssh-mcp runner as a file; it never reaches the agent container. Backs the local mcp-server, which shells out to the `ssh` / `sftp` clients of the bun runner image.",
+  "license": "Apache-2.0",
+  "keywords": ["ssh", "sftp", "remote", "server", "ops"],
+  "source": {
+    "kind": "local",
+    "server": {
+      "name": "@appstrate/ssh-mcp",
+      "version": "^1.0.0"
+    }
+  },
+  "setup_guide": {
+    "steps": [
+      {
+        "label": "Créez un compte Unix dédié sur le serveur cible — pas root. Laissez-lui un shell POSIX (/bin/sh) : un forced command SSH passe par le shell de login, donc un compte en nologin refuserait tous les verbes. Ce qui restreint la clé, c'est restrict + command=, pas l'absence de shell. Le rayon d'action de l'agent est celui de ce compte."
+      },
+      {
+        "label": "Sur ce même serveur, relevez sa clé publique d'hôte : `awk '{print $1\" \"$2}' /etc/ssh/ssh_host_ed25519_key.pub` (ou `ssh_host_rsa_key.pub` sur un sshd trop ancien). C'est l'identité du SERVEUR. Appstrate ne va pas la chercher lui-même : un relevé à distance se fait sur une première connexion non authentifiée, exactement ce qu'un intercepteur sait répondre. Vous, vous êtes déjà sur la machine."
+      },
+      {
+        "label": "Indiquez ci-dessous l'hôte, le port, ce compte et la clé d'hôte relevée. Appstrate génère la paire de clés lui-même : la clé privée n'est ni affichée ni saisie nulle part — elle naît chiffrée dans le trousseau."
+      }
+    ]
+  },
+  "auths": {
+    "primary": {
+      "type": "custom",
+      "authorized_uris": ["ssh://**"],
+      "identity_claims": {
+        "account_id": "{$credential.user}@{$credential.host}"
+      },
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "required": ["private_key", "host", "user", "host_key"],
+          "properties": {
+            "private_key": {
+              "type": "string",
+              "title": "Clé privée Appstrate",
+              "description": "Générée par la plateforme, jamais saisie ni affichée. Livrée au seul runner @appstrate/ssh-mcp, en fichier 0600 ; elle n'entre jamais dans le conteneur de l'agent.",
+              "pattern": "^-----BEGIN OPENSSH PRIVATE KEY-----"
+            },
+            "host": {
+              "type": "string",
+              "title": "Hôte",
+              "description": "Nom DNS ou adresse IP publique du serveur. Une adresse privée est refusée : l'egress du runner ne la laisse pas passer.",
+              "pattern": "^[A-Za-z0-9]([A-Za-z0-9.:-]{0,253}[A-Za-z0-9])?$"
+            },
+            "port": {
+              "type": "string",
+              "title": "Port SSH",
+              "default": "22",
+              "pattern": "^[0-9]{1,5}$"
+            },
+            "user": {
+              "type": "string",
+              "title": "Compte Unix sur la cible",
+              "description": "Le compte dédié qui portera la clé — pas root. Ce que l'agent peut faire, c'est ce que ce compte peut faire.",
+              "pattern": "^[a-z_][a-z0-9_-]{0,31}$"
+            },
+            "host_key": {
+              "type": "string",
+              "title": "Clé publique de l'hôte",
+              "description": "Relevée par vous sur la machine, puis épinglée. C'est l'identité du SERVEUR, pas la vôtre. Tout changement refuse la connexion — il n'y a pas d'acceptation à la première connexion, personne ne signe dans un run autonome.",
+              "pattern": "^(ssh-ed25519|ssh-rsa) [A-Za-z0-9+/]+=*$"
+            },
+            "allowed_verbs": {
+              "type": "string",
+              "title": "Verbes autorisés",
+              "default": "[\"hostname\", \"uptime\", \"disk_usage\"]",
+              "description": "Tableau JSON de noms. Seul le NOM part sur le fil : c'est le dispatcher installé sur la cible qui décide ce qu'il exécute, jamais une commande envoyée d'ici. La commande d'installation générée implémente hostname, uptime, disk_usage, memory et whoami. Un tableau vide — ou ce champ effacé — n'autorise AUCUN verbe.",
+              "pattern": "^\\[\\s*(\"[a-z][a-z0-9_]{0,31}\"\\s*(,\\s*\"[a-z][a-z0-9_]{0,31}\"\\s*)*)?\\]$"
+            },
+            "read_only": {
+              "type": "string",
+              "title": "Lecture seule",
+              "default": "1",
+              "description": "Refuse ssh_write_file côté serveur, et fait poser `sftp-server -R` par la commande d'installation. Défense en profondeur : la barrière qui compte est le compte Unix sur la cible.",
+              "pattern": "^[01]$"
+            }
+          }
+        }
+      },
+      "delivery": {
+        "files": {
+          "/run/secrets/ssh_key": {
+            "value": "{$credential.private_key}",
+            "mode": "0600"
+          }
+        },
+        "env": {
+          "SSH_PRIVATE_KEY_PATH": {
+            "value": "/run/secrets/ssh_key"
+          },
+          "SSH_HOST": {
+            "value": "{$credential.host}"
+          },
+          "SSH_PORT": {
+            "value": "{$credential.port}"
+          },
+          "SSH_USER": {
+            "value": "{$credential.user}"
+          },
+          "SSH_HOST_KEY": {
+            "value": "{$credential.host_key}"
+          },
+          "SSH_ALLOWED_VERBS": {
+            "value": "{$credential.allowed_verbs}"
+          },
+          "SSH_READ_ONLY": {
+            "value": "{$credential.read_only}"
+          }
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        },
+        "dev.appstrate/provisioning": {
+          "kind": "ssh_keypair",
+          "provides": ["private_key", "read_only"]
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}

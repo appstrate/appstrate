@@ -973,6 +973,25 @@ export const integrationsPaths = {
                   display_name: { type: "string" },
                   icon: { type: ["string", "null"] },
                   auth: { type: "object", additionalProperties: true },
+                  setup_guide: {
+                    type: ["object", "null"],
+                    description:
+                      "AFPS §7.10 publisher setup steps, rendered above the form so the instructions reach the person being asked for a credential.",
+                    properties: {
+                      steps: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          required: ["label"],
+                          properties: {
+                            label: { type: "string" },
+                            url: { type: "string" },
+                          },
+                        },
+                      },
+                    },
+                    additionalProperties: true,
+                  },
                   connection_id: { type: ["string", "null"] },
                   csrf: { type: ["string", "null"] },
                 },
@@ -1027,6 +1046,42 @@ export const integrationsPaths = {
                 properties: {
                   ok: { type: "boolean" },
                   connection: integrationConnectionSchema,
+                  provisioned: {
+                    type: "object",
+                    description:
+                      'Present when the auth declares `_meta["dev.appstrate/provisioning"]`: what the user must now do with the material the platform minted. Public halves only — the private key is sealed in the connection\'s envelope and is never returned. Returned once; nothing persists it.',
+                    required: ["steps"],
+                    properties: {
+                      steps: {
+                        type: "array",
+                        description:
+                          "Ordered handoff steps. A list rather than named fields so a new provisioning kind ships without a front-end branch.",
+                        items: {
+                          type: "object",
+                          required: ["kind", "label"],
+                          properties: {
+                            kind: { type: "string", enum: ["command", "value"] },
+                            label: { type: "string" },
+                            note: { type: "string" },
+                            shell: {
+                              type: "string",
+                              description:
+                                "`kind: command` — shell to run on the target. Never executed by the platform.",
+                            },
+                            deferred: {
+                              type: "boolean",
+                              description:
+                                "`kind: command` — to be run later, when the connection is deleted, not now.",
+                            },
+                            value: {
+                              type: "string",
+                              description: "`kind: value` — a value to read or compare.",
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
                 },
               },
             },

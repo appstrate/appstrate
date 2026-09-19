@@ -363,6 +363,68 @@ export const mePaths = {
       },
     },
   },
+  "/api/me/connections/{connectionId}/handoff": {
+    get: {
+      operationId: "getMyConnectionHandoff",
+      tags: ["Profile"],
+      summary: "What the platform minted for this connection, and what to do with it",
+      description:
+        "For a connection whose credentials the platform MINTED, the ordered steps the user " +
+        "owns on their own machine: the block that authorises the key on the target, the " +
+        "fingerprint to compare, and — flagged `deferred` — the block that takes the key back " +
+        "off once the connection is deleted. Deleting it destroys the platform's half and " +
+        "nothing else, since the platform has no access to the target. DERIVED from the " +
+        "credential bundle on demand, never stored: every step is a pure function of the key " +
+        "it describes. An empty list for a pasted credential, and for an unknown, malformed " +
+        "or not-owned id (same non-disclosure as the DELETE beside it).",
+      parameters: [
+        {
+          name: "connectionId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Ordered handoff steps (possibly empty)",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  hasMore: { type: "boolean" },
+                  data: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["kind", "label"],
+                      properties: {
+                        kind: { type: "string", enum: ["command", "value"] },
+                        label: { type: "string" },
+                        note: { type: "string" },
+                        shell: { type: "string" },
+                        deferred: {
+                          type: "boolean",
+                          description:
+                            "Due when the connection is deleted, not now. A delete confirmation renders these; the screen that follows creation renders the rest.",
+                        },
+                        value: { type: "string" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+      },
+    },
+  },
   "/api/me/context": {
     get: {
       operationId: "getMyContext",

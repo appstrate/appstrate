@@ -1927,6 +1927,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/connections/{connectionId}/handoff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the platform minted for this connection, and what to do with it
+         * @description For a connection whose credentials the platform MINTED, the ordered steps the user owns on their own machine: the block that authorises the key on the target, the fingerprint to compare, and — flagged `deferred` — the block that takes the key back off once the connection is deleted. Deleting it destroys the platform's half and nothing else, since the platform has no access to the target. DERIVED from the credential bundle on demand, never stored: every step is a pure function of the key it describes. An empty list for a pasted credential, and for an unknown, malformed or not-owned id (same non-disclosure as the DELETE beside it).
+         */
+        get: operations["getMyConnectionHandoff"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/context": {
         parameters: {
             query?: never;
@@ -11276,6 +11296,15 @@ export interface operations {
                         auth: {
                             [key: string]: unknown;
                         };
+                        /** @description AFPS §7.10 publisher setup steps, rendered above the form so the instructions reach the person being asked for a credential. */
+                        setup_guide?: ({
+                            steps?: {
+                                label: string;
+                                url?: string;
+                            }[];
+                        } & {
+                            [key: string]: unknown;
+                        }) | null;
                         connection_id?: string | null;
                         csrf?: string | null;
                     };
@@ -11397,6 +11426,22 @@ export interface operations {
                             createdAt: string;
                             /** Format: date-time */
                             updatedAt: string;
+                        };
+                        /** @description Present when the auth declares `_meta["dev.appstrate/provisioning"]`: what the user must now do with the material the platform minted. Public halves only — the private key is sealed in the connection's envelope and is never returned. Returned once; nothing persists it. */
+                        provisioned?: {
+                            /** @description Ordered handoff steps. A list rather than named fields so a new provisioning kind ships without a front-end branch. */
+                            steps: {
+                                /** @enum {string} */
+                                kind: "command" | "value";
+                                label: string;
+                                note?: string;
+                                /** @description `kind: command` — shell to run on the target. Never executed by the platform. */
+                                shell?: string;
+                                /** @description `kind: command` — to be run later, when the connection is deleted, not now. */
+                                deferred?: boolean;
+                                /** @description `kind: value` — a value to read or compare. */
+                                value?: string;
+                            }[];
                         };
                     };
                 };
@@ -13084,6 +13129,45 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getMyConnectionHandoff: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ordered handoff steps (possibly empty) */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        hasMore: boolean;
+                        data: {
+                            /** @enum {string} */
+                            kind: "command" | "value";
+                            label: string;
+                            note?: string;
+                            shell?: string;
+                            /** @description Due when the connection is deleted, not now. A delete confirmation renders these; the screen that follows creation renders the rest. */
+                            deferred?: boolean;
+                            value?: string;
+                        }[];
+                    };
+                };
             };
             401: components["responses"]["Unauthorized"];
         };

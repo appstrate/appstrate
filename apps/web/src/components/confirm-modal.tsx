@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 
 interface ConfirmModalProps {
+  /** Extra content under the description, for a decision that needs more than a sentence. */
+  children?: ReactNode;
   open: boolean;
   onClose: () => void;
   onConfirm: () => void;
@@ -28,6 +31,7 @@ export function ConfirmModal({
   variant = "destructive",
   isPending,
   confirmDisabled,
+  children,
 }: ConfirmModalProps) {
   const { t } = useTranslation("common");
 
@@ -48,6 +52,10 @@ export function ConfirmModal({
       }
     >
       <p className="text-muted-foreground text-sm">{description}</p>
+      {/* Anything the decision needs in front of it and not merely described —
+          today the block that undoes a minted credential on the customer's own
+          machine, which no later screen can hand back. */}
+      {children}
     </Modal>
   );
 }
