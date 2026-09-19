@@ -1927,7 +1927,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/me/connections/{connectionId}/teardown": {
+    "/api/me/connections/{connectionId}/handoff": {
         parameters: {
             query?: never;
             header?: never;
@@ -1935,10 +1935,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * What still has to be undone on the target for this connection
-         * @description For a connection whose credentials the platform MINTED, the block that takes its public half back off the customer's machine. Deleting the connection destroys the platform's half and nothing else — it has no access to the target — so the delete confirmation reads this first. DERIVED from the credential bundle on demand, never stored: the block is a pure function of the key it removes. An empty list for a pasted credential, and for an unknown, malformed or not-owned id (same non-disclosure as the DELETE beside it).
+         * What the platform minted for this connection, and what to do with it
+         * @description For a connection whose credentials the platform MINTED, the ordered steps the user owns on their own machine: the block that authorises the key on the target, the fingerprint to compare, and — flagged `deferred` — the block that takes the key back off once the connection is deleted. Deleting it destroys the platform's half and nothing else, since the platform has no access to the target. DERIVED from the credential bundle on demand, never stored: every step is a pure function of the key it describes. An empty list for a pasted credential, and for an unknown, malformed or not-owned id (same non-disclosure as the DELETE beside it).
          */
-        get: operations["getMyConnectionTeardown"];
+        get: operations["getMyConnectionHandoff"];
         put?: never;
         post?: never;
         delete?: never;
@@ -13125,7 +13125,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
-    getMyConnectionTeardown: {
+    getMyConnectionHandoff: {
         parameters: {
             query?: never;
             header?: never;
@@ -13136,7 +13136,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Ordered teardown steps (possibly empty) */
+            /** @description Ordered handoff steps (possibly empty) */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -13154,6 +13154,7 @@ export interface operations {
                             label: string;
                             note?: string;
                             shell?: string;
+                            /** @description Due when the connection is deleted, not now. A delete confirmation renders these; the screen that follows creation renders the rest. */
                             deferred?: boolean;
                             value?: string;
                         }[];

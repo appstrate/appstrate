@@ -24,10 +24,13 @@
  * names the platform owns: the connect form reads it to hide those fields, and
  * {@link readProvisioning} checks it covers the kind's floor, so a manifest
  * that under-declares fails loudly instead of putting a mintable secret back
- * in front of the user. The registry below maps a `kind` to a function that
- * takes the submitted fields and returns the credentials to persist plus the
- * material to SHOW once. Provisioned names are merged over the submitted bag,
+ * in front of the user. Provisioned names are merged over the submitted bag,
  * so a client cannot supply its own `private_key`.
+ *
+ * Two tables, one per half, both keyed by `kind`: {@link PROVISIONERS} mints
+ * the credentials, {@link HANDOFFS} renders what the user is left holding —
+ * from the STORED bundle, so the screen after the form and the one months
+ * later derive the same block instead of one of them replaying a copy.
  *
  * What provisioning does NOT bound: the shape of the fields the user DOES
  * supply. Those constraints live in the manifest's `credentials.schema`
@@ -40,22 +43,12 @@ import { createHash } from "node:crypto";
 
 import { invalidRequest } from "../../lib/errors.ts";
 import {
+  fingerprintPublicKey,
   generateOpenSshEd25519KeyPair,
   publicKeyFromOpenSshPrivateKey,
 } from "../../lib/openssh-key.ts";
 import { scanSshHostKey, type SshHostKeyScan } from "../../lib/ssh-host-key.ts";
 import { isBlockedHost } from "@appstrate/afps-shared/ssrf";
-
-/** What a provisioner produces. */
-export interface ProvisionResult {
-  /** Merged over the submitted credential bag before persistence. */
-  credentials: Record<string, string>;
-  /**
-   * Shown to the user ONCE, on the screen that follows the connect form.
-   * Never secret — this is the half that has to reach the target host.
-   */
-  display: ProvisionDisplay;
-}
 
 /**
  * One thing the user has to do, or check, once the platform has minted its half.
@@ -81,15 +74,13 @@ export type HandoffStep =
       /**
        * Not now — kept for when the connection is deleted. The platform cannot
        * reach the target to undo anything itself, so a teardown block that is
-       * only ever shown once is a teardown nobody performs.
+       * only ever shown once is a teardown nobody performs. A surface showing
+       * the list at deletion time renders these and hides the rest; the
+       * surface that follows creation does the opposite.
        */
       deferred?: boolean;
     }
   | { kind: "value"; label: string; value: string; note?: string };
-
-export interface ProvisionDisplay {
-  steps: readonly HandoffStep[];
-}
 
 /** The submitted, not-yet-persisted credential bag. */
 type SubmittedFields = Record<string, unknown>;
@@ -333,7 +324,7 @@ export interface ProvisionContext {
 async function provisionSshKeyPair(
   fields: SubmittedFields,
   ctx: ProvisionContext,
-): Promise<ProvisionResult> {
+): Promise<Record<string, string>> {
   const host = requiredString(fields, "host");
   const user = requiredString(fields, "user");
   if (!USER_NAME_RE.test(user)) {
@@ -374,75 +365,134 @@ async function provisionSshKeyPair(
   }
 
   const keyPair = generateOpenSshEd25519KeyPair(`appstrate ${ctx.integrationId}`);
-  const dispatchPath = dispatchPathFor(keyPair.publicKey);
 
+  // Credentials only. What the user must DO with them is rendered by
+  // `sshHandoffSteps` from this very bundle — the same function the connection
+  // detail surface calls months later, so the two can never disagree.
   return {
-    credentials: {
-      private_key: keyPair.privateKey,
-      host,
-      port: String(port),
-      user,
-      host_key: scan.hostKey,
-      allowed_verbs: JSON.stringify(verbs),
-      // Read-only is the floor the SERVER applies; the target's own dispatcher
-      // is the boundary that matters, and it runs nothing that writes (its
-      // sftp arm execs `sftp-server -R`).
-      read_only: "1",
-    },
-    display: {
-      steps: [
-        {
-          kind: "command",
-          label: "À coller sur le serveur cible (en root, ou avec sudo)",
-          shell: renderInstallCommand(
-            user,
-            keyPair.publicKey,
-            verbs,
-            hostKeyPubFile(scan.hostKey),
-            dispatchPath,
-          ),
-        },
-        {
-          kind: "value",
-          label: "Empreinte de l'hôte, épinglée",
-          value: scan.fingerprint,
-          note:
-            "La commande ci-dessus imprime l'empreinte du serveur en dernière ligne. " +
-            "Si elle diffère de celle-ci, quelqu'un s'est intercalé : supprimez la connexion.",
-        },
-        {
-          kind: "command",
-          deferred: true,
-          label: "Retirer cette clé plus tard",
-          shell: renderRevokeCommand(user, keyPair.publicKey, dispatchPath),
-          note:
-            "Gardez ce bloc. Supprimer la connexion dans Appstrate détruit la moitié privée et " +
-            "rien d'autre — Appstrate ne peut pas atteindre votre serveur pour retirer sa clé " +
-            "d'authorized_keys.",
-        },
-      ],
-    },
+    private_key: keyPair.privateKey,
+    host,
+    port: String(port),
+    user,
+    host_key: scan.hostKey,
+    allowed_verbs: JSON.stringify(verbs),
+    // Read-only is the floor the SERVER applies; the target's own dispatcher
+    // is the boundary that matters, and it runs nothing that writes (its
+    // sftp arm execs `sftp-server -R`).
+    read_only: "1",
   };
 }
 
 /**
- * Rebuild the teardown block for a connection that already exists, from the
- * credentials it already holds.
+ * Render every step a minted SSH connection implies, from the credential
+ * bundle alone: the block to install, the fingerprint to compare, and the
+ * block that takes the key back off the target later.
  *
- * DERIVED, never stored. Deleting a connection destroys the platform's half of
- * a minted credential and nothing else — its public key stays authorized on the
- * customer's machine — so the removal block has to be available later than the
- * screen that first showed it. Persisting it was the obvious answer and the
- * wrong one: an `openssh-key-v1` container carries its own public half in the
- * clear, so the block is a pure function of the bundle. A column would have
- * bought a permanent migration for data that cannot be missing, and a stored
- * copy can drift from the key it claims to remove. This cannot.
+ * DERIVED, never stored — and derived on BOTH surfaces, which is the point.
+ * The screen that follows the connect form and the one that hands the removal
+ * back months later call this same function, so the block a user is given at
+ * deletion cannot disagree with the one they installed. Persisting any of it
+ * was tried and reverted: an `openssh-key-v1` container carries its own public
+ * half in the clear beside the private one (which is why `ssh-keygen -y`
+ * answers instantly on an unencrypted key) and the fingerprint is a pure
+ * function of the pinned host key, so a column would have bought a permanent
+ * migration for data that cannot be missing, plus a stored copy free to drift
+ * from the key it claims to remove.
  *
- * Returns an empty list for a kind that leaves nothing behind, and for a
- * credential bundle too incomplete to describe one — a caller showing this at
- * delete time must render nothing rather than a half-built command.
+ * Fail-soft: a bundle too incomplete to describe a step yields an empty list
+ * rather than a half-built command — a surface must render nothing rather than
+ * a `grep -vF ''` that would empty the file it is meant to prune. At creation
+ * time that branch is unreachable, because `provisionSshKeyPair` produced the
+ * bundle and validated every field on the way in; `connect-provisioning.test.ts`
+ * asserts the list non-empty there, so a regression making the happy path
+ * soft-fail turns red instead of silently handing back nothing.
  */
-export function teardownStepsFor(
+function sshHandoffSteps(credentials: Record<string, unknown>): HandoffStep[] {
+  const user = typeof credentials.user === "string" ? credentials.user.trim() : "";
+  const privateKey = typeof credentials.private_key === "string" ? credentials.private_key : "";
+  const hostKey = typeof credentials.host_key === "string" ? credentials.host_key.trim() : "";
+  if (!USER_NAME_RE.test(user) || privateKey === "" || hostKey === "") return [];
+
+  let publicKey: string;
+  let hostKeyPub: string;
+  let fingerprint: string;
+  try {
+    publicKey = publicKeyFromOpenSshPrivateKey(privateKey);
+    hostKeyPub = hostKeyPubFile(hostKey);
+    fingerprint = fingerprintPublicKey(hostKey);
+  } catch {
+    return [];
+  }
+
+  // Lenient, unlike `parseVerbs` on the way in. This bag did not necessarily
+  // come from a provisioner: `POST .../connect/fields` persists whatever the
+  // caller sent, checked against the manifest `pattern` and nothing else. A
+  // name that would not survive `parseVerbs` is dropped rather than refused,
+  // because refusing here would deny a deletion its removal block.
+  let verbs: string[] = [];
+  const rawVerbs = credentials.allowed_verbs;
+  if (typeof rawVerbs === "string" && rawVerbs !== "") {
+    try {
+      const parsed: unknown = JSON.parse(rawVerbs);
+      if (Array.isArray(parsed)) {
+        verbs = parsed.filter(
+          (v): v is string => typeof v === "string" && VERB_NAME_RE.test(v) && v in DEFAULT_VERBS,
+        );
+      }
+    } catch {
+      verbs = [];
+    }
+  }
+
+  const dispatchPath = dispatchPathFor(publicKey);
+
+  return [
+    {
+      kind: "command",
+      label: "À coller sur le serveur cible (en root, ou avec sudo)",
+      shell: renderInstallCommand(user, publicKey, verbs, hostKeyPub, dispatchPath),
+    },
+    {
+      kind: "value",
+      label: "Empreinte de l'hôte, épinglée",
+      value: fingerprint,
+      note:
+        "La commande ci-dessus imprime l'empreinte du serveur en dernière ligne. " +
+        "Si elle diffère de celle-ci, quelqu'un s'est intercalé : supprimez la connexion.",
+    },
+    {
+      kind: "command",
+      deferred: true,
+      label: "Retirer cette clé du serveur",
+      shell: renderRevokeCommand(user, publicKey, dispatchPath),
+      note:
+        "Gardez ce bloc. Supprimer la connexion dans Appstrate détruit la moitié privée et " +
+        "rien d'autre — Appstrate ne peut pas atteindre votre serveur pour retirer sa clé " +
+        "d'authorized_keys.",
+    },
+  ];
+}
+
+/**
+ * Per-kind step renderers, read from a stored credential bundle.
+ *
+ * A table for the same reason {@link PROVISIONERS} is one: a kind that mints
+ * something must not be able to ship its provisioner and forget what the user
+ * is left holding. Branching on the kind inside the function below would let
+ * exactly that through — it did, until this became a table.
+ */
+const HANDOFFS: Record<string, (credentials: Record<string, unknown>) => HandoffStep[]> = {
+  ssh_keypair: sshHandoffSteps,
+};
+
+/**
+ * The steps a connection's credentials imply, for an auth that provisions.
+ *
+ * Empty for an auth that provisions nothing, for a kind that leaves nothing
+ * behind, and for a bundle too incomplete to describe a step — a caller
+ * renders nothing rather than a half-built command.
+ */
+export function handoffStepsFor(
   auth: unknown,
   credentials: Record<string, unknown>,
 ): readonly HandoffStep[] {
@@ -453,33 +503,14 @@ export function teardownStepsFor(
     // A manifest this build cannot read is not a reason to refuse a deletion.
     return [];
   }
-  if (declaration?.kind !== "ssh_keypair") return [];
-
-  const user = typeof credentials.user === "string" ? credentials.user.trim() : "";
-  const privateKey = typeof credentials.private_key === "string" ? credentials.private_key : "";
-  if (!USER_NAME_RE.test(user) || privateKey === "") return [];
-
-  let publicKey: string;
-  try {
-    publicKey = publicKeyFromOpenSshPrivateKey(privateKey);
-  } catch {
-    return [];
-  }
-
-  return [
-    {
-      kind: "command",
-      deferred: true,
-      label: "Retirer cette clé du serveur",
-      shell: renderRevokeCommand(user, publicKey, dispatchPathFor(publicKey)),
-      note:
-        "Supprimer la connexion détruit la moitié privée et rien d'autre — Appstrate ne peut pas " +
-        "atteindre votre serveur pour retirer sa clé d'authorized_keys.",
-    },
-  ];
+  if (!declaration) return [];
+  return HANDOFFS[declaration.kind]?.(credentials) ?? [];
 }
 
-type Provisioner = (fields: SubmittedFields, ctx: ProvisionContext) => Promise<ProvisionResult>;
+type Provisioner = (
+  fields: SubmittedFields,
+  ctx: ProvisionContext,
+) => Promise<Record<string, string>>;
 
 const PROVISIONERS: Record<string, Provisioner> = {
   ssh_keypair: provisionSshKeyPair,
@@ -539,7 +570,7 @@ export async function provisionCredentials(
   auth: unknown,
   fields: SubmittedFields,
   ctx: ProvisionContext,
-): Promise<ProvisionResult | null> {
+): Promise<Record<string, string> | null> {
   const declaration = readProvisioning(auth);
   if (!declaration) return null;
   const provisioner = PROVISIONERS[declaration.kind]!;

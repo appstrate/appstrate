@@ -318,17 +318,31 @@ export function PreferencesConnectionsPage() {
   } | null>(null);
 
   /**
-   * What still has to be undone on the customer's own machine, derived server
-   * side from the credential bundle. Fetched only while the confirmation is
-   * open: it costs a decryption, so the list must not pay it for every row to
-   * serve the one row being deleted. Empty for a pasted credential, which left
-   * nothing behind.
+   * Everything the platform minted for this connection, derived server side
+   * from the credential bundle. Fetched only while the confirmation is open:
+   * it costs a decryption, so the list must not pay it for every row to serve
+   * the one row being acted on. Empty for a pasted credential, which left
+   * nothing on a target.
    */
-  const teardown = $api.useQuery(
+  const handoff = $api.useQuery(
     "get",
-    "/api/me/connections/{connectionId}/teardown",
+    "/api/me/connections/{connectionId}/handoff",
     { params: { path: { connectionId: confirmState?.connectionId ?? "" } } },
     { enabled: !!confirmState, select: (e) => e.data },
+  );
+
+  /**
+   * Only what is due AT deletion. The endpoint also carries the block that
+   * INSTALLED the key, which has no business in a confirmation about removing
+   * it — and `deferred` is dropped on the way out because this is the moment
+   * those steps stop being "later".
+   */
+  const teardownSteps = useMemo(
+    () =>
+      (handoff.data ?? [])
+        .filter((step) => step.deferred)
+        .map((step) => ({ ...step, deferred: false })),
+    [handoff.data],
   );
 
   const totalConnections = useMemo(
@@ -456,12 +470,9 @@ export function PreferencesConnectionsPage() {
           );
         }}
       >
-        {!!teardown.data?.length && (
+        {teardownSteps.length > 0 && (
           <div className="mt-4">
-            <HandoffSteps
-              // No longer deferred: this IS the moment it is due.
-              steps={teardown.data.map((step) => ({ ...step, deferred: false }))}
-            />
+            <HandoffSteps steps={teardownSteps} />
           </div>
         )}
       </ConfirmModal>

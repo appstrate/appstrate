@@ -727,14 +727,18 @@ describe("hosted connect portal — credential provisioning", () => {
 });
 
 /**
- * The removal block has to be available LATER than the screen that first showed
- * it: deleting a connection destroys the platform's half of a minted credential
- * and nothing else, so its public key stays authorized on the customer's
- * machine. Nothing persists the block — it is derived from the credential
- * bundle, because an `openssh-key-v1` container carries its own public half in
- * the clear and a stored copy could drift from the key it claims to remove.
+ * Both blocks have to be available LATER than the screen that first showed
+ * them. The removal one because deleting a connection destroys the platform's
+ * half of a minted credential and nothing else, so its public key stays
+ * authorized on the customer's machine. The install one because the screen
+ * that showed it authenticates with a page cookie destroyed on submit, so it
+ * is the only copy in existence until this endpoint.
+ *
+ * Nothing persists either — both are derived from the credential bundle,
+ * because an `openssh-key-v1` container carries its own public half in the
+ * clear and a stored copy could drift from the key it claims to remove.
  */
-describe("me/connections/:id/teardown — derived, not stored", () => {
+describe("me/connections/:id/handoff — derived, not stored", () => {
   let ctx: TestContext;
   beforeEach(async () => {
     await truncateAll();
@@ -760,8 +764,8 @@ describe("me/connections/:id/teardown — derived, not stored", () => {
     return (await res.json()) as { id: string };
   };
 
-  const teardownOf = async (connectionId: string) => {
-    const res = await app.request(`/api/me/connections/${connectionId}/teardown`, {
+  const handoffOf = async (connectionId: string) => {
+    const res = await app.request(`/api/me/connections/${connectionId}/handoff`, {
       headers: authHeaders(ctx),
     });
     expect(res.status).toBe(200);
@@ -772,11 +776,13 @@ describe("me/connections/:id/teardown — derived, not stored", () => {
     const pair = generateOpenSshEd25519KeyPair("appstrate @myorg/ssh");
     const conn = await importSsh(pair.privateKey);
 
-    const { data } = await teardownOf(conn.id);
-    expect(data).toHaveLength(1);
-    const step = data[0]!;
+    const { data } = await handoffOf(conn.id);
+    // Install block, fingerprint, removal block — the same three the connect
+    // screen showed, rebuilt from the keyring alone.
+    expect(data.map((s) => s.kind)).toEqual(["command", "value", "command"]);
+    const step = data.find((s) => s.deferred)!;
+    expect(step).toBeDefined();
     expect(step.kind).toBe("command");
-    expect(step.deferred).toBe(true);
 
     // The base64 of THIS key, so the command removes its line and no other —
     // which is exactly the property a stored copy could lose.
@@ -794,7 +800,7 @@ describe("me/connections/:id/teardown — derived, not stored", () => {
     });
     expect(res.status).toBe(200);
     const conn = (await res.json()) as { id: string };
-    expect((await teardownOf(conn.id)).data).toEqual([]);
+    expect((await handoffOf(conn.id)).data).toEqual([]);
   });
 
   /**
@@ -805,7 +811,7 @@ describe("me/connections/:id/teardown — derived, not stored", () => {
     ["a malformed id", "not-a-uuid"],
     ["an unknown id", "11111111-2222-3333-4444-555555555555"],
   ])("answers an empty list for %s", async (_label, id) => {
-    expect((await teardownOf(id)).data).toEqual([]);
+    expect((await handoffOf(id)).data).toEqual([]);
   });
 
   it("refuses to derive one for someone else's connection", async () => {
@@ -813,7 +819,7 @@ describe("me/connections/:id/teardown — derived, not stored", () => {
     const conn = await importSsh(pair.privateKey);
 
     const other = await createTestContext({ orgSlug: "otherorg" });
-    const res = await app.request(`/api/me/connections/${conn.id}/teardown`, {
+    const res = await app.request(`/api/me/connections/${conn.id}/handoff`, {
       headers: authHeaders(other),
     });
     expect(res.status).toBe(200);

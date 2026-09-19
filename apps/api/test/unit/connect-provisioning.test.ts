@@ -21,9 +21,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 import {
+  handoffStepsFor,
   provisionCredentials,
   readProvisioning,
-  type HandoffStep,
 } from "../../src/services/connect/provisioning.ts";
 
 const SSH_AUTH = {
@@ -42,15 +42,24 @@ const ctx = { integrationId: "@appstrate/ssh" };
  * The handoff is a LIST of typed steps, so the tests reach into it by role
  * rather than by field name: there is one block to run now and one kept for the
  * teardown, and which index they land on is not the contract.
+ *
+ * Both go through `handoffStepsFor` on the bag the provisioner PERSISTS — the
+ * same call the connect route and `GET /api/me/connections/{id}/handoff` make.
+ * So every assertion below about the generated script doubles as an assertion
+ * that the script is derivable from stored credentials alone: nothing in this
+ * file can pass against a block the platform had to keep a copy of.
  */
-function shellOf(res: { display: { steps: readonly HandoffStep[] } }, deferred: boolean): string {
-  const step = res.display.steps.find((s) => s.kind === "command" && !!s.deferred === deferred);
+function shellOf(credentials: Record<string, string>, deferred: boolean): string {
+  const step = handoffStepsFor(SSH_AUTH, credentials).find(
+    (s) => s.kind === "command" && !!s.deferred === deferred,
+  );
   if (!step || step.kind !== "command")
     throw new Error(`no ${deferred ? "teardown" : "install"} step`);
   return step.shell;
 }
-const installShell = (res: { display: { steps: readonly HandoffStep[] } }) => shellOf(res, false);
-const revokeShell = (res: { display: { steps: readonly HandoffStep[] } }) => shellOf(res, true);
+const installShell = (credentials: Record<string, string>) => shellOf(credentials, false);
+const revokeShell = (credentials: Record<string, string>) => shellOf(credentials, true);
+const stepsOf = (credentials: Record<string, string>) => handoffStepsFor(SSH_AUTH, credentials);
 
 describe("readProvisioning", () => {
   it("returns null for an auth that declares nothing", () => {
@@ -198,12 +207,12 @@ const base = { host: "ssh.example.test", user: "agent", port: "2222" };
 describe("provisionCredentials — what gets minted and rendered", () => {
   it("mints an OpenSSH private key and pins the scanned host key", async () => {
     const res = (await provisionCredentials(SSH_AUTH, { ...base }, stubCtx))!;
-    expect(res.credentials.private_key).toStartWith("-----BEGIN OPENSSH PRIVATE KEY-----");
-    expect(res.credentials.private_key).toEndWith("-----END OPENSSH PRIVATE KEY-----\n");
-    expect(res.credentials.host_key).toBe(HOST_KEY);
-    expect(res.credentials.port).toBe("2222");
+    expect(res.private_key).toStartWith("-----BEGIN OPENSSH PRIVATE KEY-----");
+    expect(res.private_key).toEndWith("-----END OPENSSH PRIVATE KEY-----\n");
+    expect(res.host_key).toBe(HOST_KEY);
+    expect(res.port).toBe("2222");
     // The private half is never part of what is shown.
-    expect(JSON.stringify(res.display)).not.toContain("PRIVATE KEY");
+    expect(JSON.stringify(stepsOf(res))).not.toContain("PRIVATE KEY");
   });
 
   it("installs the very key it minted — the two halves cannot drift", async () => {
@@ -239,7 +248,7 @@ describe("provisionCredentials — what gets minted and rendered", () => {
     expect(script).toContain("refused verb");
     // The dispatcher must never hand the request to a shell.
     expect(script).not.toContain("eval");
-    expect(JSON.parse(res.credentials.allowed_verbs!)).toEqual(["hostname", "disk_usage"]);
+    expect(JSON.parse(res.allowed_verbs!)).toEqual(["hostname", "disk_usage"]);
   });
 
   /**
@@ -257,7 +266,7 @@ describe("provisionCredentials — what gets minted and rendered", () => {
       { ...base, ...(allowed_verbs === undefined ? {} : { allowed_verbs }) },
       stubCtx,
     ))!;
-    expect(JSON.parse(res.credentials.allowed_verbs!)).toEqual([]);
+    expect(JSON.parse(res.allowed_verbs!)).toEqual([]);
   });
 
   it("points the fingerprint check at the key type it actually pinned", async () => {
@@ -298,15 +307,15 @@ describe("provisionCredentials — what gets minted and rendered", () => {
    */
   it("describes the handoff as typed steps, not named fields", async () => {
     const res = (await provisionCredentials(SSH_AUTH, { ...base }, stubCtx))!;
-    expect(res.display.steps.map((s) => s.kind)).toEqual(["command", "value", "command"]);
+    expect(stepsOf(res).map((s) => s.kind)).toEqual(["command", "value", "command"]);
 
-    const commands = res.display.steps.filter((s) => s.kind === "command");
+    const commands = stepsOf(res).filter((s) => s.kind === "command");
     // Exactly one of the two blocks is for later: the teardown. Shipping both
     // as "do this now" is how a removal command becomes a removal nobody runs.
     expect(commands.filter((s) => s.kind === "command" && s.deferred)).toHaveLength(1);
 
     // Every step is renderable: a label, and the payload its kind promises.
-    for (const step of res.display.steps) {
+    for (const step of stepsOf(res)) {
       expect(step.label.length).toBeGreaterThan(0);
       if (step.kind === "command") expect(step.shell.length).toBeGreaterThan(0);
       else expect(step.value.length).toBeGreaterThan(0);
@@ -314,9 +323,59 @@ describe("provisionCredentials — what gets minted and rendered", () => {
 
     // The fingerprint moved from a bespoke field to a `value` step — and it is
     // still the scanned one, not the minted key's.
-    const value = res.display.steps.find((s) => s.kind === "value");
+    const value = stepsOf(res).find((s) => s.kind === "value");
     expect(value && value.kind === "value" && value.value).toBe(
       "SHA256:e9BAhcGr5z9zvM6nYcXrEt2BkBrTfpCQ/QSvw/h2INc",
+    );
+  });
+
+  /**
+   * The load-bearing property of the whole design: nothing about the handoff is
+   * stored, so the block must be a pure function of the persisted bag.
+   *
+   * Pinned two ways. A bag narrowed to exactly the columns the keyring holds —
+   * no extras carried over from the request — must render byte-identically to
+   * the bag the provisioner returned; that is what makes the column, its
+   * migration and its drizzle snapshot unnecessary rather than merely absent.
+   * And the list must be NON-EMPTY here, because `sshHandoffSteps` fails soft:
+   * a regression that made the happy path fall into that branch would
+   * otherwise hand the user nothing while every other assertion stayed green.
+   */
+  it("derives the same block from the stored bundle alone", async () => {
+    const res = (await provisionCredentials(SSH_AUTH, { ...base }, stubCtx))!;
+    const atCreation = stepsOf(res);
+    expect(atCreation.length).toBeGreaterThan(0);
+
+    // What `getIntegrationConnectionCredentialFields` hands back months later:
+    // the stored names, nothing else, order not preserved.
+    const readBack = {
+      read_only: res.read_only!,
+      host_key: res.host_key!,
+      user: res.user!,
+      allowed_verbs: res.allowed_verbs!,
+      port: res.port!,
+      private_key: res.private_key!,
+      host: res.host!,
+    };
+    expect(stepsOf(readBack)).toEqual(atCreation);
+  });
+
+  /**
+   * The fail-soft branch itself: a bundle that cannot describe a step yields an
+   * empty list, never a half-built command. `grep -vF ''` matches every line,
+   * so a revoke block rendered from a missing key would empty the very
+   * `authorized_keys` it was meant to prune.
+   */
+  it("renders nothing rather than a half-built command", async () => {
+    const res = (await provisionCredentials(SSH_AUTH, { ...base }, stubCtx))!;
+    for (const missing of ["private_key", "user", "host_key"]) {
+      const { [missing]: _dropped, ...partial } = res;
+      expect(stepsOf(partial)).toEqual([]);
+    }
+    // A private key that is not one parses to nothing, not to a block naming an
+    // empty public half.
+    expect(stepsOf({ ...res, private_key: "-----BEGIN OPENSSH PRIVATE KEY-----\nnope" })).toEqual(
+      [],
     );
   });
 
@@ -338,9 +397,9 @@ describe("provisionCredentials — what gets minted and rendered", () => {
       read_only: "0",
     };
     const res = (await provisionCredentials(SSH_AUTH, fields, stubCtx))!;
-    expect(res.credentials.private_key).not.toContain("attacker");
-    expect(res.credentials.host_key).toBe(HOST_KEY);
-    expect(res.credentials.read_only).toBe("1");
+    expect(res.private_key).not.toContain("attacker");
+    expect(res.host_key).toBe(HOST_KEY);
+    expect(res.read_only).toBe("1");
     // Stripped from the submitted bag too, so a later merge cannot resurrect
     // them whatever order the caller composes in.
     expect(fields.private_key).toBeUndefined();

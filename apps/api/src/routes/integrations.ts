@@ -92,7 +92,7 @@ import {
   usesAutoProvisionedClient,
 } from "../services/integration-connections.ts";
 import { resolveStrategy } from "../services/connect/registry.ts";
-import { provisionCredentials } from "../services/connect/provisioning.ts";
+import { handoffStepsFor, provisionCredentials } from "../services/connect/provisioning.ts";
 import { createConnectRunExecutor } from "../services/connect/connect-run-launcher.ts";
 import { getCurrentScopesGranted } from "../services/integration-scope-resolver.ts";
 import { isUserConnectionCreationBlocked } from "../services/integration-connection-resolver.ts";
@@ -1097,9 +1097,7 @@ export function createIntegrationsRouter() {
       const provisioned = await provisionCredentials(auth, body.credentials, {
         integrationId: claims.package_id,
       });
-      const credentials = provisioned
-        ? { ...body.credentials, ...provisioned.credentials }
-        : body.credentials;
+      const credentials = provisioned ? { ...body.credentials, ...provisioned } : body.credentials;
 
       const conn = await resolveStrategy(auth, {
         connectToolExecutor: createConnectRunExecutor(),
@@ -1114,14 +1112,20 @@ export function createIntegrationsRouter() {
         { kind: "fields", credentials },
       );
       clearConnectPageCookie(c);
-      // `provisioned.display` is the half that must reach the target host — a
-      // public key and a fingerprint, never a secret. It is returned once,
-      // here, because nothing persists it: the private half is already sealed
-      // in the connection's envelope and is never readable again.
+      // The half that must reach the target host — a public key and a
+      // fingerprint, never a secret. DERIVED from the bundle that was just
+      // persisted, by the same function `GET /api/me/connections/{id}/handoff`
+      // calls later, so what the user installs and what they are handed at
+      // deletion cannot drift apart.
+      //
+      // It is carried on this response rather than fetched, because THIS
+      // caller cannot fetch it: the hosted portal authenticates with a page
+      // cookie that `clearConnectPageCookie` just destroyed, and an end-user
+      // reaching it may hold no platform session at all.
       return c.json({
         ok: true,
         connection: conn,
-        ...(provisioned ? { provisioned: provisioned.display } : {}),
+        ...(provisioned ? { provisioned: { steps: handoffStepsFor(auth, credentials) } } : {}),
       });
     } catch (err) {
       if (err instanceof ApiError) throw err;

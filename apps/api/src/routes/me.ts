@@ -61,7 +61,7 @@ import {
   listUsableIntegrationsForActor,
   readIntegrationAuth,
 } from "../services/integration-connections.ts";
-import { teardownStepsFor } from "../services/connect/provisioning.ts";
+import { handoffStepsFor } from "../services/connect/provisioning.ts";
 import { logger } from "../lib/logger.ts";
 import { listRunnableAgents, listActiveSkills } from "../services/space-packages.ts";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
@@ -378,28 +378,32 @@ router.delete("/connections/:connectionId", async (c) => {
 });
 
 /**
- * `GET /api/me/connections/:connectionId/teardown` — what still has to be
- * undone on the customer's own machine.
+ * `GET /api/me/connections/:connectionId/handoff` — what the platform minted
+ * for this connection and what the user must do with it.
  *
- * Only a MINTED credential leaves anything behind. Deleting the connection
- * destroys the platform's half and nothing else: its public key stays
- * authorized on the target, because the platform has no access there. So the
- * delete confirmation reads this first, and it is the last surface that can
- * hand the removal back.
+ * Two things live here. The block that AUTHORISES the key on the target, which
+ * the screen after the connect form also shows but keeps nowhere: that page
+ * authenticates with a page cookie destroyed on submit, so closing the window
+ * used to strand the connection with no way to install its key. And the block
+ * that REMOVES it, which is due at deletion — only a MINTED credential leaves
+ * anything behind, because deleting the connection destroys the platform's
+ * half and nothing else: its public key stays authorized on the target, where
+ * the platform has no access.
  *
- * DERIVED on demand, never stored. The block is a pure function of the
- * credential bundle — an `openssh-key-v1` container carries its own public half
- * in the clear — so a column would have bought a permanent migration for data
+ * Both are DERIVED on demand, never stored, by the same `handoffStepsFor` the
+ * submit path calls. A column would have bought a permanent migration for data
  * that cannot be missing, and a stored copy could drift from the key it claims
- * to remove. Computed here rather than on the connection LIST because it costs
- * a decryption, and a list must not pay it for every row to serve the one the
- * user is about to delete.
+ * to remove. Callers pick what they need off `deferred`.
+ *
+ * Computed here rather than on the connection LIST because it costs a
+ * decryption, and a list must not pay it for every row to serve the one row
+ * the user is acting on.
  *
  * Non-disclosure matches the DELETE beside it: an unknown, malformed or
  * not-owned id answers an empty list rather than a 404, so a caller probing
  * ids learns nothing.
  */
-router.get("/connections/:connectionId/teardown", async (c) => {
+router.get("/connections/:connectionId/handoff", async (c) => {
   const connectionId = c.req.param("connectionId")!;
   const actor = getActor(c);
   const authority = getMeConnectionAuthority(c);
@@ -441,11 +445,11 @@ router.get("/connections/:connectionId/teardown", async (c) => {
     );
     const credentials = await getIntegrationConnectionCredentialFields(connectionId);
     if (!credentials) return empty();
-    return c.json(listResponse([...teardownStepsFor(auth, credentials)]));
+    return c.json(listResponse([...handoffStepsFor(auth, credentials)]));
   } catch (err) {
     // A manifest that no longer loads must not block a deletion — the user can
     // still delete, they just get no removal block.
-    logger.warn("Could not derive connection teardown steps", {
+    logger.warn("Could not derive connection handoff steps", {
       err: String(err),
       connectionId,
     });
