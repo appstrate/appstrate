@@ -2,7 +2,8 @@
 
 import { Fragment, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { HandoffSteps, type HandoffStep } from "../../components/integration-connect/handoff-steps";
+import { $api } from "../../api/client";
+import { HandoffSteps } from "../../components/integration-connect/handoff-steps";
 import { Link } from "react-router-dom";
 import { Unplug, Pencil, Check, X } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -314,13 +315,21 @@ export function PreferencesConnectionsPage() {
      * radius before deleting the connection globally.
      */
     reused_by_agents: number;
-    /**
-     * Only a MINTED credential leaves something behind on a target. Deleting
-     * here destroys our half and nothing else, so this is the last screen that
-     * can hand back the block that removes the rest.
-     */
-    teardown_steps?: HandoffStep[];
   } | null>(null);
+
+  /**
+   * What still has to be undone on the customer's own machine, derived server
+   * side from the credential bundle. Fetched only while the confirmation is
+   * open: it costs a decryption, so the list must not pay it for every row to
+   * serve the one row being deleted. Empty for a pasted credential, which left
+   * nothing behind.
+   */
+  const teardown = $api.useQuery(
+    "get",
+    "/api/me/connections/{connectionId}/teardown",
+    { params: { path: { connectionId: confirmState?.connectionId ?? "" } } },
+    { enabled: !!confirmState, select: (e) => e.data },
+  );
 
   const totalConnections = useMemo(
     () => (groups ?? []).reduce((s, g) => s + g.total_connections, 0),
@@ -390,9 +399,6 @@ export function PreferencesConnectionsPage() {
                         identity: conn.identity,
                         connectionId: conn.connection_id,
                         reused_by_agents: conn.reused_by_agents ?? 0,
-                        ...(conn.teardown_steps?.length
-                          ? { teardown_steps: conn.teardown_steps }
-                          : {}),
                       })
                     }
                     onUpdateLabel={(label) =>
@@ -450,11 +456,11 @@ export function PreferencesConnectionsPage() {
           );
         }}
       >
-        {confirmState?.teardown_steps && (
+        {!!teardown.data?.length && (
           <div className="mt-4">
             <HandoffSteps
               // No longer deferred: this IS the moment it is due.
-              steps={confirmState.teardown_steps.map((step) => ({ ...step, deferred: false }))}
+              steps={teardown.data.map((step) => ({ ...step, deferred: false }))}
             />
           </div>
         )}

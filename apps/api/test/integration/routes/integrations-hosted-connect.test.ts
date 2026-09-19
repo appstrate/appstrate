@@ -26,7 +26,7 @@ import {
   buildConnectUrl,
   connectClaimsFor,
 } from "../../../src/services/connect/connect-session.ts";
-import { setConnectionTeardownSteps } from "../../../src/services/integration-connections.ts";
+import { generateOpenSshEd25519KeyPair } from "../../../src/lib/openssh-key.ts";
 
 const app = getTestApp();
 
@@ -727,37 +727,29 @@ describe("hosted connect portal — credential provisioning", () => {
 });
 
 /**
- * The teardown block a provisioner produced has to OUTLIVE the screen that
- * showed it. Deleting the connection destroys the platform's half and nothing
- * else — its public key stays authorized on the customer's machine — so the
- * delete confirmation is the last surface that can hand the removal back, and
- * it reads it off this list.
+ * The removal block has to be available LATER than the screen that first showed
+ * it: deleting a connection destroys the platform's half of a minted credential
+ * and nothing else, so its public key stays authorized on the customer's
+ * machine. Nothing persists the block — it is derived from the credential
+ * bundle, because an `openssh-key-v1` container carries its own public half in
+ * the clear and a stored copy could drift from the key it claims to remove.
  */
-describe("me/connections — persisted teardown steps", () => {
+describe("me/connections/:id/teardown — derived, not stored", () => {
   let ctx: TestContext;
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
     await seedIntegration(ctx.orgId, await provisionedManifest("@myorg/ssh"));
+    await seedIntegration(ctx.orgId, apiKeyManifest("@myorg/gmail"));
   });
 
-  const TEARDOWN = [
-    {
-      kind: "command" as const,
-      label: "Retirer cette clé plus tard",
-      shell: "grep -vF 'AAAAC3Nz' ~agent/.ssh/authorized_keys",
-      deferred: true,
-    },
-  ];
-
-  const createConnection = async () => {
+  const importSsh = async (privateKey: string) => {
     const res = await app.request("/api/integrations/@myorg/ssh/auths/primary/connect/fields", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({
         credentials: {
-          private_key:
-            "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n-----END OPENSSH PRIVATE KEY-----\n",
+          private_key: privateKey,
           host: "ssh.example.test",
           user: "agent",
           host_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5",
@@ -768,41 +760,63 @@ describe("me/connections — persisted teardown steps", () => {
     return (await res.json()) as { id: string };
   };
 
-  it("carries them to the connection list once persisted", async () => {
-    const conn = await createConnection();
-    await setConnectionTeardownSteps(conn.id, TEARDOWN);
-
-    const res = await app.request("/api/me/connections", { headers: authHeaders(ctx) });
+  const teardownOf = async (connectionId: string) => {
+    const res = await app.request(`/api/me/connections/${connectionId}/teardown`, {
+      headers: authHeaders(ctx),
+    });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      data: Array<{ connections: Array<{ connection_id: string; teardown_steps?: unknown[] }> }>;
-    };
-    const entry = body.data.flatMap((g) => g.connections).find((c) => c.connection_id === conn.id);
-    expect(entry?.teardown_steps).toEqual(TEARDOWN);
+    return (await res.json()) as { data: Array<Record<string, unknown>> };
+  };
+
+  it("derives a removal block naming the very key the connection holds", async () => {
+    const pair = generateOpenSshEd25519KeyPair("appstrate @myorg/ssh");
+    const conn = await importSsh(pair.privateKey);
+
+    const { data } = await teardownOf(conn.id);
+    expect(data).toHaveLength(1);
+    const step = data[0]!;
+    expect(step.kind).toBe("command");
+    expect(step.deferred).toBe(true);
+
+    // The base64 of THIS key, so the command removes its line and no other —
+    // which is exactly the property a stored copy could lose.
+    const base64 = pair.publicKey.split(/\s+/)[1]!;
+    expect(step.shell).toContain(`grep -vF '${base64}'`);
+    // And the dispatcher path is the one minting derived from the same key.
+    expect(step.shell).toMatch(/rm -f "\$tmp" \/usr\/local\/bin\/appstrate-dispatch-[0-9a-f]{12}/);
+  });
+
+  it("is empty for an auth that mints nothing", async () => {
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/api/connect/fields", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ credentials: { api_key: "AKIA-SECRET" } }),
+    });
+    expect(res.status).toBe(200);
+    const conn = (await res.json()) as { id: string };
+    expect((await teardownOf(conn.id)).data).toEqual([]);
   });
 
   /**
-   * A pasted credential left nothing on a target, so the delete confirmation
-   * must not invent a removal to perform. Absent, not an empty array.
+   * Same non-disclosure as the DELETE beside it: a caller probing ids must not
+   * be able to tell an unknown one from a not-owned one.
    */
-  it("omits them for a connection that had none", async () => {
-    const conn = await createConnection();
-    const res = await app.request("/api/me/connections", { headers: authHeaders(ctx) });
-    const body = (await res.json()) as {
-      data: Array<{ connections: Array<{ connection_id: string; teardown_steps?: unknown[] }> }>;
-    };
-    const entry = body.data.flatMap((g) => g.connections).find((c) => c.connection_id === conn.id);
-    expect(entry).toBeDefined();
-    expect(entry?.teardown_steps).toBeUndefined();
+  it.each([
+    ["a malformed id", "not-a-uuid"],
+    ["an unknown id", "11111111-2222-3333-4444-555555555555"],
+  ])("answers an empty list for %s", async (_label, id) => {
+    expect((await teardownOf(id)).data).toEqual([]);
   });
 
-  it("writing an empty list is a no-op, not a stored empty array", async () => {
-    const conn = await createConnection();
-    await setConnectionTeardownSteps(conn.id, []);
-    const rows = await db
-      .select()
-      .from(integrationConnections)
-      .where(eq(integrationConnections.id, conn.id));
-    expect(rows[0]?.teardownSteps).toBeNull();
+  it("refuses to derive one for someone else's connection", async () => {
+    const pair = generateOpenSshEd25519KeyPair("appstrate @myorg/ssh");
+    const conn = await importSsh(pair.privateKey);
+
+    const other = await createTestContext({ orgSlug: "otherorg" });
+    const res = await app.request(`/api/me/connections/${conn.id}/teardown`, {
+      headers: authHeaders(other),
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { data: unknown[] }).data).toEqual([]);
   });
 });

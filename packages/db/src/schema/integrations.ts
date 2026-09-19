@@ -69,24 +69,6 @@ export const integrationConnections = pgTable(
     credentialsEncrypted: text("credentials_encrypted").notNull(),
     /** Identity claims extracted via the AFPS `auths.{key}.identity_claims` map (§7.4) — `sub`, `email`, … */
     identityClaims: jsonb("identity_claims"),
-    /**
-     * The handoff steps kept for teardown — the block that takes a
-     * platform-MINTED credential back off the target (`HandoffStep[]` with
-     * `deferred: true`, `services/connect/provisioning.ts`).
-     *
-     * Persisted because deleting the connection destroys our half and NOTHING
-     * else: the platform has no access to the customer's machine, so its public
-     * key stays authorized there until someone removes it by hand. Shown once at
-     * creation, that removal is one nobody performs — which is the standing
-     * criticism of forced-command access, and the reason this column exists
-     * rather than the block being ephemeral like the install one.
-     *
-     * NOT secret, and that is what makes persisting it legitimate: a public
-     * key's base64 and a file path. The private half never leaves the keyring.
-     * NULL for every connection whose credentials were pasted rather than
-     * minted — there is nothing on a target to undo.
-     */
-    teardownSteps: jsonb("teardown_steps"),
     /** Granted OAuth scopes — surfaced in the UI for re-consent prompts. */
     scopesGranted: text("scopes_granted")
       .array()

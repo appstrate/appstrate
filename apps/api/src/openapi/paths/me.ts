@@ -162,23 +162,6 @@ export const mePaths = {
                               reused_by_agents: { type: "integer" },
                               auth_key: { type: "string" },
                               shared_with_org: { type: "boolean" },
-                              teardown_steps: {
-                                type: "array",
-                                description:
-                                  "For a connection whose credentials the platform MINTED: the block that takes its public half back off the target. Absent for a pasted credential. Carried on the list because the moment it must be readable is the delete confirmation, after which the connection is gone.",
-                                items: {
-                                  type: "object",
-                                  required: ["kind", "label"],
-                                  properties: {
-                                    kind: { type: "string", enum: ["command", "value"] },
-                                    label: { type: "string" },
-                                    note: { type: "string" },
-                                    shell: { type: "string" },
-                                    deferred: { type: "boolean" },
-                                    value: { type: "string" },
-                                  },
-                                },
-                              },
                               org: {
                                 type: "object",
                                 required: ["id", "name"],
@@ -376,6 +359,63 @@ export const mePaths = {
       ],
       responses: {
         "204": { description: "Connection deleted (or never existed)" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+      },
+    },
+  },
+  "/api/me/connections/{connectionId}/teardown": {
+    get: {
+      operationId: "getMyConnectionTeardown",
+      tags: ["Profile"],
+      summary: "What still has to be undone on the target for this connection",
+      description:
+        "For a connection whose credentials the platform MINTED, the block that takes its " +
+        "public half back off the customer's machine. Deleting the connection destroys the " +
+        "platform's half and nothing else — it has no access to the target — so the delete " +
+        "confirmation reads this first. DERIVED from the credential bundle on demand, never " +
+        "stored: the block is a pure function of the key it removes. An empty list for a " +
+        "pasted credential, and for an unknown, malformed or not-owned id (same " +
+        "non-disclosure as the DELETE beside it).",
+      parameters: [
+        {
+          name: "connectionId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Ordered teardown steps (possibly empty)",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  hasMore: { type: "boolean" },
+                  data: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["kind", "label"],
+                      properties: {
+                        kind: { type: "string", enum: ["command", "value"] },
+                        label: { type: "string" },
+                        note: { type: "string" },
+                        shell: { type: "string" },
+                        deferred: { type: "boolean" },
+                        value: { type: "string" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
       },
     },

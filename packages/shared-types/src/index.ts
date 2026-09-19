@@ -477,23 +477,6 @@ export interface MeConnectionEntry {
   /** Where this connection lives (the connection is keyed per-space). */
   org: { id: string; name: string };
   space: { id: string; name: string };
-  /**
-   * For a connection whose credentials the platform MINTED: the block that
-   * takes its public half back off the target. Absent for a pasted credential,
-   * which left nothing behind.
-   *
-   * On the list rather than fetched on demand because the moment it has to be
-   * readable is the delete confirmation — and after that the connection, and
-   * any endpoint that could still serve it, are gone.
-   */
-  teardown_steps?: Array<{
-    kind: "command" | "value";
-    label: string;
-    note?: string;
-    shell?: string;
-    deferred?: boolean;
-    value?: string;
-  }>;
 }
 
 export interface MeConnectionSourceGroup {

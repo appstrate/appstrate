@@ -39,7 +39,10 @@
 import { createHash } from "node:crypto";
 
 import { invalidRequest } from "../../lib/errors.ts";
-import { generateOpenSshEd25519KeyPair } from "../../lib/openssh-key.ts";
+import {
+  generateOpenSshEd25519KeyPair,
+  publicKeyFromOpenSshPrivateKey,
+} from "../../lib/openssh-key.ts";
 import { scanSshHostKey, type SshHostKeyScan } from "../../lib/ssh-host-key.ts";
 import { isBlockedHost } from "@appstrate/afps-shared/ssrf";
 
@@ -177,6 +180,16 @@ function hostKeyPubFile(hostKey: string): string {
   const path = HOST_KEY_PUB_FILE[type];
   if (!path) throw invalidRequest(`unsupported host key type: ${type}`);
   return path;
+}
+
+/**
+ * One dispatcher per KEY, not per host: two connections to the same machine must
+ * not share — and silently widen — a verb list. Derived from the public key so
+ * the teardown can recompute the same path years later without it being stored.
+ */
+function dispatchPathFor(publicKey: string): string {
+  const keyId = createHash("sha256").update(publicKey).digest("hex").slice(0, 12);
+  return `/usr/local/bin/appstrate-dispatch-${keyId}`;
 }
 
 /** The base64 field of an `authorized_keys` line — unique per key, and `grep -F`-safe. */
@@ -361,10 +374,7 @@ async function provisionSshKeyPair(
   }
 
   const keyPair = generateOpenSshEd25519KeyPair(`appstrate ${ctx.integrationId}`);
-  // One dispatcher per KEY, not per host: two connections to the same machine
-  // must not share (and silently widen) a verb list.
-  const keyId = createHash("sha256").update(keyPair.publicKey).digest("hex").slice(0, 12);
-  const dispatchPath = `/usr/local/bin/appstrate-dispatch-${keyId}`;
+  const dispatchPath = dispatchPathFor(keyPair.publicKey);
 
   return {
     credentials: {
@@ -413,6 +423,60 @@ async function provisionSshKeyPair(
       ],
     },
   };
+}
+
+/**
+ * Rebuild the teardown block for a connection that already exists, from the
+ * credentials it already holds.
+ *
+ * DERIVED, never stored. Deleting a connection destroys the platform's half of
+ * a minted credential and nothing else — its public key stays authorized on the
+ * customer's machine — so the removal block has to be available later than the
+ * screen that first showed it. Persisting it was the obvious answer and the
+ * wrong one: an `openssh-key-v1` container carries its own public half in the
+ * clear, so the block is a pure function of the bundle. A column would have
+ * bought a permanent migration for data that cannot be missing, and a stored
+ * copy can drift from the key it claims to remove. This cannot.
+ *
+ * Returns an empty list for a kind that leaves nothing behind, and for a
+ * credential bundle too incomplete to describe one — a caller showing this at
+ * delete time must render nothing rather than a half-built command.
+ */
+export function teardownStepsFor(
+  auth: unknown,
+  credentials: Record<string, unknown>,
+): readonly HandoffStep[] {
+  let declaration: ProvisioningDeclaration | null;
+  try {
+    declaration = readProvisioning(auth);
+  } catch {
+    // A manifest this build cannot read is not a reason to refuse a deletion.
+    return [];
+  }
+  if (declaration?.kind !== "ssh_keypair") return [];
+
+  const user = typeof credentials.user === "string" ? credentials.user.trim() : "";
+  const privateKey = typeof credentials.private_key === "string" ? credentials.private_key : "";
+  if (!USER_NAME_RE.test(user) || privateKey === "") return [];
+
+  let publicKey: string;
+  try {
+    publicKey = publicKeyFromOpenSshPrivateKey(privateKey);
+  } catch {
+    return [];
+  }
+
+  return [
+    {
+      kind: "command",
+      deferred: true,
+      label: "Retirer cette clé du serveur",
+      shell: renderRevokeCommand(user, publicKey, dispatchPathFor(publicKey)),
+      note:
+        "Supprimer la connexion détruit la moitié privée et rien d'autre — Appstrate ne peut pas " +
+        "atteindre votre serveur pour retirer sa clé d'authorized_keys.",
+    },
+  ];
 }
 
 type Provisioner = (fields: SubmittedFields, ctx: ProvisionContext) => Promise<ProvisionResult>;

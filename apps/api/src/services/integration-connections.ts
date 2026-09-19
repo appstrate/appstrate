@@ -1872,29 +1872,6 @@ export async function deleteIntegrationOAuthClient(
  *   2. `email` / `account_email` / `sub` claims if present
  *   3. The literal string `"default"` when nothing matches (single-account)
  */
-/**
- * Keep the teardown block a provisioner produced, so deleting the connection
- * can hand it back.
- *
- * Written AFTER the connection exists rather than inside the credential write:
- * the steps are not a credential, the strategies that persist credentials know
- * nothing about provisioning, and threading an optional field through all four
- * of them to reach one would be a wider change than the guarantee is worth.
- * The cost, stated plainly: this is a second statement, so a failure here
- * leaves a usable connection whose teardown was only ever on screen — the
- * state we are already in for every connection created before this column.
- */
-export async function setConnectionTeardownSteps(
-  connectionId: string,
-  steps: readonly unknown[],
-): Promise<void> {
-  if (steps.length === 0) return;
-  await db
-    .update(integrationConnections)
-    .set({ teardownSteps: steps })
-    .where(eq(integrationConnections.id, connectionId));
-}
-
 export function extractIdentity(
   manifest: IntegrationManifest,
   authKey: string,

@@ -123,6 +123,74 @@ export function generateOpenSshEd25519KeyPair(comment: string): OpenSshKeyPair {
   };
 }
 
+/**
+ * Read the PUBLIC half back out of an `OPENSSH PRIVATE KEY` this file wrote.
+ *
+ * No cryptography: the `openssh-key-v1` container carries the public blob and
+ * the comment in the clear beside the private one (PROTOCOL.key — that is how
+ * `ssh-keygen -y` answers instantly on an unencrypted key). So the authorized_keys
+ * line a connection installed is RECOVERABLE from what the keyring already
+ * holds, which is why nothing persists it: a stored copy could drift from the
+ * key it claims to describe, and a derived one cannot.
+ *
+ * Only the `cipher: none` container this file mints is in scope. An encrypted
+ * key, or any other shape, is refused rather than half-parsed.
+ */
+export function publicKeyFromOpenSshPrivateKey(pem: string): string {
+  const body = pem
+    .replace("-----BEGIN OPENSSH PRIVATE KEY-----", "")
+    .replace("-----END OPENSSH PRIVATE KEY-----", "")
+    .replace(/\s+/g, "");
+  const buf = Buffer.from(body, "base64");
+  const magic = "openssh-key-v1\0";
+  if (buf.subarray(0, magic.length).toString("binary") !== magic) {
+    throw new Error("not an OPENSSH PRIVATE KEY container");
+  }
+
+  let at = magic.length;
+  const readString = (): Buffer => {
+    if (at + 4 > buf.length) throw new Error("truncated OPENSSH key container");
+    const len = buf.readUInt32BE(at);
+    at += 4;
+    if (at + len > buf.length) throw new Error("truncated OPENSSH key container");
+    const out = buf.subarray(at, at + len);
+    at += len;
+    return out;
+  };
+
+  const cipher = readString().toString("utf8");
+  readString(); // kdfname
+  readString(); // kdfoptions
+  if (cipher !== "none") throw new Error(`encrypted OPENSSH key (cipher ${cipher})`);
+  if (at + 4 > buf.length) throw new Error("truncated OPENSSH key container");
+  const keyCount = buf.readUInt32BE(at);
+  at += 4;
+  if (keyCount !== 1) throw new Error(`expected one key in the container, found ${keyCount}`);
+
+  const blob = readString();
+  const privateSection = readString();
+
+  // The comment lives in the private section, after the two checkints and the
+  // keytype / public / private fields. It is part of the authorized_keys line
+  // this connection installed, so the line cannot be rebuilt without it.
+  let p = 8;
+  const readFrom = (): Buffer => {
+    if (p + 4 > privateSection.length) throw new Error("truncated OPENSSH private section");
+    const len = privateSection.readUInt32BE(p);
+    p += 4;
+    if (p + len > privateSection.length) throw new Error("truncated OPENSSH private section");
+    const out = privateSection.subarray(p, p + len);
+    p += len;
+    return out;
+  };
+  const keyType = readFrom().toString("utf8");
+  readFrom(); // public
+  readFrom(); // private
+  const comment = readFrom().toString("utf8");
+
+  return `${keyType} ${blob.toString("base64")}${comment ? ` ${comment}` : ""}`;
+}
+
 /** `SHA256:…`, base64 without padding — the form `ssh-keygen -l` prints. */
 function fingerprintFromBlob(blob: Buffer): string {
   const digest = createHash("sha256").update(blob).digest("base64").replace(/=+$/, "");

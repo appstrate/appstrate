@@ -1927,6 +1927,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/connections/{connectionId}/teardown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What still has to be undone on the target for this connection
+         * @description For a connection whose credentials the platform MINTED, the block that takes its public half back off the customer's machine. Deleting the connection destroys the platform's half and nothing else — it has no access to the target — so the delete confirmation reads this first. DERIVED from the credential bundle on demand, never stored: the block is a pure function of the key it removes. An empty list for a pasted credential, and for an unknown, malformed or not-owned id (same non-disclosure as the DELETE beside it).
+         */
+        get: operations["getMyConnectionTeardown"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/context": {
         parameters: {
             query?: never;
@@ -13067,16 +13087,6 @@ export interface operations {
                                 reused_by_agents: number;
                                 auth_key: string;
                                 shared_with_org: boolean;
-                                /** @description For a connection whose credentials the platform MINTED: the block that takes its public half back off the target. Absent for a pasted credential. Carried on the list because the moment it must be readable is the delete confirmation, after which the connection is gone. */
-                                teardown_steps?: {
-                                    /** @enum {string} */
-                                    kind: "command" | "value";
-                                    label: string;
-                                    note?: string;
-                                    shell?: string;
-                                    deferred?: boolean;
-                                    value?: string;
-                                }[];
                                 org: {
                                     id: string;
                                     name: string;
@@ -13111,6 +13121,44 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getMyConnectionTeardown: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ordered teardown steps (possibly empty) */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        hasMore: boolean;
+                        data: {
+                            /** @enum {string} */
+                            kind: "command" | "value";
+                            label: string;
+                            note?: string;
+                            shell?: string;
+                            deferred?: boolean;
+                            value?: string;
+                        }[];
+                    };
+                };
             };
             401: components["responses"]["Unauthorized"];
         };

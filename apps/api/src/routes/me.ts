@@ -40,7 +40,7 @@ import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { getOrgById, getUserOrganizations } from "../services/organizations.ts";
 import { db } from "@appstrate/db/client";
-import { integrationConnections } from "@appstrate/db/schema";
+import { integrationConnections, spaces } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { listMeConnections, type MeConnectionAuthority } from "../services/me-connections.ts";
 import { getActor } from "../lib/actor.ts";
@@ -57,8 +57,12 @@ import {
 } from "../services/integration-pins-service.ts";
 import {
   deleteIntegrationConnection,
+  getIntegrationConnectionCredentialFields,
   listUsableIntegrationsForActor,
+  readIntegrationAuth,
 } from "../services/integration-connections.ts";
+import { teardownStepsFor } from "../services/connect/provisioning.ts";
+import { logger } from "../lib/logger.ts";
 import { listRunnableAgents, listActiveSkills } from "../services/space-packages.ts";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { listRecentForActor } from "../services/state/runs.ts";
@@ -371,6 +375,82 @@ router.delete("/connections/:connectionId", async (c) => {
     resourceId: connectionId,
   });
   return c.body(null, 204);
+});
+
+/**
+ * `GET /api/me/connections/:connectionId/teardown` — what still has to be
+ * undone on the customer's own machine.
+ *
+ * Only a MINTED credential leaves anything behind. Deleting the connection
+ * destroys the platform's half and nothing else: its public key stays
+ * authorized on the target, because the platform has no access there. So the
+ * delete confirmation reads this first, and it is the last surface that can
+ * hand the removal back.
+ *
+ * DERIVED on demand, never stored. The block is a pure function of the
+ * credential bundle — an `openssh-key-v1` container carries its own public half
+ * in the clear — so a column would have bought a permanent migration for data
+ * that cannot be missing, and a stored copy could drift from the key it claims
+ * to remove. Computed here rather than on the connection LIST because it costs
+ * a decryption, and a list must not pay it for every row to serve the one the
+ * user is about to delete.
+ *
+ * Non-disclosure matches the DELETE beside it: an unknown, malformed or
+ * not-owned id answers an empty list rather than a 404, so a caller probing
+ * ids learns nothing.
+ */
+router.get("/connections/:connectionId/teardown", async (c) => {
+  const connectionId = c.req.param("connectionId")!;
+  const actor = getActor(c);
+  const authority = getMeConnectionAuthority(c);
+  const empty = () => c.json(listResponse([]));
+
+  if (!z.uuid().safeParse(connectionId).success) return empty();
+
+  // `integration_connections` carries no `org_id` (it is space-scoped), and
+  // reading the manifest needs one — so it comes from the space, joined here.
+  const [row] = await db
+    .select({
+      spaceId: integrationConnections.spaceId,
+      orgId: spaces.orgId,
+      integrationId: integrationConnections.integrationId,
+      authKey: integrationConnections.authKey,
+      userId: integrationConnections.userId,
+      endUserId: integrationConnections.endUserId,
+    })
+    .from(integrationConnections)
+    .innerJoin(spaces, eq(spaces.id, integrationConnections.spaceId))
+    .where(eq(integrationConnections.id, connectionId))
+    .limit(1);
+  if (!row) return empty();
+
+  // Same ownership predicate the delete relies on, applied here because this
+  // read decrypts a credential: a connection is its owner's regardless of the
+  // org the caller is currently scoped to.
+  const owns = actor.type === "end_user" ? row.endUserId === actor.id : row.userId === actor.id;
+  if (!owns) return empty();
+  if (authority.kind === "bound" && authority.spaceId && row.spaceId !== authority.spaceId) {
+    return empty();
+  }
+
+  try {
+    const { auth } = await readIntegrationAuth(
+      { orgId: row.orgId, spaceId: row.spaceId },
+      row.integrationId,
+      row.authKey,
+    );
+    const credentials = await getIntegrationConnectionCredentialFields(connectionId);
+    if (!credentials) return empty();
+    return c.json(listResponse([...teardownStepsFor(auth, credentials)]));
+  } catch (err) {
+    // A manifest that no longer loads must not block a deletion — the user can
+    // still delete, they just get no removal block.
+    logger.warn("Could not derive connection teardown steps", {
+      err: String(err),
+      connectionId,
+    });
+    return empty();
+  }
 });
 
 /**

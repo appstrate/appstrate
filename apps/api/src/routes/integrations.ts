@@ -90,7 +90,6 @@ import {
   toPublicClient,
   updateIntegrationOAuthClient,
   usesAutoProvisionedClient,
-  setConnectionTeardownSteps,
 } from "../services/integration-connections.ts";
 import { resolveStrategy } from "../services/connect/registry.ts";
 import { provisionCredentials } from "../services/connect/provisioning.ts";
@@ -1114,22 +1113,6 @@ export function createIntegrationsRouter() {
         },
         { kind: "fields", credentials },
       );
-      // Keep the block that undoes this on the target. Nothing else can hand
-      // it back: after the screen that follows, the material is gone, and the
-      // platform has no access to the customer's machine to undo anything
-      // itself. Best-effort — a connection whose teardown failed to persist is
-      // still a usable connection, and the block is on screen right now.
-      if (provisioned) {
-        const deferred = provisioned.display.steps.filter(
-          (step) => step.kind === "command" && step.deferred,
-        );
-        await setConnectionTeardownSteps(conn.id, deferred).catch((err) => {
-          logger.warn("Could not persist connection teardown steps", {
-            err: String(err),
-            connectionId: conn.id,
-          });
-        });
-      }
       clearConnectPageCookie(c);
       // `provisioned.display` is the half that must reach the target host — a
       // public key and a fingerprint, never a secret. It is returned once,
