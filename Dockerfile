@@ -155,16 +155,7 @@ COPY --from=build /app/system-packages ./system-packages
 COPY --from=build /app/LICENSE /app/NOTICE ./
 COPY --from=build --chown=bun:bun /app/packages/module-ee/LICENSE ./packages/module-ee/LICENSE
 
-# su-exec for lightweight privilege drop in entrypoint.
-#
-# Deliberately nothing else. @appstrate/ssh once put an `openssh-client` here
-# for one call — `ssh-keyscan`, to read a target's host key at connect time —
-# which shipped an interactive SSH client to every self-hoster, including the
-# ones who never connect a host, in an image that also holds the Docker socket.
-# The host key is now supplied by the user, read off the machine from a session
-# they authenticated themselves, so the platform opens no SSH socket at all.
-# Adding a client back means someone reintroduced a network call this image
-# does not need.
+# su-exec for lightweight privilege drop in entrypoint
 RUN apk add --no-cache su-exec
 
 # Entrypoint: detects Docker socket GID and adds bun to that group before exec

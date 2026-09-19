@@ -117,6 +117,32 @@ const DEFAULT_VERBS: Record<string, string> = {
 const VERB_NAME_RE = /^[a-z][a-z0-9_]{0,31}$/;
 
 /**
+ * The JSON shape of an `allowed_verbs` value, or null when it is not one.
+ *
+ * Shared by the two readers because they disagree on POLICY, not on syntax:
+ * {@link parseVerbs} refuses anything it does not recognise, because it is
+ * answering a form submission someone can correct, while {@link sshHandoffSteps}
+ * drops it, because it is rendering a block from a bundle that already exists
+ * and a refusal there would deny a deletion its removal command. Keeping the
+ * JSON handling in one place is what stops those two policies from drifting
+ * into two different notions of what an allowlist even is.
+ *
+ * An absent or empty value is an empty list, never "all of them" — emptying a
+ * permission field has to narrow it.
+ */
+function verbArrayFrom(raw: unknown): unknown[] | null {
+  if (raw === undefined || raw === null || raw === "") return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw !== "string") return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Parse the connection's verb allowlist.
  *
  * An absent or empty value means NO verbs, never "all of them". Emptying a
@@ -125,18 +151,8 @@ const VERB_NAME_RE = /^[a-z][a-z0-9_]{0,31}$/;
  * caller that omits the field entirely has declared nothing to allow.
  */
 function parseVerbs(raw: unknown): string[] {
-  if (raw === undefined || raw === null || raw === "") return [];
-  let parsed: unknown;
-  if (typeof raw === "string") {
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      throw invalidRequest("`allowed_verbs` must be a JSON array of names");
-    }
-  } else {
-    parsed = raw;
-  }
-  if (!Array.isArray(parsed)) throw invalidRequest("`allowed_verbs` must be a JSON array of names");
+  const parsed = verbArrayFrom(raw);
+  if (parsed === null) throw invalidRequest("`allowed_verbs` must be a JSON array of names");
   if (parsed.length === 0) return [];
 
   const verbs = parsed.map((v) => {
@@ -165,7 +181,8 @@ function parseVerbs(raw: unknown): string[] {
 /**
  * Where a target keeps the public half of the host key we pinned. Enumerated
  * rather than derived: this path is interpolated into a script that runs as
- * root, and the set is exactly what {@link scanSshHostKey} can return.
+ * root, and the set is exactly the two types the manifest's `host_key`
+ * `pattern` admits.
  */
 const HOST_KEY_PUB_FILE: Record<string, string> = {
   "ssh-ed25519": "/etc/ssh/ssh_host_ed25519_key.pub",
@@ -433,20 +450,9 @@ function sshHandoffSteps(credentials: Record<string, unknown>): HandoffStep[] {
   // caller sent, checked against the manifest `pattern` and nothing else. A
   // name that would not survive `parseVerbs` is dropped rather than refused,
   // because refusing here would deny a deletion its removal block.
-  let verbs: string[] = [];
-  const rawVerbs = credentials.allowed_verbs;
-  if (typeof rawVerbs === "string" && rawVerbs !== "") {
-    try {
-      const parsed: unknown = JSON.parse(rawVerbs);
-      if (Array.isArray(parsed)) {
-        verbs = parsed.filter(
-          (v): v is string => typeof v === "string" && VERB_NAME_RE.test(v) && v in DEFAULT_VERBS,
-        );
-      }
-    } catch {
-      verbs = [];
-    }
-  }
+  const verbs = (verbArrayFrom(credentials.allowed_verbs) ?? []).filter(
+    (v): v is string => typeof v === "string" && VERB_NAME_RE.test(v) && v in DEFAULT_VERBS,
+  );
 
   const dispatchPath = dispatchPathFor(publicKey);
 
