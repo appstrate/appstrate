@@ -41,9 +41,6 @@ import {
 } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { guardedFetch, isBlockedUrl } from "@appstrate/core/ssrf";
-// The canonical `{$credential.<field>}` regex. That module declares itself the
-// single implementation of this grammar; a local copy here would be a second.
-import { CREDENTIAL_REF } from "@appstrate/afps-shared/credential-template";
 import {
   resolveSystemClientForAuth,
   getDefaultSystemIntegrationClient,
@@ -1885,7 +1882,7 @@ export function extractIdentity(
   const mapping = auth.identity_claims ?? {};
   const claims: Record<string, unknown> = {};
   for (const [outKey, accessor] of Object.entries(mapping)) {
-    claims[outKey] = resolveAccessor(source, accessor);
+    claims[outKey] = readPath(source, accessor);
   }
   const accountId =
     (typeof claims.accountId === "string" && claims.accountId) ||
@@ -1993,53 +1990,6 @@ function readPath(source: Record<string, unknown>, accessor: string): unknown {
     }
   }
   return cur;
-}
-
-/**
- * Resolve one `identity_claims` accessor against the credential bag.
- *
- * Two forms, both current. A bare path (`$.email`) reads one value — what every
- * OAuth auth declares, where the IdP already hands back a single identifier. A
- * TEMPLATE interpolates several credential fields using the same
- * `{$credential.<field>}` grammar `delivery.{http,env,files}` uses, so a
- * manifest states it once and the same way in both places.
- *
- * The template form exists because some identities are composite and a single
- * path cannot express one: an SSH connection is a Unix account ON a host, and
- * `@appstrate/ssh` is explicitly built to carry several connections to the same
- * machine (that is why each key gets its own dispatcher). Naming one by its
- * host alone would give two of them the same identity. Nothing about that is
- * SSH-specific — mtls and a database endpoint are the same shape.
- *
- * Fail-closed on BOTH ways a template can fail to resolve, because an identity
- * is displayed and compared, so a partial one is worse than none:
- *
- *   - a referenced field is missing or empty — the accessor yields `""` and the
- *     caller falls back to `"default"` rather than minting `"@host"`;
- *   - a reference this grammar does not admit (`{$credential.my-host}`,
- *     `{$credential.a.b}`, an unclosed brace) survives substitution as literal
- *     text. Left alone it became the identity: a manifest typo silently named a
- *     connection `agent@{$credential.my-host}`. Any `{$credential` still
- *     standing after the render refuses the whole accessor.
- *
- * The second check is what makes the branch total. Deciding the form by
- * substring means three states — path, template, malformed — squeezed into two,
- * and the third used to leave through the template arm wearing its own syntax.
- */
-function resolveAccessor(source: Record<string, unknown>, accessor: string): unknown {
-  // No dot in the sniff: `{$credential}` and `{$credentialx` are malformed
-  // templates, not paths, and must reach the refusal below rather than be read
-  // as a path that happens to contain braces.
-  if (!accessor.includes("{$credential")) return readPath(source, accessor);
-  let complete = true;
-  const rendered = accessor.replace(CREDENTIAL_REF, (_match, field: string) => {
-    const value = source[field];
-    if (typeof value === "string" && value.trim() !== "") return value.trim();
-    complete = false;
-    return "";
-  });
-  if (rendered.includes("{$credential")) return "";
-  return complete ? rendered : "";
 }
 
 // ─────────────────────────────────────────────

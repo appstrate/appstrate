@@ -351,10 +351,15 @@ const CASES: Record<string, Case> = {
   // first of the three layers `extractIdentity` is handed.
   /**
    * The one mapping whose source is NOT a third-party payload: an SSH identity
-   * is the credential bag the platform itself assembled, and it is COMPOSITE —
-   * a Unix account ON a host. `@appstrate/ssh` is built to carry several
-   * connections to the same machine (each key gets its own dispatcher), so a
-   * host-only key would give two of them the same account id.
+   * is read off the credential bag the platform itself assembled.
+   *
+   * The host, not the account. `@appstrate/ssh` has the user create ONE
+   * dedicated Unix account and reuse it, so the account name is the field that
+   * repeats and the host is the field that varies — the better discriminator
+   * of the two, and `accountId` is only ever a display value (it seeds the
+   * connection's default label and tells candidates apart in the
+   * `must_choose_connection` picker; nothing resolves by it, and there is no
+   * uniqueness constraint on it).
    */
   "@appstrate/ssh": {
     authKey: "primary",
@@ -365,7 +370,7 @@ const CASES: Record<string, Case> = {
       host_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5",
       read_only: "1",
     },
-    accountId: "appstrate@vps.example.com",
+    accountId: "vps.example.com",
     source_doc: "the platform's own credential bag — services/connect/provisioning.ts",
   },
   "@appstrate/slack": {

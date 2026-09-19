@@ -33,7 +33,7 @@
       "type": "custom",
       "authorized_uris": ["ssh://**"],
       "identity_claims": {
-        "account_id": "{$credential.user}@{$credential.host}"
+        "account_id": "$.host"
       },
       "credentials": {
         "schema": {
