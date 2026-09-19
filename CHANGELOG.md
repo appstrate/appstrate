@@ -27,9 +27,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   hold (Teleport has no per-command SSH policy either; it brokers hosts and
   records sessions). Read and write are separate tools, so an agent's
   `toolAllowlist` can withhold `ssh_write_file` sidecar-side. Host keys are
-  pinned from the connection's `host_key` (`ssh-keyscan` line) with
-  `StrictHostKeyChecking=yes` against a per-process `known_hosts`; there is no
-  trust-on-first-use, because in an autonomous run nobody is there to accept.
+  pinned from the connection's `host_key` with `StrictHostKeyChecking=yes`
+  against a per-process `known_hosts`; there is no trust-on-first-use, because
+  in an autonomous run nobody is there to accept.
 
   The server shells out to the `ssh`/`sftp` clients the bun runner image already
   bakes in, and reaches a proxied target through an OpenSSH `ProxyCommand` that
@@ -45,14 +45,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   declaring `entry_point: "./server.js"` could not be imported at all (#1461),
   and `delivery.files` landed unreadable in every runner image (#1462).
 
-- **Connecting an SSH host asks for three fields, not a private key.** The
-  platform mints the ed25519 pair itself and reads the target's host key, so
-  the form asks only for what nobody else can know — host, port, account. The
-  private half is generated straight into the credential envelope: never
+- **Connecting an SSH host never asks for a private key.** The platform mints
+  the ed25519 pair itself, straight into the credential envelope: never
   displayed, never typed, never readable again. A pasted key is almost always
   the user's PERSONAL key, already installed on ten other machines, so the
   blast radius of an Appstrate credential used to leave Appstrate; a minted
   pair is used nowhere else.
+
+  The form asks for what only the user can answer — host, port, account, and
+  the target's own host key. The line is "can the platform produce this better
+  than the user can", not "can it produce it at all". The host key is the case
+  that decides the difference: the platform CAN fetch it, and an earlier cut of
+  this work did, with `ssh-keyscan`. But a scan is an unauthenticated first
+  contact — precisely what a machine-in-the-middle answers — while the user is
+  already on a shell there, creating the Unix account the guide asks for. So
+  they read it off the machine (`awk '{print $1" "$2}'
+/etc/ssh/ssh_host_ed25519_key.pub`) and the platform opens no SSH socket at
+  any point.
 
   After creation the connect page shows the one block to paste on the target —
   it installs the public key with `restrict` + `command=`, writes the
@@ -62,9 +71,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and prints the host's own fingerprint — of the key type actually pinned — so
   it can be compared against the one shown on screen. The same screen carries
   the block that REMOVES the key: deleting the connection destroys the private
-  half and nothing else, because the platform cannot reach the target. That comparison is the only step that can catch a
-  machine-in-the-middle on the platform's scan, and it costs one glance in a
-  terminal the user is already in.
+  half and nothing else, because the platform cannot reach the target.
+
+  Nothing about either block is stored. Both are derived on demand from the
+  credential bundle the keyring already holds — an `openssh-key-v1` container
+  carries its own public half in the clear, and the fingerprint is a pure
+  function of the pinned host key — so `GET /api/me/connections/{id}/handoff`
+  rebuilds exactly what the connect screen showed, months later, by the same
+  function. A column would have bought a permanent migration for data that
+  cannot be missing, and a stored copy could drift from the key it claims to
+  remove.
 
   The mechanism is generic, not SSH-specific: an auth opts in with
   `_meta["dev.appstrate/provisioning"]` (AFPS §10), declaring in `provides` the
@@ -80,11 +96,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   persisted: the platform's usual egress guard honours
   `EGRESS_ALLOW_INTERNAL_HOSTS` while the runner's CONNECT floor has no
   allowlist at all, and creating a connection on the looser of the two would
-  have produced runs that always fail. So the host-key scan applies the bare
-  resolving floor — the very predicate the runner's listener uses — and not
-  that guard. A literal check alone would not have done it: the allowlist holds
-  hostNAMES, and a name never trips a no-DNS blocklist. The platform image gains `openssh-client` for the one `ssh-keyscan`
-  call; it never opens an SSH session.
+  have produced runs that always fail. The form therefore applies the bare
+  floor — the predicate the runner's listener uses — and not that guard. It
+  checks literals only; a NAME resolving to a private address meets the
+  runner's own CONNECT gate at run time, which is the gate that was always
+  going to decide. The platform image gains nothing for any of this: it opens
+  no SSH socket, so it ships no SSH client.
 
 ### Fixed
 
