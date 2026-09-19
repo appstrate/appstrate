@@ -9,6 +9,16 @@
  * quoting — are exercised directly. What the argv tests pin is the POLICY:
  * a missing `StrictHostKeyChecking=yes` or a stray `ForwardAgent` is a
  * security regression, not a style change.
+ *
+ * Lives in `scripts/test/`, beside the other tests for `scripts/`, and NOT in
+ * `apps/api/test/unit/`: it tests a SYSTEM PACKAGE, not the platform. A system
+ * package is deletable by construction — remove its sources and its `.afps`
+ * and the platform must be unaffected — but this file resolves those sources
+ * at module load, so from the API suite its absence took all 168 unit files
+ * down with it. Nor does it belong inside the package directory:
+ * `collectZipEntries` (scripts/build-system-packages.ts) walks everything but
+ * `node_modules` and dotfiles, so a `*.test.ts` there would ship inside the
+ * archive handed to customers.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
@@ -20,7 +30,7 @@ import { createServer, type Server } from "node:net";
 // Resolved, not hard-coded: the source directory carries the package version
 // in its name, so a static import breaks on every version bump.
 const { readdir } = await import("node:fs/promises");
-const SOURCES = join(import.meta.dir, "../../../../scripts/system-packages");
+const SOURCES = join(import.meta.dir, "..", "system-packages");
 const serverDir = (await readdir(SOURCES))
   .filter((d) => d.startsWith("mcp-server-ssh-"))
   .sort()
