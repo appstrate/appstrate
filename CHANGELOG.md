@@ -114,6 +114,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `setup_guide`, which until now appeared only on the integration detail page —
   everywhere except the surface actually asking someone for a credential.
 
+### Security
+
+- **Removing a space member judges BOTH of its bounds under the membership
+  lock.** `DELETE /api/spaces/{id}/members/{userId}` asks two questions: whether
+  the caller could have granted the standing the removal LEAVES BEHIND (dropping
+  an explicit restriction in an `open` space hands out its default role), and
+  whether they could have granted the standing being DROPPED. The second moved
+  inside the lock in #1438; the first stayed at the route, resolved against an
+  `org_members` row read on its own statement — so a concurrent organization
+  promotion could move the target's role between that read and the DELETE, and
+  the refusal was computed against an open space's default instead of a preset
+  `admin`. Both bounds now run inside `removeSpaceMember`'s transaction, after
+  `lockOrgMemberForSpaceGrant`, and `access_after` is reported from that same
+  transaction rather than from a lookup after it. Only a caller racing a
+  promotion sees a difference, and it is a refusal (403) where the stale read
+  reported the swept row as merely missing (404). (#1439)
+
 ## [1.0.0-beta.59] - 2026-09-18
 
 ### Added

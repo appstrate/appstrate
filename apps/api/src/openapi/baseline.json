@@ -23450,12 +23450,30 @@
             "type": "string",
             "description": "Human-readable title; preserved from the underlying error factory."
           },
-          "candidate_connection_ids": {
+          "candidate_connections": {
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "object",
+              "required": ["id", "label", "account_id", "owned_by_actor"],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": ["string", "null"],
+                  "description": "User-given name; `null` when the connection was never labelled."
+                },
+                "account_id": {
+                  "type": "string",
+                  "description": "The auth's account discriminator (`sub` claim, email, host…)."
+                },
+                "owned_by_actor": {
+                  "type": "boolean",
+                  "description": "True when the connection is the caller's own, false when inherited via org sharing."
+                }
+              }
             },
-            "description": "Populated on `must_choose_connection`. Connection ids the caller may pick from; pass one back via the request body's `connection_overrides` map to retry the run."
+            "description": "Populated on `must_choose_connection`. The connections the caller may pick from, each carrying the fields that tell them apart; pass one `id` back via the request body's `connection_overrides` map to retry the run."
           },
           "connection_id": {
             "type": "string",

@@ -29,7 +29,7 @@ import { useIntegrationDetail, useIntegrationAgentResolution } from "../hooks/us
  * Reusing the picker keeps this modal in lockstep with the dropdown — same
  * candidate list, scope/lock verdicts and connect orchestration — instead of
  * re-deriving an affordance from the static 412 payload (the previous code
- * filtered must_choose candidates down to the 412's `candidate_connection_ids`,
+ * filtered must_choose candidates down to the 412's `candidate_connections`,
  * which dropped connections needing reconnection and so disagreed with the tab
  * dropdown). Only structural failures — the integration is not active here, or
  * its package is missing, mistyped or unloadable — keep a plain message: no
@@ -63,8 +63,19 @@ export interface MissingIntegrationFieldError {
   message: string;
   /** Missing scopes — populated on insufficient_scopes for the OAuth re-consent upgrade. */
   missing_scopes?: string[];
-  /** Candidate connection ids — populated on must_choose_connection. */
-  candidate_connection_ids?: string[];
+  /**
+   * Candidate connections — populated on must_choose_connection. Declared to
+   * describe the payload, deliberately unread here: the row embeds the shared
+   * `IntegrationConnectionPicker`, whose candidate list is a superset (see the
+   * module comment above). API and MCP callers, which have no picker, choose
+   * from this field.
+   */
+  candidate_connections?: {
+    id: string;
+    label: string | null;
+    account_id: string;
+    owned_by_actor: boolean;
+  }[];
   /**
    * The dead/under-scoped connection id — populated on `needs_reconnection`
    * and `insufficient_scopes`.

@@ -7,7 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **New export `ConnectionCandidate` (`@appstrate/core/integration`)** — one
+  connection the caller may pick from on `must_choose_connection`, carrying
+  `id`, `label`, `accountId` and `ownedByActor`.
+
 ### Changed
+
+- **BREAKING: `ConnectionResolutionError.candidateConnectionIds` is replaced by
+  `candidateConnections`** (`@appstrate/core/integration`), an array of
+  `ConnectionCandidate` instead of bare ids; on the wire
+  (`ResolutionFieldError`, `@appstrate/core/api-errors`) the field
+  `candidate_connection_ids: string[]` becomes `candidate_connections:
+{ id, label, account_id, owned_by_actor }[]`. An id alone is opaque: a caller
+  with no picker — an API client, an MCP model reading the 412 — had to fetch
+  the connection list to learn which uuid is which before it could name one in
+  `connection_overrides`. The resolver already holds the rows, so the three
+  distinguishing fields cost no extra query. Read `candidate_connections[].id`
+  where the old array held the ids.
 
 - **BREAKING: `AuthResolution.principalKind` is a new REQUIRED member** (type
   `PrincipalKind`, with the tuple `PRINCIPAL_KINDS`, in `@appstrate/core/module`).

@@ -35,7 +35,6 @@ import {
   deleteSpace,
   spaceSettingsSchema,
 } from "../services/spaces.ts";
-import { getOrgMember } from "../services/organizations.ts";
 import {
   listSpaceMembers,
   removeSpaceMember,
@@ -50,12 +49,7 @@ import {
   personaFor,
   personaMemberships,
 } from "../lib/view-as.ts";
-import {
-  loadSpaceMember,
-  resolveSpaceRole,
-  toSpaceRoleWire,
-  type SpaceRoleRef,
-} from "../lib/space-role.ts";
+import { resolveSpaceRole, toSpaceRoleWire, type SpaceRoleRef } from "../lib/space-role.ts";
 import { applySpacePermissions } from "../middleware/space-context.ts";
 import { validateSpaceInOrg } from "../lib/space-lookup.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
@@ -723,46 +717,30 @@ export function createSpacesRouter() {
   // the open space's implicit membership; the caller should not have to
   // re-derive it from the visibility.
   router.delete("/:id/members/:userId", requirePermission("space-members", "remove"), async (c) => {
-    const orgId = c.get("orgId");
     const space = c.get("space")!;
     const userId = c.req.param("userId")!;
 
-    // Two bounds, not one. This one: dropping an explicit restriction can grant
-    // the open-space default. The other — the standing being DROPPED must be
-    // one the caller could have granted, or `space-members:remove` alone ejects
-    // a space admin — is asserted inside `removeSpaceMember`, on the row it
-    // deletes, under the same lock the grant path holds.
-    const permissions = c.get("permissions");
-    const member = await getOrgMember(orgId, userId);
-    assertCanGrantSpaceRole(
-      permissions,
-      // The target's standing, so the caller id is THEIRS — a personal space
-      // resolves `admin` for its owner and nothing for anyone else.
-      member ? resolveSpaceRole(member.role, space, null, userId) : null,
-    );
-    if (
-      !(await removeSpaceMember({
-        orgId,
-        spaceId: space.id,
-        userId,
-        actorPermissions: permissions,
-      }))
-    ) {
-      throw notFound("Space member not found");
-    }
+    // Both bounds — the standing left behind must be one the caller could have
+    // granted, and the standing being dropped one they could have granted too —
+    // are asserted inside `removeSpaceMember`, on the rows it acts on and under
+    // the lock the grant path holds. Judged here they would rest on an org role
+    // a concurrent promotion can move between the read and the DELETE (#1439),
+    // which is also why `access_after` comes back from that transaction rather
+    // than from a lookup after it.
+    const { removed, accessAfter } = await removeSpaceMember({
+      orgId: c.get("orgId"),
+      space,
+      userId,
+      actorPermissions: c.get("permissions"),
+    });
+    if (!removed) throw notFound("Space member not found");
     await recordAuditFromContext(c, {
       action: "space.member_removed",
       resourceType: "space_member",
       resourceId: `${space.id}:${userId}`,
     });
 
-    // What is left after the row is gone — one PK lookup, one membership row.
-    // The row was just deleted, so this can only find one an admin re-added
-    // concurrently; the org role is what usually answers.
-    const after = member
-      ? resolveSpaceRole(member.role, space, await loadSpaceMember(space.id, userId), userId)
-      : null;
-    return c.json({ access_after: after ? "implicit" : "none" });
+    return c.json({ access_after: accessAfter ? "implicit" : "none" });
   });
 
   // ─── Space packages (activate / deactivate / configure) ────────────

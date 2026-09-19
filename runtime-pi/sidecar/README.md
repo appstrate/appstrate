@@ -31,7 +31,7 @@ The `/mcp` endpoint advertises two first-party tools, both backed by the platfor
 | `run_history`   | Past-run metadata via the platform's per-run-token internal endpoint.                                                                                                                |
 | `recall_memory` | Read the unified `package_persistence` archive — enumerates prior `note()` appends and (optionally) named pinned slots set via `pin()`. Replaces the legacy "Memory" prompt section. |
 
-Outbound credentialled HTTP access is exposed per integration as `{ns}__api_call` (credential-injecting outbound proxy, validated against `authorizedUris`), spawned alongside the first-party tools — see "AFPS Integrations runtime" in the platform-level `CLAUDE.md`.
+Outbound credentialled HTTP access is exposed per integration as `{ns}__api_call` (credential-injecting outbound proxy, validated against `authorizedUris`), spawned alongside the first-party tools — see "AFPS Integrations (summary)" in the platform-level `AGENTS.md`.
 
 The agent's primary completions are served by the HTTP `/llm/*` route the Pi SDK calls natively; the sidecar does not expose a completions tool. Sub-agent workflows are handled platform-side by spawning a separate run.
 
@@ -174,5 +174,5 @@ Cancellation honours `ctx.signal` between chunks; on abort, the resolver issues 
 - The resolver-side contract — file resolution, `responseMode` logic, `byteLength` thresholds — is documented next to the code in [`packages/afps-runtime/src/resolvers/http-call-core.ts`](../../packages/afps-runtime/src/resolvers/http-call-core.ts).
 - The `api_upload` adapter contracts, chunker semantics, and per-protocol error surfaces are documented next to the code in [`runtime-pi/mcp/api-upload-resolver.ts`](../mcp/api-upload-resolver.ts) and [`runtime-pi/mcp/upload-adapters/`](../mcp/upload-adapters/).
 - The full reserved `dev.appstrate/*` `_meta` vocabulary — tool-descriptor routing markers, the `upstream` result key, the `events` channel, who sets and consumes each — is documented in [`docs/architecture/SIDECAR.md`](../../docs/architecture/SIDECAR.md) under "Reserved `_meta` vocabulary".
-- Sidecar lifecycle, network isolation, parallel container startup, and credential reporting paths are documented in the platform-level [`CLAUDE.md`](../../CLAUDE.md) under "Sidecar Protocol".
+- Sidecar lifecycle, network isolation, parallel container startup, and credential reporting paths are documented in [`docs/architecture/SIDECAR.md`](../../docs/architecture/SIDECAR.md).
 - Integration auth modes (`oauth2` / `api_key` / `basic` / `mtls` / `custom` — AFPS §7.2) and the `auths.{key}.delivery.{http | env | files}` injection contract live in `@appstrate/connect`.

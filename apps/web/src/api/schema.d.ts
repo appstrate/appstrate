@@ -5933,8 +5933,16 @@ export interface components {
             message: string;
             /** @description Human-readable title; preserved from the underlying error factory. */
             title?: string;
-            /** @description Populated on `must_choose_connection`. Connection ids the caller may pick from; pass one back via the request body's `connection_overrides` map to retry the run. */
-            candidate_connection_ids?: string[];
+            /** @description Populated on `must_choose_connection`. The connections the caller may pick from, each carrying the fields that tell them apart; pass one `id` back via the request body's `connection_overrides` map to retry the run. */
+            candidate_connections?: {
+                id: string;
+                /** @description User-given name; `null` when the connection was never labelled. */
+                label: string | null;
+                /** @description The auth's account discriminator (`sub` claim, email, host…). */
+                account_id: string;
+                /** @description True when the connection is the caller's own, false when inherited via org sharing. */
+                owned_by_actor: boolean;
+            }[];
             /** @description Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`). */
             connection_id?: string;
             /** @description Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks; forwarded to the OAuth re-consent prompt. */

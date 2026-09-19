@@ -570,13 +570,12 @@ The `/audit-casing` skill dispatches parallel opus sub-agents to verify every di
 
 ## Related files
 
-- `/Users/pierrecabriere/Dev/appstrate/appstrate/CLAUDE.md` — references this doc
-- `/Users/pierrecabriere/Dev/appstrate/CLAUDE.md` — workspace root, references this doc
-- `/Users/pierrecabriere/Dev/appstrate/appstrate/.claude/commands/audit-casing.md` — automated audit skill
-- `/Users/pierrecabriere/Dev/appstrate/afps-spec/spec.md` — AFPS canonical spec (snake_case authority)
-- `/Users/pierrecabriere/Dev/appstrate/appstrate/packages/core/src/validation.ts` — appstrate Zod validators
-- `/Users/pierrecabriere/Dev/appstrate/appstrate/packages/shared-types/src/index.ts` — wire DTO type definitions
-- `/Users/pierrecabriere/Dev/appstrate/appstrate/apps/api/src/openapi/schemas.ts` — OpenAPI components
+- `AGENTS.md` (repo root) — references this doc
+- `.claude/commands/audit-casing.md` — automated audit skill
+- `packages/core/src/validation.ts` — appstrate Zod validators
+- `packages/shared-types/src/index.ts` — wire DTO type definitions
+- `apps/api/src/openapi/schemas.ts` — OpenAPI components
+- AFPS canonical spec (snake_case authority) — <https://github.com/appstrate/afps-spec/blob/main/spec.md>
 
 ---
 

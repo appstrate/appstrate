@@ -328,7 +328,7 @@ The installer (`curl -fsSL https://get.appstrate.dev | bash`) generates all five
 ```sh
 bun run setup            # One-command dev bootstrap (first time only)
 bun run dev              # Start API + web (turbo, hot-reload)
-bun run check            # The full quality gate — 18 tasks, listed in CLAUDE.md
+bun run check            # The full quality gate — task list in AGENTS.md
 bun test                 # All tests — requires Docker
 bun run db:generate      # Generate Drizzle migrations from schema changes
 bun run db:migrate       # Apply migrations manually (boot applies them automatically)
@@ -347,7 +347,7 @@ bun test apps/api/test/           # API unit + integration
 bun test runtime-pi/              # Runtime + sidecar tests
 ```
 
-Test infrastructure (PostgreSQL, Redis, MinIO, DinD) is started automatically by the preload script on first run. Framework: `bun:test`. See `CLAUDE.md` Testing section for conventions and patterns.
+Test infrastructure (PostgreSQL, Redis, MinIO, DinD) is started automatically by the preload script on first run. Framework: `bun:test`. See `AGENTS.md` Testing section for conventions and patterns.
 
 ## Tech Stack
 
@@ -388,7 +388,7 @@ The platform is actively used in production. See [SECURITY.md](./SECURITY.md) fo
 - **Bug reports**: [GitHub Issues](https://github.com/appstrate/appstrate/issues)
 - **Questions**: [Discord](https://discord.gg/5Js2CKWNnh)
 - **Security vulnerabilities**: See [SECURITY.md](./SECURITY.md) for responsible disclosure
-- **Developer guide**: See [CLAUDE.md](./CLAUDE.md) for architecture, testing, and conventions
+- **Developer guide**: See [AGENTS.md](./AGENTS.md) for architecture, testing, and conventions
 - **Email**: hello@appstrate.dev
 
 ## Contributing

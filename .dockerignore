@@ -53,7 +53,8 @@ docs/
 scripts/
 .github/
 .husky/
-CLAUDE.md
+**/AGENTS.md
+**/CLAUDE.md
 CONTRIBUTING.md
 CHANGELOG.md
 CODE_OF_CONDUCT.md

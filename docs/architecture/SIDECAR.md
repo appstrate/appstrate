@@ -1,6 +1,6 @@
 # Sidecar Protocol
 
-Runtime detail beyond the architecture diagram in `CLAUDE.md`. Complements `docs/architecture/INTEGRATIONS_RUNTIME.md`.
+Runtime detail beyond the architecture diagram in `AGENTS.md`. Complements `docs/architecture/INTEGRATIONS_RUNTIME.md`.
 
 ### Sidecar Protocol (details beyond the architecture diagram)
 
