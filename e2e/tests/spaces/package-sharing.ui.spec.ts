@@ -78,10 +78,11 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
   expect(model.status(), await model.text()).toBe(201);
 
   // A GUEST: invited for exactly one thing, with no space assignment. Named
-  // distinctly on purpose — the member picker below is a Radix listbox driven
-  // by typeahead on the option's FIRST word, and every other seeded user in
-  // this organization is an "E2E User …", so a shared first word would commit
-  // whichever of them the list happened to highlight.
+  // distinctly on purpose — the `share-target` picker below is ONE Radix
+  // listbox over people AND spaces, driven by typeahead on the option's FIRST
+  // word, and every other seeded user in this organization is an "E2E User …",
+  // so a shared first word would commit whichever option the list happened to
+  // highlight.
   const guest: AuthResult = await registerUser(request, {
     name: `Guest ${Date.now().toString(36)}`,
   });
@@ -118,7 +119,7 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
     // The option's label is the member's `displayName`, which the sign-up hook
     // seeds from `user.name` (`profiles.displayName = user.name || user.email`)
     // — so it is the NAME on the wire here, not the address.
-    await selectOption(adminPage, "share-user", guest.name);
+    await selectOption(adminPage, "share-target", guest.name);
     const shared = adminPage.waitForResponse(
       (response) =>
         response.request().method() === "POST" && response.url().includes("/shares") === true,
@@ -379,7 +380,7 @@ test("a draft-only agent is published from the share dialog itself, then offered
     await page.goto(`/agents/${scope}/${name}`);
     await page.getByTestId("package-actions-trigger").first().click();
     await page.getByRole("menuitem", { name: /Partager|Share/ }).click();
-    await selectOption(page, "share-user", member.name);
+    await selectOption(page, "share-target", member.name);
 
     // The offer is refused for want of a version, and the dialog says so in
     // place rather than sending the author off to the Versions tab.
