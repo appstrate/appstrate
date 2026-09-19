@@ -41,6 +41,9 @@ import {
 } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { guardedFetch, isBlockedUrl } from "@appstrate/core/ssrf";
+// The canonical `{$credential.<field>}` regex. That module declares itself the
+// single implementation of this grammar; a local copy here would be a second.
+import { CREDENTIAL_REF } from "@appstrate/afps-shared/credential-template";
 import {
   resolveSystemClientForAuth,
   getDefaultSystemIntegrationClient,
@@ -1992,9 +1995,6 @@ function readPath(source: Record<string, unknown>, accessor: string): unknown {
   return cur;
 }
 
-/** `{$credential.<field>}` — the same grammar the `delivery` blocks interpolate with. */
-const CREDENTIAL_REF_RE = /\{\$credential\.([A-Za-z0-9_]+)\}/g;
-
 /**
  * Resolve one `identity_claims` accessor against the credential bag.
  *
@@ -2011,19 +2011,34 @@ const CREDENTIAL_REF_RE = /\{\$credential\.([A-Za-z0-9_]+)\}/g;
  * host alone would give two of them the same identity. Nothing about that is
  * SSH-specific — mtls and a database endpoint are the same shape.
  *
- * Fail-closed: if any referenced field is missing or empty the whole accessor
- * yields `""`, exactly as a missing path does, so the caller falls back to
- * `"default"` rather than minting a half-rendered `"@host"`.
+ * Fail-closed on BOTH ways a template can fail to resolve, because an identity
+ * is displayed and compared, so a partial one is worse than none:
+ *
+ *   - a referenced field is missing or empty — the accessor yields `""` and the
+ *     caller falls back to `"default"` rather than minting `"@host"`;
+ *   - a reference this grammar does not admit (`{$credential.my-host}`,
+ *     `{$credential.a.b}`, an unclosed brace) survives substitution as literal
+ *     text. Left alone it became the identity: a manifest typo silently named a
+ *     connection `agent@{$credential.my-host}`. Any `{$credential` still
+ *     standing after the render refuses the whole accessor.
+ *
+ * The second check is what makes the branch total. Deciding the form by
+ * substring means three states — path, template, malformed — squeezed into two,
+ * and the third used to leave through the template arm wearing its own syntax.
  */
 function resolveAccessor(source: Record<string, unknown>, accessor: string): unknown {
-  if (!accessor.includes("{$credential.")) return readPath(source, accessor);
+  // No dot in the sniff: `{$credential}` and `{$credentialx` are malformed
+  // templates, not paths, and must reach the refusal below rather than be read
+  // as a path that happens to contain braces.
+  if (!accessor.includes("{$credential")) return readPath(source, accessor);
   let complete = true;
-  const rendered = accessor.replace(CREDENTIAL_REF_RE, (_match, field: string) => {
+  const rendered = accessor.replace(CREDENTIAL_REF, (_match, field: string) => {
     const value = source[field];
     if (typeof value === "string" && value.trim() !== "") return value.trim();
     complete = false;
     return "";
   });
+  if (rendered.includes("{$credential")) return "";
   return complete ? rendered : "";
 }
 

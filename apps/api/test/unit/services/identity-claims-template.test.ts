@@ -86,6 +86,48 @@ describe("identity_claims — composite template", () => {
   });
 });
 
+/**
+ * A reference the grammar does not admit used to survive substitution as
+ * literal text and BECOME the identity: `{$credential.my-host}` named a
+ * connection `appstrate@{$credential.my-host}`, displayed to the user, because
+ * the form was decided by a substring test that squeezed three states — path,
+ * template, malformed — into two, and the third left through the template arm
+ * wearing its own syntax.
+ *
+ * The sentinel is the contract for all of them: an identity is displayed and
+ * compared, so refusing is the only safe answer and a manifest typo must read
+ * as "no identity", never as an identity that happens to contain braces.
+ */
+describe("identity_claims — a malformed reference never becomes an identity", () => {
+  it.each([
+    ["a hyphen in the field name", "{$credential.user}@{$credential.my-host}"],
+    ["a dot in the field name", "{$credential.user}@{$credential.a.b}"],
+    ["an unclosed brace", "{$credential.user@host"],
+    ["no field at all", "{$credential}"],
+    ["a misspelled opener", "{$credentialx.user}"],
+  ])("refuses %s", (_label, accessor) => {
+    const { accountId, identityClaims } = extractIdentity(
+      manifestWith({ account_id: accessor }),
+      "primary",
+      bag,
+    );
+    expect(accountId).toBe("default");
+    expect(identityClaims.account_id).toBe("");
+  });
+
+  it("refuses the whole accessor, not just the reference it could not read", () => {
+    // The half that DID resolve must not leak either: `appstrate@` is a
+    // plausible-looking identity that silently collides with every other
+    // connection whose second half failed.
+    const { identityClaims } = extractIdentity(
+      manifestWith({ account_id: "{$credential.user}@{$credential.my-host}" }),
+      "primary",
+      bag,
+    );
+    expect(identityClaims.account_id).not.toContain("appstrate");
+  });
+});
+
 describe("identity_claims — the bare-path form is untouched", () => {
   it("reads a single field", () => {
     const { accountId } = extractIdentity(manifestWith({ account_id: "$.email" }), "primary", {
