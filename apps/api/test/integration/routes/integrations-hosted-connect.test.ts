@@ -26,6 +26,7 @@ import {
   buildConnectUrl,
   connectClaimsFor,
 } from "../../../src/services/connect/connect-session.ts";
+import { setConnectionTeardownSteps } from "../../../src/services/integration-connections.ts";
 
 const app = getTestApp();
 
@@ -722,5 +723,86 @@ describe("hosted connect portal — credential provisioning", () => {
       read_only: "1",
     });
     expect(res.status).toBe(200);
+  });
+});
+
+/**
+ * The teardown block a provisioner produced has to OUTLIVE the screen that
+ * showed it. Deleting the connection destroys the platform's half and nothing
+ * else — its public key stays authorized on the customer's machine — so the
+ * delete confirmation is the last surface that can hand the removal back, and
+ * it reads it off this list.
+ */
+describe("me/connections — persisted teardown steps", () => {
+  let ctx: TestContext;
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "myorg" });
+    await seedIntegration(ctx.orgId, await provisionedManifest("@myorg/ssh"));
+  });
+
+  const TEARDOWN = [
+    {
+      kind: "command" as const,
+      label: "Retirer cette clé plus tard",
+      shell: "grep -vF 'AAAAC3Nz' ~agent/.ssh/authorized_keys",
+      deferred: true,
+    },
+  ];
+
+  const createConnection = async () => {
+    const res = await app.request("/api/integrations/@myorg/ssh/auths/primary/connect/fields", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        credentials: {
+          private_key:
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n-----END OPENSSH PRIVATE KEY-----\n",
+          host: "ssh.example.test",
+          user: "agent",
+          host_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5",
+        },
+      }),
+    });
+    expect(res.status).toBe(200);
+    return (await res.json()) as { id: string };
+  };
+
+  it("carries them to the connection list once persisted", async () => {
+    const conn = await createConnection();
+    await setConnectionTeardownSteps(conn.id, TEARDOWN);
+
+    const res = await app.request("/api/me/connections", { headers: authHeaders(ctx) });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: Array<{ connections: Array<{ connection_id: string; teardown_steps?: unknown[] }> }>;
+    };
+    const entry = body.data.flatMap((g) => g.connections).find((c) => c.connection_id === conn.id);
+    expect(entry?.teardown_steps).toEqual(TEARDOWN);
+  });
+
+  /**
+   * A pasted credential left nothing on a target, so the delete confirmation
+   * must not invent a removal to perform. Absent, not an empty array.
+   */
+  it("omits them for a connection that had none", async () => {
+    const conn = await createConnection();
+    const res = await app.request("/api/me/connections", { headers: authHeaders(ctx) });
+    const body = (await res.json()) as {
+      data: Array<{ connections: Array<{ connection_id: string; teardown_steps?: unknown[] }> }>;
+    };
+    const entry = body.data.flatMap((g) => g.connections).find((c) => c.connection_id === conn.id);
+    expect(entry).toBeDefined();
+    expect(entry?.teardown_steps).toBeUndefined();
+  });
+
+  it("writing an empty list is a no-op, not a stored empty array", async () => {
+    const conn = await createConnection();
+    await setConnectionTeardownSteps(conn.id, []);
+    const rows = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, conn.id));
+    expect(rows[0]?.teardownSteps).toBeNull();
   });
 });

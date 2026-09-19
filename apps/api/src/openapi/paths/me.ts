@@ -162,6 +162,23 @@ export const mePaths = {
                               reused_by_agents: { type: "integer" },
                               auth_key: { type: "string" },
                               shared_with_org: { type: "boolean" },
+                              teardown_steps: {
+                                type: "array",
+                                description:
+                                  "For a connection whose credentials the platform MINTED: the block that takes its public half back off the target. Absent for a pasted credential. Carried on the list because the moment it must be readable is the delete confirmation, after which the connection is gone.",
+                                items: {
+                                  type: "object",
+                                  required: ["kind", "label"],
+                                  properties: {
+                                    kind: { type: "string", enum: ["command", "value"] },
+                                    label: { type: "string" },
+                                    note: { type: "string" },
+                                    shell: { type: "string" },
+                                    deferred: { type: "boolean" },
+                                    value: { type: "string" },
+                                  },
+                                },
+                              },
                               org: {
                                 type: "object",
                                 required: ["id", "name"],

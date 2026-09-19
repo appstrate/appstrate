@@ -103,6 +103,7 @@ async function listAllActorIntegrationConnections(
       label: integrationConnections.label,
       sharedWithOrg: integrationConnections.sharedWithOrg,
       identityClaims: integrationConnections.identityClaims,
+      teardownSteps: integrationConnections.teardownSteps,
       createdAt: integrationConnections.createdAt,
     })
     .from(integrationConnections)
@@ -236,6 +237,13 @@ async function listAllActorIntegrationConnections(
       reused_by_agents: reuseCount.get(`${row.spaceId}|${row.packageId}`) ?? 0,
       org: { id: row.orgId, name: orgName },
       space: { id: row.spaceId, name: row.spaceName },
+      // Only a MINTED credential has anything to undo on a target, so this is
+      // null for every pasted one. Surfaced on the list because the delete
+      // confirmation is where it has to be readable: deleting here removes our
+      // half and leaves the public key authorized on the customer's machine.
+      ...(Array.isArray(row.teardownSteps) && row.teardownSteps.length > 0
+        ? { teardown_steps: row.teardownSteps as MeConnectionEntry["teardown_steps"] }
+        : {}),
     };
     group.connections.push(entry);
     group.total_connections += 1;

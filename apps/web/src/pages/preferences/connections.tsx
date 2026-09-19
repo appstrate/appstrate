@@ -2,6 +2,7 @@
 
 import { Fragment, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { HandoffSteps, type HandoffStep } from "../../components/integration-connect/handoff-steps";
 import { Link } from "react-router-dom";
 import { Unplug, Pencil, Check, X } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -313,6 +314,12 @@ export function PreferencesConnectionsPage() {
      * radius before deleting the connection globally.
      */
     reused_by_agents: number;
+    /**
+     * Only a MINTED credential leaves something behind on a target. Deleting
+     * here destroys our half and nothing else, so this is the last screen that
+     * can hand back the block that removes the rest.
+     */
+    teardown_steps?: HandoffStep[];
   } | null>(null);
 
   const totalConnections = useMemo(
@@ -383,6 +390,9 @@ export function PreferencesConnectionsPage() {
                         identity: conn.identity,
                         connectionId: conn.connection_id,
                         reused_by_agents: conn.reused_by_agents ?? 0,
+                        ...(conn.teardown_steps?.length
+                          ? { teardown_steps: conn.teardown_steps }
+                          : {}),
                       })
                     }
                     onUpdateLabel={(label) =>
@@ -439,7 +449,16 @@ export function PreferencesConnectionsPage() {
             { onSuccess: () => setConfirmState(null) },
           );
         }}
-      />
+      >
+        {confirmState?.teardown_steps && (
+          <div className="mt-4">
+            <HandoffSteps
+              // No longer deferred: this IS the moment it is due.
+              steps={confirmState.teardown_steps.map((step) => ({ ...step, deferred: false }))}
+            />
+          </div>
+        )}
+      </ConfirmModal>
     </>
   );
 }

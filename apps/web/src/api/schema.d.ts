@@ -13067,6 +13067,16 @@ export interface operations {
                                 reused_by_agents: number;
                                 auth_key: string;
                                 shared_with_org: boolean;
+                                /** @description For a connection whose credentials the platform MINTED: the block that takes its public half back off the target. Absent for a pasted credential. Carried on the list because the moment it must be readable is the delete confirmation, after which the connection is gone. */
+                                teardown_steps?: {
+                                    /** @enum {string} */
+                                    kind: "command" | "value";
+                                    label: string;
+                                    note?: string;
+                                    shell?: string;
+                                    deferred?: boolean;
+                                    value?: string;
+                                }[];
                                 org: {
                                     id: string;
                                     name: string;
