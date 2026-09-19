@@ -1898,6 +1898,34 @@ export const schemas = {
       },
     },
   },
+  /**
+   * One step a user must run or check after the platform minted a credential
+   * for them. Shared by the two surfaces that hand these out — the connect
+   * submit response and `GET /api/me/connections/{id}/handoff` — because both
+   * render the SAME derived list and a second copy of this shape is a second
+   * thing the SPA's renderer can drift from.
+   */
+  HandoffStep: {
+    type: "object",
+    required: ["kind", "label"],
+    properties: {
+      kind: { type: "string", enum: ["command", "value"] },
+      label: { type: "string" },
+      note: { type: "string" },
+      shell: {
+        type: "string",
+        description:
+          "`kind: command` — shell to run on the target. Never executed by the platform.",
+      },
+      deferred: {
+        type: "boolean",
+        description:
+          "`kind: command` — due when the connection is deleted, not now. A delete confirmation renders these; the screen that follows creation renders the rest.",
+      },
+      value: { type: "string", description: "`kind: value` — a value to read or compare." },
+    },
+  },
+
   IntegrationPin: {
     type: "object",
     required: [

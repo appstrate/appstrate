@@ -5383,6 +5383,18 @@ export interface components {
                 max_size?: number;
             };
         };
+        HandoffStep: {
+            /** @enum {string} */
+            kind: "command" | "value";
+            label: string;
+            note?: string;
+            /** @description `kind: command` — shell to run on the target. Never executed by the platform. */
+            shell?: string;
+            /** @description `kind: command` — due when the connection is deleted, not now. A delete confirmation renders these; the screen that follows creation renders the rest. */
+            deferred?: boolean;
+            /** @description `kind: value` — a value to read or compare. */
+            value?: string;
+        };
         /** @description Per-integration connection verdict for an agent: which connection the next run uses (admin pin → run/schedule override → member pin → fallback + scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses. */
         IntegrationAgentResolution: {
             /** @enum {string} */
@@ -11430,18 +11442,7 @@ export interface operations {
                         /** @description Present when the auth declares `_meta["dev.appstrate/provisioning"]`: what the user must now do with the material the platform minted. Public halves only — the private key is sealed in the connection's envelope and is never returned. Returned once; nothing persists it. */
                         provisioned?: {
                             /** @description Ordered handoff steps. A list rather than named fields so a new provisioning kind ships without a front-end branch. */
-                            steps: {
-                                /** @enum {string} */
-                                kind: "command" | "value";
-                                label: string;
-                                note?: string;
-                                /** @description `kind: command` — shell to run on the target. Never executed by the platform. */
-                                shell?: string;
-                                /** @description `kind: command` — to be run later, when the connection is deleted, not now. */
-                                deferred?: boolean;
-                                /** @description `kind: value` — a value to read or compare. */
-                                value?: string;
-                            }[];
+                            steps: components["schemas"]["HandoffStep"][];
                         };
                     };
                 };
@@ -13156,16 +13157,7 @@ export interface operations {
                         /** @enum {string} */
                         object: "list";
                         hasMore: boolean;
-                        data: {
-                            /** @enum {string} */
-                            kind: "command" | "value";
-                            label: string;
-                            note?: string;
-                            shell?: string;
-                            /** @description Due when the connection is deleted, not now. A delete confirmation renders these; the screen that follows creation renders the rest. */
-                            deferred?: boolean;
-                            value?: string;
-                        }[];
+                        data: components["schemas"]["HandoffStep"][];
                     };
                 };
             };

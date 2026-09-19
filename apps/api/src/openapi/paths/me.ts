@@ -399,22 +399,7 @@ export const mePaths = {
                   hasMore: { type: "boolean" },
                   data: {
                     type: "array",
-                    items: {
-                      type: "object",
-                      required: ["kind", "label"],
-                      properties: {
-                        kind: { type: "string", enum: ["command", "value"] },
-                        label: { type: "string" },
-                        note: { type: "string" },
-                        shell: { type: "string" },
-                        deferred: {
-                          type: "boolean",
-                          description:
-                            "Due when the connection is deleted, not now. A delete confirmation renders these; the screen that follows creation renders the rest.",
-                        },
-                        value: { type: "string" },
-                      },
-                    },
+                    items: { $ref: "#/components/schemas/HandoffStep" },
                   },
                 },
               },

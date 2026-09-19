@@ -1056,29 +1056,7 @@ export const integrationsPaths = {
                         type: "array",
                         description:
                           "Ordered handoff steps. A list rather than named fields so a new provisioning kind ships without a front-end branch.",
-                        items: {
-                          type: "object",
-                          required: ["kind", "label"],
-                          properties: {
-                            kind: { type: "string", enum: ["command", "value"] },
-                            label: { type: "string" },
-                            note: { type: "string" },
-                            shell: {
-                              type: "string",
-                              description:
-                                "`kind: command` — shell to run on the target. Never executed by the platform.",
-                            },
-                            deferred: {
-                              type: "boolean",
-                              description:
-                                "`kind: command` — to be run later, when the connection is deleted, not now.",
-                            },
-                            value: {
-                              type: "string",
-                              description: "`kind: value` — a value to read or compare.",
-                            },
-                          },
-                        },
+                        items: { $ref: "#/components/schemas/HandoffStep" },
                       },
                     },
                   },

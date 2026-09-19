@@ -233,6 +233,8 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   SpaceMemberRemoval:
     "single-field acknowledgement of DELETE /spaces/{id}/members/{userId}; the page re-reads SpaceMemberObject, which IS registered",
   ResolutionFieldError: "ProblemDetail.errors[] item; never read through a shared-type",
+  HandoffStep:
+    "flattened projection of a discriminated union: the server type (services/connect/provisioning.ts) makes `shell` required on the command arm and `value` on the value arm, which a flat schema cannot express and this check cannot compare; the SPA consumes the generated spec type directly",
   ModelGenerationSettings:
     "embedded request/response value object; canonical runtime type lives in @appstrate/core",
   ModelGenerationCapabilities:

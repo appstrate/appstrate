@@ -18,18 +18,14 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
+import type { components } from "../../api/schema";
 
-export interface HandoffStep {
-  kind: "command" | "value";
-  label: string;
-  note?: string;
-  /** `kind: "command"` — shell to run on the target. */
-  shell?: string;
-  /** `kind: "command"` — run when the connection is deleted, not now. */
-  deferred?: boolean;
-  /** `kind: "value"` — a value to read or compare. */
-  value?: string;
-}
+/**
+ * Straight off the generated wire types — the server owns this shape and both
+ * surfaces that emit it ($ref the same `HandoffStep` component), so restating
+ * it here would be a third copy free to drift from the two that are checked.
+ */
+export type HandoffStep = components["schemas"]["HandoffStep"];
 
 const BLOCK_CLASS =
   "bg-muted/40 max-h-80 overflow-auto rounded-md border p-3 font-mono text-[11px] leading-relaxed whitespace-pre";

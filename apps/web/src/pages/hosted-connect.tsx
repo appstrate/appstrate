@@ -42,21 +42,15 @@ type ConnectContext = Omit<
 
 type Phase = "loading" | "form" | "submitting" | "done" | "provisioned" | "error";
 
-/**
- * Material the platform minted that has to reach the target host. Returned
- * once by `/connect/submit`; nothing persists it, and nothing here is secret —
- * the private half never leaves the server.
- */
-interface Provisioned {
-  steps: HandoffStep[];
-}
-
 export function HostedConnectPage() {
   const { t } = useTranslation("settings");
   const [phase, setPhase] = useState<Phase>("loading");
   const [context, setContext] = useState<ConnectContext | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
-  const [provisioned, setProvisioned] = useState<Provisioned | null>(null);
+  // Material the platform minted that has to reach the target host. Returned
+  // once by `/connect/submit`; nothing persists it, and nothing here is secret —
+  // the private half never leaves the server.
+  const [provisioned, setProvisioned] = useState<{ steps: HandoffStep[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Technical reason behind a context-load failure (HTTP status or network
   // error). Shown under the generic body so an invalid/expired link, a removed
@@ -120,7 +114,7 @@ export function HostedConnectPage() {
       // this window the instant it sees `ok: true`, which would take the block
       // away before it could be read. It is announced on the user's own
       // "I installed the key" instead.
-      const minted = (data as { provisioned?: Provisioned } | undefined)?.provisioned;
+      const minted = data?.provisioned;
       if (minted) {
         setProvisioned(minted);
         setPhase("provisioned");
