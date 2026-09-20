@@ -1053,7 +1053,10 @@ function FileSelectionActions({
           <ChevronDown />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      {/* Closing must not hand focus back to the trigger: these items open a
+          modal whose editor takes the focus, and Monaco loses its keyboard
+          input when it is focused on mount and blurred right after. */}
+      <DropdownMenuContent align="end" onCloseAutoFocus={(event) => event.preventDefault()}>
         {gestures?.canEdit ? (
           <DropdownMenuItem disabled={gestures.busy} onSelect={gestures.onEdit}>
             <Pencil />
