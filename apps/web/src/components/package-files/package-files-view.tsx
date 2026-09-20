@@ -456,6 +456,9 @@ export function PackageFilesView({
     () => new Map(visibleFiles.map((file) => [file.treeEntry.path, file])),
     [visibleFiles],
   );
+  const editedFile = editingFile.value
+    ? files.find((file) => file.bundlePath === editingFile.value)
+    : undefined;
   const mainFile = `Bundle AFPS/${initialPath ?? primaryDisplayFile(type).name}`;
   const defaultFile =
     visibleFiles.find((file) => file.treeEntry.path === mainFile) ?? visibleFiles[0];
@@ -843,21 +846,24 @@ export function PackageFilesView({
           title={t("editor.editFile", { name: editingFile.value })}
           className="sm:max-w-5xl"
         >
-          <FileTextEditor
-            packageId={packageId}
-            entry={
-              files.find((file) => file.bundlePath === editingFile.value)?.sourceEntry ?? {
-                path: editingFile.value,
-                size: 0,
-                media_kind: "text",
-                inline: "",
-              }
-            }
-            path={editingFile.value}
-            onApply={(text) => {
-              if (stage([fileTextOperation(editingFile.value!, text)])) editingFile.close();
-            }}
-          />
+          {/* The editor seeds Monaco once and owns its text afterwards, so it may
+              only mount on the real entry: mounting on a placeholder (a deep
+              link that lands before the tree has loaded) would open an empty
+              file that never fills in. */}
+          {editedFile ? (
+            <FileTextEditor
+              packageId={packageId}
+              entry={editedFile.sourceEntry}
+              path={editingFile.value}
+              onApply={(text) => {
+                if (stage([fileTextOperation(editingFile.value!, text)])) editingFile.close();
+              }}
+            />
+          ) : bundleEntries ? (
+            <ErrorState message={t("agents:files.errorLoad")} />
+          ) : (
+            <LoadingState />
+          )}
         </Modal>
       )}
       <UnsavedChangesModal blocker={blocker} onSaveDraft={writableDraft ? saveEdits : undefined} />
