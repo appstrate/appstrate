@@ -1561,9 +1561,10 @@ the card, read `prompt.md` in the explorer, see the card again.
 2. **The lab has no package creation handler**, so a skill cannot be created
    end to end locally: only the creation screens can be judged. Add the POST
    fixtures, or accept that this path is verified on a real instance.
-3. **`INTEGRATION.md` cannot be deleted** once written: the API's
-   `resolveDraftContent` protects a real companion doc, and no operation
-   removes it. Either the file operations cover it or the UI says so.
+3. **The lab has no integration the org OWNS.** Its only one carrying an
+   `INTEGRATION.md` is a system package, so the explorer offers no gesture on
+   it and the companion doc cannot be exercised locally — which is how it was
+   wrongly recorded as undeletable (see question 12). A fixture fixes it.
 
 **How this was verified**
 
@@ -1687,12 +1688,21 @@ and each carries what the UI does in the meantime.
     binary. The server page already shows a server's runtime, so the product
     can say what it supports; the doc should say the same.
 
-12. **An integration's `INTEGRATION.md` cannot be removed** (raised 14
-    September, by wiring the editor to it). The column it lives in is shared
-    with a manifest-text fallback, and `resolveDraftContent` protects a real
-    doc from being overwritten by that fallback — which also means no write
-    clears it. A file operation deleting the entry would, if the column
-    followed; until then the UI can only add or change one.
+12. ~~**An integration's `INTEGRATION.md` cannot be removed**~~ — WRONG, and
+    worth keeping as a lesson (raised 14 September, disproved 20 September).
+    The API creates, changes and deletes the companion doc like any other
+    file: `isProtectedPackageFile` pins only `manifest.json` and a REQUIRED
+    content entry (`prompt.md`, `SKILL.md`), not an optional one, and
+    `packages-files-write.test.ts` pins the whole round trip — "can create and
+    remove an integration's optional companion without resurrecting it",
+    including the shared column going empty. `resolveDraftContent` protects
+    the doc from the MANIFEST-TEXT fallback, not from its author. What was
+    observed instead was the lab: its only integration holding an
+    `INTEGRATION.md` is a SYSTEM package, which nobody may edit, so the
+    explorer correctly offered no Supprimer. The lesson is the one already at
+    the top of this file — a screen with no fixture is a screen nobody looks
+    at — with a corollary: a missing fixture reads as a product limitation.
+    Check the server's own tests before writing one down.
 
 13. **Who clears a role's unavailable permissions?** (raised 14 September, by
     the main merge.) The redesign offered a Retirer button per permission,
@@ -1701,6 +1711,19 @@ and each carries what the UI does in the meantime.
     `unavailable_permissions` and dropped the button; this branch followed it.
     If an admin must still be able to clear one, the button comes back and the
     route has to accept the save.
+
+    Reading it again on 20 September turned up something else, and it is a
+    DEFECT, on main as much as here: the editor keeps the old filter
+    `unavailable_permissions.filter((p) => selected.has(p))`, while `selected`
+    is now seeded from `permissions` alone — the granted half. The two sets are
+    disjoint by construction, so the intersection is always empty and the
+    "Indisponible" panel, its explanation and its test render for nobody. It
+    made sense when the client derived both halves from one selection; it
+    survived the change that split them. Meanwhile saving the role DOES drop
+    the unknown permissions, because the PATCH resends `selected`. So the
+    behaviour the panel exists to announce happens silently, and an admin who
+    opens a degraded role to rename it clears its permissions without being
+    told. Whatever is decided about the button, the filter has to go.
 
 ### NEXT, IN ORDER (written 23 August, for whoever picks this up cold)
 
