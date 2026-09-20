@@ -1,6 +1,8 @@
 # UX/UI redesign — state, decisions, and what is left
 
-Branch `feat/redesign-lab`, worktree `worktrees/redesign-lab`. Reference
+Branch `feat/uxui-dashboard-prototype`, worktree
+`worktrees/uxui-dashboard-prototype` (it started on `feat/redesign-lab`).
+Reference
 stylesheet exported out of Claude Design and kept outside the repo at
 `satellites/redesign-2026/styles.css`.
 
@@ -9,7 +11,9 @@ says where things stand, why the non-obvious calls were made, and what is still
 open — so the work can be picked up cold.
 
 **Picking it up cold, read in this order:** "How the work goes" just below,
-then **"Open", which now opens on NEXT, IN ORDER**: the numbered blocks that
+then **"Open", which opens on WHERE THIS STANDS (20 September 2026)** — the
+most recent state, and what is left. After it come the questions for the API
+and the product, then NEXT, IN ORDER: the numbered blocks that
 are the work, written for someone with no other context. Then "Form pattern",
 which the first of those blocks is entirely about, and "The grammar", which
 frames the rest. The sections in between describe what is already built, and are
@@ -1435,6 +1439,117 @@ So the strategy the reference itself suggests:
 
 ## Open
 
+### WHERE THIS STANDS (20 September 2026, branch `feat/uxui-dashboard-prototype`)
+
+Read this first: it is the most recent state. The blocks under NEXT, IN ORDER
+below are older and were written for the shell and the form pattern; what
+follows supersedes them wherever they disagree.
+
+The branch is level with `origin/main` (zero commits behind) and carries main's
+PR #1312 (unified package file editing), #1438 (the beta.57 audit) and #1441.
+
+**What the package surfaces now are**
+
+- **Two groups per package, for all four types** (agent, skill, integration,
+  local MCP server): **Explorer** (Carte, Fichiers, Versions) and **Package
+  AFPS**, which used to be called Définition. Paramètres opens on the first
+  entry the caller may see.
+- **Package AFPS holds the manifest's forms** (Général, Schémas, Skills,
+  Intégrations, Outils, Source, Méthodes d'authentification) plus **Contenu**,
+  a read-only table of every file in the bundle with its role (manifest, main
+  file, documentation, entry point, reference, script, asset) and its size.
+  Each row opens that file in Explorer › Fichiers.
+- **Général** replaced Identité: the section already held Identité, Publication
+  and Exécution as sub-groups, and the name now says so.
+- **Outils** is its own section. For an agent it is the manifest's
+  `runtime_tools` (output, log, note, pin, publish_file), which are not
+  integration packages and are not per-space configuration. For an integration
+  it is the tool catalogue AND its policy, merged: both come from the package
+  alone, so the Explorer entry that showed the catalogue is gone.
+- **The raw manifest is not a section and not a link under every form.** It
+  opens from `manifest.json` in Explorer › Fichiers (Actions › Modifier),
+  `?editManifest=1`, over Général.
+- **The save bar only exists when something is unsaved.** It sticks to the
+  bottom of the window from the first change; the settings card clips its
+  overflow with `overflow-clip`, because `overflow-hidden` breaks a sticky
+  child. The `panel-dialog` presentation of `EditorShell` was deleted with it.
+- **Versions is the history.** A draft ahead of its last version says so in one
+  line with a Comparer button, and every row compares with the draft from its
+  own menu; the diff opens in a modal instead of pushing the list down.
+
+**Files are changed in ONE place: Explorer › Fichiers**
+
+- The tree is `Bundle AFPS/` plus `Dépendances/` (an agent's skills, the local
+  server an integration runs), the latter only when there is one, and always
+  read-only.
+- For whoever may write the package, on the draft: new file, import, rename,
+  delete, replace, and Modifier in a modal. Every gesture stages a file
+  operation from `lib/package-file-drafts` (main's PR #1312) and nothing is
+  written until the save bar sends them with the stored manifest and its lock
+  version, in one package PUT.
+- The rail is version picker first, then three icon buttons (search, new file,
+  import); search opens its field under the bar and pushes the tree down.
+- Package AFPS › Contenu reads the same bundle and never writes.
+
+**Three defects found by driving the lab, all fixed**
+
+1. A deep link (`?editFile=…`) opened the editor on a placeholder entry while
+   the tree loaded, and Monaco owns its text after mount: the file stayed
+   empty. The modal now waits for the real entry.
+2. The modal had a fixed height and pushed Appliquer off a window under 730px.
+   Editors are `min(60vh, …)` now.
+3. **Opening the editor from a row menu swallowed every keystroke.** Radix
+   hands focus back to the menu trigger as it closes, and a Monaco focused on
+   mount and blurred right after keeps a detached edit context: the caret
+   blinks and nothing types until the editor is blurred and focused again. The
+   menu that opens a modal now prevents its own `onCloseAutoFocus`. Watch for
+   this anywhere a menu item opens a dialog that focuses an editor.
+
+**The main merge overwrote redesign choices, and it will happen again**
+
+Merging `origin/main` on 10 September silently restored main's UI in nine
+places (Chat back in the main nav, collaborator SSO duplicated into an Advanced
+group, the integration pins section, the agent input settings, two full-page
+loading states, stray overlay routes, a resurrected `run-row`, and thirteen
+strings). All of it was found on 14 September by comparing against the branch
+as it stood before the merge, and restored in `48e7fd264`.
+
+**The procedure, for the next merge:** the pre-merge state is kept at
+`worktrees/uxui-before-merge` (commit `50a3ba693`). Run its lab on another port
+(`VITE_LAB=1 bunx vite --port 5178`), capture nav, settings rail and headings on
+both, and diff them; then list the files both sides touched and check each
+resolution; then list locale keys whose HEAD value equals main's and differs
+from the redesign's. Take main's BEHAVIOUR (permissions, renames, API), keep the
+redesign's INTERFACE.
+
+**What is left, smallest first**
+
+1. **Run main's e2e spec** `e2e/tests/agents/package-files-editor.ui.spec.ts`.
+   It typechecks since the merge but has never run here; it drives the creation
+   and edit pages, which this branch did not restyle.
+2. **Align the map's edit dialog.** `modules/agent-map/map-edit-dialog.tsx`
+   still saves the prompt through the legacy `content` field rather than file
+   operations. It works, and it is the last caller that does.
+3. **Decide the removed "Retirer" button on a role's unavailable permissions.**
+   Main dropped it (the server now names them in `unavailable_permissions`);
+   this branch followed main. If an admin must be able to clear one, it comes
+   back with a new test.
+4. **The lab has no package creation handler**, so a skill cannot be created
+   end to end locally: only the creation screens can be judged. Add the POST
+   fixtures, or accept that this path is verified on a real instance.
+5. **`INTEGRATION.md` cannot be deleted** once written: the API's
+   `resolveDraftContent` protects a real companion doc, and no operation
+   removes it. Either the file operations cover it or the UI says so.
+
+**How this was verified**
+
+Three Playwright scripts under the session scratchpad drive the lab
+(`t1-files`, `t2-settings`, `t3-roles`): 57 assertions covering the file
+gestures, the save bar, the tools section, the rails per role and the creation
+screens. They are the fastest way back into this state; rewrite them rather
+than clicking through by hand. The chrome-devtools MCP was unavailable, and
+Playwright against Chrome stable was enough.
+
 ### QUESTIONS FOR THE API AND THE PRODUCT (raised by the RBAC pass, 12 September 2026)
 
 Not UI work: each one is a decision or an endpoint that belongs to whoever owns
@@ -1522,6 +1637,21 @@ and each carries what the UI does in the meantime.
     `integration-runtime-adapter-docker.ts` builds node, bun, python, uv and
     binary. The server page already shows a server's runtime, so the product
     can say what it supports; the doc should say the same.
+
+12. **An integration's `INTEGRATION.md` cannot be removed** (raised 14
+    September, by wiring the editor to it). The column it lives in is shared
+    with a manifest-text fallback, and `resolveDraftContent` protects a real
+    doc from being overwritten by that fallback — which also means no write
+    clears it. A file operation deleting the entry would, if the column
+    followed; until then the UI can only add or change one.
+
+13. **Who clears a role's unavailable permissions?** (raised 14 September, by
+    the main merge.) The redesign offered a Retirer button per permission,
+    since the write route 400s on a string the deployment cannot name. Main
+    replaced the client-side derivation with a served
+    `unavailable_permissions` and dropped the button; this branch followed it.
+    If an admin must still be able to clear one, the button comes back and the
+    route has to accept the save.
 
 ### NEXT, IN ORDER (written 23 August, for whoever picks this up cold)
 
