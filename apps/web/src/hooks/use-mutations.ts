@@ -411,19 +411,20 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   const cfg = PACKAGE_CONFIG[type];
   return useMutation({
+    // Every caller builds this through `packageUpdateBody`, and none of them
+    // sends the API's `content` field any more: a package's primary file is
+    // one of its files, written as a file operation like the others.
     mutationFn: async (body: {
       manifest: Record<string, unknown>;
-      /** Legacy API content field; the editor sends ordered file operations. */
-      content?: string;
       operations?: import("../lib/package-file-tree").PackageFileWriteOperation[];
       lock_version: number;
     }): Promise<{ id: string; lock_version: number }> => {
       const { data } = await client.PUT(`/api/packages/${cfg.path}/{scope}/{name}`, {
         params: { path: splitPackageRef(packageId) },
-        // No cast needed: the body's explicit `{manifest, content,
-        // lock_version}` keys satisfy the skill/integration/mcp-server update
-        // operations (generic-object manifest) in the dynamic-path union, so
-        // the assignment typechecks directly.
+        // No cast needed: the body's explicit `{manifest, lock_version}` keys
+        // satisfy the skill/integration/mcp-server update operations
+        // (generic-object manifest) in the dynamic-path union, so the
+        // assignment typechecks directly.
         body,
       });
       // 200 → the updated package resource, bare (issue #657). The resource

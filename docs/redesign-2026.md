@@ -1535,19 +1535,33 @@ branches that both added a migration since the fork both numbered it from the
 same index, and only one of the two files survives a conflict on that journal.
 The check that catches it costs nothing: boot the API on an EMPTY database.
 
+**One body for every package write**
+
+Every save the SPA sends is now built by `packageUpdateBody`
+(`lib/package-file-drafts.ts`): the manifest, the lock version, and file
+operations. The API's `content` field — which names a different file per
+package type, `prompt.md` here and `SKILL.md` there — has no caller left, so
+the mutation hook no longer accepts it. The visual map was the last one: its
+prompt card writes `prompt.md` as an operation like the explorer does, and its
+other cards (skills, integrations, tools, schemas) send the manifest alone,
+which leaves the stored prompt untouched instead of echoing back the copy the
+dialog read when it opened.
+
+The lab's map was a fixed fixture, so a prompt written from a card never came
+back and the round trip could only be judged on a real instance. It now serves
+what the last save wrote, which is what makes the loop checkable: write from
+the card, read `prompt.md` in the explorer, see the card again.
+
 **What is left, smallest first**
 
-1. **Align the map's edit dialog.** `modules/agent-map/map-edit-dialog.tsx`
-   still saves the prompt through the legacy `content` field rather than file
-   operations. It works, and it is the last caller that does.
-2. **Decide the removed "Retirer" button on a role's unavailable permissions.**
+1. **Decide the removed "Retirer" button on a role's unavailable permissions.**
    Main dropped it (the server now names them in `unavailable_permissions`);
    this branch followed main. If an admin must be able to clear one, it comes
    back with a new test.
-3. **The lab has no package creation handler**, so a skill cannot be created
+2. **The lab has no package creation handler**, so a skill cannot be created
    end to end locally: only the creation screens can be judged. Add the POST
    fixtures, or accept that this path is verified on a real instance.
-4. **`INTEGRATION.md` cannot be deleted** once written: the API's
+3. **`INTEGRATION.md` cannot be deleted** once written: the API's
    `resolveDraftContent` protects a real companion doc, and no operation
    removes it. Either the file operations cover it or the UI says so.
 

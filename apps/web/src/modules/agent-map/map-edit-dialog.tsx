@@ -20,6 +20,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import type { ResourceEntry } from "@appstrate/shared-types";
+import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import { Modal } from "../../components/modal";
 import { Spinner } from "../../components/spinner";
 import { ResourceSection } from "../../components/agent-editor/resource-section";
@@ -33,6 +34,7 @@ import {
   manifestToSchemaFields,
   setResourceEntries,
 } from "../../components/agent-editor/utils";
+import { fileTextOperation, packageUpdateBody } from "../../lib/package-file-drafts";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useUpdatePackage } from "../../hooks/use-mutations";
 import { useActivateIntegration } from "../../hooks/use-integrations";
@@ -68,6 +70,9 @@ const TITLE_KEY: Record<MapEditKind, string> = {
 function isSchemaKind(kind: MapEditKind): kind is "input" | "output" {
   return kind === "input" || kind === "output";
 }
+
+/** An agent's prompt is one file of its bundle, and always that one. */
+const PROMPT_FILE = PACKAGE_CONTENT_ENTRY.agent!.path;
 
 interface MapEditDialogProps {
   kind: MapEditKind | null;
@@ -179,12 +184,18 @@ function MapEditForm({
       if (wrapper) next[kind] = wrapper;
       else delete next[kind];
     }
+    // The same body the explorer's save bar sends. The prompt is a FILE, so it
+    // travels as a file operation rather than through `content`, the legacy
+    // field that names a different file per package type. The other kinds
+    // touch the manifest alone, and a PUT carrying no file operation leaves
+    // the stored draft as it is — echoing the prompt as it was read when the
+    // dialog opened would be the only way to lose a concurrent edit of it.
     update.mutate(
-      {
+      packageUpdateBody({
         manifest: next,
-        content: kind === "prompt" ? draftPrompt : prompt,
         lock_version: lockVersion,
-      },
+        operations: kind === "prompt" ? [fileTextOperation(PROMPT_FILE, draftPrompt)] : [],
+      }),
       {
         onSuccess: () => {
           // The map is a projection of what we just changed, and it is the very

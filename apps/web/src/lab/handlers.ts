@@ -1122,10 +1122,24 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "GET",
     pattern: /^\/api\/agents\/[^/]+\/[^/]+\/map$/,
-    handler: (_url, scenario) =>
-      scenario === "error"
-        ? { status: 500, body: { title: "Agent map unavailable" } }
-        : { status: 200, body: f.agentMap },
+    // The map is a PROJECTION of the definition, so a prompt written from one
+    // of its cards has to come back on the next read. Without this the card
+    // kept showing the fixture and the round trip could only be judged on a
+    // real instance — which is how the map's save path went unlooked at.
+    handler: (url, scenario) => {
+      if (scenario === "error") return { status: 500, body: { title: "Agent map unavailable" } };
+      const written = changedAgentBundles.get(agentPackageId(url))?.prompt;
+      if (written === undefined || written === null) return { status: 200, body: f.agentMap };
+      return {
+        status: 200,
+        body: {
+          ...f.agentMap,
+          nodes: f.agentMap.nodes.map((node) =>
+            node.type === "agent" ? { ...node, data: { ...node.data, prompt: written } } : node,
+          ),
+        },
+      };
+    },
   },
   {
     method: "GET",
