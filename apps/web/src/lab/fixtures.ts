@@ -318,9 +318,15 @@ function presetRole(preset: LabPreset): Role {
 }
 
 /**
- * The five presets, then one org bundle: the roles page shows both kinds. The
+ * The five presets, then two org bundles: the roles page shows both kinds. A
  * bundle names a way of working, not a trade — a role cannot aim at particular
  * agents; the space it is granted in decides which agents those are.
+ *
+ * The second one is DEGRADED: it holds a permission this deployment cannot
+ * name, the way a role survives the module that granted it being unloaded.
+ * That is the only state in which the editor's "Indisponible" panel appears,
+ * and with no fixture for it the panel went unseen long enough for a stale
+ * filter to empty it for everyone.
  */
 export const roles: Json200<"/api/roles", "get"> = {
   object: "list",
@@ -346,6 +352,19 @@ export const roles: Json200<"/api/roles", "get"> = {
       unavailable_permissions: [],
       createdAt: ago(30_000),
       updatedAt: ago(4_000),
+    },
+    {
+      object: "role",
+      kind: "custom",
+      id: "role_lab_analyste",
+      key: "analyste",
+      name: "Analyste",
+      description: "Relit les runs et écrit dans le chat, quand le module chat est chargé.",
+      permissions: ["agents:read", "runs:read", "runs:read-all"],
+      // Granted when the chat module was loaded, kept by the row ever since.
+      unavailable_permissions: ["chat:write"],
+      createdAt: ago(60_000),
+      updatedAt: ago(9_000),
     },
   ],
 };

@@ -1552,19 +1552,24 @@ back and the round trip could only be judged on a real instance. It now serves
 what the last save wrote, which is what makes the loop checkable: write from
 the card, read `prompt.md` in the explorer, see the card again.
 
-**What is left, smallest first**
+**A role's unavailable permissions are shown, and no button removes them**
 
-1. **Decide the removed "Retirer" button on a role's unavailable permissions.**
-   Main dropped it (the server now names them in `unavailable_permissions`);
-   this branch followed main. If an admin must be able to clear one, it comes
-   back with a new test.
-2. **The lab has no package creation handler**, so a skill cannot be created
+Settled on 20 September, question 13 with it. The "Indisponible" panel now
+lists what the server sends instead of intersecting it with the granted half,
+which emptied it every time. The button main dropped does not come back: the
+panel already says that saving the role drops those permissions, and that is
+what saving does, so a per-permission Retirer would be a second way to spell
+one gesture. An admin who wants to keep them closes the dialog.
+
+The lab had no degraded role, which is why nobody saw the panel go blank. It
+has one now — "Analyste", holding `chat:write` from a chat module this
+deployment no longer loads.
+
+**What is left**
+
+1. **The lab has no package creation handler**, so a skill cannot be created
    end to end locally: only the creation screens can be judged. Add the POST
    fixtures, or accept that this path is verified on a real instance.
-3. **The lab has no integration the org OWNS.** Its only one carrying an
-   `INTEGRATION.md` is a system package, so the explorer offers no gesture on
-   it and the companion doc cannot be exercised locally — which is how it was
-   wrongly recorded as undeletable (see question 12). A fixture fixes it.
 
 **How this was verified**
 
@@ -1699,10 +1704,13 @@ and each carries what the UI does in the meantime.
     the doc from the MANIFEST-TEXT fallback, not from its author. What was
     observed instead was the lab: its only integration holding an
     `INTEGRATION.md` is a SYSTEM package, which nobody may edit, so the
-    explorer correctly offered no Supprimer. The lesson is the one already at
-    the top of this file — a screen with no fixture is a screen nobody looks
-    at — with a corollary: a missing fixture reads as a product limitation.
-    Check the server's own tests before writing one down.
+    explorer correctly offered no Supprimer. The org's own integration,
+    `@tractr/quickbooks-online`, was there all along and runs the whole cycle
+    in the lab: create `INTEGRATION.md`, save, Renommer and Supprimer on its
+    row, save, gone. The lesson is the one already at the top of this file — a
+    screen with no fixture is a screen nobody looks at — with a corollary: the
+    fixture you did not look for reads as a product limitation. Check the
+    server's own tests before writing one down.
 
 13. **Who clears a role's unavailable permissions?** (raised 14 September, by
     the main merge.) The redesign offered a Retirer button per permission,
@@ -1712,8 +1720,10 @@ and each carries what the UI does in the meantime.
     If an admin must still be able to clear one, the button comes back and the
     route has to accept the save.
 
-    Reading it again on 20 September turned up something else, and it is a
-    DEFECT, on main as much as here: the editor keeps the old filter
+    **Settled on 20 September: the button stays gone, and the panel is fixed.**
+    What follows is what the reading turned up, kept because the shape of the
+    mistake is worth more than the fix. It was a DEFECT, on main as much as
+    here: the editor keeps the old filter
     `unavailable_permissions.filter((p) => selected.has(p))`, while `selected`
     is now seeded from `permissions` alone — the granted half. The two sets are
     disjoint by construction, so the intersection is always empty and the
@@ -1723,7 +1733,7 @@ and each carries what the UI does in the meantime.
     the unknown permissions, because the PATCH resends `selected`. So the
     behaviour the panel exists to announce happens silently, and an admin who
     opens a degraded role to rename it clears its permissions without being
-    told. Whatever is decided about the button, the filter has to go.
+    told. The filter is gone; the panel lists what the server sends.
 
 ### NEXT, IN ORDER (written 23 August, for whoever picks this up cold)
 
