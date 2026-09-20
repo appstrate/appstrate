@@ -84,7 +84,10 @@ const ORG_MEMBER = [
   "proxies:read",
   "llm-proxy:call",
 ];
-const ORG_GUEST = ORG_MEMBER.filter((p) => p !== "members:read" && p !== "roles:read");
+// A guest sees no billing either: `@appstrate/module-ee` grants `billing:read`
+// to owner, admin and member only.
+const GUEST_EXCLUDED = ["members:read", "roles:read", "billing:read"];
+const ORG_GUEST = ORG_MEMBER.filter((p) => !GUEST_EXCLUDED.includes(p));
 
 const ORG_PERMISSIONS: Record<LabRole, string[]> = {
   owner: orgAll,
