@@ -345,9 +345,17 @@ for (const nonInline of [false, true]) {
     });
     await editor.saveButton.click();
     await expect(page).toHaveURL(`/skills/${id}`);
-    await page.getByRole("button", { name: "Actions du package" }).click();
-    await page.getByRole("menuitem", { name: "Modifier", exact: true }).click();
-    await page.getByRole("tab", { name: "Fichiers", exact: true }).click();
+    // Reopened WITHOUT a page reload, which is the whole point: the explorer
+    // must wait for a fresh index instead of seeding Monaco from the cache the
+    // save left behind. Files are reached through Paramètres › Explorer ›
+    // Fichiers; the detail page's actions menu no longer offers Modifier.
+    await page.getByRole("tab", { name: "Paramètres", exact: true }).click();
+    // Scoped to the settings rail: the main navigation carries a "Fichiers"
+    // link of its own, for the org's files, and an unscoped match takes it.
+    await page
+      .getByRole("navigation", { name: "Paramètres" })
+      .getByRole("link", { name: "Fichiers", exact: true })
+      .click();
     try {
       await expect(editor.tree).not.toBeVisible();
     } finally {

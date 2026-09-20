@@ -1514,30 +1514,40 @@ loading states, stray overlay routes, a resurrected `run-row`, and thirteen
 strings). All of it was found on 14 September by comparing against the branch
 as it stood before the merge, and restored in `48e7fd264`.
 
+It took a TENTH thing with it, which no screen could show: the migration
+`0039_rainy_next_avengers` (`organizations.logo`, added with the redesigned org
+surfaces). Main owned a `0039` of its own, the resolution kept main's, and the
+column stayed in the Drizzle schema with nothing to create it. Every existing
+database already had the column, so nothing failed here for ten days; a FRESH
+one 500'd on the first `INSERT INTO organizations`, which means a new
+self-hosted instance could not create its first organization. The e2e run below
+is what hit it. Restored as `0063_org_logo`, `IF NOT EXISTS` so the databases
+that ran the original migrate rather than abort.
+
 **The procedure, for the next merge:** the pre-merge state is kept at
 `worktrees/uxui-before-merge` (commit `50a3ba693`). Run its lab on another port
 (`VITE_LAB=1 bunx vite --port 5178`), capture nav, settings rail and headings on
 both, and diff them; then list the files both sides touched and check each
 resolution; then list locale keys whose HEAD value equals main's and differs
 from the redesign's. Take main's BEHAVIOUR (permissions, renames, API), keep the
-redesign's INTERFACE.
+redesign's INTERFACE. And **diff `packages/db/drizzle/meta/_journal.json`**: two
+branches that both added a migration since the fork both numbered it from the
+same index, and only one of the two files survives a conflict on that journal.
+The check that catches it costs nothing: boot the API on an EMPTY database.
 
 **What is left, smallest first**
 
-1. **Run main's e2e spec** `e2e/tests/agents/package-files-editor.ui.spec.ts`.
-   It typechecks since the merge but has never run here; it drives the creation
-   and edit pages, which this branch did not restyle.
-2. **Align the map's edit dialog.** `modules/agent-map/map-edit-dialog.tsx`
+1. **Align the map's edit dialog.** `modules/agent-map/map-edit-dialog.tsx`
    still saves the prompt through the legacy `content` field rather than file
    operations. It works, and it is the last caller that does.
-3. **Decide the removed "Retirer" button on a role's unavailable permissions.**
+2. **Decide the removed "Retirer" button on a role's unavailable permissions.**
    Main dropped it (the server now names them in `unavailable_permissions`);
    this branch followed main. If an admin must be able to clear one, it comes
    back with a new test.
-4. **The lab has no package creation handler**, so a skill cannot be created
+3. **The lab has no package creation handler**, so a skill cannot be created
    end to end locally: only the creation screens can be judged. Add the POST
    fixtures, or accept that this path is verified on a real instance.
-5. **`INTEGRATION.md` cannot be deleted** once written: the API's
+4. **`INTEGRATION.md` cannot be deleted** once written: the API's
    `resolveDraftContent` protects a real companion doc, and no operation
    removes it. Either the file operations cover it or the UI says so.
 
@@ -1549,6 +1559,31 @@ gestures, the save bar, the tools section, the rails per role and the creation
 screens. They are the fastest way back into this state; rewrite them rather
 than clicking through by hand. The chrome-devtools MCP was unavailable, and
 Playwright against Chrome stable was enough.
+
+Main's e2e spec `e2e/tests/agents/package-files-editor.ui.spec.ts` runs green
+here too, 16/16, against the real API. Two of its cases reopened the editor
+through the detail page's Actions › Modifier, which the redesign removed
+(`showEdit={false}`: files are edited in Paramètres › Explorer › Fichiers), so
+they now reopen it there instead — scoped to the settings rail, because the
+main navigation carries a "Fichiers" link of its own that an unscoped match
+takes. What they assert is unchanged: no reload, so the explorer still has to
+wait for a fresh index rather than seed Monaco from the cache the save left.
+
+Running it locally takes two things the config does not supply. Build the web
+app first (`cd apps/web && bun run build` — the API serves `dist`, and a stale
+one tests the wrong screens). Then start the API yourself rather than letting
+Playwright do it, because this worktree's `.env` names a PostgreSQL that is not
+running, and `PGLITE_DATA_DIR` alone does not override it:
+
+```bash
+DATABASE_URL= PORT=3000 APP_URL=http://localhost:3000 \
+  TRUSTED_ORIGINS=http://localhost:3000,http://localhost:5173 \
+  PGLITE_DATA_DIR=./data/e2e/pglite FS_STORAGE_PATH=./data/e2e/storage \
+  bun apps/api/src/index.ts
+```
+
+`webServer.reuseExistingServer` then picks it up. `data/e2e` is disposable:
+delete it to migrate from scratch, which is how the lost migration was found.
 
 ### QUESTIONS FOR THE API AND THE PRODUCT (raised by the RBAC pass, 12 September 2026)
 

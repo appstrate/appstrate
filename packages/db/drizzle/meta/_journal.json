@@ -442,6 +442,13 @@
       "when": 1788888609265,
       "tag": "0062_org_models_unique_binding",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1789933134833,
+      "tag": "0063_org_logo",
+      "breakpoints": true
     }
   ]
 }

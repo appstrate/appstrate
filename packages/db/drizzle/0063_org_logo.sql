@@ -1,0 +1,11 @@
+-- `organizations.logo` reaches the schema a second time.
+--
+-- It arrived with the redesigned org surfaces as `0039_rainy_next_avengers`,
+-- and the 10 September merge of main dropped that file: main already owned
+-- `0039`, the resolution kept main's, and the column stayed in the Drizzle
+-- schema with nothing to create it. A fresh database then 500'd on the very
+-- first `INSERT INTO organizations` — which is what the e2e suite hit.
+--
+-- `IF NOT EXISTS` because the databases that ran the original `0039` before
+-- the merge already hold the column, and they must migrate rather than abort.
+ALTER TABLE "organizations" ADD COLUMN IF NOT EXISTS "logo" text;
