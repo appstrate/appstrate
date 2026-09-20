@@ -23,15 +23,17 @@ import { translateSkillFrontmatterError } from "../lib/skill-frontmatter";
 import { ConfirmModal } from "./confirm-modal";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
-import { Trash2, MoreHorizontal, RotateCcw, History } from "lucide-react";
+import { Trash2, MoreHorizontal, RotateCcw, History, GitCompareArrows } from "lucide-react";
 
 interface VersionHistoryProps {
   packageId: string;
   type: PackageType;
   isOwned: boolean;
+  /** Compare that version with the current draft, in the section's own modal. */
+  onCompare?: (version: string) => void;
 }
 
-export function VersionHistory({ packageId, type, isOwned }: VersionHistoryProps) {
+export function VersionHistory({ packageId, type, isOwned, onCompare }: VersionHistoryProps) {
   const { t } = useTranslation(["agents", "common"]);
   const { data: versions, isLoading, error } = usePackageVersions(type, packageId);
   const [search, setSearch] = useState("");
@@ -73,7 +75,7 @@ export function VersionHistory({ packageId, type, isOwned }: VersionHistoryProps
         }}
       />
       <DataTable
-        label={t("version.archives")}
+        label={t("version.history")}
         rows={rows}
         rowKey={(version) => String(version.id)}
         surface="integrated"
@@ -140,6 +142,12 @@ export function VersionHistory({ packageId, type, isOwned }: VersionHistoryProps
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
+                        {onCompare && (
+                          <DropdownMenuItem onSelect={() => onCompare(version.version)}>
+                            <GitCompareArrows />
+                            {t("version.compareWithDraft")}
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuItem
                           disabled={restoreVersion.isPending || deleteVersion.isPending}
                           onSelect={() =>

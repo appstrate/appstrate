@@ -33,6 +33,11 @@ export function DraftDiffView({
       )}
       <DiffEditor
         height="400px"
+        // Monaco disposes its models on unmount before the widget resets, which
+        // logs "TextModel got disposed…" every time the diff closes in a modal.
+        // Keeping the models hands that cleanup back to monaco itself.
+        keepCurrentOriginalModel
+        keepCurrentModifiedModel
         theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
         language={language}
         original={original}

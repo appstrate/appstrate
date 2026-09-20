@@ -649,8 +649,6 @@
   "version.restoreConfirm": "Restore version {{version}}? The current active version will be overwritten.",
   "version.deleteConfirm": "Permanently delete version {{version}}? This action cannot be undone.",
   "version.noVersions": "No versions created",
-  "version.archives": "Version history",
-  "version.diff": "Changes",
   "version.diffManifest": "Manifest",
   "version.noChanges": "No changes since the last version",
   "version.modified": "Modified",
@@ -944,5 +942,9 @@
   "files.saved": "Files saved",
   "files.pendingCount_one": "{{count}} unsaved file change",
   "files.pendingCount_other": "{{count}} unsaved file changes",
-  "integrationEditor.allowUndeclaredTools.summary": "Agents may pick every tool of the server, including ones added after publication."
+  "integrationEditor.allowUndeclaredTools.summary": "Agents may pick every tool of the server, including ones added after publication.",
+  "version.draftAhead": "The draft holds changes that are in no version yet.",
+  "version.compare": "Compare",
+  "version.compareWithDraft": "Compare with the draft",
+  "version.history": "Version history"
 }
