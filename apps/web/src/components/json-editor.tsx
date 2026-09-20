@@ -42,7 +42,8 @@ export function JsonEditor({ value, onApply, schema }: JsonEditorProps) {
   return (
     <div className="flex flex-col gap-3">
       <Editor
-        height="600px"
+        // Same rule as the file editor: never taller than the window allows.
+        height="min(60vh, 600px)"
         language="json"
         theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
         defaultValue={initialJson}

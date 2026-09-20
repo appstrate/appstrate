@@ -1198,7 +1198,8 @@ function FileTextEditorBody({
         value={value}
         onChange={setValue}
         language={languageForPath(path)}
-        height="560px"
+        // Fits a short window: the modal must never push Appliquer off screen.
+        height="min(60vh, 560px)"
       />
       <div className="flex justify-end">
         <Button type="button" onClick={() => onApply(value)}>
