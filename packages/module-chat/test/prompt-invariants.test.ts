@@ -2,7 +2,7 @@
 
 /**
  * Guard the chat system prompt's behavioral invariants against silent drift.
- * The prompt is a single literal edited by hand; these substring checks pin the
+ * The persona is assembled by `buildSystemPrompt` from the turn's grants; these substring checks pin the
  * rules the product depends on (single sub-agent for chained actions, no run
  * metrics in replies, prefer available integrations) so a rewrite that drops
  * one fails loudly instead of degrading agent behavior in production.
@@ -148,8 +148,8 @@ describe("caller-context prompt hygiene", () => {
   });
 
   it("keeps the block free of standing instructions — they belong to the system prompt", () => {
-    // Everything the model must DO with the context is a constant, so it lives in
-    // the static prompt. The block renders data only; the sole exception is the
+    // Everything the model must DO with the context lives in the persona
+    // (`buildSystemPrompt`). The block renders data only; the sole exception is the
     // reply-language line, which is parameterised by the `X-Chat-Locale` header.
     const out = formatCallerContext({
       user: { name: "Ada" },
@@ -173,7 +173,7 @@ describe("caller-context prompt hygiene", () => {
     ]) {
       expect(out).not.toContain(imperative);
     }
-    // …and standing in the static prompt instead.
+    // …and standing in the persona instead.
     for (const imperative of [
       "Use the current date to resolve relative dates",
       "Use every `@scope/name` id verbatim",
@@ -255,6 +255,9 @@ describe("the persona without inline composition", () => {
     expect(FULL).toContain("manage agents");
     expect(REDUCED).not.toContain("manage agents");
     expect(REDUCED).toContain("configure or activate agents");
+    // Manifest fields mean nothing to a turn that may not author an agent.
+    expect(FULL).toContain("`dependencies.integrations`");
+    expect(REDUCED).not.toContain("dependencies.");
   });
 
   it("is materially shorter — the point is not to pay for what is refused", () => {

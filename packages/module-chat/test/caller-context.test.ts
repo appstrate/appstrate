@@ -64,7 +64,7 @@ describe("formatCallerContext", () => {
     expect(out).toContain("(shared; no default — you must select tools explicitly)");
     // Connected integrations are rendered as DATA ONLY. The verbatim-id rule,
     // like the preference order and the tool-catalog rule, lives outside this
-    // block — in SYSTEM_PROMPT and in the platform MCP server instructions.
+    // block — in the persona (`buildSystemPrompt`) and in the platform MCP server instructions.
     expect(out).not.toContain("Use the `@scope/name` id verbatim");
   });
 
@@ -124,12 +124,24 @@ describe("formatCallerContext", () => {
       home_writable: true,
     };
     const raw = { user: { name: "Ada" }, org: { role: "member" }, agents: [draft] };
-    expect(formatCallerContext(raw, { authoring: true })).toContain("yours to run");
-    const off = formatCallerContext(raw, { authoring: false });
+    expect(formatCallerContext(raw, { canAuthorAgents: true })).toContain("yours to run");
+    const off = formatCallerContext(raw, { canAuthorAgents: false });
     expect(off).toContain("draft, runnable only once the user turns agent authoring back on");
     // Distinct from the "draft only, not runnable" rule, which means never runnable.
     expect(off).not.toContain("draft only, not runnable");
     expect(off).not.toContain("version=draft");
+  });
+
+  it("lists attachable skills only to a turn that may author agents", () => {
+    const raw = {
+      user: { name: "Ada" },
+      org: { role: "member" },
+      skills: [{ package_id: "@acme/research", display_name: "Research" }],
+    };
+    expect(formatCallerContext(raw, { canAuthorAgents: true })).toContain(
+      "## Skills you can attach",
+    );
+    expect(formatCallerContext(raw, { canAuthorAgents: false })).not.toContain("## Skills");
   });
 
   it("says nothing about the draft for a PUBLISHED agent", () => {
@@ -200,7 +212,7 @@ describe("formatCallerContext", () => {
     expect(out).toContain("(takes input: no)");
     expect(out).toContain("`@acme/report`");
     expect(out).toContain("(takes input: yes)");
-    // Data only — the "prefer an existing agent" rule moved to SYSTEM_PROMPT.
+    // Data only — the "prefer an existing agent" rule lives in `buildSystemPrompt`.
     expect(out).not.toContain("Prefer running an existing agent");
     expect(out).not.toContain("(list truncated)");
   });
@@ -213,7 +225,7 @@ describe("formatCallerContext", () => {
       agents: [{ package_id: "@appstrate/triage", takes_input: false }],
       agents_truncated: true,
     });
-    // The marker is data; SYSTEM_PROMPT owns what to DO about it (listAgents).
+    // The marker is data; `buildSystemPrompt` owns what to DO about it (listAgents).
     expect(out).toContain("(list truncated)");
     expect(out).not.toContain('`operation_id: "listAgents"`');
   });
@@ -258,7 +270,7 @@ describe("formatCallerContext", () => {
     expect(out).toContain("`@acme/pdf`");
     // No version → no version suffix rendered.
     expect(out).not.toContain("@acme/pdf` (v");
-    // Data only — the `dependencies.skills` authoring rule moved to SYSTEM_PROMPT.
+    // Data only — the `dependencies.skills` rule lives in `buildSystemPrompt` (when the turn may author).
     expect(out).not.toContain("dependencies.skills");
     expect(out).not.toContain("(list truncated)");
   });
@@ -271,7 +283,7 @@ describe("formatCallerContext", () => {
       skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
       skills_truncated: true,
     });
-    // The marker is data; SYSTEM_PROMPT owns what to DO about it (listSkills).
+    // The marker is data; `buildSystemPrompt` owns what to DO about it (listSkills).
     // That instruction must name the operation: `search_operations` ranks
     // `listSkills` below every create/delete variant, so a keyword search is
     // not a reliable path back to the truncated list.
@@ -336,7 +348,7 @@ describe("formatCallerContext", () => {
     // The payload field still exists (it backs the MCP `get_me` tool); the
     // RENDERING is what was removed. `started_at` rewrote the system prompt on
     // every turn that launched a run, invalidating its single cache breakpoint
-    // and the conversation history behind it. SYSTEM_PROMPT tells the model to
+    // and the conversation history behind it. `buildSystemPrompt` tells the model to
     // call `listRuns` instead.
     expect(out).not.toContain("The user's recent runs");
     expect(out).not.toContain("@appstrate/triage");
@@ -394,7 +406,7 @@ describe("buildCallerContextBlock", () => {
       spaceId: "spc_1",
       user,
       deps,
-      authoring: true,
+      canAuthorAgents: true,
     });
     // Block is rendered from the dispatched payload, not from request context.
     expect(out).toContain("`@appstrate/gmail`");
@@ -414,7 +426,7 @@ describe("buildCallerContextBlock", () => {
       spaceId: "spc_1",
       user,
       deps,
-      authoring: true,
+      canAuthorAgents: true,
     });
     expect(out).toContain("Ada (ada@acme.com)");
   });
@@ -427,7 +439,7 @@ describe("buildCallerContextBlock", () => {
       spaceId: "spc_1",
       user,
       deps,
-      authoring: true,
+      canAuthorAgents: true,
     });
     expect(out).toBe("");
   });

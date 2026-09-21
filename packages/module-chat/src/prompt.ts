@@ -139,9 +139,9 @@ Files the user attaches to the conversation are shown to you as \`[Attached file
 
 Everything a run writes under \`outputs/\` is published when it ends: the files appear on the run's page, come back in the \`run_and_wait\` result's \`files\` list, and render as downloadable chips in this chat. Content merely returned through the \`output\` tool is plain data for YOU — it never becomes a file the user can open or download.${inline(` So when the user asks for a file or downloadable deliverable (a report, a CSV, an image, a PDF…), instruct the sub-agent, in its \`prompt\`, to WRITE it as a file into the \`outputs/\` directory of its workspace (creating it if needed). Do both when useful: the file in \`outputs/\` for the user, a short \`output\` payload for your own summary. Give every deliverable a concise, descriptive, task-specific kebab-case filename in the user's language, including enough subject or scope to remain understandable after it is downloaded outside this run (for example, \`analyse-concurrents-restaurants-lyon.md\`). NEVER use context-free names such as ${CONTEXT_FREE_FILENAMES_PHRASE}. When the user asks for a report or summary without naming a format, default to markdown with such a descriptive filename; only reach for another format (PDF, HTML…) when the user explicitly asks for it.`)}
 
-Your context block below is DATA — the user's identity and role, the current date, the integrations they have connected, the agents they can run, and the skills available. How to act on it:
+Your context block below is DATA — the user's identity and role, the current date, the integrations they have connected, the agents they can run${author(", and the skills available")}. How to act on it:
 - Use the current date to resolve relative dates and schedules.
-- Use every \`@scope/name\` id verbatim: in \`dependencies.integrations\`, in \`run_and_wait\`'s \`scope\`/\`name\`, and in \`dependencies.skills\`.
+- Use every \`@scope/name\` id verbatim: ${author("in `dependencies.integrations`, in `run_and_wait`'s `scope`/`name`, and in `dependencies.skills`", "in `run_and_wait`'s `scope`/`name`")}.
 - ${inline("Prefer running an existing agent over doing the work inline when one fits the task", "Run an existing agent whenever one fits the task")}. Run it with \`run_and_wait\` using \`kind:"agent"\`, then answer from the returned result.
 ${author(`- Skills are not run on their own. When you build or configure an agent and one of the listed skills fits the task, declare it under the agent manifest's \`dependencies.skills\` keyed by its id (e.g. \`"@appstrate/web-research": "^1.2.0"\`) — use the version shown, or \`"*"\` if none. The run route validates that declared skills exist.
 `)}- A list marked \`(list truncated)\` is partial: call \`invoke_operation\` with \`operation_id: "listAgents"\` or \`"listSkills"\` for the full one.
@@ -221,7 +221,7 @@ export function normalizeChatLocale(raw: string | undefined): string {
  */
 export function formatCallerContext(
   raw: unknown,
-  opts?: { locale?: string; now?: Date; authoring?: boolean },
+  opts?: { locale?: string; now?: Date; canAuthorAgents?: boolean },
 ): string {
   const ctx = (raw ?? {}) as CallerContext;
   const name = ctx.user?.name?.trim();
@@ -308,7 +308,7 @@ export function formatCallerContext(
                 ? "; draft only, not runnable — nothing published and you do not author it"
                 : // A draft runs on the author's `agents:write`, which the
                   // turn drops when authoring is off.
-                  opts?.authoring === false
+                  opts?.canAuthorAgents === false
                   ? "; draft, runnable only once the user turns agent authoring back on"
                   : "; draft only, yours to run — pass version=draft"
               : ""
@@ -317,7 +317,8 @@ export function formatCallerContext(
     }
     if (ctx.agents_truncated) lines.push("(list truncated)");
   }
-  if (ctx.skills?.length) {
+  // Skills attach to an agent the turn may author; otherwise they are noise.
+  if (ctx.skills?.length && opts?.canAuthorAgents !== false) {
     lines.push("", "## Skills you can attach to an agent");
     for (const s of ctx.skills) {
       const desc = s.description?.trim();
@@ -358,11 +359,11 @@ export async function buildCallerContextBlock(
     deps: ChatPlatformDeps;
     /** UI language forwarded by the client (`X-Chat-Locale`); defaults to fr. */
     locale?: string;
-    /** Whether this turn may author agents (see `turnPermissions`). */
-    authoring: boolean;
+    /** Whether the turn's token holds `agents:write` (see `turnPermissions`). */
+    canAuthorAgents: boolean;
   },
 ): Promise<string> {
-  const { origin, headers, spaceId, user, deps, locale, authoring } = args;
+  const { origin, headers, spaceId, user, deps, locale, canAuthorAgents } = args;
   // The persona's while previewing: this block tells the model what the caller
   // may do, and every operation it names is checked against the persona.
   const role = c.get("viewAs")?.orgRole ?? c.get("orgRole");
@@ -388,7 +389,7 @@ export async function buildCallerContextBlock(
       new Request(new URL("/api/me/context", origin).toString(), { headers: ctxHeaders }),
     );
     if (res.ok) {
-      return formatCallerContext((await res.json()) as CallerContext, { locale, authoring });
+      return formatCallerContext((await res.json()) as CallerContext, { locale, canAuthorAgents });
     }
     // No space context (e.g. requireSpaceContext rejected) — keep the
     // identity/role block rather than dropping context entirely.

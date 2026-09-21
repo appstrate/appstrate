@@ -18,7 +18,7 @@ function turnModelId(message: unknown): string | null {
   return turnMetadataFromMessage(sourceMessage(message))?.modelId ?? null;
 }
 
-/** The newest message's model; may name one that no longer exists. */
+/** The model of the newest message that carries one; may name one that no longer exists. */
 export function latestTurnModelId(messages: readonly unknown[]): string | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const id = turnModelId(messages[i]);
