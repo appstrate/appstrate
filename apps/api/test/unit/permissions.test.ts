@@ -346,29 +346,27 @@ describe("runs:read-all", () => {
 });
 
 describe("agents:run-inline", () => {
-  it("is held by builder and admin, and by neither operator, runner nor viewer", () => {
-    // `run` launches a manifest someone composed and pinned; `run-inline`
-    // executes one the request body carries. `admin`/`builder` derive the new
-    // action from the catalog — the point of asserting it is that the
-    // derivation reaches them and the three hand-enumerated presets stay out.
-    for (const preset of ["admin", "builder"] as const) {
+  it("is held by every preset that may USE the space, and withheld from `runner`", () => {
+    // `admin`/`builder` derive it from the catalog; `operator` names it
+    // explicitly, because composing a one-off agent is using the space and an
+    // operator is what an ordinary member resolves to in an `open` one.
+    for (const preset of ["admin", "builder", "operator"] as const) {
       expect(presetPermissions(preset).has("agents:run-inline"), preset).toBe(true);
     }
-    for (const preset of ["operator", "runner", "viewer"] as const) {
-      expect(presetPermissions(preset).has("agents:run-inline"), preset).toBe(false);
-    }
+    // `runner` launches what it may not READ — a body-supplied manifest naming
+    // its own dependencies is exactly how it would reach around that.
+    expect(presetPermissions("runner").has("agents:run-inline")).toBe(false);
+    // `viewer` looks; it does not launch anything, by either route.
+    expect(presetPermissions("viewer").has("agents:run-inline")).toBe(false);
+    expect(presetPermissions("viewer").has("agents:run")).toBe(false);
   });
 
-  it("does not follow from `agents:run`, in either direction", () => {
-    // The whole point of the split: `runner` and `operator` keep launching
-    // published agents and lose nothing else. A future refactor that derives
-    // one from the other fails here.
-    for (const preset of ["operator", "runner"] as const) {
-      expect(presetPermissions(preset).has("agents:run"), preset).toBe(true);
-      expect(presetPermissions(preset).has("agents:run-inline"), preset).toBe(false);
-    }
-    // And `viewer` holds neither — it looks, it does not launch.
-    expect(presetPermissions("viewer").has("agents:run")).toBe(false);
+  it("does not follow from `agents:run` — `runner` is the whole point of the split", () => {
+    // Before the split, one grant covered both acts and `runner` inherited the
+    // second with the first. A future refactor that derives one from the other
+    // fails here.
+    expect(presetPermissions("runner").has("agents:run")).toBe(true);
+    expect(presetPermissions("runner").has("agents:run-inline")).toBe(false);
   });
 
   it("is API-key grantable, and only to a creator who holds it", () => {
@@ -379,11 +377,16 @@ describe("agents:run-inline", () => {
       "agents:run",
       "agents:run-inline",
     ]);
-    // A plain member holds `operator` in the default space: the wider scope
-    // narrows away silently, like any grant above its creator.
+    // A plain member holds `operator` in the default space, which now names the
+    // grant explicitly — so both survive. The ceiling still bites elsewhere:
+    // `agents:write` is builder-and-up and narrows away for the same member.
     expect(validateScopes(["agents:run", "agents:run-inline"], inDefaultSpace("member"))).toEqual([
       "agents:run",
+      "agents:run-inline",
     ]);
+    expect(validateScopes(["agents:run-inline", "agents:write"], inDefaultSpace("member"))).toEqual(
+      ["agents:run-inline"],
+    );
   });
 
   it("is space-level, so it needs a space context to be held at all", () => {

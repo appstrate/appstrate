@@ -157,6 +157,15 @@ const OPERATOR_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> =
   new Set<SpaceLevelPermission>([
     "agents:read",
     "agents:run",
+    // Composing a one-off agent from the chat is USING the space, not
+    // authoring in it: the manifest is thrown away with the run, nothing is
+    // published, and the caller already reads the catalog it draws on. The
+    // preset that must NOT hold it is `runner`, which launches what it cannot
+    // read — a body-supplied manifest is exactly how it would reach around
+    // that. An operator in an `open` space is also what an ordinary member
+    // resolves to (`resolveSpaceRole`), so withholding it here would put the
+    // chat's inline composition behind an admin role for everyone.
+    "agents:run-inline",
     "skills:read",
     "mcp-servers:read",
     // `runs:read` alone — the runs this member launched. Seeing a colleague's

@@ -77,9 +77,12 @@ export interface CoreResources {
   // `run-inline` does NOT imply `run`, and is not derived from it. `run`
   // launches a manifest a human composed, reviewed and pinned to a version;
   // `run-inline` executes a manifest assembled at request time, declaring its
-  // own `dependencies.integrations` — arbitrary code in a container holding the
-  // space's credentials. A role that launches without auditing (`runner`) holds
-  // the first and never the second. It IS API-key grantable — `appstrate run
+  // own `dependencies.integrations`. The preset that must NOT hold it is
+  // `runner`: it launches what it may not READ, and a body-supplied manifest
+  // naming its own dependencies is exactly how it would reach around that.
+  // `operator` holds it — composing a one-off agent is using the space, the
+  // manifest dies with the run, and an operator already reads the catalog it
+  // draws on. It IS API-key grantable — `appstrate run
   // ./agent.afps` is a headless inline run — and the creator ceiling bounds it
   // to keys minted by someone who holds it. It is NOT in the OIDC end-user
   // vocabulary: an end-user is an external identity impersonating through a

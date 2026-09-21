@@ -11,7 +11,7 @@ const inlineDependencyAuthorization =
  * reference, this one about WHO may post one at all.
  */
 const inlineRunPermission =
-  " **Permission:** `agents:run-inline` — NOT `agents:run`. Running a published agent executes a manifest someone in the space composed and pinned to a version; this surface executes one the request body carries, declaring its own dependencies. They are separate grants: the `admin` and `builder` space-role presets hold both, `operator` and `runner` hold only `agents:run`. It IS grantable to an API key (the headless `appstrate run ./agent.afps` flow needs it), bounded by the creator ceiling; it is NOT in the OIDC end-user scope vocabulary.";
+  " **Permission:** `agents:run-inline` — NOT `agents:run`. Running a published agent executes a manifest someone in the space composed and pinned to a version; this surface executes one the request body carries, declaring its own dependencies. They are separate grants: the `admin`, `builder` and `operator` space-role presets hold both, while `runner` holds only `agents:run` — it launches what it may not read, and a body-supplied manifest is how it would reach around that. It IS grantable to an API key (the headless `appstrate run ./agent.afps` flow needs it), bounded by the creator ceiling; it is NOT in the OIDC end-user scope vocabulary.";
 
 /**
  * One entry of the run input-file manifest. A TS const rather than a component

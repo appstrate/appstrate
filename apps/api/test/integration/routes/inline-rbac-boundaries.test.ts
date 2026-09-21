@@ -45,12 +45,7 @@ beforeEach(async () => {
   ctx = await createTestContext({ orgSlug: "inline-rbac" });
   const guest = await createTestUser();
   await addOrgMember(ctx.orgId, guest.id, "guest");
-  // `builder`, not `operator`: posting a caller-authored manifest is
-  // `agents:run-inline`, which only `admin`/`builder` hold. The subject of this
-  // file is what an inline manifest may REFERENCE, so the actor has to clear
-  // the route's own gate first — and a builder being refused the private skill
-  // below is the stronger statement anyway.
-  await seedSpaceMember({ spaceId: ctx.defaultSpaceId, userId: guest.id, presetRole: "builder" });
+  await seedSpaceMember({ spaceId: ctx.defaultSpaceId, userId: guest.id, presetRole: "operator" });
   const hidden = await seedSpace({ orgId: ctx.orgId, visibility: "private" });
   await seedPackage({
     id: skillId,
@@ -65,7 +60,7 @@ beforeEach(async () => {
 });
 
 describe("inline dependency authorization", () => {
-  it("does not accept a private skill merely because its id was supplied by a builder", async () => {
+  it("does not accept a private skill merely because its id was supplied by an operator", async () => {
     const response = await app.request("/api/runs/inline/validate", {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },
@@ -95,7 +90,7 @@ describe("inline dependency authorization", () => {
     expect(await db.select().from(runs)).toEqual([]);
   });
 
-  it("accepts a builder's readable dependency installed in their own space", async () => {
+  it("accepts an operator's readable dependency installed in their own space", async () => {
     await seedPackageShare(ctx.defaultSpaceId, skillId);
     await seedSpacePackage(ctx.defaultSpaceId, skillId);
     const response = await app.request("/api/runs/inline/validate", {

@@ -329,38 +329,34 @@ describe("runner preset", () => {
 
   const INLINE_PATHS = ["/api/runs/inline", "/api/runs/inline/validate"] as const;
 
-  it("refuses both launch presets the inline surface outright — composing is not launching", async () => {
+  it("refuses a runner the inline surface outright — composing is not launching", async () => {
     // The inline routes take a manifest in the BODY: whoever reaches them
     // decides what code runs, which dependencies it declares and which of the
-    // space's connections it authenticates with. That is `agents:run-inline`,
-    // and neither `runner` nor `operator` holds it — they launch what someone
-    // else composed. The refusal is the route guard, BEFORE the body is read,
-    // so it does not depend on what the manifest happens to name.
+    // space's connections it authenticates with. A runner launches what someone
+    // else composed and may not even READ it, so a body-supplied manifest is
+    // exactly how it would reach around that. The refusal is the route guard,
+    // BEFORE the body is read, so it does not depend on what the manifest names.
     for (const path of INLINE_PATHS) {
-      for (const [label, actor] of [
-        ["runner", runner],
-        ["operator", operator],
-      ] as const) {
-        const denied = await app.request(path, {
-          method: "POST",
-          headers: authHeaders(actor, { "Content-Type": "application/json" }),
-          body: inlineBody(),
-        });
-        expect(`${path} ${label}: ${denied.status}`).toBe(`${path} ${label}: 403`);
-        expect(await denied.text()).toContain("agents:run-inline");
-      }
+      const denied = await app.request(path, {
+        method: "POST",
+        headers: authHeaders(runner, { "Content-Type": "application/json" }),
+        body: inlineBody(),
+      });
+      expect(`${path}: ${denied.status}`).toBe(`${path}: 403`);
+      expect(await denied.text()).toContain("agents:run-inline");
     }
   });
 
-  it("lets a holder of the grant past that guard — the refusal is the permission, not the route", async () => {
-    // The discriminating control. Without it, a guard that refused EVERYONE
-    // would look exactly like the policy above. The owner holds
-    // `agents:run-inline` (preset `admin`), posts the SAME body to the SAME
-    // routes, and whatever it gets back is not that permission denial.
+  it("lets the OPERATOR through that guard — the refusal is the preset, not the route", async () => {
+    // The discriminating control, and the adjacent preset rather than an admin:
+    // `operator` is what an ordinary member resolves to in an `open` space
+    // (`resolveSpaceRole`), so if the guard refused it too, the chat's inline
+    // composition would be admin-only for everyone. Whatever this answers, it
+    // is not the permission denial above.
     for (const path of INLINE_PATHS) {
       const res = await app.request(path, {
         method: "POST",
-        headers: authHeaders(owner, { "Content-Type": "application/json" }),
+        headers: authHeaders(operator, { "Content-Type": "application/json" }),
         body: inlineBody(),
       });
       const text = await res.text();
