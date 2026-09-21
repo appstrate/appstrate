@@ -764,7 +764,7 @@
   },
   "claude-sonnet-4-5": {
     "label": "Claude Sonnet 4 5",
-    "contextWindow": 200000,
+    "contextWindow": 1000000,
     "maxTokens": 64000,
     "capabilities": [
       "text",
@@ -797,7 +797,7 @@
   },
   "claude-sonnet-4-5-20250929": {
     "label": "Claude Sonnet 4 5 20250929",
-    "contextWindow": 200000,
+    "contextWindow": 1000000,
     "maxTokens": 64000,
     "capabilities": [
       "text",

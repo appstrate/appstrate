@@ -48,6 +48,7 @@ import {
 import { _setOrchestratorForTesting } from "../../../../services/orchestrator/index.ts";
 import { setPlatformApp } from "../../../../lib/platform-app.ts";
 import { resetCatalog } from "../../catalog.ts";
+import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
 
 const app = getTestApp();
 // Wire in-process dispatch to the test app — without it `run_and_wait` has no
@@ -55,13 +56,7 @@ const app = getTestApp();
 // registerModuleRoutes; the test harness mounts modules inline).
 setPlatformApp(app);
 
-const MCP_ACCEPT = "application/json, text/event-stream";
 const INTEGRATION = "@mcpconn/svc";
-
-interface JsonRpcEnvelope {
-  result?: Record<string, unknown>;
-  error?: { code: number; message: string };
-}
 
 /** Call an MCP tool on the caller's per-org endpoint and parse its JSON payload. */
 async function callTool(
@@ -93,7 +88,12 @@ interface ValidationFieldError {
   field?: string;
   code: string;
   message: string;
-  candidate_connection_ids?: string[];
+  candidate_connections?: {
+    id: string;
+    label: string | null;
+    account_id: string;
+    owned_by_actor: boolean;
+  }[];
 }
 
 interface ProblemDetails {
@@ -143,14 +143,21 @@ describe("mcp run_and_wait — connection_overrides", () => {
 
     expect(result.isError).toBe(true);
     // The tool surfaces the route's own status + body — the model needs BOTH
-    // the code and the candidate ids to build the retry.
+    // the code and the candidates to build the retry.
     expect(result.data.status).toBe(412);
     const body = result.data.body as ProblemDetails;
     expect(body.code).toBe("missing_integration_connection");
     const err = body.errors!.find((e) => e.field === `integrations.${INTEGRATION}`);
     expect(err).toBeDefined();
     expect(err!.code).toBe("must_choose_connection");
-    expect(err!.candidate_connection_ids!.sort()).toEqual([conn1, conn2].sort());
+    expect(err!.candidate_connections!.map((c) => c.id).sort()).toEqual([conn1, conn2].sort());
+    // Each candidate reaches the model with what tells it apart, so the retry
+    // needs no separate pass over the connection list.
+    for (const c of err!.candidate_connections!) {
+      expect(c.account_id).toBeTruthy();
+      expect(c.owned_by_actor).toBe(true);
+      expect(c).toHaveProperty("label");
+    }
 
     // Nothing was launched — the readiness gate ran before run creation.
     expect(await db.select().from(runs)).toHaveLength(0);

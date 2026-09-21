@@ -16,8 +16,8 @@ import {
 } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import type { SchemaWrapper } from "@appstrate/core/form";
-import { usePermissions } from "../hooks/use-permissions";
-import { usePackageInstallState, useTogglePackageInstall } from "../hooks/use-library";
+import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
+import { usePackageActivationState, useSetPackageActive } from "../hooks/use-library";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { LoadingState } from "../components/page-states";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
@@ -41,6 +41,7 @@ import { CreateVersionModal } from "../components/create-version-modal";
 import { ForkPackageModal } from "../components/fork-package-modal";
 // Agent-specific components
 import { AgentActions } from "../components/package-detail/agent-actions";
+import { AgentInactiveAlert } from "../components/package-detail/agent-inactive-alert";
 import {
   AgentRunsTab,
   AgentSchedulesTab,
@@ -93,16 +94,25 @@ function AgentRunButtonInline({
   if (!detail) return null;
 
   const { hasModel, hasPrompt, hasRequiredSkills } = readiness;
+  // The run gate is `system ∨ (placed here ∧ switched on)`: an agent this space
+  // merely READS answers 404 `agent_not_active_in_space` on launch. The detail
+  // response this button already holds answers it for this very space, so the
+  // control says it without a second source to fall out of step with — and
+  // without a system carve-out: a system agent switched off here is not active
+  // here, and the run gate refuses it like any other.
+  const inactiveHere = !detail.active;
   // Integration connection gaps don't disable Run — they surface as a warning
   // badge here and the recovery modal at run-kickoff (412 → MissingConnectionsModal).
-  const runDisabled = !hasPrompt || !hasRequiredSkills || !hasModel;
-  const runDisabledTitle = !hasPrompt
-    ? t("detail.titleEmptyPrompt")
-    : !hasRequiredSkills
-      ? t("detail.titleMissingSkill")
-      : !hasModel
-        ? t("detail.titleModel")
-        : undefined;
+  const runDisabled = inactiveHere || !hasPrompt || !hasRequiredSkills || !hasModel;
+  const runDisabledTitle = inactiveHere
+    ? t("detail.titleNotActive")
+    : !hasPrompt
+      ? t("detail.titleEmptyPrompt")
+      : !hasRequiredSkills
+        ? t("detail.titleMissingSkill")
+        : !hasModel
+          ? t("detail.titleModel")
+          : undefined;
 
   return (
     <RunAgentButton
@@ -167,6 +177,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const displayName = agentDetail?.display_name ?? pkgDetail?.name ?? pkgDetail?.id ?? "";
   const source = agentDetail?.source ?? pkgDetail?.source;
+  // WHICH definition the server projected. Every type answers it now, from the
+  // one function that decides it, so the read-only banner below is a single
+  // condition rather than one per type.
+  const definition = (agentDetail ?? pkgDetail)?.definition;
   const version = agentDetail?.version ?? pkgDetail?.version;
   const hasUnarchivedChanges =
     agentDetail?.has_unarchived_changes ?? pkgDetail?.has_unarchived_changes;
@@ -200,12 +214,29 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const downloadPackage = usePackageDownload(scope, name);
   const downloadBundle = useAgentBundleExport(scope, name);
   const deletePkgMutation = useDeletePackage(type);
-  const uninstallMutation = useTogglePackageInstall();
+  const setActive = useSetPackageActive();
   const currentSpaceId = useCurrentSpaceId();
-  const { installedSpaceNames, isInstalledInCurrentSpace } = usePackageInstallState(packageId);
+  // Only a skill or an MCP server needs this: their detail response carries no
+  // `active`, so the library's projection of the placement is the only answer
+  // available. An agent's detail answers for itself (`AgentDetail.active`,
+  // read by `AgentRunButtonInline`, `AgentActions` and the banner below), and
+  // asking the library too would be one page reading one fact twice — so the
+  // query is not even mounted there.
+  const { isActiveInCurrentSpace } = usePackageActivationState(packageId, {
+    enabled: type !== "agent",
+  });
+  // The package's own detail response is the authority on both halves of the
+  // home contract: the id (only when this caller reaches that space) and the
+  // write verdict. `undefined` means "not loaded yet", which every gate reads
+  // as "no".
+  const homeSpaceId = (agentDetail ?? pkgDetail)?.home_space_id;
+  const homeWritable = (agentDetail ?? pkgDetail)?.home_writable;
+  const homeDeletable = (agentDetail ?? pkgDetail)?.home_deletable;
+  const homeShareable = (agentDetail ?? pkgDetail)?.home_shareable;
+  const homeSpaceName = useHomeSpaceName(homeSpaceId);
   const [forkOpen, setForkOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{
-    type: "deletePackage" | "uninstallPackage";
+    type: "deletePackage" | "deactivatePackage";
     description: string;
   } | null>(null);
 
@@ -297,6 +328,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     source: source ?? ("local" as const),
     type,
     version,
+    homeSpaceName,
   };
 
   // ── Render ──
@@ -382,6 +414,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 isOwned={isOwned}
                 isBuiltIn={isBuiltIn}
                 isHistoricalVersion={isHistoricalVersion}
+                homeSpaceId={homeSpaceId}
+                homeWritable={homeWritable}
+                homeDeletable={homeDeletable}
+                homeShareable={homeShareable}
                 downloadVersion={downloadVersion}
                 onDownload={downloadPackage}
                 onCreateVersion={() => setCreateVersionOpen(true)}
@@ -393,31 +429,42 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   const typeLabel = t(`packages.type.${type}`, { ns: "settings" });
                   setConfirmAction({
                     type: "deletePackage",
-                    description:
-                      installedSpaceNames.length > 0
-                        ? t("packages.deleteConfirmWithSpaces", {
-                            type: typeLabel,
-                            name: nameStr,
-                            spaces: installedSpaceNames.join(", "),
-                            ns: "settings",
-                          })
-                        : t("packages.deleteConfirm", {
-                            type: typeLabel,
-                            name: nameStr,
-                            ns: "settings",
-                          }),
+                    description: t("packages.deleteConfirm", {
+                      type: typeLabel,
+                      name: nameStr,
+                      ns: "settings",
+                    }),
                   });
                 }}
-                canUninstall={isInstalledInCurrentSpace && source !== "system"}
-                onUninstall={() => {
+                // ONE pair of doors, for every family: a skill or an MCP
+                // server is switched on and off in a space exactly like an
+                // agent, through `POST` / `DELETE /api/spaces/{id}/packages`.
+                // Switching off keeps the placement and its settings.
+                canActivate={isActiveInCurrentSpace === false}
+                onActivate={() => {
+                  if (!currentSpaceId) return;
+                  setActive.mutate(
+                    { spaceId: currentSpaceId, packageId, active: true },
+                    // Same as the DEACTIVATE path below: the optimistic write
+                    // shows the switch taken and its rollback says nothing, so
+                    // the server's refusal is reported here or nowhere.
+                    {
+                      onError: (err) =>
+                        toast.error(err instanceof Error ? err.message : t("error.generic")),
+                    },
+                  );
+                }}
+                canDeactivate={isActiveInCurrentSpace === true}
+                onDeactivate={() => {
                   setConfirmAction({
-                    type: "uninstallPackage",
-                    description: t("packages.uninstallConfirm", {
+                    type: "deactivatePackage",
+                    description: t("packages.deactivateConfirm", {
                       name: displayName,
                       ns: "settings",
                     }),
                   });
                 }}
+                activationPending={setActive.isPending}
               />
             </div>
           )
@@ -431,6 +478,23 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       />
 
       {type === "agent" && <ModelRequiredAlert />}
+
+      {/* Placed here, switched off. The page renders in full — reading and
+          configuring an agent is not running it — and says the one thing that
+          would otherwise turn a click into a 404. */}
+      {agentDetail && !agentDetail.active && <AgentInactiveAlert packageId={packageId} />}
+
+      {/* Nothing has ever been published and the working copy is not this
+          reader's: what the page renders below is the author's work in
+          progress. Saying it is what makes the greyed-out Run button legible
+          — and the page renders at all precisely because reading a definition
+          is not running it. True of every package type: the server answers
+          `definition` for all four from one function. */}
+      {definition === "draft" && !homeWritable && (
+        <Alert className="mb-4">
+          <AlertDescription>{t("detail.draftReadOnly")}</AlertDescription>
+        </Alert>
+      )}
 
       {!isOwned && (
         <div className="mb-4 flex items-center gap-3 rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-3 text-sm">
@@ -561,19 +625,19 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         onClose={() => setConfirmAction(null)}
         title={t("btn.confirm", { ns: "common" })}
         description={confirmAction?.description ?? ""}
-        isPending={deletePkgMutation.isPending || uninstallMutation.isPending}
+        isPending={deletePkgMutation.isPending || setActive.isPending}
         confirmLabel={
-          confirmAction?.type === "uninstallPackage"
-            ? t("packages.uninstall", { ns: "settings" })
+          confirmAction?.type === "deactivatePackage"
+            ? t("packages.deactivate", { ns: "settings" })
             : undefined
         }
         onConfirm={() => {
           if (!confirmAction) return;
           const close = () => setConfirmAction(null);
-          if (confirmAction.type === "uninstallPackage") {
+          if (confirmAction.type === "deactivatePackage") {
             if (!currentSpaceId) return;
-            uninstallMutation.mutate(
-              { spaceId: currentSpaceId, packageId, installed: true },
+            setActive.mutate(
+              { spaceId: currentSpaceId, packageId, active: false },
               {
                 onSuccess: close,
                 onError: (err) =>

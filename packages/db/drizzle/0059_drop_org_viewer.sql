@@ -70,6 +70,14 @@
 -- per invitation, so this is a sub-second rewrite on any real installation, and
 -- on expiry the statement errors, the batch aborts and boot fails its health
 -- gate: a failed deploy, not a silent skip.
+--
+-- And RELEASED at the foot of the file, the way `0056` and `0057` release
+-- theirs. `SET LOCAL` is scoped to the transaction, not to the file, and
+-- drizzle wraps the whole pending batch in ONE transaction — so a ceiling left
+-- standing here governs `0060` … `0067` as well, none of which declares it or
+-- was sized against it. `0061` builds ten indexes on the oauth tables under it;
+-- on a large installation that is a `57014` that aborts the entire batch and
+-- names a statement in a file that never set the limit.
 SET LOCAL lock_timeout = '3s';--> statement-breakpoint
 SET LOCAL statement_timeout = '60s';--> statement-breakpoint
 
@@ -205,4 +213,12 @@ BEGIN
     ALTER COLUMN "role" TYPE "public"."org_role" USING "role"::text::org_role;
 
   DROP TYPE "public"."org_role__pre_0059";
-END $$;
+END $$;--> statement-breakpoint
+
+-- ═══ C. Hand the ceilings back ═══════════════════════════════════════════════
+--
+-- Same instrument, same reason, same spelling as `0056` and `0057`: the fences
+-- above are this file's, and the eight migrations that follow in the same
+-- transaction must not inherit them.
+SET LOCAL statement_timeout = DEFAULT;--> statement-breakpoint
+SET LOCAL lock_timeout = DEFAULT;

@@ -52,6 +52,29 @@
 -- itself (steps 0 and 5) rather than asserted here; run it against a restored
 -- `pg_dump` copy first and record the two sets of numbers.
 --
+-- ═══ WHY EVERY `org_role` COMPARISON IS `::text` ═══
+--
+-- `role = 'viewer'` is the natural spelling and it is wrong here.
+-- `packages/db/drizzle/0059_drop_org_viewer.sql` recreates `org_role` without
+-- `viewer`, and from that moment the bare literal no longer parses as a value
+-- of the type: Postgres casts it BEFORE comparing, so `role = 'viewer'` raises
+-- `22P02 invalid input value for enum org_role: "viewer"` — even against zero
+-- rows. `role::text = 'viewer'` compares strings and returns 0 instead.
+--
+-- That matters because this script is ALSO run on a database that already took
+-- `0059`. Drizzle applies the whole pending batch in one transaction, so a
+-- deployment whose watermark sits before `0056` takes `0056` … `0059` together
+-- and only then runs this file; the README's "four zeros" branch says to run it
+-- anyway, and a bare literal would answer that with an opaque `22P02` in the
+-- middle of a stopped-traffic window. `0059`'s own guard is spelled `::text`
+-- for exactly this reason — see its "WHY THE COMPARISONS ARE `::text`" section.
+--
+-- Only the `org_role` columns are converted: `org_members.role` and
+-- `org_invitations.role`. `space_members.preset_role` is `text` with a CHECK
+-- and `viewer` remains a perfectly legal SPACE preset there — a different
+-- column, a different vocabulary — and `oauth_clients.signup_role` is `text`
+-- too. Neither is cast.
+--
 -- ═══ VERIFY — the counts must DISCRIMINATE ═══
 --
 -- The script prints counts before and after, in one transaction, and verifies
@@ -75,8 +98,8 @@
 --
 --   -- Standalone re-check, after the fact:
 --   SELECT
---     (SELECT count(*) FROM org_members     WHERE role = 'viewer')                AS viewers_left,
---     (SELECT count(*) FROM org_invitations WHERE role = 'viewer'
+--     (SELECT count(*) FROM org_members     WHERE role::text = 'viewer')          AS viewers_left,
+--     (SELECT count(*) FROM org_invitations WHERE role::text = 'viewer'
 --                                             AND status = 'pending')             AS pending_left,
 --     (SELECT count(*) FROM space_members   WHERE preset_role = 'viewer')         AS viewer_rows,
 --     (SELECT count(*) FROM oauth_clients   WHERE signup_role = 'guest'
@@ -112,9 +135,9 @@ CREATE TABLE IF NOT EXISTS drizzle.migration_scripts (
 -- `ON COMMIT DROP`: the table lives exactly as long as this transaction, so a
 -- failed run leaves nothing behind and a re-run starts clean.
 CREATE TEMP TABLE mig0008_viewers ON COMMIT DROP AS
-  SELECT org_id, user_id FROM org_members WHERE role = 'viewer';
+  SELECT org_id, user_id FROM org_members WHERE role::text = 'viewer';
 CREATE TEMP TABLE mig0008_invitations ON COMMIT DROP AS
-  SELECT id, org_id FROM org_invitations WHERE role = 'viewer' AND status = 'pending';
+  SELECT id, org_id FROM org_invitations WHERE role::text = 'viewer' AND status = 'pending';
 -- Same reason as the two above: step 4 fills the snapshot, so afterwards there
 -- is no way left to ask which clients owed one.
 CREATE TEMP TABLE mig0008_oauth_clients ON COMMIT DROP AS
@@ -165,7 +188,7 @@ BEGIN
     JOIN spaces s ON s.org_id = v.org_id
     JOIN space_members m ON m.space_id = s.id AND m.user_id = v.user_id;
   SELECT count(*) INTO v_pending
-    FROM org_invitations WHERE role = 'viewer' AND status = 'pending';
+    FROM org_invitations WHERE role::text = 'viewer' AND status = 'pending';
   SELECT count(*) INTO v_clients FROM mig0008_oauth_clients;
   RAISE NOTICE 'before: % org viewer(s), % (user, space) pair(s) to cover, % already covered by a hand-added row, % pending viewer invitation(s), % legacy viewer OAuth client(s)',
     v_viewers, v_expected, v_existing, v_pending, v_clients;
@@ -184,7 +207,7 @@ JOIN spaces s ON s.org_id = v.org_id
 ON CONFLICT (space_id, user_id) DO NOTHING;
 
 -- ═══ 2. The org role itself ═════════════════════════════════════════════════
-UPDATE org_members SET role = 'guest' WHERE role = 'viewer';
+UPDATE org_members SET role = 'guest' WHERE role::text = 'viewer';
 
 -- ═══ 3. Pending invitations ═════════════════════════════════════════════════
 --
@@ -194,7 +217,7 @@ UPDATE org_invitations i SET space_assignments = i.space_assignments || COALESCE
   SELECT jsonb_agg(jsonb_build_object('space_id', s.id, 'preset_role', 'viewer') ORDER BY s.id)
   FROM spaces s WHERE s.org_id = i.org_id
     AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(i.space_assignments) a WHERE a->>'space_id' = s.id)
-), '[]'::jsonb), role = 'guest' WHERE role = 'viewer' AND status = 'pending';
+), '[]'::jsonb), role = 'guest' WHERE role::text = 'viewer' AND status = 'pending';
 
 -- ═══ 4. OIDC clients that auto-provision on signup ══════════════════════════
 --
@@ -234,9 +257,9 @@ DECLARE
   v_spaceless_clients bigint;
   v_missing_client_assignments bigint;
 BEGIN
-  SELECT count(*) INTO v_viewers FROM org_members WHERE role = 'viewer';
+  SELECT count(*) INTO v_viewers FROM org_members WHERE role::text = 'viewer';
   SELECT count(*) INTO v_pending
-    FROM org_invitations WHERE role = 'viewer' AND status = 'pending';
+    FROM org_invitations WHERE role::text = 'viewer' AND status = 'pending';
   SELECT count(*) INTO v_expected
     FROM mig0008_viewers v JOIN spaces s ON s.org_id = v.org_id;
   SELECT count(*) INTO v_covered

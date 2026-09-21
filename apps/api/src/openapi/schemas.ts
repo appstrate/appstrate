@@ -3,7 +3,7 @@
 import { orgRoleEnum } from "@appstrate/db/schema";
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
 import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
-import { SPACE_ID_RE } from "../lib/ids.ts";
+import { SPACE_ID_RE } from "@appstrate/db/ids";
 
 const ORG_ROLES = [...orgRoleEnum.enumValues];
 
@@ -35,7 +35,42 @@ const RUNTIME_TOOL_IDS = [...SELECTABLE_RUNTIME_TOOLS];
  * does not keep. Sharing the PROPERTIES instead is what keeps the two halves
  * from drifting on the descriptions.
  */
+/**
+ * The `home_space_id` / `home_writable` / `home_deletable` / `home_shareable`
+ * group, on every shape that carries a package's home (`AgentDetail`,
+ * `OrgPackageItem`, `OrgPackageItemDetail`, `LibraryPackageList`). ONE
+ * definition: the server computes all four in one place (`homeWireForCaller`),
+ * and four hand-copied descriptions drifted the moment the contract changed.
+ */
+const PACKAGE_HOME_PROPERTIES = {
+  home_space_id: {
+    type: ["string", "null"],
+    description:
+      "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: a colleague's personal space, for instance, which is readable through a placement but never nameable, or a system package, which the platform ships into every space instead of housing in one. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority.",
+  },
+  home_writable: {
+    type: "boolean",
+    description:
+      "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that.",
+  },
+  home_deletable: {
+    type: "boolean",
+    description:
+      "Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete.",
+  },
+  home_shareable: {
+    type: "boolean",
+    description:
+      "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it.",
+  },
+} as const;
+
 export const ORG_SETTINGS_PROPERTIES = {
+  restrict_package_copy: {
+    type: "boolean",
+    description:
+      "When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space: `POST /api/packages/{scope}/{name}/fork`, `GET /api/packages/{scope}/{name}/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt on all three: the CLI's skills sync downloads them into a local checkout by design. A SERVER-side agent run is unaffected — it assembles the same bundle and hands it to nobody — but `appstrate run --local`, which downloads one, is not: a copy of the agent leaves the platform to perform it, which is what this setting is about.",
+  },
   api_version: {
     type: "string",
     description:
@@ -102,11 +137,30 @@ export const schemas = {
       },
       // Channel-specific smuggles surfaced by services/integration-connection-resolver.ts:translateResolutionError.
       // Documented here so SDK consumers can rely on them without reading the resolver source.
-      candidate_connection_ids: {
+      candidate_connections: {
         type: "array",
-        items: { type: "string" },
+        items: {
+          type: "object",
+          required: ["id", "label", "account_id", "owned_by_actor"],
+          properties: {
+            id: { type: "string" },
+            label: {
+              type: ["string", "null"],
+              description: "User-given name; `null` when the connection was never labelled.",
+            },
+            account_id: {
+              type: "string",
+              description: "The auth's account discriminator (`sub` claim, email, host…).",
+            },
+            owned_by_actor: {
+              type: "boolean",
+              description:
+                "True when the connection is the caller's own, false when inherited via org sharing.",
+            },
+          },
+        },
         description:
-          "Populated on `must_choose_connection`. Connection ids the caller may pick from; pass one back via the request body's `connection_overrides` map to retry the run.",
+          "Populated on `must_choose_connection`. The connections the caller may pick from, each carrying the fields that tell them apart; pass one `id` back via the request body's `connection_overrides` map to retry the run.",
       },
       connection_id: {
         type: "string",
@@ -271,32 +325,28 @@ export const schemas = {
   },
   SpacePackage: {
     type: "object",
-    description: "A package installed in a space with its model/proxy/version overrides.",
-    // The installedPackageSelect projection emits every field unconditionally
+    description:
+      "A package PLACED in a space, with `enabled` and its model/proxy overrides. The row survives deactivation — every setting on it is kept — and goes away only when the placement behind it is withdrawn: the share is revoked (`DELETE /api/packages/{scope}/{name}/shares/{target}`), or the package's home moves out of the space with `keep_in_previous_home: false`. It carries no version: outside its home space a package runs its latest published version, and its draft runs for whoever can write it.",
+    // The spacePackageSelect projection emits every field unconditionally
     // (package_type/package_source come from the join). `object` is spec-only
-    // (not on the InstalledPackage type). Stored input values and their locks
+    // (not on the SpacePackage shared type). Stored input values and their locks
     // are not here — they are read via `GET /api/agents/{scope}/{name}`
     // (`AgentDetail.input`), where the schema and the locks travel with them.
     //
     // CASING: this object deliberately mixes cases and the spec matches the
-    // runtime serializer (`services/space-packages.ts:installedPackageSelect`)
+    // runtime serializer (`services/space-packages.ts:spacePackageSelect`)
     // field-for-field — spec==runtime is the hard invariant, so do NOT "normalize".
     //   - `packageId`/`modelId`/`proxyId`/`updatedAt` are camelCase per the
     //     universal *Id / timestamp carve-out (docs/CASING_CONVENTIONS.md).
-    //   - `version_id`/`installed_at` are snake_case: the projection aliases them
-    //     that way, so they DIVERGE from the *Id / timestamp carve-out. Documented
-    //     module carve-out — the write path (`updatePackageSchema`,
-    //     `PUT .../packages/{scope}/{name}` body) uses the same `version_id` key,
-    //     so read and write stay symmetric. A client that sends `versionId`
-    //     (camel, per the carve-out expectation) has its version pin silently
-    //     dropped by the Zod body schema — the divergence is load-bearing and
-    //     intentional here, not an accident.
+    //   - `installed_at` is snake_case: the projection aliases the COLUMN of
+    //     that name, so it DIVERGES from the timestamp carve-out. Documented
+    //     module carve-out, and the one place the activation vocabulary does
+    //     not reach — the column is data, renamed by a migration or not at all.
     required: [
       "packageId",
       "generationConfig",
       "modelId",
       "proxyId",
-      "version_id",
       "enabled",
       "installed_at",
       "updatedAt",
@@ -312,7 +362,6 @@ export const schemas = {
       },
       modelId: { type: ["string", "null"], description: "Model override for this space" },
       proxyId: { type: ["string", "null"], description: "Proxy override for this space" },
-      version_id: { type: ["integer", "null"], description: "Pinned version (null = latest)" },
       enabled: { type: "boolean" },
       installed_at: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -320,7 +369,7 @@ export const schemas = {
       package_source: { type: "string", enum: ["system", "local"] },
       draft_manifest: {
         type: ["object", "null"],
-        description: "Raw draft manifest JSONB for the installed package.",
+        description: "Raw draft manifest JSONB for the placed package.",
       },
     },
   },
@@ -468,12 +517,17 @@ export const schemas = {
   },
   AgentSkillRef: {
     type: "object",
-    required: ["id"],
+    required: ["id", "home_writable"],
     properties: {
       id: { type: "string" },
       version: { type: "string" },
       name: { type: "string" },
       description: { type: "string" },
+      home_writable: {
+        type: "boolean",
+        description:
+          'Whether THIS caller holds the skill\'s `skills:write` in its home space — i.e. whether its DRAFT is theirs to run. A launch may opt one dependency into its working copy with `dependency_overrides: { "@scope/skill": "draft" }`, and the run routes answer `403 draft_not_writable` when this is false, so a client offers that option only where it is true. Always emitted.',
+      },
     },
   },
   AgentListItem: {
@@ -482,6 +536,8 @@ export const schemas = {
     // emitted by the GET /api/agents mapper. `display_name`/`description`/
     // `schema_version`/`author` stay optional (manifest-derived, may be absent);
     // `forked_from` is not emitted by the list endpoint (shared-type optional).
+    // There is no `active`: the listing IS the active set, so the field could
+    // only ever say `true` — `AgentDetail.active` is where the switch is read.
     required: [
       "id",
       "source",
@@ -554,16 +610,26 @@ export const schemas = {
     // shared-type marks them optional to match). `forked_from` is optional for
     // a second reason: a summary read (`agents:run` without `agents:read`)
     // withholds the authoring history along with the manifest and the prompt.
+    // The home group (`home_space_id`/`home_writable`/`home_deletable`/
+    // `home_shareable`) is NOT part of that withheld set: a summary read still
+    // has to know it may not edit, and an absent boolean would read as "not
+    // answered yet" rather than "no".
     required: [
       "id",
       "source",
       "scope",
       "version",
+      "definition",
       "dependencies",
       "input",
       "running_runs",
       "last_run",
       "effective_timeout_seconds",
+      "active",
+      "home_space_id",
+      "home_writable",
+      "home_deletable",
+      "home_shareable",
     ],
     properties: {
       id: { type: "string" },
@@ -576,6 +642,12 @@ export const schemas = {
           "Scope from manifest name, including the leading `@` (e.g. `@myorg`). Directly usable as the `{scope}` path parameter of package/agent operations.",
       },
       version: { type: ["string", "null"], description: "Version from manifest" },
+      definition: {
+        type: "string",
+        enum: ["draft", "published"],
+        description:
+          'WHICH definition every manifest-derived field here was projected from: `draft` is the author\'s working copy, `published` a `package_versions` snapshot (the `latest` one, or the version `?version=` named). With no selector: the draft for a caller who may WRITE the agent, otherwise the latest published version, and — when nothing is published — the draft in read-only, because a package the listing shows must have a page. `definition: "draft"` together with `home_writable: false` is therefore the pair that means "never published, you are seeing the author\'s work in progress": a launch with no selector will answer `404 no_published_version`, so a client disables it and says why rather than offering a button that cannot work.',
+      },
       manifest: {
         allOf: [{ $ref: "#/components/schemas/AgentManifest" }],
         description: "Full manifest object (user agents only)",
@@ -706,6 +778,7 @@ export const schemas = {
         description: "Number of published versions (0 for built-in agents)",
       },
       forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
+      ...PACKAGE_HOME_PROPERTIES,
       has_unarchived_changes: {
         type: "boolean",
         description: "Whether the active version has changes not yet archived as a version",
@@ -714,6 +787,11 @@ export const schemas = {
         type: "integer",
         description:
           "Run timeout that will actually be enforced, in seconds: the manifest's `timeout` (or the platform default when it declares none) clamped to this deployment's `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`. Compare with `manifest.timeout` to detect a capped declaration. Emitted for system agents too, which do not expose `manifest`.",
+      },
+      active: {
+        type: "boolean",
+        description:
+          "Whether the agent is ACTIVE in the space this detail was read from — the placement row's `enabled` where the package is placed here, the deployment's default where the space holds no row. Answered by the detail itself so a loaded page needs no second call. READING an agent never requires it to be active, which is why this endpoint answers 200 on `active: false` while `POST …/run`, `POST …/schedules` and `GET …/bundle` answer `404 agent_not_active_in_space`. The agents INDEX carries no such field — it lists the active set — so a page that must render an inactive agent reaches it from the space library. Always emitted.",
       },
     },
   },
@@ -1372,11 +1450,17 @@ export const schemas = {
       "updatedAt",
       "name",
       "description",
+      "icon",
+      "keywords",
       "created_by",
       "used_by_agents",
       "version",
       "auto_installed",
       "forked_from",
+      "home_space_id",
+      "home_writable",
+      "home_deletable",
+      "home_shareable",
     ],
     properties: {
       id: { type: "string" },
@@ -1386,6 +1470,17 @@ export const schemas = {
       },
       name: { type: "string" }, // getPackageDisplayName always returns a string (falls back to id)
       description: { type: ["string", "null"] },
+      icon: {
+        type: ["string", "null"],
+        description:
+          "The manifest's `icon` (an Iconify id), `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone.",
+      },
+      keywords: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "The manifest's `keywords`, `[]` when it declares none — what an index page's search matches on beyond the name and the description.",
+      },
       source: { type: "string", enum: ["system", "local"] },
       created_by: { type: ["string", "null"] },
       created_by_name: { type: "string" },
@@ -1393,6 +1488,7 @@ export const schemas = {
       version: { type: ["string", "null"], description: "Manifest version (semver)" },
       auto_installed: { type: "boolean" },
       forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
+      ...PACKAGE_HOME_PROPERTIES,
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },
@@ -1415,7 +1511,12 @@ export const schemas = {
       "version",
       "auto_installed",
       "forked_from",
+      "home_space_id",
+      "home_writable",
+      "home_deletable",
+      "home_shareable",
       "agents",
+      "definition",
     ],
     properties: {
       id: { type: "string" },
@@ -1425,7 +1526,17 @@ export const schemas = {
       },
       name: { type: "string" }, // getPackageDisplayName always returns a string (falls back to id)
       description: { type: ["string", "null"] },
-      content: { type: ["string", "null"], description: "Package item content" },
+      definition: {
+        type: "string",
+        enum: ["draft", "published"],
+        description:
+          'WHICH definition `content`, `manifest` and every field projected from them were read from: `draft` is the author\'s working copy, `published` a `package_versions` snapshot (the `latest` one, or the version `?version=` named). With no selector: the draft for a caller who may WRITE the package, otherwise the latest published version, and — when nothing is published — the draft in read-only, because a package the listing shows must have a page. The SAME rule and the same two functions the agent detail and the file explorer use, so the Content tab and the Files tab can never disagree about which bytes they are showing. `definition: "draft"` together with `home_writable: false` means "never published, you are seeing the author\'s work in progress".',
+      },
+      content: {
+        type: ["string", "null"],
+        description:
+          "The package's primary content: `SKILL.md` for a skill, `INTEGRATION.md` for an integration, the manifest text for an mcp-server (which has no companion file of its own) and for an integration published without one. Read from the draft or from the published archive according to `definition`.",
+      },
       source: { type: "string", enum: ["system", "local"] },
       created_by: { type: ["string", "null"] },
       auto_installed: { type: "boolean" },
@@ -1445,6 +1556,7 @@ export const schemas = {
         description: "Whether the active version has changes not yet archived as a version",
       },
       forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
+      ...PACKAGE_HOME_PROPERTIES,
       agents: {
         type: "array",
         items: {
@@ -1637,7 +1749,7 @@ export const schemas = {
   IntegrationCredentialsResponse: {
     type: "object",
     description:
-      "Live credentials + per-auth HTTP delivery plans + per-auth expiries for an installed integration. Returned by both `GET /internal/integration-credentials/{scope}/{name}` and `POST .../refresh` (identical shape). Feeds the sidecar's MITM `MitmCredentialSource.current()` + `.deliveryPlans()`. All wire keys are snake_case per AFPS (see `docs/CASING_CONVENTIONS.md` — internal sidecar↔platform endpoints share the Zone 1 default).",
+      "Live credentials + per-auth HTTP delivery plans + per-auth expiries for an active integration. Returned by both `GET /internal/integration-credentials/{scope}/{name}` and `POST .../refresh` (identical shape). Feeds the sidecar's MITM `MitmCredentialSource.current()` + `.deliveryPlans()`. All wire keys are snake_case per AFPS (see `docs/CASING_CONVENTIONS.md` — internal sidecar↔platform endpoints share the Zone 1 default).",
     required: ["auths", "delivery_plans", "expires_at_epoch_ms"],
     properties: {
       auths: {
@@ -1755,17 +1867,18 @@ export const schemas = {
   AgentConnectionReadiness: {
     type: "object",
     description:
-      "Bulk integration connection readiness for an agent. `blocks_run`/`errors` mirror the run-kickoff 412 (run semantics); `integrations[]` carries every declared integration's management verdict for the Connexions tab.",
+      "What stands between this agent and a run, in one call: the connection verdict (mirroring the run-kickoff 412, run semantics) plus the space's own activation switch. `integrations[]` carries every declared integration's management verdict for the Connexions tab.",
     required: ["blocks_run", "errors", "integrations"],
     properties: {
       blocks_run: {
         type: "boolean",
-        description: "True iff POST /api/agents/{scope}/{name}/run would reject with 412.",
+        description:
+          "True iff `POST /api/agents/{scope}/{name}/run` would refuse — a connection the resolver rejects (412), or the agent being switched off in this space (404 `agent_not_active_in_space`). Equivalently: `errors` is non-empty.",
       },
       errors: {
         type: "array",
         description:
-          "Integration portion of the 412 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors). Shares the single ResolutionFieldError component so the shape can't drift from the 412 error items.",
+          'What blocks the run. The integration portion of the 412 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors), plus, FIRST when it applies, `{ field: "agent", code: "agent_not_active" }` — the space has switched the agent off, so the run doors answer `404 agent_not_active_in_space` while this read answers 200 and says why. The remedy is `POST /api/spaces/{spaceId}/packages`. Shares the single ResolutionFieldError component so the shape can\'t drift from the 412 error items.',
         items: { $ref: "#/components/schemas/ResolutionFieldError" },
       },
       integrations: {
@@ -1829,6 +1942,23 @@ export const schemas = {
       updatedAt: { type: "string", format: "date-time" },
     },
   },
+  SpaceSweepResult: {
+    type: "object",
+    required: ["object", "space_id", "rehomed_packages", "deleted_packages"],
+    properties: {
+      object: { type: "string", enum: ["space_sweep"] },
+      space_id: { type: "string", description: "The personal space that was swept and deleted" },
+      rehomed_packages: {
+        type: "integer",
+        description:
+          "Packages this space homed that another space has placed: re-homed to the organization's default space rather than deleted",
+      },
+      deleted_packages: {
+        type: "integer",
+        description: "Packages this space homed that no other space had placed: deleted",
+      },
+    },
+  },
   SpaceObject: {
     type: "object",
     required: [
@@ -1840,6 +1970,7 @@ export const schemas = {
       "settings",
       "visibility",
       "default_role",
+      "personal",
       "access",
       "role",
       "permissions",
@@ -1873,6 +2004,17 @@ export const schemas = {
         type: "string",
         enum: [...SPACE_ROLE_PRESETS],
         description: "Preset the implicit members of an `open` space hold",
+      },
+      personal: {
+        type: "boolean",
+        description:
+          "Whether this space is one member's personal space. Such a space is reached by its owner alone — organization owners and admins included — takes no other members, is always `private`, and only its name can be changed. Its owner is deliberately not named on the wire.",
+      },
+      orphaned_at: {
+        type: ["string", "null"],
+        format: "date-time",
+        description:
+          "When the owner of this personal space stopped being a member of the organization; null while they are one. Present only for organization owners and admins, the only callers an orphaned personal space is listed to — they may convert it to a team space or sweep it immediately. Absent on every other projection.",
       },
       access: {
         type: "string",
@@ -2123,14 +2265,25 @@ export const schemas = {
   LibraryPackageList: {
     type: "array",
     description:
-      "Packages of a single type visible to the org. Each entry carries an " +
-      "`installed_in` array listing the caller-org spaces where the package " +
-      "is currently installed (empty array = not installed in any of the caller's spaces).",
+      "Packages of a single type visible to the org. Each entry carries its " +
+      "`placements`: one entry per space the package is placed in and the caller reads, saying WHY it " +
+      "is there (`via`) and whether that space runs it (`state`).",
     items: {
       type: "object",
-      required: ["id", "type", "source", "name", "description", "installed_in"],
+      required: [
+        "id",
+        "type",
+        "source",
+        "name",
+        "description",
+        "home_space_id",
+        "home_writable",
+        "home_deletable",
+        "home_shareable",
+        "placements",
+      ],
       properties: {
-        id: { type: "string", description: "Package id (`pkg_…`)." },
+        id: { type: "string", description: "Package id (`@scope/name`)." },
         type: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
         source: {
           type: "string",
@@ -2147,13 +2300,112 @@ export const schemas = {
           description:
             "Description from the package draft manifest; empty string when not provided.",
         },
-        installed_in: {
+        ...PACKAGE_HOME_PROPERTIES,
+        placements: {
           type: "array",
           description:
-            "Space ids (`spc_…`) belonging to the caller's org where this package is installed.",
-          items: { type: "string" },
+            "Where this package is PLACED, restricted to spaces the caller reads this type in. Empty when the " +
+            "package is placed nowhere the caller can see — which the space form still lists when the caller " +
+            "could place it there in one click (a package whose home grants them `<type>:share`).",
+          items: { $ref: "#/components/schemas/PackagePlacement" },
         },
       },
+    },
+  },
+  PackagePlacement: {
+    type: "object",
+    description:
+      "One (package, space) cell of the library map: why the package reaches that space, and whether the space runs it.",
+    required: ["space_id", "via", "state", "shared_by"],
+    properties: {
+      space_id: {
+        type: "string",
+        description: "Space id (`spc_…`) — always one the caller reads.",
+      },
+      via: {
+        type: "string",
+        enum: ["home", "shared", "system"],
+        description:
+          "WHY the package is placed here: `home` (this space owns it and governs its draft), `shared` (it was offered to this space), `system` (a built-in package, readable in every space).",
+      },
+      state: {
+        type: "string",
+        enum: ["active", "inactive", "none"],
+        description:
+          "Whether the space RUNS it. `active`: yes. `inactive`: it was switched off here, and its per-space model, proxy and input settings are kept. `none`: nothing has switched it on yet — a pending offer is exactly this. Activate with `POST /api/spaces/{spaceId}/packages`, deactivate with `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none`.",
+      },
+      shared_by: {
+        type: ["object", "null"],
+        description:
+          'Who offered it — on `via: "shared"` placements only. `null` there when the offer came from a home move rather than from a person, once that account is gone, or once they have left this organization. Always `null` for `home` and `system`.',
+        required: ["user_id", "name"],
+        properties: {
+          user_id: { type: "string" },
+          name: { type: "string" },
+        },
+      },
+    },
+  },
+  ShareTarget: {
+    type: "object",
+    description:
+      "Who a package is offered to. A PERSON is not a space: a `user` target is resolved server-side to that member's personal space, so the sharer never handles the id of a space they cannot see. A `space` target must be one the caller can already reach — which is also why another member's personal space is not targetable by id.",
+    required: ["kind"],
+    oneOf: [
+      {
+        type: "object",
+        required: ["kind", "user_id"],
+        properties: {
+          kind: { type: "string", enum: ["user"] },
+          user_id: { type: "string", description: "Organization member's user id." },
+        },
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        required: ["kind", "space_id"],
+        properties: {
+          kind: { type: "string", enum: ["space"] },
+          space_id: { type: "string", description: "Space id (`spc_…`) the caller can reach." },
+        },
+        additionalProperties: false,
+      },
+    ],
+  },
+  ShareTargetView: {
+    type: "object",
+    description:
+      "A share's subject as the server renders it back. A personal-space target comes back as its OWNER — never as a space id, which is the one fact a personal space withholds.",
+    required: ["kind", "name"],
+    properties: {
+      kind: { type: "string", enum: ["user", "space"] },
+      user_id: { type: "string", description: "Present when `kind` is `user`." },
+      space_id: { type: "string", description: "Present when `kind` is `space`." },
+      name: {
+        type: "string",
+        description: "The member's display name, or the space's name.",
+      },
+    },
+  },
+  PackageShare: {
+    type: "object",
+    description:
+      "One entry of a package's AUDIENCE (`package_shares`): a space the package is offered to. A share grants READ and the affordance to activate; it is never an activation, and no execution path consults it.",
+    required: ["object", "target", "shared_by", "created_at"],
+    properties: {
+      object: { type: "string", enum: ["package_share"] },
+      target: { $ref: "#/components/schemas/ShareTargetView" },
+      shared_by: {
+        type: ["object", "null"],
+        description:
+          "Who shared it. `null` once that account is gone, and `null` once they have left this organization.",
+        required: ["user_id", "name"],
+        properties: {
+          user_id: { type: "string" },
+          name: { type: "string" },
+        },
+      },
+      created_at: { type: "string", format: "date-time" },
     },
   },
 } as const;

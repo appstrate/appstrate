@@ -63,6 +63,11 @@ export function PackageCard({
           {type === "agent" && !!runningRuns && runningRuns > 0 && <Badge status="running" />}
           {type === "agent" && (
             <div onClick={(e) => e.stopPropagation()}>
+              {/* Listed here IS runnable here: the index and the launch routes
+                  read the same rule (placed in this space and switched on), so
+                  the card never has to explain an activation the row could not
+                  carry. A package placed here but switched off is not on this
+                  list at all — it is in the space library, with its switch. */}
               <RunAgentButton
                 packageId={id}
                 variant="ghost"

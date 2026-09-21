@@ -35,8 +35,8 @@
  * See also:
  * - `services/oauth-admin.ts` — the underlying `createInstanceClientFromEnv`,
  *   `compareDeclaredClientWithStored`, and `listInstanceClientIds` helpers.
- * - `docs/architecture/OSS_EE_SPEC.md` — why we avoid HTTP admin surface
- *   for instance clients.
+ * - the OSS/EE split spec (internal, `appstrate/docs` repository — not in this
+ *   tree) — why we avoid HTTP admin surface for instance clients.
  */
 
 import { z } from "zod";

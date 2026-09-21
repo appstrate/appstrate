@@ -33,10 +33,15 @@ import {
   addOrgMember,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedApiKey, seedSpace } from "../../helpers/seed.ts";
+import { seedPackage, seedApiKey, seedSpace, seedPackageShare } from "../../helpers/seed.ts";
 import { orgPermissions, presetPermissions, validateScopes } from "../../../src/lib/permissions.ts";
-import { eq } from "drizzle-orm";
-import { integrationConnections, spacePackages } from "@appstrate/db/schema";
+import { and, eq } from "drizzle-orm";
+import {
+  auditEvents,
+  integrationConnections,
+  packageShares,
+  spacePackages,
+} from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   localIntegrationManifest,
@@ -81,13 +86,19 @@ function gmailManifest(name = "@myorg/gmail"): IntegrationManifest {
   });
 }
 
-async function seedIntegration(orgId: string, manifest: IntegrationManifest) {
+/**
+ * `homeSpaceId` is the PLACEMENT, not decoration: a `space_packages` row only
+ * speaks for a space the package is placed in, so an integration seeded with
+ * no home and activated in a space would read as inactive everywhere.
+ */
+async function seedIntegration(orgId: string, manifest: IntegrationManifest, homeSpaceId?: string) {
   return seedPackage({
     id: manifest.name,
     orgId,
     type: "integration",
     source: "local",
     draftManifest: manifest,
+    ...(homeSpaceId ? { homeSpaceId } : {}),
   });
 }
 
@@ -119,7 +130,7 @@ describe("block_user_connections workflow", () => {
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
-    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"), ctx.defaultSpaceId);
     await activate(ctx.defaultSpaceId, "@myorg/gmail");
   });
 
@@ -277,7 +288,20 @@ describe("block_user_connections — auto-active system integration", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
     // Seed gmail but DO NOT activate it — no space_packages row exists.
-    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    // `source: "system"` because that is what an integration the DEPLOYMENT
+    // offers actually is: `system-packages/` imports them that way, and
+    // `SYSTEM_INTEGRATIONS` names that subset. It matters here because
+    // materializing the placement row now goes through the activation door,
+    // which asks the placement rule — and a `local` package homed nowhere is
+    // placed nowhere, so a fixture spelling it that way would be asserting
+    // against a state no deployment produces.
+    await seedPackage({
+      id: "@myorg/gmail",
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "system",
+      draftManifest: gmailManifest("@myorg/gmail"),
+    });
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/clickup"));
     // gmail ships a system client → auto-active. clickup does not.
     initSystemIntegrations([
@@ -319,6 +343,21 @@ describe("block_user_connections — auto-active system integration", () => {
       .where(eq(spacePackages.packageId, "@myorg/gmail"));
     expect(row?.enabled).toBe(true);
     expect(row?.blocked).toBe(true);
+
+    // …written through the ONE door that creates placement rows
+    // (`activatePackageWithin`), and audited as what it is: nothing. The
+    // integration was already on by the deployment's default, so the row
+    // records no decision and `package.activated` has nothing to say.
+    const activated = await db
+      .select({ id: auditEvents.id })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.action, "package.activated"),
+          eq(auditEvents.resourceId, "@myorg/gmail"),
+        ),
+      );
+    expect(activated).toHaveLength(0);
   });
 
   it("404s when toggling block on a non-system integration that is not installed", async () => {
@@ -334,6 +373,87 @@ describe("block_user_connections — auto-active system integration", () => {
       .from(spacePackages)
       .where(eq(spacePackages.packageId, "@myorg/clickup"));
     expect(rows).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// 1c. block_user_connections on an ORPHAN placement row
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * A `space_packages` row with neither a home nor a share behind it is the
+ * ORPHAN `scripts/migration/0016` repairs — inherited residue no live path
+ * writes, and a decision about an integration this space has LOST.
+ *
+ * The gate that enforces this flag (`isUserConnectionCreationBlocked`) asks
+ * PLACEMENT, so honouring the row here would persist a lock nothing enforces:
+ * `200 blocked: true`, a padlock on the Integrations page, and
+ * `POST …/connect` still admitting every member. The write must refuse instead
+ * — through the same 404 an integration that is not installed already gets.
+ */
+describe("block_user_connections — ORPHAN placement row", () => {
+  let ctx: TestContext;
+  const ORPHAN = "@myorg/orphan-gmail";
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "myorg" });
+    // Homed in ANOTHER space of the org — reachable by the owner in session,
+    // so the route's gate passes and what the assertion reads is the placement
+    // conjunct, not an authorization refusal standing in for it.
+    const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+    await seedIntegration(ctx.orgId, gmailManifest(ORPHAN), elsewhere.id);
+    // The row, and ONLY the row: no home here, no offer here.
+    await activate(ctx.defaultSpaceId, ORPHAN);
+  });
+
+  const patchBlock = (blocked: boolean) =>
+    app.request(`/api/integrations/${ORPHAN}/settings`, {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ block_user_connections: blocked }),
+    });
+
+  it("404s the PATCH on an orphan row, writes no flag and grafts no share", async () => {
+    const res = await patchBlock(true);
+    expect(res.status, await res.clone().text()).toBe(404);
+
+    // The row is exactly as it was seeded — the UPDATE matched nothing, and
+    // the activation door it fell through to rolled the transaction back.
+    const [row] = await db
+      .select({
+        enabled: spacePackages.enabled,
+        blocked: spacePackages.blockUserConnections,
+      })
+      .from(spacePackages)
+      .where(
+        and(eq(spacePackages.spaceId, ctx.defaultSpaceId), eq(spacePackages.packageId, ORPHAN)),
+      );
+    expect(row?.blocked).toBe(false);
+    expect(row?.enabled).toBe(true);
+    // A refusal is not a repair: the offer that would place it is not written.
+    expect(
+      await db.select().from(packageShares).where(eq(packageShares.packageId, ORPHAN)),
+    ).toEqual([]);
+  });
+
+  it("succeeds on the exact same PATCH once a share PLACES the integration here", async () => {
+    // The discriminating control: same row, same request, one offer apart.
+    await seedPackageShare(ctx.defaultSpaceId, ORPHAN);
+
+    const res = await patchBlock(true);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await res.json()) as { block_user_connections: boolean }).toMatchObject({
+      block_user_connections: true,
+    });
+
+    const [row] = await db
+      .select({ blocked: spacePackages.blockUserConnections })
+      .from(spacePackages)
+      .where(
+        and(eq(spacePackages.spaceId, ctx.defaultSpaceId), eq(spacePackages.packageId, ORPHAN)),
+      );
+    expect(row?.blocked).toBe(true);
   });
 });
 

@@ -87,8 +87,10 @@ function fakeContext(opts: {
     user: opts.user,
     // What `enterSpaceContext` writes on every `/api/chat/*` route.
     space: { id: opts.spaceId },
+    principalKind: "user",
     orgRole: "member",
-    permissions: [],
+    // A Set, as `enterSpaceContext` writes and `ChatEnv` declares.
+    permissions: new Set<string>(),
   };
   const headers = new Headers({ "x-space-id": opts.spaceId });
   return {

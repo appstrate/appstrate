@@ -67,6 +67,7 @@ import {
   applySpaceAssignments,
   assertSpaceAssignmentsValid,
 } from "../../../services/space-assignments.ts";
+import { provisionMember } from "../../../services/organizations.ts";
 import type { AuthIdentity } from "../auth/types.ts";
 import { getClientCached } from "./oauth-admin.ts";
 
@@ -139,17 +140,12 @@ export async function resolveOrCreateOrgMembership(
   // Step 3: auto-provision. ON CONFLICT DO NOTHING handles the race between
   // two concurrent logins; if we lose, re-read via step 1.
   const inserted = await db.transaction(async (tx) => {
-    const [created] = await tx
-      .insert(organizationMembers)
-      .values({
-        orgId,
-        userId: authUser.id,
-        role: policy.signupRole,
-      })
-      .onConflictDoNothing({
-        target: [organizationMembers.orgId, organizationMembers.userId],
-      })
-      .returning({ role: organizationMembers.role });
+    // `provisionMember` is THE membership door (RBAC spec §3.6): it writes the
+    // membership row and the member's personal space in this transaction, so an
+    // SSO-provisioned member is not the one population without one. `created`
+    // is its ON CONFLICT DO NOTHING `RETURNING` — the loser of the concurrent-
+    // login race gets `false` and re-reads through step 1.
+    const { created } = await provisionMember(tx, orgId, authUser.id, policy.signupRole);
     if (!created) return null;
     const assignments = policy.signupSpaceAssignments ?? [];
     try {
@@ -168,7 +164,7 @@ export async function resolveOrCreateOrgMembership(
       if (error instanceof ApiError) throw new OrgSignupConfigurationError(error.message);
       throw error;
     }
-    return created;
+    return { role: policy.signupRole };
   });
 
   if (inserted) {

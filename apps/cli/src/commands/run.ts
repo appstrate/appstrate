@@ -133,7 +133,7 @@ export interface RunCommandOptions {
   proxy?: string;
   /**
    * When true, ignore the per-space `run-config` (model / proxy /
-   * versionPin) and rely only on flags + env vars + defaults. Useful
+   * generation / stored inputs) and rely only on flags + env vars + defaults. Useful
    * for deterministic CI runs where the space's persisted state
    * must not drift the run.
    */
@@ -250,13 +250,11 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   //     verified against the server's integrity header and discarded
   //     when the run finishes — no on-disk cache. Requires a remote
   //     integration mode so we already have the bearer token + spaceId in
-  //     `resolverInputs`. The inherited `versionPin` is applied as the
-  //     spec when the user did not type `@spec` themselves.
-  const bundleTarget =
-    target.kind === "id" && !target.spec && inheritedConfig.versionPin
-      ? { ...target, spec: inheritedConfig.versionPin }
-      : target;
-  const bundleSource = await resolveBundleSource(bundleTarget, opts, resolverInputs);
+  //     `resolverInputs`. An id without `@spec` fetches the latest
+  //     published version, like every other surface; the author's working
+  //     copy is reached by naming it (`@draft`), and the instance answers
+  //     `403 draft_not_writable` to anyone who cannot write the package.
+  const bundleSource = await resolveBundleSource(target, opts, resolverInputs);
   const bundle =
     bundleSource.kind === "path"
       ? await readBundleFromFile(bundleSource.path)
@@ -1084,7 +1082,6 @@ async function maybeFetchRunConfig(
       inherited: null,
       flagModel: opts.model,
       flagProxy: opts.proxy,
-      hasExplicitSpec: target.kind === "id" ? target.spec !== undefined : false,
       envModel: process.env.APPSTRATE_MODEL_ID,
       envProxy: process.env.APPSTRATE_PROXY,
     });
@@ -1107,7 +1104,6 @@ async function maybeFetchRunConfig(
     inherited: payload,
     flagModel: opts.model,
     flagProxy: opts.proxy,
-    hasExplicitSpec: idTarget.spec !== undefined,
     envModel: process.env.APPSTRATE_MODEL_ID,
     envProxy: process.env.APPSTRATE_PROXY,
   });
@@ -1125,7 +1121,13 @@ type BundleSource =
       version: string;
       /** Whether the fetched bundle came from draft state or a published release. */
       registryStage: "draft" | "published";
-      /** Spec the user/inheritance asked for (only set for published). */
+      /**
+       * Version spec to resolve server-side, when the user named one that
+       * needs resolving. The two reserved selectors (`draft`, `published`)
+       * are carried by `registryStage` instead: `POST /api/runs/remote`
+       * feeds `spec` to `resolveExportVersion`, which knows semver, ranges
+       * and dist-tags — and neither keyword is a dist-tag.
+       */
       spec: string | undefined;
       /** SRI digest (`sha256-…`) the server reported for the artifact. */
       integrity: string;
@@ -1174,7 +1176,7 @@ async function resolveBundleSource(
     packageId: target.packageId,
     version: fetched.version,
     registryStage: fetched.stage,
-    spec: target.spec,
+    spec: target.spec === "draft" || target.spec === "published" ? undefined : target.spec,
     integrity: fetched.integrity,
   };
 }

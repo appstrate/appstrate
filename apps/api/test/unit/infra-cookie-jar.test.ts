@@ -4,7 +4,7 @@
  * Unit tests for the infra cookie jar stores.
  *
  * Redis impl is exercised via a fake {@link KeyValueCache} injected through
- * the `getCache` seam (dependency injection, per CLAUDE.md mocking policy —
+ * the `getCache` seam (dependency injection, per AGENTS.md mocking policy —
  * no `mock.module`). The in-memory impl needs no infra.
  */
 

@@ -22,7 +22,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
@@ -111,12 +111,13 @@ describe("credential-proxy integration-resolver", () => {
     token = startTokenServer();
     await seedPackage({
       id: INTEGRATION_ID,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
       draftManifest: gmailManifest(token.url),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION_ID);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION_ID);
     const [oauthClient] = await db
       .insert(integrationOauthClients)
       .values({
@@ -196,6 +197,7 @@ describe("credential-proxy integration-resolver", () => {
     const NO_AUTH = "@official/noauth";
     await seedPackage({
       id: NO_AUTH,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
@@ -220,7 +222,7 @@ describe("credential-proxy integration-resolver", () => {
         },
       },
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, NO_AUTH);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, NO_AUTH);
 
     await expect(
       resolveIntegrationProxyCredentials({ ...input(), integrationId: NO_AUTH }),

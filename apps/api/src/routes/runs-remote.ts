@@ -10,7 +10,8 @@
  * long-running remote run.
  *
  * Both routes authenticate via JWT bearer (interactive CLI) or API key
- * with the `agents:run` scope (headless — GitHub Action, CI). HMAC-signed
+ * with the `agents:run` scope (headless — GitHub Action, CI); an inline
+ * `source` also takes `agents:write`. HMAC-signed
  * event ingestion lives in a separate router (`runs-events.ts`) because
  * its auth model is fundamentally different.
  *
@@ -29,14 +30,18 @@ import { FILE_URI_PREFIX, UPLOAD_URI_PREFIX } from "@appstrate/core/file-uri";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
+import { assertPermission, requirePermission } from "../middleware/require-permission.ts";
 import { invalidRequest, notFound, forbidden, ApiError } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { getActor } from "../lib/actor.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getPlatformRunLimits } from "../services/run-limits.ts";
-import { assertPackageDependenciesAccessible } from "../lib/package-access.ts";
+import {
+  assertPackageDependenciesAccessible,
+  assertDraftSelectorAllowed,
+  assertDependencyDraftOverridesAllowed,
+} from "../lib/package-access.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import type { IntegrationManifestCache } from "../services/integration-service.ts";
 import { collectFileRefs } from "../services/input-parser.ts";
@@ -46,7 +51,7 @@ import { createRun } from "../services/run-creation.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { resolveRegistryAgent } from "../services/registry-run-resolver.ts";
 import { validateInput } from "../services/schema.ts";
-import { getInstalledPackageSettings } from "../services/space-packages.ts";
+import { getSpacePackageSettings } from "../services/space-packages.ts";
 import { resolveEffectiveInput } from "../services/input-resolution.ts";
 import { validateAgentReadiness } from "../services/agent-readiness.ts";
 import { assertSpaceInScope } from "../services/spaces.ts";
@@ -129,8 +134,14 @@ export const CreateRemoteRunBodySchema = z
         (snap) => !snap || JSON.stringify(snap).length <= CONTEXT_SNAPSHOT_MAX_BYTES,
         `contextSnapshot exceeds ${CONTEXT_SNAPSHOT_MAX_BYTES} bytes`,
       ),
+    // Closed like the root: this body already carries `contextSnapshot` in
+    // camelCase by carve-out, so `sink: { ttlSeconds }` is the confusion the
+    // shape invites. Open, that typo is stripped while `body.sink` stays
+    // truthy, the run silently takes REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS (2h)
+    // and a long run's events are refused in flight — while the SAME field
+    // misspelt on `PATCH /api/runs/{id}/sink/extend` is a 400.
     sink: z
-      .object({
+      .strictObject({
         ttl_seconds: z.number().int().positive().max(86400).optional(),
       })
       .optional(),
@@ -230,11 +241,26 @@ export function createRunsRemoteRouter() {
         body.dependency_overrides && Object.keys(body.dependency_overrides).length > 0
           ? body.dependency_overrides
           : null;
-
+      // A dependency opted into its working copy needs the SAME authority here
+      // as on the platform run route: the host the run executes on changes
+      // nothing about who owns the unpublished bytes. Asked once per branch
+      // rather than once above them, because the gate now judges the keys
+      // against the EFFECTIVE manifest and the two branches get that manifest
+      // from different places — the catalog here, the request body there. Both
+      // placements stay ahead of every write this handler makes (the inline
+      // branch's shadow package row is inserted after its own).
       if (src.kind === "registry") {
         // Server-resolved attribution. The runner names the package; we
         // load manifest+prompt from our own catalog. No fingerprint
         // reconciliation, no shadow row, no "Inline" badge.
+        //
+        // FIRST, and before the draft-authority gate below: this is where the
+        // execution question is asked, and its `not_placed` answer is the same
+        // 404 a nonexistent id gets. The platform run route gets that ordering
+        // from its middleware (`requireAgent()` loads the agent before the
+        // handler runs at all); here the handler owns it, and asking authority
+        // first would answer `403 draft_not_writable` for a package the caller
+        // is not entitled to know exists.
         const resolved = await resolveRegistryAgent({
           orgId,
           spaceId,
@@ -243,16 +269,26 @@ export function createRunsRemoteRouter() {
           spec: src.spec,
           ...(src.integrity ? { integrityHint: src.integrity } : {}),
         });
+        // `stage: "draft"` is `?version=draft` spelled for this surface, so it
+        // answers to the one predicate that says who owns a working copy —
+        // otherwise the 403 the platform run route returns is a formality any
+        // caller holding `agents:run` steps around by posting here instead.
+        await assertDraftSelectorAllowed(c, src.packageId, src.stage);
         agentForRun = resolved.agent;
         overrideVersionLabel = resolved.versionLabel;
         attributionPath = "registry";
+        await assertDependencyDraftOverridesAllowed(
+          c,
+          dependencyOverrides,
+          agentForRun.manifest as unknown as Record<string, unknown>,
+        );
 
         // A cataloged agent has per-space settings, so the run's input
         // resolves through the same four layers as a platform run: author
         // defaults < editor defaults < caller input, with locked fields
         // refused (400 `locked_input_field`). There is no schedule layer here.
-        const { values: storedValues, locked: lockedFields } = await getInstalledPackageSettings(
-          spaceId,
+        const { values: storedValues, locked: lockedFields } = await getSpacePackageSettings(
+          { orgId, spaceId },
           agentForRun.id,
         );
         const inputSchema = agentForRun.manifest.input?.schema;
@@ -293,10 +329,18 @@ export function createRunsRemoteRouter() {
           actor,
         });
       } else {
+        // Composing: `agents:write` on top of the route's `agents:run` —
+        // mirror of `canComposeInline` (@appstrate/core/permissions).
+        assertPermission(c, "agents", "write");
         // Inline path — the runner ships a manifest+prompt blob. Validate
         // structurally, then create a shadow LoadedPackage. All inline
         // runs land on a shadow ephemeral package ("Inline" badge in UI);
         // callers who want deterministic attribution use kind=registry.
+        // The posted manifest IS the effective one on this branch — it is the
+        // definition the run executes — so the keys are judged against it
+        // before the preflight resolves a single pin.
+        await assertDependencyDraftOverridesAllowed(c, dependencyOverrides, src.manifest);
+
         const preflight = await runInlinePreflight({
           authorizeDependencies: (manifest) => assertPackageDependenciesAccessible(c, manifest),
           orgId,

@@ -37,11 +37,13 @@ import { mintSessionId } from "../src/session-id.ts";
 import { acquirePiChatSlot, releaseOnClose } from "../src/pi-chat/concurrency.ts";
 import type { PiChatInput } from "../src/pi-chat/engine.ts";
 import type { ChatAttachmentRequest } from "@appstrate/core/chat-contract";
+import type { PrincipalKind } from "@appstrate/core/module";
 import { buildChatPlatformDeps, type ChatPlatformDeps } from "../src/platform-services.ts";
 import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
 import { errorHandler } from "../../../apps/api/src/middleware/error-handler.ts";
 import { initSystemModelProviderKeys } from "../../../apps/api/src/services/model-registry.ts";
-import { SYSTEM_PROMPT } from "../src/prompt.ts";
+import { buildSystemPrompt } from "../src/prompt.ts";
+import { chatLoopbackStrategy } from "../src/loopback-auth.ts";
 
 // The chat handler reads the system model registry; the HTTP harness initializes it at boot.
 initSystemModelProviderKeys();
@@ -192,9 +194,12 @@ async function collectUiChunks(
 
 describe("handleChatStream", () => {
   let ctx: TestContext;
+  /** What `app.onError` saw, so a thrown invariant can be asserted on its message. */
+  let handlerError: Error | null = null;
 
   beforeEach(async () => {
     await truncateAll();
+    handlerError = null;
     ctx = await createTestContext({ orgSlug: "chat-handler-org" });
   });
 
@@ -203,17 +208,23 @@ describe("handleChatStream", () => {
     deps: ReturnType<typeof buildChatPlatformDeps>,
     engine?: ChatEngine,
     permissions: Set<string> = new Set<string>(),
+    principalKind: PrincipalKind = "user",
   ) {
     const app = new Hono<ChatEnv>();
     // Mirror production's RFC 9457 error boundary so invalid client input is
-    // asserted at the HTTP contract, not as an uncaught handler exception.
-    app.onError((error, context) => errorHandler(error, context as never));
+    // asserted at the HTTP contract, not as an uncaught handler exception. The
+    // boundary renders a non-`ApiError` as a bare 500, so keep the error itself.
+    app.onError((error, context) => {
+      handlerError = error;
+      return errorHandler(error, context as never);
+    });
     app.post("/api/chat", (c) => {
       c.set("orgId", ctx.orgId);
       c.set("user", ctx.user);
       // What `enterSpaceContext` writes on every `/api/chat/*` route in
       // production — the session's space and the scope of the turn's reads.
       c.set("space", { id: ctx.defaultSpaceId });
+      c.set("principalKind", principalKind);
       c.set("orgRole", "owner");
       c.set("orgName", ctx.org.name);
       c.set("orgSlug", ctx.org.slug);
@@ -242,6 +253,10 @@ describe("handleChatStream", () => {
       permissions?: Set<string>;
       /** Replace the single user message (to carry a composer attachment). */
       parts?: unknown[];
+      /** The kind the auth pipeline resolved; production reaches here as `user` only. */
+      principalKind?: PrincipalKind;
+      /** The composer's agent-authoring switch for this turn; omitted = on. */
+      agentAuthoring?: boolean;
     },
   ): Promise<Response> {
     // Real platform deps (the same context `init()` gets), with dispatch
@@ -254,7 +269,7 @@ describe("handleChatStream", () => {
         ? { resolveChatAttachment: overrides.resolveChatAttachment }
         : {}),
     };
-    const app = buildApp(deps, engine, overrides?.permissions);
+    const app = buildApp(deps, engine, overrides?.permissions, overrides?.principalKind);
     const res = await app.request("/api/chat", {
       method: "POST",
       headers: {
@@ -272,10 +287,30 @@ describe("handleChatStream", () => {
           },
         ],
         ...(generation ? { generation } : {}),
+        ...(overrides?.agentAuthoring === undefined
+          ? {}
+          : { agent_authoring: overrides.agentAuthoring }),
       }),
     });
     return res;
   }
+
+  it("refuses to mint a loopback for a principal that is not the user", async () => {
+    // `chat:read`/`chat:write` are neither `apiKeyGrantable` nor
+    // `endUserGrantable` (`index.ts`), so nothing but a `user` principal reaches
+    // this handler today — and `chatLoopbackStrategy` declares `principalKind:
+    // "user"` on that basis. Widening those grants must break here, loudly,
+    // rather than hand a key's loopback the creator's personal spaces.
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(mintSessionId(), undefined, engine, {
+      principalKind: "delegate",
+    });
+
+    expect(res.status).toBe(500);
+    expect(handlerError?.message).toMatch(/loopback minted for a delegate principal/);
+    // Refused before the turn began: no engine call, no persisted session.
+    expect(calls).toEqual([]);
+  });
 
   it("hands the composer attachment the caller's own permission set", async () => {
     // The gallery the user picks an `appfile://` from is filtered by
@@ -451,7 +486,9 @@ describe("handleChatStream", () => {
     // (4) The system prompt was assembled from the caller context. There are no
     // inline MCP instructions on this path: the engine's own handshake delivers
     // them, and it is handed the org-scoped URL to open it with.
-    expect(input.system).toContain(SYSTEM_PROMPT.slice(0, 64));
+    expect(input.system).toContain(
+      buildSystemPrompt({ canComposeInline: false, canAuthorAgents: false }).slice(0, 64),
+    );
     expect(input.system).toContain(CONTEXT_ORG_MARKER);
     expect(input.platformMcp.url).toContain(`/api/mcp/o/${encodeURIComponent(ctx.orgId)}`);
     expect(input.platformMcp.headers.Authorization).toMatch(/^Bearer /);
@@ -597,4 +634,69 @@ describe("handleChatStream", () => {
     expect(second.calls[0]!.system).not.toContain("provider timed out");
     expect(second.calls[0]!.system).not.toContain("@acme/report");
   }, 20_000);
+
+  describe("the composer's agent-authoring switch", () => {
+    /** The permission set the turn's platform-MCP bearer actually carries. */
+    async function tokenPermissions(input: PiChatInput): Promise<string[]> {
+      const authorization = input.platformMcp?.headers?.Authorization;
+      expect(typeof authorization).toBe("string");
+      const resolved = await chatLoopbackStrategy.authenticate({
+        headers: new Headers({ authorization: authorization as string }),
+      } as never);
+      expect(resolved).not.toBeNull();
+      return [...(resolved!.permissions ?? [])].sort();
+    }
+
+    /** The one argument a model needs to compose an inline agent, whatever the prose. */
+    const INLINE_MARKER = 'kind:"inline"';
+    const REDUCED_MARKER = "Do not create or modify an agent in this turn";
+
+    const BUILDER = new Set(["agents:read", "agents:run", "agents:write"]);
+
+    async function turn(permissions: Set<string>, agentAuthoring?: boolean) {
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(mintSessionId(), undefined, engine, {
+        permissions,
+        ...(agentAuthoring === undefined ? {} : { agentAuthoring }),
+      });
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      const input = calls[0]!;
+      return { token: await tokenPermissions(input), system: input.system };
+    }
+
+    it("keeps `agents:write` and teaches inline composition when on", async () => {
+      const { token, system } = await turn(BUILDER, true);
+      expect(token).toEqual(["agents:read", "agents:run", "agents:write"]);
+      expect(system).toContain(INLINE_MARKER);
+      expect(system).not.toContain(REDUCED_MARKER);
+    });
+
+    it("drops only `agents:write` from the token and the inline teaching when off", async () => {
+      const { token, system } = await turn(BUILDER, false);
+      expect(token).toEqual(["agents:read", "agents:run"]);
+      expect(system).not.toContain(INLINE_MARKER);
+      expect(system).toContain(REDUCED_MARKER);
+    });
+
+    it("is on when the body carries no flag", async () => {
+      const { token, system } = await turn(BUILDER);
+      expect(token).toContain("agents:write");
+      expect(system).toContain(INLINE_MARKER);
+    });
+
+    it("never grants `agents:write` to a caller who lacks it", async () => {
+      const { token, system } = await turn(new Set(["agents:run"]), true);
+      expect(token).toEqual(["agents:run"]);
+      expect(system).not.toContain(INLINE_MARKER);
+    });
+
+    it("teaches inline composition only with `agents:run` as well", async () => {
+      const { token, system } = await turn(new Set(["agents:write"]), true);
+      expect(token).toEqual(["agents:write"]);
+      expect(system).not.toContain(INLINE_MARKER);
+      // It may still create agents: nothing tells it otherwise.
+      expect(system).not.toContain(REDUCED_MARKER);
+    });
+  });
 });

@@ -3,6 +3,7 @@
 import { useCallback, useMemo } from "react";
 import { useOrg } from "./use-org.ts";
 import { useSpaces } from "./use-spaces.ts";
+import type { SpaceGrant } from "../lib/package-permissions.ts";
 import { useCurrentSpaceId } from "./use-current-space.ts";
 import type { OrgRole } from "@appstrate/shared-types";
 import { ORG_ROLES_WITH_FULL_ACCESS, type CorePermission } from "@appstrate/core/permissions";
@@ -43,6 +44,26 @@ export function useCanPreviewRole(): boolean {
   return orgRole !== null && (ORG_ROLES_WITH_FULL_ACCESS as readonly OrgRole[]).includes(orgRole);
 }
 
+/** Organization catalog administration follows the effective organization role. */
+export function useCanManageOrgCatalog(): boolean {
+  const { orgRole } = usePermissions();
+  return orgRole === "owner" || orgRole === "admin";
+}
+
+/**
+ * Display name of a package's home space, or `null` when there is none to show.
+ *
+ * `home_space_id` is already `null` whenever the caller does not reach the home
+ * (the server withholds the id — RBAC spec §6.9), so this covers both a package
+ * with no home at all and a home that belongs to somebody else. There is no
+ * companion "can I write it" hook: that answer is `home_writable` on the
+ * package's own read, computed server-side.
+ */
+export function useHomeSpaceName(homeSpaceId: string | null | undefined): string | null {
+  const { data: spaces } = useSpaces();
+  return (homeSpaceId && spaces?.find((s) => s.id === homeSpaceId)?.name) || null;
+}
+
 /**
  * Permission gating for the UI.
  *
@@ -81,4 +102,38 @@ export function usePermissions() {
   const ready = !!currentOrg && !spacesLoading && (!!space || !enterableSpaceExists);
 
   return { can, ready, orgRole: currentOrg?.role ?? null };
+}
+
+/**
+ * The caller's standing in ONE named space, in the shape the activation verdict
+ * reads (`maySetPackageActive`). Activating a package is judged in the TARGET
+ * space and nowhere else, and owning that space is its own authorization —
+ * neither fact survives the org∪space union `can` computes, so the row itself
+ * travels.
+ *
+ * Any space, not only the current one: a surface may ask about a space the
+ * caller is not standing in (the share dialog asks about a package's HOME), and
+ * `can` would answer for the wrong one. The array is safe to read that way
+ * because the server already unions the org half into every row
+ * (`effectiveInSpace`, `apps/api/src/lib/view-as.ts`) — so for the current
+ * space this agrees with `can` by construction.
+ *
+ * `undefined` while `GET /api/spaces` is in flight, for no space at all, or for
+ * a space this caller does not reach: all three read as "not yet", never as a
+ * refusal.
+ */
+export function useSpaceGrant(spaceId: string | null | undefined): SpaceGrant | undefined {
+  const { data: spaces } = useSpaces();
+  const space = spaceId ? spaces?.find((s) => s.id === spaceId) : undefined;
+  if (!space) return undefined;
+  return {
+    permissions: space.permissions,
+    personal: space.personal,
+    access: space.access,
+  };
+}
+
+/** {@link useSpaceGrant} for the space the caller is currently in. */
+export function useCurrentSpaceGrant(): SpaceGrant | undefined {
+  return useSpaceGrant(useCurrentSpaceId());
 }

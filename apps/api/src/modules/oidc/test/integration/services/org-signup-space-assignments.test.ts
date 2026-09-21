@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { organizationMembers, spaceMembers, spaces } from "@appstrate/db/schema";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
-import { setFeatureFlag } from "../../../../../../test/helpers/app.ts";
 import {
   createTestContext,
   createTestUser,
@@ -20,17 +19,9 @@ import {
 
 describe("OIDC signup space assignments", () => {
   let owner: TestContext;
-  let restoreFlag: () => void;
   beforeEach(async () => {
     await truncateAll();
-    // A signup policy naming a bundle grants one at every login it drives, so
-    // it asks the same licence a direct grant does (`assertCustomRolesFeature`).
-    restoreFlag = setFeatureFlag("custom_roles", true);
     owner = await createTestContext({ orgSlug: "oidc-assignment" });
-  });
-
-  afterEach(() => {
-    restoreFlag();
   });
 
   function orgClient(
@@ -45,8 +36,10 @@ describe("OIDC signup space assignments", () => {
     });
   }
 
-  it("rejects guest configurations without assignments and admin configurations with them", async () => {
-    await expect(orgClient({ signupRole: "guest" })).rejects.toThrow("at least one space");
+  it("accepts guest configurations without assignments and rejects admin configurations with them", async () => {
+    // A guest lands in their own personal space (RBAC spec §3.6), so a signup
+    // policy that grants no team space is a policy, not a dead account.
+    expect((await orgClient({ signupRole: "guest" })).signupSpaceAssignments).toEqual([]);
     await expect(
       orgClient({
         signupRole: "admin",
@@ -68,12 +61,16 @@ describe("OIDC signup space assignments", () => {
         ?.signupSpaceAssignments,
     ).toEqual(second);
     expect((await loadClientSignupPolicy(client.clientId))?.signupSpaceAssignments).toEqual(second);
-    await expect(updateClient(client.clientId, { signupSpaceAssignments: [] })).rejects.toThrow(
-      "at least one space",
-    );
+    // Promoting to `admin` while grants are stored is refused against the
+    // STORED list, so this has to run before the list is cleared.
     await expect(updateClient(client.clientId, { signupRole: "admin" })).rejects.toThrow(
       "must be empty",
     );
+    // Clearing the grants of a guest policy is allowed — the personal space
+    // remains, so the policy still provisions somewhere.
+    expect(
+      (await updateClient(client.clientId, { signupSpaceAssignments: [] }))?.signupSpaceAssignments,
+    ).toEqual([]);
     expect(
       (await updateClient(client.clientId, { signupRole: "admin", signupSpaceAssignments: [] }))
         ?.signupRole,

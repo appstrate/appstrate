@@ -400,7 +400,7 @@ export default tseslint.config(
     },
   },
   {
-    // `console.*` ban — application source only (CLAUDE.md: "No `console.*`:
+    // `console.*` ban — application source only (AGENTS.md: "No `console.*`:
     // use `@appstrate/core/logger`", and in `apps/cli` the `CommandIO` sink in
     // `src/lib/io.ts`). Until now that rule was enforced by review alone:
     // `no-console` is not part of `js.configs.recommended` and was set nowhere

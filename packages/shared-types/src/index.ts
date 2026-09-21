@@ -467,10 +467,11 @@ export interface MeConnectionEntry {
   /** Admin/owner sharing toggle (per-org). */
   shared_with_org: boolean;
   /**
-   * Number of installed agents in this connection's space that
-   * declare this integration in their dependencies. Used by the UI to
-   * surface "reused by N agents" so members understand that the connection
-   * is shared across the org's agents rather than per-agent.
+   * Number of agents this connection's space RUNS — placed here and switched
+   * on, or on by the deployment's default — that declare this integration in
+   * their dependencies. Used by the UI to surface "reused by N agents" so
+   * members understand that the connection is shared across the org's agents
+   * rather than per-agent.
    */
   reused_by_agents: number;
   /** Where this connection lives (the connection is keyed per-space). */
@@ -538,8 +539,19 @@ export interface AgentDetail {
      *
      * `version`/`name`/`description` are emitted only when present on the
      * manifest skill ref (handler spreads them conditionally) — AFPS §4.1.
+     *
+     * `home_writable` is always present: it says whether THIS caller may run
+     * that skill's DRAFT (`dependency_overrides: { "@scope/skill": "draft" }`),
+     * which the run routes refuse to anyone who cannot write it. The launch
+     * form offers the option only where it is `true`.
      */
-    skills?: { id: string; version?: string; name?: string; description?: string }[];
+    skills?: {
+      id: string;
+      version?: string;
+      name?: string;
+      description?: string;
+      home_writable: boolean;
+    }[];
     /**
      * AFPS §4.1 mcp_servers dependency group (`{ id, version }` per entry).
      * Composition too: withheld from a summary read, with `skills`.
@@ -582,6 +594,18 @@ export interface AgentDetail {
   prompt?: string;
   scope: string | null;
   version: string | null;
+  /**
+   * WHICH definition every manifest-derived field above was projected from:
+   * `draft` is the author's working copy, `published` a `package_versions`
+   * snapshot (the `latest` one, or the one an explicit `?version=` named).
+   *
+   * `definition: "draft"` with `home_writable: false` is the one pair a reader
+   * must act on: nothing is published yet, the page is showing the author's
+   * work in progress, and a launch with no selector answers
+   * `404 no_published_version` — so the SPA renders the read-only banner and
+   * disables Launch instead of offering a button that cannot work.
+   */
+  definition: "draft" | "published";
   manifest?: Record<string, unknown>; // Raw manifest from DB (user agents only)
 
   callback_url?: string;
@@ -590,6 +614,44 @@ export interface AgentDetail {
   /** Authoring history: withheld from a summary read, with `version_count`. */
   forked_from?: string | null;
   /**
+   * The space whose `agents:write` governs this agent
+   * (`packages.home_space_id`) — emitted ONLY when the caller reaches that
+   * space. `null` means "not a space you can see": a home whose id is withheld
+   * (a colleague's personal space, readable through a placement but never
+   * nameable), or a system agent, which the platform ships into every space
+   * instead of housing in one. Read {@link home_writable}, never this field, to
+   * decide whether a write may be offered.
+   */
+  home_space_id: string | null;
+  /**
+   * Whether THIS caller holds `agents:write` in the home space — the exact
+   * predicate the write routes enforce. Computed server-side
+   * (`homeWireForCaller`); the SPA derives no write authority of its own.
+   * Always emitted, INCLUDING on a summary read: an absent boolean would read
+   * as "not answered yet" rather than "no".
+   */
+  home_writable: boolean;
+  /**
+   * Whether THIS caller holds `agents:delete` in the home space — the exact
+   * predicate `DELETE /api/packages/agents/{scope}/{name}` enforces, from the
+   * same server-side computation. A field of its own because `agents:delete` is
+   * an INDEPENDENT permission string: every preset that writes also deletes, so
+   * it equals {@link home_writable} for a preset-only organization, but a custom
+   * space role is an arbitrary bundle and may grant one without the other.
+   * Always emitted.
+   */
+  home_deletable: boolean;
+  /**
+   * Whether THIS caller holds `agents:share` in the home space — the predicate
+   * the THREE `/shares` routes that change the audience enforce (offer, list,
+   * revoke), from the same server-side computation. Activating an offered
+   * package is not one of them: it is the recipient's own act on their own
+   * space and asks for no `share`. Sharing is a third verb on the home, not a
+   * synonym for writing: a custom role may hold one without the other. Always
+   * emitted.
+   */
+  home_shareable: boolean;
+  /**
    * Run timeout actually enforced, in seconds: the manifest's `timeout` (or the
    * platform default when it declares none) clamped to this deployment's
    * `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`. Compare with
@@ -597,6 +659,18 @@ export interface AgentDetail {
    * including for system agents, which do not expose `manifest`.
    */
   effective_timeout_seconds: number;
+  /**
+   * Whether the agent is ACTIVE in the space this detail was read from — the
+   * placement row's `enabled` where the package is placed here, the
+   * deployment's default where the space holds no row. Answered by the detail
+   * itself so a page that has loaded the agent needs no second call to learn
+   * whether it runs. Reading an agent never requires it to be active; `false`
+   * is the state this page exists to repair, and it is why the three execution
+   * doors answer `404 agent_not_active_in_space` while this one answers 200.
+   * The agents INDEX carries no such field: it lists the active set, so the
+   * answer there would only ever be `true`.
+   */
+  active: boolean;
 }
 
 // --- Organization Package Types ---
@@ -606,6 +680,19 @@ export interface OrgPackageItem extends BasePackageListItem {
   name: string;
   /** Always emitted by the org-package list/detail mappers. */
   description: string | null;
+  /**
+   * The manifest's `icon` — an Iconify id for the card the index page draws.
+   * `null` when the manifest declares none. Read off the same rendered
+   * manifest as `name` and `description`, so an index page needs no second
+   * route to draw itself. Always emitted by the list mapper.
+   */
+  icon: string | null;
+  /**
+   * The manifest's `keywords`, `[]` when it declares none — what an index
+   * page's search box matches on beyond the name and the description. Always
+   * emitted by the list mapper.
+   */
+  keywords: string[];
   forked_from: string | null;
   created_by: string | null;
   /** Omitted when the creating user is unknown. */
@@ -614,13 +701,64 @@ export interface OrgPackageItem extends BasePackageListItem {
   updatedAt: string;
   used_by_agents: number;
   auto_installed: boolean;
+  /**
+   * The space whose `<type>:write` governs this package
+   * (`packages.home_space_id`) — emitted ONLY when the caller reaches that
+   * space; `null` means a withheld home, or a system package, which the
+   * platform ships into every space instead of housing in one. Always emitted
+   * by the org-package mappers.
+   */
+  home_space_id: string | null;
+  /**
+   * Whether THIS caller holds the type's `write` in the home space — the exact
+   * predicate the write routes enforce, computed server-side
+   * (`homeWireForCaller`). Always emitted.
+   */
+  home_writable: boolean;
+  /**
+   * Whether THIS caller holds the type's `delete` in the home space — the exact
+   * predicate `DELETE /api/packages/{type}/{scope}/{name}` enforces, from the
+   * same computation. A field of its own because `<type>:delete` is an
+   * INDEPENDENT permission string a custom space role may withhold while
+   * granting `write`. Always emitted.
+   */
+  home_deletable: boolean;
+  /**
+   * Whether THIS caller holds the type's `share` in the home space — the
+   * predicate the THREE `/shares` routes that change the audience enforce
+   * (offer, list, revoke), from the same computation; activating an offered
+   * package asks for no `share`. Always emitted.
+   */
+  home_shareable: boolean;
 }
 
 // The detail endpoint does not emit the list-only `used_by_agents`, so it is
 // dropped from the base via Omit (a sub-interface can't loosen a required
-// field to optional).
-export interface OrgPackageItemDetail extends Omit<OrgPackageItem, "used_by_agents"> {
-  /** Present but nullable — the draft_content column is nullable. */
+// field to optional). `icon` and `keywords` go the same way and for the
+// mirror-image reason: they exist so an INDEX row can be drawn without its
+// manifest, and the detail ships `manifest` itself.
+export interface OrgPackageItemDetail extends Omit<
+  OrgPackageItem,
+  "used_by_agents" | "icon" | "keywords"
+> {
+  /**
+   * WHICH definition `content`, `manifest` and every field projected from it
+   * (`name`, `description`, `version`, `manifest_name`) were read from —
+   * exactly the field `AgentDetail` carries, for exactly the same reason: a
+   * caller who may WRITE the package reads their own working copy, everybody
+   * else reads the latest published version, and nothing but this flag tells
+   * the two apart on the wire.
+   *
+   * `definition: "draft"` with `home_writable: false` is the pair a reader
+   * must act on: nothing is published yet, the page is showing the author's
+   * work in progress, and the SPA says so instead of letting it pass for a
+   * released definition.
+   */
+  definition: "draft" | "published";
+  /**
+   * Present but nullable — the `draft_content` column is nullable, and a
+   * published projection reads the archive entry this type is authored around.
+   */
   content: string | null;
   agents: { id: string; display_name: string }[];
   manifest?: Record<string, unknown>;
@@ -956,6 +1094,19 @@ export interface SpaceInfo {
   visibility: "open" | "closed" | "private";
   /** Preset the implicit members of an `open` space hold. */
   default_role: "admin" | "builder" | "operator" | "viewer";
+  /**
+   * Whether this is one member's personal space (RBAC spec §3.6). Reached by
+   * its owner alone — organization owners and admins included — takes no other
+   * members, always `private`, and only its name is editable. The owner is
+   * deliberately NOT named on the wire.
+   */
+  personal: boolean;
+  /**
+   * When the owner of a personal space stopped being a member. Present only on
+   * the owner/admin projection, the only one an orphaned personal space is
+   * listed to.
+   */
+  orphaned_at?: string | null;
   /** Whether the caller may enter — a `closed` space is listed as `"none"`. */
   access: "member" | "none";
   /** The caller's role here, or `null` when they have none. */
@@ -965,6 +1116,16 @@ export interface SpaceInfo {
   created_by: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** What `POST /api/spaces/:id/sweep-now` did to an orphaned personal space. */
+export interface SpaceSweepResult {
+  object: "space_sweep";
+  space_id: string;
+  /** Homed packages another space had placed: handed to the org catalogue. */
+  rehomed_packages: number;
+  /** Homed packages nothing else had placed: deleted. */
+  deleted_packages: number;
 }
 
 /** One row of `GET /api/spaces/:id/members` — who reaches the space, and how. */
@@ -986,13 +1147,21 @@ export interface SpaceMember {
  *
  * @openapiMirror
  */
-export interface InstalledPackage {
+export interface SpacePackage {
   packageId: string;
   generationConfig: ModelGenerationSettings | null;
   modelId: string | null;
   proxyId: string | null;
-  version_id: number | null;
+  /** Whether the space RUNS it. The row and its settings survive a `false`. */
   enabled: boolean;
+  /**
+   * When the placement row was created. `installed_at` is the COLUMN's name and
+   * predates the activation vocabulary; it is kept on the wire because renaming
+   * a published field breaks every consumer reading it, which is a cost the
+   * rename buys nothing against. (The `integrations:install` permission strings
+   * are kept for a different reason — those really are rows, in `space_roles`
+   * and in every API key's scopes.)
+   */
   installed_at: string;
   updatedAt: string;
   package_type: string;
@@ -1005,7 +1174,9 @@ export interface InstalledPackage {
  * `GET /api/spaces/{spaceId}/packages/{scope}/{name}/run-config`.
  * Single source of truth for both the dashboard's per-space agent run and
  * the CLI's `appstrate run @scope/agent` invocation — keeping them in
- * lockstep prevents UI ↔ CLI drift on model / proxy / version pin.
+ * lockstep prevents UI ↔ CLI drift on model / proxy / generation settings.
+ * It carries no VERSION: which bytes run is the launch selector's business,
+ * not the placement's.
  *
  * `input` carries the per-space stored input layer, because
  * `appstrate run @scope/agent --local` fetches the bundle and executes it on
@@ -1019,8 +1190,6 @@ export interface ResolvedRunConfig {
   generation: ModelGenerationSettings | null;
   modelId: string | null;
   proxyId: string | null;
-  /** Pinned semver label (`1.2.3`), or null when the space uses the floating dist-tag. */
-  version_pin: string | null;
   /**
    * `space_packages.input_settings` — layer 2 of the input resolution
    * (`apps/api/src/services/input-resolution.ts`), on the wire under the same

@@ -22,7 +22,6 @@ import type {
 } from "@appstrate/shared-types";
 import { $api, client, type paths } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
-import { isVersioned } from "../lib/version-selector";
 
 // Spec-pinned narrowings for the two integration read endpoints. They take the
 // generated OpenAPI response shape verbatim (so a rename/removal of any
@@ -34,10 +33,15 @@ import { isVersioned } from "../lib/version-selector";
 type RawIntegrationSummary = NonNullable<
   paths["/api/integrations"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
 >[number];
-export type IntegrationSummaryWire = Omit<RawIntegrationSummary, "manifest"> &
+type IntegrationSummaryWire = Omit<RawIntegrationSummary, "manifest"> &
   // `/api/integrations` supports `?fields=` projection, so the spec marks these
   // optional; this hook never projects, so re-require what consumers read.
-  Required<Pick<RawIntegrationSummary, "id" | "orgId" | "source">> & {
+  // `active` is in that list because both management readers sort the space's
+  // placements on it — the agent editor's connection block tells an active
+  // dependency from a placed-but-off one, and the detail page drives the
+  // switch. Were the field to leave the response, an optional type would make
+  // both read `undefined` in silence instead of failing to compile.
+  Required<Pick<RawIntegrationSummary, "id" | "orgId" | "source" | "active">> & {
     manifest: IntegrationManifestView;
   };
 type RawIntegrationDetail =
@@ -90,10 +94,10 @@ export function invalidateIntegrationQueries(qc: QueryClient): Promise<void> {
     predicate: (query) => {
       const path = query.queryKey[1];
       if (typeof path !== "string") return false;
-      // The integration package list is keyed `["packages","integrations",…]`
-      // and its `?active=true` variant is exactly what activation changes — so a
-      // row that just got activated has to stop being served from cache. Without
-      // this, activating left every "not active here" list still saying so.
+      // The integration index is keyed `["packages","integrations",…]` and lists
+      // the ACTIVE set, which is exactly what activation changes — so a row that
+      // just got switched on (or off) has to stop being served from cache.
+      // Without this, activating left every index still omitting it.
       if (query.queryKey[0] === "packages" && path === "integrations") return true;
       return (
         path.startsWith("/api/integrations") ||
@@ -172,17 +176,16 @@ function agentConnectionReadinessQueryOptions(
   const { scope, name } = agentPackageId
     ? splitPackageRef(agentPackageId)
     : { scope: "", name: "" };
-  // A non-`draft` version pins the verdict to that published manifest, so the
-  // run-options modal's per-integration badge matches the run (#770). Omitted/
-  // `draft` → no query param → the draft verdict the launch badge has always
-  // shown. `version` rides the query so the cache key splits per version.
+  // The `version` selector rides in the key: an explicit `draft` and the
+  // published version resolve different manifests, so their verdicts must not
+  // share one cache entry.
   return $api.queryOptions(
     "get",
     "/api/agents/{scope}/{name}/connection-readiness",
     {
       params: {
         path: { scope, name },
-        ...(isVersioned(version) ? { query: { version } } : {}),
+        ...(version ? { query: { version } } : {}),
         header: {
           "X-Org-Id": orgId ?? undefined,
           "X-Space-Id": spaceId ?? undefined,
@@ -244,46 +247,6 @@ export function useIntegrationRunBlocking(
     enabled: Boolean(orgId && spaceId && integrationId && agentPackageId),
     select: (data) =>
       data.integrations.find((i) => i.integration_id === integrationId)?.run_blocking ?? false,
-  });
-}
-
-export function useActivateIntegration() {
-  const { t } = useTranslation("settings");
-  const qc = useQueryClient();
-  return useMutation({
-    // 201 + the bare integration detail resource (#657) — activation
-    // state is the resource's `active` field.
-    mutationFn: async (vars: { params: { path: { packageId: string } } }) => {
-      const { data } = await client.POST("/api/integrations/{packageId}/activate", {
-        ...vars,
-        body: {},
-      });
-      return data;
-    },
-    onSuccess: () => {
-      toast.success(t("integrations.activate.success"));
-      void invalidateIntegrationQueries(qc);
-    },
-    onError: () => toast.error(t("integrations.activate.error")),
-  });
-}
-
-export function useDeactivateIntegration() {
-  const { t } = useTranslation("settings");
-  const qc = useQueryClient();
-  return useMutation({
-    // DELETE → 204 empty (#657): deactivation removes the
-    // space_packages row; the detail stays GET-able.
-    mutationFn: async (vars: { params: { path: { packageId: string } } }) => {
-      await client.DELETE("/api/integrations/{packageId}/deactivate", {
-        ...vars,
-      });
-    },
-    onSuccess: () => {
-      toast.success(t("integrations.deactivate.success"));
-      void invalidateIntegrationQueries(qc);
-    },
-    onError: () => toast.error(t("integrations.deactivate.error")),
   });
 }
 
@@ -419,7 +382,7 @@ export function useIntegrationPins(packageId: string | undefined) {
 }
 
 /**
- * R2 — installed agents that declare this integration as a dependency. Used
+ * R2 — the space's agents that declare this integration as a dependency. Used
  * by the centralised pin management table to populate the "pin a new agent"
  * picker.
  */

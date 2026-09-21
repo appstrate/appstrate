@@ -20,7 +20,13 @@ import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { truncateAll, db } from "../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../test/helpers/redis.ts";
 import { createTestContext, orgOnlyHeaders } from "../../../../../test/helpers/auth.ts";
-import { seedApiKey } from "../../../../../test/helpers/seed.ts";
+import { seedApiKey, seedPackage } from "../../../../../test/helpers/seed.ts";
+import {
+  MCP_ACCEPT,
+  mcpPath,
+  mcpRpc,
+  type JsonRpcEnvelope,
+} from "../../../../../test/helpers/mcp.ts";
 import { setPlatformApp } from "../../../../lib/platform-app.ts";
 import { drainAudits, pendingAuditCount } from "../../../../services/audit.ts";
 import { getCatalog, resetCatalog } from "../../catalog.ts";
@@ -32,31 +38,7 @@ const app = getTestApp();
 // registerModuleRoutes; the test harness mounts modules inline).
 setPlatformApp(app);
 
-const MCP_ACCEPT = "application/json, text/event-stream";
-
-/** The per-org MCP endpoint for an org id (`X-Org-Id` header carries the same). */
-function mcpPath(headers: Record<string, string>): string {
-  return `/api/mcp/o/${headers["X-Org-Id"]}`;
-}
-
-interface JsonRpcEnvelope {
-  result?: Record<string, unknown>;
-  error?: { code: number; message: string };
-}
-
-/** POST a JSON-RPC message to the caller's per-org endpoint, parse the envelope. */
-async function rpc(
-  headers: Record<string, string>,
-  message: Record<string, unknown>,
-): Promise<{ status: number; envelope: JsonRpcEnvelope }> {
-  const res = await app.request(mcpPath(headers), {
-    method: "POST",
-    headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
-    body: JSON.stringify(message),
-  });
-  const text = await res.text();
-  return { status: res.status, envelope: text ? (JSON.parse(text) as JsonRpcEnvelope) : {} };
-}
+const rpc = mcpRpc(app);
 
 /** Parse the JSON payload a tool returns in its first text content block. */
 function toolPayload(envelope: JsonRpcEnvelope): {
@@ -368,6 +350,45 @@ describe("mcp tool round-trip", () => {
     const payload = toolPayload(envelope);
     // The dispatch HAPPENED (mcp:invoke present) but the op denied it: the tool
     // result carries the route's own 403, not a bypass and not a 200.
+    expect(payload.data.status).toBe(403);
+    expect(payload.isError).toBe(true);
+  });
+
+  it("cannot share a package: `share` is on no API key, MCP or not", async () => {
+    // `sharePackage` is an operation like any other, and the RBAC it meets is
+    // the REST pipeline's (RBAC spec §6.10): the verb decides who runs a
+    // package with whose credentials, so it is absent from the API-key
+    // allowlist and a key can never carry it — through MCP no more than
+    // directly.
+    const ctx = await createTestContext();
+    await seedPackage({
+      id: "@mcpshare/worker",
+      orgId: ctx.orgId,
+      type: "agent",
+      homeSpaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+    });
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["mcp:read", "mcp:invoke", "agents:read", "agents:write", "agents:configure"],
+    });
+    const headers = { Authorization: `Bearer ${key.rawKey}`, "X-Org-Id": ctx.orgId };
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "invoke_operation",
+        arguments: {
+          operation_id: "sharePackage",
+          path_params: { scope: "@mcpshare", name: "worker" },
+          body: { target: { kind: "space", space_id: ctx.defaultSpaceId } },
+        },
+      },
+    });
+    const payload = toolPayload(envelope);
     expect(payload.data.status).toBe(403);
     expect(payload.isError).toBe(true);
   });

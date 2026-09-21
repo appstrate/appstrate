@@ -7,7 +7,7 @@ import { writeBundleToBuffer, type Bundle } from "@appstrate/afps-runtime/bundle
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedApiKey, seedPackage } from "../../helpers/seed.ts";
+import { seedApiKey, seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
 import { _setSystemPackagesForTesting } from "../../../src/services/system-packages.ts";
 
 const app = getTestApp();
@@ -97,5 +97,38 @@ describe("system bundle root installation authorization", () => {
     expect(
       await db.select().from(spacePackages).where(eq(spacePackages.packageId, id)),
     ).toHaveLength(1);
+  });
+
+  // The waiver is ACTIVE here, not "holds a row": `importBundle` ends by
+  // calling `activatePackage` on the root, so an import of a package the space
+  // deliberately switched OFF performs an activation and owes the grant. The
+  // row satisfies the PLACEMENT half on its own (a system package is placed in
+  // every space), which is exactly why the placement half alone was not enough.
+  it("refuses a system root the space switched OFF, and leaves the switch off", async () => {
+    await seedSpacePackage(ctx.defaultSpaceId, id, { enabled: false });
+
+    const response = await importRoot(["skills:write", "integrations:read"]);
+
+    const [row] = await db.select().from(spacePackages).where(eq(spacePackages.packageId, id));
+    expect({ status: response.status, enabled: row?.enabled }).toMatchObject({
+      status: 403,
+      enabled: false,
+    });
+  });
+
+  it("lets the holder of the install permission switch that same root back on", async () => {
+    await seedSpacePackage(ctx.defaultSpaceId, id, { enabled: false });
+
+    const response = await importRoot([
+      "skills:write",
+      "integrations:read",
+      "integrations:install",
+    ]);
+
+    const [row] = await db.select().from(spacePackages).where(eq(spacePackages.packageId, id));
+    expect({ status: response.status, enabled: row?.enabled }).toMatchObject({
+      status: 201,
+      enabled: true,
+    });
   });
 });

@@ -18,6 +18,7 @@ import { and, eq } from "drizzle-orm";
 import { toSlug } from "@appstrate/core/naming";
 import { db } from "./client.ts";
 import { organizations, organizationMembers } from "./schema/organizations.ts";
+import { provisionOrg } from "./provision-org.ts";
 
 /**
  * Return type of the exported `createBootstrapOrg`; callers read it by
@@ -83,24 +84,13 @@ export async function createBootstrapOrg(
     slug = `${baseSlug}-${attempt + 2}`;
   }
 
-  // Org row + owner membership commit together: a partial write (org created
-  // but membership insert failing) would strand an org with no owner. The
-  // transaction makes the pair atomic.
-  const org = await db.transaction(async (tx) => {
-    const [created] = await tx
-      .insert(organizations)
-      .values({ name: orgName, slug, createdBy: userId })
-      .returning({ id: organizations.id, slug: organizations.slug });
-    if (!created) {
-      throw new Error("createBootstrapOrg: organizations insert returned no row");
-    }
-    await tx.insert(organizationMembers).values({
-      orgId: created.id,
-      userId,
-      role: "owner",
-    });
-    return created;
-  });
+  // Org row, owner membership, default space and the owner's personal space
+  // commit together (`provisionOrg`, shared with `createOrganization`): a
+  // partial write would strand an org with no owner, or an owner with nowhere
+  // to land.
+  const { org } = await db.transaction(async (tx) =>
+    provisionOrg(tx, { name: orgName, slug, ownerUserId: userId }),
+  );
 
   return { created: true, orgId: org.id, slug: org.slug };
 }

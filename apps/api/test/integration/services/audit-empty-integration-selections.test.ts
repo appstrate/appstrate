@@ -20,7 +20,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageVersion, seedSchedule } from "../../helpers/seed.ts";
+import { seedPackage, seedPackageVersion, seedSchedule, seedSpace } from "../../helpers/seed.ts";
 import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
 import { spacePackages, packageDistTags, packageVersions, packages } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
@@ -137,35 +137,59 @@ describe("auditEmptyIntegrationSelections", () => {
 
   it("an installed draft is reported but does not block when only explicitly selectable", async () => {
     await seedSplitAgent();
-    await db
-      .insert(spacePackages)
-      .values({ spaceId: ctx.defaultSpaceId, packageId: AGENT_ID, versionId: null });
+    await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId: AGENT_ID });
 
     const findings = await auditEmptyIntegrationSelections();
     const reachable = findings.filter(isReachable);
     expect(reachable).toHaveLength(1);
     expect(reachable[0]?.artifact).toBe("draft");
-    expect(reachable[0]?.installedIn).toEqual([ctx.defaultSpaceId]);
+    expect(reachable[0]?.placedIn).toEqual([ctx.defaultSpaceId]);
     expect(reachable[0]?.activeIn).toEqual([]);
     expect(findings.filter(isBlocking)).toHaveLength(0);
   });
 
-  it("a healthy install pin leaves its explicitly selectable broken draft as a warning", async () => {
-    const { goodVersionId } = await seedSplitAgent();
+  // The report names spaces the agent can RUN in. A `space_packages` row is
+  // not that: switched off, or with nothing placing it, the agent runs nowhere
+  // and the space belongs in no finding.
+  it("does not name a space that merely holds a row", async () => {
+    await seedSplitAgent();
     await db
       .insert(spacePackages)
-      .values({ spaceId: ctx.defaultSpaceId, packageId: AGENT_ID, versionId: goodVersionId });
+      .values({ spaceId: ctx.defaultSpaceId, packageId: AGENT_ID, enabled: false });
+
+    let draft = (await auditEmptyIntegrationSelections()).find((f) => f.artifact === "draft");
+    expect(draft?.placedIn).toEqual([]);
+    expect(draft && isReachable(draft)).toBe(false);
+
+    // ORPHAN: switched back on, but re-homed elsewhere and offered to nobody.
+    const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+    await db.update(packages).set({ homeSpaceId: elsewhere.id }).where(eq(packages.id, AGENT_ID));
+    await db
+      .update(spacePackages)
+      .set({ enabled: true })
+      .where(
+        and(eq(spacePackages.spaceId, ctx.defaultSpaceId), eq(spacePackages.packageId, AGENT_ID)),
+      );
+
+    draft = (await auditEmptyIntegrationSelections()).find((f) => f.artifact === "draft");
+    expect(draft?.placedIn).toEqual([]);
+    expect(draft && isReachable(draft)).toBe(false);
+  });
+
+  it("a healthy published default leaves its explicitly selectable broken draft as a warning", async () => {
+    await seedSplitAgent();
+    await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId: AGENT_ID });
 
     const reachable = (await auditEmptyIntegrationSelections()).filter(isReachable);
     expect(reachable).toHaveLength(1);
     expect(reachable[0]?.artifact).toBe("draft");
-    expect(reachable[0]?.installedIn).toEqual([ctx.defaultSpaceId]);
+    expect(reachable[0]?.placedIn).toEqual([ctx.defaultSpaceId]);
     expect(reachable[0]?.activeIn).toEqual([]);
     expect(reachable.filter(isBlocking)).toHaveLength(0);
   });
 
   it("blocks when the default published version is broken", async () => {
-    const { goodVersionId } = await seedSplitAgent();
+    await seedSplitAgent();
     const broken = await seedPackageVersion({
       packageId: AGENT_ID,
       version: "2.0.0",
@@ -174,15 +198,11 @@ describe("auditEmptyIntegrationSelections", () => {
     await db
       .insert(packageDistTags)
       .values({ packageId: AGENT_ID, tag: "latest", versionId: broken.id });
-    await db.insert(spacePackages).values({
-      spaceId: ctx.defaultSpaceId,
-      packageId: AGENT_ID,
-      versionId: goodVersionId,
-    });
+    await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId: AGENT_ID });
 
     const findings = await auditEmptyIntegrationSelections();
     const latest = findings.find((f) => f.artifact === "2.0.0");
-    expect(latest?.installedIn).toEqual([ctx.defaultSpaceId]);
+    expect(latest?.placedIn).toEqual([ctx.defaultSpaceId]);
     expect(latest?.activeIn).toEqual([ctx.defaultSpaceId]);
     expect(latest && isBlocking(latest)).toBe(true);
   });
@@ -197,40 +217,13 @@ describe("auditEmptyIntegrationSelections", () => {
     await db
       .insert(packageDistTags)
       .values({ packageId: AGENT_ID, tag: "latest", versionId: goodVersionId });
-    await db.insert(spacePackages).values({
-      spaceId: ctx.defaultSpaceId,
-      packageId: AGENT_ID,
-      versionId: goodVersionId,
-    });
+    await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId: AGENT_ID });
 
     const findings = await auditEmptyIntegrationSelections();
     const old = findings.find((f) => f.artifact === historical.version);
-    expect(old?.installedIn).toEqual([ctx.defaultSpaceId]);
+    expect(old?.placedIn).toEqual([ctx.defaultSpaceId]);
     expect(old?.activeIn).toEqual([]);
     expect(old && isBlocking(old)).toBe(false);
-  });
-
-  it("blocks when a space version pin targets an otherwise historical version", async () => {
-    const { goodVersionId } = await seedSplitAgent();
-    const pinnedBroken = await seedPackageVersion({
-      packageId: AGENT_ID,
-      version: "2.0.0",
-      manifest: agentManifest(AGENT_ID, "2.0.0"),
-    });
-    await db
-      .insert(packageDistTags)
-      .values({ packageId: AGENT_ID, tag: "latest", versionId: goodVersionId });
-    await db.insert(spacePackages).values({
-      spaceId: ctx.defaultSpaceId,
-      packageId: AGENT_ID,
-      versionId: pinnedBroken.id,
-    });
-
-    const pinned = (await auditEmptyIntegrationSelections()).find(
-      (f) => f.artifact === pinnedBroken.version,
-    );
-    expect(pinned?.activeIn).toEqual([ctx.defaultSpaceId]);
-    expect(pinned && isBlocking(pinned)).toBe(true);
   });
 
   it("flags a non-empty inherited selection when hidden_tools removes every tool", async () => {
@@ -267,9 +260,7 @@ describe("auditEmptyIntegrationSelections", () => {
         and(eq(packageVersions.packageId, INTEGRATION_ID), eq(packageVersions.version, "1.0.0")),
       );
     await seedSplitAgent();
-    await db
-      .insert(spacePackages)
-      .values({ spaceId: ctx.defaultSpaceId, packageId: AGENT_ID, versionId: null });
+    await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId: AGENT_ID });
 
     const validationErrors = await validateAgentIntegrationSelections({
       manifest: agentManifest(AGENT_ID, "1.1.0"),

@@ -9,20 +9,23 @@ import type { Context } from "hono";
 import { resolvePrincipalPermissions } from "@appstrate/core/principal-permissions";
 import type { OrgRole } from "@appstrate/core/permissions";
 import { orgHalfFor, personaFor } from "./view-as.ts";
+import { isUserPrincipal } from "./principal.ts";
 import type { AppEnv } from "../types/index.ts";
 
 const EMPTY: ReadonlySet<string> = new Set<string>();
 
 /**
- * Session-shaped callers only: `mayGrant` holds session-only strings, and a
- * `deferOrgResolution` strategy has no ceiling of its own, so it counts as one.
+ * Per-principal grants belong to the human (RBAC spec §4.1: `orgPermissions = role set ∪ module
+ * grants ∪ principalPermissions(user, org)`), so a `user` principal takes them by any transport.
+ * A delegate's ceiling (`scopes ∩ …`) never holds a `mayGrant` string, so skipping the lookup for
+ * it changes nothing but the query.
  */
 export async function principalGrants(
   c: Context<AppEnv>,
   orgId: string | undefined,
 ): Promise<ReadonlySet<string>> {
   if (!orgId) return EMPTY;
-  if (c.get("authMethod") !== "session" && !c.get("deferOrgResolution")) return EMPTY;
+  if (!isUserPrincipal(c)) return EMPTY;
   return resolvePrincipalPermissions({ orgId, userId: c.get("user").id });
 }
 

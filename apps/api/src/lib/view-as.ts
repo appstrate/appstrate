@@ -32,7 +32,8 @@ import {
 } from "@appstrate/core/permissions";
 import type { OrgRole, SpaceRolePreset, ViewAsOrgRole } from "@appstrate/core/permissions";
 import { ApiError } from "./errors.ts";
-import { isSpaceRoleId, SPACE_ID_RE } from "./ids.ts";
+import { isSpaceRoleId } from "./ids.ts";
+import { SPACE_ID_RE } from "@appstrate/db/ids";
 import { effectivePermissions, orgPermissions, type Permission } from "./permissions.ts";
 import {
   loadSpaceMember,
@@ -44,8 +45,8 @@ import {
   type SpaceRoleRef,
 } from "./space-role.ts";
 import { canGrantSpaceRole } from "./space-role-policy.ts";
-import { hasCustomRoles } from "../services/space-roles.ts";
 import { validateSpaceInOrg } from "./space-lookup.ts";
+import { isUserPrincipal } from "./principal.ts";
 import type { AppEnv } from "../types/index.ts";
 
 export interface ViewAsPersona {
@@ -218,12 +219,30 @@ async function validatePersonaSpace(
 ): Promise<NonNullable<ViewAsPersona["space"]>> {
   const space = await validateSpaceInOrg(requested.spaceId, orgId);
   if (!space) throw viewAsNotFound(`Space '${requested.spaceId}' not found in this organization`);
+  // A personal space has exactly one member and no role to preview: whatever
+  // persona were asked for, the answer would be its owner's `admin`. Refusing
+  // is also what keeps the preview a pure restriction — a previewing admin
+  // holds nothing there to narrow (RBAC spec §3.6).
+  //
+  // Named rather than folded into the 404 above, deliberately. Collapsing it
+  // would close one more oracle, but what §3.6 hides is the PROPERTY "this id
+  // is a personal space", and reaching this branch means already holding the
+  // id — so the enumeration has no starting point to work from. Against that,
+  // the named 400 is what tells an owner why their own preview was refused.
+  // §3.6 and the two tests that pin it are the contract.
+  if (space.ownerUserId !== null) {
+    throw invalidViewAs(
+      `Space '${space.id}' is a personal space; there is no role to preview in it.`,
+    );
+  }
   const role = await resolvePersonaSpaceRole(orgId, requested.role);
   // Grantability against what the real caller holds THERE, the same rule that gates handing
   // the role to someone else. Owners and admins carry no `space_members` row, so `null` IS it.
   const real = effectivePermissions({
     orgPermissions: orgPermissions(realOrgRole),
-    spacePermissions: spacePermissions(resolveSpaceRole(realOrgRole, space, null)),
+    // `null` caller: the space is not personal (refused above), so the
+    // parameter cannot change the answer.
+    spacePermissions: spacePermissions(resolveSpaceRole(realOrgRole, space, null, null)),
   });
   if (!canGrantSpaceRole(real, role)) {
     onDenial(`view_as:${requested.role.kind}`);
@@ -235,21 +254,15 @@ async function validatePersonaSpace(
 }
 
 /**
- * Feature gate first: with `custom_roles` off there is no bundle vocabulary to
- * look in, and every refusal here carries a code the client reads as "drop it".
+ * A preset is code, so it resolves without a query; a bundle is a row, and one
+ * belonging to another organization must read as absent. The refusal carries a
+ * code the client reads as "drop the preview".
  */
 async function resolvePersonaSpaceRole(
   orgId: string,
   ref: PersonaRoleRequest,
 ): Promise<SpaceRoleRef> {
   if (ref.kind === "preset") return { kind: "preset", preset: ref.preset };
-  if (!hasCustomRoles()) {
-    throw viewAsForbidden(
-      "Previewing a custom space role requires the `custom_roles` feature, provided by the " +
-        "Appstrate Cloud plan (the `@appstrate/module-ee` module). The four built-in presets " +
-        "(admin, builder, operator, viewer) are always previewable.",
-    );
-  }
   const [row] = await db
     .select()
     .from(spaceRoles)
@@ -263,8 +276,9 @@ async function resolvePersonaSpaceRole(
 }
 
 /**
- * Eligibility at the earliest point the header can be judged: a key or bearer carries its own
- * ceiling and no session to narrow. The marker goes on after the handler, or via `errorHandler`.
+ * A transport question, not an identity one: will the permission middleware honour the header?
+ * Only a session or a `deferOrgResolution` strategy resolves the org late enough to narrow, so the
+ * predicate stays transport-shaped. The marker goes on after the handler, or via `errorHandler`.
  */
 export function viewAsTransportGuard() {
   return async (c: Context<AppEnv>, next: Next) => {
@@ -403,6 +417,33 @@ export function effectiveInSpace(
 
 export function callerOrgRole(c: Context<AppEnv>, orgId = c.get("orgId")): OrgRole {
   return personaFor(c, orgId)?.orgRole ?? c.get("orgRole");
+}
+
+/**
+ * The user whose personal spaces this request may reach, or `null` when the
+ * principal is not one (RBAC spec §3.6). Every `resolveSpaceRole` call site
+ * passes it — no default, because a default would hand an API key its
+ * creator's private drafts.
+ *
+ * A personal space is a member's private half, so it answers to that member's
+ * own credential — `principalKind: "user"`, whatever the transport — and to
+ * nothing else: a delegate (API key, OAuth dashboard client) carries the
+ * creator's authority, not their privacy — its scope ceiling names permissions
+ * and can never name the person's private space, which is exactly why a
+ * third-party client is a delegate — and an end-user is not a member at all.
+ *
+ * Under a role preview it is `null`: a persona has no personal space, and
+ * `X-View-As` cannot even name one ({@link validatePersonaSpace}). Answering
+ * the previewer's own would put a space in the preview that the previewed role
+ * does not have, which is the one thing a preview must not do.
+ */
+export function callerPersonalOwnerId(
+  c: Context<AppEnv>,
+  orgId: string | undefined = c.get("orgId"),
+): string | null {
+  if (!isUserPrincipal(c)) return null;
+  if (orgId !== undefined && personaFor(c, orgId)) return null;
+  return c.get("user")?.id ?? null;
 }
 
 /** Its own row, or none anywhere else. Exported for SSE, which has no `c.get("user")`. */

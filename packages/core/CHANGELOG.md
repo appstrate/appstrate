@@ -9,6 +9,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New export `ConnectionCandidate` (`@appstrate/core/integration`)** — one
+  connection the caller may pick from on `must_choose_connection`, carrying
+  `id`, `label`, `accountId` and `ownedByActor`.
+- **New export `canComposeInline` (`@appstrate/core/permissions`)** — whether
+  a caller may compose an inline agent: `agents:write` and `agents:run`. Takes a
+  membership test, so a `Set` or an array both fit.
+- **`AppstrateTurnMetadata` gains optional `modelId` and `modelLabel`
+  (`@appstrate/core/chat-turn-metadata`)** — the model a chat turn ran on,
+  stamped when the engine closes the turn. Additive: a turn the engine did not
+  close carries neither.
+
+### Changed
+
+- **BREAKING: `ConnectionResolutionError.candidateConnectionIds` is replaced by
+  `candidateConnections`** (`@appstrate/core/integration`), an array of
+  `ConnectionCandidate` instead of bare ids; on the wire
+  (`ResolutionFieldError`, `@appstrate/core/api-errors`) the field
+  `candidate_connection_ids: string[]` becomes `candidate_connections:
+{ id, label, account_id, owned_by_actor }[]`. An id alone is opaque: a caller
+  with no picker — an API client, an MCP model reading the 412 — had to fetch
+  the connection list to learn which uuid is which before it could name one in
+  `connection_overrides`. The resolver already holds the rows, so the three
+  distinguishing fields cost no extra query. Read `candidate_connections[].id`
+  where the old array held the ids.
+
+- **BREAKING: `AuthResolution.principalKind` is a new REQUIRED member** (type
+  `PrincipalKind`, with the tuple `PRINCIPAL_KINDS`, in `@appstrate/core/module`).
+  A credential declares WHAT it is — the platform user by any transport; a
+  delegate the user issued with its own life and ceiling (an API key, a
+  third-party OAuth client): their authority, not their privacy; or an external
+  end-user (RBAC spec §7) — instead of every gate inferring it from
+  `authMethod` and `deferOrgResolution`; a strategy fails to compile until it
+  declares one, and the pipeline throws on a missing or unknown value, or on an
+  `"end_user"`/`endUser` disagreement, never bucketing it by default. The
+  platform's identity-shaped gates (`/api/profile` and its password,
+  `/api/welcome/setup`, creating a space or an organization, the organization
+  library, the bound-org filter of the org listings, `/me/connections`
+  authority) now read the kind: a third-party OAuth client (`oauth2-dashboard`)
+  and an OIDC end-user token are refused or bound there exactly like an API
+  key, where `authMethod !== "api_key"` used to let them through; the org
+  listings fail closed for a non-user credential with no org binding.
+  `deferOrgResolution` is now pipeline ordering only and carries no authority.
+
+## [10.0.0] — 2026-09-17
+
+### Added
+
+- New action `share` on the `agents`, `skills`, `mcp-servers` and `integrations` resources of `CoreResources` (`@appstrate/core/permissions`), hence the permission strings `agents:share`, `skills:share`, `mcp-servers:share` and `integrations:share`. It offers a package to another space — its AUDIENCE (`package_shares`), never its activation, which stays the recipient's own act on `space_packages`. `CORE_RESOURCE_ACTIONS` mirrors it, so `SPACE_LEVEL_PERMISSIONS` and the custom-role validator pick the four strings up on their own; the platform grants them to the `admin` and `builder` presets (both derived from the catalog) and to no API key. A module with an exhaustive `Record<CoreAction<"agents">, …>` gains a key.
+
+- New optional member `restrict_package_copy: boolean` on `orgSettingsSchema` (`@appstrate/core/permissions`), default absent = `false`. When an organization sets it, forking a package and downloading a published version require `<type>:share` in the source package's home space; skills are exempt (the CLI's skills sync is a local copy by design). `OrgSettings` (`z.infer`, re-exported from `@appstrate/shared-types`) widens by one optional field.
+
 - New subpath `@appstrate/core/package-file-operations`: `applyFileTreeOperations`,
   `isProtectedPackageFile`, `PackageFileWriteError`, `PackageFileWriteErrorCode`
   and `FileTreeOperation`. The browser and API share ordered file operations,

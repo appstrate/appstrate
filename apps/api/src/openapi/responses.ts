@@ -6,6 +6,14 @@ import { REQUEST_ID_ONLY_HEADERS } from "./headers.ts";
  * Reusable OpenAPI response definitions — RFC 9457 Problem Details format.
  */
 export const responses = {
+  VersionArtifactUnavailable: {
+    description:
+      "The selected published agent has no readable prompt archive (`version_artifact_unavailable`). The working copy is never substituted.",
+    headers: REQUEST_ID_ONLY_HEADERS,
+    content: {
+      "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+    },
+  },
   Unauthorized: {
     description: "Missing or invalid authentication",
     headers: {
@@ -37,47 +45,6 @@ export const responses = {
           detail: "Insufficient permissions",
           code: "forbidden",
           requestId: "req_abc123",
-        },
-      },
-    },
-  },
-  /**
-   * The 403 of anything that DEFINES or GRANTS a custom space role: two causes,
-   * one status. `code` is what tells them apart, so both are named — the
-   * generic `Forbidden` documents only the first.
-   */
-  CustomRoleFeatureForbidden: {
-    description:
-      "`forbidden` — the caller does not hold the required permission; or `feature_unavailable` — `custom_roles` is not available on this deployment, so a bundle can be neither defined nor granted. The four built-in presets stay usable, and DELETING a leftover bundle never asks for the feature.",
-    content: {
-      "application/problem+json": {
-        schema: { $ref: "#/components/schemas/ProblemDetail" },
-        examples: {
-          forbidden: {
-            summary: "Missing permission",
-            value: {
-              type: "https://docs.appstrate.dev/errors/forbidden",
-              title: "Forbidden",
-              status: 403,
-              detail: "Insufficient permissions",
-              instance: "urn:appstrate:request:req_2f1c6d84",
-              code: "forbidden",
-              requestId: "req_2f1c6d84",
-            },
-          },
-          feature_unavailable: {
-            summary: "Feature not on this deployment",
-            value: {
-              type: "https://docs.appstrate.dev/errors/feature-unavailable",
-              title: "Feature Unavailable",
-              status: 403,
-              detail:
-                "Defining a custom space role requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/module-ee` module).",
-              instance: "urn:appstrate:request:req_2f1c6d84",
-              code: "feature_unavailable",
-              requestId: "req_2f1c6d84",
-            },
-          },
         },
       },
     },
@@ -349,8 +316,7 @@ export const responses = {
       "user themselves; every other credential carries a ceiling of its own and no session to " +
       "narrow. The other refusals reuse the " +
       "statuses already documented on this operation: `403 view_as_forbidden` when the real org " +
-      "role is not owner/admin, the role is not grantable by the caller in that space, or a " +
-      "custom role is previewed where the `custom_roles` feature is off, and " +
+      "role is not owner/admin or the role is not grantable by the caller in that space, and " +
       "`404 view_as_not_found` when the space is not in the organization, the custom role does " +
       "not exist, or the organization named alongside the persona is not the caller's. Those four " +
       'codes are the complete set that means "drop the preview" — a plain `not_found` under an ' +

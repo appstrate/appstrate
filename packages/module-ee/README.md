@@ -287,10 +287,11 @@ These seven tables live in the **platform** database (`DATABASE_URL`). `migrateE
 
 **Module features** (merged into `AppConfig.features` at boot):
 
-| Flag           | Meaning                                                                                                                                                                                                                                                                                                                                                     |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `billing`      | The billing surface exists — the dashboard renders plan/usage/checkout                                                                                                                                                                                                                                                                                      |
-| `custom_roles` | Licenses the platform's own `POST/PATCH /api/roles` AND every path that grants a bundle — space-member writes, invitations, OAuth signup policies (RBAC spec §9). The space-role data model, the four presets, the read routes and `DELETE /api/roles/{id}` are OSS: dropping the flag freezes what bundles reach and still lets a deployment clean them up |
+| Flag      | Meaning                                                                |
+| --------- | ---------------------------------------------------------------------- |
+| `billing` | The billing surface exists — the dashboard renders plan/usage/checkout |
+
+> **Custom space roles are not EE-owned.** `/api/roles` — defining, editing, deleting a bundle, and every path that grants one — is Apache-2.0 platform code, gated by the `roles:*` permissions and by nothing else (RBAC spec §9). The `custom_roles` flag this module used to contribute was removed with the gate it fed; do not reintroduce a flag for it.
 
 > **Signup gating is no longer EE-owned.** Domain allowlist (`AUTH_ALLOWED_SIGNUP_DOMAINS`), invitation-only signup (`AUTH_DISABLE_SIGNUP`), platform-admin allowlist (`AUTH_PLATFORM_ADMIN_EMAILS`), and bootstrap-owner auto-org (`AUTH_BOOTSTRAP_OWNER_EMAIL`) all live natively in the platform's `evaluateSignupPolicy` since PR #282. The `beforeSignup` hook + `DomainNotAllowedError` were removed from EE in this PR.
 

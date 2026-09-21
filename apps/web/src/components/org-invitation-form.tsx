@@ -19,7 +19,6 @@ import {
   hasUnavailableAssignments,
   assignmentsFor,
   toSpaceAssignments,
-  validateSpaceAssignments,
   type AssignmentDraft,
 } from "../lib/space-assignments";
 import { SpaceAssignmentsField } from "./space-assignments-field";
@@ -166,11 +165,9 @@ export function OrgInvitationForm({
               return t("orgSettings.assignmentsNotReady");
             if (hasUnavailableAssignments(value, spaces, rolesQuery.options))
               return t("orgSettings.assignmentsUnavailable");
-            return validateSpaceAssignments(
-              form.getValues("role"),
-              toSpaceAssignments(value),
-              t("orgSettings.inviteSpacesRequired"),
-            );
+            // No role requires a grant: a guest with none lands in their own
+            // personal space, which is where a shared package is accepted.
+            return true;
           },
         }}
         render={({ field, fieldState }) => (

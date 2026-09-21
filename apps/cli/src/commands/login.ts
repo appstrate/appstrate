@@ -84,7 +84,7 @@ interface LoginOptions {
 
 /**
  * Dependency-injected prompt helpers so the login command is testable
- * without mock.module (banned per CLAUDE.md). Production paths bind to
+ * without mock.module (banned per AGENTS.md). Production paths bind to
  * the real `@clack/prompts` helpers in `lib/ui.ts`. Return `null` from
  * either hook to signal "user opted out / cannot prompt" — the caller
  * leaves `orgId` unset and prints a follow-up hint.

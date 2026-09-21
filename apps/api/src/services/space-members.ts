@@ -22,9 +22,15 @@ import {
 import type { SpaceRolePreset } from "@appstrate/core/permissions";
 import type { SpaceMember } from "@appstrate/shared-types";
 import { conflict, notFound } from "../lib/errors.ts";
-import { loadSpaceMember, resolveSpaceRole, toRef, toSpaceRoleWire } from "../lib/space-role.ts";
+import {
+  loadSpaceMember,
+  resolveSpaceRole,
+  toRef,
+  toSpaceRoleWire,
+  type SpaceAccessRow,
+  type SpaceRoleRef,
+} from "../lib/space-role.ts";
 import { assertCanGrantSpaceRole, assertCanManageSpaceMember } from "../lib/space-role-policy.ts";
-import { assertCustomRolesFeature } from "./space-roles.ts";
 import type { DbOrTx } from "../lib/db-helpers.ts";
 
 /** Assignment as the write routes accept it: one preset, or one custom role id. */
@@ -55,7 +61,12 @@ export async function resolveOrgMemberEmail(orgId: string, email: string): Promi
  */
 export async function listSpaceMembers(
   orgId: string,
-  space: { id: string; visibility: string; defaultRole: SpaceRolePreset },
+  space: {
+    id: string;
+    visibility: string;
+    defaultRole: SpaceRolePreset;
+    ownerUserId: string | null;
+  },
   includeImplicit: boolean,
 ): Promise<SpaceMember[]> {
   const explicitRows = await db
@@ -102,10 +113,15 @@ export async function listSpaceMembers(
   for (const row of orgRows) {
     const found = explicit.get(row.userId);
     const orgRole = row.role;
+    // The fourth argument is the user THIS row is about, not the request's
+    // caller: the question asked of the resolver is "what would this person
+    // hold here". On a personal space that answers `admin` for its owner and
+    // `null` for everyone else, so the list is the owner alone (decision 10).
     const effective = resolveSpaceRole(
       orgRole,
       { id: space.id, ...spaceAccess(space) },
       found ? { ref: toRef(found) } : null,
+      row.userId,
     );
     if (!effective) continue;
     out.push({
@@ -122,10 +138,15 @@ export async function listSpaceMembers(
   return out;
 }
 
-function spaceAccess(space: { visibility: string; defaultRole: SpaceRolePreset }) {
+function spaceAccess(space: {
+  visibility: string;
+  defaultRole: SpaceRolePreset;
+  ownerUserId: string | null;
+}) {
   return {
     visibility: space.visibility as "open" | "closed" | "private",
     defaultRole: space.defaultRole,
+    ownerUserId: space.ownerUserId,
   };
 }
 
@@ -161,6 +182,7 @@ export async function saveSpaceMember(params: {
   // Serialize with org promotion/removal, which lock this row before cleaning
   // up space memberships. A transaction alone would still allow stale grants.
   return db.transaction(async (tx) => {
+    await assertSpaceTakesMembers(tx, spaceId);
     const target = await lockOrgMemberForSpaceGrant(tx, orgId, userId);
     const targetRole = target?.role;
     if (!targetRole) throw notFound("User is not a member of this organization");
@@ -201,6 +223,27 @@ export async function saveSpaceMember(params: {
   });
 }
 
+/**
+ * A personal space has exactly one member — its owner — and no row for them
+ * (RBAC spec §3.6, decision 10). "Personal" has to mean one thing: collaboration
+ * goes through a team space, distribution through sharing. Converting the space
+ * (`POST /api/spaces/{id}/convert-to-team`) is what makes it grantable.
+ */
+async function assertSpaceTakesMembers(tx: DbOrTx, spaceId: string): Promise<void> {
+  const [space] = await tx
+    .select({ ownerUserId: spaces.ownerUserId })
+    .from(spaces)
+    .where(eq(spaces.id, spaceId))
+    .limit(1);
+  if (space?.ownerUserId) {
+    throw conflict(
+      "personal_space_has_no_members",
+      "A personal space belongs to one member and takes no others. " +
+        "Convert it to a team space first.",
+    );
+  }
+}
+
 function existingSpaceMember() {
   return conflict(
     "space_member_exists",
@@ -214,33 +257,73 @@ interface RoleColumns {
   customRoleId: string | null;
 }
 
+/** What a removal did, and the standing the target is left with. */
+export interface SpaceMemberRemoval {
+  /** False when there was no explicit row — the caller renders that as 404. */
+  removed: boolean;
+  /**
+   * The standing the target holds with NO explicit row, resolved under the
+   * removal's lock. It is what the deleted row was hiding — and, when
+   * `removed` is false, what they already held. `null` means they reach the
+   * space no longer.
+   */
+  accessAfter: SpaceRoleRef | null;
+}
+
 /**
- * Remove an explicit row. Returns false when there was none.
+ * Remove an explicit row, and report the implicit standing it leaves behind.
  *
- * The target bound lives here, not at the route: the row read it rests on and
- * the DELETE that acts on it must be one statement's worth of truth. The lock
- * is the grant path's — org promotion/removal take it before touching space
- * memberships — so the role asserted here cannot change under the delete.
+ * Both bounds live here, not at the route: the rows they rest on and the DELETE
+ * that acts on them must be one statement's worth of truth.
  *
- * @throws 403 when the caller could not have granted the role being dropped.
+ *  - the **grant** bound, on `accessAfter`: dropping an explicit restriction can
+ *    hand out the open space's default role, so the caller must have been able
+ *    to grant it. At the route this rested on an org role a concurrent
+ *    promotion could move before the DELETE ran (#1439).
+ *  - the **manage** bound, on the row being dropped: without it,
+ *    `space-members:remove` alone ejects a space admin, because a removal in a
+ *    `closed` or `private` space exposes no implicit role for the grant bound
+ *    to refuse.
+ *
+ * Grant first, so a caller who may not touch this target learns nothing about
+ * whether the row exists.
+ *
+ * What the lock covers, precisely: `lockOrgMemberForSpaceGrant` is the lock org
+ * promotion and removal take before touching space memberships, so the ORG ROLE
+ * and the MEMBER ROW cannot move under the delete. The SPACE row is the request
+ * pipeline's (`c.get("space")`), pinned for the request like everywhere else —
+ * `applySpacePermissions` resolved the caller's own ceiling from that same row,
+ * so re-reading it here would judge the bound against a space the permission
+ * that admitted the request was never checked against. A concurrent
+ * `PATCH /api/spaces/{id}` widening `default_role` is therefore NOT serialized
+ * against this removal — a property of every space-scoped write in the
+ * platform, not of this one.
+ *
+ * @throws 403 when the caller could not have granted the standing left behind,
+ *   or the one being dropped.
  */
 export async function removeSpaceMember(params: {
   orgId: string;
-  spaceId: string;
+  space: SpaceAccessRow;
   userId: string;
   actorPermissions: ReadonlySet<string> | undefined;
-}): Promise<boolean> {
-  const { orgId, spaceId, userId } = params;
+}): Promise<SpaceMemberRemoval> {
+  const { orgId, space, userId } = params;
   return db.transaction(async (tx) => {
-    await lockOrgMemberForSpaceGrant(tx, orgId, userId);
-    const existing = await loadSpaceMember(spaceId, userId, tx);
-    if (!existing) return false;
+    const target = await lockOrgMemberForSpaceGrant(tx, orgId, userId);
+    // The standing is the TARGET's, so the caller id is theirs — a personal
+    // space resolves `admin` for its owner and nothing for anyone else. No
+    // member row: the removal is about to delete the only one there could be.
+    const accessAfter = target ? resolveSpaceRole(target.role, space, null, userId) : null;
+    assertCanGrantSpaceRole(params.actorPermissions, accessAfter);
+    const existing = await loadSpaceMember(space.id, userId, tx);
+    if (!existing) return { removed: false, accessAfter };
     assertCanManageSpaceMember(params.actorPermissions, existing.ref);
     const deleted = await tx
       .delete(spaceMembers)
-      .where(and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, userId)))
+      .where(and(eq(spaceMembers.spaceId, space.id), eq(spaceMembers.userId, userId)))
       .returning({ userId: spaceMembers.userId });
-    return deleted.length > 0;
+    return { removed: deleted.length > 0, accessAfter };
   });
 }
 
@@ -262,6 +345,10 @@ export async function deleteSpaceMembershipsInOrg(
   orgId: string,
   userId: string,
 ): Promise<RevokedSpaceAssignment[]> {
+  // Every space of the org, personal ones included, and that is not a leak:
+  // a personal space holds no `space_members` row at all
+  // ({@link assertSpaceTakesMembers}), so a promotion has nothing to revoke
+  // there and cannot reach inside one.
   const orgSpaces = await tx.select({ id: spaces.id }).from(spaces).where(eq(spaces.orgId, orgId));
   if (orgSpaces.length === 0) return [];
   return tx
@@ -283,11 +370,14 @@ export async function deleteSpaceMembershipsInOrg(
 }
 
 /**
- * The FK alone would accept another org's bundle, so the org is checked here.
+ * The FK alone would accept another org's bundle, so the org is checked here —
+ * a bundle from a neighbouring organization reads as "not found", never as a
+ * grantable role.
  *
- * Granting a bundle is the licensed half of the feature, not just defining one
- * — the gate comes before the lookup so the refusal is about the deployment
- * and says nothing about which `srl_` ids exist. Presets never ask.
+ * Both branches end on the same question, `assertCanGrantSpaceRole`: a caller
+ * may only hand out permissions they hold in this space. That bound is what
+ * keeps a bundle from being a privilege ladder, and it applies to a preset and
+ * a custom role identically.
  */
 async function assignmentColumns(
   orgId: string,
@@ -299,7 +389,6 @@ async function assignmentColumns(
     assertCanGrantSpaceRole(actorPermissions, { kind: "preset", preset: assignment.preset_role });
     return { presetRole: assignment.preset_role, customRoleId: null };
   }
-  assertCustomRolesFeature("assign");
   const [role] = await tx
     .select({
       id: spaceRoles.id,

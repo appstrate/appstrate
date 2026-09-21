@@ -13,6 +13,8 @@
     "./auth-policy": "./src/auth-policy.ts",
     "./password-policy": "./src/password-policy.ts",
     "./bootstrap-org": "./src/bootstrap-org.ts",
+    "./ids": "./src/ids.ts",
+    "./provision-org": "./src/provision-org.ts",
     "./storage": "./src/storage.ts",
     "./notify": "./src/notify.ts"
   },

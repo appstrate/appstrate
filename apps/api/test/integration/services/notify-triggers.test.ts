@@ -30,7 +30,7 @@ import {
   localIntegrationManifest,
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { appendRunLog } from "../../../src/services/state/runs.ts";
 
 const oversizedTextCases = [
@@ -381,6 +381,7 @@ describe("NOTIFY triggers (regression)", () => {
     const INTEG = "@notifyorg/svc";
     await seedPackage({
       id: INTEG,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
@@ -402,7 +403,7 @@ describe("NOTIFY triggers (regression)", () => {
         },
       }),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEG);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEG);
 
     // Local accumulator — the listener handler stays attached for the
     // process lifetime (the ListenClient abstraction in db/client.ts hides

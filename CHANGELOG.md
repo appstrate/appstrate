@@ -6,7 +6,689 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+
+- **Removing a space member judges BOTH of its bounds under the membership
+  lock.** `DELETE /api/spaces/{id}/members/{userId}` asks two questions: whether
+  the caller could have granted the standing the removal LEAVES BEHIND (dropping
+  an explicit restriction in an `open` space hands out its default role), and
+  whether they could have granted the standing being DROPPED. The second moved
+  inside the lock in #1438; the first stayed at the route, resolved against an
+  `org_members` row read on its own statement — so a concurrent organization
+  promotion could move the target's role between that read and the DELETE, and
+  the refusal was computed against an open space's default instead of a preset
+  `admin`. Both bounds now run inside `removeSpaceMember`'s transaction, after
+  `lockOrgMemberForSpaceGrant`, and `access_after` is reported from that same
+  transaction rather than from a lookup after it. Only a caller racing a
+  promotion sees a difference, and it is a refusal (403) where the stale read
+  reported the swept row as merely missing (404). (#1439)
+
 ### Added
+
+- **The chat composer shows what the assistant may do, and which model
+  answered.** A chip beside the model picker names the caller's role in the
+  space and lists the acts the assistant can perform for them, each computed
+  from the guards the server checks. Each assistant message shows the model
+  that answered it, and reopening a conversation pre-selects that model
+  (never a deleted or disconnected one). An "agent authoring" toggle next to
+  the attachment button lets a caller who may create agents keep the assistant
+  to published agents: off, the turn's MCP bearer is minted without
+  `agents:write` (request body `agent_authoring`, absent = on; remembered per
+  user and browser).
+
+### Changed
+
+- **BREAKING: composing an inline agent requires `agents:write` and
+  `agents:run`.** `POST /api/runs/inline`, `POST /api/runs/inline/validate` and
+  an `inline` source on `POST /api/runs/remote` asked `agents:run` alone; they
+  now also ask `agents:write` — composing a manifest is authoring an agent. The
+  `admin` and `builder` presets compose; `operator` (the default role of open
+  spaces), `runner` and `viewer` no longer do, and an OIDC end-user token can no
+  longer reach these routes. An API key with an explicit scope list needs
+  `agents:write` in it for `appstrate run ./agent.afps`. The platform MCP
+  `run_and_wait` tool and its server instructions offer `kind: "inline"` only to
+  a caller holding both grants.
+
+## [1.0.0-beta.59] - 2026-09-18
+
+### Added
+
+- **MCP Emails — one MCP surface over Gmail, Fastmail, iCloud, Yahoo, Zoho,
+  Yandex and any IMAP/SMTP account the member has connected upstream.**
+  `@appstrate/mcpemails@1.0.0` is a system integration backed by the hosted
+  [MCP Emails](https://mcpemails.com) server, and it joins the DCR-based
+  remote-MCP family (`notion-mcp`, `canva-mcp`, `clickup-mcp`):
+  `source.kind: remote` + `streamable-http` against
+  `https://mcpemails.com/api/mcp`, and an `oauth` auth the sidecar fills with
+  the actor's access token. RFC 9728 protected-resource discovery, RFC 8414 AS
+  metadata, RFC 7591 DCR as a public client and RFC 7636 PKCE (S256) — no OAuth
+  app is registered by hand: the operator installs the connector and each member
+  clicks Connect. The manifest was read off the live server and the AGPL source
+  rather than the marketing page, which disagrees with the code in two places
+  that would have cost real scopes — `search:email` is vestigial (no tool
+  requires it; `read:email` already gates the search action) and the surface is
+  26 tools, not the 23 the docs advertise. `accountId` maps to `$.sub` rather
+  than `$.email`, because userinfo returns the address only when the token
+  carries `openid` or `email`; both are in `default_scopes`, so a connection is
+  still labelled by address. There are no webhooks and no server-initiated
+  events, so an agent that must react to new mail polls `email_read` with
+  `action: "list"`.
+
+- **The production compose ships in this repository, as `deploy/`, and
+  `appstrate/cloud` is retired.** That repository had held no product code since
+  the billing module came in-tree as `@appstrate/module-ee`; its
+  `docker-compose.yml` now lives at `deploy/docker-compose.yml`, with
+  `deploy/.env.example` and a runbook beside it, under the project name
+  `appstrate-prod`. It is deliberately NOT merged with
+  `examples/self-hosting/docker-compose.yml`, which teaches a stock install: the
+  project name, the service names Coolify's domain routing points at
+  (`appstrate-postgres`, `appstrate-minio`, … against `postgres`, `minio`, …)
+  and the `internal: true` network the example uses — which on `appstrate` would
+  cut its egress to the model providers — all differ, and the top-level
+  `volumes:` keys are load-bearing as well. Each file points at the other, so a
+  change that belongs in both is carried across by hand.
+
+  Moving it in-tree put it under the three `bun run check` gates that glob every
+  tracked `*docker-compose*.yml`. None had ever run on it, and three failed.
+  `verify:env-docs` caught the expensive one: its `.env.example` omitted
+  `CONNECT_SESSION_SECRET`, `RUN_TOKEN_SECRET` and `UPLOAD_SIGNING_SECRET`, all
+  three hard-required with no default, so a raw `docker compose up` from that
+  file could not boot and had not been able to for months.
+  `verify:compose-defaults` found ten YAML defaults restating the Zod schema's
+  own, plus only four of `@appstrate/module-ee`'s eight variables forwarded.
+  `verify:release-version` now holds its sixteen image refs to the release like
+  every other shipped compose. And `SIDECAR_POOL_SIZE`, deleted from the platform
+  along with the sidecar pool, had survived here configuring nothing — removed.
+
+  **Operators:** Coolify names the volumes after the RESOURCE uuid, not after the
+  repository, and that cuts both ways. Repointing an EXISTING resource at this
+  file moves, renames and orphans nothing; standing up a NEW one hands you empty
+  volumes however faithfully the compose is copied, and is therefore a data
+  migration rather than a configuration change. `deploy/README.md` says so,
+  because the file reads like a configuration artifact and that is exactly the
+  wrong intuition to bring to it. The resource UUID is written nowhere on
+  purpose — a value that has to be correct to be useful is worse than absent once
+  it is stale — so read it off the resource.
+
+### Changed
+
+- **BREAKING (modules): every principal DECLARES what it is, and
+  `@appstrate/core` goes to 11.0.0.** `AuthResolution` carries a required
+  `principalKind`: `"user"` for the platform user by any transport, `"delegate"`
+  for their authority under a ceiling of its own (an API key, a third-party
+  OAuth client), `"end_user"` for an external identity, set iff `endUser` is. A
+  strategy that omits it, declares an unknown value or contradicts `endUser` is
+  refused by the pipeline with a thrown error — never a default bucket — so an
+  out-of-tree auth strategy fails to compile until it declares one. What it
+  replaces was a proxy: `callerPersonalOwnerId` inferred "is this credential the
+  human themselves?" from the transport (`authMethod === "session"`, the
+  `deferOrgResolution` pipeline flag), copied into four gates asking four
+  different questions, with `!orgRole` standing in for "end-user" and some twenty
+  routes asking "is this the person?" through `authMethod === "api_key"`. The
+  extension point was open — a module may contribute an auth strategy — while the
+  authority model was a closed enumeration, so the first contributed principal
+  landed in the most restricted bucket on four unrelated gates, with four
+  symptoms and only one of them visible. Every gate that asks who the caller is
+  now reads `isUserPrincipal`; the three other inputs survive with the question
+  each actually answers (`api_key` about the key object, `session` about the
+  first-party cookie transport, `deferOrgResolution` about when the pipeline
+  resolves), and the webhooks scope and `/me/connections` read the credential's
+  binding rather than a kind.
+
+  **A third-party OAuth client and an OIDC end-user token are now refused on the
+  profile and its password, on onboarding, on space and organization creation and
+  on the organization library — exactly like an API key**, and the organization
+  listings bind a delegate to its organization and fail closed without one.
+
+- **Migration `0068` validates `packages_org_package_has_home`.** `0067` added
+  that CHECK as `NOT VALID`, which governs every write from the moment it applies
+  while leaving the inherited rows unbacked; `0068` runs the
+  `ALTER TABLE packages VALIDATE CONSTRAINT` that finishes the job (#1450). It is
+  a no-op on a deployment that has already run
+  `scripts/migration/0014-packages-home-space-backfill.sql`, which ends by
+  validating the constraint itself — it is the fresh install that would otherwise
+  carry the constraint marked `NOT VALID` forever.
+
+### Fixed
+
+- **A chat turn in a personal space no longer 404s (#1456).** The turn failed on
+  its first MCP call with a 404 naming a space that exists, in the right
+  organization, owned by the session's author: the chat module's server-minted
+  loopback bearer is neither a cookie session nor the `deferOrgResolution`
+  pipeline, so the transport proxy the gate used answered "not the person" for
+  the person. A turn in the caller's own personal space now works and carries
+  their per-principal grants. The mechanism is the required `principalKind`
+  above.
+
+- **Operator variables no longer travel through the production compose's
+  `environment:` block — the defect that took production down during the
+  cutover.** Coolify MATERIALISES every key that block names: a bare `- FOO`
+  becomes `FOO: ''` in the compose it generates, so the form the rest of the repo
+  uses — name the variable, omit the value, let the Zod schema's default apply —
+  is not merely unnecessary there, it is unavailable, because "unset" cannot be
+  expressed. `z.coerce.number("")` is 0, `@appstrate/module-ee`'s own `.min(1)`
+  refused it, the module failed to initialize and the platform crash-looped.
+  Probing `""` against the real schema of all nineteen bare names the file
+  carried found twelve unsafe: seven refuse to boot (`APP_URL`, `TRUST_PROXY`,
+  `LOG_LEVEL`, `USERCONTENT_URL`, `FILE_RETENTION_DAYS`, `SMTP_PORT`,
+  `EE_RECONCILIATION_BATCH_SIZE`) and four degrade in silence, which is the worse
+  half — `EE_RECONCILIATION_INTERVAL_SECONDS` 300 → 0 pauses metering,
+  `EE_RECONCILIATION_REPLAY_WINDOW` 200 → 0 disables the scan that exists to
+  catch unbilled usage nobody sees, `EE_RECONCILIATION_MAX_GAP_SECONDS` 86400 → 0
+  resumes over any gap, and `S3_PUBLIC_ENDPOINT` goes from undefined to `""`.
+  That one `.min(1)` floor is the only reason any of it surfaced; without it
+  billing would have stopped without a word. The block now carries only what the
+  file COMPUTES — a service hostname, an image ref bound to
+  `${APPSTRATE_VERSION}`, a mirror of `ports:`/`volumes:`, one variable remapped
+  onto another, and the two deliberate overrides (`RUN_ADAPTER`, `MODULES`) whose
+  YAML value differs from the code default on purpose. Everything else arrives
+  through `env_file`, which Coolify adds to every service and which the file now
+  declares itself, so a raw `docker compose` run uses the identical mechanism.
+
+- **A credential delivered through `delivery.files` is readable by the runner
+  again.** `docker cp <hostdir> <container>:/` stamps every copied entry with the
+  HOST-side ownership — the uid the sidecar runs as — while all four runner
+  images declare `USER runner:runner` (uid 1001) and the default mode for
+  `delivery.files` is `0400`. A delivered secret therefore landed as
+  `-r-------- 1 <sidecar uid> 0` and the runner could not read its own file. It
+  hit every owner-only mode on all four runners, including the cert+key pair of
+  `mtls`, which is today's only production consumer of `delivery.files`. Chowning
+  the staged file is not available (it needs privileges the sidecar does not
+  have, and macOS refuses it anyway), so the staged mirror is streamed as an
+  in-memory USTAR archive through `docker cp -`, where uid and gid are nothing
+  but header fields. **The staged modes are kept exactly as they are** —
+  relaxing `0400` to something world-readable would have made the symptom
+  disappear by throwing away the protection the mode exists to provide. Staging
+  itself is unchanged: path safety checks, parent directories and their modes
+  still come from `stageFileMountsOnHost`, and only the transport differs. The
+  reason it went unseen is that the existing tests covered staging and never
+  exercised CONSUMPTION inside a container.
+
+- **An `mcp-server` whose `entry_point` is written `./server.js` imports again.**
+  `checkCompanionFiles` resolved `manifest.server.entry_point` through an exact
+  `files.has()`, while MCPB manifests conventionally spell the path explicitly
+  relative and zip entries are stored flat — two spellings that never meet. No
+  `mcp-server` package of this repository could be installed through
+  `POST /api/packages/import`, the shipped reference package
+  `@appstrate/bun-toolkit-server` (`"./server.ts"`) included, while the on-disk
+  system-package loader accepted the very same archive: the front door was
+  deciding the package's validity. Either spelling resolves now, and ONLY a
+  leading `./` is normalized — `..` segments and absolute paths stay unresolved,
+  so the lookup cannot leave the archive root, and a genuinely absent payload
+  still reports `MCP_SERVER_MISSING_ENTRY_POINT` with the declared path.
+
+- **`scripts/migration/0010` ordered its pages by the text cast instead of by the
+  key.** A cast keeps the output name, so `ORDER BY` bound to the `::text`
+  SELECT-list output while the `WHERE` beside it saw the input column —
+  lexicographic ordering against a numeric cursor. Page 1 ended at 9287 and page
+  2 asked for the ids numerically above it, so 109 of the 717 billing-ledger rows
+  were never selected, and the transaction committed. Found by rehearsing the
+  beta.58 window against a `pg_dump` restore of production; the fix qualifies the
+  key with its table, which cannot resolve to an output name. **No production
+  data was lost** — the legacy database and the platform each hold the same 717
+  rows, verified. Re-run on a fresh restore: 717/717, every table matches, and a
+  second run still refuses with exit 1 as the runbook requires.
+
+## [1.0.0-beta.58] - 2026-09-17
+
+### Added
+
+- **The per-type package index carries `icon` and `keywords`.** Both are read
+  off the same rendered manifest as `name` and `description`, so an index page
+  draws its cards and runs its search from that listing alone — which is what
+  lets the Integrations page read the index every other type reads instead of a
+  wider route of its own. Additive on `GET /api/packages/{skills,mcp-servers,integrations}`.
+
+- **A package now lives in ONE space and reaches every other one through a
+  SHARE.** `package_shares` (migration **0065**, a brand-new table with no
+  backfill) says a package is OFFERED to a space; `space_packages` says it is
+  ACTIVATED there. Two tables, because a package runs with the RECIPIENT's
+  credentials: activating one is a consent, and an "offered but not accepted"
+  state carried on `space_packages` would have had to be filtered at each of that
+  table's every reader, where one miss executes a package nobody agreed to.
+  The subject is always a SPACE — "share with Bob" is a share with Bob's personal
+  space, resolved server-side from his user id and created if he has none, and
+  the sharer never learns that id: the listing renders such a target as its
+  owner. A package is readable from exactly TWO placements, its HOME
+  (`packages.home_space_id`) and every space it is SHARED into. An INSTALLATION
+  is deliberately not a third one: it was the only answer to "why does this space
+  see this package" that never consulted `<type>:share`, so a builder of B who
+  read A's package from anywhere could switch it on in B and hand B a placement A
+  had granted to nobody. Activating is the act of TAKING an offer, and therefore
+  a placement's consequence rather than its source.
+
+  Three routes change the audience and are authorized by a THIRD verb on the
+  package's home space (`<type>:share`):
+  `POST /api/packages/{scope}/{name}/shares` (idempotent, 409
+  `share_target_is_home` when the target is the home itself, 404 for a space the
+  caller cannot reach — so another member's personal space is not targetable by a
+  guessed id), `GET …/shares` and `DELETE …/shares/{target}` (which removes the
+  placement behind the share in the SAME transaction — otherwise the package
+  keeps running where it may no longer be seen). Offering a package with
+  **nothing published** is 409 `package_has_no_version`, for EVERY target and
+  checked before the target is resolved so a refused offer provisions no personal
+  space: outside its home a package runs its latest published version, so an
+  offer of one with nothing published is an offer of nothing. The refusal lands
+  on the only principal who can clear it, in the act they are performing, where
+  the dialog offers **Publier et partager**.
+
+  **Activating has ONE pair of doors**, `POST /api/spaces/{spaceId}/packages`
+  and its `DELETE`, for a personal space exactly as for a team one. The package
+  must be homed in the target or shared into it, re-read under the share row's
+  lock inside the writing transaction, so a revoke racing an activation makes it
+  refuse rather than commit a placement nothing backs; otherwise 404, never a
+  403, since a space id can be private. A caller holding `<type>:share` in the
+  home may switch on one that is NOT placed there yet — the offer is created
+  with the activation, in that one transaction, which is the administrator's
+  single click from the library, and it is why reading A's package from B still
+  grants nothing about placing it in B. In the caller's OWN personal space the
+  type's activation grants are waived entirely: ownership is the authorization,
+  and a `guest` holds only the `operator` preset there, which carries none of
+  them. An API key never carries `share`, so it activates the already-placed and
+  nothing else. `GET /api/spaces/{id}/library` proposes exactly what that call
+  would accept, so the listing cannot offer a package the activation would
+  refuse.
+
+  **Outside its home, a package runs the latest PUBLISHED version, always.**
+  Publishing IS the rollout — the model of Copilot Studio, custom GPTs, n8n and
+  Apps Script — so an author ships a fix and every recipient gets it on their
+  next launch, with nothing to accept a second time. It is a policy the product
+  chose rather than one the field agrees on: Figma hands the consumer a
+  review-and-accept step instead, and that flow was weighed and declined. A recipient cannot repair an
+  agent they do not own, so freezing one on bytes its author had stopped
+  maintaining bought them nothing; the real hazard, a new version demanding an
+  access they never granted, is already refused at the right moment by 412
+  `missing_integration_connection` and its connection offers. Dependency versions
+  are unaffected: an agent's manifest ranges resolve against the published
+  catalogue and each run freezes what it resolved.
+
+- **The library is the map of PLACEMENTS, and it is actionable.** Both
+  `GET /api/library` (the organization map, owners and admins) and
+  `GET /api/spaces/{id}/library` (one space's own page) now return, per package,
+  `placements: [{ space_id, via, state, shared_by }]` — one entry per space the
+  package is placed in and the caller reads for that type. `via` says WHY it is
+  there (`home`, `shared`, `system`), `state` whether that space RUNS it
+  (`active` — a row saying `enabled`; `inactive` — a row saying `false`; `none` —
+  no row at all), and `shared_by` names the offer's author on `shared` entries,
+  `null` there when the offer came from a home move. `state` comes from the ONE
+  activation rule the run gate reads, where the placement ROW always wins and
+  the deployment's default answers only where there is no row: a shipped
+  integration reads `active` in a space nobody has touched rather than as an
+  untaken offer, an untaken offer reads `none`, and a system package somebody
+  switched off reads `inactive` like any other. A pending offer is therefore a placement with
+  `state: "none"` — the same row, the same switch as every other space — and an
+  offer and a package somebody switched off stop looking alike. The organization
+  map is a surface an administrator ACTS on: move a home, revoke a share from
+  its chip, and switch a package on in a space it was never placed in, that last
+  one creating the offer with the activation when they hold `<type>:share` in
+  the home.
+
+- **The DRAFT belongs to whoever may WRITE the package, and every executable form
+  of it now says so — `403 draft_not_writable`.** A head deployment is the
+  developer's, the rule Apps Script states. One predicate and one wording gate
+  all of it: `?version=draft` on `POST /api/agents/{scope}/{name}/run`, on
+  schedule creation and
+  update and on `GET /api/agents/{scope}/{name}/connection-readiness`;
+  `dependency_overrides: { "@acme/skill": "draft" }` on the run route, the
+  remote-run route and both schedule writes, where the authority asked is the one
+  over THAT dependency rather than over the agent declaring it; `stage: "draft"`
+  on `POST /api/runs/remote`; and `GET /api/agents/{scope}/{name}/bundle?source=draft`,
+  because an exported draft is a draft run with the bytes handed over as well.
+  **Operators: an API key now needs `agents:write` to export a draft**, which is
+  what `appstrate run @scope/agent@draft --local` does — `agents:read` is enough
+  for every published export. A schedule is judged when it is WRITTEN and never
+  re-judged when it fires, exactly as its frozen `connection_overrides` are. A
+  selector left out is still the published `latest` (#636), and still 404
+  `no_published_version` when there is none — there is no silent fall-back to the
+  draft anywhere.
+
+- **Reading a package is not executing it: a readable package never 404s on its
+  detail page.** With no selector named, the page renders the DRAFT for a caller
+  who may write the package, the latest PUBLISHED version for everybody else,
+  and — when nothing is published at all — the draft in read-only, since hiding
+  it would 404 a page the package list had just linked to. `AgentDetail` and
+  `OrgPackageItemDetail` both carry the new required field `definition`
+  (`"draft" | "published"`) so the reader is told which of the two they are
+  looking at instead of inferring it; the SPA renders `definition: "draft"` with
+  `home_writable: false` as a read-only banner — the same banner and the same key
+  for all four package types — and disables **Lancer** with that reason rather
+  than letting the launch fail.
+  The readiness badge and the input-settings editor judge the SAME effective
+  selector, from the same function, so a badge can no longer contradict the page
+  it sits on. `AgentDetail.dependencies.skills[]` gains `home_writable` too, which
+  is what decides whether the run and schedule forms offer a per-dependency
+  **Brouillon** option at all. The agent and skill hints in `GET /api/me/context`,
+  the chat system prompt and the MCP tool descriptions carry the same flag: a
+  draft-only package is presented to the model as runnable with `version=draft`
+  only when the caller may write it, and as "not yet published, not runnable"
+  otherwise.
+
+- **One verb for the whole platform: ACTIVATE and DEACTIVATE, one pair of doors,
+  four package types.** `POST /api/spaces/{spaceId}/packages` switches a package
+  on in a space and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`
+  switches it off, for agents, skills, mcp-servers and integrations alike. Both
+  are idempotent by construction — the placement row is upserted, so the `POST`
+  answers **201** when it put the package on and **200**, with the same body,
+  when it was already on. A DEACTIVATION never deletes the row: `enabled = false`, **204**, and the space
+  keeps the model, the proxy, the generation settings and the stored input
+  values it chose, so switching a package off for a week costs nothing to undo.
+  Only revoking the share that placed it removes the row, along with the
+  placement. A package that is on with no row at all — a system one, an
+  integration the deployment offers — gets one written `false` by the `DELETE`,
+  which is what makes that opt-out survive the next run; a package that is not
+  on and has no row is a **404** instead, because an offer nobody has taken up
+  has nothing to switch off and writing the row would turn a pending offer into
+  "switched off", a decision its recipient never made.
+  `PUT /api/spaces/{id}/packages/{scope}/{name}` no longer carries `enabled` —
+  the body is `.strict()`, so sending it is a 400 — and carries nothing but
+  `modelId`, `proxyId` and `generationConfig`, all three under `configure`,
+  which is the one grant the personal-space waiver never covers. A guest at home
+  therefore switches on and off what was offered to them and never chooses the
+  model it runs on: that spends the organization's LLM budget, which is
+  precisely what their org role withholds. The permission STRINGS are unchanged
+  (`agents:configure`, `integrations:install` / `integrations:uninstall`,
+  `<type>:write`): they are rows in `space_roles` and entries in every API key's
+  scope list, and renaming a grant is a migration of data, not of code — so no
+  role, no key and no custom bundle has to be touched. Audits are
+  `package.activated` and `package.deactivated`, for every type.
+
+- **"Active here" has ONE definition, and the placement ROW always wins WHERE
+  THE PACKAGE IS PLACED.** A space's row decides — `enabled` or `false` — for a
+  package that space HOLDS, homed here or offered here, and the deployment's
+  default answers only where there is no row at all: `source = 'system'`,
+  narrowed for INTEGRATIONS to the subset `SYSTEM_INTEGRATIONS` names, since a
+  deployment ships tens of integration packages and offers only those. The rule
+  is written twice and nowhere else (`activeHereSql(spaceId)` for the queries,
+  which conjoins the placement filter and states the two LEFT JOINs it expects,
+  and `isActiveHere(pkg, row, placed)` for the callers already holding the
+  rows), with a table-driven test walking every (type × source × placed × row)
+  cell so the twins cannot drift, and every reader asks it: the run gate, the
+  caller-context hints, `AgentDetail.active`, the library's `state`, the type
+  INDEX pages, the three reads of a space's own placement rows and the
+  integration readiness. The placement conjunct rides on
+  the ROW branch alone, because the default only ever switches on packages the
+  deployment ships and those are placed everywhere by construction, while a row
+  is a decision a space made about a package it may since have LOST. So an
+  ORPHAN row — no home, no share, the residue `scripts/migration/0016` repairs —
+  is active NOWHERE: it is absent from the caller context handed to the model
+  and from every type index, the run gate and the scheduler tick refuse it, and
+  the space-package listing, detail and resolved run-config read it as no row at
+  all rather than handing back the draft manifest of a package the space no
+  longer holds. The run gate also carries the organization boundary inside its
+  own query rather than leaving it to whatever each caller reads next: a
+  boundary held by convention is the one an added caller drops in silence, and
+  stating it costs a predicate on an indexed column. **A SYSTEM package is
+  switchable per space like any other** —
+  `DELETE /api/spaces/{id}/packages/{scope}/{name}` writes it
+  a row saying `false` and the space stops running it, sticky across every run
+  until somebody switches it back on. An explicit `false` is an operator
+  decision the platform must not overrule, and a switch that changes nothing is
+  worse than no switch: Figma disables any library, VS Code any extension.
+
+- **A package that is switched off does not run, on every door and in one
+  voice.** Deactivating is a real refusal rather than a filter on a listing, so
+  the THREE doors that make an agent run mount the activation guard
+  (`requireActiveAgent()`) behind the placement one and answer
+  `404 agent_not_active_in_space` for an agent placed in this space and switched
+  off — `POST /api/agents/{scope}/{name}/run` (a rerun is `rerun_from` in that
+  same body, not a route of its own), `POST …/schedules` and `GET …/bundle` —
+  with `POST /api/spaces/{id}/packages` named in the detail. `POST /api/runs/remote`
+  is the FOURTH door: it reads the same verdict inline, because the resource it
+  resolves is a package of any type rather than an agent, and renders the two
+  halves apart — its own generic `package_not_active_in_space` for a package the
+  space holds and has switched off, and the byte-identical body of a nonexistent
+  id for one no placement holds. That route takes a package id straight from the
+  request rather than from a path a placement guard has already narrowed, so two
+  distinguishable refusals would make it an existence oracle over every package
+  the organization owns; the `403 draft_not_writable` of `stage: "draft"` is
+  asserted after that verdict for the same reason. An agent this space cannot
+  read at all gets the opaque `404 agent_not_found` on the other three, so the
+  status is 404 either way and a space holding no placement still learns
+  nothing. A SCHEDULE obeys it
+  at every FIRE, not only when it was written, and from the SAME executable
+  predicate the four execution doors ask (`agentExecutionBlock`: placed here AND
+  active here): whether a space runs a package is a property of the space and can
+  change after the schedule was authored, so a switched-off agent produces a
+  visible failed run naming the switch and the schedule stays ARMED — switching
+  the agent back on lets the next tick run it, with nothing to re-enable by
+  hand. Without that tick gate, deactivating would have been a filter on the
+  pages a human looks at while the agent kept running on the space's credentials
+  and the organization's LLM budget. Reading is untouched, deliberately and
+  everywhere: every route that says what an agent IS, or how this space has
+  configured it, answers 200 with the switch off, and the verdict travels in the
+  payload instead — `AgentDetail.active` on the detail, since the index lists the
+  ACTIVE set and would answer `true` on every row — which is what lets the SPA
+  open a switched-off agent from the library and offer **Activer dans cet
+  espace** on its own page instead of letting a call fail.
+
+- **`AgentDetail.active` — the detail answers the execution question itself.**
+  Required, the same rule the index filters on, resolved inside the reads the
+  handler already performs. A page that has loaded the agent needs no second
+  call to learn whether the space runs it, and the page that repairs a
+  switched-off agent is exactly the one that must not have to ask twice. The
+  readiness answers it too, as data rather than as a status: `GET /api/agents/{scope}/{name}/connection-readiness`
+  is a READ, so it answers **200** for a switched-off agent and carries
+  `{ field: "agent", code: "agent_not_active" }` FIRST in `errors` with
+  `blocks_run: true`, next to `integration_not_active`. Every other entry there
+  describes something to configure and none of it can run while the space has
+  the agent off, so that one leads — and a 404 would have blanked the very panel
+  whose job is to say what blocks the run.
+
+- **Moving a package's home ACTIVATES it in the destination**, through the
+  activation DOOR itself and in the same transaction as the move, exactly as
+  creating one activates it in the space it was written in. A package lives
+  where it is written, and arriving in a space that cannot run it would make the
+  move a two-step act with no second button on the page that performed it. Going
+  through the door rather than writing the row by hand keeps `space_packages` to
+  one writer and gives the act the door's guarantees: an mcp-server whose
+  `latest` archive does not parse fails the WHOLE move with the door's `422`
+  instead of arriving active and unusable, and the activation is AUDITED like
+  any other — `package.activated` with `after: { spaceId, via: "move" }`,
+  written only when the destination actually started running the package and
+  naming what did it. A destination that had deliberately switched the package
+  off keeps that decision, because the move transfers AUTHORITY and decides
+  nothing about what a space runs. A home set to `NULL` — the organization
+  catalogue — activates nothing.
+
+- **Moving a package's home reconciles the placements it invalidates.**
+  `PUT /api/packages/{scope}/{name}/home` now writes, in the same transaction as the
+  move, a `package_shares` row for every space that still holds a placement row
+  and is not the new home — `shared_by` NULL, because nobody offered
+  it; the home did, until this call — and deletes the destination's own share,
+  for the mirror image of the reason an offer to the home answers 409
+  `share_target_is_home`. Those authorless rows are ordinary shares: `GET …/shares`
+  lists them with no author and `DELETE …/shares/{target}` revokes one like any
+  other, taking the placement with it. Without this a move left a row nothing
+  placed — still running for a schedule, invisible on every page of the space
+  running it.
+
+  **One reconciliation, and the offboarding sweeper calls it too.**
+  `reconcilePlacementsAfterRehome` is the single function behind every rewrite of
+  `packages.home_space_id`, and its second caller is the personal-space sweeper:
+  when an orphaned member's space is emptied, a package PLACED in another space
+  is re-homed to the organization's DEFAULT space AND offered to each space that
+  held a row, in the sweep's own transaction. The default space needs no offer — it
+  is the home now — and the package, its draft included, becomes readable there,
+  which is what "a package of the organization that belongs to no team" means. Sharing the reconciliation matters most on that
+  path precisely because it acts on nobody's request: without it the sweep is the
+  one thing in the platform that MAKES the placement rows everything else refuses
+  to honour, and a team space keeps running a departed author's agent while
+  losing it from every page and failing its cron each tick. The question the
+  sweep turns on is PLACED elsewhere — the one placement predicate, so an OFFER
+  saves a package exactly as a row does, and only a package no other space was
+  ever placed for is deleted with its author's space. Every comparable splits a
+  departing member's content on the same axis: Google Workspace transfers the
+  SHARED half of a Drive and makes including the unshared files a separate
+  opt-in, Figma keeps a draft shared before removal readable by everyone it was
+  shared with, n8n makes transfer-or-delete an operator's choice. **No live code
+  path creates an orphan placement now**; `scripts/migration/0016` repairs the
+  inherited ones.
+
+  Re-importing a bundle whose root is homed elsewhere follows the
+  same rule: it activates it WITH an offer when the caller holds `<type>:share`
+  in that home, and otherwise reports `root_active: false` and logs the refusal
+  at **warn**, because a placement that did not happen is an operator-visible
+  fact.
+
+- **New permission `share`** on `agents`, `skills`, `mcp-servers` and
+  `integrations` (`@appstrate/core`, additive): held by the `admin` and
+  `builder` presets, by no API key (the share decides who runs what with whose
+  credentials, so it is session-only like `integrations:configure`), and
+  droppable from a custom role by an organization that wants Notion's split of
+  authoring from distributing. Every package read now carries a third home field
+  beside `home_space_id` / `home_writable`: `home_shareable`, the same predicate
+  for `share`, which is what the SPA's "Partager…" action is gated on.
+
+- **Organization setting `restrict_package_copy`** (default `false`). Reading a
+  package implies being able to copy it, as in Notion, Drive and Figma. An
+  organization may close that: at `true`, `POST …/fork` and
+  `GET …/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` require
+  `<type>:share` in the SOURCE package's home space (owners and admins when it
+  has none) and answer `403 package_copy_restricted` otherwise. Without it,
+  personal spaces open "fork it into mine, then share it on" to every reader —
+  `share` would protect the link and not the content. **Skills and system
+  packages are exempt** on all three: the CLI's skills sync downloads skills
+  into a local checkout by design and a skill's audience is already the space it
+  is placed in, while a system package is shipped readable in every space of
+  every organization and so has no owning space for the setting to protect.
+  `/bundle` is the widest of the three and the one to know about: **a
+  SERVER-side agent run is unaffected** — it assembles the same bundle and hands
+  it to nobody — but `appstrate run @scope/agent --local` downloads one, so
+  under a restricted organization it answers `403 package_copy_restricted`. That
+  is the flag's meaning rather than a side effect: a copy of the agent leaves
+  the platform to perform a local run. Reading a package's files in the file
+  explorer stays open in both settings — a screen is not a copy. Toggled from
+  the organization's general settings page under `org:settings`.
+
+- **Every member of an organization now has a personal space — "Mon espace".**
+  It is created at the moment they join (organization creation, invitation
+  accept, SSO auto-provision and first-boot bootstrap all go through one
+  `provisionMember` seam, in the same transaction as the membership row, so a
+  member without one cannot exist), and `GET /api/spaces` repairs a missing one
+  for the caller. It is `private`, holds exactly one member, and is reached by
+  its **owner alone** — an organization owner or admin gets a 404 on it, on
+  every route: the detail, the members list, the package detail of a draft homed
+  there, `PATCH`, `DELETE`, the SSE stream, and a schedule pointed at it. That
+  is the whole point: agents, runs, files and chat sessions started there are
+  private, and a draft nobody has shared is nobody else's business. The owner's
+  own session reaches it, and so does the same person through a CLI device-flow
+  or MCP instance token — their own credential by another transport. An **API
+  key** and an **end-user** never do: a key is pinned to a space and carries its
+  creator's authority, not their privacy, so a key minted into a personal space
+  would 404 on every request it made and `POST /api/api-keys` refuses it with a
+  409 `personal_space_takes_no_keys` (API keys are team-space only). A role
+  preview (`X-View-As`) can neither list nor target one (400). A **guest** who
+  owns a personal space holds preset `operator` there rather than `admin`:
+  receive and run what is shared with them, not author agents on the
+  organization's LLM budget. Only the name is editable: `visibility` or
+  `default_role` on it is a 409 `personal_space_immutable`, `DELETE` is a 409
+  `personal_space_not_deletable`, and a `space_members` write is a 409
+  `personal_space_has_no_members`. Two administrative acts remain — both
+  audited, both refused to API keys, and both applying to an **orphaned** space
+  only:
+  `POST /api/spaces/{id}/convert-to-team` turns one whose owner has LEFT into an
+  ordinary team space (it stays `private`), the one way an administrator ever
+  reaches inside one, and `POST /api/spaces/{id}/sweep-now` deletes it
+  immediately. A live personal space is never convertible, and all three acts —
+  those two plus `DELETE` — answer **404 rather than 409** on a live personal
+  space that is not the caller's own, an API key included (a key carries its
+  creator's authority, not their privacy): a named refusal would confirm that
+  the id is somebody's private workspace. Leaving the organization does not delete
+  anything: `spaces` gains `orphaned_at`, stamped by the member removal (whose
+  audit event now names the spaces it put on the clock), and for 30 days the
+  space is listed to owners and admins (`personal: true`, `orphaned_at` set,
+  `access: "none"`) so it can be converted, while a re-invite inside the window
+  hands it back untouched. During that window a package homed there but
+  placed elsewhere is writable by nobody, which is the intended state —
+  converting the space ends it early. After 30 days the new hourly
+  `personal-space-sweeper` worker empties it — a package it homes moves to the
+  organization's default space when another space holds a placement for it, and
+  is deleted when it lived only there — and deletes the space with its runs, files and
+  sessions. `GET /api/spaces` items carry `personal`, the switcher pins
+  "Mon espace" above the team spaces, a personal space's settings hide the
+  Members tab and lock the visibility and default-role controls, and the
+  organization's Spaces page lists orphaned ones with **Convertir en espace
+  d'équipe** / **Supprimer maintenant**. `POST /api/end-users` joins
+  `POST /api/api-keys` and the OIDC client registration in refusing a personal
+  space (409 `personal_space_takes_no_end_users`): it holds no identity that
+  outlives the one member it belongs to. Migration `0064` is shape-only and
+  needs no backfill to be correct; provisioning the spaces of members who
+  already exist is `scripts/migration/0015-personal-spaces-backfill.sql`, run
+  AFTER the deploy is validated — nothing is degraded while it has not run, and
+  nothing counts spaces for a quota today, so the count it prints matters only
+  to an operator with a per-space ceiling of their own. **This one is a one-way
+  deploy**, and from the FIRST BOOT of the new build rather than from `0015`:
+  personal spaces exist from the first request served, and an older build's
+  resolver reads one as an ordinary `private` space — handing every organization
+  owner and admin `admin` inside it, the one thing the feature refuses. Roll
+  forward, or restore the coordinated backup; the runbook
+  (`scripts/migration/README.md` → "Personal spaces & sharing rollout") states
+  the per-file rollback truth.
+
+- **`DELETE /api/spaces/{id}` now refuses a space with runs in progress** —
+  409 `space_has_active_runs` while any run in it is `pending` or `running`, for
+  every actor including the offboarding sweeper (which logs and retries on the
+  next pass). The delete cascade-drops `runs`/`run_logs`, so performing it under
+  a live container tore the rows out from under it. Same rule as organization
+  deletion, and now literally the same predicate.
+
+- **A package now has a home space, and it alone decides who may write it.**
+  `packages.home_space_id` names the space whose `<type>:write` authorizes
+  editing, publishing, restoring, renaming and deleting a package; the other
+  spaces it is installed in consume it and get no say. A package of the
+  organization ALWAYS has one — the CHECK `packages_org_package_has_home`
+  (migration **0067**) states it in the database rather than leaving it to every
+  writer's memory — and the organization's DEFAULT space is the home of the
+  packages that belong to no team: owners and admins reached it already, and a
+  builder of the default space gains the write, which is what a default space is
+  for. The only rows with no home are the two the constraint names: a SYSTEM
+  package (`org_id IS NULL` — a delivery, not a placement) and an inline run's
+  `ephemeral` shadow row, which no package route can reach and which a home
+  would make blocking for its space's deletion. The home is asked, and
+  nothing else: the mutation routes no longer also require the permission in the
+  space the request comes from, so an author edits their own package while
+  browsing a space where they only read. The routes acting on the _placement_
+  — activate, deactivate, configure, per-space settings — keep their current-space
+  guard, because that is what they are about. The home is set from the space a
+  package is created, imported or forked in — every such path resolves one, an
+  org-level MCP bearer landing on the default space — is exposed as
+  `home_space_id` on package reads and on `GET /api/library`, and is moved by the
+  new `PUT /api/packages/{scope}/{name}/home`, whose `home_space_id` is a REQUIRED
+  space id (`null` is a 400) and which requires that permission in both
+  the old and the new home (an unreachable destination answers 404). A PERSONAL
+  space is never a destination — 409 `home_move_into_personal_space`: a personal
+  space homes only what is created or forked in it, and every member but a guest
+  holds `write` in their own, so the move would otherwise put a team's package
+  beyond every administrator's reach (nobody enters a personal space) for as
+  long as its owner stays a member; `POST …/fork` is the private copy. It is a
+  read grant too, everywhere: the home is one of the two placements that make a
+  package readable (the other is a SHARE), so a draft nobody has been offered —
+  or one placed only where its author cannot go — stays visible to them, on the
+  detail, in the library and in the file explorer. Reading is still not running:
+  that needs an ACTIVE placement in the space it runs in. **Operators:** the
+  permission is no longer required in _every_ space where a package is placed,
+  which cost an author the edit of their own package the moment someone switched
+  it on in a space the author cannot read. A space that
+  homes a package can no longer be deleted: `DELETE /api/spaces/{id}` answers
+  409 `space_homes_packages` and names them, so moving them stays the caller's
+  act — the package page's actions menu carries a **Move to a space…** dialog for
+  exactly that, listing the spaces where the caller may author this type.
+  Migration **0063** adds the column and **0067** adds the CHECK as `NOT VALID`,
+  so it governs every write from the moment it applies while the inherited rows
+  are still unbacked: every existing row starts with no home and is therefore
+  admin-only until the operator runs
+  `scripts/migration/0014-packages-home-space-backfill.sql`, which gives every
+  package a home — one installation, the oldest of several, or the default space
+  for one installed nowhere — and ends by validating the constraint. It belongs
+  between the migrations and bringing the new version up — stop, migrate,
+  run 0014 then 0016, start — so nothing serves traffic while non-owner authors
+  and API keys are locked out. Rolling 0063 back is safe before 0014; afterwards
+  it needs `ALTER TABLE packages DROP CONSTRAINT packages_org_package_has_home`
+  and then `UPDATE packages SET home_space_id = NULL`, in that order, because the
+  column's `ON DELETE RESTRICT` refuses to delete a space that homes a package
+  and an older build has no route that clears a home. The combined
+  runbook for 0063-0067 and the scripts is `scripts/migration/README.md` →
+  "Personal spaces & sharing rollout".
 
 - **One file editor for agents, skills, integrations and MCP servers.** The
   Files tab stages creation, text editing, upload, replacement, rename and
@@ -70,11 +752,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the agent and skill editors now refuse a caller without `agents:write` /
   `skills:write` up front, instead of opening a form whose save would answer 403. The presets stop being a
   single ladder here: `runner` and `viewer` grant things the other does not, so
-  neither is "above" the other. Migration **0060** widens the three space-role
-  CHECK constraints; it is applied automatically at boot, with no operator step.
-  One thing to check before deploying: an organization that defined a **custom
-  role keyed `runner`** must rename it first — the migration refuses rather than
-  let a bundle shadow the preset, and says so by name.
+  neither is "above" the other. Migration **0060** rewrites the three space-role
+  CHECK constraints — two widen to admit `runner`, the third narrows
+  `space_roles.key` so a custom role cannot shadow the preset — and it carries
+  no pre-flight, no guard and no `RAISE`. There is nothing to count: the preset
+  and the constraint reserving its key arrive in the same batch, so the only row
+  the narrowing could refuse — a custom role keyed `runner`, defined before the
+  key was reserved — is structurally impossible, and a guard over it would be a
+  `RAISE` no database can reach. Were one ever to exist, it surfaces as a bare
+  `23514` naming `space_roles_key_not_preset`, which is the correct failure for
+  a state nothing can produce. Applied automatically at boot, no operator step.
 
   **API consumers**: `dependencies.skills`, `dependencies.mcp_servers` and
   `forked_from` are optional on the agent DTOs from now on — a summary read
@@ -101,8 +788,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `core-providers` next to `openai-compatible`, for any self-hosted or
   third-party endpoint speaking the Anthropic Messages API (LiteLLM proxy, …).
 
-- **`POST /api/model-provider-credentials/discover`** — asks an endpoint once
-  for its listing (`GET <base_url>/models`) and returns the ids it serves,
+- **`POST /api/model-provider-credentials/discover`** — asks an endpoint for
+  its listing (`GET <base_url>/models`), follows the listing's own cursor when
+  it declares one (Anthropic `has_more` / `last_id`, Google `nextPageToken`) up
+  to 10 pages or 1000 models, and returns the ids it serves,
   each described from the fields the listing publishes (vLLM `max_model_len`,
   Mistral `capabilities`, OpenRouter `context_length` / `architecture` /
   `top_provider` / `supported_parameters`, LM Studio `max_context_length`) and,
@@ -111,73 +800,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   says which described it, `label` is catalog-only, an id in no catalog comes
   back all-null. Takes an existing `credential_id` or an inline `provider_id` +
   `api_key` (+ `base_url_override`), so the model form can list a custom
-  endpoint before its credential exists. Persists nothing, never echoes the
-  key, refuses OAuth providers (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`),
+  endpoint before its credential exists. `truncated` says when a page or model
+  cap stopped the read, so a partial view never passes for a whole one. It
+  persists no model state — no credential is created, no `available_model_ids`
+  is written — while the probe itself IS recorded in the audit trail
+  (`model_provider_credential.discovered`: the endpoint reached and what came
+  back, never the key), since it spends a key on an operator-supplied URL. It
+  never echoes the key, refuses OAuth providers
+  (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`),
   and never returns a per-token cost: an endpoint serving a vendor's model id is
   not billed at the vendor's rate. Rate limited to 6/min behind
   `model-provider-credentials:write`.
-
-- **`@appstrate/core/map-with-concurrency`** — the bounded worker pool moved
-  out of `apps/api/src/lib/map-with-concurrency.ts` into core, unchanged, and
-  re-imported by `lib/boot.ts`, `services/input-parser.ts` and
-  `services/system-packages.ts`. `appstrate skills sync` needs the same pool
-  against the rate-limited package routes; a copy in the CLI would have been
-  the third in the repo, and the first two had already diverged on
-  abort-on-rejection.
-
-- **`appstrate skills sync` — the org's skills in Claude Code and Codex,
-  refreshed without a manual step.** Materializes every skill installed in the
-  profile's pinned space as an [Agent Skills](https://agentskills.io/specification)
-  directory, into `claude-plugin` (a complete Claude Code plugin under
-  `$XDG_DATA_HOME/appstrate/claude-plugin/`, the default), `codex`
-  (`~/.agents/skills/`) or `claude-user` (`~/.claude/skills/`). The auto-sync is
-  a Claude Code marketplace `command` source re-running the CLI once per
-  session — no server change, no hook, no daemon — so `--print-path` prints the
-  plugin directory as the only stdout line and the output is byte-deterministic.
-  Published `latest` by default (integrity-verified), `--source draft` for
-  authors. Exactly one thing is rewritten in `SKILL.md`, the frontmatter `name`,
-  so it matches the directory; an artifact published before the platform's
-  frontmatter gate is synced as authored and named once on stderr. An ownership
-  ledger keyed by target and `HOME` root makes the shared roots safe (nothing it
-  does not own is written or removed), a `mkdir` lock serializes concurrent
-  sessions, and per-skill failures never cost the plugin under `--print-path`.
-  On a fresh machine the plugin install still succeeds before the CLI is
-  connected: it gets a single `/appstrate:setup` skill naming the missing step
-  and a `SessionStart` hook that surfaces it at every session start, both
-  replaced by the organization's skills on the first connected sync.
-  Full behaviour: `apps/cli/README.md` → `appstrate skills`.
-
-- **Two release gates joined `bun run check`: `verify:release-version` and
-  `verify:env-docs`.** Both close a hole that a green check had been reporting
-  as fine.
-
-  `verify:release-version` (`scripts/verify-release-version.ts`) compares the
-  hardcoded `${APPSTRATE_VERSION:-<version>}` fallback in every shipped compose
-  file and `.env.example` against the git tag namespace. That fallback is what a
-  self-hoster gets from the documented `docker compose up -d` without exporting
-  the variable, and nothing checked it: measured at `v1.0.0-beta.53` all five
-  compose files still said `1.0.0-beta.41` — 79 sites, twelve releases stale —
-  while `.env.example` said `1.0.0-beta.51`, a third value again. The #1201
-  image-trio guard structurally cannot see this: it compares the platform, the
-  `PI_IMAGE` and the `SIDECAR_IMAGE` refs to EACH OTHER, and all three read the
-  same stale fallback, so the trio is perfectly coherent — coherently twelve
-  releases old. The gate has two arms: a FLOOR (not behind the newest `v*` tag)
-  run by `check.yml` on every PR, and an EXACT match run by the `verify-version`
-  preflight in `release.yml` that every publishing job `needs:`. The floor is
-  deliberately not an equality, so the bump PR — during which the fallback is
-  one release ahead of every tag that exists — is not the thing it fails.
-
-  `verify:env-docs` (`scripts/verify-env-docs.ts`) turns `docs/ENV.md`'s
-  "superset of the schema" claim from an assertion into a check:
-  `keys(envSchema) ⊆ rows(ENV.md)` and `keys(*.env.example) ⊆ rows(ENV.md) ∪
-INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
-  table was missing two schema keys and seven `.env.example` keys. It is a
-  completeness check only and never writes the file: the Notes column carries
-  cross-field boot rules and failure behaviour no Zod schema encodes. Three
-  vacuity floors fail the run rather than pass it when a population parses
-  empty. It cannot reach variables read straight from `process.env` — they are
-  in no schema and in no example file — which `docs/ENV.md`'s own header now
-  says out loud.
 
 - **The runtime container e2e now runs one inference turn through the BUILT
   pi + sidecar pair (#1197).** `runtime-pi/test/inference-container.e2e.test.ts`
@@ -195,6 +828,235 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   green).
 
 ### Changed
+
+- **Custom space roles are open-source.** Defining a bundle, editing one,
+  granting one and previewing one no longer ask for the `custom_roles` feature
+  flag, which `@appstrate/module-ee` contributed and which the platform's own
+  `/api/roles` write routes read. The whole surface was already Apache-2.0 code
+  sitting in core; what has been deleted is the licence check over it. A
+  deployment running `MODULES=none` now defines, edits, grants and previews
+  custom roles, and `apps/api/test/integration/modules/zero-footprint.test.ts`
+  — which mounts zero modules — is where that is asserted, because those four
+  calls answered `403 feature_unavailable` before.
+
+  The presets (`admin`, `builder`, `operator`, `runner`, `viewer`) are
+  unchanged, and so is the authorization: `roles:write` and `roles:delete` are
+  owner/admin org permissions, `canGrantSpaceRole` still forbids handing out
+  permissions the caller does not hold in that space, and a bundle from another
+  organization is still not found. Those are now the WHOLE gate — an org
+  `member` is still refused, with `code: "forbidden"`.
+
+  **API:** the `feature_unavailable` refusal is gone from the platform. It had
+  exactly one producer, so the `403` of `POST`/`PATCH /api/roles`,
+  `POST`/`PATCH /api/spaces/{id}/members` and the two invitation routes is now
+  the ordinary `forbidden` response, with no `feature_unavailable` example
+  declared. A client branching on that code will never see it again; the
+  requests that raised it now succeed. `GET /api/spaces/{id}/roles` is
+  filtered by the caller's permissions alone, so it offers bundles on every
+  deployment. No migration, no stored state: the flag was computed at boot and
+  never persisted, and the change only ever widens what an existing row allows.
+
+  **Operators:** a `MODULES` list naming `@appstrate/module-ee` keeps working
+  untouched — the module declares `features: { billing: true }` and nothing
+  else. Nothing in an `.env` has to change.
+
+- **BREAKING (API): asking what an agent IS and asking whether it RUNS are two
+  guards now, and only the second one refuses.** `requireAgent()` loads an agent
+  by the PLACEMENT rule — homed here, offered here, or shipped with the
+  deployment — and raises one refusal, the opaque `404 agent_not_found`;
+  `requireActiveAgent()` asks the activation and is mounted behind it by the
+  three execution doors alone. So a switched-off agent placed in this space now
+  answers **200** on `GET …/model`, `/proxy`, `/persistence`, `/runs`,
+  `/schedules`, `/connection-readiness` and its detail, and on the writes beside
+  them — `PUT …/model`, `/proxy`, `/input-settings`,
+  `PUT /api/spaces/{id}/packages/{scope}/{name}`, `DELETE …/runs`,
+  `DELETE …/persistence`. Those are the acts of somebody about to switch the
+  agent back on, and the single guard that answered the execution question for
+  all of them broke the very page carrying the switch: the SPA's detail view
+  threw on its own model and readiness calls. The activation gate carries a
+  handler marker, so the list of routes that ask the execution question is read
+  off the route table by a conformance test rather than asserted in a comment.
+  One tightening travels with the split: the placement rule is now the ONLY way
+  in, so an ORPHANED `space_packages` row — no home, no share, the state
+  `scripts/migration/0016` repairs — no longer opens the agent routes either.
+  The detail route already refused it; the two now speak with one voice.
+
+- **BREAKING (CLI): `appstrate skills sync` reads the ACTIVE skills of a space,
+  not merely the placed ones.** The plan reads
+  `/api/packages/skills`, which IS that active set, so a skill switched off in a
+  space is not
+  written into the Claude Code plugin, `~/.claude/skills/` or `~/.agents/skills/`
+  from it — which is what the switch means everywhere else: activation governs
+  what a space OFFERS. Switching one back on brings it back at the next sync,
+  since the sync re-reads that list every time.
+
+- **The three doors are the only things that CREATE a `space_packages` row.**
+  Activate, deactivate, configure — nothing else inserts it. The row is deleted
+  by exactly two callers, neither of which is a door: `revokePackageShare`
+  (`services/package-shares.ts`), which drops the share and the row behind it in
+  one transaction, and the `keep: false` branch of
+  `reconcilePlacementsAfterRehome` (`services/package-placement.ts`), which
+  empties the old home a `PUT …/home {"keep_in_previous_home": false}` released.
+  And one caller UPDATES a column in place on a row that is already placed —
+  `setBlockUserConnections` (`services/integration-pins-service.ts`) writing
+  `block_user_connections`. The per-space
+  integration settings route (`PATCH /api/integrations/{id}/settings`,
+  `block_user_connections`) has to materialise a row for an integration the
+  deployment offers with no row yet; materialising one IS activating, so it goes
+  through the activation door in its own transaction and inherits that door's
+  verdict — a package the door would not activate here rolls the whole call back
+  into the 404 it always answered — and writes no audit, because the door
+  reports the package was already active and `package.activated` is written only
+  when the answer moves. And **configuring never activates**: `PUT …/model` on a
+  package merely OFFERED here answers `404 … is not active in this space`, from
+  the same function as the `DELETE`'s third branch, instead of creating a row
+  that would have meant "on" without the placement rule, without `<type>:share`
+  and without a trace.
+
+- **The library never hides a real placement row.** A personal space is still
+  never OFFERED the deployment's integrations — an offer into somebody's own
+  space is somebody else's act — but that skip now applies only to the
+  placement that would have existed by construction alone. Once the space holds
+  a `space_packages` row the map renders it like any other (`via: "system"`, and
+  `state` from the one activation rule), because a row is a decision its owner
+  made, and hiding it hid both that state and the switch that undoes it.
+
+- **BREAKING (API): the three per-space package doors refuse an unreachable id
+  in the SAME words.** `POST /api/spaces/{id}/packages`,
+  `PUT /api/spaces/{id}/packages/{scope}/{name}` and its `DELETE` all run the
+  catalog read before they look at anything else, so a package id the caller
+  cannot reach — one homed in another member's personal space — answers exactly
+  the 404 an id that does not exist answers, body for body. Two different
+  `detail` strings made the doors an existence oracle for packages living in
+  spaces a member's privacy says do not exist for the caller.
+
+- **BREAKING (API): `shared_by` names a sharer only while they are still a
+  member of the organization.** Both `GET /api/packages/{scope}/{name}/shares`
+  and the library's `placements[].shared_by` reach the name THROUGH the
+  organization's membership rows rather than through the user table, so a former
+  member's name is not something a share listing can hand back. The offer itself
+  survives untouched — only the attribution goes `null`, which is already the
+  shape a share created by a home move carries.
+
+- **BREAKING (API): readiness judges a declared skill by PLACEMENT, and the
+  message names the repair.** `resolveDeclaredSkills`
+  (`services/package-catalog.ts`) resolves the skills an agent declares through
+  `placementReadFilter` + `placementShareJoin`, anchored on the home of the
+  package that DECLARES them — the same placement rule every other read of a
+  package obeys. So a skill that is published but homed in another space, and
+  never shared with the agent's home, does not resolve, and readiness answers
+  `missing_skill`. The wording it replaces asserted an INSTALLATION (`is not
+installed`), an act that no longer exists; the message now states both
+  repairs, because publishing alone is not one of them:
+  `Required skill '…' is not available to this agent — publish it, or share it
+with the agent's home space`. What a space's ACTIVATION governs is something
+  else entirely — what that space OFFERS: the caller-context hints, the
+  integration credentials a run may reach, the type index pages.
+
+- **The AFPS §7.7 warnings are named for when they happen: `import-time`.**
+  `services/integration-import-warnings.ts` and
+  `services/agent-import-warnings.ts` (both renamed), their OpenAPI descriptions
+  and the `warnings` array on `POST /api/packages/import-bundle` all say
+  import-time — the moment those checks actually run. Nothing about placing a
+  package produces them.
+
+- **BREAKING (API): an index lists what the space can LAUNCH — the ACTIVE set,
+  and nothing else.** `GET /api/agents` and
+  `GET /api/packages/{agents|skills|mcp-servers|integrations}` read one rule,
+  `activeHereSql(spaceId)`: placed here and switched on, or shipped here with no
+  row saying otherwise. It is the same expression the run gate and the
+  caller-context hints the chat and `get_me` serve read, so a page cannot offer
+  a control the doors would refuse, and a launcher is never rendered greyed. Two
+  questions, two pages: what is PLACED here and in what state is **Packages de
+  cet espace** — the library — which carries the origin, `Proposé` / `Désactivé`
+  / `Actif`, and one switch per row. Taking up an offer, switching a package
+  back on and switching a shipped integration on all happen there; the index
+  never shows a pending offer or a switched-off row, and its empty state names
+  the library. A switched-off package is still fully reachable: its detail
+  answers 200, opens from the library or from its URL, stays editable by
+  whoever holds its home's `write`, and carries a one-line **Désactivé dans cet
+  espace** banner with an **Activer** button. `GET /api/agents` is served by
+  `listActivePackages` — named for what it returns — and `listOrgItems` answers
+  for the other three types from the same predicate.
+
+- **BREAKING: every read of a package answers with ONE definition.** The file
+  explorer — `GET /api/packages/{scope}/{name}/files` and `…/files/content` —
+  and the detail pages of skills, integrations and mcp-servers —
+  `GET /api/packages/{skills,integrations,mcp-servers}/{scope}/{name}` — no
+  longer serve the draft to every reader. With no `?version` they answer the
+  same effective selector the agent detail page renders
+  (`defaultDefinitionSelector`: the draft for a caller who may write the
+  package, the latest published version for everybody else, and the draft when
+  nothing is published at all), and an explicit `?version=draft` is the author's
+  act it is on every other route, refused to everybody else with
+  `403 draft_not_writable`.
+
+  The explorer was the last door where the word `draft` bought bytes the run
+  route refuses, and the widest one per request: a caller who loops the index
+  has the working copy on disk. **For the CLI, the draft sync is the author's
+  sync**: `appstrate skills sync --source draft` now needs write authority, and
+  the default `--source published` is unchanged for everyone.
+
+  The three detail pages were not an escalation — reading a draft is open to
+  every reader of the package by design — but they made the question have two
+  answers: the Content tab of a published skill showed the author's working
+  copy while its own Files tab, in the same second, showed the published bytes.
+  `content`, `manifest` and every field projected from the manifest (`name`,
+  `description`, `version`, `manifest_name`) now move together with the new
+  required `OrgPackageItemDetail.definition`; these three routes gain the
+  `?version` selector the agent detail already had, with the same
+  `draft_not_writable` refusal and a `422 version_artifact_unavailable` for a
+  published archive whose primary file cannot be read. A mutating call echoes the
+  draft it just wrote, and a SYSTEM package reports `definition: "published"` —
+  its stored tree IS the definition the platform ships — while still refusing a
+  named `draft` like everybody else's.
+
+- **A draft export resolves its dependencies exactly as a draft run does.**
+  `GET /api/agents/{scope}/{name}/bundle?source=draft` puts the agent's DRAFT
+  at the root — the half `agents:write` gates — and every transitive
+  dependency at the PUBLISHED version its manifest range selects, against the
+  published catalogue. That is what a server-side `version=draft` run without
+  `dependency_overrides` executes, and an export answering anything else
+  handed the CLI different bytes from the ones the platform runs: the closure
+  used to be walked against draft state, so exporting shipped the working copy
+  of a skill the run route refuses in the same request. A dependency no
+  published version satisfies now fails the export the way it fails the run —
+  the same `422 dependency_unresolved`, naming the dependency — instead of
+  falling back. Running a dependency's working
+  copy stays the one act that says so, `dependency_overrides`, with its own
+  write gate.
+
+- **A `dependency_overrides` key that names no declared dependency is a `400`,
+  not a `403`.** Whether the key means anything at all is decided against the
+  EFFECTIVE manifest — the definition the launch will execute — before whose
+  working copy it would have been, on `POST /api/runs`,
+  `POST /api/runs/remote` and both schedule writes. A typo in a dependency id
+  otherwise came back as `403 draft_not_writable`, sending its reader after a
+  grant they do not need for an act the launch would never have performed.
+
+- **Re-sending a schedule's stored selector is not asking for it again.**
+  `PUT /api/schedules/{id}` judges `version_override` and each
+  `dependency_overrides` entry only when the body CARRIES the field and its
+  value DIFFERS from the one the row holds. A holder of `schedules:write` can
+  therefore edit the cron or the input of a draft schedule they did not
+  author, and it is MOVING a schedule onto the draft — or onto a dependency's
+  draft — that asks for `<type>:write` and can answer
+  `403 draft_not_writable`. Creation judges whatever is present, there being
+  no stored value to compare against. The schedule form sends
+  `version_override` only when it moved, so the refusal that remains is a
+  refusal of something the editor actually asked for.
+
+- **A package read no longer publishes its home space's id to callers who
+  cannot see that space.** `home_space_id` on `AgentDetail`, `OrgPackageItem`,
+  `OrgPackageItemDetail` and `GET /api/library` is now the home's id **only when
+  the caller reaches that space**, and `null` otherwise — so a package homed in a
+  member's personal space and shared into a team space no longer hands
+  everyone in that team the id of a private workspace. Each of those four shapes
+  gains **`home_writable: boolean`**, the server's own verdict on whether this
+  caller may write the package (the exact predicate the write routes enforce).
+  Read `home_writable`, never the id, to decide whether to offer an edit: the
+  dashboard now does exactly that, and its client-side derivation of write
+  authority is gone.
 
 - **One archive-path rule, everywhere a package's files are written or read
   back.** Importing a ZIP already dropped an entry named with a `..` segment, an
@@ -251,8 +1113,9 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   was a wrong name silently starting every organization on an empty free plan
   while Stripe kept charging them. The module needs PostgreSQL outright: under
   tier 0 (PGlite, no `DATABASE_URL`) it refuses to start, naming `DATABASE_URL`.
-  Its remaining variables are the four `STRIPE_*` and the three
-  `EE_RECONCILIATION_*`.
+  Its remaining variables are the four `STRIPE_*` and the four
+  `EE_RECONCILIATION_*` (`INTERVAL_SECONDS`, `BATCH_SIZE`, `REPLAY_WINDOW`,
+  `MAX_GAP_SECONDS`).
 
   **OPERATOR ACTIONS.** None of its own: this entry and the in-tree move below
   ship together, so a deployment coming from `@appstrate/cloud` has ONE upgrade
@@ -278,9 +1141,14 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
   **OPERATOR ACTIONS.** One path, for a deployment coming from
   `@appstrate/cloud`; a new one needs none of it. Rehearse all of it on a
-  restored copy of both databases and note the per-table counts. In `MODULES`,
-  replace `@appstrate/cloud` with `@appstrate/module-ee`. Stop the platform (let
-  the running runs drain) and `pg_dump` the billing database as the safety net.
+  restored copy of both databases and note the per-table counts. Stop the
+  platform (let the running runs drain) and `pg_dump` the billing database as
+  the safety net. **Do not touch `MODULES` yet**: the build still in service
+  does not carry `packages/module-ee`, so naming it is fatal to that build
+  exactly as `@appstrate/cloud` is fatal to the new one — every declared module
+  is required, the loader throws, and the container crash-loops without binding
+  a port. It is swapped at the END, with the new image, and
+  `scripts/migration/README.md` step 5a is where the runbook puts it.
   Move its rows into the platform database with
   `bun scripts/migration/0010-ee-tables-into-platform-db.ts --apply`,
   `EE_SOURCE_DATABASE_URL` = the EXACT value `CLOUD_DATABASE_URL` held and
@@ -302,8 +1170,10 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   must read source = target on every row. Deploy, then check the boot log for
   `Module loaded` with `"id":"ee"` and `billing sweeper started`, and that
   `select count(*) from drizzle.ee_migrations` on the platform database counts
-  every file in `packages/module-ee/drizzle/migrations` (7 today). Keep
-  the old database read-only (`REVOKE`) for a week, then `DROP DATABASE`; until
+  as many entries as `packages/module-ee/drizzle/migrations/meta/_journal.json`
+  holds — read the journal rather than a number written here; it is eight today
+  (`0000_init` … `0007_bigint_cost_credits`). Keep the old database read-only
+  (`REVOKE`) for a week, then `DROP DATABASE`; until
   that drop the rollback is the previous image with `CLOUD_DATABASE_URL`
   restored, losing only writes made on the platform copy after the cutover.
 
@@ -340,22 +1210,29 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   a `custom` credential.
 
 - **Limits and capabilities behind one toggle, "Définir moi-même les limites
-  et capacités".** Off, a sentence states the fallback chain (row override →
-  catalog → runtime defaults: 128k context, 16k output tokens, text only, no
-  reasoning); on, every field ships, an unticked box included. On an edit,
-  toggle off or a blanked limit sends `null` and drops the stored override. The
+  et capacités".** Off, a sentence states the two ends of the fallback chain the
+  server actually walks — the catalog entry when the model is known, the runtime
+  defaults otherwise (128k context, 16k output tokens, text only, no reasoning).
+  The row override in front of them is not spelled out, because a row with an
+  override is exactly the row that opens the toggle ON. On, every field ships,
+  an unticked box included. On an edit, toggle off or a blanked limit sends
+  `null` and drops the stored override. The
   toggle opens on only when the row differs from its catalog entry, so a
   catalogued model never gets the catalog's numbers frozen as overrides. The
   "Avancé" fold and its "détection automatique du SDK" copy are removed.
 
-- **Model discovery lists the provider's models once.** `discoverAvailableModels`
-  sends ONE guarded `GET <base_url>/models` (`listServedModels`), parsed per
+- **Model discovery lists the provider's models in one guarded pass.**
+  `discoverAvailableModels` sends a guarded `GET <base_url>/models`
+  (`listServedModels`) and follows that listing's own cursor for as long as it
+  declares one — at most 10 pages or 1000 models, and `truncated` when either
+  cap cut the read short. Each page is parsed per
   `apiShape` (`{ data: [{ id }] }`, or `{ models: [{ name: "models/<id>" }] }`
-  for the Google shapes), and persists the discovery candidates present in it
+  for the Google shapes), and it persists the discovery candidates present in it
   as `available_model_ids`. An auth failure, an unreadable listing, a 429 that
   survives one retry, a listing a page or model cap cut short, or an empty
   intersection leave the previous list untouched — intersecting against a
   partial view would drop the candidates sitting past the cut.
+
 - **Wire change** — `POST /api/model-provider-credentials/{id}/refresh-models`
   answers `candidate_count` in place of `probed_count` (the candidates
   considered; static providers report theirs instead of 0).
@@ -368,195 +1245,18 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   keeps it correct only as long as every future workflow and every hand-made
   Release remembers the flag. The consumers now filter by tag themselves
   (drafts and prereleases skipped, as before), so a stray Release can no
-  longer point an update at assets that do not exist. Both walk pages of 30
-  (5 at most) until one holds a `v*` Release; the CLI then takes the highest
-  version on that page rather than the most recently created one, so a hotfix
-  for an older line published after a newer release is not "latest" (the shell
-  scripts keep creation order: no `sort -V` on macOS, and the rendered
-  installer pins its version anyway). The CLI names the releases it skipped
-  when no `v*` one is found; `releaseUrls` no longer has a `latest/download`
+  longer point an update at assets that do not exist. The two halves walk the
+  list differently, on purpose. The shell scripts read pages of 30 (5 at most)
+  and stop at the FIRST page holding a `v*` Release, taking it in creation
+  order — no `sort -V` on macOS, and the rendered installer pins its version
+  anyway. The CLI reads pages of 100 (2 at most) and does not stop at the first
+  page carrying a candidate: it collects every page, then takes the HIGHEST
+  version across all of them, because creation order and version order diverge
+  whenever a hotfix is cut for an older line — so the first page holding a
+  candidate can hold the lower one, and such a hotfix is not "latest". The CLI
+  names the releases it skipped when no `v*` one is found; `releaseUrls` no
+  longer has a `latest/download`
   branch because nothing reaches it any more.
-
-- **BREAKING (wire): WRITING a skill whose `SKILL.md` frontmatter has no
-  `description`, or a `name` that breaks the Agent Skills naming rule, is now a 400.** The platform only required the `name` KEY to be present, so a skill
-  created with the editor's default skeleton — `name:` and `description:` both
-  blank — was accepted, published, and produced an artifact Codex rejects and
-  Claude Code never auto-invokes. AFPS §3.3 spells both fields SHOULD; the
-  platform is a PRODUCER of these artifacts and holds itself to MUST.
-
-  A `SKILL.md` is accepted only when its frontmatter declares a `name` of 1-64
-  characters of lowercase `a-z`, `0-9` and `-` with no leading, trailing or
-  consecutive hyphen ([Agent Skills
-  specification](https://agentskills.io/specification)) and a non-empty
-  `description` of at most 1024 characters — both counted in Unicode code
-  points. That `name` is the BARE skill slug (`triage`), a different namespace
-  from the `@scope/name` package id, and must be written **inline on one line**:
-  `name:\n  triage` and `name : triage` are valid YAML the platform's package
-  loader cannot read, so writing one is refused rather than frozen into a
-  version no run could load.
-
-  The frontmatter is parsed with the **`yaml` library, at the same major the
-  skill runtime uses** (`@earendil-works/pi-coding-agent` parses `SKILL.md`
-  with `yaml` 2.9), mirroring its delimiters and newline handling, so the
-  platform cannot accept a document the agent then fails to PARSE. Block
-  scalars, folded scalars, next-line values, quoted escapes, inline
-  `# comments` and CRLF all read correctly; what YAML refuses, the platform
-  refuses (`description: a: b`, `name:x`, a duplicate key, a non-mapping block,
-  a non-string field); and a leading **BOM is rejected** rather than stripped,
-  because the runtime tests `startsWith("---")` and silently drops the skill.
-  The RULES are deliberately stricter than the runtime's, which only warns on a
-  spec violation and counts UTF-16 units — being stricter costs an author one
-  edit, being looser mints an immutable artifact no agent will load. A parity
-  test (`packages/runner-pi/test/skill-frontmatter-parity.test.ts`) runs the
-  real runtime loader and asserts the asymmetry only ever points that way.
-
-  The rule lives once, in `@appstrate/afps-shared`'s `checkSkillMarkdown`,
-  declared as the `skill` entry's `validateContent` on the shared package-type
-  config and applied by every path that WRITES skill content: `POST
-/api/packages/skills`, `PUT /api/packages/skills/{scope}/{name}`, `POST
-.../versions`, `POST .../versions/{version}/restore`, `POST
-/api/packages/import` (both the AFPS and the bare-skill-ZIP fallback),
-  `/import-bundle`, `/import-github`, and the MCP module's
-  `validate_package_file` / `import_package_file`. The 400 is an ordinary
-  problem+json whose first field error carries the machine-readable reason —
-  `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`,
-  `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or
-  `skill_invalid_frontmatter_description` — so a client can tell "no
-  description" from "bad name" without parsing prose.
-
-  **READING and RE-IMPORTING existing artifacts are deliberately untouched, and
-  that is the load-bearing half.** Published versions are immutable: a skill
-  published without a description cannot be repaired in place, so gating the
-  read side would have failed every RUN of every agent depending on one.
-  `checkCompanionFiles` — which `extractRootFromAfps` and the run launcher's
-  package catalog call — therefore still asks only for a frontmatter `name`,
-  through the exact same permissive probe as before. And the rule applies to
-  the ROOT of an import only, never to a dependency copy a bundle carries.
-
-  What changes for existing data is the DRAFT — every write, and only writes. A
-  stored skill draft whose `SKILL.md` does not conform must be completed before
-  its next save or publish. **Operator step, after deploying this release:**
-  `bun scripts/migration/0007-skill-frontmatter-quote-descriptions.ts` (dry-run;
-  `--apply` to write) quotes the `description:` lines `yaml` cannot parse — 17
-  of production's 66 skills carry an unquoted `description: … : …`, which the
-  agent runtime already fails to load — and names the rest for a manual edit.
-  **Restoring a legacy published version is refused** for the same reason: a restore writes a draft. Forking is NOT gated
-  — it byte-copies an already-published artifact, so nothing new enters the
-  world. The skill editor, the publish modal and the version-restore
-  confirmation translate the server's reason codes, so the author sees the
-  missing field rather than an English `detail` — or, as the restore dialog did
-  before, nothing at all.
-
-- **Chat turns shed their fixed per-hop costs** (#1243). The preamble reads
-  (models, default space, caller context, session) run in parallel; the
-  resumable recording is coalesced (50 ms / 16 KiB) instead of one store
-  append per SSE chunk and is released ten seconds after persistence settles;
-  the final assistant message is extracted in a single pass; session
-  bookkeeping is one UPDATE per persisted message; the MCP operation index is
-  memoised per permission set; the package hints query is bounded in SQL. The
-  chat UI throttles message re-renders and polls the session list every 10 s
-  while a turn is generating (60 s idle), and the resume route clears a
-  marker whose producer died. MCP `invoke_operation` audit inserts are no
-  longer awaited on the response path: they are tracked in-process and
-  drained (5 s cap) by graceful shutdown before the DB closes. Every
-  process-local TTL cache in the platform is now an instance of
-  `@appstrate/core/cache`, whose `invalidate`/`clear` broadcast to every
-  replica over the Postgres NOTIFY channel `cache_invalidate`.
-
-- **BREAKING: the `application` entity is now `space`, everywhere, with no
-  compatibility layer** (#1227). The org-scoped container that delimits agents,
-  skills and integrations is renamed across 619 files — wire, database, headers,
-  routes, CLI, SPA and telemetry. `docs/NO_TRANSITIONAL_CODE.md` §1 forbids
-  aliases and dual-read paths, so this breaks the contract ON PURPOSE: a caller
-  still sending `X-Application-Id` or calling `/api/applications` now fails
-  loudly rather than being quietly accommodated. Verified: no `/api/applications`
-  route survives anywhere in `apps/`.
-  `app_`-prefixed ids become `spc_`; the header is `X-Space-Id`; the OTel
-  attribute is `appstrate.space.id` (the old series goes to zero without
-  erroring, so dashboards must be repointed rather than debugged).
-  `@appstrate/core` and `@appstrate/afps-runtime` both change public surface —
-  each needs a major release, and `cloud` needs a CODE change, not just a
-  version bump.
-
-  **Deploying this is a maintenance window, not a rolling deploy**, and the
-  operator steps are not optional:
-  - One replica, port closed, migrations at boot. §1 forbids the
-    expand-migrate-contract that would make a rolling deploy possible.
-  - `pg_dump -Fc` immediately before. **There is no down migration**, and
-    rolling the image back does not roll the schema back: the watermark is
-    compared by timestamp, so a reverted deploy finds nothing to apply and runs
-    old code against a renamed schema.
-  - **Two artifacts, both required.** `0053_applications_to_spaces.sql` applies
-    at boot and renames the catalog;
-    `scripts/migration/0003-application-ids-to-space-ids.sql` is run BY HAND and
-    rewrites the values. Neither is sufficient alone.
-  - Then `VALIDATE CONSTRAINT` on `webhooks_level_values`,
-    `webhooks_level_check` and `oauth_clients_level_check` — `0053` adds them
-    `NOT VALID` because the rows still hold the old value at that point.
-  - **Do NOT rewrite storage keys.** `files.storage_key`,
-    `uploads.storage_key` and `storage_deletion_jobs.storage_key` keep their
-    `app_` path segment deliberately: `0003` moves no bytes, so rewriting the
-    keys would point every row at an object that does not exist. Nothing
-    compares a storage key to a space id. New objects are written under `spc_`;
-    old ones stay where they are.
-  - Do not run `audit:storage-orphans` until verification is complete.
-  - Announce the CLI break: nothing gates an installed CLI to a version, and §1
-    forbids building such a mechanism, so users run `npm i -g appstrate@latest`
-    on the day. Open dashboard tabs must hard-refresh, and OAuth connect flows
-    in flight will fail (short Redis TTL, drainable).
-
-  Untouched, because the word means something else there: `appfile://` (it
-  encodes a `file_` id and never carried a space id), `APP_URL`, `--app-url`,
-  the turborepo `apps/` directory, the Hono `app` variable, the ~3,100
-  `application/*` MIME literals, `appp_`, and every use meaning the platform
-  itself or a third-party OAuth app registered at Google, GitHub or Discord.
-
-- **BREAKING: every remaining JSON request body is `.strict()` too — an unknown
-  key is a `400` instead of a silent strip.** The entry above closed the package
-  JSON bodies; this closes the rest of the API. `apps/api/src/routes/*.ts` went
-  from 23 `.strict()` schemas to 68 — **45 more request bodies across 16 route
-  files**: `integrations` (10), `models` (5), `organizations` and `spaces` (4
-  each), `model-provider-credentials`, `packages`, `profile` and `proxies` (3
-  each), `model-providers-oauth` (2), and one each in `agents`, `api-keys`,
-  `auth-bootstrap`, `me`, `uploads`, `user-agents` and `welcome`. All 45 are
-  top-level body schemas reached through `readJsonBody`; not one is a nested
-  object tightened by accident.
-
-  **This is a wire-contract change, not a validation tidy-up.** A client sending
-  a property the body does not model used to get its `2xx` and have the property
-  dropped on the floor. It now gets `400` `validation_failed`. The shape that
-  breaks is read-modify-write — `GET` a resource, edit one field, `PUT` the
-  whole object back — because every property of the response the update body
-  does not model is now refused BY NAME, exactly as described for the package
-  bodies above.
-
-  The OpenAPI spec follows with no second edit: `z.toJSONSchema()` emits
-  `additionalProperties: false` for a `.strict()` object, so every body wired
-  through `apps/api/src/openapi/zod-schema-registry.ts` — which is nearly all of
-  them — now advertises the refusal it enforces.
-
-- **BREAKING (API keys): five more `GET` routes enforce a read permission.**
-  Same class as the eight run and schedule reads gated in `1.0.0-beta.52`, and
-  the same reasoning: each was gated on org membership alone and enforced
-  nothing about what the caller may do.
-
-  - `GET /api/agents` → `agents:read`
-  - `GET /api/agents/{scope}/{name}/proxy` → `agents:read`
-  - `GET /api/agents/{scope}/{name}/model` → `agents:read`
-  - `GET /api/spaces/{spaceId}/packages` → `spaces:read`
-  - `GET /api/spaces/{spaceId}/packages/{scope}/{name}` → `spaces:read`
-
-  On the two agent detail routes the permission check is registered BEFORE
-  `requireAgent()` on purpose: that middleware `404`s on an unknown agent, so
-  the reverse order would answer "does this agent exist?" for a caller not
-  allowed to read agents at all.
-
-  **No dashboard user loses anything.** Every org role down to `guest` already
-  holds `agents:read` and `spaces:read` (`apps/api/src/lib/permissions.ts`), so
-  the SPA is unaffected. What changes is an ALREADY-MINTED API key scoped
-  without the matching permission: it reached these five reads through org
-  membership and now gets `403`. Both scopes are grantable to API keys — re-mint
-  the key with them.
 
 - **BREAKING (API keys): `GET /api/schedules/{id}/runs` asks for a run-read
   permission on top of `schedules:read`.** The response names schedules but
@@ -637,12 +1337,18 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   exits 0.
 
 - **`EE_RECONCILIATION_INTERVAL_SECONDS=0` pauses metering only.** The
-  module's `init()` always arms its maintenance tick (300 s), so account
-  repair and cursor upkeep keep running while the sweep itself is paused; the
-  value is no longer a way to run the module with no timer at all. (#1326)
+  module's `init()` always arms its maintenance tick (300 s), so the two things
+  that tick does — the fleet-wide storage-entitlement resync and the retry of
+  Stripe cancellations left unconfirmed — keep running while the sweep itself is
+  paused; the value is no longer a way to run the module with no timer at all.
+  What the maintenance tick does NOT do is touch `ee_billing_cursor`: every
+  writer of that watermark sits on the paused path, so the watermark freezes for
+  the whole pause. Consequence to plan for: un-pausing is a resume over a gap,
+  and `assertCursorResumable` refuses to boot past
+  `EE_RECONCILIATION_MAX_GAP_SECONDS` of it. (#1326)
 
 - **`appstrate skills sync` treats a revoked organization as an empty source.**
-  When `GET /api/spaces` answers 403, every skill the sync installed from that
+  When `GET /api/spaces` answers 403, every skill the sync materialized from that
   organization is removed and the run exits 0 with a note on stderr; a
   `--space` flag typed on that run fails instead, because you typed it just
   now. (#1362)
@@ -665,96 +1371,6 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   keeping "try again" for a failure the server named nothing for. The shared
   wording is "Preview unavailable" / "Prévisualisation indisponible".
 
-- **BREAKING: the package JSON bodies are `.strict()` — an unknown key is a
-  `400` instead of a silent strip.** `source_code` was dropped from the package
-  contract when its last reader died with the `tool` package type, and the
-  schemas were left open, so a client still sending it got a `201` and a package
-  without it with nothing anywhere saying the field had gone. A retired name
-  must fail loudly (`docs/NO_TRANSITIONAL_CODE.md` §1) — the rule that closed
-  the four launch surfaces in #1187, and this surface was left out of it. The
-  barrier is generic and names no field: it refuses any key the body does not
-  model. Seven request bodies carry `additionalProperties: false` in the spec to
-  match — `POST /api/packages/{skills,agents,integrations}` and
-  `PUT /api/packages/{skills,agents,integrations,mcp-servers}/{scope}/{name}`.
-  Refusals answer `400` `validation_failed` blaming the field `body`.
-
-  **Why this is BREAKING and not a fix: `.strict()` makes read-modify-write a
-  `400`.** `packageJsonUpdateSchema` accepts three keys — `manifest`, `content`
-  and `lock_version` — and every other property of the object the matching `GET`
-  hands back is now refused BY NAME.
-
-  For agents, `GET /api/packages/agents/{scope}/{name}` answers with the
-  `AgentDetail` component's 19 properties, of which the update body accepts
-  exactly two (`content` is not among them — an agent's content comes back as
-  `prompt`). The other 17 are refused: `id`, `display_name`, `description`,
-  `source`, `scope`, `version`, `prompt`, `updatedAt`, `input`, `output`,
-  `dependencies`, `last_run`, `running_runs`, `version_count`, `forked_from`,
-  `has_unarchived_changes`, `effective_timeout_seconds`.
-
-  For skills, integrations and mcp-servers the `GET` answers with
-  `OrgPackageItemDetail`, 18 properties, of which the update body accepts three.
-  The other 15 are refused: `id`, `orgId`, `name`, `description`, `source`,
-  `created_by`, `auto_installed`, `version`, `manifest_name`, `version_count`,
-  `has_unarchived_changes`, `forked_from`, `agents`, `createdAt`, `updatedAt`.
-
-  A third-party client that does the obvious thing — `GET` the package, edit
-  `manifest`, `PUT` the object back — previously had those keys stripped and got
-  a `200`; it now gets a `400` on `id`. **Send only `manifest`, `content` and
-  `lock_version`.** In-repo callers are unaffected: the three `toWireBody`
-  implementations already send exactly that, and `useCreatePackage`'s body type
-  declared an `id?: string` no caller ever passed, removed here — a key declared
-  against a now-strict body is a `400` waiting for its first caller.
-
-  `detect:breaking` reports this as non-breaking, and that is correct about the
-  OpenAPI _document_: it does not model a request body tightening
-  `additionalProperties`, which is invisible to both it and the generated SPA
-  types. This entry is the only signal a consumer gets. Same reasoning as the
-  schedule-body entry further down, which enumerates its 15 refused fields for
-  the same reason.
-
-- **BREAKING: an AFPS integration declaring a bare auth-scheme `prefix` is
-  refused at install time.** AFPS §7.6 defines `delivery.http.prefix` as a
-  literal prepended to the rendered value — every spec example writes the
-  trailing space. Appstrate additionally accepted the bare scheme (`"Bearer"`)
-  in `Authorization` position and spliced the separator in at request time; its
-  own comment called it "this compatibility rule". The injector now concatenates
-  verbatim and inspects nothing, and validator rule (1d) rejects the bare form
-  where the manifest author can act on it, naming the replacement
-  (`Write "Bearer ".`).
-
-  **51 in-repo system integrations wrote the bare form** — 44 `Bearer`,
-  6 `Basic`, 1 `Zoho-oauthtoken` — and every one is fixed here with a patch
-  bump and a rebuilt archive, per the immutable-published-version precedent of
-  #928.
-  Without the bump the fix stays inert in production. No exact-version pin
-  references any of them.
-
-  **Operators: an org-imported or org-published integration stored before this
-  change stops resolving.** System packages are unexposed (`resolvePublishedManifest`
-  short-circuits on the in-memory registry the rebuilt archives replaced), but
-  `packages.draft_manifest` and `package_versions.manifest` hold the author's
-  bytes verbatim and are never revalidated on read, so a stored bare prefix now
-  fails `invalid_manifest` at the first read — which the route maps onto `404`,
-  presenting as a missing integration rather than a bad prefix. Apply
-  `scripts/migration/0005-afps-bare-auth-scheme-prefix.sql`; its `WHERE` is
-  exactly the condition it removes (RFC 9110 token grammar, under
-  `Authorization` or `Proxy-Authorization`, case-insensitive) and it is
-  idempotent. It deliberately does not rewrite the uploaded archive bytes, so
-  `package_versions.integrity` is untouched and the boot sync's refuse-overwrite
-  guard still holds — the archive keeps the author's original spelling, and
-  re-importing it now fails loudly at the install gate.
-
-- **Run logs: an untagged `appstrate.progress` row renders as runtime output,
-  not as model prose.** `assistant_message` is the only marker of
-  model-authored text; the run-detail log view additionally treated a data-less
-  `debug`-level progress row as agent text, "compatibility with runs emitted
-  before `assistant_message` was stamped". No in-tree emitter produces that
-  shape as agent text, and the one shape still producible from outside the tree
-  is a runner lifecycle breadcrumb by definition — so the fallback was
-  attributing a container-lifecycle line to the model. Bounded and cosmetic: for
-  runs predating the stamp, such rows now carry the runtime dot instead of the
-  speech-bubble icon. Text, ordering, level colour and grouping are unchanged.
-
 - **Every rate limit keeps a per-process budget behind Redis.** Each limiter the
   platform builds — auth, OIDC, run, proxy — now carries a `RateLimiterMemory`
   insurance limiter of the same points and duration
@@ -772,6 +1388,7 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   serving the referenced images. Existing release tags are preserved and all
   references pin verified multi-platform digests. The test fixture replaces
   `latest` with the server release already used by the Tier 3 example.
+
 - **Typing fast into a Monaco pane no longer drops characters.** The agent
   prompt editor, the package JSON tab and the new file editor fed Monaco a
   controlled `value` from React state, and `@monaco-editor/react` applies a
@@ -782,6 +1399,7 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   loaded machine arrived as `prin1)`. Every authoring pane now seeds Monaco once
   (`defaultValue`) and receives text it did not type as a remount, keyed by
   what changed it (another file, a discarded draft, a re-read server copy).
+
 - **Idempotent run retries enforce current permissions and input visibility.**
   The request fingerprint includes its method, URL and body; using the same key
   for a different route or version returns `422 idempotency_conflict` without
@@ -835,11 +1453,15 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   register OAuth client credentials…"); the catch around the hosted dispatch
   swallowed that error, and the auto-provisioning failure written to be shown
   verbatim with it. A client-side (4xx) refusal from the OAuth strategy now
-  reaches the popup with its own status and detail, and the single-use link is
+  reaches the popup with its own STATUS — and generic wording, not the
+  `ApiError`'s own detail, which names operator artefacts (a client row id,
+  `CONNECTION_ENCRYPTION_KEY`, an upstream AS's prose) on a route that carries
+  no session; the detail stays on the log line. The single-use link is
   handed back rather than burned — nothing was minted on its strength — so a
   retry once the client is registered works from the very same link instead of
   the previous second misleading "This connect link has already been used."
-  Transient and unknown failures keep the generic wording, the 502 and the burn.
+  Transient and unknown failures differ in what is left: they keep the 502 and
+  the burn, since one of them may have gone half way.
 
 - **Deleting an organization reserves the deletion before any module tears
   anything down (migration `0058`).** `DELETE /api/orgs/:orgId` checked
@@ -914,10 +1536,11 @@ progress` and emits nothing. Once a handler has run the organization is
   no billing account (`@appstrate/module-ee`).** They answered 503, which tells a
   client to retry something no retry can fix.
 
-- **A disabled install checkbox in the library says why.** The row now names the
-  reason — a system package, or the permission the caller lacks — and shows
-  nothing at all while permissions are still loading, rather than a bare disabled
-  box that reads as a broken control.
+- **A disabled activation checkbox in the library says why.** The row names the
+  reason — a system package, the permission the caller lacks in that space, or a
+  home they may not share out of — and shows nothing at all while permissions
+  are still loading, rather than a bare disabled box that reads as a broken
+  control.
 
 - **The billing managers card no longer clears itself when the member roster
   fails to load.** Without the roster every saved manager read as "no longer a
@@ -1023,9 +1646,13 @@ progress` and emits nothing. Once a handler has run the organization is
   (#1277).** The refresh brought `gpt-6-astra` into `openai.json`, which
   `curated-model-drift` rightly flagged as unreviewed for Codex: the vendor
   page (https://learn.chatgpt.com/docs/models) lists it as recommended for
-  ChatGPT sign-in (Pro plans and above), so it joins the Codex
-  `modelDiscoveryCandidates` and `featuredModels`, newest first. The same
-  refresh marks the whole 5.6 family `temperature: "unsupported"` on the
+  ChatGPT sign-in (Pro plans and above) — from Pro plans only, so it joins the
+  Codex `modelDiscoveryCandidates`, where a Pro subscriber picks it
+  deliberately, and stays OUT of `featuredModels`, which the platform seeds into
+  `org_models` on everyone's behalf (see "A Plus subscriber is no longer handed
+  a Pro-only Codex model" above; `PRO_PLAN_MODEL_IDS` names both such ids and a
+  test pins both halves). The same refresh marks the whole 5.6 family
+  `temperature: "unsupported"` on the
   OpenAI API, so the `resolveCatalogDefaults` test that proves the Codex
   override rejects temperature now reads `gpt-5.4`, an id the API still
   supports it on.
@@ -1058,8 +1685,322 @@ progress` and emits nothing. Once a handler has run the organization is
 - **A Dynamic Client Registration body without `scope` now yields the full
   self-service scope set (#1267).** An MCP client registering without `scope`
   got the identity scopes alone, so authorizing for `mcp:read` / `mcp:invoke`
-  was bounced with `invalid_scope`. Narrow registrations stay narrow — and an
-  already-registered scope-less client reads as one, so it must re-register.
+  was bounced with `invalid_scope`. A declared `scope` is VALIDATED against that
+  ceiling and then discarded: `persistOAuthClientRegistration` writes the whole
+  ceiling to the row either way, so a registration declaring less is advisory,
+  not a narrowing. Intersecting it back in would buy no confinement — the
+  declaration is client-controlled, a registrant wanting the ceiling re-registers
+  or edits its metadata document — while breaking every MCP client that
+  publishes a minimal `scope` and then requests what the protected resource
+  advertises. What actually bounds such a client is the ceiling itself, the
+  single-audience rule at `/oauth2/token`, the consent screen and the caller's
+  live org role. An already-registered client whose row predates this still
+  carries the identity scopes alone, so it must re-register.
+
+### Removed
+
+- **BREAKING (API): the `?active=true` query parameter is gone from
+  `GET /api/packages/{agents|skills|mcp-servers|integrations}`.** An index IS the
+  active set now, so the parameter said nothing the bare URL does not: it is no
+  longer declared in OpenAPI and no longer read by the route, and a caller still
+  sending it receives exactly the body it receives without it. What used to be
+  the wider listing — everything placed here, switched on or not, plus the offers
+  nobody has taken up — is the space's LIBRARY, `GET /api/spaces/{id}/library`,
+  which answers with `placements[]` and a `state` per space.
+
+- **The Integrations page's Actives / Installed tabs are gone**, with their
+  `integrations.tabs.*` and `integrations.empty.all` strings. The page is an
+  index, so it lists the integrations the space can use; the "Installed" tab was
+  a second, poorer copy of **Packages de cet espace**, which carries the origin,
+  `Proposé` / `Désactivé` / `Actif` and the switch that changes it. The empty
+  state of each index names that page instead.
+
+- **The SPA's `not_installed_or_invalid_manifest` mapping is gone.** It rendered
+  a message for an error code the platform has never emitted, so the branch was
+  unreachable and the string it showed described a state no response could
+  report. The connections modal reads the code the readiness actually writes,
+  `integration_invalid_manifest`, and nothing else.
+
+- **BREAKING (operators): the `integration_dropped` reason `not_installed` is
+  gone; the value is `not_active`.** It is the marker written on a run whose
+  declared integration could not be spawned, and it names the space's switch —
+  the same word the routes, the audits and the library use for that act. The
+  markers already written on past runs keep the old string: rewriting them would
+  be a data migration, not a code change.
+
+- **BREAKING (operators): the `package.unshared` audit field `uninstalled` is
+  gone; the field is `placementRemoved`.** A revoke deletes the share and the
+  `space_packages` row behind it in one transaction, and the entry says which of
+  the two it actually removed — under the name the platform now gives that row.
+
+- **A system package is no longer force-active in every space.** There is no
+  "always active, immutable" lock left in the API or in the library UI: a space
+  switches a shipped agent, skill or mcp-server off exactly as it switches an
+  org-authored one off, and the row saying `false` survives every run. The
+  deployment's default still decides where no row exists — `source = 'system'`,
+  and for integrations the `SYSTEM_INTEGRATIONS` subset — so nothing changes for
+  a space that has never touched the switch.
+
+- **Three internal seams that each answered "is this package usable here" their
+  own way are gone**: `getPackageWithAccess` (the loader that folded
+  "not found" and "not active" into one `null`, which is why the run doors could
+  not tell a caller which refusal they had hit), `getCatalogPackageType` (a
+  second catalog read beside the authorization one) and `listInstalledSkills`
+  (now `listActiveSkills`, reading the active set it always meant). The one
+  definition of "active here" lives in `services/package-activation.ts` and
+  every reader asks it.
+
+- **BREAKING (API): `POST /api/packages/{scope}/{name}/shares/accept` is gone.**
+  Taking up an offer IS activating it, and activating has one pair of doors —
+  `POST /api/spaces/{spaceId}/packages` and its `DELETE` — for a personal space
+  exactly as for a team one, with ownership standing in for the activation grant
+  there. The accept route existed only because the activation route could not
+  say "the offer is enough"; now it can, so a second door with its own authorization rule, its own
+  response shape and its own audit event (`package.share_accepted`) is a
+  duplicate of the happy path rather than a feature. The path is absent, so a
+  caller still posting to it gets a 404 from the router. `GET …/shares` renders
+  the audience as before; nothing about offering or revoking changed.
+
+- **BREAKING (API): a placement no longer carries a version.** Migration
+  **0066** drops `space_packages.version_id` and its foreign key, and everything
+  that spelled it goes with it: `version_id` on
+  `PATCH /api/spaces/{id}/packages/{scope}/{name}` (the body schema is `.strict()`,
+  so sending it is now a 400), `version_pin` on
+  `GET …/packages/{scope}/{name}/run-config`, on `AgentDetail` and on the
+  space-package object in `@appstrate/shared-types`, the `409 version_in_use`
+  refusal that stopped a pinned version from being deleted, the
+  `update_available` flag on `LibraryPackage` with the "Mise à jour disponible"
+  badge and button it fed, the re-accept update path, and the CLI's inheritance
+  of the pin from `run-config` (`appstrate run` with no `@spec` runs the latest
+  published version, `@draft` runs the working copy), and the launch form's
+  inherit option, which is now simply **Dernière version publiée** — there is no
+  pin left to inherit, and an explicit choice stays explicit. Outside its home a
+  package runs the latest published version, always, so a column selecting a
+  definition had nothing left to select and the guards that protected it had
+  nothing left to protect. **`0066` is one-way**: a previous build reads the column at launch, on
+  the detail page and in the export, and writes it through the space-package
+  configuration route. Whatever it held is discarded with it — a pinned
+  placement becomes a `latest` one, which is the rule from this release on.
+  The window also needs `scripts/migration/0016-package-shares-backfill.sql`,
+  right after `0014`: it gives every placement row sitting outside its package's
+  home the `package_shares` row that now places it there, without which those
+  packages vanish from the spaces running them at the first request. The runbook
+  is `scripts/migration/README.md` → "Personal spaces & sharing rollout".
+
+- **BREAKING (API): neither library shape has a `shared` section, and
+  `LibraryPackage.installed_in` is gone.** Both were the old reading of the
+  library as a matrix of package × space whose cell meant "there is a
+  `space_packages` row here", with a lobby beside it for the offers that had no
+  row yet. That shape hid the two axes that actually decide anything — the HOME
+  and the SHARE — gave a package's move no representation at all, and made a
+  pending offer and a package somebody had switched off the same empty cell.
+  `placements` replaces both (see **Added**): an offer is a placement with
+  `state: "none"`, on the package's own row and behind the same switch as every
+  other space. The keys are absent from the responses rather than empty, and the
+  SPA has no "Partagés avec moi" section in either view — the row itself carries
+  a **Proposé** badge until somebody switches it on.
+
+- **BREAKING (API): `POST /api/integrations/{packageId}/activate` and
+  `DELETE /api/integrations/{packageId}/deactivate` are gone**, with their audit
+  events `integration.activated` and `integration.deactivated`. An integration is
+  activated in a space exactly as an agent, a skill and an mcp-server are —
+  `POST /api/spaces/{spaceId}/packages` and its `DELETE` (see **Added**) — and a
+  second family of routes for one type meant the placement rule, the offer that
+  may have to be created with it and the personal-space waiver were all stated
+  twice, in two authorization paths a reader had to compare. The paths are
+  absent, so a caller still posting to them gets a 404 from the router. The
+  permissions are untouched: `integrations:install` and `integrations:uninstall`
+  are what the spaces doors ask for an integration. Audits for all four types
+  are now `package.activated` and `package.deactivated`.
+
+- **BREAKING (API): `enabled` left
+  `PUT /api/spaces/{id}/packages/{scope}/{name}`.** The body is `.strict()`, so a
+  request still sending it is a 400 rather than a silent no-op. Activation is its
+  own act with its own pair of doors; carrying it on the configuration route as
+  well meant one act had two spellings, each with its own gate, and the `PUT`
+  had to classify its body to know which one it was performing. What is left on
+  that route is `modelId`, `proxyId` and `generationConfig`, all three under
+  `configure`.
+
+- **BREAKING (API): `409 already_installed` is gone**, and so is
+  `agent_not_installed_in_space`. Activating a package that is already active is
+  the state the caller asked for, so `POST /api/spaces/{spaceId}/packages`
+  answers **200** with the same body instead of a conflict — 201 stays for the
+  call that actually switched it on. The run-gate refusals are renamed for what
+  they now mean: `agent_not_active_in_space` (`GET …/bundle`),
+  `package_not_active_in_space` (`POST /api/runs/remote`) and
+  `package_not_placed` (the per-space package routes and `run-config`), since a
+  space can hold a placement and still not run it. `POST /api/packages/import-bundle`
+  reports `root_active` where it reported `root_installed`. The renamed
+  `operationId`s on the space-package routes follow the same act:
+  `listSpacePackages`, `activatePackage`, `getSpacePackage`, `updateSpacePackage`,
+  `deactivatePackage`.
+
+- **BREAKING (operators): the organization role `viewer` is retired; `guest`
+  replaces it, and moving the rows is two migrations plus three scripts in ONE
+  maintenance window.** A `viewer` was read-only everywhere; that is a space concern now, so
+  a former viewer becomes an org `guest` plus an explicit `viewer` role in every
+  space that exists at migration time — the same reach, and it does not widen
+  onto spaces created later. Mapping them to `member` instead would have handed
+  them every open space's default preset, which is `operator`: write access they
+  never had.
+
+  **The five files, in this order.** `packages/db/drizzle/0056_space_roles.sql`
+  adds `guest` to `org_role` and creates the space-role tables;
+  `packages/db/drizzle/0059_drop_org_viewer.sql` recreates `org_role` WITHOUT
+  `viewer`. Both ride the same pending batch, which is applied by a ONE-SHOT
+  MIGRATOR — deliberately not by starting the application — so a bad migration
+  fails with its own exit code before anything binds a port. Then, after that
+  batch and before the new version serves traffic, three scripts run BY HAND:
+  `scripts/migration/0008-org-viewer-to-guest.sql`,
+  `scripts/migration/0012-org-invitation-history-viewer-to-guest.sql` and
+  `scripts/migration/0017-restore-handmoved-viewers.sql`. Between the batch and
+  the scripts a row still reading `viewer` resolves no permission set at all and
+  every request from that user fails, so the window covers all of it — this is
+  not two deploys. **Rollback is one-way from `0056`**: it promotes
+  `chat_sessions.space_id` to NOT NULL and the previous build inserts without
+  it, and `0059` is one-way for the same reason. Roll forward.
+
+  **That order only works on a database with no `viewer` rows left, which is
+  what this one is.** `0059` section A raises rather than run while
+  `org_members` or `org_invitations` still carry `viewer`, and drizzle applies
+  the whole batch in one transaction — so on a database that still holds such
+  rows the batch rolls back before `0008` (which has to READ them, and cannot
+  run before `0056` creates `space_members`) ever gets its turn. Unwinding that
+  sandwich needs a release carrying `0056` without `0059`, and nobody has cut
+  one: since beta.57 the twelve migrations are all unapplied and ship together.
+  Here the four `viewer` counts read zero, so the question is moot and `0008`
+  and `0012` run as witnesses rather than as repairs.
+
+  **`0017` is the one with real work on this database**, and the four-zero
+  pre-flight is blind to it: on 2026-09-09 the two `viewer` members were moved
+  off the value BY HAND, to `member`, because `guest` did not exist in the type
+  yet. `member` is strictly wider than what they had — with
+  `spaces.default_role = 'operator'` it is write access in every open space —
+  and `0008` selects `WHERE role::text = 'viewer'`, which is now empty, so it
+  runs green straight over them. `0017` gives those two pairs the shape `0008`
+  would have, and only while the row still reads `member`. `0012` takes what
+  `0008` deliberately leaves — the accepted, expired and cancelled invitations,
+  pure history — which `0059` needs because it cannot cast them.
+
+  `0008` is idempotent, runs in one transaction, and verifies by coverage
+  rather than by a count that reads the same whether it worked or not: it
+  aborts unless every pre-flip (user, space) pair carries a `space_members` row
+  and every pending invitation carries its space snapshot. It is run-once by
+  construction rather than by convention: the one step whose predicate does not
+  remove its own condition — the OAuth signup snapshot, which after the deploy
+  also matches a client an admin deliberately left with no assignments — is
+  skipped on every run past the first, off a marker the script writes in
+  `drizzle.migration_scripts`, and names the clients it declined to widen.
+
+  **A sixth file can be needed BEFORE the batch.** `0056` also creates the
+  partial unique index behind "one pending invitation per (organization,
+  email)", and a duplicate pair left by a race under earlier code fails that
+  statement and rolls the whole migration back. Count the pairs before the
+  deploy and run `scripts/migration/0009-org-invitations-dedupe-pending.sql` if
+  there are any — it is the one file of the six that runs ahead of the batch.
+  **The executable order, including every query above, is
+  `scripts/migration/README.md` → "Detail — RBAC rollout"**, which is what to
+  follow; this entry is the reasoning, not the runbook. Rehearse the whole
+  sequence against a restored `pg_dump` copy first.
+
+  Two more consequences an operator should know about. **An API key pinned to a
+  space cannot mutate a package installed in more than one space**, whatever its
+  scopes: a package's draft, versions and identity are shared across its
+  installations, so a mutation needs authority in every one of them, and a key
+  delegates authority in exactly one. Re-run such a mutation from a session, or
+  uninstall the package from the spaces the key does not cover. And the audience
+  of billing mail moved: `ModuleInitContext.getOrgAdminEmails` is gone from the
+  module contract, replaced by `getOrgOwnerEmails` and `getOrgMembers` (see
+  `packages/core/CHANGELOG.md`), so an unset billing contact now falls back to
+  the org's OWNERS rather than fanning out to every administrator.
+
+### Security
+
+- **`GET /api/integrations` and its detail obey PLACEMENT, so an integration
+  homed in somebody's personal space stops being org-wide readable.** Both
+  routes filtered on "does this organization own the row?" and on nothing else:
+  no home, no share, no space at all entered the query. An integration drafted
+  in a member's PERSONAL space and offered to nobody therefore came back in
+  full — its name, its description, its `auths` with their `authorized_uris`,
+  its tool catalog — to every caller holding `integrations:read`, organization
+  owners and admins included, while `GET /api/packages/integrations` omitted
+  that very row and its detail answered 404 for the same caller. The Integrations
+  page hid it by filtering `active` in the browser, which is not a boundary: the
+  HTTP response carried it, so a network tab, an API key, the CLI or `curl` read
+  it whole. RBAC spec §3.6 states the rule the routes were missing — owners and
+  admins neither read nor write a personal space, and the home is the only
+  authority there is. Both now conjoin `placementReadFilter`, the SAME rule the
+  per-type index and the space library read, rather than a third formulation of
+  it: an integration is listed and readable when the current space HOMES it, was
+  OFFERED it, or when the deployment ships it. Placement is not activation — an
+  offer not taken up and an integration switched off both stay listed, with
+  `active: false`. Resolving a DECLARED dependency stays org-wide (§6.9), where
+  the run resolves it, through a reader that says so by name.
+
+- **A forwarded chain shorter than `TRUST_PROXY` no longer picks the client's
+  own address.** `lib/client-ip.ts` reads `X-Forwarded-For` from the RIGHT,
+  which is unspoofable while each trusted hop appends its entry. When the chain
+  carried FEWER entries than the hop count it used to clamp to the LEFTMOST
+  one — an entry no proxy wrote — so any caller could name its own IP under any
+  `TRUST_PROXY >= 1` and mint a fresh bucket per request. Every per-IP control
+  keyed on that answer, including the rate limit that is the stated defence
+  against `AUTH_BOOTSTRAP_TOKEN` brute force, the Better Auth production limiter
+  and the address recorded on sessions and audit events. A short chain now fails
+  closed: the whole forwarded set is distrusted (`X-Real-IP` included, or
+  stripping the chain would just move the hole) and the socket peer answers.
+
+  The resolved value must also **be** an IP address now. Port suffixes and
+  bracketed IPv6 normalize to the address they name; anything else is dropped.
+  That closes a one-caller denial of service: an unparseable address made
+  Better Auth's `getIP` drop _every_ caller into one shared rate-limit bucket.
+
+  **Operators:** the hop count must match the topology. `TRUST_PROXY=1` behind a
+  single reverse proxy that appends `X-Forwarded-For`; a TLS-terminating L4 load
+  balancer (AWS NLB TLS listener, GCP TCP proxy) appends nothing and is not a
+  hop. Verify too that the origin port is not reachable around the proxy — the
+  shipped compose publishes it on all host interfaces, and Docker's rules bypass
+  host firewalls.
+
+- **`TRUST_PROXY=false` refuses to boot in production behind a non-loopback
+  `APP_URL`.** The platform terminates no TLS, so that pair means a proxy is in
+  front by construction, and ignoring `X-Forwarded-For` there hands every caller
+  the proxy's own address — collapsing every per-IP rate limit and every audit
+  record into one bucket. `@appstrate/env` now rejects the combination at boot
+  instead of running degraded.
+
+  **Operators: name the hop count.** `TRUST_PROXY=1` behind a single reverse
+  proxy, `N` behind N hops you control. The self-hosting example ships `1` and
+  passes the variable through in all four of its compose files.
+
+- **A token request that identifies no client is held to the self-service
+  confinement.** `/oauth2/token` confines a self-registered (DCR / CIMD) client
+  to exactly one protected-resource audience; a request naming no client now
+  falls under the same rule rather than past it, so dropping `client_id` is not
+  a way to mint a token for the broad platform audience. `private_key_jwt` keeps
+  working: the client id is read from the `client_assertion`'s `sub` (RFC 7523
+  §3, `iss` must agree when present), unverified — the provider then verifies
+  the assertion against the row that id names, so a forged assertion naming an
+  operator-provisioned client dies on the signature check and one naming a
+  self-service client stays confined.
+
+- **Operators: run `scripts/migration/0011` after the drizzle batch carrying
+  `0057`, on any deployment that has ever accepted a self-registered client —
+  the API refuses to boot in between, and that is the intended sequence.**
+  `0057` adds `oauth_clients.self_service` and leaves it `false` on every row;
+  `0011` fills it from the `selfService` key already in `metadata`. Until it
+  runs, a self-registered client reads as operator-provisioned and its tokens
+  are not confined, so the deployment comes up only far enough to apply `0057`,
+  counts the rows still unfolded and exits naming the script; under a supervisor
+  it restarts into the same refusal. The order is therefore: deploy → the API
+  applies `0057` and exits → run `0011` against the database → restart. A
+  deployment that never accepted a self-registered client counts zero and never
+  sees the refusal. The script is idempotent, runs in one transaction, and never
+  flips a `true` back.
+
+## [1.0.0-beta.57] - 2026-09-03
+
+### Fixed
 
 - **A killed `appstrate skills sync` no longer locks the next ten minutes of
   sessions out.** Closing a Claude Code session seconds after opening it kills
@@ -1081,55 +2022,356 @@ skills sync is running` and kept the stale plugin. The lock is now
   `make_latest: false`, and the CLI names a non-platform `latest` tag instead
   of building a URL from it.
 
+## [1.0.0-beta.56] - 2026-09-03
+
+### Added
+
+- **`@appstrate/core/map-with-concurrency`** — the bounded worker pool moved
+  out of `apps/api/src/lib/map-with-concurrency.ts` into core, unchanged, and
+  re-imported by `lib/boot.ts`, `services/input-parser.ts` and
+  `services/system-packages.ts`. `appstrate skills sync` needs the same pool
+  against the rate-limited package routes; a copy in the CLI would have been
+  the third in the repo, and the first two had already diverged on
+  abort-on-rejection.
+
+- **`appstrate skills sync` — the org's skills in Claude Code and Codex,
+  refreshed without a manual step.** Materializes every skill placed in the
+  profile's pinned space as an [Agent Skills](https://agentskills.io/specification)
+  directory, into `claude-plugin` (a complete Claude Code plugin under
+  `$XDG_DATA_HOME/appstrate/claude-plugin/`, the default), `codex`
+  (`~/.agents/skills/`) or `claude-user` (`~/.claude/skills/`). The auto-sync is
+  a Claude Code marketplace `command` source re-running the CLI once per
+  session — no server change, no hook, no daemon — so `--print-path` prints the
+  plugin directory as the only stdout line and the output is byte-deterministic.
+  Published `latest` by default (integrity-verified), `--source draft` for
+  authors. Exactly one thing is rewritten in `SKILL.md`, the frontmatter `name`,
+  so it matches the directory; an artifact published before the platform's
+  frontmatter gate is synced as authored and named once on stderr. An ownership
+  ledger keyed by target and `HOME` root makes the shared roots safe (nothing it
+  does not own is written or removed), a `mkdir` lock serializes concurrent
+  sessions, and per-skill failures never cost the plugin under `--print-path`.
+  On a fresh machine the plugin install still succeeds before the CLI is
+  connected: it gets a single `/appstrate:setup` skill naming the missing step
+  and a `SessionStart` hook that surfaces it at every session start, both
+  replaced by the organization's skills on the first connected sync.
+  Full behaviour: `apps/cli/README.md` → `appstrate skills`.
+
+### Changed
+
+- **BREAKING (wire): WRITING a skill whose `SKILL.md` frontmatter has no
+  `description`, or a `name` that breaks the Agent Skills naming rule, is now a 400.** The platform only required the `name` KEY to be present, so a skill
+  created with the editor's default skeleton — `name:` and `description:` both
+  blank — was accepted, published, and produced an artifact Codex rejects and
+  Claude Code never auto-invokes. AFPS §3.3 spells both fields SHOULD; the
+  platform is a PRODUCER of these artifacts and holds itself to MUST.
+
+  A `SKILL.md` is accepted only when its frontmatter declares a `name` of 1-64
+  characters of lowercase `a-z`, `0-9` and `-` with no leading, trailing or
+  consecutive hyphen ([Agent Skills
+  specification](https://agentskills.io/specification)) and a non-empty
+  `description` of at most 1024 characters — both counted in Unicode code
+  points. That `name` is the BARE skill slug (`triage`), a different namespace
+  from the `@scope/name` package id, and must be written **inline on one line**:
+  `name:\n  triage` and `name : triage` are valid YAML the platform's package
+  loader cannot read, so writing one is refused rather than frozen into a
+  version no run could load.
+
+  The frontmatter is parsed with the **`yaml` library, at the same major the
+  skill runtime uses** (`@earendil-works/pi-coding-agent` parses `SKILL.md`
+  with `yaml` 2.9), mirroring its delimiters and newline handling, so the
+  platform cannot accept a document the agent then fails to PARSE. Block
+  scalars, folded scalars, next-line values, quoted escapes, inline
+  `# comments` and CRLF all read correctly; what YAML refuses, the platform
+  refuses (`description: a: b`, `name:x`, a duplicate key, a non-mapping block,
+  a non-string field); and a leading **BOM is rejected** rather than stripped,
+  because the runtime tests `startsWith("---")` and silently drops the skill.
+  The RULES are deliberately stricter than the runtime's, which only warns on a
+  spec violation and counts UTF-16 units — being stricter costs an author one
+  edit, being looser mints an immutable artifact no agent will load. A parity
+  test (`packages/runner-pi/test/skill-frontmatter-parity.test.ts`) runs the
+  real runtime loader and asserts the asymmetry only ever points that way.
+
+  The rule lives once, in `@appstrate/afps-shared`'s `checkSkillMarkdown`,
+  declared as the `skill` entry's `validateContent` on the shared package-type
+  config and applied by every path that WRITES skill content: `POST
+/api/packages/skills`, `PUT /api/packages/skills/{scope}/{name}`, `POST
+.../versions`, `POST .../versions/{version}/restore`, `POST
+/api/packages/import` (both the AFPS and the bare-skill-ZIP fallback),
+  `/import-bundle`, `/import-github`, and the MCP module's
+  `validate_package_file` / `import_package_file`. The 400 is an ordinary
+  problem+json whose first field error carries the machine-readable reason —
+  `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`,
+  `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or
+  `skill_invalid_frontmatter_description` — so a client can tell "no
+  description" from "bad name" without parsing prose.
+
+  **READING and RE-IMPORTING existing artifacts are deliberately untouched, and
+  that is the load-bearing half.** Published versions are immutable: a skill
+  published without a description cannot be repaired in place, so gating the
+  read side would have failed every RUN of every agent depending on one.
+  `checkCompanionFiles` — which `extractRootFromAfps` and the run launcher's
+  package catalog call — therefore still asks only for a frontmatter `name`,
+  through the exact same permissive probe as before. And the rule applies to
+  the ROOT of an import only, never to a dependency copy a bundle carries.
+
+  What changes for existing data is the DRAFT — every write, and only writes. A
+  stored skill draft whose `SKILL.md` does not conform must be completed before
+  its next save or publish. **Operator step, after deploying this release:**
+  `bun scripts/migration/0007-skill-frontmatter-quote-descriptions.ts` (dry-run;
+  `--apply` to write) quotes the `description:` lines `yaml` cannot parse — 17
+  of production's 66 skills carry an unquoted `description: … : …`, which the
+  agent runtime already fails to load — and names the rest for a manual edit.
+  **Restoring a legacy published version is refused** for the same reason: a restore writes a draft. Forking is NOT gated
+  — it byte-copies an already-published artifact, so nothing new enters the
+  world. The skill editor, the publish modal and the version-restore
+  confirmation translate the server's reason codes, so the author sees the
+  missing field rather than an English `detail` — or, as the restore dialog did
+  before, nothing at all.
+
+- **Chat turns shed their fixed per-hop costs** (#1243). The preamble reads
+  (models, default space, caller context, session) run in parallel; the
+  resumable recording is coalesced (50 ms / 16 KiB) instead of one store
+  append per SSE chunk and is released ten seconds after persistence settles;
+  the final assistant message is extracted in a single pass; session
+  bookkeeping is one UPDATE per persisted message; the MCP operation index is
+  memoised per permission set; the package hints query is bounded in SQL. The
+  chat UI throttles message re-renders and polls the session list every 10 s
+  while a turn is generating (60 s idle), and the resume route clears a
+  marker whose producer died. MCP `invoke_operation` audit inserts are no
+  longer awaited on the response path: they are tracked in-process and
+  drained (5 s cap) by graceful shutdown before the DB closes. Every
+  process-local TTL cache in the platform is now an instance of
+  `@appstrate/core/cache`, whose `invalidate`/`clear` broadcast to every
+  replica over the Postgres NOTIFY channel `cache_invalidate`.
+
+## [1.0.0-beta.55] - 2026-09-01
+
+No entries were recorded for this release. `CHANGELOG.md` is byte-identical at
+`v1.0.0-beta.54` and `v1.0.0-beta.55`, so everything below shipped in beta.54
+or earlier.
+
+## [1.0.0-beta.54] - 2026-08-28
+
+### Added
+
+- **Two release gates joined `bun run check`: `verify:release-version` and
+  `verify:env-docs`.** Both close a hole that a green check had been reporting
+  as fine.
+
+  `verify:release-version` (`scripts/verify-release-version.ts`) compares the
+  hardcoded `${APPSTRATE_VERSION:-<version>}` fallback in every shipped compose
+  file and `.env.example` against the git tag namespace. That fallback is what a
+  self-hoster gets from the documented `docker compose up -d` without exporting
+  the variable, and nothing checked it: measured at `v1.0.0-beta.53` all five
+  compose files still said `1.0.0-beta.41` — 79 sites, twelve releases stale —
+  while `.env.example` said `1.0.0-beta.51`, a third value again. The #1201
+  image-trio guard structurally cannot see this: it compares the platform, the
+  `PI_IMAGE` and the `SIDECAR_IMAGE` refs to EACH OTHER, and all three read the
+  same stale fallback, so the trio is perfectly coherent — coherently twelve
+  releases old. The gate has two arms: a FLOOR (not behind the newest `v*` tag)
+  run by `check.yml` on every PR, and an EXACT match run by the `verify-version`
+  preflight in `release.yml` that every publishing job `needs:`. The floor is
+  deliberately not an equality, so the bump PR — during which the fallback is
+  one release ahead of every tag that exists — is not the thing it fails.
+
+  `verify:env-docs` (`scripts/verify-env-docs.ts`) turns `docs/ENV.md`'s
+  "superset of the schema" claim from an assertion into a check:
+  `keys(envSchema) ⊆ rows(ENV.md)` and `keys(*.env.example) ⊆ rows(ENV.md) ∪
+INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
+  table was missing two schema keys and seven `.env.example` keys. It is a
+  completeness check only and never writes the file: the Notes column carries
+  cross-field boot rules and failure behaviour no Zod schema encodes. Three
+  vacuity floors fail the run rather than pass it when a population parses
+  empty. It cannot reach variables read straight from `process.env` — they are
+  in no schema and in no example file — which `docs/ENV.md`'s own header now
+  says out loud.
+
+### Changed
+
+- **BREAKING: the `application` entity is now `space`, everywhere, with no
+  compatibility layer** (#1227). The org-scoped container that delimits agents,
+  skills and integrations is renamed across 619 files — wire, database, headers,
+  routes, CLI, SPA and telemetry. `docs/NO_TRANSITIONAL_CODE.md` §1 forbids
+  aliases and dual-read paths, so this breaks the contract ON PURPOSE: a caller
+  still sending `X-Application-Id` or calling `/api/applications` now fails
+  loudly rather than being quietly accommodated. Verified: no `/api/applications`
+  route survives anywhere in `apps/`.
+  `app_`-prefixed ids become `spc_`; the header is `X-Space-Id`; the OTel
+  attribute is `appstrate.space.id` (the old series goes to zero without
+  erroring, so dashboards must be repointed rather than debugged).
+  `@appstrate/core` and `@appstrate/afps-runtime` both change public surface —
+  each needs a major release, and `cloud` needs a CODE change, not just a
+  version bump.
+
+  **Deploying this is a maintenance window, not a rolling deploy**, and the
+  operator steps are not optional:
+  - One replica, port closed, migrations at boot. §1 forbids the
+    expand-migrate-contract that would make a rolling deploy possible.
+  - `pg_dump -Fc` immediately before. **There is no down migration**, and
+    rolling the image back does not roll the schema back: the watermark is
+    compared by timestamp, so a reverted deploy finds nothing to apply and runs
+    old code against a renamed schema.
+  - **Two artifacts, both required.** `0053_applications_to_spaces.sql` applies
+    at boot and renames the catalog;
+    `scripts/migration/0003-application-ids-to-space-ids.sql` is run BY HAND and
+    rewrites the values. Neither is sufficient alone.
+  - Then `VALIDATE CONSTRAINT` on `webhooks_level_values`,
+    `webhooks_level_check` and `oauth_clients_level_check` — `0053` adds them
+    `NOT VALID` because the rows still hold the old value at that point.
+  - **Do NOT rewrite storage keys.** `files.storage_key`,
+    `uploads.storage_key` and `storage_deletion_jobs.storage_key` keep their
+    `app_` path segment deliberately: `0003` moves no bytes, so rewriting the
+    keys would point every row at an object that does not exist. Nothing
+    compares a storage key to a space id. New objects are written under `spc_`;
+    old ones stay where they are.
+  - Do not run `audit:storage-orphans` until verification is complete.
+  - Announce the CLI break: nothing gates an installed CLI to a version, and §1
+    forbids building such a mechanism, so users run `npm i -g appstrate@latest`
+    on the day. Open dashboard tabs must hard-refresh, and OAuth connect flows
+    in flight will fail (short Redis TTL, drainable).
+
+  Untouched, because the word means something else there: `appfile://` (it
+  encodes a `file_` id and never carried a space id), `APP_URL`, `--app-url`,
+  the turborepo `apps/` directory, the Hono `app` variable, the ~3,100
+  `application/*` MIME literals, `appp_`, and every use meaning the platform
+  itself or a third-party OAuth app registered at Google, GitHub or Discord.
+
+- **BREAKING: every remaining JSON request body is `.strict()` too — an unknown
+  key is a `400` instead of a silent strip.** The entry above closed the package
+  JSON bodies; this closes the rest of the API. `apps/api/src/routes/*.ts` went
+  from 23 `.strict()` schemas to 68 — **45 more request bodies across 16 route
+  files**: `integrations` (10), `models` (5), `organizations` and `spaces` (4
+  each), `model-provider-credentials`, `packages`, `profile` and `proxies` (3
+  each), `model-providers-oauth` (2), and one each in `agents`, `api-keys`,
+  `auth-bootstrap`, `me`, `uploads`, `user-agents` and `welcome`. All 45 are
+  top-level body schemas reached through `readJsonBody`; not one is a nested
+  object tightened by accident.
+
+  **This is a wire-contract change, not a validation tidy-up.** A client sending
+  a property the body does not model used to get its `2xx` and have the property
+  dropped on the floor. It now gets `400` `validation_failed`. The shape that
+  breaks is read-modify-write — `GET` a resource, edit one field, `PUT` the
+  whole object back — because every property of the response the update body
+  does not model is now refused BY NAME, exactly as described for the package
+  bodies above.
+
+  The OpenAPI spec follows with no second edit: `z.toJSONSchema()` emits
+  `additionalProperties: false` for a `.strict()` object, so every body wired
+  through `apps/api/src/openapi/zod-schema-registry.ts` — which is nearly all of
+  them — now advertises the refusal it enforces.
+
+- **BREAKING (API keys): five more `GET` routes enforce a read permission.**
+  Same class as the eight run and schedule reads gated in `1.0.0-beta.52`, and
+  the same reasoning: each was gated on org membership alone and enforced
+  nothing about what the caller may do.
+
+  - `GET /api/agents` → `agents:read`
+  - `GET /api/agents/{scope}/{name}/proxy` → `agents:read`
+  - `GET /api/agents/{scope}/{name}/model` → `agents:read`
+  - `GET /api/spaces/{spaceId}/packages` → `spaces:read`
+  - `GET /api/spaces/{spaceId}/packages/{scope}/{name}` → `spaces:read`
+
+  On the two agent detail routes the permission check is registered BEFORE
+  `requireAgent()` on purpose: that middleware `404`s on an unknown agent, so
+  the reverse order would answer "does this agent exist?" for a caller not
+  allowed to read agents at all.
+
+  **No dashboard user loses anything.** Every org role down to `guest` already
+  holds `agents:read` and `spaces:read` (`apps/api/src/lib/permissions.ts`), so
+  the SPA is unaffected. What changes is an ALREADY-MINTED API key scoped
+  without the matching permission: it reached these five reads through org
+  membership and now gets `403`. Both scopes are grantable to API keys — re-mint
+  the key with them.
+
+- **BREAKING: the package JSON bodies are `.strict()` — an unknown key is a
+  `400` instead of a silent strip.** `source_code` was dropped from the package
+  contract when its last reader died with the `tool` package type, and the
+  schemas were left open, so a client still sending it got a `201` and a package
+  without it with nothing anywhere saying the field had gone. A retired name
+  must fail loudly (`docs/NO_TRANSITIONAL_CODE.md` §1) — the rule that closed
+  the four launch surfaces in #1187, and this surface was left out of it. The
+  barrier is generic and names no field: it refuses any key the body does not
+  model. Seven request bodies carry `additionalProperties: false` in the spec to
+  match — `POST /api/packages/{skills,agents,integrations}` and
+  `PUT /api/packages/{skills,agents,integrations,mcp-servers}/{scope}/{name}`.
+  Refusals answer `400` `validation_failed` blaming the field `body`.
+
+  **Why this is BREAKING and not a fix: `.strict()` makes read-modify-write a
+  `400`.** `packageJsonUpdateSchema` accepts four keys — `manifest`, `content`,
+  `lock_version` and `operations` — and the rule for everything else is stated
+  once, as a rule rather than a list, because a list goes stale the first time a
+  response grows a field: **every property of the object the matching `GET`
+  hands back, other than those four, is refused BY NAME.**
+
+  For agents, `GET /api/packages/agents/{scope}/{name}` answers with the
+  `AgentDetail` component's 24 properties, of which the update body accepts
+  exactly two — `manifest` and `lock_version` (`content` is not among them: an
+  agent's content comes back as `prompt`). The other 22 are refused.
+
+  For skills, integrations and mcp-servers the `GET` answers with
+  `OrgPackageItemDetail`, 22 properties, of which the update body accepts three
+  — `manifest`, `content` and `lock_version`. The other 19 are refused.
+
+  A third-party client that does the obvious thing — `GET` the package, edit
+  `manifest`, `PUT` the object back — previously had those keys stripped and got
+  a `200`; it now gets a `400` on `id`. **Send only `manifest`, `content`,
+  `lock_version` and, where you mean it, `operations`.** In-repo callers are
+  unaffected: the three `toWireBody`
+  implementations already send exactly that, and `useCreatePackage`'s body type
+  declared an `id?: string` no caller ever passed, removed here — a key declared
+  against a now-strict body is a `400` waiting for its first caller.
+
+  `detect:breaking` reports this as non-breaking, and that is correct about the
+  OpenAPI _document_: it does not model a request body tightening
+  `additionalProperties`, which is invisible to both it and the generated SPA
+  types. This entry is the only signal a consumer gets. Same reasoning as the
+  schedule-body entry further down, which enumerates its 15 refused fields for
+  the same reason.
+
+- **BREAKING: an AFPS integration declaring a bare auth-scheme `prefix` is
+  refused at install time.** AFPS §7.6 defines `delivery.http.prefix` as a
+  literal prepended to the rendered value — every spec example writes the
+  trailing space. Appstrate additionally accepted the bare scheme (`"Bearer"`)
+  in `Authorization` position and spliced the separator in at request time; its
+  own comment called it "this compatibility rule". The injector now concatenates
+  verbatim and inspects nothing, and validator rule (1d) rejects the bare form
+  where the manifest author can act on it, naming the replacement
+  (`Write "Bearer ".`).
+
+  **51 in-repo system integrations wrote the bare form** — 44 `Bearer`,
+  6 `Basic`, 1 `Zoho-oauthtoken` — and every one is fixed here with a patch
+  bump and a rebuilt archive, per the immutable-published-version precedent of
+  #928.
+  Without the bump the fix stays inert in production. No exact-version pin
+  references any of them.
+
+  **Operators: an org-imported or org-published integration stored before this
+  change stops resolving.** System packages are unexposed (`resolvePublishedManifest`
+  short-circuits on the in-memory registry the rebuilt archives replaced), but
+  `packages.draft_manifest` and `package_versions.manifest` hold the author's
+  bytes verbatim and are never revalidated on read, so a stored bare prefix now
+  fails `invalid_manifest` at the first read — which the route maps onto `404`,
+  presenting as a missing integration rather than a bad prefix. Apply
+  `scripts/migration/0005-afps-bare-auth-scheme-prefix.sql`; its `WHERE` is
+  exactly the condition it removes (RFC 9110 token grammar, under
+  `Authorization` or `Proxy-Authorization`, case-insensitive) and it is
+  idempotent. It deliberately does not rewrite the uploaded archive bytes, so
+  `package_versions.integrity` is untouched and the boot sync's refuse-overwrite
+  guard still holds — the archive keeps the author's original spelling, and
+  re-importing it now fails loudly at the install gate.
+
+- **Run logs: an untagged `appstrate.progress` row renders as runtime output,
+  not as model prose.** `assistant_message` is the only marker of
+  model-authored text; the run-detail log view additionally treated a data-less
+  `debug`-level progress row as agent text, "compatibility with runs emitted
+  before `assistant_message` was stamped". No in-tree emitter produces that
+  shape as agent text, and the one shape still producible from outside the tree
+  is a runner lifecycle breadcrumb by definition — so the fallback was
+  attributing a container-lifecycle line to the model. Bounded and cosmetic: for
+  runs predating the stamp, such rows now carry the runtime dot instead of the
+  speech-bubble icon. Text, ordering, level colour and grouping are unchanged.
+
 ### Removed
-
-- **BREAKING (operators): the organization role `viewer` is retired; `guest`
-  replaces it, and moving the rows is a two-file deploy in ONE maintenance
-  window.** A `viewer` was read-only everywhere; that is a space concern now, so
-  a former viewer becomes an org `guest` plus an explicit `viewer` role in every
-  space that exists at migration time — the same reach, and it does not widen
-  onto spaces created later. Mapping them to `member` instead would have handed
-  them every open space's default preset, which is `operator`: write access they
-  never had.
-
-  **The two files, in this order.** `packages/db/drizzle/0056_space_roles.sql`
-  applies at boot with the rest of the pending batch; then
-  `scripts/migration/0008-org-viewer-to-guest.sql` runs BY HAND, before the new
-  version serves traffic. Between them a row still reading `viewer` resolves no
-  permission set at all and every request from that user fails, so the window
-  covers both — this is not two deploys. **Rollback is one-way from `0056`**:
-  it promotes `chat_sessions.space_id` to NOT NULL and the previous build
-  inserts without it. Roll forward.
-
-  `0008` is idempotent, runs in one transaction, and verifies by coverage
-  rather than by a count that reads the same whether it worked or not: it
-  aborts unless every pre-flip (user, space) pair carries a `space_members` row
-  and every pending invitation carries its space snapshot. It is run-once by
-  construction rather than by convention: the one step whose predicate does not
-  remove its own condition — the OAuth signup snapshot, which after the deploy
-  also matches a client an admin deliberately left with no assignments — is
-  skipped on every run past the first, off a marker the script writes in
-  `drizzle.migration_scripts`, and names the clients it declined to widen.
-
-  **A third file can be needed first.** `0056` also creates the partial unique
-  index behind "one pending invitation per (organization, email)", and a
-  duplicate pair left by a race under earlier code fails that statement and
-  rolls the whole migration back. Count the pairs before the deploy and run
-  `scripts/migration/0009-org-invitations-dedupe-pending.sql` if there are any.
-  **The runbook, including that query, is `scripts/migration/README.md` → RBAC
-  rollout**; rehearse the whole sequence against a restored `pg_dump` copy first,
-  since the row counts are unmeasured until you do.
-
-  Two more consequences an operator should know about. **An API key pinned to a
-  space cannot mutate a package installed in more than one space**, whatever its
-  scopes: a package's draft, versions and identity are shared across its
-  installations, so a mutation needs authority in every one of them, and a key
-  delegates authority in exactly one. Re-run such a mutation from a session, or
-  uninstall the package from the spaces the key does not cover. And the audience
-  of billing mail moved: `ModuleInitContext.getOrgAdminEmails` is gone from the
-  module contract, replaced by `getOrgOwnerEmails` and `getOrgMembers` (see
-  `packages/core/CHANGELOG.md`), so an unset billing contact now falls back to
-  the org's OWNERS rather than fanning out to every administrator.
 
 - **BREAKING (operators): migration `0055` drops `org_invitations.accepted_by`
   and `accepted_at` — and THE RELEASE CARRYING IT CANNOT BE ROLLED BACK.**
@@ -1331,30 +2573,6 @@ skills sync is running` and kept the stale plugin. The lock is now
 
 ### Security
 
-- **A forwarded chain shorter than `TRUST_PROXY` no longer picks the client's
-  own address.** `lib/client-ip.ts` reads `X-Forwarded-For` from the RIGHT,
-  which is unspoofable while each trusted hop appends its entry. When the chain
-  carried FEWER entries than the hop count it used to clamp to the LEFTMOST
-  one — an entry no proxy wrote — so any caller could name its own IP under any
-  `TRUST_PROXY >= 1` and mint a fresh bucket per request. Every per-IP control
-  keyed on that answer, including the rate limit that is the stated defence
-  against `AUTH_BOOTSTRAP_TOKEN` brute force, the Better Auth production limiter
-  and the address recorded on sessions and audit events. A short chain now fails
-  closed: the whole forwarded set is distrusted (`X-Real-IP` included, or
-  stripping the chain would just move the hole) and the socket peer answers.
-
-  The resolved value must also **be** an IP address now. Port suffixes and
-  bracketed IPv6 normalize to the address they name; anything else is dropped.
-  That closes a one-caller denial of service: an unparseable address made
-  Better Auth's `getIP` drop _every_ caller into one shared rate-limit bucket.
-
-  **Operators:** the hop count must match the topology. `TRUST_PROXY=1` behind a
-  single reverse proxy that appends `X-Forwarded-For`; a TLS-terminating L4 load
-  balancer (AWS NLB TLS listener, GCP TCP proxy) appends nothing and is not a
-  hop. Verify too that the origin port is not reachable around the proxy — the
-  shipped compose publishes it on all host interfaces, and Docker's rules bypass
-  host firewalls.
-
 - **The sidecar's HTTP control surface is authenticated, deny-by-default.**
   Every route on the sidecar app now sits behind an `app.use("*")` middleware
   (`runtime-pi/sidecar/app.ts`) that refuses any request not presenting the
@@ -1402,42 +2620,6 @@ skills sync is running` and kept the stale plugin. The lock is now
   #1201 image-trio boot guard already refuses a deployment whose platform,
   `PI_IMAGE` and `SIDECAR_IMAGE` versions disagree, so a correctly pinned
   compose file cannot land in either state.
-
-- **`TRUST_PROXY=false` refuses to boot in production behind a non-loopback
-  `APP_URL`.** The platform terminates no TLS, so that pair means a proxy is in
-  front by construction, and ignoring `X-Forwarded-For` there hands every caller
-  the proxy's own address — collapsing every per-IP rate limit and every audit
-  record into one bucket. `@appstrate/env` now rejects the combination at boot
-  instead of running degraded.
-
-  **Operators: name the hop count.** `TRUST_PROXY=1` behind a single reverse
-  proxy, `N` behind N hops you control. The self-hosting example ships `1` and
-  passes the variable through in all four of its compose files.
-
-- **A token request that identifies no client is held to the self-service
-  confinement.** `/oauth2/token` confines a self-registered (DCR / CIMD) client
-  to exactly one protected-resource audience; a request naming no client now
-  falls under the same rule rather than past it, so dropping `client_id` is not
-  a way to mint a token for the broad platform audience. `private_key_jwt` keeps
-  working: the client id is read from the `client_assertion`'s `sub` (RFC 7523
-  §3, `iss` must agree when present), unverified — the provider then verifies
-  the assertion against the row that id names, so a forged assertion naming an
-  operator-provisioned client dies on the signature check and one naming a
-  self-service client stays confined.
-
-- **Operators: run `scripts/migration/0011` after the drizzle batch carrying
-  `0057`, on any deployment that has ever accepted a self-registered client —
-  the API refuses to boot in between, and that is the intended sequence.**
-  `0057` adds `oauth_clients.self_service` and leaves it `false` on every row;
-  `0011` fills it from the `selfService` key already in `metadata`. Until it
-  runs, a self-registered client reads as operator-provisioned and its tokens
-  are not confined, so the deployment comes up only far enough to apply `0057`,
-  counts the rows still unfolded and exits naming the script; under a supervisor
-  it restarts into the same refusal. The order is therefore: deploy → the API
-  applies `0057` and exits → run `0011` against the database → restart. A
-  deployment that never accepted a self-registered client counts zero and never
-  sees the refusal. The script is idempotent, runs in one transaction, and never
-  flips a `true` back.
 
 ## [1.0.0-beta.53] - 2026-08-26
 

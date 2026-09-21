@@ -72,7 +72,7 @@ interface ResolveLiveCredentialsOptions {
  * reporting "the API is unavailable" against a fleet of uncredentialed 401s.
  *
  * Throws ApiError on:
- *   - 404: integration not declared by the agent, not installed, or no
+ *   - 404: integration not declared by the agent, not active, or no
  *     connection for the actor (including a run-pinned connection that has
  *     since been deleted or unshared). Nothing exists to flag, so this is
  *     deliberately NOT the 410 below.
@@ -202,7 +202,7 @@ export async function resolveLiveIntegrationCredentials(
     // another manifest version, so flagging `needsReconnection` — which 410
     // promises — would destroy a working connection over a manifest edit.
     // NOT 404: 404 on this endpoint already means "not a dependency / not
-    // installed", and stacking a third unrelated cause behind it is exactly the
+    // active", and stacking a third unrelated cause behind it is exactly the
     // illegibility this path exists to remove.
     logger.warn("Integration connection's auth key is not declared by the pinned manifest", {
       runId: context.runId,
@@ -379,7 +379,7 @@ export async function resolveLiveIntegrationCredentials(
       // refresh response narrowed `scopesGranted` (user revoked some
       // permissions in their account settings between issuance and
       // refresh), cross-check against the union of `requiredScopes`
-      // across every installed agent and flip `needsReconnection`
+      // across every agent in the space and flip `needsReconnection`
       // if the actor has dropped below that floor. Fast-path: skip
       // the agent scan unless the refresh actually shrank scopes.
       if (refreshed.shrinkDetected && refreshed.scopesGranted !== null) {

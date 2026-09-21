@@ -3,11 +3,12 @@
 /**
  * RBAC on the package READ surface (issue #1123).
  *
- * Every `GET` under `/api/packages` used to be gated on `hasPackageAccess`
- * alone — a visibility check ("is this package a system package, or installed
- * in THIS space?"), never an authorization one. A credential scoped
- * without `skills:read` could therefore read a skill's manifest AND its full
- * `SKILL.md` through the detail route, and pull the published ZIP through
+ * Every `GET` under `/api/packages` carries `readGuard` — the type's
+ * `<type>:read` — on top of the visibility question `isPackageActiveHere`
+ * answers ("is this package a system package, or active in THIS space?").
+ * Visibility is not authorization: on its own it lets a credential scoped
+ * without `skills:read` read a skill's manifest AND its full `SKILL.md`
+ * through the detail route, and pull the published ZIP through
  * `/{version}/download`.
  *
  * These tests pin the guard per route rather than once: the value of the fix
@@ -30,15 +31,23 @@
 
 import { describe, it, expect, beforeEach, beforeAll } from "bun:test";
 import { eq } from "drizzle-orm";
-import { spacePackages } from "@appstrate/db/schema";
+import { packageShares, spacePackages } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  createTestUser,
+  authHeaders,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import {
   seedPackage,
-  seedInstalledPackage,
+  seedPackageShare,
+  seedPublishedVersion,
+  seedSpacePackage,
   seedApiKey,
   seedPackageVersion,
+  seedSpace,
 } from "../../helpers/seed.ts";
 import { zipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
@@ -60,7 +69,28 @@ const SKILL_BODY =
  * which would make the negative assertions below pass for the wrong reason.
  */
 async function publishSkill(ctx: TestContext, version = "0.1.0"): Promise<void> {
-  await seedPackage({ id: SKILL_ID, type: "skill", orgId: ctx.orgId, createdBy: ctx.user.id });
+  // Deliberately OUT OF REACH of the calling space: the suite's visibility
+  // assertions turn on that, so the placement each test wants (a share, a row)
+  // is its own fixture and never the publisher's.
+  //
+  // The home is a stranger's PERSONAL space, which is the only home an
+  // organization OWNER does not reach (§3.6) — every team space, private ones
+  // included, answers `admin` to them. A homeless package is not an option: an
+  // organization's package always has one (`packages_org_package_has_home`).
+  const stranger = await createTestUser();
+  const elsewhere = await seedSpace({
+    orgId: ctx.orgId,
+    name: "Stranger",
+    ownerUserId: stranger.id,
+    visibility: "private",
+  });
+  await seedPackage({
+    id: SKILL_ID,
+    type: "skill",
+    orgId: ctx.orgId,
+    createdBy: ctx.user.id,
+    homeSpaceId: elsewhere.id,
+  });
 
   const zip = zipArtifact({
     "manifest.json": new TextEncoder().encode(
@@ -109,6 +139,7 @@ describe("packages GET routes — read permission", () => {
 
     await seedPackage({
       id: SKILL_ID,
+      homeSpaceId: ctx.defaultSpaceId,
       type: "skill",
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
@@ -120,7 +151,7 @@ describe("packages GET routes — read permission", () => {
       },
       draftContent: SKILL_BODY,
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, SKILL_ID);
+    await seedSpacePackage(ctx.defaultSpaceId, SKILL_ID);
     await seedPackageVersion({
       packageId: SKILL_ID,
       version: "0.1.0",
@@ -196,8 +227,19 @@ describe("packages GET routes — read permission", () => {
     // An `agents:read`-only key must not reach a SKILL — the per-type guard is
     // the point. Reading the agent is still allowed with the same key.
     const agentId = "@testorg/read-guard-agent";
-    await seedPackage({ id: agentId, type: "agent", orgId: ctx.orgId, createdBy: ctx.user.id });
-    await seedInstalledPackage(ctx.defaultSpaceId, agentId);
+    await seedPackage({
+      id: agentId,
+      homeSpaceId: ctx.defaultSpaceId,
+      type: "agent",
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+    });
+    // PUBLISHED: an API key never holds write authority over a package, so the
+    // agent detail it reads is the latest published version — an unpublished
+    // agent answers `404 no_published_version` and this test would assert the
+    // wrong refusal.
+    await seedPublishedVersion(agentId, "0.1.0");
+    await seedSpacePackage(ctx.defaultSpaceId, agentId);
 
     const key = await seedApiKey({
       orgId: ctx.orgId,
@@ -228,7 +270,8 @@ describe("packages version download — access + read permission", () => {
 
   it("403s a download for a key without the package type's read scope", async () => {
     await publishSkill(ctx);
-    await seedInstalledPackage(ctx.defaultSpaceId, SKILL_ID);
+    await seedPackageShare(ctx.defaultSpaceId, SKILL_ID);
+    await seedSpacePackage(ctx.defaultSpaceId, SKILL_ID);
 
     const key = await seedApiKey({
       orgId: ctx.orgId,
@@ -245,7 +288,8 @@ describe("packages version download — access + read permission", () => {
 
   it("serves the artifact to a key holding skills:read", async () => {
     await publishSkill(ctx);
-    await seedInstalledPackage(ctx.defaultSpaceId, SKILL_ID);
+    await seedPackageShare(ctx.defaultSpaceId, SKILL_ID);
+    await seedSpacePackage(ctx.defaultSpaceId, SKILL_ID);
 
     const key = await seedApiKey({
       orgId: ctx.orgId,
@@ -263,7 +307,7 @@ describe("packages version download — access + read permission", () => {
 
   it("404s a download for a package that is not installed in the calling space", async () => {
     // Pre-fix this route resolved the row with `orgOrSystemFilter` alone and
-    // never called `hasPackageAccess`, so it served artifact bytes for
+    // never called `isPackageActiveHere`, so it served artifact bytes for
     // packages the `/files` routes correctly hide. Permission is held here
     // (owner session) — the 404 is the visibility gate, nothing else.
     await publishSkill(ctx);
@@ -310,7 +354,8 @@ describe("packages file explorer — read permission", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "testorg" });
     await publishSkill(ctx);
-    await seedInstalledPackage(ctx.defaultSpaceId, SKILL_ID);
+    await seedPackageShare(ctx.defaultSpaceId, SKILL_ID);
+    await seedSpacePackage(ctx.defaultSpaceId, SKILL_ID);
   });
 
   it("403s the index and the file bytes for a key without skills:read", async () => {
@@ -404,9 +449,12 @@ describe("packages file explorer — read permission", () => {
 
   it("still 404s (not 403s) a package the calling space cannot see", async () => {
     // Visibility is settled first and deliberately: the RBAC resource comes
-    // from the row, so `hasPackageAccess` has to run before the type is known.
-    // Same order as `/{version}/download` — permission is held here.
+    // from the row, so the placement check has to run before the type is known.
+    // Same order as `/{version}/download` — permission is held here. BOTH rows
+    // go: a package is placed in a space by its home or by a share, so leaving
+    // the offer behind would keep it visible and the 404 would never be tested.
     await db.delete(spacePackages).where(eq(spacePackages.packageId, SKILL_ID));
+    await db.delete(packageShares).where(eq(packageShares.packageId, SKILL_ID));
 
     const res = await app.request(`/api/packages/${SKILL_ID}/files`, {
       headers: authHeaders(ctx),

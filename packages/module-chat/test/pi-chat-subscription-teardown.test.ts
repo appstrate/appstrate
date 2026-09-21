@@ -191,6 +191,7 @@ async function runStubbedTurn(abortSettles: boolean) {
     },
     modelBinding: binding,
     presetId: "preset_teardown",
+    modelLabel: "Teardown preset",
     orgId: "org_teardown",
     userId: "user_teardown",
     chatSessionId: null,

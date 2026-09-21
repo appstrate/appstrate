@@ -11,6 +11,14 @@ interface SkillDep {
   id: string;
   version?: string;
   name?: string;
+  /**
+   * `home_writable` of THIS dependency: whether the caller may write the skill
+   * in its home space. The draft is the skill author's working copy, so the
+   * server refuses `dependency_overrides: { "<skill>": "draft" }` to anyone
+   * else (`403 draft_not_writable`) — per dependency, not per agent. Absent
+   * while the detail is in flight, which reads as "no".
+   */
+  homeWritable?: boolean;
 }
 
 interface DependencyOverridesSectionProps {
@@ -24,10 +32,11 @@ interface DependencyOverridesSectionProps {
 /**
  * Per-skill dependency override editor (#666). For each declared skill the
  * user can keep the manifest pin (inherit), run the dependency's mutable
- * working copy ("draft" — the skill edit loop), or pin an exact published
- * version for this run. Emits the flat `{ skillId: "draft" | "<version>" }`
- * map `dependency_overrides` expects, with inherit entries omitted so the
- * payload only carries genuine overrides.
+ * working copy ("draft" — the skill edit loop, offered only for a skill this
+ * caller can write), or pin an exact published version for this run. Emits
+ * the flat `{ skillId: "draft" | "<version>" }` map `dependency_overrides`
+ * expects, with inherit entries omitted so the payload only carries genuine
+ * overrides.
  *
  * Skills are the only bundled dependency type the run resolves, matching
  * `buildAgentPackage` server-side.
@@ -91,8 +100,12 @@ function DependencyOverrideRow({
           },
           // "draft" runs the dependency's mutable working copy — the skill
           // edit loop. Persisted on the run row so a drafted run is never
-          // mistaken for a reproducible one.
-          { value: DRAFT, label: t("run.overrides.dependencyDraft") },
+          // mistaken for a reproducible one. Authority is read per SKILL:
+          // authoring the agent says nothing about who owns its dependencies,
+          // and the server gates each one on its own.
+          ...(skill.homeWritable
+            ? [{ value: DRAFT, label: t("run.overrides.dependencyDraft") }]
+            : []),
         ]}
       />
     </div>

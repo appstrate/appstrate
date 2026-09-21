@@ -19,7 +19,8 @@ import { z } from "zod";
 import { spaceRoleAssignmentShape } from "../../../src/lib/space-role-assignment.ts";
 import { describe, it, expect } from "bun:test";
 import { ApiError } from "@appstrate/core/api-errors";
-import { SPACE_ID_RE, assertSpaceId, assertSpaceRoleId, prefixedId } from "../../../src/lib/ids.ts";
+import { assertSpaceId, assertSpaceRoleId } from "../../../src/lib/ids.ts";
+import { SPACE_ID_RE, prefixedId } from "@appstrate/db/ids";
 
 /** Run `assertSpaceId` and return the `ApiError` it threw. Fails if it did not throw. */
 function captureThrow(id: string, param?: string): ApiError {

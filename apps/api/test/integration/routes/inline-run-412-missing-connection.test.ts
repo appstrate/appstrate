@@ -42,7 +42,7 @@ import {
 } from "../../helpers/run-connection-fixtures.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
 import { readConnectToken } from "../../../src/services/connect/connect-session.ts";
@@ -57,7 +57,12 @@ interface ValidationFieldError {
   code: string;
   title?: string;
   message: string;
-  candidate_connection_ids?: string[];
+  candidate_connections?: {
+    id: string;
+    label: string | null;
+    account_id: string;
+    owned_by_actor: boolean;
+  }[];
   connect_url?: string;
   expires_at?: number;
   package_id?: string;
@@ -124,7 +129,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
     expect(err).toBeDefined();
     expect(err!.code).toBe("must_choose_connection");
     // The remedy the caller is handed — it must be actionable on THIS route.
-    expect(err!.candidate_connection_ids!.sort()).toEqual([conn1, conn2].sort());
+    expect(err!.candidate_connections!.map((c) => c.id).sort()).toEqual([conn1, conn2].sort());
   });
 
   it("launches when connection_overrides names a candidate, persisting the pick and its snapshot", async () => {
@@ -266,6 +271,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
     async function seedOauthIntegration() {
       await seedPackage({
         id: OAUTH_INTEGRATION,
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         type: "integration",
         source: "local",
@@ -276,7 +282,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
         version: "1.0.0",
         manifest: oauthManifest(),
       });
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OAUTH_INTEGRATION);
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OAUTH_INTEGRATION);
     }
 
     async function launch(path: string, headers: Record<string, string>) {

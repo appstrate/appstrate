@@ -6,6 +6,9 @@ import { Button } from "@appstrate/ui/components/button";
 import { MonacoEditor as Editor } from "./monaco";
 import { useTheme } from "../stores/theme-store";
 
+/** The file this pane edits — announced by Monaco, not a translated string. */
+const MANIFEST_FILENAME = "manifest.json";
+
 interface JsonEditorProps {
   value: Record<string, unknown>;
   onApply: (parsed: Record<string, unknown>) => void;
@@ -80,6 +83,9 @@ export function JsonEditor({ value, onApply, schema }: JsonEditorProps) {
           });
         }}
         options={{
+          // Monaco announces "Editor content" and nothing else; this pane
+          // edits one named file, so it says which.
+          ariaLabel: MANIFEST_FILENAME,
           minimap: { enabled: false },
           fontSize: 13,
           fontFamily: "'SF Mono', 'Fira Code', monospace",

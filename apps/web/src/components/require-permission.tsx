@@ -3,7 +3,11 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Lock } from "lucide-react";
-import { usePermissions, type GateablePermission } from "../hooks/use-permissions";
+import {
+  usePermissions,
+  useCanManageOrgCatalog,
+  type GateablePermission,
+} from "../hooks/use-permissions";
 import { EmptyState, LoadingState } from "./page-states";
 
 /**
@@ -31,8 +35,21 @@ export function RequirePermission({
   return <NoAccessState />;
 }
 
-/** The "you do not have access to this" panel, shared by every gated route. */
-function NoAccessState() {
+/**
+ * The "you do not have access to this" panel, shared by every gated route —
+ * and by the package editor, which is NOT gated on the current space (write
+ * authority is the package's home) and so renders it from `home_writable` once
+ * the detail has loaded.
+ */
+export function NoAccessState() {
   const { t } = useTranslation("common");
   return <EmptyState message={t("access.denied")} hint={t("access.deniedHint")} icon={Lock} />;
+}
+
+/** The organization library is administrative even when the caller manages a space. */
+export function RequireOrgCatalogAdmin({ children }: { children: ReactNode }) {
+  const { ready } = usePermissions();
+  const allowed = useCanManageOrgCatalog();
+  if (!ready) return <LoadingState />;
+  return allowed ? <>{children}</> : <NoAccessState />;
 }

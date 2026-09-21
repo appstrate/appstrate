@@ -8,6 +8,7 @@ it; start here when you need the detail behind a subsystem.
 
 - [**ENV.md**](./ENV.md) — every environment variable, with defaults and notes. Kept in sync with the `@appstrate/env` Zod schema, which is the source of truth.
 - [**CASING_CONVENTIONS.md**](./CASING_CONVENTIONS.md) — the snake_case-on-the-wire / camelCase-internal policy and its documented carve-outs.
+- [**QUALITY_GATE.md**](./QUALITY_GATE.md) — the `verify:dead-code` (knip) forensics: what knip derives on its own, what an `entry` declaration replaces, and the two shapes of `ignore*` that qualify.
 
 ## Architecture
 

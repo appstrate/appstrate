@@ -2,7 +2,7 @@
 
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
-import { Trans, useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next";
 import { type LucideIcon, Layers } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { Button } from "@appstrate/ui/components/button";
@@ -11,6 +11,7 @@ import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { PackageCard } from "../components/package-card";
 import { PageHeader, type BreadcrumbEntry } from "../components/page-header";
 import { ImportModal } from "../components/import-modal";
+import { SpaceLibraryHint } from "../components/space-library-hint";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { usePermissions } from "../hooks/use-permissions";
 
@@ -122,7 +123,7 @@ export function PackageList() {
         isLoading={isLoading}
         error={error}
         emptyMessage={t("list.empty")}
-        emptyHint={<Trans t={t} i18nKey="list.emptyHint" components={{ 1: <code /> }} />}
+        emptyHint={<SpaceLibraryHint type="agent" />}
         emptyIcon={Layers}
         extraActions={
           can("agents:write") ? (

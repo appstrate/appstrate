@@ -56,7 +56,7 @@ import {
 } from "../../services/files.ts";
 import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
-import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
+import { VIEW_AS_HEADER, canComposeInline } from "@appstrate/core/permissions";
 import { asString, textResult } from "./tool-results.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 
@@ -125,6 +125,15 @@ export interface McpToolContext {
   /** The caller's org+space scope (org fixed by the endpoint/token; space resolved). */
   scope: SpaceScope;
   authorizeBundle: Parameters<typeof buildPackageFileTools>[0]["authorizeBundle"];
+  /**
+   * Whether the caller may OFFER a package from its home space — the
+   * predicate `import_package_file` needs to place a re-imported root the
+   * same way the REST import route places it. Optional so a non-HTTP caller
+   * (a unit test, an in-process consumer with no request) can omit it and
+   * get the fail-closed answer: the root is not activated and the result
+   * says so.
+   */
+  mayShareRoot?: Parameters<typeof buildPackageFileTools>[0]["mayShareRoot"];
   /** In-process dispatcher (defaults to the platform app at request time). */
   dispatch: Dispatch;
   /**
@@ -782,39 +791,136 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
   throw signal.reason ?? new Error("Aborted");
 }
 
+/**
+ * `run_and_wait` arguments that exist only for `kind:"inline"`. Declared only
+ * to a caller who may compose inline (`canComposeInline`). The launch allowlist
+ * (`RUN_AND_WAIT_ARGUMENT_NAMES`) still knows them either way: an agent-only
+ * caller that sends `kind:"inline"` anyway reaches the route and takes its 403,
+ * the one refusal that owns the rule.
+ */
+const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
+  manifest: {
+    type: "object",
+    description:
+      "Partial canonical AFPS agent manifest (kind:inline). Usually only `display_name` " +
+      "plus task-specific dependencies/configuration are needed; `name` is derived and " +
+      "AFPS boilerplate, runtime tools, and an open output schema are defaulted. Every " +
+      "provided field is an exact top-level replacement: arrays and nested objects are not " +
+      "merged, and `runtime_tools: []` is preserved. You may instead provide a complete, " +
+      "strict deterministic manifest and override every field. Do NOT put the prompt inside " +
+      "the manifest — it goes in the separate top-level `prompt` argument.",
+    properties: {
+      display_name: {
+        type: "string",
+        description:
+          "Task-specific human title. When name is omitted, the platform derives " +
+          "@inline/<slug> from this value.",
+      },
+      name: {
+        type: "string",
+        description:
+          "Optional exact canonical @scope/name override. Usually omit and provide " +
+          "display_name.",
+      },
+      dependencies: {
+        type: "object",
+        description: "Exact AFPS dependencies override.",
+        additionalProperties: true,
+      },
+      integrations_configuration: {
+        type: "object",
+        description: "Exact AFPS integration configuration override.",
+        additionalProperties: true,
+      },
+      runtime_tools: {
+        type: "array",
+        description:
+          "Exact runtime-tool selection. Omit for " +
+          "log/output/publish_file defaults; " +
+          "an explicit [] disables them all.",
+        items: { type: "string" },
+      },
+      output: {
+        type: "object",
+        description: "Exact AFPS output contract override, including a deterministic JSON schema.",
+        additionalProperties: true,
+      },
+    },
+    additionalProperties: true,
+  },
+  prompt: {
+    type: "string",
+    description:
+      "REQUIRED for kind:inline. The inline run's system prompt, as a top-level argument " +
+      "alongside `manifest` (never nested inside it). Tell the run to call the `log` tool " +
+      "to report each meaningful step — those lines are what the chat shows live. When the " +
+      "run produces files, require descriptive, task-specific names that remain clear " +
+      `outside this run; never generic names such as ${CONTEXT_FREE_FILENAMES_PHRASE}.`,
+  },
+  context_files: {
+    type: "array",
+    items: { type: "string" },
+    description:
+      "kind:inline ONLY. `appfile://` URIs — typically straight from a previous run's " +
+      "`files` result — mounted read-only into this run's `files/` directory and " +
+      "listed in its prompt. This is how you chain runs: to give a run the output of " +
+      "earlier runs, pass their `appfile://` URIs here VERBATIM. Never copy a previous " +
+      "run's content into `prompt`: re-typing it costs tokens twice, and every URL, figure " +
+      "and date you retype is one you can get wrong — the file itself cannot be. No " +
+      "manifest change is needed; the platform declares the input field for you. For " +
+      "kind:agent this argument is rejected — a published agent's input schema is a " +
+      "versioned contract, so pass the URI through one of its declared file fields instead.",
+  },
+};
+
 function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
+  // The route is the gate; this only decides what the model is told.
+  const inline = canComposeInline((p) => ctx.permissions.has(p));
+  // Inline-only descriptor spans are absent, not contradicted, for a caller
+  // who cannot launch one.
   const descriptor: Tool = {
     name: "run_and_wait",
     description:
-      'Launch a run and wait for its final status in one call: starts an agent run (`kind:"agent"`, ' +
-      'by `scope`/`name`) or an inline run (`kind:"inline"`, by `manifest`+`prompt`), exposes ' +
-      "the created run to chat for live progress, then returns " +
+      "Launch a run and wait for its final status in one call: starts " +
+      (inline
+        ? 'an agent run (`kind:"agent"`, by `scope`/`name`) or an inline run (`kind:"inline"`, ' +
+          "by `manifest`+`prompt`)"
+        : 'a run of an existing agent (`kind:"agent"`, by `scope`/`name`)') +
+      ", exposes the created run to chat for live progress, then returns " +
       "`{ id, packageId, status, done:true, result?, error? }` when the run reaches a terminal " +
       "status. Do NOT call `getRun` after this tool just to wait for completion; this tool already " +
-      "waits. For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
-      "only a concise task-specific `display_name` plus task dependencies/configuration. The " +
-      "platform derives `name` and fills omitted AFPS boilerplate, `runtime_tools` (log, output, " +
-      "publish_file), and an open object output schema. Defaults apply only " +
-      "to fields you omit; " +
-      "every field you provide replaces its default exactly, with no array or nested-object merge. " +
-      "That includes `runtime_tools: []`, which stays empty and disables every default runtime tool. " +
-      "A complete deterministic manifest may override every field, including a strict " +
-      "`output.schema`; when it does, its explicit `runtime_tools` must include `output`. The chat " +
-      "shows only lines emitted through `log`, so instruct the run to log meaningful steps whenever " +
-      "that tool is selected. Never use an id or a generic display name such as `one-shot`. " +
+      "waits. " +
+      (inline
+        ? "For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
+          "only a concise task-specific `display_name` plus task dependencies/configuration. The " +
+          "platform derives `name` and fills omitted AFPS boilerplate, `runtime_tools` (log, output, " +
+          "publish_file), and an open object output schema. Defaults apply only " +
+          "to fields you omit; " +
+          "every field you provide replaces its default exactly, with no array or nested-object merge. " +
+          "That includes `runtime_tools: []`, which stays empty and disables every default runtime tool. " +
+          "A complete deterministic manifest may override every field, including a strict " +
+          "`output.schema`; when it does, its explicit `runtime_tools` must include `output`. The chat " +
+          "shows only lines emitted through `log`, so instruct the run to log meaningful steps whenever " +
+          "that tool is selected. Never use an id or a generic display name such as `one-shot`. "
+        : "") +
       "File deliverables: every file the run writes under its workspace `outputs/` directory is " +
-      "published as a file when the run ends and returned here as a `resource_link` — when the " +
-      "goal is a downloadable file (report, CSV, image…), instruct the run's `prompt` to write it " +
-      "into `outputs/` with a descriptive, task-specific filename that remains understandable " +
-      `outside this run; never use context-free names such as ${CONTEXT_FREE_FILENAMES_PHRASE}. ` +
-      "For several files or an executable package, instruct the run to build a `.zip` or `.afps` " +
-      "archive with its normal shell tools, then publish that single archive with " +
-      "`publish_file`. " +
-      "Content merely returned in the output payload never becomes a file. " +
-      "Chaining runs (kind:inline): feed earlier runs' deliverables to a later one by passing " +
-      "their `appfile://` URIs in `context_files` — never by copying their content into " +
-      "`prompt`. " +
-      "Prefer an existing agent over an inline manifest when one matches the intent.",
+      "published as a file when the run ends and returned here as a `resource_link`" +
+      (inline
+        ? " — when the " +
+          "goal is a downloadable file (report, CSV, image…), instruct the run's `prompt` to write it " +
+          "into `outputs/` with a descriptive, task-specific filename that remains understandable " +
+          `outside this run; never use context-free names such as ${CONTEXT_FREE_FILENAMES_PHRASE}. ` +
+          "For several files or an executable package, instruct the run to build a `.zip` or `.afps` " +
+          "archive with its normal shell tools, then publish that single archive with " +
+          "`publish_file`. "
+        : ". ") +
+      "Content merely returned in the output payload never becomes a file." +
+      (inline
+        ? " Chaining runs (kind:inline): feed earlier runs' deliverables to a later one by passing " +
+          "their `appfile://` URIs in `context_files` — never by copying their content into " +
+          "`prompt`. " +
+          "Prefer an existing agent over an inline manifest when one matches the intent."
+        : ""),
     annotations: {
       title: "Run and wait",
       readOnlyHint: false,
@@ -827,114 +933,51 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       properties: {
         kind: {
           type: "string",
-          enum: ["agent", "inline"],
-          description:
-            "`agent` runs a published/draft agent by scope+name; `inline` runs a manifest.",
+          enum: inline ? ["agent", "inline"] : ["agent"],
+          description: inline
+            ? "`agent` runs a published/draft agent by scope+name; `inline` runs a manifest."
+            : "`agent` runs a published/draft agent by scope+name.",
         },
         scope: { type: "string", description: "Agent scope, keep the leading `@` (kind:agent)." },
         name: { type: "string", description: "Agent name (kind:agent)." },
         version: {
           type: "string",
           description:
-            "Agent version selector (kind:agent). Omit for the latest published version; pass " +
-            "`draft` to run the working copy of a draft-only agent.",
+            "Agent version selector (kind:agent). Omit to run the latest PUBLISHED version — " +
+            "404 `no_published_version` when the agent has none. `draft` runs the author's " +
+            "working copy and is reserved to callers who may write the agent " +
+            "(403 `draft_not_writable` otherwise).",
         },
         input: {
           type: "object",
           description:
-            "Run input, validated against the agent's input schema (either kind — for " +
-            "kind:inline, against `manifest.input.schema`). File fields (typed `format: uri` " +
+            "Run input, validated against the agent's input schema" +
+            (inline ? " (either kind — for kind:inline, against `manifest.input.schema`)" : "") +
+            ". File fields (typed `format: uri` " +
             "with a `contentMediaType`) accept `appfile://` and `upload://` URIs directly — " +
             "pass an attached file's `appfile://` URI verbatim and the file is streamed " +
             "into the run's workspace.",
           additionalProperties: true,
         },
-        manifest: {
-          type: "object",
-          description:
-            "Partial canonical AFPS agent manifest (kind:inline). Usually only `display_name` " +
-            "plus task-specific dependencies/configuration are needed; `name` is derived and " +
-            "AFPS boilerplate, runtime tools, and an open output schema are defaulted. Every " +
-            "provided field is an exact top-level replacement: arrays and nested objects are not " +
-            "merged, and `runtime_tools: []` is preserved. You may instead provide a complete, " +
-            "strict deterministic manifest and override every field. Do NOT put the prompt inside " +
-            "the manifest — it goes in the separate top-level `prompt` argument.",
-          properties: {
-            display_name: {
-              type: "string",
-              description:
-                "Task-specific human title. When name is omitted, the platform derives " +
-                "@inline/<slug> from this value.",
-            },
-            name: {
-              type: "string",
-              description:
-                "Optional exact canonical @scope/name override. Usually omit and provide " +
-                "display_name.",
-            },
-            dependencies: {
-              type: "object",
-              description: "Exact AFPS dependencies override.",
-              additionalProperties: true,
-            },
-            integrations_configuration: {
-              type: "object",
-              description: "Exact AFPS integration configuration override.",
-              additionalProperties: true,
-            },
-            runtime_tools: {
-              type: "array",
-              description:
-                "Exact runtime-tool selection. Omit for " +
-                "log/output/publish_file defaults; " +
-                "an explicit [] disables them all.",
-              items: { type: "string" },
-            },
-            output: {
-              type: "object",
-              description:
-                "Exact AFPS output contract override, including a deterministic JSON schema.",
-              additionalProperties: true,
-            },
-          },
-          additionalProperties: true,
-        },
-        prompt: {
-          type: "string",
-          description:
-            "REQUIRED for kind:inline. The inline run's system prompt, as a top-level argument " +
-            "alongside `manifest` (never nested inside it). Tell the run to call the `log` tool " +
-            "to report each meaningful step — those lines are what the chat shows live. When the " +
-            "run produces files, require descriptive, task-specific names that remain clear " +
-            `outside this run; never generic names such as ${CONTEXT_FREE_FILENAMES_PHRASE}.`,
-        },
+        ...(inline ? INLINE_ONLY_RUN_AND_WAIT_PROPERTIES : {}),
         connection_overrides: {
           type: "object",
           additionalProperties: { type: "string" },
           description:
-            'Which connection to use per integration (either kind): `{ "@scope/integration": ' +
+            "Which connection to use per integration" +
+            (inline ? " (either kind)" : "") +
+            ': `{ "@scope/integration": ' +
             '"<connection_id>" }`, exactly one connection id per integration. This is the retry ' +
             "path for a `412 must_choose_connection` launch error — that error lists the " +
-            "ambiguous integration and its `candidate_connection_ids`; pick one id from that " +
-            "list and retry the SAME call with it here. Each key is the integration id itself " +
+            "ambiguous integration and its `candidate_connections`, each with a `label`, an " +
+            "`account_id` and `owned_by_actor`; pick one candidate's `id` and retry the SAME " +
+            "call with it here. Those fields are what tells the candidates apart, so read them " +
+            "rather than listing connections separately. Each key is the integration id itself " +
             "(`@scope/integration`) — NOT the `integrations.<id>` field path the error reports " +
             "it under, which matches no integration and is ignored. TOP-LEVEL argument, " +
-            "alongside `manifest`/`input` — pass the object itself; JSON-encoding it is " +
+            (inline ? "alongside `manifest`/`input`" : "alongside `input`") +
+            " — pass the object itself; JSON-encoding it is " +
             "refused before the launch.",
-        },
-        context_files: {
-          type: "array",
-          items: { type: "string" },
-          description:
-            "kind:inline ONLY. `appfile://` URIs — typically straight from a previous run's " +
-            "`files` result — mounted read-only into this run's `files/` directory and " +
-            "listed in its prompt. This is how you chain runs: to give a run the output of " +
-            "earlier runs, pass their `appfile://` URIs here VERBATIM. Never copy a previous " +
-            "run's content into `prompt`: re-typing it costs tokens twice, and every URL, figure " +
-            "and date you retype is one you can get wrong — the file itself cannot be. No " +
-            "manifest change is needed; the platform declares the input field for you. For " +
-            "kind:agent this argument is rejected — a published agent's input schema is a " +
-            "versioned contract, so pass the URI through one of its declared file fields instead.",
         },
       },
       required: ["kind"],

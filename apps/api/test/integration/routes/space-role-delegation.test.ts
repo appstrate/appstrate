@@ -194,17 +194,18 @@ describe("space role delegation", () => {
     await seedSpaceMember({ spaceId: space.id, userId: target.user.id, presetRole: "admin" });
     const actorPermissions = new Set([...presetPermissions("viewer"), "space-members:remove"]);
     const remove = (userId: string) =>
-      removeSpaceMember({ orgId: owner.orgId, spaceId: space.id, userId, actorPermissions });
+      removeSpaceMember({ orgId: owner.orgId, space, userId, actorPermissions });
 
     await expect(remove(target.user.id)).rejects.toMatchObject({ status: 403 });
     expect(await roleKey(target, space.id)).toBe("admin");
 
     // Same bundle, a standing it could have granted: removed, and asked twice
-    // it reports the missing row instead of refusing it.
+    // it reports the missing row instead of refusing it. The space is `closed`,
+    // so nothing is left behind either time.
     const weaker = await member();
     await seedSpaceMember({ spaceId: space.id, userId: weaker.user.id, presetRole: "viewer" });
-    expect(await remove(weaker.user.id)).toBe(true);
-    expect(await remove(weaker.user.id)).toBe(false);
+    expect(await remove(weaker.user.id)).toEqual({ removed: true, accessAfter: null });
+    expect(await remove(weaker.user.id)).toEqual({ removed: false, accessAfter: null });
   });
 
   it("settings-only authority can rename and close but cannot open a stronger default or change it", async () => {

@@ -7,7 +7,6 @@ import { useTranslation } from "react-i18next";
 import { ChevronDown, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
@@ -20,7 +19,6 @@ import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { ApiError } from "../../api/client";
 import { useCanPreviewRole, usePermissions } from "../../hooks/use-permissions";
-import { useAppConfig } from "../../hooks/use-app-config";
 import {
   spaceRoleDescription,
   spaceRoleLabel,
@@ -40,7 +38,6 @@ import { Spinner } from "../../components/spinner";
 export function OrgSettingsRolesPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
-  const { features } = useAppConfig();
   const { data: roles, isLoading, error } = useRoles();
   const deleteRole = useDeleteRole();
 
@@ -54,11 +51,10 @@ export function OrgSettingsRolesPage() {
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
 
-  // Defining bundles is the gated half; the four presets ship with the
-  // platform and stay usable without the feature.
-  const customRolesEnabled = !!features.custom_roles;
-  const canWrite = customRolesEnabled && can("roles:write");
-  const canDelete = customRolesEnabled && can("roles:delete");
+  // Authoring bundles is OSS platform code: the permission is the whole gate,
+  // with no deployment-level feature on top of it.
+  const canWrite = can("roles:write");
+  const canDelete = can("roles:delete");
 
   const presets = (roles ?? []).filter((r) => r.kind === "preset");
   const custom = (roles ?? []).filter((r) => r.kind === "custom");
@@ -98,12 +94,6 @@ export function OrgSettingsRolesPage() {
 
   return (
     <>
-      {!customRolesEnabled && (
-        <Alert className="mb-4">
-          <AlertDescription>{t("roles.customUnavailable")}</AlertDescription>
-        </Alert>
-      )}
-
       <div className="mb-4 flex items-center justify-between">
         <span className="text-muted-foreground text-sm font-medium">
           {t("roles.presetsSection")}

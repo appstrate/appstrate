@@ -36,7 +36,13 @@ type ParsedRunTarget =
       packageId: string;
       scope: string;
       name: string;
-      /** Raw spec after `@`, or undefined when only `@scope/name` was given. */
+      /**
+       * Raw spec after `@`, or undefined when only `@scope/name` was given
+       * — which means the latest published version. `draft` and `published`
+       * are the platform's two reserved selectors and pass through as
+       * written; everything else is a semver, a range or a dist-tag the
+       * server resolves.
+       */
       spec: string | undefined;
     };
 
@@ -68,7 +74,7 @@ export function parseRunTarget(raw: string): ParsedRunTarget {
     if (!match) {
       throw new PackageSpecError(
         `"${trimmed}" is not a valid package id`,
-        "Expected @scope/name[@<version|tag|range>] (e.g. @system/hello-world, @scope/agent@1.2.3).",
+        "Expected @scope/name[@<version|tag|range|draft|published>] (e.g. @system/hello-world, @scope/agent@1.2.3, @scope/agent@draft).",
       );
     }
     const head = match[1] ? trimmed.slice(0, trimmed.length - match[1].length - 1) : trimmed;

@@ -29,29 +29,53 @@ import { useIntegrationDetail, useIntegrationAgentResolution } from "../hooks/us
  * Reusing the picker keeps this modal in lockstep with the dropdown — same
  * candidate list, scope/lock verdicts and connect orchestration — instead of
  * re-deriving an affordance from the static 412 payload (the previous code
- * filtered must_choose candidates down to the 412's `candidate_connection_ids`,
+ * filtered must_choose candidates down to the 412's `candidate_connections`,
  * which dropped connections needing reconnection and so disagreed with the tab
- * dropdown). Only structural failures (integration not active, package missing)
- * keep a plain message: no connection pick can fix them.
+ * dropdown). Only structural failures — the integration is not active here, or
+ * its package is missing, mistyped or unloadable — keep a plain message: no
+ * connection pick can fix them.
  */
 
 export interface MissingIntegrationFieldError {
   field: string; // `integrations.{packageId}` (integration-level — auth_key lives on the candidate row)
+  /**
+   * The codes the server puts on an `integrations.*` item: the four verdicts
+   * `collectAgentReadinessErrors` raises about the integration PACKAGE
+   * (`agent-readiness.ts`) and the connection verdicts
+   * `integration-connection-resolver.ts` raises about the accounts behind it.
+   * `| string` keeps an unlisted one rendering its server message rather than
+   * crashing the row — it is not licence to adapt a shape nothing emits.
+   */
   code:
     | "not_connected"
     | "needs_reconnection"
     | "insufficient_scopes"
     | "must_choose_connection"
-    | "package_not_found"
-    | "not_installed_or_invalid_manifest"
+    | "auth_key_mismatch"
+    | "pinned_connection_unavailable"
+    | "override_connection_unavailable"
+    | "integration_not_found"
+    | "integration_wrong_type"
+    | "integration_invalid_manifest"
     | "integration_not_active"
     | string;
   title?: string;
   message: string;
   /** Missing scopes — populated on insufficient_scopes for the OAuth re-consent upgrade. */
   missing_scopes?: string[];
-  /** Candidate connection ids — populated on must_choose_connection. */
-  candidate_connection_ids?: string[];
+  /**
+   * Candidate connections — populated on must_choose_connection. Declared to
+   * describe the payload, deliberately unread here: the row embeds the shared
+   * `IntegrationConnectionPicker`, whose candidate list is a superset (see the
+   * module comment above). API and MCP callers, which have no picker, choose
+   * from this field.
+   */
+  candidate_connections?: {
+    id: string;
+    label: string | null;
+    account_id: string;
+    owned_by_actor: boolean;
+  }[];
   /**
    * The dead/under-scoped connection id — populated on `needs_reconnection`
    * and `insufficient_scopes`.
@@ -68,12 +92,19 @@ export interface MissingIntegrationFieldError {
  */
 type ConnectionOverridesMap = Record<string, string>;
 
-/** Codes that no connection pick can fix — surfaced as a plain message, no picker. */
+/**
+ * Codes that no connection pick can fix — surfaced as a plain message, no
+ * picker. They are exactly the four the readiness pass raises about the
+ * integration PACKAGE, before any account is looked at: the declared package is
+ * absent, is not an integration, has a manifest that will not load, or is not
+ * active in this space. Connecting an account changes none of them.
+ */
 function isStructuralCode(code: string): boolean {
   return (
     code === "integration_not_active" ||
-    code === "package_not_found" ||
-    code === "not_installed_or_invalid_manifest"
+    code === "integration_not_found" ||
+    code === "integration_wrong_type" ||
+    code === "integration_invalid_manifest"
   );
 }
 

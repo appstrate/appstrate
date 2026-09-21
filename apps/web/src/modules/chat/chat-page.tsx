@@ -7,10 +7,12 @@
 // download, authenticated image preview, staged upload) and the translator.
 // Lazy-loaded behind `features.chat`.
 
-import { useCallback, useEffect, useReducer } from "react";
+import { useCallback, useEffect, useLayoutEffect, useReducer } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChatPage, type OpenFile } from "@appstrate/module-chat/ui";
+import { bindAgentAuthoringUser } from "@appstrate/module-chat/agent-authoring";
+import { useAuth } from "../../hooks/use-auth";
 import { buildScopingHeaders } from "../../lib/scoping-headers";
 import { useViewAsHeader } from "../../stores/view-as-store";
 import { useCollapsedGlobalSidebar } from "../../hooks/use-collapsed-global-sidebar";
@@ -21,9 +23,19 @@ import {
   conversationSidebarReducer,
 } from "./conversation-sidebar-state";
 import { ConversationContextActions, ConversationSidebar } from "./conversation-sidebar";
+import { ChatAccessChip } from "./chat-access-chip";
+import { usePermissions } from "../../hooks/use-permissions";
+import { canAuthorAgents } from "./chat-access";
+
+// One element for the page's lifetime: it sits in the composer slot, which the
+// chat memoizes, and the chip keeps itself current through its own hooks.
+const COMPOSER_ACTIONS = <ChatAccessChip />;
 
 export function ChatModulePage() {
   useCollapsedGlobalSidebar();
+  // The agent-authoring preference is per user: bind it before the composer paints.
+  const userId = useAuth().user?.id ?? null;
+  useLayoutEffect(() => bindAgentAuthoringUser(userId), [userId]);
   // Conversation id lives in the URL (`/chat/:conversationId`) so a refresh or
   // deep-link restores the open conversation. `replace` keeps message/title
   // updates out of the back-history.
@@ -57,6 +69,8 @@ export function ChatModulePage() {
   // The same namespace's `t` is injected into the module, so the shell AROUND
   // those answers speaks the same language too — labels and aria-labels alike.
   const { t, i18n } = useTranslation("chat");
+  // The module resolves no RBAC of its own (see `ChatPageProps.canAuthorAgents`).
+  const { can } = usePermissions();
   // The persona is read reactively and threaded through so this callback's
   // identity changes when the preview starts or ends. The module's SSE effects
   // depend on `getHeaders`, and a stream reads its URL once — without this they
@@ -117,10 +131,12 @@ export function ChatModulePage() {
           headerActions={
             <ConversationContextActions state={sidebarState} dispatch={dispatchSidebar} />
           }
+          composerActions={COMPOSER_ACTIONS}
           downloadFile={onDownloadFile}
           useFileImageSrc={useFileImageSrc}
           uploadFile={uploadFile}
           t={translate}
+          canAuthorAgents={canAuthorAgents({ can })}
         />
       </div>
       <ConversationSidebar

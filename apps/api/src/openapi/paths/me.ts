@@ -20,9 +20,10 @@ export const mePaths = {
       tags: ["Profile"],
       summary: "List orgs the authenticated caller belongs to",
       description:
-        "Returns every org the caller can access. Cookie sessions and OIDC dashboard JWTs see " +
-        "every org the user is a member of. API keys see only their bound org. OIDC end-user " +
-        "JWTs see the single org owning their space. " +
+        "Returns every org the caller can access. The user's own credential (cookie session, CLI " +
+        "or instance token) sees every org they are a member of. A delegated credential — an API " +
+        "key, a third-party OAuth client — sees only its bound org, as does an OIDC end-user JWT " +
+        "(the org owning its space). " +
         "**Does NOT require `X-Org-Id`** — this endpoint is the prerequisite to setting it.",
       parameters: [{ $ref: "#/components/parameters/XViewAs" }],
       responses: {
@@ -95,10 +96,10 @@ export const mePaths = {
       summary: "List the caller's connections across every org/space",
       description:
         "Unified user-scope view of the caller's integration connections under a " +
-        "single shape, grouped by source package. For interactive user credentials " +
-        "(cookie session, dashboard/instance JWT) it crosses orgs/spaces by " +
-        "design — does NOT require `X-Org-Id`. For an API key the list is scoped " +
-        "to the key's bound organization and space only.",
+        "single shape, grouped by source package. For the user's own credential " +
+        "(cookie session, CLI or instance token) it crosses orgs/spaces by " +
+        "design — does NOT require `X-Org-Id`. For a delegated or end-user credential " +
+        "the list is scoped to its bound organization, and to its space when it pins one.",
       responses: {
         "200": {
           description: "Connection groups",
@@ -209,14 +210,18 @@ export const mePaths = {
         {
           name: "agent_package_id",
           in: "query",
-          required: true,
+          required: false,
           schema: { type: "string" },
-          description: "Agent package id whose pins to list.",
+          description:
+            "Agent package id whose pins to list. Omitted, the list is empty — " +
+            "the picker renders before it has an agent to ask about. The DELETE " +
+            "below requires it, because deleting nothing in particular is not a " +
+            "coherent request.",
         },
       ],
       responses: {
         "200": {
-          description: "Member pins for the agent",
+          description: "Member pins for the agent, or an empty list when no agent was named",
           content: {
             "application/json": {
               schema: {
@@ -244,7 +249,6 @@ export const mePaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -343,8 +347,8 @@ export const mePaths = {
         "Intent is destructive: 'I never want to use this credential anywhere again'. " +
         "Surfaced only from the /connections management page — agent-surface unlinks now " +
         "drop the member pin instead (see `DELETE /api/me/integration-pins`). " +
-        "With an API key, only connections inside the key's bound organization and " +
-        "space can be deleted (204 with no effect otherwise).",
+        "With a delegated or end-user credential, only connections inside its bound " +
+        "organization (and space, when it pins one) can be deleted (204 with no effect otherwise).",
       parameters: [
         {
           name: "connectionId",
@@ -488,6 +492,7 @@ export const mePaths = {
                         "description",
                         "takes_input",
                         "published",
+                        "home_writable",
                         "source",
                       ],
                       properties: {
@@ -505,10 +510,17 @@ export const mePaths = {
                         published: {
                           type: "boolean",
                           description:
-                            "True when the agent has a published version (or is a system agent). " +
-                            "Run it via `runAgent` with `version` omitted. When false the agent is " +
-                            "draft-only — run it with `version=draft` (omitting `version` would 404 " +
-                            "`no_published_version`).",
+                            "True when the agent has a published version (or is a system agent) — " +
+                            "run it via `runAgent` with `version` omitted. False means draft-only: " +
+                            "omitting `version` answers 404 `no_published_version`.",
+                        },
+                        home_writable: {
+                          type: "boolean",
+                          description:
+                            "Whether THIS caller may write the agent, i.e. whether its draft is " +
+                            "theirs to run with `version=draft` (403 `draft_not_writable` " +
+                            "otherwise). Read with `published`: false/false is an agent this " +
+                            "caller cannot execute at all until its author publishes one.",
                         },
                         source: { type: "string", enum: ["system", "local"] },
                       },
@@ -539,6 +551,7 @@ export const mePaths = {
                         "description",
                         "version",
                         "published",
+                        "home_writable",
                         "source",
                       ],
                       properties: {
@@ -558,8 +571,15 @@ export const mePaths = {
                           type: "boolean",
                           description:
                             "True when the skill has a published version (or is a system skill). " +
-                            "When false the skill is draft-only — pin it for a run via " +
-                            "`dependency_overrides` with `draft`.",
+                            "False means draft-only: a manifest range can select nothing, and only " +
+                            "`dependency_overrides` with `draft` reaches its working copy.",
+                        },
+                        home_writable: {
+                          type: "boolean",
+                          description:
+                            "Whether THIS caller may write the skill, i.e. whether its draft is " +
+                            "theirs to run — `dependency_overrides` with `draft` answers 403 " +
+                            "`draft_not_writable` otherwise.",
                         },
                         source: { type: "string", enum: ["system", "local"] },
                       },
@@ -572,7 +592,7 @@ export const mePaths = {
                   },
                   skills_total: {
                     type: "integer",
-                    description: "Total installed skills before the cap.",
+                    description: "Total active skills before the cap.",
                   },
                 },
               },
@@ -599,6 +619,7 @@ export const mePaths = {
                     description: "Sorts and labels incoming email.",
                     takes_input: false,
                     published: true,
+                    home_writable: false,
                     source: "system",
                   },
                 ],
@@ -611,6 +632,7 @@ export const mePaths = {
                     description: "Multi-source web search and synthesis.",
                     version: "1.2.0",
                     published: true,
+                    home_writable: false,
                     source: "system",
                   },
                 ],

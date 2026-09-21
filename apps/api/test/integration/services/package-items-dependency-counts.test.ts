@@ -18,7 +18,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { and } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedInstalledPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
 import { packages } from "@appstrate/db/schema";
 import { extractDependencies } from "@appstrate/core/dependencies";
 import { buildPackageId } from "@appstrate/core/naming";
@@ -78,11 +78,12 @@ describe("package-items dependency counts", () => {
       for (const name of ["shared-skill", "solo-skill", "unused-skill"]) {
         await seedPackage({
           id: `@depcount/${name}`,
+          homeSpaceId: ctx.defaultSpaceId,
           orgId: ctx.orgId,
           type: "skill",
           createdBy: ctx.user.id,
         });
-        await seedInstalledPackage(ctx.defaultSpaceId, `@depcount/${name}`);
+        await seedSpacePackage(ctx.defaultSpaceId, `@depcount/${name}`);
       }
 
       await seedPackage({
@@ -148,6 +149,7 @@ describe("package-items dependency counts", () => {
     it("counts every dependency map, including a self-reference", async () => {
       await seedPackage({
         id: "@depcount/mcp-one",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         type: "mcp-server",
         createdBy: ctx.user.id,
@@ -156,7 +158,7 @@ describe("package-items dependency counts", () => {
           mcp_servers: { "@depcount/mcp-one": "^0.1.0" },
         }),
       });
-      await seedInstalledPackage(ctx.defaultSpaceId, "@depcount/mcp-one");
+      await seedSpacePackage(ctx.defaultSpaceId, "@depcount/mcp-one");
       await seedPackage({
         id: "@depcount/agent-c",
         orgId: ctx.orgId,

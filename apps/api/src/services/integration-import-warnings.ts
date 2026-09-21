@@ -4,13 +4,13 @@ import { META_NAMESPACE_KEY_REGEX } from "@appstrate/core/validation";
 import { findRetiredDependencyKeys } from "@appstrate/core/dependencies";
 
 /**
- * Install-time warnings for `integration` manifests whose `connect.login`
+ * Import-time warnings for `integration` manifests whose `connect.login`
  * declarations exercise corners of AFPS §7.7 the Appstrate login engine
  * (`packages/connect/src/connect/login-engine.ts`) does NOT fully support.
  *
- * Spec-conformant manifests are still installable — the engine is a documented
+ * Spec-conformant manifests still import cleanly — the engine is a documented
  * subset (no XPath, jsonpath single-value, criterion-type subset). These
- * warnings surface the gap at install time so the publisher learns about it
+ * warnings surface the gap at import time so the publisher learns about it
  * BEFORE the first failed credential acquisition rather than chasing a
  * runtime `LoginError` after the fact.
  *
@@ -116,7 +116,7 @@ export function collectConnectLoginWarnings(manifest: unknown): string[] {
 }
 
 /**
- * Collect install-time warnings for AFPS 1.x `dependencies` keys AFPS 2.0
+ * Collect import-time warnings for AFPS 1.x `dependencies` keys AFPS 2.0
  * retired (`tools` → `mcp_servers`, `providers` → `integrations`).
  *
  * Author input carrying one is REJECTED upstream by `validateManifest` — this
@@ -139,7 +139,7 @@ export function collectRetiredDependencyKeyWarnings(manifest: unknown): string[]
 }
 
 /**
- * Walk a package manifest's top-level `_meta` block and collect install-time
+ * Walk a package manifest's top-level `_meta` block and collect import-time
  * warnings for namespace keys that don't match the AFPS Appendix B
  * `META_NAMESPACE_KEY` regex — surface the
  * soft-fail warnings the core validator emits to `console.warn` only.

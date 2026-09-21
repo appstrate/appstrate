@@ -3,7 +3,7 @@
 /**
  * What the two settings pages decide OUTSIDE a portal: the two entry points
  * into a role preview and the persona they commit, and the roles page's own
- * gating on the `custom_roles` feature and the `roles:*` permissions.
+ * gating on the `roles:*` permissions.
  *
  * What is asserted here is what this harness can see. The dialog itself is a
  * Radix `Dialog`, and its selects are Radix `Select`s — both render through
@@ -22,14 +22,11 @@ import type { components } from "../../api/client.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
 /**
- * The roles page reads `window.__APP_CONFIG__` (the `custom_roles` feature) at
- * render, and the stores read `localStorage` at module init — so both globals
- * are installed before the dynamic imports below. `document` stays absent,
- * which is what keeps the portals inert rather than crashing.
+ * The stores read `localStorage` at module init, so the globals are installed
+ * before the dynamic imports below. `document` stays absent, which is what
+ * keeps the portals inert rather than crashing.
  */
-installFakeStorage({
-  __APP_CONFIG__: { features: { custom_roles: true }, trustedOrigins: [] },
-});
+installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { $api } = await import("../../api/client.ts");
 const { OrgSettingsRolesPage } = await import("../org-settings/roles.tsx");
@@ -59,6 +56,7 @@ function space(): components["schemas"]["SpaceObject"] {
     settings: {},
     visibility: "open",
     default_role: "viewer",
+    personal: false,
     access: "member",
     role: null,
     permissions: ["space-members:read", "space-members:invite"],
@@ -227,7 +225,7 @@ describe("the persona a submit commits", () => {
   });
 });
 
-describe("custom-role gating on the roles page", () => {
+describe("permission gating on the roles page", () => {
   const custom: components["schemas"]["RoleObject"] = {
     object: "role",
     kind: "custom",
@@ -241,52 +239,27 @@ describe("custom-role gating on the roles page", () => {
     updatedAt: null,
   };
 
-  /** `useAppConfig` reads the global at render, so the flag is swapped around one. */
-  function withCustomRoles(enabled: boolean, renderOnce: () => string): string {
-    const config = window.__APP_CONFIG__;
-    window.__APP_CONFIG__ = { ...config, features: { ...config.features, custom_roles: enabled } };
-    try {
-      return renderOnce();
-    } finally {
-      window.__APP_CONFIG__ = config;
-    }
-  }
-
   it("offers create, edit and delete to a holder of both write grants", () => {
-    const html = withCustomRoles(true, () =>
-      renderAs("admin", <OrgSettingsRolesPage />, {
-        orgPermissions: ["roles:write", "roles:delete"],
-        customRoles: [custom],
-      }),
-    );
+    const html = renderAs("admin", <OrgSettingsRolesPage />, {
+      orgPermissions: ["roles:write", "roles:delete"],
+      customRoles: [custom],
+    });
     expect(html).toContain('data-testid="create-role-button"');
     expect(html).toContain("Responsable assistance");
     expect(html).toContain("Modifier");
     expect(html).toContain("Supprimer");
-    expect(html).not.toContain("Les rôles personnalisés sont disponibles sur Appstrate Cloud.");
-  });
-
-  it("says why and offers nothing to write when the feature is off, presets included", () => {
-    const html = withCustomRoles(false, () =>
-      renderAs("owner", <OrgSettingsRolesPage />, {
-        orgPermissions: ["roles:write", "roles:delete"],
-        customRoles: [custom],
-      }),
-    );
-    expect(html).toContain("Les rôles personnalisés sont disponibles sur Appstrate Cloud.");
-    expect(html).not.toContain('data-testid="create-role-button"');
-    expect(html).not.toContain("Modifier");
-    expect(html).not.toContain("Supprimer");
-    // The four presets stay listed and usable — the feature gates authoring.
+    // The presets are listed beside the bundles, not instead of them.
     expect(html).toContain("Rôles intégrés");
   });
 
-  it("hides the create action from a reader while the feature is on", () => {
-    const html = withCustomRoles(true, () =>
-      renderAs("admin", <OrgSettingsRolesPage />, { customRoles: [custom] }),
-    );
+  it("hides create, edit and delete from a reader holding only `roles:read`", () => {
+    // The half that must stay closed now that no deployment flag sits on top:
+    // the `roles:*` grants are the whole gate, so a reader still authors
+    // nothing while reading the same catalogue.
+    const html = renderAs("admin", <OrgSettingsRolesPage />, { customRoles: [custom] });
     expect(html).toContain("Responsable assistance");
     expect(html).not.toContain('data-testid="create-role-button"');
     expect(html).not.toContain("Modifier");
+    expect(html).not.toContain("Supprimer");
   });
 });

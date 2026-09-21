@@ -24,6 +24,7 @@ import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   spacePackages,
+  packageShares,
   integrationConnections,
   integrationOauthClients,
   packages,
@@ -44,15 +45,20 @@ import {
   resolveSystemClientForAuth,
   getDefaultSystemIntegrationClient,
   listSystemIntegrationClientsFor,
-  isSystemIntegration,
   type SystemIntegrationClientDefinition,
 } from "./integration-client-registry.ts";
+import { isActiveHere } from "./package-activation.ts";
+import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
 import { mergeSystemAndDb, setExactlyOneDefault, isUuid } from "../lib/db-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import { notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
 import type { ActorScope, SpaceScope } from "../lib/scope.ts";
 import { actorInsert, actorFilter, actorOrSharedFilter } from "../lib/actor.ts";
-import { getPackageDisplayName } from "../lib/package-helpers.ts";
+import {
+  getPackageDisplayName,
+  notEphemeralFilter,
+  orgOrSystemFilter,
+} from "../lib/package-helpers.ts";
 import { integrationCallbackUrl } from "../lib/integration-callback-url.ts";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
 import type { Actor } from "@appstrate/connect";
@@ -120,7 +126,7 @@ async function loadManifestOrThrow(
   scope: SpaceScope,
   packageId: string,
 ): Promise<IntegrationManifest> {
-  const summary = await getIntegration(scope.orgId, packageId);
+  const summary = await getIntegration(scope, packageId);
   if (!summary) {
     throw notFound(`Integration '${packageId}' not found in this organization`);
   }
@@ -386,24 +392,32 @@ interface IntegrationActivation {
 }
 
 /**
- * THE activation resolver — the single source of truth every call site (spawn
- * resolver, agent readiness, sidecar guards, settings list, agent-editor detail)
- * consults, directly or via the {@link isIntegrationActive} /
- * {@link listActiveIntegrationIds} wrappers below. One SELECT over
- * `space_packages` for the whole set; the precedence rule lives here and
- * nowhere else:
+ * The integration reading of the activation rule — the entry point every
+ * integration call site (spawn resolver, agent readiness, sidecar guards,
+ * settings list, agent-editor detail) consults, directly or via the
+ * {@link isIntegrationActive} / {@link listActiveIntegrationIds} wrappers
+ * below. One SELECT over `space_packages` for the whole set, and the verdict
+ * itself comes from {@link isActiveHere} (`services/package-activation.ts`),
+ * which states the rule for all four package types:
  *
  *   1. An `space_packages` row EXISTS → its `enabled` flag wins. This is
- *      the explicit, sticky operator decision: an installed-and-enabled row is
+ *      the explicit, sticky operator decision: an enabled row is
  *      active; a disabled row (`enabled = false`) is inactive and STAYS inactive
  *      across runs (never silently re-enabled).
  *   2. NO row → auto-active iff the integration is a SYSTEM integration (offered
  *      by the deployment via `SYSTEM_INTEGRATIONS`, with or without a shared
- *      OAuth client, via {@link isSystemIntegration}). System integrations work
- *      out of the box without an explicit install; everything else stays
- *      inactive until installed.
+ *      OAuth client, via `isSystemIntegration`). System integrations work
+ *      out of the box without an explicit activation; everything else stays
+ *      inactive until somebody switches it on — the deployment ships far more
+ *      integration packages than it offers.
  *
- * Disabling a never-installed system integration materializes a row with
+ * Rule 1 is conditioned on PLACEMENT, which is why this reads the catalogue
+ * row and the offer as well as `space_packages`: a row with neither a home nor
+ * a share behind it is a decision about an integration this space has lost,
+ * and honouring it would resolve that integration's credentials for a run the
+ * placement rule refuses to show the package to.
+ *
+ * Deactivating a system integration that has no row materializes one with
  * `enabled = false` (see the enable/disable upsert), which then wins via rule 1
  * — that is what makes the opt-out sticky.
  *
@@ -421,8 +435,11 @@ export async function resolveIntegrationActivations(
       packageId: spacePackages.packageId,
       enabled: spacePackages.enabled,
       blockUserConnections: spacePackages.blockUserConnections,
+      placed: sql<boolean>`${placementReadFilter(spaceId)}`,
     })
     .from(spacePackages)
+    .innerJoin(packages, eq(packages.id, spacePackages.packageId))
+    .leftJoin(packageShares, placementShareJoin(spacePackages.packageId, spaceId))
     .where(
       and(
         eq(spacePackages.spaceId, spaceId),
@@ -433,9 +450,19 @@ export async function resolveIntegrationActivations(
   for (const id of packageIds) {
     const row = byId.get(id);
     result.set(id, {
-      // Rule 1: explicit row wins. Rule 2: no row → auto-active iff system.
-      active: row !== undefined ? row.enabled : isSystemIntegration(id),
-      blockUserConnections: row?.blockUserConnections ?? false,
+      // One rule, one implementation: the row wins where the package is
+      // placed, the deployment's default decides when there is none. `source`
+      // is not read for an integration — `SYSTEM_INTEGRATIONS` is the offer,
+      // not the package's provenance — so the catalogue join above serves the
+      // placement question alone.
+      active: isActiveHere({ id, type: "integration", source: null }, row, row?.placed ?? false),
+      // PLACEMENT gates the lock exactly as it gates `active` above, and it
+      // must: `isUserConnectionCreationBlocked`
+      // (`services/integration-connection-resolver.ts`) is the reader that
+      // ENFORCES this flag, and it conjoins the same rule — so an orphan row
+      // reported here as `true` would draw a padlock on the Integrations list
+      // and the detail page while `POST …/connect` let every member through.
+      blockUserConnections: (row?.placed ?? false) && row?.blockUserConnections === true,
     });
   }
   return result;
@@ -471,7 +498,7 @@ export async function listActiveIntegrationIds(
 /** Throw `notFound` unless the integration is active in the space. */
 export async function assertIntegrationActive(packageId: string, spaceId: string): Promise<void> {
   if (!(await isIntegrationActive(packageId, spaceId))) {
-    throw notFound(`Integration '${packageId}' is not installed in this space`);
+    throw notFound(`Integration '${packageId}' is not active in this space`);
   }
 }
 
@@ -2817,23 +2844,36 @@ export async function readIntegrationAuth(
 }
 
 // ─────────────────────────────────────────────
-// Install/uninstall (thin wrapper enforcing integration type)
+// Type guard for the integration-scoped routes
 // ─────────────────────────────────────────────
 
 /**
- * Verify the package exists and is actually an integration before
- * delegating to the generic space_packages install path. The
- * marketplace UI never calls `/api/packages/.../install`; it always
- * routes through this so the "wrong type" error surface is uniform.
+ * Verify the package exists and is actually an integration before the
+ * integration-scoped routes act on it, so the "wrong type" error surface is
+ * uniform across them.
+ *
+ * The catalogue rule is the one its two peers read — `listIntegrations` and
+ * `getIntegration` (`services/integration-service.ts`) — not a third wording of
+ * it: org-or-system, not ephemeral, and PLACED in the calling space. It runs
+ * BEFORE the placement-aware reader, so anything it accepts that the reader
+ * would hide leaks through the type refusal: without `placementReadFilter` a
+ * member could learn, by naming ids, that `@org/secret` exists and is an
+ * `agent` — a package homed in somebody else's PERSONAL space (RBAC spec §3.6).
+ * An id this space cannot reach now falls on the `!row` branch, i.e. the 404 of
+ * an id that does not exist, and `wrong_package_type` survives only for a
+ * package actually placed here.
  */
 export async function assertIsIntegration(scope: SpaceScope, packageId: string): Promise<void> {
   const [row] = await db
     .select({ type: packages.type })
     .from(packages)
+    .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
     .where(
       and(
         eq(packages.id, packageId),
-        sql`(${packages.orgId} = ${scope.orgId} OR ${packages.source} = 'system')`,
+        orgOrSystemFilter(scope.orgId),
+        notEphemeralFilter(),
+        placementReadFilter(scope.spaceId),
       ),
     )
     .limit(1);

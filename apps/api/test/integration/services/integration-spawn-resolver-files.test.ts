@@ -20,7 +20,7 @@ import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedInstalledPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
   mcpServerManifest,
@@ -127,7 +127,7 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
       source: "local",
       draftManifest: manifestWithFiles({ mode: "0600" }),
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
     await seedServer(ctx);
     await seedConnection(ctx, {
       client_cert: "-----BEGIN CERTIFICATE-----\nABC\n-----END CERTIFICATE-----",
@@ -168,7 +168,7 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
       source: "local",
       draftManifest: manifestWithFiles({}), // no mode → default
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
     await seedServer(ctx);
     await seedConnection(ctx, {
       client_cert: "cert-bytes",
@@ -195,7 +195,7 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
       source: "local",
       draftManifest: manifestWithFiles({ withUnsafePath: true }),
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
     await seedServer(ctx);
     await seedConnection(ctx, { client_cert: "c", client_key: "k" });
 
@@ -234,7 +234,7 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
         tools_policy: { call: {} },
       }),
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
     await seedServer(ctx);
     await seedConnection(ctx, { api_key: "k-1" });
 

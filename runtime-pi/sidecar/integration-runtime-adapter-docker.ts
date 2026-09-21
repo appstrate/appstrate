@@ -11,7 +11,8 @@
  * at {@link CA_CONTAINER_PATH}.
  */
 
-import { mkdtemp, mkdir, writeFile, chmod, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, chmod, rm, readdir, readFile, lstat } from "node:fs/promises";
+import { buildUstar, type UstarEntry } from "./ustar.ts";
 import { tmpdir, hostname } from "node:os";
 import { posix, join, dirname, relative, resolve, sep } from "node:path";
 
@@ -128,6 +129,22 @@ type DockerExecSpawn = (
   cmd: string[],
   opts: {
     stdin: "ignore";
+    stdout: "pipe";
+    stderr: "pipe";
+    env: Record<string, string>;
+  },
+) => DockerExecSubprocess & { kill: (signal?: number | string) => void };
+
+/**
+ * `Bun.spawn` as used by {@link dockerCpArchive}, which feeds the child an
+ * in-memory buffer on stdin. Kept separate from {@link DockerExecSpawn} rather
+ * than widening it: every other docker call this module makes depends on
+ * `stdin: "ignore"`, and that guarantee should stay stated in the type.
+ */
+type DockerCpSpawn = (
+  cmd: string[],
+  opts: {
+    stdin: Uint8Array;
     stdout: "pipe";
     stderr: "pipe";
     env: Record<string, string>;
@@ -448,6 +465,105 @@ export async function stageFileMountsOnHost(
  * must be staged that way — see {@link stageFileMountsOnHost}. Keyed by the
  * CONTAINER path, which is what the staged directory maps onto.
  */
+/**
+ * uid/gid the runner images run as — all of them declare `USER runner:runner`
+ * with uid 1001. The credential files we hand them must be owned by that uid
+ * or an owner-only mode (`0400`, the `delivery.files` default) locks the
+ * runner out of its own secret.
+ */
+const RUNNER_UID = 1001;
+const RUNNER_GID = 1001;
+
+/**
+ * Pack a staged tree into a USTAR archive, re-owning every entry to the runner
+ * uid while preserving the staged modes.
+ *
+ * `docker cp <hostdir> <container>:/` copies each entry with the ownership of
+ * the HOST-side file, which is whatever uid the sidecar process runs as — never
+ * 1001. A `0400` credential therefore landed unreadable: `-r-------- 1 <host
+ * uid>` against a process running as 1001. Chowning the staged file first is
+ * not available (it needs privileges the sidecar does not have, and macOS
+ * refuses it outright), but a tar built in-process can simply state the
+ * ownership it wants, and `docker cp -` honours it.
+ *
+ * The staged MODES are carried through untouched — the fix is ownership, not
+ * permission widening. Relaxing `0400` to world-readable would have made the
+ * symptom go away by discarding the protection the mode exists to provide.
+ */
+async function archiveStagedTree(root: string): Promise<Uint8Array> {
+  const entries: UstarEntry[] = [];
+
+  async function walk(dir: string, prefix: string): Promise<void> {
+    // Sorted so the archive is byte-identical for identical input; `readdir`
+    // order differs between filesystems.
+    const names = (await readdir(dir)).sort();
+    for (const name of names) {
+      const full = join(dir, name);
+      const archivePath = prefix === "" ? name : `${prefix}/${name}`;
+      const info = await lstat(full);
+      if (info.isDirectory()) {
+        entries.push({
+          path: archivePath,
+          mode: info.mode & 0o7777,
+          uid: RUNNER_UID,
+          gid: RUNNER_GID,
+          type: "directory",
+        });
+        await walk(full, archivePath);
+      } else if (info.isFile()) {
+        entries.push({
+          path: archivePath,
+          mode: info.mode & 0o7777,
+          uid: RUNNER_UID,
+          gid: RUNNER_GID,
+          content: new Uint8Array(await readFile(full)),
+          type: "file",
+        });
+      }
+      // Anything else (symlink, socket, device) is not something the staging
+      // step produces; skipping is safer than inventing a representation.
+    }
+  }
+
+  await walk(root, "");
+  return buildUstar(entries);
+}
+
+/**
+ * `docker cp - <container>:/`, fed the archive on stdin.
+ *
+ * Kept separate from {@link dockerExec} because that helper pins
+ * `stdin: "ignore"`, which every other docker call it serves relies on.
+ */
+async function dockerCpArchive(containerId: string, archive: Uint8Array): Promise<void> {
+  const bunSpawn = (globalThis as unknown as { Bun?: { spawn?: DockerCpSpawn } }).Bun?.spawn;
+  if (!bunSpawn) throw new Error("integration-runtime-adapter-docker: Bun.spawn unavailable");
+  const proc = bunSpawn(["docker", "cp", "-", `${containerId}:/`], {
+    stdin: archive,
+    stdout: "pipe",
+    stderr: "pipe",
+    env: dockerCliEnv(),
+  });
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timeoutId = setTimeout(() => {
+      proc.kill();
+      reject(new Error(`docker cp - timed out after ${DOCKER_EXEC_TIMEOUT_MS}ms`));
+    }, DOCKER_EXEC_TIMEOUT_MS);
+  });
+  try {
+    const [stderr, code] = await Promise.race([
+      Promise.all([new Response(proc.stderr).text(), proc.exited]),
+      timeout,
+    ]);
+    if (code !== 0) {
+      throw new Error(`docker cp - failed (exit ${code}): ${stderr.trim()}`);
+    }
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
 const STICKY_STAGED_DIRS = new Set(["/tmp", "/var/tmp"]);
 
 /**
@@ -833,7 +949,7 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
       if (spec.fileMounts && Object.keys(spec.fileMounts).length > 0) {
         const stagedDir = await stageFileMountsOnHost(spec.fileMounts);
         hostTempDirsByContainer.set(containerId, [stagedDir]);
-        await dockerExec(["cp", `${stagedDir}/.`, `${containerId}:/`]);
+        await dockerCpArchive(containerId, await archiveStagedTree(stagedDir));
       }
 
       // `docker start -ai <id>` starts the entrypoint AND attaches stdio.

@@ -23,7 +23,7 @@ import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedInstalledPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedPlacedPackage } from "../../helpers/seed.ts";
 import { apiIntegrationManifest } from "../../helpers/integration-manifests.ts";
 
 const INTEG = "@orga/gmailish";
@@ -90,7 +90,7 @@ async function seedAndResolve(
     source: "local",
     draftManifest: integManifest({ defaultTools: opts.defaultTools }),
   });
-  await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+  await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
   await seedConnection(ctx);
   return (
     await resolveIntegrationSpawns({

@@ -26,7 +26,7 @@ import {
   addOrgMember,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedInstalledPackage, seedApiKey } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage, seedApiKey } from "../../helpers/seed.ts";
 
 const app = getTestApp();
 
@@ -78,6 +78,10 @@ describe("agent-config + space-package GET routes — read permission", () => {
       id: AGENT_ID,
       type: "agent",
       orgId: ctx.orgId,
+      // HOMED here. The read routes resolve the agent by the placement rule
+      // (home, offer, or system), so a row with neither is an orphan no space
+      // reads — the state `scripts/migration/0016` repairs, not a fixture.
+      homeSpaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
       draftManifest: {
         name: AGENT_ID,
@@ -86,7 +90,7 @@ describe("agent-config + space-package GET routes — read permission", () => {
         description: "Guarded agent",
       },
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, AGENT_ID);
+    await seedSpacePackage(ctx.defaultSpaceId, AGENT_ID);
   });
 
   it("403s the agent-config GETs for a key without agents:read", async () => {

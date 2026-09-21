@@ -22,6 +22,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -50,10 +51,10 @@ import type {
   UseFileImageSrc,
 } from "./runtime-context.ts";
 export type { OpenFile } from "./runtime-context.ts";
+
 import { ThreadList, ActiveConversationTitle } from "./thread-list.tsx";
 import { ModelSelect } from "./model-select.tsx";
 import { fetchModels, type OrgModelOption } from "./models-data.ts";
-import { isModelLive } from "../model-liveness.ts";
 import {
   loadHistory,
   markSessionRead,
@@ -69,13 +70,16 @@ import { useSessions } from "./use-sessions.ts";
 import {
   subscribeGeneration,
   subscribeModel,
+  attachConversation,
   getCompatibleGenerationSettings,
-  getGenerationSettings,
   getSelectedModel,
-  setGenerationSettings,
-  setModelGenerationCapabilities,
+  editGenerationSettings,
+  setModelCatalog,
   setSelectedModel,
 } from "./model-store.ts";
+import { getAgentAuthoringEnabled } from "./agent-authoring-store.ts";
+import { latestTurnModelId } from "./turn-model.ts";
+import { AgentAuthoringToggle } from "./agent-authoring-toggle.tsx";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
 
@@ -132,6 +136,8 @@ export interface ChatPageProps {
   onOpenFile?: OpenFile;
   /** Optional host-owned actions displayed beside the conversation title. */
   headerActions?: ReactNode;
+  /** Optional host-owned controls beside the model picker. Pass a memoized node. */
+  composerActions?: ReactNode;
   /**
    * REQUIRED host services — the chat implements none of them itself (see
    * `runtime-context.ts`): the authenticated download, the authenticated image
@@ -141,6 +147,8 @@ export interface ChatPageProps {
   useFileImageSrc: UseFileImageSrc;
   uploadFile: UploadFile;
   t: ChatTranslate;
+  /** Whether the caller may create agents, resolved by the shell: the module resolves no RBAC. */
+  canAuthorAgents: boolean;
 }
 
 export function ChatPage({
@@ -150,10 +158,12 @@ export function ChatPage({
   onConversationChange,
   onOpenFile,
   headerActions,
+  composerActions,
   downloadFile,
   useFileImageSrc,
   uploadFile,
   t,
+  canAuthorAgents,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -193,25 +203,15 @@ export function ChatPage({
   const selectedModel = useSyncExternalStore(subscribeModel, getSelectedModel, getSelectedModel);
   const generation = useSyncExternalStore(
     subscribeGeneration,
-    getGenerationSettings,
-    getGenerationSettings,
+    getCompatibleGenerationSettings,
+    getCompatibleGenerationSettings,
   );
 
   // Runs on every catalog change (first load, refetch after `staleTime`), not
   // just on mount — a cached list served on re-entry still has to reconcile
-  // the stored selection. External-store sync in an effect (no setState).
+  // the selection. External-store sync in an effect (no setState).
   useEffect(() => {
-    if (!modelsQuery.data) return;
-    const list = modelsQuery.data;
-    setModelGenerationCapabilities(list);
-    // Reconcile a stale/absent stored selection to the org default. A model
-    // whose credential went dead is listed (the picker marks it, unpickable)
-    // but must not be kept as the stored selection nor adopted as the
-    // fallback — the server would reject it on the next send.
-    const live = list.filter(isModelLive);
-    const cur = getSelectedModel();
-    if (cur && live.some((m) => m.id === cur)) return;
-    setSelectedModel((live.find((m) => m.is_default) ?? live[0])?.id ?? null);
+    if (modelsQuery.data) setModelCatalog(modelsQuery.data);
   }, [modelsQuery.data]);
 
   // Unread replies for conversations the user left mid-generation. `unread` is
@@ -281,16 +281,18 @@ export function ChatPage({
   const composerSlot = useMemo(
     () => (
       <div className="flex items-center gap-2">
+        {canAuthorAgents ? <AgentAuthoringToggle /> : null}
         <ModelSelect
           models={models}
           selectedId={selectedModel}
           onSelect={setSelectedModel}
           generation={generation}
-          onGenerationChange={setGenerationSettings}
+          onGenerationChange={editGenerationSettings}
         />
+        {composerActions}
       </div>
     ),
-    [models, selectedModel, generation],
+    [canAuthorAgents, models, selectedModel, generation, composerActions],
   );
 
   // The server's view of the ACTIVE conversation, reduced to two primitives so
@@ -425,6 +427,9 @@ const Conversation = memo(function Conversation({
     gcTime: 0,
   });
 
+  // Stable identity: `ConversationInner` keys its store-attach effect on it.
+  const initialMessages = useMemo(() => history.data ?? [], [history.data]);
+
   if (persistedAtMount && history.isPending) {
     return (
       <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
@@ -437,7 +442,7 @@ const Conversation = memo(function Conversation({
       id={id}
       getHeaders={getHeaders}
       isPersisted={persistedAtMount}
-      initialMessages={history.data ?? []}
+      initialMessages={initialMessages}
       {...rest}
     />
   );
@@ -456,6 +461,15 @@ function ConversationInner({
 }: ConversationProps & { initialMessages: UIMessage[] }) {
   const queryClient = useQueryClient();
   const spaceId = spaceIdFromHeaders(getHeaders);
+
+  // Pre-select the model of this conversation's newest turn. A layout effect,
+  // so the composer never paints one frame of the stored default first.
+  useLayoutEffect(() => {
+    attachConversation(id, latestTurnModelId(initialMessages));
+  }, [id, initialMessages]);
+
+  // Detach on unmount, in its own effect so a re-run above never drops a pick.
+  useLayoutEffect(() => () => attachConversation(null, null), []);
 
   // Header builder invoked by the transport at request/reconnect time. It reads
   // the model from the external store, NOT from React state: `useChat` recreates
@@ -483,6 +497,8 @@ function ConversationInner({
             id: chatId,
             messages,
             generation: getCompatibleGenerationSettings(),
+            // Read at request time, like the model above, for the same reason.
+            agent_authoring: getAgentAuthoringEnabled(),
           },
         }),
         // Native resume targets our per-session stream endpoint (the chat id is

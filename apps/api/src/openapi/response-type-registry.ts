@@ -109,17 +109,22 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     description: "SpaceObject ↔ SpaceInfo",
   },
   {
+    specSchemaName: "SpaceSweepResult",
+    sharedTypeName: "SpaceSweepResult",
+    description: "SpaceSweepResult ↔ SpaceSweepResult",
+  },
+  {
     specSchemaName: "SpaceMemberObject",
     sharedTypeName: "SpaceMember",
     description: "SpaceMemberObject ↔ SpaceMember",
   },
   {
     specSchemaName: "SpacePackage",
-    sharedTypeName: "InstalledPackage",
-    description: "SpacePackage ↔ InstalledPackage",
+    sharedTypeName: "SpacePackage",
+    description: "SpacePackage",
   },
   // Inline run-config response — the CLI's only source for the per-space model /
-  // generation / proxy / version pin / stored input layer. Unregistered, the
+  // generation / proxy / stored input layer. Unregistered, the
   // shared-type was free to mark `generation` and `input` optional while the
   // spec required them, which is exactly the drift this step exists to catch.
   {
@@ -241,6 +246,14 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   User: "Better-Auth-shaped minimal user; no shared-type",
   ProfileBatchItem: "profiles/batch list item; SPA uses the generated spec type",
   LibraryPackageList: "SPA consumes components['schemas']['LibraryPackageList'] directly",
+  PackagePlacement:
+    "LibraryPackageList item sub-object; read through LibraryPackageList's generated spec type",
+  PackageShare:
+    "share-audience wire projected by `listPackageShares` (a space rendered as its owner when personal); no persisted row shape and no shared-type — the SPA consumes the generated spec type",
+  ShareTarget:
+    "request-body value object of POST /packages/{scope}/{name}/shares; never a response",
+  ShareTargetView:
+    "PackageShare.target sub-object; read through PackageShare's generated spec type",
   OrgDetail: "composite org-detail response (members+invitations+settings); no single shared-type",
   // Drizzle-derived types whose shared-type shape intentionally diverges from
   // the wire (Date vs ISO string / joined-resource shape) — the SPA consumes

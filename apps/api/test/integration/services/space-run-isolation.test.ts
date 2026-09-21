@@ -10,8 +10,8 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedRun, seedSpace } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { seedAgent, seedPackageShare, seedRun, seedSpace } from "../../helpers/seed.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import {
   getRecentRuns,
   getRunningRunCounts,
@@ -29,9 +29,15 @@ describe("Cross-space run isolation (service layer)", () => {
     const spaceB = await seedSpace({ orgId: ctx.orgId, name: "SpaceB" });
     spaceBId = spaceB.id;
 
-    await seedAgent({ id: agentId, orgId: ctx.orgId, createdBy: ctx.user.id });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, agentId);
-    await installPackage({ orgId: ctx.orgId, spaceId: spaceBId }, agentId);
+    await seedAgent({
+      id: agentId,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, agentId);
+    await seedPackageShare(spaceBId, agentId);
+    await activatePackage({ orgId: ctx.orgId, spaceId: spaceBId }, agentId);
   });
 
   describe("getRecentRuns", () => {

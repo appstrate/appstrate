@@ -34,13 +34,7 @@ describe("getTypeShape — required / optional partition", () => {
     // so a `?` reappearing here is the drift step 7's reverse half now catches.
     const shape = getTypeShape("ResolvedRunConfig");
     expect([...shape.optional]).toEqual([]);
-    expect([...shape.required].sort()).toEqual([
-      "generation",
-      "input",
-      "modelId",
-      "proxyId",
-      "version_pin",
-    ]);
+    expect([...shape.required].sort()).toEqual(["generation", "input", "modelId", "proxyId"]);
   });
 
   it("partitions nested shapes too — the comparison recurses", () => {

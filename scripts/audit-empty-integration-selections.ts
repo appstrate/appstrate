@@ -48,7 +48,7 @@ if (asJson) {
   );
   for (const f of findings) {
     const status = isBlocking(f) ? "BLOCK" : isReachable(f) ? "WARN" : "INFO";
-    const explicitlySelectableIn = f.installedIn.filter((id) => !f.activeIn.includes(id));
+    const explicitlySelectableIn = f.placedIn.filter((id) => !f.activeIn.includes(id));
     const where = [
       ...(f.activeIn.length > 0 ? [`default in ${f.activeIn.join(", ")}`] : []),
       ...(explicitlySelectableIn.length > 0
@@ -61,7 +61,7 @@ if (asJson) {
               .join(", ")}`,
           ]
         : []),
-      ...(f.installedIn.length === 0 && f.schedules.length === 0 ? ["not installed"] : []),
+      ...(f.placedIn.length === 0 && f.schedules.length === 0 ? ["not placed"] : []),
     ].join(" | ");
     process.stdout.write(
       `  [${status}] ${f.packageId} [${f.artifact}] -> ${f.integrationId}\n` +

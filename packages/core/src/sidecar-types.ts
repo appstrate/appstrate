@@ -439,10 +439,10 @@ export interface IntegrationSpawnSpec {
    * {@link resolveIntegrationToolCatalog}, so in the happy path the
    * sidecar's allowlist never references a hidden name. The sidecar
    * applies the same filter at runtime as a belt-and-suspenders guard
-   * against misconfigurations that bypass install-time validation
+   * against misconfigurations that bypass import-time validation
    * (test fixtures, direct DB writes, schema relaxations on disk).
    *
-   * Empty / undefined = no extra filtering (the install-time catalog
+   * Empty / undefined = no extra filtering (the import-time catalog
    * resolution is the authoritative source).
    */
   hiddenTools?: readonly string[];
