@@ -320,6 +320,36 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     }),
   },
   {
+    // ONE space's placements: the same rows as the org library, narrowed to the
+    // space the caller stands in, plus what they could still place here. A
+    // pending offer is a placement whose state is `none` — the state this lab
+    // gives `@tractr/radar-ia`, so the screen has one to take up.
+    method: "GET",
+    pattern: /^\/api\/spaces\/[^/]+\/library$/,
+    handler: (url) => {
+      const spaceId = decodeURIComponent(url.pathname.split("/")[3] ?? "");
+      const here = f.library.spaces.filter((space) => space.id === spaceId);
+      return {
+        status: 200,
+        body: {
+          ...f.library,
+          spaces: here,
+          packages: Object.fromEntries(
+            Object.entries(f.library.packages).map(([type, rows]) => [
+              type,
+              rows.map((pkg) => ({
+                ...pkg,
+                placements: pkg.placements.filter(
+                  (placement) => placement.space_id === spaceId,
+                ),
+              })),
+            ]),
+          ),
+        },
+      };
+    },
+  },
+  {
     method: "GET",
     pattern: /^\/api\/library$/,
     // The matrix reads the same overlay as the lists, so a box ticked here and
