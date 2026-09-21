@@ -15,25 +15,6 @@
       "version": "^1.0.0"
     }
   },
-  "setup_guide": {
-    "steps": [
-      {
-        "label": "Décidez du COMPTE UNIX, c'est toute la question de sécurité. L'agent pourra faire exactement ce que ce compte peut faire — ni plus, ni moins. Pour un accès root, indiquez root en connaissance de cause. Sinon créez un compte dédié et restreignez-le comme vous restreindriez n'importe quel utilisateur : sudoers, groupes, shell restreint. Appstrate ne rétrécit rien au-delà."
-      },
-      {
-        "label": "Laissez-lui un shell POSIX (/bin/sh). SSH exécute toute commande via le shell de login : un compte en nologin ne ferait rien, et l'échec n'apparaîtrait qu'en plein run."
-      },
-      {
-        "label": "Sur ce même serveur, relevez sa clé publique d'hôte : `awk '{print $1\" \"$2}' /etc/ssh/ssh_host_ed25519_key.pub` (ou `ssh_host_rsa_key.pub` sur un sshd trop ancien). C'est l'identité du SERVEUR. Appstrate ne va pas la chercher lui-même : un relevé à distance se fait sur une première connexion non authentifiée, exactement ce qu'un intercepteur sait répondre. Vous, vous êtes déjà sur la machine."
-      },
-      {
-        "label": "Indiquez ci-dessous l'hôte, le port, ce compte et la clé d'hôte relevée. Appstrate génère la paire de clés lui-même : la clé privée n'est ni affichée ni saisie nulle part — elle naît chiffrée dans le trousseau."
-      },
-      {
-        "label": "Côté agent, choisissez ses outils. Un agent qui ne doit RIEN modifier reçoit ssh_probe et ssh_read, et ni ssh_exec, ni ssh_write_file, ni ssh_edit_file — un outil qu'il n'a pas, plutôt qu'une règle qu'il pourrait contourner par le discours. C'est par agent, donc la même connexion sert un lecteur et un rédacteur."
-      }
-    ]
-  },
   "auths": {
     "primary": {
       "type": "custom",
@@ -67,13 +48,13 @@
             "user": {
               "type": "string",
               "title": "Compte Unix sur la cible",
-              "description": "Le compte qui portera la clé : c'est LUI la frontière. Ce que l'agent peut faire, c'est exactement ce que ce compte peut faire. Un compte dédié et restreint par défaut ; root seulement en connaissance de cause.",
+              "description": "Le compte qui portera la clé : c'est LUI la frontière. Ce que l'agent peut faire, c'est exactement ce que ce compte peut faire. Un compte dédié et restreint par défaut (sudoers, groupes, shell restreint) ; root seulement en connaissance de cause. Il lui faut un shell POSIX : SSH passe toute commande par le shell de login, un compte en nologin n'exécuterait rien. Appstrate génère la paire de clés et vous donne ensuite le bloc qui l'installe sur ce compte.",
               "pattern": "^[a-z_][a-z0-9_-]{0,31}$"
             },
             "host_key": {
               "type": "string",
               "title": "Clé publique de l'hôte",
-              "description": "Relevée par vous sur la machine, puis épinglée. C'est l'identité du SERVEUR, pas la vôtre. Tout changement refuse la connexion — il n'y a pas d'acceptation à la première connexion, personne ne signe dans un run autonome.",
+              "description": "L'identité du SERVEUR, pas la vôtre. Relevez-la sur la machine elle-même : awk '{print $1\" \"$2}' /etc/ssh/ssh_host_ed25519_key.pub (ou ssh_host_rsa_key.pub sur un sshd ancien) — un relevé à distance passerait par une connexion non authentifiée, exactement ce qu'un intercepteur sait falsifier. Elle est épinglée : tout changement refuse la connexion, il n'y a pas d'acceptation à la première connexion.",
               "pattern": "^(ssh-ed25519|ssh-rsa) [A-Za-z0-9+/]+=*$"
             }
           }

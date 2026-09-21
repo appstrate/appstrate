@@ -11327,15 +11327,6 @@ export interface operations {
                         auth: {
                             [key: string]: unknown;
                         };
-                        /** @description AFPS §7.10 publisher setup steps, rendered above the form. */
-                        setup_guide?: ({
-                            steps?: {
-                                label: string;
-                                url?: string;
-                            }[];
-                        } & {
-                            [key: string]: unknown;
-                        }) | null;
                         connection_id?: string | null;
                         csrf?: string | null;
                     };

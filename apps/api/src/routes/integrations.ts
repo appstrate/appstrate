@@ -1068,8 +1068,6 @@ export function createIntegrationsRouter() {
       display_name: manifest.display_name ?? claims.package_id,
       icon: manifest.icon ?? null,
       auth: authWithoutMintedCredentials(claims.package_id, auth),
-      // AFPS §7.10 publisher instructions, shown where the credential is asked for.
-      setup_guide: manifest.setup_guide ?? null,
       connection_id: claims.connection_id ?? null,
       csrf: claims.csrf ?? null,
     });

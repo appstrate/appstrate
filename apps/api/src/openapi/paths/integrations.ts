@@ -978,24 +978,6 @@ export const integrationsPaths = {
                     description:
                       'The auth declaration the form renders. Credentials the platform mints (`_meta["dev.appstrate/provisioning"]`, AFPS §10) are removed from `credentials.schema` — display only; submissions are validated against the full schema.',
                   },
-                  setup_guide: {
-                    type: ["object", "null"],
-                    description: "AFPS §7.10 publisher setup steps, rendered above the form.",
-                    properties: {
-                      steps: {
-                        type: "array",
-                        items: {
-                          type: "object",
-                          required: ["label"],
-                          properties: {
-                            label: { type: "string" },
-                            url: { type: "string" },
-                          },
-                        },
-                      },
-                    },
-                    additionalProperties: true,
-                  },
                   connection_id: { type: ["string", "null"] },
                   csrf: { type: ["string", "null"] },
                 },

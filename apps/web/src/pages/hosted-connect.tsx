@@ -6,7 +6,6 @@ import { Spinner } from "../components/spinner";
 import { CredentialFields } from "../components/integration-connect/credential-fields";
 import { initialCredentialValues } from "../components/integration-connect/credential-schema";
 import { HandoffSteps, type HandoffStep } from "../components/integration-connect/handoff-steps";
-import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
 import { IntegrationIcon } from "../components/integration-icon";
 import { client, type paths } from "../api/client";
 import { publishConnectCompletion } from "../lib/connect-completion";
@@ -195,9 +194,6 @@ export function HostedConnectPage() {
               <p className="text-muted-foreground text-sm">
                 {t("integration.connect.modal.subtitle", { type: context.auth.type })}
               </p>
-              {context.setup_guide?.steps && context.setup_guide.steps.length > 0 && (
-                <SetupGuideSteps steps={context.setup_guide.steps} />
-              )}
               <CredentialFields auth={context.auth} values={values} onChange={setValues} />
               {error && <p className="text-sm text-red-400">{error}</p>}
               <Button type="submit" className="w-full" disabled={phase === "submitting"}>
