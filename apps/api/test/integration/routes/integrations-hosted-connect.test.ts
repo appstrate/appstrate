@@ -814,16 +814,10 @@ describe("hosted connect portal — credential provisioning", () => {
     // the only difference is that every value is in shape.
     const res = await submit(SSH_FORM_FIELDS);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { handoff_steps?: Array<{ kind: string; id: string }> };
+    const body = (await res.json()) as { handoff_steps?: Array<{ kind: string }> };
     // The user never typed a private key — the platform made one, and handed
     // back the install block for its public half.
     expect(body.handoff_steps?.map((s) => s.kind)).toEqual(["command", "value", "command"]);
-    // Each step names itself, so a localised client can key on it.
-    expect(body.handoff_steps?.map((s) => s.id)).toEqual([
-      "ssh_install",
-      "ssh_host_fingerprint",
-      "ssh_revoke",
-    ]);
   });
 
   /**
@@ -999,7 +993,6 @@ describe("me/connections/:id/handoff — the teardown half, derived", () => {
         note: removal.note,
       },
     ]);
-    expect(removal.id).toBe("ssh_revoke");
     expect(data.every((s) => !("deferred" in s))).toBe(true);
 
     // The base64 of the key this connection actually holds, so the command

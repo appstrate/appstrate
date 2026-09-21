@@ -52,7 +52,6 @@ export function ConfirmModal({
       }
     >
       <p className="text-muted-foreground text-sm">{description}</p>
-      {/* Anything the decision needs in front of it rather than merely described. */}
       {children}
     </Modal>
   );

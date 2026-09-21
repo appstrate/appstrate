@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -95,8 +95,8 @@ function decodeContainer(pem: string): {
 
 describe("generateOpenSshEd25519KeyPair", () => {
   it("writes the openssh-key-v1 container with an unencrypted single key", () => {
-    const kp = generateOpenSshEd25519KeyPair();
-    const c = decodeContainer(kp.privateKey);
+    const pem = generateOpenSshEd25519KeyPair();
+    const c = decodeContainer(pem);
 
     expect(c.magic).toBe("openssh-key-v1\0");
     expect(c.cipher).toBe("none");
@@ -105,8 +105,8 @@ describe("generateOpenSshEd25519KeyPair", () => {
   });
 
   it("carries the same public point in the blob, the private section and the derived line", () => {
-    const kp = generateOpenSshEd25519KeyPair();
-    const c = decodeContainer(kp.privateKey);
+    const pem = generateOpenSshEd25519KeyPair();
+    const c = decodeContainer(pem);
 
     // Public blob: string "ssh-ed25519", string <32-byte point>.
     const pub = reader(c.publicBlob);
@@ -117,7 +117,7 @@ describe("generateOpenSshEd25519KeyPair", () => {
     expect(pub.offset).toBe(c.publicBlob.length);
 
     // The line the platform derives must encode exactly that blob.
-    const [, derivedBase64] = publicKeyFromOpenSshPrivateKey(kp.privateKey).split(/\s+/);
+    const [, derivedBase64] = publicKeyFromOpenSshPrivateKey(pem).split(/\s+/);
     expect(Buffer.from(derivedBase64!, "base64").equals(c.publicBlob)).toBe(true);
 
     // Private section: checkint ×2, type, point, seed||point, comment, padding.
@@ -138,8 +138,8 @@ describe("generateOpenSshEd25519KeyPair", () => {
   });
 
   it("pads the private section to the cipher block size with 1,2,3,…", () => {
-    const kp = generateOpenSshEd25519KeyPair();
-    const c = decodeContainer(kp.privateKey);
+    const pem = generateOpenSshEd25519KeyPair();
+    const c = decodeContainer(pem);
     expect(c.privateSection.length % 8).toBe(0);
 
     // Re-walk to the end of the declared fields; whatever follows is padding.
@@ -153,10 +153,8 @@ describe("generateOpenSshEd25519KeyPair", () => {
   it("mints a different key every call", () => {
     const a = generateOpenSshEd25519KeyPair();
     const b = generateOpenSshEd25519KeyPair();
-    expect(a.privateKey).not.toBe(b.privateKey);
-    expect(publicKeyFromOpenSshPrivateKey(a.privateKey)).not.toBe(
-      publicKeyFromOpenSshPrivateKey(b.privateKey),
-    );
+    expect(a).not.toBe(b);
+    expect(publicKeyFromOpenSshPrivateKey(a)).not.toBe(publicKeyFromOpenSshPrivateKey(b));
   });
 });
 
@@ -211,9 +209,9 @@ function forgeContainer(
 
 describe("publicKeyFromOpenSshPrivateKey", () => {
   it("returns the bare `ssh-ed25519 <base64>` pair, never the container's comment", () => {
-    const kp = generateOpenSshEd25519KeyPair();
-    expect(publicKeyFromOpenSshPrivateKey(kp.privateKey)).toMatch(/^ssh-ed25519 [A-Za-z0-9+/]+=*$/);
-    expect(publicKeyFromOpenSshPrivateKey(kp.privateKey)).not.toContain("appstrate");
+    const pem = generateOpenSshEd25519KeyPair();
+    expect(publicKeyFromOpenSshPrivateKey(pem)).toMatch(/^ssh-ed25519 [A-Za-z0-9+/]+=*$/);
+    expect(publicKeyFromOpenSshPrivateKey(pem)).not.toContain("appstrate");
   });
 
   it("drops a hostile comment instead of carrying it out of the container", () => {
@@ -244,18 +242,6 @@ describe("publicKeyFromOpenSshPrivateKey", () => {
 });
 
 describe("fingerprintPublicKey", () => {
-  it("reports what ssh-keygen -l prints, over the decoded blob", () => {
-    const kp = generateOpenSshEd25519KeyPair();
-    const [type, base64] = publicKeyFromOpenSshPrivateKey(kp.privateKey).split(/\s+/);
-    const expected =
-      "SHA256:" +
-      createHash("sha256")
-        .update(Buffer.from(base64!, "base64"))
-        .digest("base64")
-        .replace(/=+$/, "");
-    expect(fingerprintPublicKey(`${type} ${base64}`)).toBe(expected);
-  });
-
   it("accepts an ssh-rsa line", () => {
     // `AAAAB3NzaC1yc2E=` is the wire string `ssh-rsa`, so text and blob agree.
     expect(fingerprintPublicKey("ssh-rsa AAAAB3NzaC1yc2E=")).toStartWith("SHA256:");
@@ -308,9 +294,9 @@ describe.if(sshKeygen !== null)("cross-check against the real ssh-keygen", () =>
   it("derives the same public key from our private key", async () => {
     const dir = mkdtempSync(join(tmpdir(), "appstrate-openssh-key-"));
     try {
-      const kp = generateOpenSshEd25519KeyPair();
+      const pem = generateOpenSshEd25519KeyPair();
       const keyPath = join(dir, "id_ed25519");
-      writeFileSync(keyPath, kp.privateKey, { mode: 0o600 });
+      writeFileSync(keyPath, pem, { mode: 0o600 });
 
       const proc = Bun.spawn([sshKeygen!, "-y", "-f", keyPath], {
         stdout: "pipe",
@@ -325,7 +311,7 @@ describe.if(sshKeygen !== null)("cross-check against the real ssh-keygen", () =>
 
       // ssh-keygen echoes the comment it read out of the container, so the
       // whole line must match — which also proves the comment round-tripped.
-      expect(out.trim()).toBe(`${publicKeyFromOpenSshPrivateKey(kp.privateKey)} appstrate`);
+      expect(out.trim()).toBe(`${publicKeyFromOpenSshPrivateKey(pem)} appstrate`);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -334,9 +320,9 @@ describe.if(sshKeygen !== null)("cross-check against the real ssh-keygen", () =>
   it("reports the same fingerprint as ssh-keygen -l", async () => {
     const dir = mkdtempSync(join(tmpdir(), "appstrate-openssh-key-"));
     try {
-      const kp = generateOpenSshEd25519KeyPair();
+      const pem = generateOpenSshEd25519KeyPair();
       const pubPath = join(dir, "id_ed25519.pub");
-      writeFileSync(pubPath, publicKeyFromOpenSshPrivateKey(kp.privateKey) + "\n");
+      writeFileSync(pubPath, publicKeyFromOpenSshPrivateKey(pem) + "\n");
 
       const proc = Bun.spawn([sshKeygen!, "-l", "-f", pubPath], { stdout: "pipe" });
       const out = await new Response(proc.stdout).text();
@@ -344,7 +330,7 @@ describe.if(sshKeygen !== null)("cross-check against the real ssh-keygen", () =>
 
       // `256 SHA256:… comment (ED25519)` — the fingerprint is the 2nd field.
       expect(out.trim().split(/\s+/)[1]).toBe(
-        fingerprintPublicKey(publicKeyFromOpenSshPrivateKey(kp.privateKey)),
+        fingerprintPublicKey(publicKeyFromOpenSshPrivateKey(pem)),
       );
     } finally {
       rmSync(dir, { recursive: true, force: true });

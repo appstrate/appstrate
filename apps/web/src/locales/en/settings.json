@@ -934,7 +934,6 @@
   "integration.connect.provisioned.title": "Connection created — one step left on your side",
   "integration.connect.provisioned.body": "The credentials this connection needs were generated and sealed in the keyring: they are not shown here and cannot be read back. What remains has to be done on the machine this connection points at.",
   "integration.connect.provisioned.deferredHint": "keep this for later",
-  "integration.connect.provisioned.copied": "Copied",
   "integration.connect.provisioned.doneBtn": "Done, I ran it",
   "integration.connect.handoff.ssh_install.label": "Paste on the target server (as root, or with sudo)",
   "integration.connect.handoff.ssh_host_fingerprint.label": "Host fingerprint, pinned",

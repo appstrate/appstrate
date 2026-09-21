@@ -21,6 +21,7 @@ export function CopyBlock({
   value,
   multiline = false,
   dense = false,
+  className = "",
   testId,
 }: {
   value: string;
@@ -28,6 +29,8 @@ export function CopyBlock({
   multiline?: boolean;
   /** Tighter padding for inline use inside a form. */
   dense?: boolean;
+  /** Extra classes on the value itself (e.g. a height cap); the copy button stays put. */
+  className?: string;
   testId?: string;
 }) {
   const { t } = useTranslation("common");
@@ -40,7 +43,7 @@ export function CopyBlock({
       <code
         className={`text-foreground block font-mono text-xs select-all ${
           dense ? "px-2 py-1.5 pr-9" : "px-3 py-2 pr-12"
-        } ${multiline ? "overflow-x-auto whitespace-pre" : "break-all"}`}
+        } ${multiline ? "overflow-x-auto whitespace-pre" : "break-all"} ${className}`}
       >
         {value}
       </code>

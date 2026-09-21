@@ -4,46 +4,28 @@
  * SSH — reach one host over SSH (Bun, dependency-free).
  *
  * Shells out to the `ssh` / `sftp` clients baked into the bun runner image
- * (`runtime-pi/runners/bun/Dockerfile` adds git + openssh-client), exactly
- * as `@appstrate/github-git-mcp` shells out to `git`. Pairs with the
- * `@appstrate/ssh` integration, which delivers the private key as a file
- * (`delivery.files`) and the non-secret connection fields as env
- * (`delivery.env`).
+ * (`runtime-pi/runners/bun/Dockerfile`), as `@appstrate/github-git-mcp` shells
+ * out to `git`. The `@appstrate/ssh` integration delivers the private key as a
+ * file (`delivery.files`) and the non-secret fields as env (`delivery.env`).
  *
- * Design rules, in order of importance:
- *
- *  1. The private key never enters the agent container. It is delivered to
- *     THIS process at `SSH_PRIVATE_KEY_PATH`, read by `ssh` itself, and no
- *     tool returns or accepts key material.
- *
- *  2. The Unix account IS the boundary, and this server does not pretend to be
- *     a second one. `ssh_exec` hands its string to that account's login shell:
- *     SSH `exec` has no argv at the protocol level, so there is no narrower
- *     payload to send. What the account may do is the whole of what an agent
- *     may do through this connection, and restricting it — a dedicated user,
- *     sudoers, a restricted shell — is the operator's act on their own machine.
- *
- *  3. Capabilities are separate TOOLS, and that is where "read-only" lives.
- *     The platform grants tools per agent (`toolAllowlist`, enforced
- *     sidecar-side), so an agent that must not change the target is given
- *     `ssh_probe` / `ssh_read_file` / `ssh_list_dir` and NOT `ssh_exec` or
- *     `ssh_write_file` — a tool it does not have rather than a branch it might
- *     talk its way past. Per-agent, so one connection serves both a reader and
- *     a writer.
- *
- *  4. No trust-on-first-use. The connection carries the host's public key
- *     (`SSH_HOST_KEY`); it is written to a private `known_hosts` and
- *     `StrictHostKeyChecking=yes` refuses anything else. In an autonomous run
- *     nobody is there to accept a new key.
+ * Invariants:
+ *  - The private key never enters the agent container: it reaches THIS process
+ *    at `SSH_PRIVATE_KEY_PATH`, is read by `ssh` itself, and no tool returns or
+ *    accepts key material.
+ *  - The Unix account is the only boundary. "Read-only" is a per-agent tool
+ *    grant (`toolAllowlist`, enforced sidecar-side), never a branch in here —
+ *    the tool descriptions say which tools write.
+ *  - No trust-on-first-use: the connection carries the host's public key
+ *    (`SSH_HOST_KEY`), written to a private `known_hosts`, and
+ *    `StrictHostKeyChecking=yes` refuses anything else.
  *
  * Boot is lazy: `initialize` / `tools/list` answer with no env at all (the
- * conformance probe spawns the server that way), and a missing or malformed
- * configuration is reported on the first tool call instead of as an opaque
- * "server closed the connection".
+ * conformance probe spawns the server that way); a bad configuration is
+ * reported on the first tool call, not as "server closed the connection".
  *
- * Why hand-rolled (not @modelcontextprotocol/sdk): no node_modules in the
- * runner image, and the wire surface needed is `initialize` + `tools/list` +
- * `tools/call` over line-delimited JSON-RPC.
+ * Hand-rolled rather than @modelcontextprotocol/sdk: the runner image has no
+ * node_modules, and the surface is `initialize` + `tools/list` + `tools/call`
+ * over line-delimited JSON-RPC.
  */
 
 import { rmSync } from "node:fs";
@@ -61,44 +43,32 @@ export interface SshConfig {
   port: number;
   user: string;
   privateKeyPath: string;
-  /** The host's own public key, as `<type> <base64>`. */
-  hostKey: { type: string; key: string };
+  /** The host's own public key, normalised to `<type> <base64>`. */
+  hostKey: string;
   /** CONNECT proxy to dial through, when the runner has no direct route. */
   proxyUrl: string | null;
 }
 
 /**
- * Parse `<type> <base64>` — the exact form the integration manifest's
- * `host_key` pattern admits, read by the operator off the target's own
- * `/etc/ssh/ssh_host_*_key.pub`. No host column and no trailing comment: what
- * is pinned is the KEY, which `renderKnownHosts` binds to the connection's own
- * host and port.
+ * Accept `<type> <base64>` — what the integration manifest's `host_key` pattern
+ * admits, read off the target's `/etc/ssh/ssh_host_*_key.pub`. No host column
+ * and no comment: what is pinned is the KEY, bound to this connection's host
+ * and port by `renderKnownHosts`.
  */
-export function parseHostKey(raw: string): { type: string; key: string } {
-  const [type, key, ...rest] = raw.trim().split(/\s+/);
-  if (
-    rest.length > 0 ||
-    !type ||
-    !key ||
-    !/^(ssh-ed25519|ssh-rsa)$/.test(type) ||
-    !/^[A-Za-z0-9+/]+=*$/.test(key)
-  ) {
+export function parseHostKey(raw: string): string {
+  const m = /^(ssh-ed25519|ssh-rsa)\s+([A-Za-z0-9+/]+=*)$/.exec(raw.trim());
+  if (!m) {
     throw new Error(
       "SSH_HOST_KEY must be `<type> <base64>` — ssh-ed25519 or ssh-rsa, and the base64 key, " +
         "nothing else. There is no trust-on-first-use fallback.",
     );
   }
-  return { type, key };
+  return `${m[1]} ${m[2]}`;
 }
 
 /** `known_hosts` line for this connection — bracketed form when the port is not 22. */
-export function renderKnownHosts(
-  host: string,
-  port: number,
-  hostKey: { type: string; key: string },
-): string {
-  const hostField = port === 22 ? host : `[${host}]:${port}`;
-  return `${hostField} ${hostKey.type} ${hostKey.key}\n`;
+export function renderKnownHosts(host: string, port: number, hostKey: string): string {
+  return `${port === 22 ? host : `[${host}]:${port}`} ${hostKey}\n`;
 }
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
@@ -112,9 +82,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SshConfig {
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
     throw new Error(`SSH_PORT must be a TCP port (got: ${env.SSH_PORT})`);
   }
-  // Same reader as the ProxyCommand helper: two readers of one signal drift,
-  // and this one drifting means no ProxyCommand and a DIRECT dial that skips
-  // the sidecar's SSRF floor entirely.
+  // The ProxyCommand helper's own reader: a drift here means a DIRECT dial
+  // that skips the sidecar's SSRF floor.
   const proxy = proxyUrlFromEnv(env);
   return {
     host: required(env, "SSH_HOST"),
@@ -131,32 +100,22 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SshConfig {
 /** Directory holding this file — `proxy-connect.ts` sits next to it. */
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 
-/**
- * Options shared by every ssh/sftp invocation.
- *
- * `-F /dev/null` ignores any user or system config the image might carry, so
- * the policy below is the whole policy. `BatchMode` fails instead of
- * prompting — there is no terminal. `IdentitiesOnly` pins auth to the
- * delivered key. Forwarding of every kind is off: an agent-driven session has
- * no business opening tunnels.
- */
 export interface SshOptionOverrides {
-  /**
-   * `ERROR` for every tool; `VERBOSE` for the probe, which reads its success
-   * off stderr. Exactly ONE `LogLevel=` is emitted: for `-o` options OpenSSH
-   * keeps the FIRST value it obtains and ignores later ones (measured — a
-   * `-o LogLevel=VERBOSE` appended after the base `ERROR` produced no output
-   * at all), so overriding by appending is not an option.
-   */
+  /** `VERBOSE` for the probe, which reads its success off stderr; `ERROR` otherwise. */
   logLevel?: "ERROR" | "VERBOSE";
-  /**
-   * `-N`: authenticate and open no session. It is an OPTION, so it belongs
-   * here rather than after the destination, where the `--` below would make
-   * it the remote command instead.
-   */
+  /** `-N`: authenticate, open no session. An option, so it must precede the `--`. */
   noSession?: boolean;
 }
 
+/**
+ * Options shared by every ssh/sftp invocation. `-F /dev/null` drops any config
+ * the image carries, so this table is the whole policy: no prompts (there is no
+ * terminal), auth pinned to the delivered key, no forwarding of any kind.
+ *
+ * Each key is emitted exactly once: for `-o` OpenSSH keeps the FIRST value and
+ * ignores later ones (measured — an appended `LogLevel=VERBOSE` after `ERROR`
+ * produced no output), so an override replaces a value, never appends one.
+ */
 export function buildSshOptions(
   cfg: SshConfig,
   knownHostsPath: string,
@@ -165,28 +124,19 @@ export function buildSshOptions(
   const opts = [
     "-F",
     "/dev/null",
-    "-o",
-    "BatchMode=yes",
-    "-o",
-    "StrictHostKeyChecking=yes",
-    "-o",
-    `UserKnownHostsFile=${knownHostsPath}`,
-    "-o",
-    "IdentitiesOnly=yes",
-    "-o",
-    `IdentityFile=${cfg.privateKeyPath}`,
-    "-o",
-    "PasswordAuthentication=no",
-    "-o",
-    "KbdInteractiveAuthentication=no",
-    "-o",
-    "ForwardAgent=no",
-    "-o",
-    "ForwardX11=no",
-    "-o",
-    "ConnectTimeout=15",
-    "-o",
-    `LogLevel=${overrides.logLevel ?? "ERROR"}`,
+    ...Object.entries({
+      BatchMode: "yes",
+      StrictHostKeyChecking: "yes",
+      UserKnownHostsFile: knownHostsPath,
+      IdentitiesOnly: "yes",
+      IdentityFile: cfg.privateKeyPath,
+      PasswordAuthentication: "no",
+      KbdInteractiveAuthentication: "no",
+      ForwardAgent: "no",
+      ForwardX11: "no",
+      ConnectTimeout: "15",
+      LogLevel: overrides.logLevel ?? "ERROR",
+    }).flatMap(([key, value]) => ["-o", `${key}=${value}`]),
   ];
   if (overrides.noSession) opts.push("-N");
   if (cfg.proxyUrl) {
@@ -198,12 +148,8 @@ export function buildSshOptions(
 
 /**
  * `ssh … -- user@host [command]` — the command is handed to the login shell.
- *
- * The `--` is load-bearing: OpenSSH parses options with getopt, so a `user` or
- * `host` beginning with `-` would otherwise be read as one (`-w…` measured as
- * `Bad tun device`). `ssh [options] -- destination [command]` keeps the
- * destination a destination whatever it starts with, and the remote command
- * still follows it.
+ * The `--` is load-bearing: without it getopt reads a `user` or `host` starting
+ * with `-` as an option (`-w…` measured as `Bad tun device`).
  */
 export function buildSshArgs(
   cfg: SshConfig,
@@ -236,10 +182,8 @@ export function buildSftpArgs(cfg: SshConfig, knownHostsPath: string): string[] 
 }
 
 /**
- * Quote a path for an sftp batch line. sftp accepts double-quoted arguments;
- * a path that cannot be represented that way is refused rather than escaped
- * — the set is small (double quote, backslash, newline, NUL) and a leading `-` would be
- * read as an option.
+ * Double-quote a path for an sftp batch line. What quoting cannot carry (quote,
+ * backslash, CR/LF, NUL) or a leading `-` (an option) is refused, not escaped.
  */
 export function quoteSftpPath(path: string): string {
   if (path === "" || /["\\\n\r\0]/.test(path) || path.startsWith("-")) {
@@ -258,11 +202,7 @@ export interface RunResult {
 
 export interface RunOptions {
   stdin?: string;
-  /**
-   * Resolve as SUCCESS (code 0) as soon as accumulated stderr matches, then
-   * kill the process. For `ssh -N`, which authenticates and then holds the
-   * connection open forever — there is no exit to wait for on success.
-   */
+  /** Resolve as code 0 once stderr matches, then kill — `ssh -N` never exits on success. */
   untilStderr?: RegExp;
   /** Wall-clock ceiling. On expiry the process is killed and code 124 returned. */
   ceilingMs?: number;
@@ -345,20 +285,16 @@ const EXEC_OUTPUT_BYTES = 64 * 1024;
 const READ_FILE_BYTES = 256 * 1024;
 
 /**
- * Byte-budget truncation that never emits a broken UTF-8 sequence.
- *
- * `Buffer.subarray(0, n).toString("utf8")` does NOT drop a partial trailing
- * sequence — it decodes it to U+FFFD (measured on Bun 1.3), so the cut has to
- * be moved back to a character boundary by hand: skip continuation bytes
- * (`10xxxxxx`), then drop a lead byte whose sequence would not have fit.
+ * Byte-budget truncation that never emits a broken UTF-8 sequence:
+ * `Buffer.toString("utf8")` decodes a partial tail to U+FFFD (measured on
+ * Bun 1.3), so the cut is moved back to a character boundary by hand.
  */
 export function truncateUtf8(text: string, budget: number): { text: string; truncated: boolean } {
   const bytes = Buffer.from(text, "utf8");
   if (bytes.length <= budget) return { text, truncated: false };
   let cut = budget;
   while (cut > 0 && (bytes[cut]! & 0b1100_0000) === 0b1000_0000) cut--;
-  // `cut` now sits on a lead byte (or ASCII). If the sequence it starts runs
-  // past the budget, exclude it too.
+  // On a lead byte (or ASCII) now; exclude its sequence if it overruns.
   const lead = bytes[cut]!;
   const seqLen = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : lead >= 0xc0 ? 2 : 1;
   if (cut + seqLen <= budget) cut += seqLen;
@@ -366,14 +302,10 @@ export function truncateUtf8(text: string, budget: number): { text: string; trun
 }
 
 /**
- * Parse `sftp> ls -la` output into entries. Batch mode echoes each command as
- * a `sftp> …` line, which is skipped. Sorted by name — readdir order differs
- * between filesystems, and a caller comparing output should not see that.
- *
- * sftp echoes the path it was GIVEN in front of every entry
- * (`ls -la /home/agent` → `… /home/agent/t.txt`), so `name` is the last
- * segment; `detail` keeps the line verbatim, link target included. `.` and
- * `..` are dropped — the directory the caller just named is not a finding.
+ * Parse `sftp> ls -la` output, skipping the echoed `sftp> …` command line and
+ * `.`/`..`. sftp prefixes each entry with the path it was GIVEN, so `name` is
+ * the last segment; `detail` is the line verbatim. Sorted by name, because
+ * readdir order differs between filesystems.
  */
 export function parseSftpLs(output: string): Array<{ name: string; detail: string }> {
   return output
@@ -382,11 +314,9 @@ export function parseSftpLs(output: string): Array<{ name: string; detail: strin
     .filter((l) => l !== "" && !l.startsWith("sftp>"))
     .map((line) => {
       const fields = line.trim().split(/\s+/);
-      // `-rw-r--r--    1 uid  gid  size  mon day  time  name…` — the remainder
-      // after the 8 fixed columns, so names with spaces survive.
+      // Everything after the 8 fixed columns, so names with spaces survive.
       const rest = fields.length > 8 ? fields.slice(8).join(" ") : fields.at(-1)!;
-      // A symlink line is `name -> target`; only the half before the arrow is
-      // a name.
+      // A symlink line is `name -> target`.
       const arrow = rest.indexOf(" -> ");
       const path = arrow === -1 ? rest : rest.slice(0, arrow);
       return { name: path.slice(path.lastIndexOf("/") + 1), detail: line.trim() };
@@ -406,11 +336,7 @@ function logLine(fields: Record<string, string | number | boolean>): void {
 
 // ─────────────────────────── session material ─────────────────────────
 
-/**
- * Per-process private directory: the `known_hosts` file and sftp scratch
- * files. Created lazily under HOME (writable in the runner image), falling
- * back to the system tmpdir.
- */
+/** Per-process 0700 directory for `known_hosts` and sftp scratch files, under HOME or tmpdir. */
 let sessionDir: string | null = null;
 let knownHostsPath: string | null = null;
 let exitHookInstalled = false;
@@ -421,10 +347,8 @@ async function ensureSession(cfg: SshConfig): Promise<string> {
   sessionDir = await mkdtemp(join(root, ".appstrate-ssh-"));
   await chmod(sessionDir, 0o700);
   if (!exitHookInstalled) {
-    // Nothing else removes the directory: the stdin loop ending returns from
-    // `main` and the process exits, so `exit` is the last moment anything
-    // runs — and the only one where an unlink must be SYNCHRONOUS. Installed
-    // once per process, not once per directory, so nothing accumulates.
+    // The only cleanup: the server ends when stdin does, and `exit` is the last
+    // moment anything runs — so the unlink must be synchronous. Once per process.
     process.on("exit", () => {
       if (sessionDir) rmSync(sessionDir, { recursive: true, force: true });
     });
@@ -469,8 +393,19 @@ export interface Deps {
   knownHostsPath?: string;
 }
 
-async function knownHostsFor(cfg: SshConfig, deps: Deps): Promise<string> {
-  return deps.knownHostsPath ?? ensureSession(cfg);
+interface Session {
+  cfg: SshConfig;
+  kh: string;
+  run: Runner;
+}
+
+async function session(deps: Deps): Promise<Session> {
+  const cfg = getConfig();
+  return {
+    cfg,
+    kh: deps.knownHostsPath ?? (await ensureSession(cfg)),
+    run: deps.run ?? runProcess,
+  };
 }
 
 /** Staging path for one sftp `get`/`put`, inside the 0700 session dir. */
@@ -488,8 +423,7 @@ function sshFailure(what: string, res: RunResult): Error {
     hint =
       "\nhint: the pinned host key does not match — the target's key changed or SSH_HOST_KEY is wrong. Never accept a new key silently; reconnect the integration.";
   } else if (/permission denied \(publickey/i.test(tail)) {
-    // Three causes the client cannot tell apart — sshd sends the same refusal
-    // for all of them, so they are named together.
+    // sshd sends the same refusal for all three causes, so they are named together.
     hint =
       "\nhint: the target rejected the key — check authorized_keys on the dedicated account. " +
       "The `restrict` option the install block writes needs OpenSSH 7.2 or newer; an older sshd " +
@@ -500,13 +434,9 @@ function sshFailure(what: string, res: RunResult): Error {
   } else if (/CONNECT refused by proxy/i.test(tail)) {
     hint = "\nhint: the egress proxy refused the target (private address or blocked host).";
   } else if (what === "sftp" && /^connection closed/i.test(tail)) {
-    // Last, and only when the channel dying is the FIRST thing said: sshd
-    // routes the sftp SUBSYSTEM through a forced command when the account has
-    // one, and a forced command with no sftp arm refuses it before a single
-    // packet — which reads as a dead host unless it is named. A
-    // `Connection closed` that FOLLOWS another diagnostic is that diagnostic's
-    // consequence and gets nothing from here. Appstrate installs no forced
-    // command, so this is the operator's own `ForceCommand` or `command=`.
+    // Only when the closed channel is the FIRST thing said: a forced command
+    // without an sftp arm refuses the subsystem before a single packet, which
+    // reads as a dead host. After another diagnostic it is that one's consequence.
     hint =
       "\nhint: the sftp subsystem was refused before the session opened. If this account has a " +
       "forced command (ForceCommand in sshd_config, or command= in authorized_keys), it needs an " +
@@ -516,14 +446,11 @@ function sshFailure(what: string, res: RunResult): Error {
 }
 
 export async function probeTool(deps: Deps = {}): Promise<Record<string, unknown>> {
-  const cfg = getConfig();
-  const kh = await knownHostsFor(cfg, deps);
-  const run = deps.run ?? runProcess;
-  // `-N`: authenticate, open no session — nothing runs on the target and a
-  // forced command is never invoked. But `-N` then HOLDS the connection (it
-  // exists for port forwarding), so success is read off stderr: at VERBOSE
-  // ssh prints `Authenticated to <host> … using "publickey"`, and the process
-  // is killed once that line lands. Failure still exits 255.
+  const { cfg, kh, run } = await session(deps);
+  // `-N` runs nothing on the target (no forced command either) but then HOLDS
+  // the connection, so success is read off stderr — at VERBOSE ssh prints
+  // `Authenticated to <host> … using "publickey"` — and the process is killed.
+  // Failure still exits 255.
   const res = await run(
     ["ssh", ...buildSshArgs(cfg, kh, undefined, { logLevel: "VERBOSE", noSession: true })],
     {
@@ -548,13 +475,11 @@ export async function execTool(
   args: { command?: unknown },
   deps: Deps = {},
 ): Promise<Record<string, unknown>> {
-  const cfg = getConfig();
+  const { cfg, kh, run } = await session(deps);
   if (typeof args.command !== "string" || args.command.trim() === "") {
     throw new ProtocolError("`command` must be a non-empty string");
   }
   const command = args.command;
-  const kh = await knownHostsFor(cfg, deps);
-  const run = deps.run ?? runProcess;
   logLine({ op: "exec" });
   // A command that never returns must not pin the runner forever.
   const res = await run(["ssh", ...buildSshArgs(cfg, kh, command)], { ceilingMs: 120_000 });
@@ -573,9 +498,7 @@ export async function execTool(
   };
 }
 
-async function sftpBatch(cfg: SshConfig, deps: Deps, commands: string[]): Promise<RunResult> {
-  const kh = await knownHostsFor(cfg, deps);
-  const run = deps.run ?? runProcess;
+async function sftpBatch({ cfg, kh, run }: Session, commands: string[]): Promise<RunResult> {
   const res = await run(["sftp", ...buildSftpArgs(cfg, kh)], { stdin: commands.join("\n") + "\n" });
   if (res.code !== 0) throw sshFailure("sftp", res);
   return res;
@@ -585,12 +508,11 @@ export async function readFileTool(
   args: { path?: unknown },
   deps: Deps = {},
 ): Promise<Record<string, unknown>> {
-  const cfg = getConfig();
+  const s = await session(deps);
   if (typeof args.path !== "string") throw new ProtocolError("`path` must be a string");
-  await knownHostsFor(cfg, deps);
   const scratch = scratchPath("get");
   try {
-    await sftpBatch(cfg, deps, [`get ${quoteSftpPath(args.path)} ${quoteSftpPath(scratch)}`]);
+    await sftpBatch(s, [`get ${quoteSftpPath(args.path)} ${quoteSftpPath(scratch)}`]);
     const bytes = await readFile(scratch);
     const out = truncateUtf8(bytes.toString("utf8"), READ_FILE_BYTES);
     return { path: args.path, bytes: bytes.length, truncated: out.truncated, content: out.text };
@@ -603,11 +525,11 @@ export async function listDirTool(
   args: { path?: unknown },
   deps: Deps = {},
 ): Promise<Record<string, unknown>> {
-  const cfg = getConfig();
+  const s = await session(deps);
   if (typeof args.path !== "string") throw new ProtocolError("`path` must be a string");
-  // `-a` because a home directory's interesting contents are dotfiles, and
-  // plain `ls -l` hides them with no signal that anything was held back.
-  const res = await sftpBatch(cfg, deps, [`ls -la ${quoteSftpPath(args.path)}`]);
+  // `-a`: a home directory's interesting contents are dotfiles, and plain
+  // `ls -l` hides them with no signal that anything was held back.
+  const res = await sftpBatch(s, [`ls -la ${quoteSftpPath(args.path)}`]);
   return { path: args.path, entries: parseSftpLs(res.stdout) };
 }
 
@@ -615,14 +537,13 @@ export async function writeFileTool(
   args: { path?: unknown; content?: unknown },
   deps: Deps = {},
 ): Promise<Record<string, unknown>> {
-  const cfg = getConfig();
+  const s = await session(deps);
   if (typeof args.path !== "string") throw new ProtocolError("`path` must be a string");
   if (typeof args.content !== "string") throw new ProtocolError("`content` must be a string");
-  await knownHostsFor(cfg, deps);
   const scratch = scratchPath("put");
   try {
     await writeFile(scratch, args.content, { mode: 0o600 });
-    await sftpBatch(cfg, deps, [`put ${quoteSftpPath(scratch)} ${quoteSftpPath(args.path)}`]);
+    await sftpBatch(s, [`put ${quoteSftpPath(scratch)} ${quoteSftpPath(args.path)}`]);
     return { path: args.path, bytes: Buffer.byteLength(args.content, "utf8") };
   } finally {
     await rm(scratch, { force: true }).catch(() => {});
@@ -647,17 +568,9 @@ interface JsonRpcResponse {
 
 /**
  * Static — answered with no configuration, which is how the conformance probe
- * spawns the server.
- *
- * Each `description` is byte-identical to the same tool's entry in the package
- * manifest, and `scripts/test/ssh-mcp.test.ts` diffs the two: the manifest is
- * what the platform shows when granting tools, this is what the agent reads,
- * and nothing but that diff holds the pair together.
- *
- * "WRITES" in a description is the signal a read-only grant is built from: an
- * agent that must not change the target is given the tools WITHOUT it. The
- * same test pins both halves of that split, so a new tool cannot join the list
- * without landing on one side or the other.
+ * spawns the server. Each `description` must equal the manifest's (what the
+ * platform shows when granting tools), and "WRITES" marks the tools a read-only
+ * agent is NOT granted; `scripts/test/ssh-mcp.test.ts` pins both.
  */
 export const TOOLS = [
   {
@@ -710,6 +623,16 @@ function okResult(id: number | string | null | undefined, payload: unknown): Jso
   };
 }
 
+type ToolHandler = (args: Record<string, unknown>, deps: Deps) => Promise<Record<string, unknown>>;
+
+const TOOL_HANDLERS = new Map<string, ToolHandler>([
+  ["ssh_probe", (_args, deps) => probeTool(deps)],
+  ["ssh_exec", execTool],
+  ["ssh_read_file", readFileTool],
+  ["ssh_list_dir", listDirTool],
+  ["ssh_write_file", writeFileTool],
+]);
+
 export async function handleRequest(
   req: JsonRpcRequest,
   deps: Deps = {},
@@ -730,55 +653,31 @@ export async function handleRequest(
   }
   if (req.method === "tools/call") {
     const params = (req.params ?? {}) as { name?: string; arguments?: Record<string, unknown> };
-    const args = params.arguments ?? {};
-    const started = performance.now();
-    try {
-      switch (params.name) {
-        case "ssh_probe":
-          return okResult(req.id, await probeTool(deps));
-        case "ssh_exec":
-          return okResult(req.id, await execTool(args, deps));
-        case "ssh_read_file":
-          return okResult(req.id, await readFileTool(args, deps));
-        case "ssh_list_dir":
-          return okResult(req.id, await listDirTool(args, deps));
-        case "ssh_write_file":
-          return okResult(req.id, await writeFileTool(args, deps));
-        default:
-          return {
-            jsonrpc: "2.0",
-            id: req.id ?? null,
-            error: { code: -32602, message: `Unknown tool: ${params.name}` },
-          };
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      const ms = Math.round(performance.now() - started);
-      // Refusals and misconfiguration are tool RESULTS the agent can act on
-      // (an unreadable path, a refused login), reported as isError content rather
-      // than a protocol error that reads as a dead channel. Only a malformed
-      // request is a protocol error.
-      if (err instanceof ProtocolError) {
-        logLine({ op: "tool-refused", tool: params.name ?? "<unset>", ms, message });
-        return {
-          jsonrpc: "2.0",
-          id: req.id ?? null,
-          result: {
-            isError: true,
-            content: [
-              { type: "text", text: JSON.stringify({ refused: true, reason: message }, null, 2) },
-            ],
-          },
-        };
-      }
-      logLine({ op: "tool-error", tool: params.name ?? "<unset>", ms, message });
+    const name = params.name ?? "";
+    const handler = TOOL_HANDLERS.get(name);
+    if (!handler) {
       return {
         jsonrpc: "2.0",
         id: req.id ?? null,
-        result: {
-          isError: true,
-          content: [{ type: "text", text: JSON.stringify({ error: message }, null, 2) }],
-        },
+        error: { code: -32602, message: `Unknown tool: ${params.name}` },
+      };
+    }
+    const started = performance.now();
+    try {
+      return okResult(req.id, await handler(params.arguments ?? {}, deps));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const ms = Math.round(performance.now() - started);
+      // Refusals and misconfiguration are tool RESULTS the agent can act on,
+      // reported as isError content rather than a protocol error that reads as
+      // a dead channel. Only a malformed request is a protocol error.
+      const refused = err instanceof ProtocolError;
+      logLine({ op: refused ? "tool-refused" : "tool-error", tool: name, ms, message });
+      const body = refused ? { refused: true, reason: message } : { error: message };
+      return {
+        jsonrpc: "2.0",
+        id: req.id ?? null,
+        result: { isError: true, content: [{ type: "text", text: JSON.stringify(body, null, 2) }] },
       };
     }
   }

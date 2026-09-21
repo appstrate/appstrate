@@ -9,7 +9,7 @@ import { HandoffSteps, type HandoffStep } from "../components/integration-connec
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
 import { IntegrationIcon } from "../components/integration-icon";
 import { client, type paths } from "../api/client";
-import { publishConnectCompletion, publishConnectHeldOpen } from "../lib/connect-completion";
+import { publishConnectCompletion } from "../lib/connect-completion";
 import type { IntegrationManifestAuth } from "../hooks/use-integrations";
 
 /**
@@ -40,15 +40,23 @@ type ConnectContext = Omit<
   "auth"
 > & { auth: IntegrationManifestAuth };
 
-type Phase = "loading" | "form" | "submitting" | "done" | "provisioned" | "error";
+type Phase = "loading" | "form" | "submitting" | "done" | "error";
+
+const closeWindow = () => {
+  try {
+    window.close();
+  } catch {
+    /* not a popup — the confirmation stays visible */
+  }
+};
 
 export function HostedConnectPage() {
   const { t } = useTranslation("settings");
   const [phase, setPhase] = useState<Phase>("loading");
   const [context, setContext] = useState<ConnectContext | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
-  // What the user must now do on the target host for the minted credential to
-  // work. Nothing here is secret — the private half never leaves the server.
+  // What the user must still do on the target host for a minted credential.
+  // Nothing here is secret — the private half never leaves the server.
   const [handoffSteps, setHandoffSteps] = useState<HandoffStep[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Technical reason behind a context-load failure (HTTP status or network
@@ -80,26 +88,6 @@ export function HostedConnectPage() {
     };
   }, []);
 
-  /**
-   * Tell whatever opened this window to stop counting down. The opener arms a
-   * deadline and force-closes the popup when it expires; the install block
-   * below is read against another machine, so the normal case outlives it and
-   * the block would be destroyed along with the window.
-   */
-  const announceHeldOpen = (packageId: string) => {
-    publishConnectHeldOpen({ packageId }, window.opener as Window | null, window.location.origin);
-  };
-
-  /** Tell whatever opened this window that the connection now exists. */
-  const announceConnected = () => {
-    if (!context) return;
-    publishConnectCompletion(
-      { ok: true, packageId: context.package_id },
-      window.opener as Window | null,
-      window.location.origin,
-    );
-  };
-
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     // A missing CSRF nonce means the page session is broken (cookie cleared or
@@ -116,29 +104,17 @@ export function HostedConnectPage() {
         params: { header: { "x-connect-csrf": context.csrf } },
         body: { credentials: values },
       });
-      // A provisioning auth hands back an install block, and this is the only
-      // screen that shows it. The completion signal is therefore WITHHELD
-      // here: the opener (`useHostedConnectPopup`) closes this window the
-      // instant it sees `ok: true`, which would take the block away before it
-      // could be read. It is announced on the user's own "I ran it" instead.
+      // The connection exists: announce it now. The popup opener does not close
+      // this window, so an install block below stays up until the user is done.
+      publishConnectCompletion(
+        { ok: true, packageId: context.package_id },
+        window.opener as Window | null,
+        window.location.origin,
+      );
       const minted = data?.handoff_steps;
-      if (minted && minted.length > 0) {
-        setHandoffSteps(minted);
-        setPhase("provisioned");
-        announceHeldOpen(context.package_id);
-        return;
-      }
-
-      announceConnected();
+      if (minted && minted.length > 0) setHandoffSteps(minted);
+      else setTimeout(closeWindow, 1200);
       setPhase("done");
-      // Close the popup/tab after a short confirmation, mirroring the OAuth page.
-      setTimeout(() => {
-        try {
-          window.close();
-        } catch {
-          /* not a popup — the confirmation stays visible */
-        }
-      }, 1200);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setPhase("form");
@@ -149,7 +125,7 @@ export function HostedConnectPage() {
     <div className="bg-background text-foreground flex min-h-screen items-center justify-center p-4">
       {/* The install block is a shell script — wrapping it into a 28rem column
           would make it unreadable, so that one phase gets a wider page. */}
-      <div className={`w-full space-y-6 ${phase === "provisioned" ? "max-w-2xl" : "max-w-md"}`}>
+      <div className={`w-full space-y-6 ${handoffSteps ? "max-w-2xl" : "max-w-md"}`}>
         {phase === "loading" && (
           <div className="flex justify-center py-12">
             <Spinner />
@@ -168,7 +144,7 @@ export function HostedConnectPage() {
           </div>
         )}
 
-        {phase === "provisioned" && handoffSteps && (
+        {phase === "done" && handoffSteps && (
           <div className="space-y-5" data-testid="connect-provisioned">
             <div>
               <h1 className="text-lg font-semibold">
@@ -186,15 +162,9 @@ export function HostedConnectPage() {
               className="w-full"
               data-testid="provisioned-done"
               onClick={() => {
-                // Announcing only now is what kept this window open long
-                // enough to read: the opener closes it on this signal.
-                announceConnected();
-                setPhase("done");
-                try {
-                  window.close();
-                } catch {
-                  /* not a popup — the confirmation stays visible */
-                }
+                // In a full tab `close()` is a no-op: fall back to the done message.
+                setHandoffSteps(null);
+                closeWindow();
               }}
             >
               {t("integration.connect.provisioned.doneBtn")}
@@ -202,7 +172,7 @@ export function HostedConnectPage() {
           </div>
         )}
 
-        {phase === "done" && (
+        {phase === "done" && !handoffSteps && (
           <div className="space-y-2 text-center">
             <h1 className="text-lg font-semibold text-green-400">
               {t("integration.connect.hosted.doneTitle")}

@@ -18,42 +18,26 @@ export interface CredentialFieldSchema {
   default?: string;
 }
 
-/** The auth's `credentials.schema.properties`, or `undefined` if it declares none. */
-function schemaProperties(auth: IntegrationManifestAuth): Record<string, unknown> | undefined {
-  const schema = auth.credentials?.schema as { properties?: Record<string, unknown> } | undefined;
-  const props = schema?.properties;
-  return props && typeof props === "object" ? props : undefined;
+/** The declared `credentials.schema.properties` — present-but-empty names no field. */
+function declared(auth: IntegrationManifestAuth): Record<string, unknown> | undefined {
+  const props = (auth.credentials?.schema as { properties?: unknown } | undefined)?.properties;
+  return props && typeof props === "object" ? (props as Record<string, unknown>) : undefined;
 }
 
 /** Per-field presentation, keyed by credential name. */
 export function fieldSchemas(auth: IntegrationManifestAuth): Record<string, CredentialFieldSchema> {
-  const props = schemaProperties(auth);
-  if (!props) return {};
-  const out: Record<string, CredentialFieldSchema> = {};
-  for (const [name, raw] of Object.entries(props)) {
-    if (raw && typeof raw === "object") out[name] = raw;
-  }
-  return out;
+  return Object.fromEntries(
+    Object.entries(declared(auth) ?? {}).filter(([, raw]) => raw && typeof raw === "object"),
+  ) as Record<string, CredentialFieldSchema>;
 }
 
-/**
- * The credential fields the form should ask the user for: the declared
- * properties, verbatim.
- *
- * Nothing is filtered out here. A credential the PLATFORM mints is already
- * absent from the schema `GET /api/integrations/connect/context` serves — the
- * server owns that list, since which names a provisioning kind owns is a
- * property of the provisioner, not of the manifest.
- */
+/** The declared fields verbatim; the auth type's canonical set only when none are declared. */
 export function deriveFieldNames(auth: IntegrationManifestAuth): string[] {
-  const props = schemaProperties(auth);
+  const props = declared(auth);
   if (props) return Object.keys(props);
   if (auth.type === "api_key") return ["api_key"];
   if (auth.type === "basic") return ["username", "password"];
-  // AFPS §7.5 — mtls credential schema SHOULD describe a client cert and
-  // private key (chain optional). When the manifest omits explicit
-  // `credentials.schema.properties`, fall back to the two canonical fields so
-  // the form still renders inputs.
+  // AFPS §7.5 — an mtls schema SHOULD describe a client cert and private key.
   if (auth.type === "mtls") return ["client_cert", "client_key"];
   return [];
 }

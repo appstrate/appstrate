@@ -6057,7 +6057,7 @@
         "operationId": "importIntegrationConnection",
         "tags": ["Integrations"],
         "summary": "Import a connection by submitting credentials directly (programmatic)",
-        "description": "Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).",
+        "description": "Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).\n\nA credential the platform mints (auth declaring `_meta[\"dev.appstrate/provisioning\"]`) is refused with a 400 naming the field; such an auth connects through the Connect portal (`initiateIntegrationConnect`).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -6538,6 +6538,29 @@
                     },
                     "auth": {
                       "type": "object",
+                      "additionalProperties": true,
+                      "description": "The auth declaration the form renders. Credentials the platform mints (`_meta[\"dev.appstrate/provisioning\"]`, AFPS §10) are removed from `credentials.schema` — display only; submissions are validated against the full schema."
+                    },
+                    "setup_guide": {
+                      "type": ["object", "null"],
+                      "description": "AFPS §7.10 publisher setup steps, rendered above the form.",
+                      "properties": {
+                        "steps": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": ["label"],
+                            "properties": {
+                              "label": {
+                                "type": "string"
+                              },
+                              "url": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      },
                       "additionalProperties": true
                     },
                     "connection_id": {
@@ -6689,6 +6712,13 @@
                           "type": "string",
                           "format": "date-time"
                         }
+                      }
+                    },
+                    "handoff_steps": {
+                      "type": "array",
+                      "description": "Present when the auth declares `_meta[\"dev.appstrate/provisioning\"]`: what the user must do with the material the platform minted, in order. Never contains a secret. Steps flagged `deferred` are due at deletion and are served again by `getMyConnectionHandoff`.",
+                      "items": {
+                        "$ref": "#/components/schemas/HandoffStep"
                       }
                     }
                   }
@@ -12193,6 +12223,64 @@
         "responses": {
           "204": {
             "description": "Connection deleted (or never existed)"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/me/connections/{connectionId}/handoff": {
+      "get": {
+        "operationId": "getMyConnectionHandoff",
+        "tags": ["Profile"],
+        "summary": "What is due on the target when this connection is deleted",
+        "description": "For a connection whose credentials the platform minted, the steps to run on the target when deleting it (e.g. removing the installed key) — deleting the connection cannot reach the target. Creation-time steps come only from `submitIntegrationConnect`. `deferred` is omitted: every step here is deletion-time. Empty for an auth that mints nothing, and for an unknown, malformed or not-owned id.",
+        "parameters": [
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handoff steps due at deletion (possibly empty)",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/HandoffCommandStep"
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -25829,6 +25917,74 @@
                 }
               }
             }
+          }
+        }
+      },
+      "HandoffCommandStep": {
+        "type": "object",
+        "required": ["kind", "id", "label", "shell"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["command"]
+          },
+          "id": {
+            "type": "string",
+            "description": "Stable identifier a client can key a translation on; `label`/`note` are the English default."
+          },
+          "label": {
+            "type": "string"
+          },
+          "shell": {
+            "type": "string",
+            "description": "Shell to run on the target. The platform never runs it."
+          },
+          "note": {
+            "type": "string"
+          },
+          "deferred": {
+            "type": "boolean",
+            "description": "Due when the connection is deleted, not now. Only on `submitIntegrationConnect`; `getMyConnectionHandoff` omits it."
+          }
+        }
+      },
+      "HandoffValueStep": {
+        "type": "object",
+        "required": ["kind", "id", "label", "value"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["value"]
+          },
+          "id": {
+            "type": "string",
+            "description": "Stable identifier a client can key a translation on; `label`/`note` are the English default."
+          },
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "HandoffStep": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/HandoffCommandStep"
+          },
+          {
+            "$ref": "#/components/schemas/HandoffValueStep"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "command": "#/components/schemas/HandoffCommandStep",
+            "value": "#/components/schemas/HandoffValueStep"
           }
         }
       },

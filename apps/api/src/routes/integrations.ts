@@ -705,17 +705,11 @@ export function createIntegrationsRouter() {
   // form, no end-user interaction. The interactive path is the Connect portal
   // (`connect/session`) — use that whenever a human/agent supplies the secret.
   //
-  // This door runs NO provisioner, so it refuses any name the auth declares as
-  // platform-minted (`readProvisioning` below): accepting one would let a
-  // caller plant a key of its own and have the platform hand the target an
-  // install block for it. A provisioning auth connects through the portal.
-  //
-  // The invariants an integration's RUNTIME depends on therefore cannot live
-  // in `services/connect/provisioning.ts` — that runs on one door only. They
-  // belong in the auth's `credentials.schema`, which `FieldsStrategy`
-  // validates on BOTH doors: `@appstrate/ssh` carries `pattern` for exactly
-  // that reason (the Unix account is concatenated into ssh's destination
-  // argument, so it must never be a shell string).
+  // No provisioner runs here, so a platform-minted name is refused (see
+  // `services/connect/provisioning.ts`). Runtime invariants therefore live in
+  // the auth's `credentials.schema`, validated on both doors — not in the
+  // provisioner.
+  // Schema `pattern`s (e.g. `@appstrate/ssh`'s `user`) guard here; the account check is hosted-only.
   router.post(
     "/:packageId{@[^/]+/[^/]+}/auths/:authKey/connect/fields",
     requirePermission("integrations", "connect"),
@@ -739,8 +733,6 @@ export function createIntegrationsRouter() {
             `Auth '${authKey}' is type '${auth.type}' — use the OAuth flow, not the fields flow`,
           );
         }
-        // A minted name supplied by the caller is a key the platform did not
-        // make and would nonetheless install on the target. Refuse it here.
         const minted = readProvisioning(packageId, auth)?.provides.find(
           (name) => name in body.credentials,
         );
@@ -1075,13 +1067,8 @@ export function createIntegrationsRouter() {
       auth_key: claims.auth_key,
       display_name: manifest.display_name ?? claims.package_id,
       icon: manifest.icon ?? null,
-      // Without the credentials the platform mints: the form renders the
-      // schema it is given, and nobody is asked to type a value about to be
-      // generated. Display only — the submit door below validates against the
-      // FULL manifest schema and drops those names whatever the body carries.
       auth: authWithoutMintedCredentials(claims.package_id, auth),
-      // AFPS §7.10 publisher instructions, rendered on the form itself: this
-      // is the surface where someone is asked to produce the credential.
+      // AFPS §7.10 publisher instructions, shown where the credential is asked for.
       setup_guide: manifest.setup_guide ?? null,
       connection_id: claims.connection_id ?? null,
       csrf: claims.csrf ?? null,
@@ -1107,28 +1094,17 @@ export function createIntegrationsRouter() {
       if (auth.type === "oauth2") {
         throw invalidRequest("This integration uses OAuth — open the connect link instead");
       }
-      // What this auth mints, if anything — read once here because it decides
-      // two things: whether to open the target's envelope, and whether the
-      // response carries a handoff block.
       const provisioning = readProvisioning(claims.package_id, auth);
-      // On a RECONNECT of such an auth, the bundle the connection already
-      // holds. The provisioner reuses the key it finds there, so re-running
-      // the form leaves the key already installed on the target valid. Read
-      // under BOTH conditions so an auth that mints nothing never pays a
-      // decryption. Safe to decrypt: `connection_id` rides SIGNED claims, and
-      // the mint route asserted the actor owns that connection before minting
-      // them (`assertConnectionBelongsToActor`, `connect/session` above).
+      // On a reconnect, the stored bundle, so the provisioner can reuse the key
+      // already installed on the target. Decrypted only for a provisioning
+      // auth; safe because `connection_id` rides SIGNED claims minted after
+      // `assertConnectionBelongsToActor` (`connect/session` above).
       const existing =
         provisioning && claims.connection_id
           ? await getIntegrationConnectionCredentialFields(claims.connection_id)
           : null;
-      // Credentials the platform mints rather than asks for (for SSH, the key
-      // pair). Runs BEFORE `complete` so the minted values are persisted in
-      // the same envelope as the submitted ones, and so a provisioning failure
-      // (a blocked address, a field the minting needs and cannot use) is a 400
-      // on the form instead of a connection nobody can use. This is the ONLY
-      // door that provisions — `connect/fields` refuses a provisioned name
-      // outright.
+      // Before `complete`, so minted values share the envelope and a
+      // provisioning failure is a 400 on the form, not an unusable connection.
       const provisioned = await provisionCredentials(
         claims.package_id,
         auth,
@@ -1150,16 +1126,8 @@ export function createIntegrationsRouter() {
         { kind: "fields", credentials },
       );
       clearConnectPageCookie(c);
-      // The half that must reach the target host — a public key and a
-      // fingerprint, never a secret. DERIVED from the bundle just persisted,
-      // by the same `handoffStepsFor` that `GET /api/me/connections/{id}/handoff`
-      // re-derives the teardown half from, so the block installed here and the
-      // one handed back at deletion cannot drift apart.
-      //
-      // It is carried on this response rather than fetched, because THIS
-      // caller cannot fetch it: the hosted portal authenticates with a page
-      // cookie that `clearConnectPageCookie` just destroyed, and an end-user
-      // reaching it may hold no platform session at all.
+      // Carried on the response, not fetched: the page cookie that authenticates
+      // the portal was just cleared, and the end-user may hold no session.
       return c.json({
         ok: true,
         connection: conn,

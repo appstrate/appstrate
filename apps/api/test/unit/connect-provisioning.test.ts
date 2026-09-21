@@ -14,7 +14,6 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { randomBytes } from "node:crypto";
 import { lstat, mkdtemp, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,10 +38,13 @@ import {
  */
 const SSH_ID = "@appstrate/ssh";
 let restoreRegistry: () => void;
-beforeAll(() => {
+/** One bundle for every test that only reads it; reconnect tests mint their own. */
+let minted: Record<string, string>;
+beforeAll(async () => {
   restoreRegistry = _setSystemPackagesForTesting(
     new Map([[SSH_ID, { packageId: SSH_ID } as SystemPackageEntry]]),
   );
+  minted = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
 });
 afterAll(() => restoreRegistry());
 
@@ -92,10 +94,7 @@ describe("readProvisioning", () => {
    * it claims to describe.
    */
   it("derives the names the platform owns from the kind alone", () => {
-    expect(readProvisioning(SSH_ID, SSH_AUTH)).toEqual({
-      kind: "ssh_keypair",
-      provides: ["private_key"],
-    });
+    expect(readProvisioning(SSH_ID, SSH_AUTH)?.provides).toEqual(["private_key"]);
   });
 
   /**
@@ -104,9 +103,12 @@ describe("readProvisioning", () => {
    * it as "provisions nothing" would ask the user to type the key the manifest
    * expects to be minted.
    */
-  it("refuses the block on a package that is not a system package", () => {
+  it("refuses the block, and minting, on a package that is not a system package", async () => {
     expect(() => readProvisioning("@acme/ssh", SSH_AUTH)).toThrow(/only system packages may/);
     expect(() => authWithoutMintedCredentials("@acme/ssh", SSH_AUTH)).toThrow(
+      /only system packages may/,
+    );
+    await expect(provisionCredentials("@acme/ssh", SSH_AUTH, { ...base }, null)).rejects.toThrow(
       /only system packages may/,
     );
   });
@@ -115,26 +117,22 @@ describe("readProvisioning", () => {
     expect(readProvisioning("@acme/ssh", { type: "custom" })).toBeNull();
   });
 
-  it("refuses to mint for a package that is not a system package", async () => {
-    await expect(provisionCredentials("@acme/ssh", SSH_AUTH, { ...base }, null)).rejects.toThrow(
-      /only system packages may/,
-    );
-  });
-
-  it("answers no handoff steps rather than throwing, for a non-system package", async () => {
+  it("answers no handoff steps rather than throwing, for a non-system package", () => {
     // The same complete bundle yields every step under the system id, so the
     // empty list below is the refusal and not an incomplete bundle.
-    const credentials = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
-    expect(handoffStepsFor(SSH_ID, SSH_AUTH, credentials)).toHaveLength(3);
+    expect(handoffStepsFor(SSH_ID, SSH_AUTH, minted)).toHaveLength(3);
     // The deletion surface reads this: a refusal must never block a deletion.
-    expect(handoffStepsFor("@acme/ssh", SSH_AUTH, credentials)).toEqual([]);
+    expect(handoffStepsFor("@acme/ssh", SSH_AUTH, minted)).toEqual([]);
   });
 
   it("throws on a kind this build has no provisioner for", () => {
-    const auth = { _meta: { "dev.appstrate/provisioning": { kind: "quantum_key" } } };
     // Falling back to "the user types it" would silently turn a
-    // platform-minted credential into a field nobody filled.
-    expect(() => readProvisioning(SSH_ID, auth)).toThrow(/unknown credential provisioning kind/);
+    // platform-minted credential into a field nobody filled. Inherited
+    // `Object.prototype` names are not kinds either.
+    for (const kind of ["quantum_key", "toString", "__proto__"]) {
+      const auth = { _meta: { "dev.appstrate/provisioning": { kind } } };
+      expect(() => readProvisioning(SSH_ID, auth)).toThrow(/unknown credential provisioning kind/);
+    }
   });
 });
 
@@ -263,42 +261,17 @@ const base = {
 };
 
 describe("provisionCredentials — what gets minted and rendered", () => {
-  it("mints an OpenSSH private key and pins the supplied host key", async () => {
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
-    expect(res.private_key).toStartWith("-----BEGIN OPENSSH PRIVATE KEY-----");
-    expect(res.private_key).toEndWith("-----END OPENSSH PRIVATE KEY-----\n");
-    expect(res.host_key).toBe(HOST_KEY);
-    expect(res.port).toBe("2222");
+  it("mints an OpenSSH private key and pins the supplied host key", () => {
+    expect(minted.private_key).toStartWith("-----BEGIN OPENSSH PRIVATE KEY-----");
+    expect(minted.private_key).toEndWith("-----END OPENSSH PRIVATE KEY-----\n");
+    expect(minted.host_key).toBe(HOST_KEY);
+    expect(minted.port).toBe("2222");
     // The private half is never part of what is shown.
-    expect(JSON.stringify(stepsOf(res))).not.toContain("PRIVATE KEY");
-  });
-
-  it("installs the very key it minted — the two halves cannot drift", async () => {
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
-    const publicKey = publicKeyFromOpenSshPrivateKey(res.private_key!);
-    expect(installShell(res)).toContain(`'restrict ${publicKey} appstrate'`);
-  });
-
-  /**
-   * `restrict` narrows the KEY (no forwarding, no pty); the account narrows
-   * what it may DO. The comment is this file's own literal, never the one inside
-   * the key container: that is read back from stored credentials, which are not
-   * trusted at render time, and this line is pasted as root.
-   */
-  it("authorises the key with restrict and a platform-minted comment", async () => {
-    const script = installShell((await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!);
-    expect(script).toMatch(/'restrict ssh-ed25519 [A-Za-z0-9+/]+=* appstrate'/);
-  });
-
-  it("appends nothing a second time when the block is replayed", async () => {
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
-    const base64 = publicKeyFromOpenSshPrivateKey(res.private_key!).split(/\s+/)[1];
-    expect(installShell(res)).toContain(`grep -qF '${base64}' "$keys"`);
+    expect(JSON.stringify(stepsOf(minted))).not.toContain("PRIVATE KEY");
   });
 
   it("points the fingerprint check at the key type it actually pinned", async () => {
-    const ed = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
-    expect(installShell(ed)).toContain("/etc/ssh/ssh_host_ed25519_key.pub");
+    expect(installShell(minted)).toContain("/etc/ssh/ssh_host_ed25519_key.pub");
 
     // An sshd too old for ed25519 pins RSA — and reading an ed25519 file there
     // would silently skip the check that the pinned key is this server's.
@@ -312,56 +285,26 @@ describe("provisionCredentials — what gets minted and rendered", () => {
     expect(installShell(rsa)).not.toContain("ed25519_key.pub");
   });
 
-  it("refuses to install a key on an account with no login shell", async () => {
-    // sshd runs an incoming command through the login shell, so an account set
-    // to nologin runs nothing — and the failure would only surface mid-run, as
-    // a command that produced no output.
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
-    expect(installShell(res)).toContain("*/nologin|*/false)");
-  });
-
   /**
    * The handoff is data, and its SHAPE is the contract the SPA renders against:
-   * a list of typed steps with no SSH in it. A second provisioning kind adds
-   * steps, not a front-end branch — which is only true while nothing here
-   * depends on their order or their count.
+   * typed steps with no SSH in it, each with a nonempty payload. The `id` is what
+   * a localised client keys on, so renaming one silently drops a translation.
+   * Exactly one command is deferred: the teardown.
    */
-  /**
-   * The `id` is what a localised client keys on, so it is part of the contract
-   * in a way the English beside it is not: renaming one silently drops a
-   * translation back to the server's own text.
-   */
-  it("names each step with an id that is stable for this kind", async () => {
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
-    expect(stepsOf(res).map((s) => s.id)).toEqual([
-      "ssh_install",
-      "ssh_host_fingerprint",
-      "ssh_revoke",
+  it("describes the handoff as typed, identified steps", () => {
+    const nonEmpty = expect.stringMatching(/\S/);
+    expect(stepsOf(minted)).toMatchObject([
+      { kind: "command", id: "ssh_install", label: nonEmpty, shell: nonEmpty },
+      {
+        kind: "value",
+        id: "ssh_host_fingerprint",
+        label: nonEmpty,
+        // The SUPPLIED host key's fingerprint, not the minted key's.
+        value: "SHA256:e9BAhcGr5z9zvM6nYcXrEt2BkBrTfpCQ/QSvw/h2INc",
+      },
+      { kind: "command", id: "ssh_revoke", deferred: true, label: nonEmpty, shell: nonEmpty },
     ]);
-  });
-
-  it("describes the handoff as typed steps, not named fields", async () => {
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
-    expect(stepsOf(res).map((s) => s.kind)).toEqual(["command", "value", "command"]);
-
-    const commands = stepsOf(res).filter((s) => s.kind === "command");
-    // Exactly one of the two blocks is for later: the teardown. Shipping both
-    // as "do this now" is how a removal command becomes a removal nobody runs.
-    expect(commands.filter((s) => s.kind === "command" && s.deferred)).toHaveLength(1);
-
-    // Every step is renderable: a label, and the payload its kind promises.
-    for (const step of stepsOf(res)) {
-      expect(step.label.length).toBeGreaterThan(0);
-      if (step.kind === "command") expect(step.shell.length).toBeGreaterThan(0);
-      else expect(step.value.length).toBeGreaterThan(0);
-    }
-
-    // The `value` step carries the SUPPLIED host key's fingerprint, not the
-    // minted key's: it is what the user compares the target's own against.
-    const value = stepsOf(res).find((s) => s.kind === "value");
-    expect(value && value.kind === "value" && value.value).toBe(
-      "SHA256:e9BAhcGr5z9zvM6nYcXrEt2BkBrTfpCQ/QSvw/h2INc",
-    );
+    expect(stepsOf(minted).filter((s) => s.kind === "command" && s.deferred)).toHaveLength(1);
   });
 
   /**
@@ -376,19 +319,18 @@ describe("provisionCredentials — what gets minted and rendered", () => {
    * a regression that made the happy path fall into that branch would
    * otherwise hand the user nothing while every other assertion stayed green.
    */
-  it("derives the same block from the stored bundle alone", async () => {
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
-    const atCreation = stepsOf(res);
+  it("derives the same block from the stored bundle alone", () => {
+    const atCreation = stepsOf(minted);
     expect(atCreation.length).toBeGreaterThan(0);
 
     // What `getIntegrationConnectionCredentialFields` hands back months later:
     // the stored names, nothing else, order not preserved.
     const readBack = {
-      host_key: res.host_key!,
-      user: res.user!,
-      port: res.port!,
-      private_key: res.private_key!,
-      host: res.host!,
+      host_key: minted.host_key!,
+      user: minted.user!,
+      port: minted.port!,
+      private_key: minted.private_key!,
+      host: minted.host!,
     };
     expect(stepsOf(readBack)).toEqual(atCreation);
   });
@@ -399,26 +341,16 @@ describe("provisionCredentials — what gets minted and rendered", () => {
    * so a revoke block rendered from a missing key would empty the very
    * `authorized_keys` it was meant to prune.
    */
-  it("renders nothing rather than a half-built command", async () => {
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
+  it("renders nothing rather than a half-built command", () => {
     for (const missing of ["private_key", "user", "host_key"]) {
-      const { [missing]: _dropped, ...partial } = res;
+      const { [missing]: _dropped, ...partial } = minted;
       expect(stepsOf(partial)).toEqual([]);
     }
     // A private key that is not one parses to nothing, not to a block naming an
     // empty public half.
-    expect(stepsOf({ ...res, private_key: "-----BEGIN OPENSSH PRIVATE KEY-----\nnope" })).toEqual(
-      [],
-    );
-  });
-
-  it("hands back the block that takes the key back off the target", async () => {
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
-    const keyBase64 = /'restrict ssh-ed25519 (\S+)/.exec(installShell(res))?.[1];
-    expect(keyBase64).toBeDefined();
-    // Matched on the key's own base64 with `grep -F`, so it removes exactly
-    // this connection's line — deleting the connection here cannot do it.
-    expect(revokeShell(res)).toContain(`grep -vF '${keyBase64}'`);
+    expect(
+      stepsOf({ ...minted, private_key: "-----BEGIN OPENSSH PRIVATE KEY-----\nnope" }),
+    ).toEqual([]);
   });
 
   /**
@@ -470,69 +402,6 @@ describe("provisionCredentials — what gets minted and rendered", () => {
     const { host_key: _dropped, ...noHostKey } = base;
     await expect(provisionCredentials(SSH_ID, SSH_AUTH, { ...noHostKey }, null)).rejects.toThrow(
       /`host_key` is required/,
-    );
-  });
-});
-
-/**
- * A stored bundle is never trusted at render time: the fields INSIDE the key
- * container — key type and comment — are whatever its bytes say, the public
- * line is rebuilt rather than echoed, and the block it lands in is pasted as
- * root.
- */
-describe("a forged key container cannot reach the generated script", () => {
-  const HOSTILE = "x'; touch /tmp/PWNED; echo '";
-
-  function sshString(value: Buffer | string): Buffer {
-    const bytes = typeof value === "string" ? Buffer.from(value, "utf8") : value;
-    const len = Buffer.alloc(4);
-    len.writeUInt32BE(bytes.length);
-    return Buffer.concat([len, bytes]);
-  }
-
-  function forgeContainer(keyType: string, comment: string): string {
-    const point = randomBytes(32);
-    const blob = Buffer.concat([sshString(keyType), sshString(point)]);
-    const priv = Buffer.concat([
-      Buffer.alloc(8), // the two checkints
-      sshString(keyType),
-      sshString(point),
-      sshString(Buffer.concat([randomBytes(32), point])),
-      sshString(comment),
-    ]);
-    const len = Buffer.alloc(4);
-    len.writeUInt32BE(1);
-    const container = Buffer.concat([
-      Buffer.from("openssh-key-v1\0", "binary"),
-      sshString("none"),
-      sshString("none"),
-      sshString(""),
-      len,
-      sshString(blob),
-      sshString(priv),
-    ]);
-    return (
-      "-----BEGIN OPENSSH PRIVATE KEY-----\n" +
-      container.toString("base64") +
-      "\n-----END OPENSSH PRIVATE KEY-----\n"
-    );
-  }
-
-  it("renders nothing at all for a hostile key type", () => {
-    const private_key = forgeContainer(`ssh-ed25519'; ${HOSTILE}`, "agent");
-    expect(stepsOf({ ...base, private_key })).toEqual([]);
-  });
-
-  it("renders the key from its blob, so a hostile comment never appears", () => {
-    const private_key = forgeContainer("ssh-ed25519", `${HOSTILE}\nrm -rf /`);
-    const steps = stepsOf({ ...base, private_key });
-    expect(steps.length).toBeGreaterThan(0);
-    const rendered = JSON.stringify(steps);
-    for (const hostile of ["PWNED", "touch /tmp", "rm -rf"]) {
-      expect(rendered).not.toContain(hostile);
-    }
-    expect(installShell({ ...base, private_key })).toMatch(
-      /'restrict ssh-ed25519 [A-Za-z0-9+/]+=* appstrate'/,
     );
   });
 });
@@ -605,20 +474,7 @@ async function runScript(
   return { stdout, stderr, code };
 }
 
-async function parses(script: string): Promise<string> {
-  const file = join(await mkdtemp(join(tmpdir(), "ssh-handoff-")), "script.sh");
-  await writeFile(file, script + "\n");
-  const proc = Bun.spawn(["sh", "-n", file], { stdout: "pipe", stderr: "pipe" });
-  const [stderr, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
-  return `${code} ${stderr}`.trim();
-}
-
 describe("the generated install script", () => {
-  it("is valid POSIX shell", async () => {
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
-    expect(await parses(installShell(res))).toBe("0");
-  });
-
   it("stops before touching anything when the account has no login shell", async () => {
     // `nobody` is /usr/bin/false on macOS and /usr/sbin/nologin on Debian —
     // both are the shape that runs no command. The guard runs before the `su`,
@@ -639,8 +495,7 @@ describe("the generated install script", () => {
    * for: whether the host running the suite HAS a host key is not the subject.
    */
   async function installWithSshKeygen(body: string): Promise<ShellRun> {
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
-    return runScript(installShell(res), {
+    return runScript(installShell(minted), {
       home: await mkdtemp(join(tmpdir(), "ssh-fingerprint-")),
       bin: await binWith("ssh-keygen", body),
     });
@@ -679,8 +534,7 @@ describe("the generated install script", () => {
 describe("the install block warns about a locked password", () => {
   async function installWithShadow(field: string | null) {
     const home = await mkdtemp(join(tmpdir(), "ssh-shadow-"));
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
-    const shell = installShell(res);
+    const shell = installShell(minted);
     // Exactly one site, so the rewrite cannot silently miss or over-reach.
     expect(shell.split("/etc/shadow")).toHaveLength(2);
 
@@ -726,29 +580,15 @@ describe("the install block warns about a locked password", () => {
  * stays inside it.
  */
 describe("the blocks survive being pasted into a live shell", () => {
-  const statements = (shell: string) => shell.split("\n").filter((l) => !l.startsWith("#"));
-
-  it("wraps each block in a subshell", async () => {
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
-    for (const shell of [installShell(res), revokeShell(res)]) {
-      expect(statements(shell)[0]).toBe("(");
-      expect(statements(shell).at(-1)).toBe(")");
-    }
-  });
-
-  it("ends the block on a failure and leaves the shell running", async () => {
-    // A `set -e` that had leaked out would take the whole paste — and the
+  it("ends the block on a failure, leaves the shell running, and answers its status", async () => {
+    // A `set -e` or `exit` that leaked out would take the whole paste — and the
     // session it was pasted into — down with the failing command.
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
     const bin = await binWith("su", "exit 7");
-    const run = await runScript([installShell(res), `echo STILL-HERE`].join("\n"), { bin });
-    expect(run.stdout).toContain("STILL-HERE");
-  });
-
-  it("answers with the status of what ran inside it", async () => {
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
-    const run = await runScript(installShell(res), { bin: await binWith("su", "exit 7") });
-    expect(run.code).toBe(7);
+    for (const shell of [installShell(minted), revokeShell(minted)]) {
+      const run = await runScript([shell, `echo STILL-HERE`].join("\n"), { bin });
+      expect(run.stdout).toContain("STILL-HERE");
+      expect((await runScript(shell, { bin })).code).toBe(7);
+    }
   });
 });
 
@@ -762,18 +602,17 @@ describe("the blocks survive being pasted into a live shell", () => {
 describe("the install block appends a whole line", () => {
   async function installInto(existing: string | null) {
     const home = await mkdtemp(join(tmpdir(), "ssh-append-"));
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
     const keys = join(home, ".ssh", "authorized_keys");
     if (existing !== null) {
       await mkdir(join(home, ".ssh"), { recursive: true });
       await writeFile(keys, existing);
     }
-    const line = `restrict ${publicKeyFromOpenSshPrivateKey(res.private_key!)} appstrate\n`;
+    const line = `restrict ${publicKeyFromOpenSshPrivateKey(minted.private_key!)} appstrate\n`;
     return {
       line,
-      run: await runScript(installShell(res), { home }),
+      run: await runScript(installShell(minted), { home }),
       read: () => readFile(keys, "utf8"),
-      again: () => runScript(installShell(res), { home }),
+      again: () => runScript(installShell(minted), { home }),
     };
   }
 
@@ -820,9 +659,8 @@ describe("root performs no write under the account's home", () => {
   const rootHalf = (shell: string) =>
     shell.replace(/<<'APPSTRATE_SSH'\n[\s\S]*?\nAPPSTRATE_SSH/g, "<<'APPSTRATE_SSH'");
 
-  it("leaves both blocks with nothing for root to open, create, chown or chmod", async () => {
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
-    for (const shell of [installShell(res), revokeShell(res)]) {
+  it("leaves both blocks with nothing for root to open, create, chown or chmod", () => {
+    for (const shell of [installShell(minted), revokeShell(minted)]) {
       const root = rootHalf(shell);
       expect(root).toContain("su -s /bin/sh agent <<'APPSTRATE_SSH'");
       for (const verb of ["chown", "chmod", "install ", ">>"]) {
@@ -845,8 +683,7 @@ describe("root performs no write under the account's home", () => {
     await mkdir(join(home, ".ssh"), { recursive: true });
     await symlink(victim, keys);
 
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
-    const install = await runScript(installShell(res), { home });
+    const install = await runScript(installShell(minted), { home });
     expect(install.code).toBe(0);
     expect(await readFile(victim, "utf8")).toStartWith("VICTIM\n");
     expect(await readFile(victim, "utf8")).toContain("restrict ssh-ed25519");
@@ -854,7 +691,7 @@ describe("root performs no write under the account's home", () => {
     expect((await lstat(keys)).isSymbolicLink()).toBe(true);
 
     // And the teardown prunes through the same link, back to the byte.
-    const revoke = await runScript(revokeShell(res), { home });
+    const revoke = await runScript(revokeShell(minted), { home });
     expect(`${revoke.code} ${revoke.stderr}`.trim()).toBe("0");
     expect(await readFile(victim, "utf8")).toBe("VICTIM\n");
     expect((await lstat(keys)).isSymbolicLink()).toBe(true);
@@ -873,21 +710,15 @@ describe("the generated revoke script", () => {
     lines: string[] | null,
   ): Promise<{ run: ShellRun; left?: string; file: string }> {
     const home = await mkdtemp(join(tmpdir(), "ssh-revoke-"));
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
-    const keyBase64 = publicKeyFromOpenSshPrivateKey(res.private_key!).split(/\s+/)[1]!;
+    const keyBase64 = publicKeyFromOpenSshPrivateKey(minted.private_key!).split(/\s+/)[1]!;
     const file = join(home, ".ssh", "authorized_keys");
     if (lines) {
       await mkdir(join(home, ".ssh"), { recursive: true });
       await writeFile(file, lines.map((l) => l.replace("<KEY>", keyBase64)).join("\n") + "\n");
     }
-    const run = await runScript(revokeShell(res), { home });
+    const run = await runScript(revokeShell(minted), { home });
     return { run, left: lines ? await readFile(file, "utf8") : undefined, file };
   }
-
-  it("is valid POSIX shell", async () => {
-    const res = (await provisionCredentials(SSH_ID, SSH_AUTH, { ...base }, null))!;
-    expect(await parses(revokeShell(res))).toBe("0");
-  });
 
   it("removes this key's line and leaves every other one", async () => {
     const { run, left } = await revokeAgainst([

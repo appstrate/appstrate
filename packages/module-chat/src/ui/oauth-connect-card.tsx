@@ -16,10 +16,10 @@
  *  1. `postMessage` from the callback popup (same-browser, instant).
  *  2. a `BroadcastChannel` publish (same browser even if the user finished in a
  *     plain tab rather than the popup).
- *  3. a card-local `connection_update` SSE stream (cross-tab/device backstop),
- *     which only settles once the card's popup is gone — see `connect-waiter.ts`.
- * A completion message settles at once; an SSE hit waits for the card's popup
- * to close. `resumed` guards against a double resume.
+ *  3. a card-local `connection_update` SSE stream (cross-tab/device backstop).
+ * A failure settles at once and leaves the card retryable; a success waits for
+ * the card's popup to close — see `connect-waiter.ts`. `resumed` guards against
+ * a double resume.
  *
  * The callback page contract — channel name, message type, payload and the
  * origin policy both directions must agree on — lives in
@@ -49,8 +49,8 @@ import {
 import { Button } from "@appstrate/ui/components/button";
 import { useChatHeaders } from "./runtime-context.ts";
 import { orgSpaceFromHeaders } from "./run-events.ts";
-import { claimResume, encodeResume, type ResumeMeta } from "./auth-offer.ts";
-import { createConnectWaiter } from "./connect-waiter.ts";
+import { claimResume, encodeResume, type CompletionDetail, type ResumeMeta } from "./auth-offer.ts";
+import { createConnectWaiter, routeCompletion } from "./connect-waiter.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 
 type Phase = "idle" | "pending" | "done" | "connected" | "error";
@@ -225,7 +225,7 @@ export function OAuthConnectCard({
   // closes must survive the listener effect re-running (phase, headers, meta).
   const [waiter] = useState(createConnectWaiter);
   useEffect(() => {
-    waiter.bind(complete);
+    waiter.bind(() => complete(true));
   }, [waiter, complete]);
   useEffect(() => {
     waiter.resume();
@@ -246,11 +246,13 @@ export function OAuthConnectCard({
     // package-addressed completion on either carrier — the intended direction,
     // since it cannot tell its own integration's completion from anyone else's.
     const card = { state, packageId };
+    const onCompletion = (d: CompletionDetail) =>
+      routeCompletion(d, waiter, (error) => complete(false, error));
 
     // `acceptsCompletionMessage` validates `ev.origin` before the payload — a
     // `message` listener that skips that check authenticates nothing.
     const onMessage = (ev: MessageEvent) => {
-      if (acceptsCompletionMessage(ev, window.location.origin, card)) waiter.completion(ev.data);
+      if (acceptsCompletionMessage(ev, window.location.origin, card)) onCompletion(ev.data);
     };
     window.addEventListener("message", onMessage);
 
@@ -262,21 +264,21 @@ export function OAuthConnectCard({
         bc.onmessage = (ev) => {
           // `completionMatches` is a type guard, so the raw `data` narrows here.
           const d: unknown = ev.data;
-          if (completionMatches(d, card)) waiter.completion(d);
+          if (completionMatches(d, card)) onCompletion(d);
         };
       } catch {
         bc = null;
       }
     }
 
-    const closeSse = watchConnectionSse(getHeaders, packageId, () => waiter.connectionSeen());
+    const closeSse = watchConnectionSse(getHeaders, packageId, () => waiter.connected());
 
     return () => {
       window.removeEventListener("message", onMessage);
       bc?.close();
       closeSse();
     };
-  }, [phase, state, packageId, getHeaders, waiter]);
+  }, [phase, state, packageId, getHeaders, waiter, complete]);
 
   const start = () => {
     if (!authUrl) return;

@@ -1,16 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The one credential-entry surface. Its whole job is turning the auth served by
- * `GET /api/integrations/connect/context` into inputs — every declared field,
- * and only those, with the labels and descriptions it declares. Values are the
- * caller's: the form seeds them with `initialCredentialValues` and owns them
- * from there.
- *
- * It filters NOTHING. A credential the platform mints for itself is already
- * absent from that schema, stripped server-side, because which names a
- * provisioning kind owns is a property of the provisioner rather than of the
- * manifest. A second filter here could only ever disagree with the first.
+ * The credential form renders the auth `GET /api/integrations/connect/context`
+ * serves: every declared field, with its declared label and description.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -23,10 +15,7 @@ import type { IntegrationManifestAuth } from "../../../hooks/use-integrations.ts
 await i18nReady;
 await i18n.changeLanguage("fr");
 
-/**
- * The @appstrate/ssh auth AS THE CONTEXT ENDPOINT SERVES IT: the minted
- * `private_key` is already gone, so these four are what the form must ask for.
- */
+/** The @appstrate/ssh auth as the context endpoint serves it (minted key stripped). */
 const SSH_AUTH = {
   type: "custom",
   credentials: {
@@ -68,8 +57,20 @@ describe("CredentialFields — the served schema, verbatim", () => {
     for (const shown of ["host", "port", "user", "host_key"]) {
       expect(inputTag(markup, shown)).not.toBeNull();
     }
-    // And nothing it does not declare.
-    expect(inputTag(markup, "private_key")).toBeNull();
+    // Nothing undeclared: not the minted key, not an auth-type default field.
+    for (const hidden of ["private_key", "api_key", "password"]) {
+      expect(inputTag(markup, hidden)).toBeNull();
+    }
+  });
+
+  it("renders no input for an auth whose declared properties are empty", () => {
+    // Every field minted server-side leaves `properties: {}` — not a cue to
+    // fall back on the auth type's default fields.
+    const allMinted = {
+      type: "api_key",
+      credentials: { schema: { type: "object", properties: {} } },
+    } as unknown as IntegrationManifestAuth;
+    expect(html(allMinted)).not.toContain("field-input-");
   });
 });
 
@@ -90,14 +91,9 @@ describe("CredentialFields — manifest-declared presentation", () => {
 });
 
 describe("CredentialFields — values belong to the caller", () => {
-  it("renders the value it is given", () => {
+  it("renders the value it is given, a cleared one included", () => {
     const seeded = html(SSH_AUTH, initialCredentialValues(SSH_AUTH));
     expect(inputTag(seeded, "port")).toContain('value="22"');
-  });
-
-  it("lets a cleared field stay cleared", () => {
-    // Clearing a seeded field must stay cleared, or the box cannot be emptied
-    // at all.
     const cleared = html(SSH_AUTH, { ...initialCredentialValues(SSH_AUTH), port: "" });
     expect(inputTag(cleared, "port")).not.toContain('value="22"');
   });

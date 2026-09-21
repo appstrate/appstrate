@@ -1,44 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Credential PROVISIONING — the credentials an integration's auth needs but
- * that the person connecting should never have to produce by hand.
+ * Credential PROVISIONING — credentials an auth needs that the person
+ * connecting should never produce by hand. For SSH, the key pair: a pasted key
+ * is usually a PERSONAL one installed elsewhere; a minted pair is used nowhere
+ * else and never displayed. The host key is asked for, not scanned — a first
+ * unauthenticated contact is exactly what a machine-in-the-middle answers.
  *
- * For SSH that is the key pair, and nothing else: a user pasting a private key
- * is almost always pasting their PERSONAL key, already installed on ten other
- * machines, so the blast radius of an Appstrate credential leaves Appstrate. A
- * minted pair is used nowhere else and is never displayed, typed or copied.
- * The host key goes the other way — the platform could only obtain it over an
- * unauthenticated first contact, exactly what a machine-in-the-middle answers,
- * while the user reads it off the machine from a session they already
- * authenticated. So it is asked for, not minted.
+ * An auth opts in with `_meta["dev.appstrate/provisioning"]: { "kind": … }`
+ * (AFPS §10). What a kind mints is declared once, in {@link KINDS}, never in
+ * the (immutable) manifest.
  *
- * An auth opts in through `_meta["dev.appstrate/provisioning"]` (AFPS §10):
- * `{ "kind": "ssh_keypair" }`. The manifest names the KIND and nothing else:
- * WHICH credentials a kind mints is a property of the provisioner, i.e. of the
- * code in this file, so {@link KINDS} is the one declaration of it. A manifest
- * is content-addressed and immutable once published, and a second copy of that
- * list inside one could only ever disagree with the provisioner it describes.
+ * Invariants, stated here once:
+ * - SYSTEM PACKAGES ONLY: provisioning has the platform mint a key and author a
+ *   block pasted as root. {@link readProvisioning}, which every reader goes
+ *   through, refuses it elsewhere.
+ * - NO DOOR LETS A CLIENT SUPPLY `private_key`: the hosted form never renders
+ *   it, the portal overwrites it, and `POST .../connect/fields` (no
+ *   provisioner) refuses a minted name.
+ * - THE HANDOFF IS DERIVED FROM THE STORED BUNDLE, NEVER STORED: creation and
+ *   deletion screens both call {@link handoffStepsFor}, so they cannot drift.
+ * - THE STORED BUNDLE IS UNTRUSTED AT RENDER TIME: everything interpolated into
+ *   a pasted block is validated or rebuilt, never echoed.
  *
- * Honoured for SYSTEM packages only. A provisioning auth has the platform mint
- * a key and author the block a user pastes as root, so declaring one is a
- * platform privilege, not something any imported manifest can claim:
- * {@link readProvisioning} refuses the block on any other package, and every
- * reader goes through it.
- *
- * No door lets a client supply its own `private_key`:
- * {@link authWithoutMintedCredentials} takes those names out of the schema the
- * hosted form renders, so nobody is asked to type a value about to be
- * generated, and the programmatic `POST .../connect/fields` refuses a minted
- * name outright rather than storing a key the platform did not make.
- *
- * {@link KINDS} is the whole registry, one entry per kind: what it mints, the
- * minting, and what the user is left holding afterwards.
- *
- * Provisioning does NOT bound the fields the user DOES supply: that is the
- * manifest's `credentials.schema`, validated by `FieldsStrategy` on EVERY path
- * that creates a connection — including the programmatic
- * `POST .../connect/fields` import, which never runs a provisioner.
+ * The fields the user DOES supply are bounded by the manifest's
+ * `credentials.schema`, validated by `FieldsStrategy` on both doors.
  */
 
 import { invalidRequest } from "../../lib/errors.ts";
@@ -53,37 +39,23 @@ import { isBlockedHost } from "@appstrate/afps-shared/ssrf";
 import { isSystemPackage } from "../system-packages.ts";
 
 /**
- * One thing the user has to do, or check, once the platform minted its half.
- *
- * Steps are DATA, not named fields: the SPA renders the list, so a new `kind`
- * ships without a front-end branch. Two shapes, both with a consumer today — a
- * block to run and a value to read; publisher prose is already `setup_guide`
- * (AFPS §7.10).
- *
- * Each step carries an `id`, stable per provisioning kind, and `label`/`note`
- * in English beside it. A headless caller reads the English; the SPA keys a
- * translation on the `id` and falls back to it. Two audiences, one payload.
+ * One thing the user does or checks once the platform minted its half — data,
+ * so a new kind needs no front-end branch. `id` is stable per kind (the SPA's
+ * translation key); `label`/`note` are the English default.
  */
 export type HandoffStep =
   | {
       kind: "command";
-      /** Stable per kind. What a client keys a translation on. */
       id: string;
       label: string;
       /** Shell to run on the target. Copied, never executed by the platform. */
       shell: string;
       note?: string;
-      /**
-       * Not now — kept for when the connection is deleted. The platform cannot
-       * reach the target to undo anything itself, and a teardown block shown
-       * only once is a teardown nobody performs. The deletion surface renders
-       * these and hides the rest; the creation surface does the opposite.
-       */
+      /** Due at deletion, not now: the platform cannot reach the target to undo anything. */
       deferred?: boolean;
     }
   | { kind: "value"; id: string; label: string; value: string; note?: string };
 
-/** The submitted, not-yet-persisted credential bag. */
 type SubmittedFields = Record<string, unknown>;
 
 function requiredString(fields: SubmittedFields, name: string): string {
@@ -93,11 +65,7 @@ function requiredString(fields: SubmittedFields, name: string): string {
   return value;
 }
 
-/**
- * Where a target keeps the public half of the host key we pinned. Enumerated
- * rather than derived: the path is interpolated into a script that runs as
- * root, and the set is exactly the two types `parsePublicKeyLine` admits.
- */
+/** Enumerated, not derived: the path is interpolated into a root script. */
 const HOST_KEY_PUB_FILE: Record<PublicKeyType, string> = {
   "ssh-ed25519": "/etc/ssh/ssh_host_ed25519_key.pub",
   "ssh-rsa": "/etc/ssh/ssh_host_rsa_key.pub",
@@ -117,36 +85,12 @@ function publicKeyBase64(publicKey: string): string {
 }
 
 /**
- * Render the one block the user pastes on the target: it authorises the minted
- * public key on the account they named, and nothing else.
- *
- * Root touches no path under that account's home: every filesystem operation is
- * handed to `su`, which performs it AS the account. Opening, creating, chowning
- * or chmoding follows symlinks, and the home belongs to the very account an
- * agent gets a shell on — so a swapped `~/.ssh/authorized_keys` would hand root
- * whatever it points at, on a block the user is invited to replay. Writing
- * through such a link as the account is that account's own privilege, and
- * changes nothing it could not already do.
- *
- * There is deliberately no `command=`: what an agent may do is what the ACCOUNT
- * may do, and narrowing that is the operator's act on their own machine — a
- * dedicated user, sudoers, a restricted shell. The setup guide says so.
- *
- * Everything interpolated is platform-minted or validated: the account against
- * {@link USER_NAME_RE}, the host-key file picked from a fixed table, the public
- * key rebuilt by `publicKeyFromOpenSshPrivateKey` as `ssh-ed25519 <base64>`
- * (never a string read out of the stored container, which is not trusted at
- * render time), and the trailing comment a literal of this file's. So nothing
- * here can carry shell syntax across — including into the `su` payload, a
- * QUOTED heredoc, which the shell passes on without expanding a character.
- *
- * The whole thing runs in a subshell, because it is PASTED — into an
- * interactive root shell, where a top-level `set -eu` would outlive the block
- * and an `exit 1` would close the session. The parentheses keep both inside,
- * and the subshell's status is still the block's.
- *
- * It ends by printing the host fingerprint, from a session the user already
- * authenticated, so comparing it with what they pasted costs one glance.
+ * The block that authorises the minted key on the named account. Filesystem
+ * work goes through `su` AS the account: root following a swapped
+ * `authorized_keys` symlink would write wherever it points. No `command=`: the
+ * operator narrows the ACCOUNT. Every interpolation is validated and the `su`
+ * payload is a QUOTED heredoc. The subshell keeps `set -eu`/`exit` from
+ * outliving a paste into an interactive root shell.
  */
 function renderInstallCommand(user: string, publicKey: string, hostKeyPub: string): string {
   return [
@@ -220,17 +164,8 @@ function renderInstallCommand(user: string, publicKey: string, hostKeyPub: strin
 }
 
 /**
- * Render the block that takes this key back off the target. Matched on the
- * key's own base64 (`grep -F`, so none of its characters is a pattern), which
- * removes exactly this connection's line and no other.
- *
- * Filtered AS the account, and wrapped in a subshell, for the two reasons
- * {@link renderInstallCommand} is: root opens no path under a home that account
- * controls, and neither `set -eu` nor a failure outlives a pasted block.
- *
- * Two outcomes are ordinary rather than failures, and each would otherwise
- * destroy the file under `set -e`: no `authorized_keys` at all, and a `grep`
- * that matched every line — a file holding this key and no other.
+ * The block that removes this key (`grep -vF` on its base64), as the account and
+ * in a subshell like {@link renderInstallCommand}.
  */
 function renderRevokeCommand(user: string, publicKey: string): string {
   return [
@@ -260,18 +195,8 @@ function renderRevokeCommand(user: string, publicKey: string): string {
 const USER_NAME_RE = /^[a-z_][a-z0-9_-]{0,31}$/;
 
 /**
- * The pair a reconnect already installed, or null when there is none to keep.
- *
- * A pair is reused only on the TARGET it was installed on — same host, port and
- * account. Reusing it there is what keeps the installed line describable: a
- * second pair for the same target strands the first public key in that
- * `authorized_keys`, and the platform cannot reach the host to take it out.
- *
- * When the target changes, a fresh pair is minted, and the line on the previous
- * target stays there — unusable, since its private half is overwritten, and
- * described by no block the platform can still render. Removing it is the
- * operator's, on the machine they own. A stored half this build cannot read
- * describes nothing either, so it is not kept.
+ * The stored key, if it targets the SAME host/port/account and is readable —
+ * a second pair would strand the installed line. Otherwise null: mint afresh.
  */
 function reusableSshPrivateKey(
   existing: Record<string, unknown> | null,
@@ -305,11 +230,8 @@ async function provisionSshKeyPair(
     throw invalidRequest("`port` must be a number between 1 and 65535");
   }
 
-  // Mirror the RUNNER's egress floor — deliberately WITHOUT the operator's
-  // EGRESS_ALLOW_INTERNAL_HOSTS allowlist, which the runner's CONNECT listener
-  // does not honour: a connection created on the looser floor produces runs
-  // that always fail. Literals only — nothing here opens a socket to this host,
-  // so nothing here resolves its name either.
+  // The RUNNER's egress floor (it ignores EGRESS_ALLOW_INTERNAL_HOSTS), on
+  // literals only: nothing here connects to or resolves this host.
   if (isBlockedHost(host)) {
     throw invalidRequest(
       "runs cannot reach this host: it is a private, loopback or link-local address, " +
@@ -317,34 +239,21 @@ async function provisionSshKeyPair(
     );
   }
 
-  // SUPPLIED, not scanned: a scan is an unauthenticated first contact, which
-  // is what a machine-in-the-middle answers. Shape is the manifest's job
-  // (`credentials.schema.pattern`, validated on BOTH doors); what is checked
-  // here is only what this file interpolates into a root script.
+  // Checked only as far as this file interpolates it; shape is the manifest's.
   const hostKey = requiredString(fields, "host_key");
   hostKeyPubFile(hostKey);
 
-  // Credentials only: what the user must DO with them is rendered by
-  // `sshHandoffSteps` from this very bundle, months later as well as now.
   const target = { host, port: String(port), user };
   return {
-    private_key:
-      reusableSshPrivateKey(existing, target) ?? generateOpenSshEd25519KeyPair().privateKey,
+    private_key: reusableSshPrivateKey(existing, target) ?? generateOpenSshEd25519KeyPair(),
     ...target,
     host_key: hostKey,
   };
 }
 
 /**
- * Render every step a minted SSH connection implies, from the credential bundle
- * alone: the block to install, the fingerprint to compare, and the block that
- * takes the key back off the target later.
- *
- * DERIVED, never stored, on BOTH surfaces — the screen after the connect form
- * and the one handing the removal back months later call this same function, so
- * the two cannot disagree. Fail-soft: a bundle too incomplete to describe a
- * step yields an empty list rather than a half-built command, since a
- * `grep -vF ''` would empty the file it is meant to prune.
+ * The SSH steps, from the bundle alone. `[]` on an incomplete bundle, never a
+ * half-built command: `grep -vF ''` would empty the file.
  */
 function sshHandoffSteps(credentials: Record<string, unknown>): HandoffStep[] {
   const user = typeof credentials.user === "string" ? credentials.user.trim() : "";
@@ -395,17 +304,11 @@ function sshHandoffSteps(credentials: Record<string, unknown>): HandoffStep[] {
   ];
 }
 
-/**
- * Every kind, and everything a kind IS — three halves that are not
- * independently optional: a kind shipping a provisioner and no `provides` would
- * mint a private key and then let a client supply its own. `handoff` renders
- * from the STORED bundle, so the screen after the form and the one months later
- * derive the same block instead of one of them replaying a copy.
- */
+/** One entry per kind: what it mints, the minting, and the steps it leaves the user. */
 const KINDS: Record<
   string,
   {
-    /** What the kind MINTS — the sole declaration of it, moving with `mint`. */
+    /** Names the platform owns: never read from a request body, never asked for. */
     provides: readonly string[];
     mint: (
       fields: SubmittedFields,
@@ -415,53 +318,36 @@ const KINDS: Record<
   }
 > = {
   ssh_keypair: {
-    // The only thing the platform mints. NOT `host_key`: the user supplies that.
+    // NOT `host_key`: the user supplies that.
     provides: ["private_key"],
     mint: provisionSshKeyPair,
     handoff: sshHandoffSteps,
   },
 };
 
-/**
- * The steps a connection's credentials imply, for an auth that provisions.
- *
- * Empty for an auth that provisions nothing, for a kind that leaves nothing
- * behind, and for a bundle too incomplete to describe a step — a caller
- * renders nothing rather than a half-built command.
- */
+type Provisioning = (typeof KINDS)[string];
+
+/** The steps a connection's credentials imply; `[]` when there are none. */
 export function handoffStepsFor(
   packageId: string,
   auth: unknown,
   credentials: Record<string, unknown>,
 ): readonly HandoffStep[] {
-  let declaration: ProvisioningDeclaration | null;
+  let provisioning: Provisioning | null;
   try {
-    declaration = readProvisioning(packageId, auth);
+    provisioning = readProvisioning(packageId, auth);
   } catch {
-    // A manifest this build cannot read, or one claiming provisioning it may
-    // not, is not a reason to refuse a deletion.
+    // An unreadable or refused declaration must never block a deletion.
     return [];
   }
-  if (!declaration) return [];
-  return KINDS[declaration.kind]!.handoff(credentials);
-}
-
-export interface ProvisioningDeclaration {
-  kind: string;
-  /** Names the platform owns: never read from a request body, never asked for. */
-  provides: readonly string[];
+  return provisioning?.handoff(credentials) ?? [];
 }
 
 /**
- * Read `_meta["dev.appstrate/provisioning"]` off an auth block of `packageId`,
- * or null when the auth provisions nothing. The one chokepoint every reader
- * goes through, so it is where the system-package rule lives.
- *
- * Throws, never falls back to "the user types it", on a block declared by a
- * package that is not a system package and on a kind this build does not know:
- * either fallback would ask for a credential the manifest expects to be minted.
+ * The provisioner an auth declares, or null. Throws on a non-system package or
+ * an unknown kind — never falls back to "the user types it".
  */
-export function readProvisioning(packageId: string, auth: unknown): ProvisioningDeclaration | null {
+export function readProvisioning(packageId: string, auth: unknown): Provisioning | null {
   const meta = (auth as { _meta?: Record<string, unknown> } | null)?._meta;
   const block = meta?.["dev.appstrate/provisioning"] as { kind?: unknown } | undefined;
   if (!block) return null;
@@ -471,36 +357,26 @@ export function readProvisioning(packageId: string, auth: unknown): Provisioning
     );
   }
   const kind = block.kind;
-  if (typeof kind !== "string" || !(kind in KINDS)) {
+  const provisioning =
+    typeof kind === "string" && Object.hasOwn(KINDS, kind) ? KINDS[kind] : undefined;
+  if (!provisioning) {
     throw invalidRequest(`unknown credential provisioning kind: ${String(kind)}`);
   }
-  return { kind, provides: KINDS[kind]!.provides };
+  return provisioning;
 }
 
 /**
- * The same auth with the credentials the platform mints taken out of
- * `credentials.schema` — what the hosted connect form is handed, so it renders
- * inputs for what only the user can answer.
- *
- * Display only, and deliberately a SERVER answer: the stored shape genuinely
- * holds those names, so "what the form asks for" and "what a connection is
- * made of" are two different questions and the client should be answering
- * neither. Submitted bags are still validated against the FULL manifest schema,
- * and whatever a body carries for a minted name is overwritten by what
- * {@link provisionCredentials} returns.
- *
- * Returns a copy. The manifest it comes from is shared, so a strip written
- * through it would be a strip every later reader sees.
+ * A copy of the auth without the minted names in `credentials.schema`, for the
+ * hosted form. Display only: submissions are validated against the full schema.
  */
 export function authWithoutMintedCredentials<T>(packageId: string, auth: T): T {
-  const declaration = readProvisioning(packageId, auth);
-  if (declaration === null || declaration.provides.length === 0) return auth;
+  const provisioning = readProvisioning(packageId, auth);
+  if (!provisioning) return auth;
   const block = auth as { credentials?: { schema?: { properties?: unknown; required?: unknown } } };
   const schema = block.credentials?.schema;
   if (!schema) return auth;
-  const minted = new Set<string>(declaration.provides);
-  // Each half only if the manifest declares it: an absent `properties` means
-  // "this auth names no fields", which an empty object would not.
+  const minted = new Set<string>(provisioning.provides);
+  // Each half only if declared: absent `properties` ≠ an empty object.
   const next = { ...schema };
   if (schema.properties && typeof schema.properties === "object") {
     next.properties = Object.fromEntries(
@@ -516,12 +392,8 @@ export function authWithoutMintedCredentials<T>(packageId: string, auth: T): T {
 }
 
 /**
- * Run the provisioner an auth declares. Returns null when it declares none,
- * so the caller keeps the plain "whatever was submitted" path.
- *
- * `existing` is the decrypted bundle of the connection being RECONNECTED, or
- * null when one is being created: a kind that already put something on a target
- * carries it over rather than minting a second copy nobody can undo.
+ * Run the declared provisioner, or null. `existing` is the decrypted bundle of
+ * a RECONNECTED connection (null on creation).
  */
 export async function provisionCredentials(
   packageId: string,
@@ -529,7 +401,6 @@ export async function provisionCredentials(
   fields: SubmittedFields,
   existing: Record<string, unknown> | null,
 ): Promise<Record<string, string> | null> {
-  const declaration = readProvisioning(packageId, auth);
-  if (!declaration) return null;
-  return KINDS[declaration.kind]!.mint(fields, existing);
+  const provisioning = readProvisioning(packageId, auth);
+  return provisioning ? provisioning.mint(fields, existing) : null;
 }

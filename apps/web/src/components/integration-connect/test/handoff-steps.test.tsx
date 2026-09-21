@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The handoff list is the screen a user reads while a minted credential is half
- * installed, and the whole point of making it DATA is that this renderer knows
- * nothing about SSH. So what is pinned here is the contract, not the wording:
- * each kind renders its payload, and a deferred step is present but out of the
- * way — if it were dropped, the removal command would exist nowhere and the key
- * would live on the target forever.
+ * The renderer knows nothing about SSH, so what is pinned is the contract:
+ * each kind renders its payload, in the order received, and a deferred step is
+ * collapsed but present — dropped, the removal command would exist nowhere.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -55,7 +52,8 @@ describe("HandoffSteps", () => {
     const markup = render(<HandoffSteps steps={[STEPS[0]!]} />);
     expect(markup).toContain("Paste this on the target server");
     expect(markup).toContain("install -d ~agent/.ssh");
-    expect(markup).toContain('data-testid="handoff-copy-0"');
+    expect(markup).toContain('data-testid="handoff-step-0"');
+    expect(markup).toContain("<button");
   });
 
   it("renders a value step's value and its note", () => {
@@ -64,11 +62,6 @@ describe("HandoffSteps", () => {
     expect(markup).toContain("the pinned key is not this server");
   });
 
-  /**
-   * The teardown block is the one the literature says this whole approach
-   * loses — "revoking requires remembering it exists". Collapsed is fine;
-   * absent is not.
-   */
   it("keeps a deferred step on the page, collapsed rather than dropped", () => {
     const markup = render(<HandoffSteps steps={STEPS} />);
     expect(markup).toContain("<details");
@@ -76,7 +69,7 @@ describe("HandoffSteps", () => {
     expect(markup).toContain("grep -vF");
   });
 
-  it("orders the steps to do now before the deferred one", () => {
+  it("renders the steps in the order received", () => {
     const markup = render(<HandoffSteps steps={STEPS} />);
     const now = markup.indexOf("Paste this on the target server");
     const fingerprint = markup.indexOf("Host fingerprint, pinned");

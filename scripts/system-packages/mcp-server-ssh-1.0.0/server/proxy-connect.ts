@@ -32,11 +32,7 @@ export interface ConnectVerdict {
 export function parseConnectResponse(banner: Buffer): ConnectVerdict | null {
   const end = banner.indexOf("\r\n\r\n");
   if (end === -1) return null;
-  const head = banner.subarray(0, end).toString("latin1");
-  const statusLine = head.slice(
-    0,
-    head.indexOf("\r\n") === -1 ? head.length : head.indexOf("\r\n"),
-  );
+  const statusLine = banner.subarray(0, end).toString("latin1").split("\r\n", 1)[0]!;
   return {
     ok: /^HTTP\/1\.[01] 2\d\d/.test(statusLine),
     statusLine,

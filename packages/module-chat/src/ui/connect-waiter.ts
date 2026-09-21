@@ -1,34 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * When the connect card may settle — pure (no React, no DOM) so the ordering
- * rules are testable without a browser.
- *
- * The two kinds of signal mean different things:
- *  - the completion message (`postMessage` / `BroadcastChannel`) is the connect
- *    page saying the flow is OVER; it settles at once.
- *  - the SSE `connection_update` only says the connection ROW exists. For a
- *    credential the platform provisions (SSH), the row exists while the connect
- *    page is still showing the install block the user has to run on the target;
- *    resuming then sends the agent at a host that does not trust the key yet.
- *
- * So an SSE hit settles only once the popup this card opened is gone: the SSE
- * is the backstop for a lost message, and a message can only be lost for good
- * once the window that would send it has closed. A handle severed by a
- * cross-origin-isolated provider page reads `closed`, which is exactly the case
- * where its `postMessage` cannot reach us either. The gate reads nothing but
- * that window, so the SSE frame and the page's own signals may arrive in any
- * order; the connect page's "held open" broadcast is not consulted.
- *
- * The gate covers the card's OWN popup only. When the card holds no handle —
- * the button was never clicked (the form was opened elsewhere, e.g. on another
- * device) or the browser blocked the popup — an SSE hit settles at once, which
- * for a provisioned credential can precede the key's installation on the
- * target. The model never receives the connect URL, so the card's button is the
- * path a user normally takes.
+ * When the connect card may resume after a success (completion message or SSE
+ * `connection_update`): only once the card's own popup is closed, because an SSH
+ * connection exists while that popup still shows the install block to run on
+ * the target. Limit: a card holding no popup handle (never clicked, popup
+ * blocked) settles at once, which can precede the key's installation.
+ * The waiter can call `onConnected` again after settling; the card's `resumed`
+ * flag is what keeps a second resume out.
  */
 
-import type { CompletionDetail } from "./auth-offer.ts";
+import type { IntegrationConnectCompletion } from "@appstrate/core/connect-handshake";
 
 /** The part of a `Window` handle the waiter reads. */
 export interface PopupHandle {
@@ -46,66 +28,62 @@ const everyInterval: Every = (fn, ms) => {
 };
 
 export interface ConnectWaiter {
-  /** Where a settlement goes — rebound whenever the card's callback changes. */
-  bind(settle: (ok: boolean, error?: string) => void): void;
+  bind(onConnected: () => void): void;
   /** The card opened `popup` (null when the browser blocked it). */
   popupOpened(popup: PopupHandle | null): void;
-  /** A completion message addressed to this card arrived. */
-  completion(detail: CompletionDetail): void;
-  /** The SSE backstop saw this card's connection row appear. */
-  connectionSeen(): void;
-  /** Stop polling; the waiter stays usable (a StrictMode remount reuses it). */
+  /** A success signal for this card arrived. */
+  connected(): void;
+  /** Stop polling; {@link resume} restarts it (a StrictMode remount reuses the waiter). */
   stop(): void;
-  /** Restart polling for an SSE hit parked before {@link stop}; called on mount. */
   resume(): void;
 }
 
 export function createConnectWaiter(every: Every = everyInterval): ConnectWaiter {
-  let settle: (ok: boolean, error?: string) => void = () => {};
+  let onConnected = () => {};
   let popup: PopupHandle | null = null;
   let seen = false;
-  let settled = false;
   let cancelPoll: (() => void) | null = null;
 
   const stop = () => {
     cancelPoll?.();
     cancelPoll = null;
   };
-  const popupOpen = () => popup !== null && !popup.closed;
-
-  const settleIfSeen = () => {
-    if (settled || !seen || popupOpen()) return;
-    settled = true;
+  const check = () => {
+    if (!seen || (popup && !popup.closed)) return;
+    seen = false;
     stop();
-    settle(true);
+    onConnected();
   };
-  const poll = () => {
-    settleIfSeen();
-    if (seen && !settled && !cancelPoll) cancelPoll = every(settleIfSeen, POPUP_POLL_MS);
+  const resume = () => {
+    check();
+    if (seen && !cancelPoll) cancelPoll = every(check, POPUP_POLL_MS);
   };
 
   return {
     bind(fn) {
-      settle = fn;
+      onConnected = fn;
     },
     popupOpened(p) {
       popup = p;
     },
-    completion(detail) {
-      if (settled) return;
-      const ok = detail.ok !== false;
-      // A failure leaves the card retryable, so only success is final.
-      if (ok) {
-        settled = true;
-        stop();
-      }
-      settle(ok, detail.error);
-    },
-    connectionSeen() {
+    connected() {
       seen = true;
-      poll();
+      resume();
     },
     stop,
-    resume: poll,
+    resume,
   };
+}
+
+/**
+ * A failure reaches `fail` at once, popup open or not, and leaves the waiter
+ * armed for a retry; only a success waits on the popup.
+ */
+export function routeCompletion(
+  d: IntegrationConnectCompletion,
+  waiter: ConnectWaiter,
+  fail: (error?: string) => void,
+): void {
+  if (d.ok === false) fail(d.error);
+  else waiter.connected();
 }

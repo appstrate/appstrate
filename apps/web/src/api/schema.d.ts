@@ -1528,7 +1528,7 @@ export interface paths {
          * Import a connection by submitting credentials directly (programmatic)
          * @description Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).
          *
-         *     This door runs no provisioner, so a credential name the platform mints for the kind the auth declares (`_meta["dev.appstrate/provisioning"].kind`) is refused with a 400 naming the field: submitting one would have the platform hand the target an install block for a key it did not mint. An auth that mints such a name — and requires it — is therefore connectable only through the Connect portal (`initiateIntegrationConnect`).
+         *     A credential the platform mints (auth declaring `_meta["dev.appstrate/provisioning"]`) is refused with a 400 naming the field; such an auth connects through the Connect portal (`initiateIntegrationConnect`).
          */
         post: operations["importIntegrationConnection"];
         delete?: never;
@@ -1938,7 +1938,7 @@ export interface paths {
         };
         /**
          * What is due on the target when this connection is deleted
-         * @description For a connection whose credentials the platform MINTED, the steps the user owns on their own machine AT DELETION — the block that takes the key back off the target, and nothing else. Deleting the connection destroys the platform's half only, since the platform has no access to the target. The steps due at CREATION (installing the key, comparing the fingerprint) come back from `submitIntegrationConnect`, which the connect portal shows once on the screen right after the form; this endpoint does not re-serve them. This list IS the deletion-time set, so `deferred` — the flag that separates those steps from the others on the submit response — is stripped from every step here. DERIVED from the credential bundle on demand, never stored: every step is a pure function of the key it describes. An empty list for an auth that mints nothing, and for an unknown, malformed or not-owned id (same non-disclosure as the DELETE beside it).
+         * @description For a connection whose credentials the platform minted, the steps to run on the target when deleting it (e.g. removing the installed key) — deleting the connection cannot reach the target. Creation-time steps come only from `submitIntegrationConnect`. `deferred` is omitted: every step here is deletion-time. Empty for an auth that mints nothing, and for an unknown, malformed or not-owned id.
          */
         get: operations["getMyConnectionHandoff"];
         put?: never;
@@ -5397,7 +5397,7 @@ export interface components {
             /** @description Shell to run on the target. The platform never runs it. */
             shell: string;
             note?: string;
-            /** @description Due when the connection is deleted, not now. Carried by `submitIntegrationConnect`, which hands out both halves; `getMyConnectionHandoff` is the deletion set itself and drops the flag. */
+            /** @description Due when the connection is deleted, not now. Only on `submitIntegrationConnect`; `getMyConnectionHandoff` omits it. */
             deferred?: boolean;
         };
         HandoffStep: components["schemas"]["HandoffCommandStep"] | components["schemas"]["HandoffValueStep"];
@@ -11323,11 +11323,11 @@ export interface operations {
                         auth_key: string;
                         display_name: string;
                         icon?: string | null;
-                        /** @description The auth declaration the form renders as-is. Credentials the platform mints for itself (an auth declaring `_meta["dev.appstrate/provisioning"]`, AFPS §10) are removed from `credentials.schema.properties` and `.required` here, so nobody is asked to type a value about to be generated; everything else is the manifest's own text. Display only: a submitted bag is validated against the full manifest schema and those names are dropped from it whatever it carries. */
+                        /** @description The auth declaration the form renders. Credentials the platform mints (`_meta["dev.appstrate/provisioning"]`, AFPS §10) are removed from `credentials.schema` — display only; submissions are validated against the full schema. */
                         auth: {
                             [key: string]: unknown;
                         };
-                        /** @description AFPS §7.10 publisher setup steps, rendered above the form so the instructions reach the person being asked for a credential. */
+                        /** @description AFPS §7.10 publisher setup steps, rendered above the form. */
                         setup_guide?: ({
                             steps?: {
                                 label: string;
@@ -11458,7 +11458,7 @@ export interface operations {
                             /** Format: date-time */
                             updatedAt: string;
                         };
-                        /** @description Present when the auth declares `_meta["dev.appstrate/provisioning"]`: what the user must now do with the material the platform minted, in order. Public halves only — the private key is sealed in the connection's envelope and is never returned. A list rather than named fields so a new provisioning kind ships without a front-end branch. Every step is DERIVED from the stored credential bundle, so this is the one surface that renders the install steps; the `deferred` ones are re-derived later by `getMyConnectionHandoff`. */
+                        /** @description Present when the auth declares `_meta["dev.appstrate/provisioning"]`: what the user must do with the material the platform minted, in order. Never contains a secret. Steps flagged `deferred` are due at deletion and are served again by `getMyConnectionHandoff`. */
                         handoff_steps?: components["schemas"]["HandoffStep"][];
                     };
                 };

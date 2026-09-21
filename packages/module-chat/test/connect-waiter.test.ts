@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * When the connect card settles. The case that matters: a platform-provisioned
- * credential (SSH) whose connection row — and so its SSE `connection_update` —
- * exists while the popup is still showing the install block. Resuming then
- * would send the agent at a host that does not trust the key yet.
+ * A success settles only once the card's popup is closed: an SSH connection
+ * exists while that popup still shows the install block.
  */
 
 import { describe, it, expect } from "bun:test";
-import { createConnectWaiter, type Every, type PopupHandle } from "../src/ui/connect-waiter.ts";
+import {
+  createConnectWaiter,
+  routeCompletion,
+  type Every,
+  type PopupHandle,
+} from "../src/ui/connect-waiter.ts";
 
 /** A popup whose `closed` the test flips. */
 function fakePopup(): PopupHandle & { close(): void } {
@@ -35,99 +38,100 @@ function manualEvery() {
 
 function setup() {
   const clock = manualEvery();
-  const calls: Array<{ ok: boolean; error?: string }> = [];
+  const calls = { count: 0 };
   const waiter = createConnectWaiter(clock.every);
-  waiter.bind((ok, error) => calls.push({ ok, error }));
+  waiter.bind(() => calls.count++);
   return { waiter, calls, clock };
 }
 
 describe("createConnectWaiter", () => {
-  it("does not resume on an SSE hit while the popup is still open", () => {
+  it("does not settle a success while the popup is still open", () => {
     const { waiter, calls, clock } = setup();
     waiter.popupOpened(fakePopup());
-    waiter.connectionSeen();
+    waiter.connected();
     clock.tick();
     clock.tick();
-    expect(calls).toEqual([]);
+    expect(calls.count).toBe(0);
   });
 
-  it("resumes on the completion message, SSE hit or not, and stops polling", () => {
+  it("settles once when the popup closes, then stops polling", () => {
     const { waiter, calls, clock } = setup();
     const popup = fakePopup();
     waiter.popupOpened(popup);
-    waiter.connectionSeen();
-    waiter.completion({ ok: true, packageId: "@appstrate/ssh" });
-    expect(calls).toEqual([{ ok: true, error: undefined }]);
-    expect(clock.pending()).toBe(0);
-    // The page closes itself after announcing; nothing settles a second time.
-    popup.close();
-    waiter.connectionSeen();
-    clock.tick();
-    expect(calls).toHaveLength(1);
-  });
-
-  it("resumes on a parked SSE hit once the popup closes", () => {
-    const { waiter, calls, clock } = setup();
-    const popup = fakePopup();
-    waiter.popupOpened(popup);
-    waiter.connectionSeen();
+    waiter.connected();
+    waiter.connected();
     popup.close();
     clock.tick();
-    expect(calls).toEqual([{ ok: true, error: undefined }]);
+    clock.tick();
+    expect(calls.count).toBe(1);
     expect(clock.pending()).toBe(0);
   });
 
-  it("resumes at once on an SSE hit that arrives after the popup closed", () => {
-    const { waiter, calls } = setup();
-    const popup = fakePopup();
-    waiter.popupOpened(popup);
-    popup.close();
-    waiter.connectionSeen();
-    expect(calls).toEqual([{ ok: true, error: undefined }]);
-  });
-
-  it("resumes at once on an SSE hit when the card opened no popup", () => {
+  it("settles at once when the card holds no popup", () => {
     const blocked = setup();
     blocked.waiter.popupOpened(null);
-    blocked.waiter.connectionSeen();
-    expect(blocked.calls).toEqual([{ ok: true, error: undefined }]);
+    blocked.waiter.connected();
+    expect(blocked.calls.count).toBe(1);
 
-    // Never clicked: the user followed a pasted link in another tab.
     const unclicked = setup();
-    unclicked.waiter.connectionSeen();
-    expect(unclicked.calls).toEqual([{ ok: true, error: undefined }]);
+    unclicked.waiter.connected();
+    expect(unclicked.calls.count).toBe(1);
   });
 
-  it("resumes a parked SSE hit after stop(), settling once the popup closes", () => {
+  it("still settles after stop() + resume()", () => {
     const { waiter, calls, clock } = setup();
     const popup = fakePopup();
     waiter.popupOpened(popup);
-    waiter.connectionSeen();
+    waiter.connected();
     waiter.stop();
     expect(clock.pending()).toBe(0);
     waiter.resume();
-    expect(calls).toEqual([]);
     popup.close();
     clock.tick();
-    clock.tick();
-    expect(calls).toEqual([{ ok: true, error: undefined }]);
+    expect(calls.count).toBe(1);
     expect(clock.pending()).toBe(0);
   });
 
-  it("does not poll on resume() before any SSE hit", () => {
+  it("does not poll on resume() before any success", () => {
     const { waiter, calls, clock } = setup();
     waiter.resume();
     expect(clock.pending()).toBe(0);
-    expect(calls).toEqual([]);
+    expect(calls.count).toBe(0);
+  });
+});
+
+describe("routeCompletion", () => {
+  it("settles a failure at once with the popup open, and leaves a retry settleable", () => {
+    const { waiter, calls, clock } = setup();
+    const failures: (string | undefined)[] = [];
+    const popup = fakePopup();
+    waiter.popupOpened(popup);
+    routeCompletion({ ok: false, error: "denied" }, waiter, (e) => failures.push(e));
+    expect(failures).toEqual(["denied"]);
+    expect(calls.count).toBe(0);
+    expect(clock.pending()).toBe(0);
+
+    // The retry: a fresh popup, then a success.
+    const retry = fakePopup();
+    waiter.popupOpened(retry);
+    routeCompletion({ ok: true }, waiter, (e) => failures.push(e));
+    retry.close();
+    clock.tick();
+    expect(calls.count).toBe(1);
+    expect(failures).toHaveLength(1);
   });
 
-  it("keeps a failed completion retryable", () => {
-    const { waiter, calls } = setup();
-    waiter.completion({ ok: false, error: "denied" });
-    waiter.completion({ ok: true });
-    expect(calls).toEqual([
-      { ok: false, error: "denied" },
-      { ok: true, error: undefined },
-    ]);
+  it("holds a success until the popup closes", () => {
+    const { waiter, calls, clock } = setup();
+    const failures: (string | undefined)[] = [];
+    const popup = fakePopup();
+    waiter.popupOpened(popup);
+    routeCompletion({ ok: true }, waiter, (e) => failures.push(e));
+    clock.tick();
+    expect(calls.count).toBe(0);
+    popup.close();
+    clock.tick();
+    expect(calls.count).toBe(1);
+    expect(failures).toEqual([]);
   });
 });

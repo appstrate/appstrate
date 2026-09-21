@@ -934,7 +934,6 @@
   "integration.connect.provisioned.title": "Connexion créée — une étape reste de votre côté",
   "integration.connect.provisioned.body": "Les identifiants dont cette connexion a besoin ont été générés et scellés dans le trousseau : ils ne sont pas affichés ici et ne peuvent pas être relus. Ce qui reste se fait sur la machine que cette connexion vise.",
   "integration.connect.provisioned.deferredHint": "à garder pour plus tard",
-  "integration.connect.provisioned.copied": "Copié",
   "integration.connect.provisioned.doneBtn": "C'est fait",
   "integration.connect.handoff.ssh_install.label": "À coller sur le serveur cible (en root, ou avec sudo)",
   "integration.connect.handoff.ssh_host_fingerprint.label": "Empreinte de l'hôte, épinglée",

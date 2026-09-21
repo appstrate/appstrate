@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Ed25519 key pairs in the two encodings OpenSSH actually reads. `node:crypto`
- * exports PKCS#8, which OpenSSH REFUSES for this curve (`ssh-keygen -y` answers
- * `invalid format`): ed25519 has no traditional PEM form and OpenSSH reads only
- * its own `OPENSSH PRIVATE KEY` container (PROTOCOL.key). The alternative is an
- * openssh-client in the platform image for one call, so it is encoded here.
+ * Ed25519 keys in the encodings OpenSSH reads. `node:crypto` exports PKCS#8,
+ * which OpenSSH refuses for ed25519; it reads only its own `OPENSSH PRIVATE KEY`
+ * container (PROTOCOL.key), encoded here rather than shipping openssh-client.
  */
 
 import { generateKeyPairSync, randomBytes, createHash } from "node:crypto";
@@ -29,23 +27,11 @@ function publicKeyBlob(rawPublicKey: Buffer): Buffer {
   return Buffer.concat([sshString("ssh-ed25519"), sshString(rawPublicKey)]);
 }
 
-export interface OpenSshKeyPair {
-  /**
-   * PEM-armoured `OPENSSH PRIVATE KEY`. Feed to `ssh -i`. The only half
-   * returned: the container carries the public one in the clear beside it, so
-   * {@link publicKeyFromOpenSshPrivateKey} derives that whenever it is needed
-   * rather than a caller carrying a second copy that could drift.
-   */
-  privateKey: string;
-}
-
 /**
- * Mint an ed25519 pair. The container carries the literal comment `appstrate`
- * for an operator inspecting the key; it is not key material, and the platform
- * never reads it back (see {@link publicKeyFromOpenSshPrivateKey}), so there is
- * nothing for a caller to choose.
+ * Mint an ed25519 pair as a PEM `OPENSSH PRIVATE KEY` (comment `appstrate`).
+ * The public half is derived from it by {@link publicKeyFromOpenSshPrivateKey}.
  */
-export function generateOpenSshEd25519KeyPair(): OpenSshKeyPair {
+export function generateOpenSshEd25519KeyPair(): string {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
 
   // Both DER encodings are fixed-length for this curve (SPKI 44, PKCS#8 48),
@@ -55,9 +41,7 @@ export function generateOpenSshEd25519KeyPair(): OpenSshKeyPair {
 
   const blob = publicKeyBlob(rawPublicKey);
 
-  // `checkint` twice: on decrypt OpenSSH compares the copies to tell a wrong
-  // passphrase from a corrupt file. Under cipher `none` it only round-trips,
-  // but it must be there and the two must match.
+  // Two matching `checkint`s: required even under cipher `none`.
   const checkint = randomBytes(4);
   let privateSection = Buffer.concat([
     checkint,
@@ -90,16 +74,14 @@ export function generateOpenSshEd25519KeyPair(): OpenSshKeyPair {
     sshString(privateSection),
   ]);
 
-  // OpenSSH wraps at 70 columns. Longer lines load fine, but a minted key is
-  // read by humans against files `ssh-keygen` wrote, so it matches byte for byte.
+  // 70 columns, like `ssh-keygen`.
   const wrapped = container.toString("base64").replace(/(.{70})/g, "$1\n");
-  const privatePem =
+  return (
     "-----BEGIN OPENSSH PRIVATE KEY-----\n" +
     wrapped +
     (wrapped.endsWith("\n") ? "" : "\n") +
-    "-----END OPENSSH PRIVATE KEY-----\n";
-
-  return { privateKey: privatePem };
+    "-----END OPENSSH PRIVATE KEY-----\n"
+  );
 }
 
 /** A forward cursor over the length-prefixed fields of a container. */
@@ -127,18 +109,10 @@ function reader(buf: Buffer, at = 0) {
 }
 
 /**
- * Read the PUBLIC half back out of an `OPENSSH PRIVATE KEY`, as exactly
- * `ssh-ed25519 <base64>`. Only the `cipher: none` container this file mints is
- * in scope; anything else is refused rather than half-parsed. No cryptography:
- * the container carries the public blob in the clear beside the private one, so
- * an installed authorized_keys line is recoverable from the keyring and nothing
- * has to persist it.
- *
- * What comes back is REBUILT, never echoed. A stored bundle is not trusted at
- * render time — the container's key-type and comment fields are whatever its
- * bytes say, and the line built from them is interpolated into a script pasted
- * as root. So the blob must be byte-exactly `ssh-ed25519 || <32-byte point>`,
- * the private section must name the same type, and the comment is never read.
+ * The public half of an unencrypted `OPENSSH PRIVATE KEY`, as exactly
+ * `ssh-ed25519 <base64>`. REBUILT, never echoed (it lands in a root script):
+ * the blob must be byte-exactly `ssh-ed25519 || <32-byte point>` and the
+ * comment is never read.
  */
 export function publicKeyFromOpenSshPrivateKey(pem: string): string {
   const body = pem
@@ -168,9 +142,7 @@ export function publicKeyFromOpenSshPrivateKey(pem: string): string {
     throw new Error("not an ed25519 OPENSSH key");
   }
 
-  // Rebuilt from the 32-byte point and required to be the bytes that were
-  // there, so a trailing byte or a short point fails here rather than
-  // travelling on into a root script.
+  // Rebuilt and compared, so a trailing byte or a short point fails here.
   const pub = reader(blob);
   pub.string(); // type — proved by the rebuild, not by reading it
   const point = pub.string();
@@ -181,12 +153,6 @@ export function publicKeyFromOpenSshPrivateKey(pem: string): string {
   return `ssh-ed25519 ${blob.toString("base64")}`;
 }
 
-/** `SHA256:…`, base64 without padding — the form `ssh-keygen -l` prints. */
-function fingerprintFromBlob(blob: Buffer): string {
-  const digest = createHash("sha256").update(blob).digest("base64").replace(/=+$/, "");
-  return `SHA256:${digest}`;
-}
-
 /** The public-key types the platform pins a host by. */
 export type PublicKeyType = "ssh-ed25519" | "ssh-rsa";
 
@@ -194,19 +160,9 @@ export type PublicKeyType = "ssh-ed25519" | "ssh-rsa";
 const PUBLIC_KEY_LINE_RE = /^(ssh-ed25519|ssh-rsa) ([A-Za-z0-9+/]+=*)$/;
 
 /**
- * Parse the ONE public-key form the platform accepts — `<type> <base64>`,
- * EXACTLY the shape that pattern admits on both connection doors: one space, no
- * comment, no surrounding whitespace. Nothing is trimmed here, because a reader
- * looser than the pattern accepts lines the programmatic door refuses, and what
- * comes out picks a file path interpolated into a script run as root. Null for
- * anything else; each caller words its own refusal.
- *
- * The blob names its own type, and the two halves must agree. A line whose
- * text says `ssh-rsa` over an ed25519 blob picks the wrong `/etc/ssh` file for
- * the install block to print, and fingerprints a key the host never offers —
- * so the one machine-in-the-middle check there is would read as a mismatch on
- * every correct host. Only the leading type string is required to match: the
- * platform pins a host key it never parses further.
+ * Parse `<type> <base64>` exactly as the manifest's `host_key` pattern admits
+ * it (nothing trimmed), or null. The blob's own type must match the text, or
+ * the install block would read the wrong `/etc/ssh` file.
  */
 export function parsePublicKeyLine(line: string): { type: PublicKeyType; base64: string } | null {
   const match = PUBLIC_KEY_LINE_RE.exec(line);
@@ -223,11 +179,12 @@ export function parsePublicKeyLine(line: string): { type: PublicKeyType; base64:
 }
 
 /**
- * Fingerprint a `<type> <base64>` line the way `ssh-keygen -l` does: SHA-256
- * over the DECODED blob, not over the text.
+ * Fingerprint a `<type> <base64>` line as `ssh-keygen -l` prints it: SHA-256
+ * over the DECODED blob, base64 without padding.
  */
 export function fingerprintPublicKey(line: string): string {
   const parsed = parsePublicKeyLine(line);
   if (!parsed) throw new Error("not an SSH public key line");
-  return fingerprintFromBlob(Buffer.from(parsed.base64, "base64"));
+  const digest = createHash("sha256").update(Buffer.from(parsed.base64, "base64")).digest("base64");
+  return `SHA256:${digest.replace(/=+$/, "")}`;
 }

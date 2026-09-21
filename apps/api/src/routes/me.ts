@@ -378,28 +378,11 @@ router.delete("/connections/:connectionId", async (c) => {
 });
 
 /**
- * `GET /api/me/connections/:connectionId/handoff` — what is due on the user's
- * own machine when this connection is deleted: the `deferred` steps, and only
- * those. Deleting a minted credential destroys the platform's half and nothing
- * else — its public key stays authorized on the target, which the platform
- * cannot reach — so the teardown block has to remain available afterwards.
- *
- * The install half belongs to the connect-submit response: the connect portal
- * shows it once, on the screen right after the form, and this endpoint does not
- * re-serve it.
- *
- * DERIVED on demand, never stored, by the same `handoffStepsFor` the submit
- * path calls, so the block that removes a key cannot drift from the one that
- * installed it. Computed here rather than on the connection LIST because it
- * costs a decryption, which a list must not pay per row.
- *
- * `deferred` is the FILTER here, not part of the answer: this list IS the
- * deletion-time set, so the flag that singles it out of a larger one has
- * nothing left to say and is dropped from every step.
- *
- * Non-disclosure matches the DELETE beside it: an unknown, malformed or
- * not-owned id answers an empty list rather than a 404, so a caller probing
- * ids learns nothing.
+ * `GET /api/me/connections/:connectionId/handoff` — the steps due on the user's
+ * own machine when this connection is deleted (the `deferred` ones, flag
+ * dropped), re-derived by {@link handoffStepsFor}. Not on the connection list:
+ * it costs a decryption per row. An unknown, malformed or not-owned id answers
+ * an empty list, the same non-disclosure as the DELETE beside it.
  */
 router.get("/connections/:connectionId/handoff", async (c) => {
   const connectionId = c.req.param("connectionId")!;
@@ -409,13 +392,9 @@ router.get("/connections/:connectionId/handoff", async (c) => {
 
   if (!z.uuid().safeParse(connectionId).success) return empty();
 
-  // `integration_connections` carries no `org_id` (it is space-scoped), and
-  // reading the manifest needs one — so it comes from the space, joined here.
-  //
-  // Ownership rides the WHERE through `actorFilter`, the same single predicate
-  // the list and the delete resolve to: a connection is its owner's whatever
-  // org the caller is currently scoped to. A row this actor does not own never
-  // loads, so nothing below can decrypt it.
+  // The org comes from the space (connections are space-scoped). Ownership
+  // rides the WHERE via `actorFilter`, so a row this actor does not own never
+  // loads and nothing below can decrypt it.
   const [row] = await db
     .select({
       spaceId: integrationConnections.spaceId,
@@ -431,10 +410,8 @@ router.get("/connections/:connectionId/handoff", async (c) => {
     .limit(1);
   if (!row) return empty();
 
-  // A BOUND credential is held to its binding here exactly as it is on the
-  // list and the delete — BOTH tiers. Org first: a leaked API key issued in
-  // one org must not have the platform decrypt its creator's credentials in
-  // another one. Then the pinned space, when it pins one.
+  // A BOUND credential is held to its org and pinned space, as on the list
+  // and the delete.
   if (authority.kind === "bound") {
     if (row.orgId !== authority.orgId) return empty();
     if (authority.spaceId && row.spaceId !== authority.spaceId) return empty();
@@ -448,24 +425,12 @@ router.get("/connections/:connectionId/handoff", async (c) => {
     );
     const credentials = await getIntegrationConnectionCredentialFields(connectionId);
     if (!credentials) return empty();
-    const removal = handoffStepsFor(row.integrationId, auth, credentials).flatMap((step) =>
-      step.kind === "command" && step.deferred === true
-        ? [
-            {
-              kind: step.kind,
-              id: step.id,
-              label: step.label,
-              shell: step.shell,
-              ...(step.note ? { note: step.note } : {}),
-            },
-          ]
-        : [],
-    );
+    const removal = handoffStepsFor(row.integrationId, auth, credentials)
+      .flatMap((step) => (step.kind === "command" && step.deferred ? [step] : []))
+      .map(({ deferred: _deferred, ...step }) => step);
     return c.json(listResponse(removal));
   } catch (err) {
-    // The confirmation modal this feeds asks for a removal block, not for a
-    // guarantee — a manifest this build cannot read, or an envelope it cannot
-    // open, answers no steps rather than a 500 on the way to deleting.
+    // No steps rather than a 500 on the way to deleting.
     logger.warn("Could not derive connection handoff steps", {
       err: String(err),
       connectionId,

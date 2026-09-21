@@ -1898,8 +1898,7 @@ export const schemas = {
       },
     },
   },
-  // A block to run on the target. `shell` is required: a command step with
-  // nothing to run is a step with no content.
+  // A block to run on the target.
   HandoffCommandStep: {
     type: "object",
     required: ["kind", "id", "label", "shell"],
@@ -1919,12 +1918,11 @@ export const schemas = {
       deferred: {
         type: "boolean",
         description:
-          "Due when the connection is deleted, not now. Carried by `submitIntegrationConnect`, which hands out both halves; `getMyConnectionHandoff` is the deletion set itself and drops the flag.",
+          "Due when the connection is deleted, not now. Only on `submitIntegrationConnect`; `getMyConnectionHandoff` omits it.",
       },
     },
   },
-  // A value to read or compare — a fingerprint, an identifier. `value` is
-  // required for the same reason `shell` is on the arm above.
+  // A value to read or compare — a fingerprint, an identifier.
   HandoffValueStep: {
     type: "object",
     required: ["kind", "id", "label", "value"],
@@ -1940,14 +1938,7 @@ export const schemas = {
       note: { type: "string" },
     },
   },
-  /**
-   * One step a user must run or check on their own machine because the
-   * platform minted a credential for them. Shared by the two surfaces that
-   * hand these out — the connect submit response (every step) and
-   * `GET /api/me/connections/{id}/handoff` (the deletion-time ones) — because
-   * both derive them from the same bundle through the same renderer, and a
-   * second copy of this shape is a second thing the SPA can drift from.
-   */
+  // One step a user runs or checks on their own machine for a minted credential.
   HandoffStep: {
     oneOf: [
       { $ref: "#/components/schemas/HandoffCommandStep" },

@@ -171,13 +171,15 @@ describe("handleRequest — protocol surface without any configuration", () => {
   });
 
   it("rejects an unknown tool as a protocol error", async () => {
-    const res = await handleRequest({
-      jsonrpc: "2.0",
-      id: 4,
-      method: "tools/call",
-      params: { name: "ssh_shell" },
-    });
-    expect(res?.error?.code).toBe(-32602);
+    for (const name of ["ssh_shell", "toString", undefined]) {
+      const res = await handleRequest({
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: { name },
+      });
+      expect(res?.error).toEqual({ code: -32602, message: `Unknown tool: ${name}` });
+    }
   });
 
   it("ignores notifications and answers unknown methods with -32601", async () => {
@@ -194,12 +196,12 @@ describe("loadConfig / parseHostKey", () => {
     const cfg = loadConfig(ENV);
     expect(cfg.host).toBe("example.com");
     expect(cfg.port).toBe(22);
-    expect(cfg.hostKey.type).toBe("ssh-ed25519");
+    expect(cfg.hostKey).toBe(HOST_KEY);
   });
 
-  it("accepts `<type> <base64>` and nothing else", () => {
-    expect(parseHostKey(HOST_KEY).type).toBe("ssh-ed25519");
-    expect(parseHostKey("ssh-rsa AAAAB3NzaC1yc2EAAAA=").key).toBe("AAAAB3NzaC1yc2EAAAA=");
+  it("accepts `<type> <base64>`, normalised to a single space", () => {
+    expect(parseHostKey(HOST_KEY)).toBe(HOST_KEY);
+    expect(parseHostKey(" ssh-rsa \t AAAAB3NzaC1yc2EAAAA=\n")).toBe("ssh-rsa AAAAB3NzaC1yc2EAAAA=");
   });
 
   // No trust-on-first-use: a host key that is absent or unparseable must fail
@@ -236,10 +238,9 @@ describe("loadConfig / parseHostKey", () => {
 
 describe("renderKnownHosts", () => {
   it("uses the bare host on port 22 and the bracketed form otherwise", () => {
-    const hk = parseHostKey(HOST_KEY);
-    expect(renderKnownHosts("example.com", 22, hk)).toBe(`example.com ssh-ed25519 ${hk.key}\n`);
-    expect(renderKnownHosts("example.com", 2222, hk)).toBe(
-      `[example.com]:2222 ssh-ed25519 ${hk.key}\n`,
+    expect(renderKnownHosts("example.com", 22, HOST_KEY)).toBe(`example.com ${HOST_KEY}\n`);
+    expect(renderKnownHosts("example.com", 2222, HOST_KEY)).toBe(
+      `[example.com]:2222 ${HOST_KEY}\n`,
     );
   });
 });
@@ -267,6 +268,30 @@ describe("buildSshArgs — the connection policy", () => {
       expect(has(args, opt)).toBe(true);
     }
     expect(args.slice(-4)).toEqual(["-p", "22", "--", "agent@example.com"]);
+  });
+
+  it("emits the options in one fixed order, each exactly once", () => {
+    const o = (kv: string) => ["-o", kv];
+    expect(buildSshArgs(loadConfig(ENV), "/kh", undefined, { noSession: true })).toEqual([
+      "-F",
+      "/dev/null",
+      ...o("BatchMode=yes"),
+      ...o("StrictHostKeyChecking=yes"),
+      ...o("UserKnownHostsFile=/kh"),
+      ...o("IdentitiesOnly=yes"),
+      ...o("IdentityFile=/run/secrets/ssh_key"),
+      ...o("PasswordAuthentication=no"),
+      ...o("KbdInteractiveAuthentication=no"),
+      ...o("ForwardAgent=no"),
+      ...o("ForwardX11=no"),
+      ...o("ConnectTimeout=15"),
+      ...o("LogLevel=ERROR"),
+      "-N",
+      "-p",
+      "22",
+      "--",
+      "agent@example.com",
+    ]);
   });
 
   it("appends the command string as the last argv entry, and nothing else", () => {
