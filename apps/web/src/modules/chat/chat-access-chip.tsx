@@ -4,38 +4,29 @@
  * "What can this assistant do for me" — the caller's role, and the handful of
  * acts the chat performs, each with a verdict.
  *
- * Lives in the SHELL, not in `module-chat`, and reaches the chat through the
- * `headerActions` prop the page already has — the same seam
- * `ConversationContextActions` uses. Everything it reads (the effective
- * permission set, the persona, the view-as dialog) is host state, and routing
- * it through a new `ChatHost` member would have bought nothing but a wider
- * injection surface.
+ * Lives in the SHELL, not in `module-chat`, and reaches the composer through
+ * the `composerActions` prop, beside the model picker: it answers a question
+ * about the message being written. Everything it reads (the effective
+ * permission set, the persona) is host state, so routing it through a
+ * `ChatHost` member would buy nothing but a wider injection surface.
  *
- * NOT in the composer's model popover, deliberately. Picking a model is an
- * ACT; a role is a STATE one is subject to. Putting them behind one control
- * suggests the second can be changed there like the first.
+ * Its own control, NOT an entry in the model popover: picking a model is an
+ * ACT, a role is a STATE one is subject to. It starts no role preview either —
+ * that belongs to role administration (settings → roles, space members).
  *
- * The preview persona needs no handling of its own: `/api/orgs` and
+ * A preview started elsewhere needs no handling of its own: `/api/orgs` and
  * `/api/spaces` both carry `X-View-As` through the client middleware, so
  * `usePermissions()` and the space row already answer AS the persona. An
  * owner previewing `runner` sees the runner's verdicts here, which is the
  * whole point of a preview.
  */
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CheckIcon, EyeIcon, ShieldIcon, XIcon } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { cn } from "@appstrate/ui/cn";
-import { ViewAsDialog } from "../../components/view-as-dialog";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import {
-  roleI18nKey,
-  useCanPreviewRole,
-  useCurrentSpaceGrant,
-  usePermissions,
-} from "../../hooks/use-permissions";
+import { roleI18nKey, useCurrentSpaceGrant, usePermissions } from "../../hooks/use-permissions";
 import { spaceRoleLabel } from "../../hooks/use-roles";
 import { useSpaces } from "../../hooks/use-spaces";
 import { useViewAs } from "../../stores/view-as-store";
@@ -48,8 +39,6 @@ export function ChatAccessChip() {
   const spaceId = useCurrentSpaceId();
   const { data: spaces } = useSpaces();
   const persona = useViewAs();
-  const canPreview = useCanPreviewRole();
-  const [previewing, setPreviewing] = useState(false);
 
   // Nothing truthful to say until both lists have landed: `can` answers
   // `false` for a set still in flight, which renders exactly like a denial.
@@ -63,67 +52,47 @@ export function ChatAccessChip() {
   const capabilities = resolveChatCapabilities({ can, spaceGrant });
 
   return (
-    <>
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className={cn(
-              "h-8 gap-1.5 px-2.5 text-xs",
-              persona && "border-primary/40 bg-primary/5",
-            )}
-            // The accessible name CONTAINS the visible text (WCAG 2.5.3): a
-            // voice user saying the role they see on the button reaches it.
-            aria-label={t("chat:access.triggerLabel", { role: roleLabel })}
-          >
-            {persona ? (
-              <EyeIcon className="text-muted-foreground size-3.5 shrink-0" />
-            ) : (
-              <ShieldIcon className="text-muted-foreground size-3.5 shrink-0" />
-            )}
-            <span className="max-w-40 truncate font-medium">{roleLabel}</span>
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent
-          side="bottom"
-          align="end"
-          sideOffset={6}
-          collisionPadding={12}
-          className="w-[min(22rem,calc(100vw-1.5rem))] p-3"
+    <Popover>
+      <PopoverTrigger asChild>
+        {/* Same shape as the model picker it sits beside. */}
+        <button
+          type="button"
+          className={cn(
+            "border-input bg-background hover:bg-accent text-foreground inline-flex min-w-0 items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs",
+            persona && "border-primary/40 bg-primary/5",
+          )}
+          // The accessible name CONTAINS the visible text (WCAG 2.5.3): a
+          // voice user saying the role they see on the button reaches it.
+          aria-label={t("chat:access.triggerLabel", { role: roleLabel })}
         >
-          <p className="text-sm font-medium">{t("chat:access.title")}</p>
-          <p className="text-muted-foreground mt-0.5 text-xs">{t("chat:access.subtitle")}</p>
-
-          <ChatCapabilityList capabilities={capabilities} />
-
-          <p className="text-muted-foreground mt-3 border-t pt-2 text-xs">
-            {t("chat:access.roleLine", { org: orgRoleLabel, space: spaceRole ?? "—" })}
-          </p>
-
-          {/* The preview is STARTED from one place only (`ViewAsDialog`) and
-              ENDED from the app-wide banner, which is already on screen while
-              one is active. So this offers the entry point and never a second
-              exit — two exits would be two things to keep in step. */}
           {persona ? (
-            <p className="text-muted-foreground mt-1 text-xs">{t("chat:access.previewing")}</p>
-          ) : canPreview ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="mt-1 h-7 w-full justify-start px-1.5 text-xs"
-              onClick={() => setPreviewing(true)}
-            >
-              <EyeIcon className="size-3.5" />
-              {t("chat:access.preview")}
-            </Button>
-          ) : null}
-        </PopoverContent>
-      </Popover>
-      {previewing && <ViewAsDialog onClose={() => setPreviewing(false)} />}
-    </>
+            <EyeIcon className="text-muted-foreground size-3.5 shrink-0" />
+          ) : (
+            <ShieldIcon className="text-muted-foreground size-3.5 shrink-0" />
+          )}
+          <span className="max-w-40 truncate font-medium">{roleLabel}</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="top"
+        align="start"
+        sideOffset={6}
+        collisionPadding={12}
+        className="w-[min(22rem,calc(100vw-1.5rem))] p-3"
+      >
+        <p className="text-sm font-medium">{t("chat:access.title")}</p>
+        <p className="text-muted-foreground mt-0.5 text-xs">{t("chat:access.subtitle")}</p>
+
+        <ChatCapabilityList capabilities={capabilities} />
+
+        <p className="text-muted-foreground mt-3 border-t pt-2 text-xs">
+          {t("chat:access.roleLine", { org: orgRoleLabel, space: spaceRole ?? "—" })}
+        </p>
+        {persona ? (
+          <p className="text-muted-foreground mt-1 text-xs">{t("chat:access.previewing")}</p>
+        ) : null}
+      </PopoverContent>
+    </Popover>
   );
 }
 

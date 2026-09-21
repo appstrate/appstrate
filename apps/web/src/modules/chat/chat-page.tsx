@@ -23,6 +23,10 @@ import {
 import { ConversationContextActions, ConversationSidebar } from "./conversation-sidebar";
 import { ChatAccessChip } from "./chat-access-chip";
 
+// One element for the page's lifetime: it sits in the composer slot, which the
+// chat memoizes, and the chip keeps itself current through its own hooks.
+const COMPOSER_ACTIONS = <ChatAccessChip />;
+
 export function ChatModulePage() {
   useCollapsedGlobalSidebar();
   // Conversation id lives in the URL (`/chat/:conversationId`) so a refresh or
@@ -116,11 +120,9 @@ export function ChatModulePage() {
           onConversationChange={onConversationChange}
           onOpenFile={presentFile}
           headerActions={
-            <div className="flex items-center gap-2">
-              <ChatAccessChip />
-              <ConversationContextActions state={sidebarState} dispatch={dispatchSidebar} />
-            </div>
+            <ConversationContextActions state={sidebarState} dispatch={dispatchSidebar} />
           }
+          composerActions={COMPOSER_ACTIONS}
           downloadFile={onDownloadFile}
           useFileImageSrc={useFileImageSrc}
           uploadFile={uploadFile}

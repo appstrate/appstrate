@@ -135,6 +135,12 @@ export interface ChatPageProps {
   /** Optional host-owned actions displayed beside the conversation title. */
   headerActions?: ReactNode;
   /**
+   * Optional host-owned controls displayed in the composer, beside the model
+   * picker. Pass a memoized node: it is part of the composer slot, and a new
+   * element on every host render would re-render the conversation with it.
+   */
+  composerActions?: ReactNode;
+  /**
    * REQUIRED host services — the chat implements none of them itself (see
    * `runtime-context.ts`): the authenticated download, the authenticated image
    * preview hook, the staged uploader, and the translator for user-facing text.
@@ -152,6 +158,7 @@ export function ChatPage({
   onConversationChange,
   onOpenFile,
   headerActions,
+  composerActions,
   downloadFile,
   useFileImageSrc,
   uploadFile,
@@ -284,9 +291,10 @@ export function ChatPage({
           generation={generation}
           onGenerationChange={editGenerationSettings}
         />
+        {composerActions}
       </div>
     ),
-    [models, selectedModel, generation],
+    [models, selectedModel, generation, composerActions],
   );
 
   // The server's view of the ACTIVE conversation, reduced to two primitives so

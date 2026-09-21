@@ -67,7 +67,6 @@
   "access.granted": "autorisé",
   "access.denied": "refusé",
   "access.roleLine": "Organisation : {{org}} · Espace : {{space}}",
-  "access.preview": "Prévisualiser un autre rôle",
   "access.previewing": "Aperçu d'un rôle en cours : ce sont les droits du rôle prévisualisé.",
   "access.capability.callApi": "Utiliser l'API Appstrate en votre nom",
   "access.capability.runAgents": "Lancer vos agents",
