@@ -32,9 +32,10 @@ import {
 } from "../../helpers/auth.ts";
 import {
   seedAgent,
+  seedPublishedVersion,
   seedApiKey,
   seedEndUser,
-  seedInstalledPackage,
+  seedSpacePackage,
   seedRun,
   seedSchedule,
 } from "../../helpers/seed.ts";
@@ -83,6 +84,7 @@ describe("run read isolation between members", () => {
 
     await seedAgent({
       id: AGENT_ID,
+      homeSpaceId: owner.defaultSpaceId,
       type: "agent",
       orgId: owner.orgId,
       createdBy: owner.user.id,
@@ -102,7 +104,13 @@ describe("run read isolation between members", () => {
         },
       },
     });
-    await seedInstalledPackage(owner.defaultSpaceId, AGENT_ID);
+    // PUBLISHED: the two operators cannot write this agent, so its detail page
+    // renders the latest published version and a `version=draft` launch is
+    // theirs to be refused (plan decisions 4 and 5). Unpublished, every read
+    // below would answer `404 no_published_version` — a refusal about the
+    // agent, in a suite about run isolation.
+    await seedPublishedVersion(AGENT_ID, "0.1.0");
+    await seedSpacePackage(owner.defaultSpaceId, AGENT_ID);
 
     const common = {
       packageId: AGENT_ID,
@@ -479,7 +487,7 @@ describe("run read isolation between members", () => {
     const agent = await app.request(AGENT_DETAIL_PATH, { headers: authHeaders(operatorA) });
     expect(agent.status).toBe(200);
 
-    const res = await app.request(`/api/agents/${AGENT_PATH}/run?version=draft`, {
+    const res = await app.request(`/api/agents/${AGENT_PATH}/run`, {
       method: "POST",
       headers: authHeaders(operatorA, { "Content-Type": "application/json" }),
       body: JSON.stringify({ rerun_from: runB }),
@@ -558,7 +566,7 @@ describe("run read isolation between members", () => {
 
   it("refuses a colleague's run output passed as an appfile:// run input", async () => {
     const fileB = await seedOutput(runB, { userId: operatorB.user.id });
-    const res = await app.request(`/api/agents/${AGENT_PATH}/run?version=draft`, {
+    const res = await app.request(`/api/agents/${AGENT_PATH}/run`, {
       method: "POST",
       headers: authHeaders(operatorA, { "Content-Type": "application/json" }),
       body: JSON.stringify({ input: { attachment: `appfile://${fileB}` } }),

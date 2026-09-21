@@ -13,6 +13,7 @@ import { conflict, forbidden, internalError, notFound } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../lib/list-response.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
+import { isUserPrincipal } from "../lib/principal.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { setDisplayName } from "../services/profile.ts";
@@ -69,13 +70,13 @@ async function getProfileResource(userId: string) {
 }
 
 // Issue #172 (extension) — `/api/profile` is the dashboard user's own
-// identity record (Better Auth-owned `user.name` is mutated by PATCH).
-// API keys must not be able to read or rewrite the human creator's
-// account: a customer integration shouldn't get the platform user's
-// PII via GET, nor be able to rename the dashboard owner via PATCH.
+// identity record (Better Auth-owned `user.name` is mutated by PATCH), so it
+// answers to the person's own credential only: a delegate (the API key)
+// carries their authority, not their identity. A customer integration must
+// not get the platform user's PII via GET, nor rename them via PATCH.
 profileRouter.get("/profile", async (c) => {
-  if (c.get("authMethod") === "api_key") {
-    throw forbidden("API keys cannot access the dashboard user profile");
+  if (!isUserPrincipal(c)) {
+    throw forbidden("Only the user's own credential can read the dashboard user profile");
   }
   const user = c.get("user");
   const profile = await getProfileResource(user.id);
@@ -87,8 +88,8 @@ profileRouter.get("/profile", async (c) => {
 });
 
 profileRouter.patch("/profile", async (c) => {
-  if (c.get("authMethod") === "api_key") {
-    throw forbidden("API keys cannot modify the dashboard user profile");
+  if (!isUserPrincipal(c)) {
+    throw forbidden("Only the user's own credential can modify the dashboard user profile");
   }
   const user = c.get("user");
 
@@ -131,8 +132,8 @@ profileRouter.patch("/profile", async (c) => {
 // existing passwords can only be changed via `changePassword` (requires the
 // current password), never overwritten here.
 profileRouter.post("/profile/password", async (c) => {
-  if (c.get("authMethod") === "api_key") {
-    throw forbidden("API keys cannot set the dashboard user password");
+  if (!isUserPrincipal(c)) {
+    throw forbidden("Only the user's own credential can set the dashboard user password");
   }
   const user = c.get("user");
   const { newPassword } = await readJsonBody(c, setPasswordSchema);

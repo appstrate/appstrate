@@ -82,7 +82,7 @@ function NewSchedulePanel({ packageId, onDone }: { packageId: string; onDone: ()
       persistedModelId={deps?.persistedModelId ?? null}
       persistedGenerationConfig={deps?.persistedGenerationConfig ?? null}
       persistedProxyId={deps?.persistedProxyId ?? null}
-      persistedVersion={deps?.persistedVersion ?? null}
+      homeWritable={deps?.homeWritable}
       packageId={packageId}
       agentIntegrations={deps?.agentIntegrations ?? []}
       blockedMessage={deps?.hasFileInputs ? t("agents:schedule.fileInputBlocked") : undefined}

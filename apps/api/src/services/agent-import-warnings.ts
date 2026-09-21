@@ -13,10 +13,10 @@ import {
 } from "./run-limits.ts";
 
 /**
- * Install-time warnings for `agent` manifests that declare something the
+ * Import-time warnings for `agent` manifests that declare something the
  * platform will silently narrow at run time.
  *
- * Sibling of `integration-install-warnings.ts` (same non-blocking `warnings`
+ * Sibling of `integration-import-warnings.ts` (same non-blocking `warnings`
  * channel on the import 201). The public collector reads deployment policy;
  * the resource rule remains pure so operator and backend ceilings can be
  * tested without mutating process-wide state.
@@ -76,7 +76,7 @@ export function collectAgentResourceWarnings(
   return warnings;
 }
 
-export function collectAgentInstallWarnings(manifest: unknown): string[] {
+export function collectAgentImportWarnings(manifest: unknown): string[] {
   const agent = asAgentManifest(manifest);
   if (!agent) return [];
 

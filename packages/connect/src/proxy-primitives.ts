@@ -86,7 +86,7 @@ export interface ProxyCredentialsPayload {
    * concatenates it verbatim, so it MUST carry its own separator: a bare scheme
    * (`Bearer`) sends `Authorization: BearerTOKEN`. Nothing repairs that here —
    * the value comes from the auth-type default table or from a manifest
-   * `delivery.http.prefix`, and the bare form is refused at install time by
+   * `delivery.http.prefix`, and the bare form is refused at import time by
    * `integrationManifestSchema` (`@appstrate/core/integration`).
    */
   credentialHeaderPrefix?: string;

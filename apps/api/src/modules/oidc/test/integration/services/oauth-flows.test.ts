@@ -437,10 +437,18 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     // issuer check (`${APP_URL}/api/auth`), resolve the end-user from the
     // `endUserId` custom claim, and emit an AuthResolution — otherwise the
     // request falls through to core auth and returns 401.
-    const res = await app.request("/api/profile", {
+    //
+    // `/api/me/orgs` rather than `/api/profile`: an end-user is not the
+    // platform person, so the identity record is a 403 for it, and this route
+    // names the org the resolution derived from the token's pinned space.
+    const res = await app.request("/api/me/orgs", {
       headers: { authorization: `Bearer ${tokens.access_token}` },
     });
-    expect(res.status).toBe(200);
+    expect(res.status, await res.clone().text()).toBe(200);
+    const listed = (await res.json()) as { data: Array<{ id: string; role: string }> };
+    expect(listed.data).toHaveLength(1);
+    expect(listed.data[0]!.id).toBe(ctx.orgId);
+    expect(listed.data[0]!.role).toBe("end_user");
   });
 
   it("PKCE enforcement rejects a tampered code_verifier at /oauth2/token", async () => {

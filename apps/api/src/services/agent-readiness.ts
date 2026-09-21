@@ -74,7 +74,7 @@ interface AgentReadinessParams {
  *
  * Single source of truth for readiness checks — the throwing wrapper
  * `validateAgentReadiness` delegates to this. Fail-fast sequence:
- * prompt → skills → integration install/enable → integration connections.
+ * prompt → skills → integration activation → integration connections.
  */
 /**
  * Map an {@link IntegrationManifestLoadFailure} to a structured readiness
@@ -138,25 +138,43 @@ export async function collectAgentReadinessErrors(
   // snapshot — never off the package object, so the declared skills and the
   // resolved closure always describe the same definition (#878). The catalog
   // query is skipped entirely when no skill is declared.
-  const declaredSkills = await resolveDeclaredSkills(manifest, orgId);
+  //
+  // Judged against what the DECLARING agent can reach — its home space, or
+  // this space when it has none (`resolveDeclaredSkills`, RBAC spec §6.9).
+  // ACTIVATION is deliberately not the question: a declared skill is carried
+  // into the bundle by the agent that declares it, not offered by the launching
+  // space, so a skill switched off here still runs. PLACEMENT is, and it is the
+  // gate that matters — this loop is what stops the run, and `RunPackageCatalog`
+  // downstream resolves the closure on `org_id` alone, so a skill reported
+  // resolved here has its bytes assembled into the bundle with nothing else
+  // asking.
+  //
+  // The message does NOT distinguish "not published" from "published somewhere
+  // you cannot reach": naming the difference would make this an existence
+  // oracle over every package the organization owns, which is the same reason
+  // an unreachable id is a 404 and not a 403 on the package routes.
+  const declaredSkills = await resolveDeclaredSkills(manifest, orgId, {
+    packageId: agent.id,
+    spaceId,
+  });
   for (const skill of declaredSkills) {
     if (skill.resolved) continue;
     errors.push({
       field: `dependencies.skills.${skill.id}`,
       code: "missing_skill",
       title: "Missing Skill",
-      message: `Required skill '${skill.id}' is not installed`,
+      message: `Required skill '${skill.id}' is not available to this agent — publish it, or share it with the agent's home space`,
     });
   }
 
-  // Integration install/enable gate — runs regardless of actor (it is an
+  // Integration ACTIVATION gate — runs regardless of actor (it is a
   // space-level fact, not an actor-level one). Every integration the agent
-  // declares MUST be installed AND enabled on the space. Without this
-  // the run silently degrades: the runtime spawn resolver skips an inactive
-  // integration (`isIntegrationActive` false) and the agent launches without
-  // its tools. The connection resolver below does NOT catch this — it gates
-  // on whether an accessible connection exists, and a disabled/uninstalled
-  // integration can still have lingering connections that resolve cleanly.
+  // declares MUST be active in the space. Without this the run silently
+  // degrades: the runtime spawn resolver skips an inactive integration
+  // (`isIntegrationActive` false) and the agent launches without its tools.
+  // The connection resolver below does NOT catch this — it gates on whether an
+  // accessible connection exists, and an inactive integration can still have
+  // lingering connections that resolve cleanly.
   // Checked before connections so an inactive integration fails fast with a
   // clear cause rather than a downstream `not_connected`.
   // Batched: one SELECT over `space_packages` for every declared
@@ -191,13 +209,13 @@ export async function collectAgentReadinessErrors(
       errors.push(manifestFailureError(id, result.failure));
     }
 
-    // Install/enable gate — every declared integration MUST be installed AND
-    // enabled on the space. Without this the run silently degrades: the
-    // runtime spawn resolver skips an inactive integration (`isIntegrationActive`
-    // false) and the agent launches without its tools. The connection resolver
-    // below does NOT catch this — it gates on whether an accessible connection
-    // exists, and a disabled/uninstalled integration can still have lingering
-    // connections that resolve cleanly. Checked before connections so an
+    // ACTIVATION gate — every declared integration MUST be active in the
+    // space. Without this the run silently degrades: the runtime spawn
+    // resolver skips an inactive integration (`isIntegrationActive` false) and
+    // the agent launches without its tools. The connection resolver below does
+    // NOT catch this — it gates on whether an accessible connection exists, and
+    // an inactive integration can still have lingering connections that resolve
+    // cleanly. Checked before connections so an
     // inactive integration fails fast with a clear cause rather than a
     // downstream `not_connected`. Integrations already flagged for a manifest
     // failure are skipped here — a missing package is necessarily inactive too,
@@ -220,8 +238,8 @@ export async function collectAgentReadinessErrors(
         errors.push({
           field: `integrations.${entry.id}`,
           code: "integration_not_active",
-          title: "Integration Not Enabled",
-          message: `Integration '${entry.id}' is not installed or is disabled in this space.`,
+          title: "Integration Not Active",
+          message: `Integration '${entry.id}' is not active in this space.`,
         });
       }
     }

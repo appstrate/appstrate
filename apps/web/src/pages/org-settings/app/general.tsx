@@ -52,6 +52,8 @@ function GeneralForm({
     settings?: { allowedRedirectDomains?: string[] };
     visibility: SpaceVisibility;
     default_role: SpaceRolePreset;
+    /** A member's own space: always private, no members but its owner (§3.6). */
+    personal: boolean;
   };
 }) {
   const { t } = useTranslation(["settings", "common"]);
@@ -209,6 +211,12 @@ function GeneralForm({
           </div>
         </SettingRow>
 
+        {application.personal && (
+          <p className="text-muted-foreground mb-4 text-sm">
+            {t("spaces.personal.settingsLocked")}
+          </p>
+        )}
+
         {/* Who reaches this space without an explicit membership row (RBAC
             spec §3.1). Radios rather than a select: the three answers differ
             in consequence, not in degree, and each needs its sentence. */}
@@ -222,7 +230,7 @@ function GeneralForm({
             <RadioGroup
               value={activeVisibility}
               onValueChange={(value) => commitVisibility(value as SpaceVisibility)}
-              disabled={application.isDefault || updateMutation.isPending}
+              disabled={application.isDefault || application.personal || updateMutation.isPending}
               aria-label={t("spaces.visibilityLabel")}
             >
               {SPACE_VISIBILITIES.map((value) => (
@@ -267,7 +275,7 @@ function GeneralForm({
                 value={activeDefaultRole}
                 options={presetOptions}
                 fallbackLabel={t(`roles.preset.${activeDefaultRole}`)}
-                disabled={updateMutation.isPending}
+                disabled={application.personal || updateMutation.isPending}
                 onValueChange={(value) => commitDefaultRole(value as SpaceRolePreset)}
               />
               <RoleCatalogState

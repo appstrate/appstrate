@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the install-time warning collector (`collectConnectLoginWarnings`).
+ * Unit tests for the import-time warning collector (`collectConnectLoginWarnings`).
  *
  * Covers AFPS §7.7 corners the Appstrate login engine cannot evaluate:
  *   - Arazzo Selector Object `type: "xpath"`
@@ -15,7 +15,7 @@ import { describe, it, expect } from "bun:test";
 import {
   collectConnectLoginWarnings,
   collectMetaWarnings,
-} from "../../../src/services/integration-install-warnings.ts";
+} from "../../../src/services/integration-import-warnings.ts";
 
 function makeIntegrationManifest(authBody: unknown): Record<string, unknown> {
   return {

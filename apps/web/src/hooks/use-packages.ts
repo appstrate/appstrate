@@ -10,7 +10,6 @@ import { asJSONSchemaObject } from "@appstrate/core/form";
 import { client, type components } from "../api/client";
 import { triggerBlobDownload } from "../lib/blob-download";
 import { splitPackageRef } from "../lib/package-paths";
-import { VERSION_DRAFT, isVersioned } from "../lib/version-selector";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { packageKeys, agentsKeys, invalidatePackageFiles } from "../lib/query-keys";
@@ -113,32 +112,41 @@ async function fetchPackageDetail(
   version?: string,
 ): Promise<AgentDetail | OrgPackageItemDetail> {
   const path = splitPackageRef(packageId);
+  // Omitted lets the server pick the definition this caller may see — their
+  // draft when they may write the package, the latest published version
+  // otherwise. An explicit `draft` is an author's read, and every type answers
+  // it the same way (`403 draft_not_writable` for anybody else).
+  const query = version ? { query: { version } } : {};
   if (type === "agent") {
-    // `version` is only meaningful for agents (issue #770): a non-`draft`
-    // selector projects that published manifest's input/integrations/skills,
-    // matching what the run will execute. Omitted/`draft` → draft.
     const { data } = await client.GET("/api/packages/agents/{scope}/{name}", {
-      params: { path, ...(isVersioned(version) ? { query: { version } } : {}) },
+      params: { path, ...query },
     });
     return normalizeAgentDetail(data!);
   }
   const { data } = await client.GET(`/api/packages/${PACKAGE_CONFIG[type].path}/{scope}/{name}`, {
-    params: { path },
+    params: { path, ...query },
   });
   return normalizePackageItemDetail(data!);
 }
 
-function usePackageList(type: PackageType, opts?: { activeOnly?: boolean }) {
+/**
+ * One type's INDEX for the current space: what runs here, and nothing else.
+ *
+ * `GET /api/packages/{type}` answers the active set — placed in this space and
+ * switched on — which is the same rule every launch route checks, so a row on
+ * this list is a row that can be used. What is placed here but switched off, and
+ * what has merely been offered, lives in the space library (`/space/packages`),
+ * the one management view. There is no selector: a narrower and a wider list
+ * would be two answers to one question.
+ */
+function usePackageList(type: PackageType) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
   const cfg = PACKAGE_CONFIG[type];
-  const activeOnly = opts?.activeOnly ?? false;
   return useQuery({
-    queryKey: packageKeys.list(cfg.path, orgId, spaceId, activeOnly ? "active" : "all"),
+    queryKey: packageKeys.list(cfg.path, orgId, spaceId),
     queryFn: async (): Promise<OrgPackageItem[]> => {
-      const { data } = await client.GET(`/api/packages/${cfg.path}`, {
-        params: { query: activeOnly ? { active: "true" } : undefined },
-      });
+      const { data } = await client.GET(`/api/packages/${cfg.path}`);
       // The spec marks most item fields optional — normalize to the
       // non-optional shape consumers have always used. `scope` is not
       // returned by the list endpoints.
@@ -146,6 +154,10 @@ function usePackageList(type: PackageType, opts?: { activeOnly?: boolean }) {
         ...item,
         name: item.name,
         description: item.description,
+        // Manifest-derived, emitted by every type's list mapper: the index
+        // pages draw their cards and run their search off this row alone.
+        icon: item.icon,
+        keywords: item.keywords,
         scope: null,
         version: item.version,
         forked_from: item.forked_from,
@@ -167,13 +179,12 @@ function usePackageDetail<T extends PackageType>(
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
   const cfg = PACKAGE_CONFIG[type];
-  // `version` rides the query key so switching the run-options version dropdown
-  // refetches the version-pinned detail instead of serving the cached draft
-  // (issue #770). Omitted → `"draft"`, preserving every existing caller's key.
-  const version = opts?.version ?? VERSION_DRAFT;
+  // The server's default projection and an explicit `draft` are two different
+  // answers and must never share a cache entry.
+  const version = opts?.version;
 
   return useQuery({
-    queryKey: packageKeys.detail(cfg.path, orgId, spaceId, id!, version),
+    queryKey: packageKeys.detail(cfg.path, orgId, spaceId, id!, version ?? null),
     queryFn: () => fetchPackageDetail(type, id!, version),
     enabled: !!orgId && !!spaceId && !!id && (opts?.enabled ?? true),
   });
@@ -223,18 +234,65 @@ function useDeletePackage(type: PackageType) {
   });
 }
 
+/**
+ * Move a package to another home space — `PUT /api/packages/{scope}/{name}/home`.
+ *
+ * The home is what authorizes every later edit (`packages.home_space_id`, RBAC
+ * spec §6.9), and it is also a read grant: the destination gains sight of the
+ * package and the old home may lose it. So this invalidates the family (detail
+ * + lists), the agent catalog and the library, not just the one detail row.
+ */
+function useMovePackageHome(type: PackageType) {
+  const qc = useQueryClient();
+  const cfg = PACKAGE_CONFIG[type];
+  return useMutation({
+    mutationFn: async ({
+      id,
+      homeSpaceId,
+      keepInPreviousHome,
+    }: {
+      id: string;
+      homeSpaceId: string;
+      /** Does the space being left keep the package? Sent explicitly — the server defaults it to `true`. */
+      keepInPreviousHome: boolean;
+    }) => {
+      await client.PUT("/api/packages/{scope}/{name}/home", {
+        params: { path: splitPackageRef(id) },
+        body: { home_space_id: homeSpaceId, keep_in_previous_home: keepInPreviousHome },
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: packageKeys.family(cfg.path) });
+      qc.invalidateQueries({ queryKey: agentsKeys.all });
+      void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
+      // The space being left may have lost the package (`keepInPreviousHome:
+      // false` drops its offer AND its placement row), so its own package
+      // listing is stale too — not just this type's family.
+      void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{spaceId}/packages"] });
+    },
+  });
+}
+
 // Re-export factory hooks for direct use
 export {
   usePackageList,
   usePackageDetail,
   useUploadPackage,
   useDeletePackage,
+  useMovePackageHome,
   type PackageType,
   PACKAGE_CONFIG,
 };
 
 // --- Agents ---
 
+/**
+ * The agent index for the current space — the ACTIVE set, like every other
+ * index ({@link usePackageList}). Every consumer (the index page, the dashboard,
+ * the nav, the run list, the schedule pickers, the notification bell) reads it
+ * as it comes: a listed agent is a runnable agent, so no surface has to gate a
+ * launch control on an activation fact the row no longer carries.
+ */
 export function useAgents() {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
@@ -288,7 +346,7 @@ export function usePackageDownload(scope: string | undefined, name: string | und
  * Export an agent as a multi-package `.afps-bundle` (its transitive
  * dependency graph in one self-contained archive). Triggers a browser
  * download via the shared `triggerBlobDownload`. Optional `version` pins the
- * export to a specific release; defaults to the version installed in the
+ * export to a specific release; defaults to the version resolved in the
  * current space.
  */
 export function useAgentBundleExport(scope: string | undefined, name: string | undefined) {

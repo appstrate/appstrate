@@ -20,6 +20,11 @@ const INVALID_SEGMENT = /[\0]/;
  * line (line-injection), desynchronising the integrity manifest.
  */
 const RECORD_DELIMITER = /[\r\n,]/;
+/**
+ * Windows drive prefix (`C:/…`). Absolute on the extraction target, yet every
+ * segment reads as relative, so the traversal loop below cannot catch it.
+ */
+const DRIVE_PREFIX = /^[a-zA-Z]:\//;
 
 export interface SanitizeOptions {
   limits: BundleLimits;
@@ -30,7 +35,14 @@ export interface SanitizeOptions {
 /**
  * Return a sanitized, depth-checked copy of the input map. Drops
  * directory entries (keys ending with `/`) and `__MACOSX/*` noise.
- * Rejects path-traversal, absolute paths, backslashes, null bytes.
+ * Rejects path-traversal (`..`, `.`, empty segments), absolute paths in BOTH
+ * spellings (leading `/` and a `C:/` drive prefix), backslashes, null bytes,
+ * signature-RECORD delimiters (comma, CR, LF) and a `__proto__` segment.
+ *
+ * That list is deliberately the same set `isSafeArchivePath`
+ * (`@appstrate/core/zip`) refuses — only the REACTION differs (throw here, drop
+ * there). `packages/core/test/sanitizer-parity.test.ts` runs both over one
+ * shared table of shapes and fails on any disagreement.
  */
 export function sanitizeEntries(
   raw: Record<string, Uint8Array>,
@@ -44,6 +56,16 @@ export function sanitizeEntries(
     if (key.length === 0) continue;
 
     if (key.startsWith("/")) {
+      throw new BundleError("ARCHIVE_INVALID", `${ctx}: absolute path not allowed: ${key}`);
+    }
+    // A Windows drive prefix is the second spelling of "absolute", and the one
+    // the segment loop below structurally cannot see: `C:/notes.md` splits into
+    // `["C:", "notes.md"]`, neither empty nor `.` nor `..`. The platform's own
+    // gate (`isSafeArchivePath`, `@appstrate/core/zip`) has always refused it,
+    // so accepting it here meant an imported `.afps` kept an entry in the
+    // rebuilt, frozen artifact that the platform's file index had dropped — two
+    // views of one package disagreeing with nothing reporting it.
+    if (DRIVE_PREFIX.test(key)) {
       throw new BundleError("ARCHIVE_INVALID", `${ctx}: absolute path not allowed: ${key}`);
     }
     if (key.includes("\\")) {
@@ -61,6 +83,14 @@ export function sanitizeEntries(
     const segments = key.split("/");
     if (segments.some((s) => s === "" || s === "." || s === "..")) {
       throw new BundleError("ARCHIVE_INVALID", `${ctx}: path traversal not allowed: ${key}`);
+    }
+    // Not a traversal, and harmless to THIS function — the result is a `Map`,
+    // which has no magic keys. It is refused because the platform refuses it
+    // (`isSafeArchivePath` and `assertPath`, `@appstrate/core`): an entry this
+    // reader admitted and the platform dropped is a bundle whose rebuilt
+    // artifact and whose file index disagree. One rule, or the two halves drift.
+    if (segments.includes("__proto__")) {
+      throw new BundleError("ARCHIVE_INVALID", `${ctx}: reserved segment in path: ${key}`);
     }
     if (segments.length > opts.limits.maxPathDepth) {
       throw new BundleError(

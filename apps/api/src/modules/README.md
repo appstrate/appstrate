@@ -230,9 +230,10 @@ avoid: an org role is platform vocabulary, and `billing` is not.
 Every `mayGrant` entry must be a known ORG-level permission (the core catalog,
 or a `level: "org"` contribution of some loaded module) — a space-level string
 is granted per space and this surface has no space. And no entry may be
-`apiKeyGrantable` / `endUserGrantable`: the surface is evaluated for
-session-shaped callers only, so a delegated credential's ceiling can never
-carry the grant and declaring one would advertise access no key can obtain.
+`apiKeyGrantable` / `endUserGrantable`: the surface is evaluated for a `user`
+principal only — the human themselves, by any transport — so a delegated
+credential's ceiling can never carry the grant and declaring one would
+advertise access no key can obtain.
 
 **At runtime**: the resolver is called once per principal per cache miss, its
 answer is filtered to `mayGrant` (an undeclared string is dropped and logged,
@@ -433,11 +434,16 @@ const jwtStrategy: AuthStrategy = {
       orgId: payload.org_id,
       orgRole: "admin",
       authMethod: "my-jwt",
+      // REQUIRED: what this credential IS, never how it arrived. `"end_user"`
+      // here because the resolution carries `endUser` below.
+      principalKind: "end_user",
       spaceId: payload.space_id,
       permissions: ["runs:read", "runs:write"],
       // Optional end-user impersonation. `EndUserContext` is exactly
       // `{ id, spaceId, name?, email? }` — core has no end-user role
-      // vocabulary, so there is no `role` field to set here.
+      // vocabulary, so there is no `role` field to set here. Drop this block
+      // and the declaration above must become `"delegate"` or `"user"`: the
+      // pipeline refuses the two disagreeing.
       endUser: {
         id: payload.enduser_id,
         spaceId: payload.space_id,
@@ -460,7 +466,7 @@ const myModule: AppstrateModule = {
 
 **Ordering.** Strategies are tried in module load order (topological sort by `manifest.dependencies`). First non-null resolution wins. Core auth (API key + cookie) runs only when every strategy has returned `null`.
 
-**What a resolution sets on `c`.** Mirrors what core API-key auth sets: `user`, `orgId`, `orgSlug?`, `orgRole`, `authMethod`, `spaceId`, `permissions` (as a string set), optional `endUser`. Downstream middleware treats strategy-authenticated requests the same as API-key requests — org-context and permission-resolution middlewares are skipped because the strategy has already resolved everything.
+**What a resolution sets on `c`.** Mirrors what core API-key auth sets: `user`, `orgId`, `orgSlug?`, `orgRole`, `authMethod`, `principalKind`, `spaceId`, `permissions` (as a string set), optional `endUser`. `principalKind` is REQUIRED and declares what the credential is — `"user"` (the platform user themselves, by any transport), `"delegate"` (an API key or a third-party OAuth client — the user's authority under a ceiling of its own, never their identity) or `"end_user"` (an external identity, set iff `endUser` is) — and it is what the personal-space, per-principal-grant and cross-organization gates read, they and nothing else (RBAC spec §7). The pipeline refuses a strategy that omits it or declares an unknown value rather than bucketing it. The three other inputs answer other questions: `authMethod === "api_key"` is read only about the key OBJECT itself (its space or org binding), `authMethod === "session"` only where the question IS the first-party cookie transport (a realm check, the platform-admin surfaces), and the optional `deferOrgResolution` only says WHEN org and permissions get resolved. None of the three is an identity signal. Downstream middleware treats strategy-authenticated requests the same as API-key requests — org-context and permission-resolution middlewares are skipped because the strategy has already resolved everything.
 
 **`permissions` type.** `readonly string[]` at the contract layer (not the typed `Permission[]` union) to keep the core RBAC catalog out of `@appstrate/core`. Use permission strings that match core's `resource:action` vocabulary — `requirePermission()` guards will 403 on unknown strings at request time.
 

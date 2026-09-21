@@ -24,7 +24,7 @@ import {
   type TestContext,
 } from "../../../../../test/helpers/auth.ts";
 import { seedAgent, seedPackage, seedSchedule } from "../../../../../test/helpers/seed.ts";
-import { installPackage } from "../../../../services/space-packages.ts";
+import { activatePackage } from "../../../../services/space-packages.ts";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
@@ -90,7 +90,7 @@ describe("GET /api/agents/:scope/:name/map", () => {
       draftManifest: manifest,
       draftContent: prompt,
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
   }
 
   async function seedIntegration() {
@@ -118,7 +118,7 @@ describe("GET /api/agents/:scope/:name/map", () => {
         tools_policy: { search: {} },
       }),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
   }
 
   function getMap(query = "") {

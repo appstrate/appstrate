@@ -15,7 +15,7 @@ import {
   useDeleteAllMemories,
   useRunAgent,
 } from "../../hooks/use-mutations";
-import { usePackageInstallState, useTogglePackageInstall } from "../../hooks/use-library";
+import { useSetPackageActive } from "../../hooks/use-library";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { PackageActionsDropdown } from "./package-actions-dropdown";
 import { ConfirmModal } from "../confirm-modal";
@@ -49,13 +49,12 @@ export function AgentActions({
   const deleteAgent = useDeleteAgent();
   const deleteRuns = useDeleteAgentRuns(packageId);
   const deleteAllMemories = useDeleteAllMemories(packageId);
-  const uninstallMutation = useTogglePackageInstall();
+  const setActive = useSetPackageActive();
   const runAgent = useRunAgent(packageId);
   const currentSpaceId = useCurrentSpaceId();
-  const { installedSpaceNames, isInstalledInCurrentSpace } = usePackageInstallState(packageId);
 
   const [confirmState, setConfirmState] = useState<{
-    type: "deleteAgent" | "clearRuns" | "clearMemories" | "uninstallAgent";
+    type: "deleteAgent" | "clearRuns" | "clearMemories" | "deactivateAgent";
     label: string;
   } | null>(null);
   const [runOptionsOpen, setRunOptionsOpen] = useState(false);
@@ -63,6 +62,24 @@ export function AgentActions({
   if (!detail) return null;
 
   const hasFileInput = schemaHasFileFields(detail.input?.schema);
+  // Whether the agent RUNS in the space this page is read from, straight off
+  // the response this menu already has. `GET /api/packages/agents/{id}` answers
+  // it for the same space it resolved everything else in, so the menu and the
+  // rest of the page cannot disagree — and a caller the library stays silent
+  // about (a `runner` holds `agents:run` and no `agents:read`, so the space
+  // library lists no agents at all) still gets a verdict here.
+  const activeHere = detail.active;
+  // Two refusals the launcher would otherwise discover by round trip. Being
+  // switched off HERE comes first, because the cure is one item away in this
+  // very menu ("Activer dans cet espace") while publishing is somebody else's
+  // act. The second is a package with nothing published whose working copy is
+  // not this caller's: a launch that names no version gets `404
+  // no_published_version`.
+  const runBlockedReason = !activeHere
+    ? t("detail.titleNotActive")
+    : detail.definition === "draft" && !detail.home_writable
+      ? t("detail.titleNeverPublished")
+      : undefined;
 
   const handleConfirm = () => {
     if (!confirmState) return;
@@ -77,12 +94,9 @@ export function AgentActions({
       case "clearMemories":
         deleteAllMemories.mutate(undefined, { onSuccess });
         break;
-      case "uninstallAgent":
+      case "deactivateAgent":
         if (!currentSpaceId) return;
-        uninstallMutation.mutate(
-          { spaceId: currentSpaceId, packageId, installed: true },
-          { onSuccess },
-        );
+        setActive.mutate({ spaceId: currentSpaceId, packageId, active: false }, { onSuccess });
         break;
     }
   };
@@ -95,10 +109,15 @@ export function AgentActions({
         isOwned={isOwned}
         isBuiltIn={detail.source === "system"}
         isHistoricalVersion={isHistoricalVersion}
+        homeSpaceId={detail.home_space_id}
+        homeWritable={detail.home_writable}
+        homeDeletable={detail.home_deletable}
+        homeShareable={detail.home_shareable}
         downloadVersion={downloadVersion}
         onDownload={downloadPackage}
         onDownloadBundle={downloadBundle}
         hasPublishedVersion={(detail.version_count ?? 0) > 0}
+        isActiveHere={activeHere}
         onCreateVersion={onCreateVersion}
         onFork={onFork}
         // The definition is edited in Paramètres › Définition.
@@ -110,39 +129,37 @@ export function AgentActions({
         onDeleteAgent={() =>
           setConfirmState({
             type: "deleteAgent",
-            label:
-              installedSpaceNames.length > 0
-                ? t("detail.deleteConfirmWithSpaces", {
-                    name: detail.display_name,
-                    spaces: installedSpaceNames.join(", "),
-                  })
-                : t("detail.deleteConfirm", { name: detail.display_name }),
+            label: t("detail.deleteConfirm", { name: detail.display_name }),
           })
         }
-        canInstall={!!currentSpaceId && !isInstalledInCurrentSpace && detail.source !== "system"}
-        onInstall={() => {
+        // The agents index lists what this space READS — an agent placed here
+        // and switched off is on it, and running it needs the switch on. This is
+        // the door: the same `POST /api/spaces/{spaceId}/packages` the library
+        // calls, reached from the page the index links to. A SYSTEM agent is
+        // not exempt: "active here" has one definition for the four families,
+        // the row wins over the platform's default, and switching one off per
+        // space is the sticky opt-out the run gate then honours.
+        canActivate={!activeHere}
+        onActivate={() => {
           if (!currentSpaceId) return;
-          uninstallMutation.mutate(
-            { spaceId: currentSpaceId, packageId, installed: false },
-            {
-              onSuccess: () =>
-                toast.success(
-                  t("packages.installed", { name: detail.display_name, ns: "settings" }),
-                ),
-              onError: (err) => toast.error(getErrorMessage(err)),
-            },
+          setActive.mutate(
+            { spaceId: currentSpaceId, packageId, active: true },
+            // The refusal has to be said: the optimistic cache write makes the
+            // switch look taken, and the rollback that follows is silent.
+            { onError: (err) => toast.error(getErrorMessage(err) || t("error.generic")) },
           );
         }}
-        canUninstall={isInstalledInCurrentSpace && detail.source !== "system"}
-        onUninstall={() =>
+        canDeactivate={activeHere}
+        onDeactivate={() =>
           setConfirmState({
-            type: "uninstallAgent",
-            label: t("packages.uninstallConfirm", {
+            type: "deactivateAgent",
+            label: t("packages.deactivateConfirm", {
               name: detail.display_name,
               ns: "settings",
             }),
           })
         }
+        activationPending={setActive.isPending}
         onDeleteRuns={() =>
           setConfirmState({
             type: "clearRuns",
@@ -158,6 +175,7 @@ export function AgentActions({
         }
         onRunWithOptions={() => setRunOptionsOpen(true)}
         labelledTrigger
+        {...(runBlockedReason ? { runBlockedReason } : {})}
       />
       <RunWithOptionsModal
         open={runOptionsOpen}
@@ -166,7 +184,8 @@ export function AgentActions({
         isPending={runAgent.isPending}
         onSubmit={({ input, version, overrides, dependencyOverrides }) => {
           // Map the modal payload onto the run API body. `version` rides the
-          // `?version=` query (defaults to `draft`, like plain "Lancer"). The
+          // `?version=` query and is always an explicit pick here — the modal
+          // seeds it with the same default plain "Lancer" would send. The
           // overrides panel already emits the server's wire values (a proxy
           // pick of "none" means no proxy), so the value passes through as-is.
           const proxy = overrides.proxy_id_override;
@@ -195,15 +214,15 @@ export function AgentActions({
         title={t("btn.confirm", { ns: "common" })}
         description={confirmState?.label ?? ""}
         confirmLabel={
-          confirmState?.type === "uninstallAgent"
-            ? t("packages.uninstall", { ns: "settings" })
+          confirmState?.type === "deactivateAgent"
+            ? t("packages.deactivate", { ns: "settings" })
             : undefined
         }
         isPending={
           deleteAgent.isPending ||
           deleteRuns.isPending ||
           deleteAllMemories.isPending ||
-          uninstallMutation.isPending
+          setActive.isPending
         }
       />
     </>

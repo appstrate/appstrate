@@ -42,6 +42,12 @@ let currentCtx: TestContext | null = null;
 /**
  * `X-Test-Perms` carries the caller's permission Set verbatim, so each test
  * names the exact grant it is probing.
+ *
+ * It pins NO space: a `user` principal is the person by another transport, and
+ * such a credential pins nothing — while `webhookScope` reads that pin (issue
+ * #1313), so a stub that set one would be testing a space-confined caller. A
+ * test that needs the SPACE half of the vocabulary sends `X-Space-Id`, which is
+ * how a session enters a space on this module's routes (`enterCallerSpace`).
  */
 const permsStrategy: AuthStrategy = {
   id: "webhook-perms-strategy",
@@ -59,7 +65,7 @@ const permsStrategy: AuthStrategy = {
       orgSlug: currentCtx.org.slug,
       orgRole: "admin",
       authMethod: "webhook-perms-strategy",
-      spaceId: currentCtx.defaultSpaceId,
+      principalKind: "user",
       permissions: raw.split(","),
     };
   },
@@ -115,9 +121,15 @@ describe("GET /api/webhooks — org-level rows need org-webhooks:read", () => {
   // audited by a later file is not swallowed by this one's array.
   afterEach(() => setPermissionDenialHandler(null));
 
+  /** `webhooks:*` is space-level, so the caller enters a space to hold it. */
+  const inDefaultSpace = (perms: string) => ({
+    "X-Test-Perms": perms,
+    "X-Space-Id": currentCtx!.defaultSpaceId,
+  });
+
   async function listWith(perms: string): Promise<string[]> {
     const res = await app.request("/api/webhooks?all=true", {
-      headers: { "X-Test-Perms": perms },
+      headers: inDefaultSpace(perms),
     });
     expect(res.status).toBe(200);
     return ((await res.json()) as { data: { id: string }[] }).data.map((w) => w.id);
@@ -128,7 +140,7 @@ describe("GET /api/webhooks — org-level rows need org-webhooks:read", () => {
     // a space admin of A from reading space B's rows through `all=true`. The
     // cross-space view is the org half's, and nothing else.
     const res = await app.request("/api/webhooks?all=true", {
-      headers: { "X-Test-Perms": "webhooks:read" },
+      headers: inDefaultSpace("webhooks:read"),
     });
     expect(res.status).toBe(403);
   });
@@ -146,14 +158,14 @@ describe("GET /api/webhooks — org-level rows need org-webhooks:read", () => {
     // The default filter returns ONLY org-level rows, so a space-half-only
     // caller legitimately sees nothing rather than another level's data.
     const res = await app.request("/api/webhooks", {
-      headers: { "X-Test-Perms": "webhooks:read" },
+      headers: inDefaultSpace("webhooks:read"),
     });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { data: unknown[] }).data).toEqual([]);
   });
 
   it("?spaceId= takes the permission from THAT space, not the caller's own", async () => {
-    // The stub strategy pins the default space, so this asks about a space the
+    // A session names its space per request, so this asks about a space the
     // caller reaches only if their role there says so. `spaceViewer` is an org
     // `member` with an explicit role in the default space and none in `other`.
     const other = await seedSpace({ orgId: currentCtx!.orgId, visibility: "closed" });
@@ -248,12 +260,20 @@ describe("GET /api/webhooks — org-level rows need org-webhooks:read", () => {
       ((await onFake.json()) as { detail: string }).detail,
     );
 
-    // Discriminator: the two ids ARE distinguishable to a caller the guard
-    // admits, so the single answer above is the guard's doing and not an
-    // accident of both spaces being unreachable.
+    // Discriminator. It used to be that the two ids were distinguishable to a
+    // caller the guard admits — a private space answered 404 and a nonexistent
+    // one 403 — which proved the single answer above was the guard's doing.
+    // That split WAS the oracle: for an org admin, who enters every team space,
+    // a 404 meant "this id is somebody's personal space". Both are 404 now, so
+    // the discriminator has to rest on something that is not an id's existence.
+    //
+    // It rests on reach instead: a space the admin CAN enter answers 201, one
+    // they cannot answers 404. The guard confines, it does not refuse
+    // everything — which is what the assertions above would otherwise pass for.
     const writer = await asRole("admin");
+    expect((await create(writer, currentCtx!.defaultSpaceId)).status).toBe(201);
     expect((await create(writer, hidden.id)).status).toBe(404);
-    expect((await create(writer, fakeSpaceId)).status).toBe(403);
+    expect((await create(writer, fakeSpaceId)).status).toBe(404);
   });
 
   it("a lookup failure that is not a miss stays a 500 for the same caller", async () => {
@@ -271,7 +291,7 @@ describe("GET /api/webhooks — org-level rows need org-webhooks:read", () => {
     // Control: the 403 above is about the caller, not about every miss —
     // someone allowed to read webhooks keeps the honest not-found.
     const res = await app.request("/api/webhooks/wh_00000000-0000-0000-0000-000000000000", {
-      headers: { "X-Test-Perms": "webhooks:read,org-webhooks:read" },
+      headers: inDefaultSpace("webhooks:read,org-webhooks:read"),
     });
     expect(res.status).toBe(404);
   });

@@ -280,6 +280,42 @@ export function resolveArch(nodeArch: string = process.arch): GuestArch {
  * Build the download URL for an asset. With a pinned `version` this points
  * at `<base>/download/v<version>/<asset>`; without one it uses GitHub's
  * `<base>/latest/download/<asset>` redirect to the newest release.
+ *
+ * WHY `latest/download` STAYS HERE, when the CLI (`self-update`,
+ * `runner/download.ts`), `scripts/bootstrap.sh` and `scripts/bootstrap-runner.sh`
+ * all dropped it in favour of listing the GitHub Releases API. Three reasons,
+ * and the decision is deliberate rather than an oversight:
+ *
+ *  1. Unpinned is a SUPPORTED MODE, not a fallback. `FIRECRACKER_ARTIFACTS_VERSION`
+ *     is optional by design (`host-env.ts`), `appstrate runner install` leaves it
+ *     unset for a dev install (`lib/runner/config-files.ts`), and
+ *     `docs/architecture/FIRECRACKER.md` documents "unset ⇒ track the newest
+ *     release, skip the download when artifacts are already present". Making the
+ *     variable required would delete that mode across four files and break every
+ *     host installed without a pin — a product change, not a hardening.
+ *
+ *  2. The URL is NOT the trust anchor here, unlike in the CLI. Whatever
+ *     `latest/download` resolves to, the manifest is Ed25519-verified against a
+ *     source-pinned key before a single hash inside it is read, the guest
+ *     protocol is gated, and both files are SHA256-checked against that signed
+ *     manifest. A release the key holder did not sign cannot install artifacts,
+ *     so the redirect can cost availability — never integrity. The CLI's
+ *     `daemonUrls` had no equivalent: a wrong release there is a plain 404 on
+ *     the asset a user asked for by version.
+ *
+ *  3. The daemon has no Releases-listing client, and giving it one would mean
+ *     an unauthenticated GitHub API call (60 req/h per IP) on the boot path of
+ *     every KVM host — a new hard dependency on a rate-limited endpoint to
+ *     replace a redirect that fails loudly. A host that cares picks the pin.
+ *
+ * The residual exposure is availability only: if a non-`v*` Release is ever
+ * marked GitHub's "latest", these assets 404 and the daemon either keeps its
+ * existing (signature-attested) artifacts with a warning, or refuses to boot
+ * with the message naming FIRECRACKER_ARTIFACTS_VERSION as the fix. THAT is the
+ * "residual `latest/download` redirect" the `make_latest: false` flag in
+ * `.github/workflows/publish-{cli,core,afps-shared}.yml` protects — do not
+ * remove that flag on the grounds that "nothing resolves releases/latest
+ * any more". This is what still does.
  */
 function assetUrl(baseUrl: string, version: string | undefined, asset: string): string {
   const base = baseUrl.replace(/\/+$/, "");

@@ -167,7 +167,12 @@ interface ScheduleFormDeps {
   persistedModelId: string | null;
   persistedGenerationConfig: ModelGenerationSettings | null;
   persistedProxyId: string | null;
-  persistedVersion: string | null;
+  /**
+   * Whether the caller may write the package. The schedule form offers the
+   * `draft` version option only to them — `POST /api/schedules` answers
+   * `403 draft_not_writable` to everyone else.
+   */
+  homeWritable: boolean;
   hasFileInputs: boolean;
   /**
    * Agent's declared integration deps (#199) — drives the schedule
@@ -178,8 +183,10 @@ interface ScheduleFormDeps {
   /**
    * Agent's declared skill dependencies — drives the per-skill dependency
    * override picker. Version-pinned when `version` is passed (#770).
+   * `homeWritable` is the dependency's OWN `home_writable`: the draft option
+   * is offered per skill, because the server gates it per skill.
    */
-  skills: Array<{ id: string; version?: string; name?: string }>;
+  skills: Array<{ id: string; version?: string; name?: string; homeWritable: boolean }>;
 }
 
 /**
@@ -197,7 +204,9 @@ interface ScheduleFormDeps {
  *
  * `version` (#770) pins the agent-detail projection to a published version so
  * the input / integrations / skills the form renders match the version the run
- * will execute. Omitted → `draft` (the editor working copy).
+ * will execute. Omitted → the projection the detail route renders by default:
+ * the working copy for whoever can write the package, the latest published
+ * version for everybody else.
  */
 export function useScheduleFormDeps(
   packageId: string | undefined,
@@ -223,6 +232,7 @@ export function useScheduleFormDeps(
   // `agents:read`) omits it rather than emptying it.
   const skillDeps = (agentDetail.dependencies.skills ?? []).map((s) => ({
     id: s.id,
+    homeWritable: s.home_writable,
     ...(s.version ? { version: s.version } : {}),
     ...(s.name ? { name: s.name } : {}),
   }));
@@ -234,7 +244,7 @@ export function useScheduleFormDeps(
       persistedModelId: agentModel?.modelId ?? null,
       persistedGenerationConfig: agentModel?.generation ?? null,
       persistedProxyId: agentProxy?.proxyId ?? null,
-      persistedVersion: agentDetail.version ?? null,
+      homeWritable: agentDetail.home_writable,
       hasFileInputs: schemaHasFileFields(agentDetail.input.schema),
       agentIntegrations: integrationDeps,
       skills: skillDeps,

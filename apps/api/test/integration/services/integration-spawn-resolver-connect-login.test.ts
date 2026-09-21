@@ -17,7 +17,7 @@ import type { ConnectContext } from "../../../src/services/connect/strategy.ts";
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedInstalledPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   localIntegrationManifest,
@@ -105,7 +105,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
       version: "0.1.0",
       manifest: serverManifest,
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
   });
 
   function connectCtx(): ConnectContext {
@@ -248,7 +248,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
       version: "0.1.0",
       manifest: serverManifest,
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
     await new LoginSecretStrategy().complete(connectCtx(), {
       kind: "fields",
       credentials: { identifiant: "user1", mot_de_passe: "s3cr3t" },
@@ -324,7 +324,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
       version: "0.1.0",
       manifest: serverManifest,
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
 
     await new LoginSecretStrategy().complete(connectCtx(), {
       kind: "fields",

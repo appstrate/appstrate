@@ -18,8 +18,8 @@
  *     `identityClaims` JSONB and `accountId` discriminator.
  *
  *   - Connections are scoped per space (every connect-able
- *     surface in Appstrate is space-scoped — see CLAUDE.md
- *     "Multi-tenant" section), with the owner being either a
+ *     surface in Appstrate is space-scoped — see the "Multi-tenant"
+ *     bullet of `apps/api/AGENTS.md`), with the owner being either a
  *     dashboard user (`userId`) or a headless end-user
  *     (`endUserId`), enforced by a check constraint.
  *
@@ -193,7 +193,8 @@ export const integrationConnections = pgTable(
  *     the old global UNIQUE).
  *
  * Lifecycle: created by admin (or auto-provisioned via DCR), optionally
- * rotated, deleted when the integration is uninstalled (FK cascade).
+ * rotated, deleted when the placement is removed (FK cascade on
+ * `space_packages`).
  */
 export const integrationOauthClients = pgTable(
   "integration_oauth_clients",

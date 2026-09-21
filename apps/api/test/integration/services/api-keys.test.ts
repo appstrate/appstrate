@@ -14,7 +14,7 @@ import {
   listApiKeys,
   revokeApiKey,
 } from "../../../src/services/api-keys.ts";
-import { prefixedId } from "../../../src/lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 
 describe("api-keys service", () => {
   let ctx: TestContext;

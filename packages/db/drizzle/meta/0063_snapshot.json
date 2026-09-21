@@ -1,5 +1,5 @@
 {
-  "id": "928a5e58-ef01-4ef4-afac-c84ebad5c9a0",
+  "id": "3e886dba-9eae-4ed6-a141-3d24f6c69869",
   "prevId": "3f0c1a92-7d54-4b18-9c6e-5a2f8b41d0e7",
   "version": "7",
   "dialect": "postgresql",
@@ -1462,12 +1462,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "logo": {
-          "name": "logo",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "org_settings": {
           "name": "org_settings",
           "type": "jsonb",
@@ -2592,6 +2586,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "home_space_id": {
+          "name": "home_space_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -2661,6 +2661,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "idx_packages_home_space_id": {
+          "name": "idx_packages_home_space_id",
+          "columns": [
+            {
+              "expression": "home_space_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -2680,6 +2695,15 @@
           "columnsFrom": ["created_by"],
           "columnsTo": ["id"],
           "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "packages_home_space_id_spaces_id_fk": {
+          "name": "packages_home_space_id_spaces_id_fk",
+          "tableFrom": "packages",
+          "tableTo": "spaces",
+          "columnsFrom": ["home_space_id"],
+          "columnsTo": ["id"],
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },

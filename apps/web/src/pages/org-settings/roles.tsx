@@ -7,7 +7,6 @@ import { useTranslation } from "react-i18next";
 import { Eye, Grid3x3, Plus, Rows3, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { Input } from "@appstrate/ui/components/input";
@@ -15,7 +14,6 @@ import { Label } from "@appstrate/ui/components/label";
 import { cn } from "@appstrate/ui/cn";
 import { ApiError } from "../../api/client";
 import { useCanPreviewRole, usePermissions } from "../../hooks/use-permissions";
-import { useAppConfig } from "../../hooks/use-app-config";
 import { useModalParam } from "../../hooks/use-modal-param";
 import {
   spaceRoleDescription,
@@ -56,7 +54,6 @@ export function OrgSettingsRolesPage() {
   const { t } = useTranslation(["settings", "common"]);
   const location = useLocation();
   const { can } = usePermissions();
-  const { features } = useAppConfig();
   const { data: roles, isLoading, error } = useRoles();
   const deleteRole = useDeleteRole();
   const canPreview = useCanPreviewRole();
@@ -82,11 +79,10 @@ export function OrgSettingsRolesPage() {
   const [confirmDelete, setConfirmDelete] = useState<RoleObject | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  // Defining bundles is the gated half; the presets ship with the platform
-  // and stay usable without the feature.
-  const customRolesEnabled = !!features.custom_roles;
-  const canWrite = customRolesEnabled && can("roles:write");
-  const canDelete = customRolesEnabled && can("roles:delete");
+  // Authoring bundles is OSS platform code (#1452): the permission is the whole
+  // gate, with no deployment-level feature on top of it.
+  const canWrite = can("roles:write");
+  const canDelete = can("roles:delete");
   const deeds = rolesPageDeeds({ canWrite, canPreview });
 
   const presets = (roles ?? []).filter((r) => r.kind === "preset");
@@ -209,11 +205,6 @@ export function OrgSettingsRolesPage() {
       {tab === "org" && (view === "matrix" ? <OrgRolesMatrix /> : <OrgRolesList />)}
       {tab === "space" && (
         <>
-          {!customRolesEnabled && (
-            <Alert className="mb-6">
-              <AlertDescription>{t("roles.customUnavailable")}</AlertDescription>
-            </Alert>
-          )}
           {view === "matrix" ? (
             isLoading ? (
               <LoadingState />

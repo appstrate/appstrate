@@ -119,7 +119,7 @@ Dispatch opus sub-agents IN PARALLEL (one message, N tool_uses), one per **patte
 
 Every hunter must:
 
-- Read `CLAUDE.md` for the subsystem's stated invariants before judging anything
+- Read `AGENTS.md` for the subsystem's stated invariants before judging anything
 - Search `claudedocs/`, PR bodies (`gh pr view`), and commit messages for the **original justification** — the strongest findings come from authors who already admitted the limit in writing
 - Return candidates with `file:line`, the **cost** (lines / files / new surfaces), the **claimed benefit**, and the **evidence found or missing**
 - Never edit. Never conclude. Candidates only.

@@ -77,6 +77,27 @@ export function companionFilesFromRecord(files: Record<string, Uint8Array>): Com
 }
 
 /**
+ * Candidate spellings for a manifest-declared archive path, in order.
+ *
+ * A manifest may write `./server.js` or `server.js`; zip entries are stored
+ * without the `./` prefix. Only the leading `./` is normalised — `..`
+ * segments and absolute paths are NOT resolved, so this cannot widen the
+ * lookup beyond the archive root.
+ */
+function archivePathCandidates(declared: string): string[] {
+  const stripped = declared.startsWith("./") ? declared.slice(2) : declared;
+  return stripped === declared ? [declared] : [declared, stripped];
+}
+
+/** First candidate spelling of `declared` present in `files`, else null. */
+function resolveArchivePath(files: CompanionFileSource, declared: string): string | null {
+  for (const candidate of archivePathCandidates(declared)) {
+    if (files.has(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
  * Validate companion-file presence per AFPS §3.3 / §3.4 for the given
  * package type. Returns the first violation encountered, or `null` when
  * the archive is consistent with the declared type.
@@ -151,7 +172,14 @@ export function checkCompanionFiles(
         message: "mcp-server manifest must declare server.entry_point",
       };
     }
-    if (!files.has(entryPoint)) {
+    // MCPB manifests conventionally write the entry point relative-explicit
+    // (`./server.js`), while archive entries are stored flat (`server.js`).
+    // Both spellings name the same file, so resolve either — an exact
+    // `has(entryPoint)` rejected every package in this repo's own
+    // `system-packages/` tree when imported through `POST /api/packages/import`,
+    // while the on-disk system-package loader accepted them. One archive, two
+    // verdicts, depending on which door it came through.
+    if (!resolveArchivePath(files, entryPoint)) {
       return {
         reason: "MCP_SERVER_MISSING_ENTRY_POINT",
         message: `mcp-server archive missing server.entry_point payload: ${entryPoint}`,

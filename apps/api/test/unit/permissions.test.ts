@@ -24,8 +24,9 @@ import { resolveSpaceRole, spacePermissions } from "../../src/lib/space-role.ts"
 function inDefaultSpace(role: Parameters<typeof orgPermissions>[0]): ReadonlySet<string> {
   const ref = resolveSpaceRole(
     role,
-    { id: "spc_test", visibility: "open", defaultRole: "operator" },
+    { id: "spc_test", visibility: "open", defaultRole: "operator", ownerUserId: null },
     null,
+    "usr_test",
   );
   return effectivePermissions({
     orgPermissions: orgPermissions(role),
@@ -116,8 +117,9 @@ describe("effective permissions in an open space", () => {
   it("guest added to the space holds exactly the preset it was given", () => {
     const ref = resolveSpaceRole(
       "guest",
-      { id: "spc_test", visibility: "closed", defaultRole: "operator" },
+      { id: "spc_test", visibility: "closed", defaultRole: "operator", ownerUserId: null },
       { ref: { kind: "preset", preset: "viewer" } },
+      "usr_test",
     );
     const perms = effectivePermissions({
       orgPermissions: orgPermissions("guest"),
@@ -250,8 +252,9 @@ describe("the `runner` preset", () => {
     // in a closed space keeps the org reads and gains nothing else.
     const ref = resolveSpaceRole(
       "member",
-      { id: "spc_test", visibility: "closed", defaultRole: "operator" },
+      { id: "spc_test", visibility: "closed", defaultRole: "operator", ownerUserId: null },
       { ref: { kind: "preset", preset: "runner" } },
+      "usr_test",
     );
     const effective = effectivePermissions({
       orgPermissions: orgPermissions("member"),
@@ -262,6 +265,55 @@ describe("the `runner` preset", () => {
     expect(effective.has("org:read")).toBe(true);
   });
 });
+describe("the `share` verb", () => {
+  /**
+   * Who may change a package's AUDIENCE (RBAC spec §6.10). `admin` and
+   * `builder` derive their grants from the catalog, so the four strings reached
+   * them the moment core declared them — what needs pinning is the three
+   * presets that must NOT have them, and the API-key allowlist, both of which
+   * are hand-written lists where an addition would be silent.
+   */
+  const SHARE = [
+    "agents:share",
+    "skills:share",
+    "mcp-servers:share",
+    "integrations:share",
+  ] as const;
+
+  it("is granted by `admin` and `builder`", () => {
+    for (const preset of ["admin", "builder"] as const) {
+      const granted = presetPermissions(preset);
+      for (const permission of SHARE) expect(granted.has(permission)).toBe(true);
+    }
+  });
+
+  it("is granted by no other preset", () => {
+    for (const preset of ["operator", "runner", "viewer"] as const) {
+      const granted = presetPermissions(preset);
+      for (const permission of SHARE) expect(granted.has(permission)).toBe(false);
+    }
+  });
+
+  it("is never grantable to an API key", () => {
+    // A share decides who runs a package with whose credentials, so it stays
+    // session-only — the same reasoning as `integrations:configure`.
+    for (const permission of SHARE) expect(API_KEY_ALLOWED_SCOPES.has(permission)).toBe(false);
+    expect(() => validateScopes(["agents:share"], new Set(["agents:share"]))).toThrow(
+      /non-grantable API key scope/,
+    );
+  });
+
+  it("is space-level, so it needs a space context to be held at all", () => {
+    for (const permission of SHARE) {
+      expect(SPACE_LEVEL_PERMISSIONS.has(permission as SpaceLevelPermission)).toBe(true);
+    }
+    // An org role alone never carries it: `effectivePermissions` with no space
+    // half is the shape of a request that never entered a space.
+    const orgOnly = effectivePermissions({ orgPermissions: orgPermissions("owner") });
+    for (const permission of SHARE) expect(orgOnly.has(permission as Permission)).toBe(false);
+  });
+});
+
 describe("runs:read-all", () => {
   it("is held by builder and admin, and by neither operator nor viewer", () => {
     // `read` is the runs the principal launched; `read-all` is the space-wide

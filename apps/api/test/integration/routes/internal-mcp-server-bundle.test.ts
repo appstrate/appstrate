@@ -34,7 +34,7 @@ import {
 } from "../../helpers/integration-manifests.ts";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { _setSystemPackagesForTesting } from "../../../src/services/system-packages.ts";
 import type { SystemPackageEntry } from "@appstrate/core/system-packages";
 
@@ -77,6 +77,7 @@ describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
   async function seedLocalIntegration(installed: boolean, serverName = MCP_SERVER) {
     await seedPackage({
       id: INTEGRATION,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
@@ -100,7 +101,7 @@ describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
       }),
     });
     if (installed) {
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
     }
   }
 
@@ -133,6 +134,7 @@ describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
     // reads `manifest.dependencies.integrations` keys to find references.
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: {
@@ -145,7 +147,7 @@ describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
         integrations_configuration: { [INTEGRATION]: { tools: ["search"] } },
       },
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
 
     const run = await seedRun({
       packageId: AGENT,

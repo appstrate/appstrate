@@ -17,6 +17,7 @@
 
 import type { Context } from "hono";
 import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/core/naming";
+import type { PrincipalKind } from "@appstrate/core/module";
 import { logger } from "./logger.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 
@@ -30,6 +31,11 @@ export type ChatEnv = {
   Variables: {
     user: { id: string; email: string; name: string };
     orgId: string;
+    /**
+     * What the caller's credential IS, as the auth pipeline resolved it. The
+     * loopback minter is the one reader: it refuses anything but `"user"`.
+     */
+    principalKind: PrincipalKind;
     /**
      * Space the router entered (`enterSpaceContext`, mounted on every
      * `/api/chat/*` route). Always set: entering is what makes the space-level
@@ -71,7 +77,7 @@ Choosing what to do:
 - If the request is to summarise, analyse, or answer questions about a file available as an \`appfile://\` URI, call \`read_file\` first. When it returns readable text, answer directly from that content; do NOT launch a run merely to read or analyse it. Use a run only when direct reading does not provide usable content (for example, it returns metadata only or binary/blob data), the task needs specialised processing such as OCR or code, or the user asks for a new file deliverable.
 - If the request needs external information or context and names no source, default to the integrations already available to the user — connected ones first, then ones activated for this space — rather than answering from memory or asking which source to use. Ask only when no available integration plausibly covers the need.
 - If the request needs an integration, an MCP, or any external action, run an agent:
-  1. Prefer an existing agent the user can run (listed in your context below) when one matches the intent — call \`run_and_wait\` with \`kind:"agent"\`, \`scope\` (KEEP the leading \`@\`, e.g. \`@acme\`) and \`name\`. Pass an \`input\` object ONLY when the agent's context entry says it takes input (it is validated against the agent's schema); omit it otherwise. \`version\`: omit it to run the latest PUBLISHED version — but an agent marked "draft only" in your context has no published version (omitting would 404 \`no_published_version\`), so for those pass \`version:"draft"\` to run the working copy.
+  1. Prefer an existing agent the user can run (listed in your context below) when one matches the intent — call \`run_and_wait\` with \`kind:"agent"\`, \`scope\` (KEEP the leading \`@\`, e.g. \`@acme\`) and \`name\`. Pass an \`input\` object ONLY when the agent's context entry says it takes input (it is validated against the agent's schema); omit it otherwise. \`version\`: omit it to run the latest PUBLISHED version. An agent marked "draft only, yours to run" has no published version but the user authors it, so pass \`version:"draft"\` for those. An agent marked "draft only, not runnable" has no published version and the user does not author it — it CANNOT be run at all (omitting 404s \`no_published_version\`, \`version:"draft"\` 403s \`draft_not_writable\`); say so and offer to compose an inline agent instead.
   2. Otherwise call \`run_and_wait\` with \`kind:"inline"\`: pass a PARTIAL canonical AFPS agent \`manifest\` plus a top-level \`prompt\`. Give EVERY inline run a task-specific identity: set \`manifest.display_name\` to a concise human title in the user's language that describes the exact action or outcome of THIS run (for example, "Analyse des 3 derniers e-mails"). The platform derives the matching \`@inline/<kebab-case-slug>\` name and fills omitted AFPS boilerplate, \`runtime_tools\` (log, output, publish_file), and an open object output schema. Defaults apply ONLY to absent top-level fields: every field you provide replaces its default exactly, arrays and nested objects are never merged, and \`runtime_tools: []\` stays empty. You can override EVERY field — including \`name\`, \`runtime_tools\`, and a complete strict \`output.schema\` — when the task needs a complex deterministic manifest; if you provide a non-empty output schema, your explicit runtime tools must include \`output\`. Never use an id or a generic display name such as \`one-shot\`, \`inline-agent\`, \`task\`, or \`worker\`; the identity is what the user sees on the run card, in run lists, and on the run page. In the manifest, declare the integration(s) under \`dependencies.integrations\` (use the exact \`@scope/name\` id and version from your context), then select that integration's tools under \`integrations_configuration.<id>.tools\`: omit the entry to inherit the integration's \`default_tools\` (shown per integration in your context), use \`[]\` for none, or list exact tool names (\`api_call\` covers most third-party REST calls). When you need a tool beyond the default, first inspect the integration with describe_operation on \`GET /api/integrations/{packageId}\` to read its full \`tool_catalog\`, then name those tools. When one of the skills listed in your context fits the task, attach it under \`dependencies.skills\` keyed by its \`@scope/name\` id with a satisfiable range (use the version shown in your context, e.g. \`"^1.2.0"\`, or \`"*"\` if none); the agent then has that skill's instructions available. In the \`prompt\`, tell the agent it is a sub-agent: report meaningful progress with \`log\`, do the work, then return the result with \`output\` as its mandatory last action.
 
 When a request chains several external actions (e.g. scrape a page THEN email the result), do NOT chain one run per action: compose ONE sub-agent that declares ALL the needed integrations under \`dependencies.integrations\` and describes the whole chain in its \`prompt\` — a single \`run_and_wait\` call. Split into separate runs only when you must decide something between the steps (the user has to confirm, or the next step depends on a result you need to inspect first).
@@ -100,7 +106,7 @@ Example — summarising the user's latest emails (adapt the integration id, vers
 \`\`\`
 Then read \`result.summary\` from the \`run_and_wait\` result and reply to the user from it.
 
-You already have the exact shape for \`run_and_wait\`: for existing agents pass \`{ kind:"agent", scope, name, version?, input? }\`; for inline runs pass \`{ kind:"inline", manifest, prompt, input?, context_files? }\` — those two optional arguments are the ONLY top-level way to give an inline run a file, and any other argument name is dropped before the launch. Either kind also takes \`connection_overrides\` — a top-level \`{ "<integration id>": "<connection id>" }\` map, used only to retry after a \`must_choose_connection\` error names its \`candidate_connection_ids\`. (You still discover any OTHER operation's schema via search/describe as usual.) Read \`run_and_wait\`'s returned \`result\` field — that is the sub-agent's deliverable; answer the user from it and never fabricate it. If the run fails, read its \`error\` and report it plainly.
+You already have the exact shape for \`run_and_wait\`: for existing agents pass \`{ kind:"agent", scope, name, version?, input? }\`; for inline runs pass \`{ kind:"inline", manifest, prompt, input?, context_files? }\` — those two optional arguments are the ONLY top-level way to give an inline run a file, and any other argument name is dropped before the launch. Either kind also takes \`connection_overrides\` — a top-level \`{ "<integration id>": "<connection id>" }\` map, used only to retry after a \`must_choose_connection\` error names its \`candidate_connections\` (each with \`label\`, \`account_id\` and \`owned_by_actor\` — pick from those, don't go list connections). (You still discover any OTHER operation's schema via search/describe as usual.) Read \`run_and_wait\`'s returned \`result\` field — that is the sub-agent's deliverable; answer the user from it and never fabricate it. If the run fails, read its \`error\` and report it plainly.
 
 After a successful \`run_and_wait\`, deliver the result directly and briefly: present the \`result\` content (formatted for readability) and stop. Do not narrate what the run did, restate its progress logs, or add closing commentary — the user watched the run live on its card. One short lead-in sentence at most.
 
@@ -141,8 +147,15 @@ interface CallerContext {
         display_name?: string | null;
         description?: string | null;
         takes_input?: boolean | null;
-        /** False = draft-only agent; the model must run it with `version=draft`. */
+        /** False = draft-only agent: no published version to run. */
         published?: boolean | null;
+        /**
+         * Whether the CALLER may write the agent, i.e. whether its draft is
+         * theirs to run. Read together with `published`: unpublished and not
+         * writable is an agent nobody but its author can execute, and telling
+         * the model to "run with version=draft" there buys a 403 loop.
+         */
+        home_writable?: boolean | null;
       }[]
     | null;
   agents_truncated?: boolean | null;
@@ -264,7 +277,13 @@ export function formatCallerContext(raw: unknown, opts?: { locale?: string; now?
       lines.push(
         `- \`${a.package_id}\` — ${label}${desc ? `: ${desc}` : ""}` +
           ` (takes input: ${a.takes_input ? "yes" : "no"}` +
-          `${a.published === false ? "; draft only — run with version=draft" : ""})`,
+          `${
+            a.published === false
+              ? a.home_writable
+                ? "; draft only, yours to run — pass version=draft"
+                : "; draft only, not runnable — nothing published and you do not author it"
+              : ""
+          })`,
       );
     }
     if (ctx.agents_truncated) lines.push("(list truncated)");

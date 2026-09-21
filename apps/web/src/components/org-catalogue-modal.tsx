@@ -44,7 +44,7 @@ import type { PackageType } from "@appstrate/core/validation";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useOrg } from "../hooks/use-org";
 import { useAllIntegrations } from "../hooks/use-integrations";
-import { useLibrary, useTogglePackageInstall } from "../hooks/use-library";
+import { useLibrary, useSetPackageActive } from "../hooks/use-library";
 import { useModalParam } from "../hooks/use-modal-param";
 import { useCatalogueKinds } from "../hooks/use-catalogue-kinds";
 import { useLocalListParams } from "../lib/list-params";
@@ -116,7 +116,7 @@ export function OrgCatalogueModal({
   const spaceId = useCurrentSpaceId();
   const { currentOrg } = useOrg();
   const { data: library, isLoading, error } = useLibrary();
-  const activate = useTogglePackageInstall();
+  const activate = useSetPackageActive();
   const list = useLocalListParams();
   const view = usePackageViewStore((s) => s.view);
   const setView = usePackageViewStore((s) => s.setView);
@@ -156,7 +156,11 @@ export function OrgCatalogueModal({
     const activeIn = spaces
       .filter(
         (space) =>
-          Boolean(libraryRow?.installed_in.includes(space.id)) ||
+          Boolean(
+            libraryRow?.placements.some(
+              (placement) => placement.space_id === space.id && placement.state === "active",
+            ),
+          ) ||
           (space.id === spaceId && activeHere),
       )
       .map((space) => space.name);
@@ -170,9 +174,18 @@ export function OrgCatalogueModal({
         return [item.id, { ...integrationState(item.id), everywhere: false }] as const;
       }
       const everywhere = item.source === "system";
-      const activeHere = Boolean(spaceId && item.installed_in.includes(spaceId));
+      const activeHere = Boolean(
+        spaceId &&
+        item.placements.some(
+          (placement) => placement.space_id === spaceId && placement.state === "active",
+        ),
+      );
       const activeIn = spaces
-        .filter((space) => item.installed_in.includes(space.id))
+        .filter((space) =>
+          item.placements.some(
+            (placement) => placement.space_id === space.id && placement.state === "active",
+          ),
+        )
         .map((space) => space.name);
       return [item.id, { activeIn, activeHere, everywhere }] as const;
     }),
@@ -229,7 +242,7 @@ export function OrgCatalogueModal({
     if (!spaceId) return;
     const target = item;
     activate.mutate(
-      { spaceId, packageId: target.id, installed: false },
+      { spaceId, packageId: target.id, active: true },
       {
         onSuccess: () => {
           setSelected((prev) => {
@@ -239,7 +252,7 @@ export function OrgCatalogueModal({
           });
           toast.success(t("packages.installed", { name: target.displayName }));
         },
-        onError: (err) => toast.error(getErrorMessage(err)),
+        onError: (err: unknown) => toast.error(getErrorMessage(err)),
       },
     );
   };

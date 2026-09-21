@@ -113,7 +113,7 @@ const PROFILE_DISPLAY_NAME =
 
 const MODULE_DESCRIPTOR =
   "Platform MODULE + model-provider descriptors (`ModelProviderDescriptor`, a " +
-  "module's own manifest). That contract is camelCase by policy — CLAUDE.md, " +
+  "module's own manifest). That contract is camelCase by policy — AGENTS.md, " +
   '"module hooks, logger fields … camelCase" — and is a different document from ' +
   "an AFPS package manifest, which is the only thing this gate is about.";
 

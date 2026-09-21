@@ -16,7 +16,7 @@ import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import {
   persistRunEvent,
   writeRunnerLedgerRow,
@@ -47,8 +47,13 @@ describe("persistRunEvent", () => {
     // dedicated test suite (run-metric-broadcaster.test.ts).
     _resetRunMetricBroadcasterForTests();
     ctx = await createTestContext();
-    await seedAgent({ id: agentId, orgId: ctx.orgId, createdBy: ctx.user.id });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, agentId);
+    await seedAgent({
+      id: agentId,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, agentId);
     const run = await seedRun({
       packageId: agentId,
       orgId: ctx.orgId,

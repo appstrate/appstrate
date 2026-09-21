@@ -28,7 +28,6 @@ import {
   hasUnavailableAssignments,
   assignmentsFor,
   toSpaceAssignments,
-  validateSpaceAssignments,
   type AssignmentDraft,
 } from "@/lib/space-assignments";
 import { usePermissions } from "@/hooks/use-permissions";
@@ -201,17 +200,6 @@ function OAuthClientFormBody({
               : "settings:orgSettings.assignmentsUnavailable",
           ),
         });
-        return;
-      }
-    }
-    if (isOrgLevel) {
-      const validation = validateSpaceAssignments(
-        signupRole,
-        signupSpaceAssignments,
-        t("settings:orgSettings.inviteSpacesRequired"),
-      );
-      if (validation !== true) {
-        setError("root", { message: validation });
         return;
       }
     }

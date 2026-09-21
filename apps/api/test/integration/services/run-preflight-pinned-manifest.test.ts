@@ -29,7 +29,7 @@ import { eq } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { getPackage } from "../../../src/services/package-catalog.ts";
 import { resolveRunPreflight } from "../../../src/services/run-pipeline.ts";
 import type { IntegrationManifestCache } from "../../../src/services/integration-service.ts";
@@ -77,6 +77,7 @@ describe("resolveRunPreflight — integration manifests are read at the PIN", ()
     // `read`, which the connection below has.
     await seedPackage({
       id: INTEG,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
@@ -94,10 +95,11 @@ describe("resolveRunPreflight — integration manifests are read at the PIN", ()
       .update(packages)
       .set({ draftManifest: integManifest("9.9.9", ["read", "write"]) })
       .where(eq(packages.id, INTEG));
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEG);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEG);
 
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: {
@@ -110,7 +112,7 @@ describe("resolveRunPreflight — integration manifests are read at the PIN", ()
         integrations_configuration: { [INTEG]: { tools: ["search"] } },
       },
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
 
     // One accessible oauth2 connection granted `read` only: enough for the
     // pinned manifest, short of the drifted draft's demand.

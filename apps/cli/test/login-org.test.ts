@@ -17,7 +17,7 @@
  *
  * Follows the same tmp-XDG + FakeKeyring pattern as `whoami.test.ts`.
  * Everything the command needs from the outside world is injected, never
- * swapped globally (CLAUDE.md bans `mock.module`): the interactive prompts
+ * swapped globally (AGENTS.md bans `mock.module`): the interactive prompts
  * arrive via `LoginDeps`, and stdout / stderr / exit via the `CommandIO`
  * sink each test builds with `createMemoryIO()`. The sink matters for the
  * same reason the prompt seam does — `bun test` runs every package in one

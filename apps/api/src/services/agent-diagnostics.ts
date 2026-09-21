@@ -13,7 +13,7 @@ import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
-import { getInstalledPackageSettings } from "./space-packages.ts";
+import { getSpacePackageSettings } from "./space-packages.ts";
 import { collectAgentReadinessErrors } from "./agent-readiness.ts";
 import { resolveAgentRunVersion, VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { resolveAgentConnectionReadiness } from "./integration-pins-service.ts";
@@ -145,7 +145,7 @@ export async function getAgentDiagnostics(args: {
   const { scope, actor, isAdmin } = args;
   const versionRef = args.version?.trim() || VERSION_SELECTOR_DRAFT;
   const { agent } = await resolveAgentRunVersion(args.agent, versionRef);
-  const packageConfig = await getInstalledPackageSettings(scope.spaceId, agent.id);
+  const packageConfig = await getSpacePackageSettings(scope, agent.id);
 
   // Connections are resolved once through their dedicated bulk service. The
   // core readiness pass therefore runs without an actor to avoid duplicating

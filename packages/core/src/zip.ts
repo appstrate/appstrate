@@ -113,6 +113,27 @@ export const ARCHIVE_MAX_FILES = 10_000;
  * (`C:/…`, absolute on the extraction target while every segment looks
  * relative), and the `__MACOSX/` metadata prefix Finder adds.
  *
+ * It also rejects two shapes that are not traversal at all. Each is here
+ * because a DOWNSTREAM reader of the same bytes rejects it, and this predicate
+ * is the gate that runs BEFORE the bytes are stored:
+ *
+ *   - A comma or a CR/LF anywhere. The `.afps` bundle reader
+ *     (`@appstrate/afps-runtime/bundle/archive-utils:sanitizeEntries`) refuses
+ *     both, because its signature RECORD is one `path,sha256,bytes` line per
+ *     entry and either character forges or splits a line. Admitting them here
+ *     is how a `PUT` of `sales,2024.csv` was answered `200`, published, and
+ *     then failed EVERY consuming run with `ARCHIVE_INVALID` — a verdict the
+ *     author who chose the name never saw.
+ *   - A `__proto__` segment. `assertPath` (`./package-file-operations.ts`)
+ *     refuses it, so an entry that got in through a ZIP import could afterwards
+ *     be neither renamed nor deleted from the editor: every operation naming it
+ *     answered `invalid_path`, with no way out. It is also the one name a
+ *     plain-object accumulator cannot carry — `files["__proto__"] = …` runs the
+ *     `Object.prototype` setter instead of creating an own property, so the
+ *     entry vanishes instead of being kept ({@link unzipArtifact} now
+ *     accumulates into a null-prototype object, but the name stays unusable on
+ *     the write path regardless).
+ *
  * ONE predicate, THREE consumers, TWO policies. Import ({@link unzipArtifact})
  * DROPS an offending entry: an author's archive is not rejected wholesale
  * because Finder slipped a resource fork into it. The draft write path REFUSES
@@ -128,16 +149,23 @@ export function isSafeArchivePath(path: string): boolean {
   if (path.includes("\0") || path.includes("\\")) return false;
   if (path.startsWith("__MACOSX/")) return false;
   if (/^[a-zA-Z]:\//.test(path)) return false;
+  // Signature-RECORD delimiters — the `.afps` reader's rule, enforced here so a
+  // name it will refuse is never stored in the first place.
+  if (/[\r\n,]/.test(path)) return false;
   for (const segment of path.split("/")) {
     if (segment === "" || segment === "." || segment === "..") return false;
+    // `assertPath` refuses it and a plain-object accumulator loses it.
+    if (segment === "__proto__") return false;
   }
   return true;
 }
 
 /**
- * Decompress a ZIP artifact and return sanitized file entries.
- * Filters out path traversal attempts, absolute paths, null bytes, backslashes,
- * __MACOSX metadata, and directory entries.
+ * Decompress a ZIP artifact and return sanitized file entries, in a
+ * null-prototype map. Filters out everything {@link isSafeArchivePath} refuses:
+ * path traversal, absolute paths in both spellings, null bytes, backslashes,
+ * signature-RECORD delimiters, a `__proto__` segment, __MACOSX metadata and
+ * directory entries.
  *
  * Decompression is STREAMING and memory-bounded (see `unzipBounded`): the
  * cumulative decompressed budget is enforced mid-inflate, so a zip bomb aborts
@@ -173,8 +201,17 @@ export function unzipArtifact(
 
   // Sanitize: drop every entry whose name {@link isSafeArchivePath} refuses —
   // traversal, `.` segments, absolute paths (leading `/` or a drive prefix),
-  // null bytes, backslashes, __MACOSX metadata and directory entries.
-  const files: Record<string, Uint8Array> = {};
+  // null bytes, backslashes, RECORD delimiters (comma, CR, LF), a `__proto__`
+  // segment, __MACOSX metadata and directory entries.
+  //
+  // Null-prototype accumulator, not `{}`: an archive entry name is
+  // attacker-chosen, and on a plain object `files["__proto__"] = bytes` invokes
+  // the `Object.prototype` setter — the entry is not created, and it can reach
+  // in and alter the object's own prototype. {@link isSafeArchivePath} now
+  // refuses that segment, so nothing should get this far; a container that has
+  // no magic keys at all is what makes the guarantee independent of the filter
+  // above ever regressing.
+  const files = Object.create(null) as Record<string, Uint8Array>;
   for (const [key, value] of Object.entries(rawFiles)) {
     if (!isSafeArchivePath(key)) continue;
     files[key] = value;

@@ -17,8 +17,11 @@ import { describe, it, expect } from "bun:test";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  findMaterialisableBareNames,
   findPassThroughGaps,
   findTableGaps,
+  findUnroutedModules,
+  ORCHESTRATED_COMPOSE_FILES,
   readSchemaDefaults,
   suppliesValue,
 } from "../verify-compose-defaults.ts";
@@ -307,5 +310,135 @@ describe("findPassThroughGaps", () => {
   it("counts a `- NAME=${VAR}` entry as forwarded, the other spelling of the same thing", () => {
     const content = compose(["ALPHA", "BETA"]) + "\n      - GAMMA=${GAMMA:-1}\n";
     expect(findPassThroughGaps(content, MODULE)).toEqual([]);
+  });
+});
+
+/**
+ * The two classes that exist because of one production outage, and the one fact behind both:
+ * `deploy/docker-compose.yml` runs under an orchestrator that MATERIALISES every key an
+ * `environment:` block names — a bare `- FOO` becomes `FOO: ''` in the compose it generates. So
+ * the form this gate prescribes everywhere else, "name the variable and let the schema default
+ * apply", is not merely unnecessary there: it is unavailable.
+ *
+ * 2026-09-18, measured. `EE_RECONCILIATION_BATCH_SIZE` arrived as `''`, `z.coerce.number("")` is
+ * 0, the module's `.min(1)` refused it, the platform crash-looped. Seven of that block's bare
+ * names would have refused to boot and four more would have degraded in SILENCE — a zero
+ * interval pauses metering, a zero replay window disables the scan that keeps usage from going
+ * unbilled.
+ *
+ * The fix was to stop passing operator variables through that block at all: `env_file` delivers
+ * them, which is why production booted for months with two hard-required secrets absent from the
+ * file. What that leaves behind is a second, quieter hazard — a compose file that boots a module
+ * and forwards nothing is either correct (it uses `env_file`) or broken (the module's whole
+ * contract is undefined at boot), and the pass-through rule reads both as "out of scope".
+ * `findUnroutedModules` is what tells them apart.
+ */
+const MODULE = [
+  { id: "ee", file: "packages/module-ee/src/env.ts", keys: ["ALPHA", "BETA"] },
+] as const;
+
+const composeWith = (body: string): string =>
+  ["services:", "  appstrate:", "    image: ghcr.io/appstrate/appstrate:1.0.0", body].join("\n");
+
+describe("findMaterialisableBareNames", () => {
+  it("names a bare entry and its line", () => {
+    const content = composeWith(
+      ["    environment:", "      - PORT=3000", "      - LOG_LEVEL"].join("\n"),
+    );
+    expect(findMaterialisableBareNames(content)).toEqual([{ line: 6, varName: "LOG_LEVEL" }]);
+  });
+
+  it("says nothing about entries that carry a value — the other half", () => {
+    // Without this the suite would pass on a predicate that flagged every line.
+    const content = composeWith(
+      [
+        "    environment:",
+        "      - PORT=3000",
+        "      - REDIS_URL=redis://appstrate-redis:6379",
+      ].join("\n"),
+    );
+    expect(findMaterialisableBareNames(content)).toEqual([]);
+  });
+
+  it("ignores a service name, which is also a bare list entry", () => {
+    expect(
+      findMaterialisableBareNames(composeWith("    depends_on:\n      - appstrate-redis")),
+    ).toEqual([]);
+  });
+});
+
+describe("findUnroutedModules", () => {
+  it("reports a module booted by default whose variables have no route", () => {
+    const content = composeWith(
+      [
+        "    environment:",
+        "      - MODULES=${MODULES:-@appstrate/module-ee}",
+        "      - PORT=3000",
+      ].join("\n"),
+    );
+    expect(findUnroutedModules(content, MODULE)).toEqual([
+      { module: "ee", declaredIn: "packages/module-ee/src/env.ts", keys: 2 },
+    ]);
+  });
+
+  it("reports nothing when env_file delivers them — the form deploy/ actually uses", () => {
+    const content = composeWith(
+      [
+        "    env_file:",
+        "      - .env",
+        "    environment:",
+        "      - MODULES=${MODULES:-@appstrate/module-ee}",
+      ].join("\n"),
+    );
+    expect(findUnroutedModules(content, MODULE)).toEqual([]);
+  });
+
+  it("reports nothing when the file does not boot the module", () => {
+    // The case the pass-through rule's old comment assumed was the only one.
+    const content = composeWith(["    environment:", "      - MODULES"].join("\n"));
+    expect(findUnroutedModules(content, MODULE)).toEqual([]);
+  });
+
+  it("reports nothing when the variables are forwarded explicitly", () => {
+    const content = composeWith(
+      [
+        "    environment:",
+        "      - MODULES=${MODULES:-@appstrate/module-ee}",
+        "      - ALPHA",
+        "      - BETA",
+      ].join("\n"),
+    );
+    expect(findUnroutedModules(content, MODULE)).toEqual([]);
+  });
+});
+
+describe("the orchestrated files themselves", () => {
+  it("names at least one file, and every one of them is tracked", () => {
+    // The list is hand-written, so its whole failure mode is naming a file that
+    // moved: the check over it then passes on nothing at all.
+    expect(ORCHESTRATED_COMPOSE_FILES.length).toBeGreaterThan(0);
+    for (const file of ORCHESTRATED_COMPOSE_FILES) {
+      expect(readFileSync(join(import.meta.dir, "..", "..", file), "utf-8").length).toBeGreaterThan(
+        0,
+      );
+    }
+  });
+
+  it("carries no bare name today, and would say so if one came back", () => {
+    for (const file of ORCHESTRATED_COMPOSE_FILES) {
+      const content = readFileSync(join(import.meta.dir, "..", "..", file), "utf-8");
+      expect(findMaterialisableBareNames(content)).toEqual([]);
+
+      // The assertion above passes on an empty list, which is also what it would
+      // say about a file it failed to read. Prove the predicate fires.
+      const poisoned = content.replace("    environment:", "    environment:\n      - LOG_LEVEL");
+      expect(findMaterialisableBareNames(poisoned)).toHaveLength(1);
+    }
+  });
+
+  it("delivers operator variables through env_file instead", () => {
+    for (const file of ORCHESTRATED_COMPOSE_FILES) {
+      expect(readFileSync(join(import.meta.dir, "..", "..", file), "utf-8")).toContain("env_file:");
+    }
   });
 });

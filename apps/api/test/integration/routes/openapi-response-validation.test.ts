@@ -14,8 +14,8 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedEndUser, seedApiKey, seedAgent } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { seedAgent, seedApiKey, seedEndUser, seedPackageShare } from "../../helpers/seed.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { buildOpenApiSpec } from "../../../src/openapi/index.ts";
 import { createOpenApiValidator } from "../../helpers/openapi-validator.ts";
 
@@ -160,7 +160,8 @@ describe("OpenAPI response validation", () => {
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, pkg.id);
+      await seedPackageShare(ctx.defaultSpaceId, pkg.id);
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, pkg.id);
 
       const schema = getResponseSchema("/api/spaces/{spaceId}/packages", "GET", "200");
       expect(schema).not.toBeNull();
@@ -209,7 +210,8 @@ describe("OpenAPI response validation", () => {
           },
         },
       });
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, pkg.id);
+      await seedPackageShare(ctx.defaultSpaceId, pkg.id);
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, pkg.id);
 
       const schema = getResponseSchema("/api/packages/agents/{scope}/{name}", "GET", "200");
       expect(schema).not.toBeNull();

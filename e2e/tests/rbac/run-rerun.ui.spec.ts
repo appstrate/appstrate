@@ -1,15 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
 
+/**
+ * "Relancer" replays the definition the original run executed — as far as the
+ * caller may replay it.
+ *
+ * `version_ref` is a concrete semver or `"draft"` (#636). A semver replays for
+ * anyone. A draft does not: it is the author's working copy and the server
+ * answers `403 draft_not_writable` to anyone without write authority on the
+ * package, so the button must send NO selector for them — which resolves the
+ * latest published version. `sent` below is what the scenarios turn on, read
+ * through `URLSearchParams.get`: `null` means the param was ABSENT, which is
+ * not the same wire act as sending `published`.
+ */
+
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { createAgentWithInputSchema } from "../../helpers/seed.ts";
 
 for (const scenario of [
-  { role: "runner", version: "1.2.3", inline: false },
-  { role: "runner", version: "draft", inline: false },
-  { role: "editor", version: "1.2.3", inline: false },
-  { role: "editor", version: "draft", inline: true },
+  { role: "runner", ran: "1.2.3", sent: "1.2.3", inline: false },
+  // The case the rule exists for: a runner rerunning somebody's draft run.
+  { role: "runner", ran: "draft", sent: null, inline: false },
+  { role: "editor", ran: "1.2.3", sent: "1.2.3", inline: false },
+  // The positive control opposite it: the author of the package does replay
+  // their own draft, so the fallback is about authority and nothing else.
+  { role: "editor", ran: "draft", sent: "draft", inline: false },
+  { role: "editor", ran: "draft", sent: "draft", inline: true },
 ]) {
-  test(`rerun: ${scenario.role}, ${scenario.version}, inline=${scenario.inline}`, async ({
+  test(`rerun: ${scenario.role}, ${scenario.ran}, inline=${scenario.inline}`, async ({
     authedPage: page,
     apiClient,
     browserCtx,
@@ -53,7 +70,7 @@ for (const scenario of [
             started_at: "2026-09-11T10:00:00Z",
             duration: 1000,
             input: scenario.role === "runner" ? null : { topic: "incident-42" },
-            version_ref: scenario.version,
+            version_ref: scenario.ran,
             file_counts: { input: 0, output: 0 },
             package_ephemeral: scenario.inline,
             cost: null,
@@ -97,7 +114,7 @@ for (const scenario of [
       await expect(dialog).toHaveCount(0);
     }
     const sent = await request;
-    expect(new URL(sent.url()).searchParams.get("version")).toBe(scenario.version);
+    expect(new URL(sent.url()).searchParams.get("version")).toBe(scenario.sent);
     expect(sent.postDataJSON()).toEqual(
       scenario.role === "runner" ? { rerun_from: runId } : { input: { topic: "reviewed-input" } },
     );

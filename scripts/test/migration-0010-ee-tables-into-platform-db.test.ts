@@ -56,6 +56,16 @@ const CREATED_AT = "2026-03-04 05:06:07.123456+00";
 const BILLING_CC = ["copy@example.com", "second copy@example.com"];
 /** One more than the script's page size, so the keyset walk takes a second page. */
 const MANAGERS = 501;
+/**
+ * More ledger rows than one page holds, with an INTEGER primary key whose
+ * DECIMAL WIDTHS DIFFER — the shape that separates numeric ordering from text
+ * ordering. `MANAGERS` above already pages, but its key is `(uuid, text)`,
+ * whose text order IS its order: paging it proves the loop runs twice, never
+ * that the loop orders by the column it filters on. Production's ledger is the
+ * one table with an integer key, and it is where the difference cost 109 of
+ * 717 rows.
+ */
+const LEDGER = 601;
 
 /**
  * The module's journal, read where the script reads it. Literals here would turn
@@ -221,9 +231,13 @@ describeRequiresPostgres("scripts/migration/0010-ee-tables-into-platform-db", ()
               ('evt_2', 'customer.subscription.updated', 'processing', $1::timestamptz, NULL)`,
       [CREATED_AT],
     );
+    // An INTEGER primary key, over more rows than one page holds. 1..601 is
+    // deliberate: text-sorted it reads 1, 10, 100, 101, …, so the page-1
+    // boundary lands far above the numeric 500th and a cursor read from the
+    // wrong ordering skips everything between the two.
     await source.unsafe(
       `INSERT INTO ee_billed_llm_usage (llm_usage_id, billed_at)
-       VALUES (1, $1::timestamptz), (2, $1::timestamptz)`,
+       SELECT g, $1::timestamptz FROM generate_series(1, ${LEDGER}) g`,
       [CREATED_AT],
     );
     await source.unsafe(
@@ -330,6 +344,9 @@ describeRequiresPostgres("scripts/migration/0010-ee-tables-into-platform-db", ()
       expect(output).toMatch(
         new RegExp(`ee_billing_managers\\s+\\|\\s+${MANAGERS}\\s+\\|\\s+${MANAGERS}\\s+\\|\\s+yes`),
       );
+      expect(output).toMatch(
+        new RegExp(`ee_billed_llm_usage\\s+\\|\\s+${LEDGER}\\s+\\|\\s+${LEDGER}\\s+\\|\\s+yes`),
+      );
 
       expect(await snapshot(target)).toEqual(await snapshot(source));
 
@@ -339,6 +356,22 @@ describeRequiresPostgres("scripts/migration/0010-ee-tables-into-platform-db", ()
       );
       expect(account.us).toBe("123456");
       expect(account.billing_cc).toEqual(BILLING_CC);
+
+      // The count alone would pass a copy that took the right NUMBER of rows
+      // from the wrong pages, so the identity asserted is the key set: every
+      // id from 1 to LEDGER, none missing, none invented. Under the text-order
+      // cursor this reads 492 of 601 with the gap in the middle.
+      const [ledger] = await target.unsafe(
+        `SELECT count(*)::int AS n, min(llm_usage_id)::int AS lo, max(llm_usage_id)::int AS hi,
+                count(*) FILTER (WHERE llm_usage_id IS NULL)::int AS nulls
+           FROM ee_billed_llm_usage`,
+      );
+      expect(ledger).toMatchObject({ n: LEDGER, lo: 1, hi: LEDGER, nulls: 0 });
+      const [{ gaps }] = await target.unsafe(
+        `SELECT count(*)::int AS gaps FROM generate_series(1, ${LEDGER}) g
+          WHERE NOT EXISTS (SELECT 1 FROM ee_billed_llm_usage b WHERE b.llm_usage_id = g)`,
+      );
+      expect(gaps).toBe(0);
 
       const [{ applied }] = await target.unsafe(
         `SELECT count(*)::int AS applied FROM drizzle.ee_migrations`,

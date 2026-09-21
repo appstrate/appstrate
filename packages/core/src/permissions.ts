@@ -68,13 +68,18 @@ export interface CoreResources {
   // Per-space configuration; `spaces` is the org-level catalog.
   "space-settings": "write";
   "space-members": "read" | "invite" | "remove" | "change-role";
-  agents: "read" | "write" | "configure" | "delete" | "run";
-  skills: "read" | "write" | "delete";
+  // `share` offers the package to another space — its AUDIENCE (`package_shares`),
+  // never its activation, which is the recipient's own act. It is a session-only
+  // grant of the `admin` and `builder` presets: it decides who runs a package
+  // with whose credentials, so it is absent from the API-key allowlist for the
+  // same reason `integrations:configure` is.
+  agents: "read" | "write" | "configure" | "delete" | "run" | "share";
+  skills: "read" | "write" | "delete" | "share";
   // AFPS §3.4 — standalone MCP Bundle (MCPB) packages. Browse/import/delete
   // like skills; no editor surface (an mcp-server manifest is an AFPS-native
   // manifest (MCPB vocabulary lifted to the root), authored externally and
   // imported as a `.afps`).
-  "mcp-servers": "read" | "write" | "delete";
+  "mcp-servers": "read" | "write" | "delete" | "share";
   // `read` = the runs the principal launched (its own manual runs, and the
   // runs of its own schedules). `read-all` = every run in the space, whoever
   // launched it: other members', end-users', and rows with no actor at all
@@ -112,7 +117,15 @@ export interface CoreResources {
   // deliberately absent from the API-key allowlist: it decides which credential every
   // other principal in the space resolves to, so it stays session-only.
   integrations:
-    "read" | "write" | "delete" | "install" | "uninstall" | "configure" | "connect" | "disconnect";
+    | "read"
+    | "write"
+    | "delete"
+    | "install"
+    | "uninstall"
+    | "configure"
+    | "connect"
+    | "disconnect"
+    | "share";
 }
 
 /** Core resource names. */
@@ -137,9 +150,9 @@ export const CORE_RESOURCE_ACTIONS = {
   roles: ["read", "write", "delete"],
   "space-settings": ["write"],
   "space-members": ["read", "invite", "remove", "change-role"],
-  agents: ["read", "write", "configure", "delete", "run"],
-  skills: ["read", "write", "delete"],
-  "mcp-servers": ["read", "write", "delete"],
+  agents: ["read", "write", "configure", "delete", "run", "share"],
+  skills: ["read", "write", "delete", "share"],
+  "mcp-servers": ["read", "write", "delete", "share"],
   runs: ["read", "read-all", "cancel", "delete"],
   files: ["read", "delete"],
   schedules: ["read", "write", "delete"],
@@ -161,6 +174,7 @@ export const CORE_RESOURCE_ACTIONS = {
     "configure",
     "connect",
     "disconnect",
+    "share",
   ],
 } as const satisfies { readonly [R in CoreResource]: readonly CoreResources[R][] };
 
@@ -373,6 +387,15 @@ export const VIEW_AS_REFUSAL_CODES: ReadonlySet<string> = new Set([
 export const orgSettingsSchema = z.object({
   api_version: z.string().optional(),
   dashboard_sso_enabled: z.boolean().optional(),
+  // Does READING a package imply being able to COPY it out? `false` (the
+  // default, and what Notion, Drive and Figma do) means yes. `true` narrows
+  // `POST /api/packages/{scope}/{name}/fork` and
+  // `GET /api/packages/{scope}/{name}/{version}/download` to callers holding
+  // `<type>:share` in the source's home space — without it, personal spaces
+  // open "fork it into mine, then share it on" to every reader, i.e. `share`
+  // would protect the link and not the content. SKILLS are exempt: the CLI's
+  // skills sync is a local copy by design and its audience is already the space.
+  restrict_package_copy: z.boolean().optional(),
 });
 
 // ---------------------------------------------------------------------------

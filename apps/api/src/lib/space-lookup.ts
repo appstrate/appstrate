@@ -19,6 +19,10 @@ export interface SpaceContextRow {
   isDefault: boolean;
   visibility: import("@appstrate/core/permissions").SpaceVisibility;
   defaultRole: import("@appstrate/core/permissions").SpaceRolePreset;
+  /** Set on a personal space; `resolveSpaceRole` reads it before the org role. */
+  ownerUserId: string | null;
+  /** When the owner left the organization — the sweeper's window (RBAC spec §3.6). */
+  orphanedAt: Date | null;
 }
 
 /** Projection behind {@link SpaceContextRow} — declared once so the two readers cannot drift. */
@@ -28,6 +32,8 @@ const SPACE_CONTEXT_COLUMNS = {
   isDefault: spaces.isDefault,
   visibility: spaces.visibility,
   defaultRole: spaces.defaultRole,
+  ownerUserId: spaces.ownerUserId,
+  orphanedAt: spaces.orphanedAt,
 } as const;
 
 /**

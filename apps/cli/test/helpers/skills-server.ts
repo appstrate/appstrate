@@ -78,6 +78,12 @@ export interface DraftFixture {
   inlineFiles?: Record<string, string>;
   /** Supporting files listed without `inline`, so they need a content fetch. */
   fetchedFiles?: Record<string, string>;
+  /**
+   * The caller cannot WRITE this skill. Naming the working copy is an author's
+   * act, so the detail route and the file routes alike answer
+   * `403 draft_not_writable` to an explicit `?version=draft` from anyone else.
+   */
+  notWritable?: boolean;
 }
 
 export interface SkillFixture {
@@ -91,6 +97,12 @@ export interface SkillFixture {
   extraFiles?: Record<string, string>;
   /** `source` on the list DTO — set to `"system"` to assert it is skipped. */
   source?: "local" | "system";
+  /**
+   * The skill is PLACED in the space but switched off there. The real list
+   * route IS the active set, so it drops the skill from the only listing the
+   * sync reads — a fixture marked this way must never reach the plan.
+   */
+  inactive?: boolean;
   /** When true, `versions/latest` answers 404 (never published). */
   unpublished?: boolean;
   /**
@@ -228,16 +240,29 @@ export function createSkillServer(
     }
 
     if (path === "/api/packages/skills") {
+      // The index IS the ACTIVE set, not the placed one — the narrowing the
+      // server applies, reproduced here unconditionally so a sync that read a
+      // wider listing fails instead of quietly syncing switched-off skills.
+      //
+      // The route takes no `active` filter. The real server ignores unknown
+      // query keys, so it would answer this same body either way; the stub is
+      // deliberately stricter and refuses, so a sync still sending the
+      // parameter turns red here instead of passing on a coincidence.
+      if (url.searchParams.has("active")) {
+        return json({ code: "bad_request", message: "Unknown query parameter: active" }, 400);
+      }
       return json({
         object: "list",
-        data: prepared.map((p) => ({
-          id: p.fixture.id,
-          name: p.name,
-          description: MANIFEST_DESCRIPTION,
-          source: p.fixture.source ?? "local",
-          version: p.version,
-          updatedAt: "2026-01-01T00:00:00.000Z",
-        })),
+        data: prepared
+          .filter((p) => !p.fixture.inactive)
+          .map((p) => ({
+            id: p.fixture.id,
+            name: p.name,
+            description: MANIFEST_DESCRIPTION,
+            source: p.fixture.source ?? "local",
+            version: p.version,
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          })),
       });
     }
 
@@ -294,11 +319,21 @@ export function createSkillServer(
       if (!found?.fixture.draft) {
         return json({ code: "not_found", message: "Package not found" }, 404);
       }
+      // The detail route reserves an explicit `?version=draft` exactly as the
+      // file routes do, and it is the FIRST request the draft resolution
+      // makes — so this is where a non-author is refused, before `/files` is
+      // ever reached.
+      const refusal = draftSelectorRefusal(found, url);
+      if (refusal) return refusal;
       return json({
         id: found.fixture.id,
         name: found.name,
         description: MANIFEST_DESCRIPTION,
-        content: draftSkillMd(found),
+        // Same rule as the file routes: the working copy answers only when the
+        // selector NAMES it, so a resolution that forgets it reads published
+        // metadata and fails on content.
+        content:
+          url.searchParams.get("version") === "draft" ? draftSkillMd(found) : found.fixture.skillMd,
         source: found.fixture.source ?? "local",
         version: found.version,
         manifest: {
@@ -320,10 +355,12 @@ export function createSkillServer(
       if (!found?.fixture.draft) {
         return json({ code: "not_found", message: "Package not found" }, 404);
       }
+      const refusal = draftSelectorRefusal(found, url);
+      if (refusal) return refusal;
       indexReads += 1;
       // `buildFileIndex` shape: sorted entries of { path, size, media_kind },
       // with `inline` carrying the full text of small text files.
-      const entries = Object.entries(draftEntries(found))
+      const entries = Object.entries(entriesFor(found, url))
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([entryPath, entry]) => ({
           path: entryPath,
@@ -331,14 +368,18 @@ export function createSkillServer(
           media_kind: "text",
           ...(entry.inline ? { inline: entry.text } : {}),
         }));
-      return json({ entries }, 200, { ETag: `"${found.fixture.draft.etag ?? "idx-1"}"` });
+      return json({ entries }, 200, { ETag: `"${indexEtag(found, url)}"` });
     }
 
     const content = path.match(/^\/api\/packages\/(@[^/]+)\/([^/]+)\/files\/content$/);
     if (content) {
       const found = prepared.find((p) => p.scope === content[1] && p.name === content[2]);
+      if (found?.fixture.draft) {
+        const refusal = draftSelectorRefusal(found, url);
+        if (refusal) return refusal;
+      }
       const wanted = url.searchParams.get("path") ?? "";
-      const entry = found?.fixture.draft ? draftEntries(found)[wanted] : undefined;
+      const entry = found?.fixture.draft ? entriesFor(found, url)[wanted] : undefined;
       if (!entry) return json({ code: "not_found", message: "File not found" }, 404);
       contentReads += 1;
       return new Response(encoder.encode(entry.text), {
@@ -365,20 +406,63 @@ function draftSkillMd(p: Prepared): string {
   return p.fixture.draft?.skillMd ?? p.fixture.skillMd;
 }
 
+/**
+ * The detail and file routes serve the definition the detail page renders
+ * unless a selector names one, and `draft` named explicitly is reserved to
+ * whoever may WRITE the package. All three call this, so a sync that forgets
+ * to name the working copy gets the PUBLISHED bytes — the way the routes
+ * answer it — and fails its assertion on content rather than on nothing.
+ */
+function draftSelectorRefusal(p: Prepared, url: URL): Response | null {
+  if (url.searchParams.get("version") !== "draft") return null;
+  if (!p.fixture.draft?.notWritable) return null;
+  return json(
+    {
+      code: "draft_not_writable",
+      message: `You cannot write ${p.fixture.id}, so its draft is not yours to read`,
+    },
+    403,
+  );
+}
+
+function entriesFor(p: Prepared, url: URL): Record<string, { text: string; inline: boolean }> {
+  return url.searchParams.get("version") === "draft" ? draftEntries(p) : publishedEntries(p);
+}
+
+/** The index ETag is a property of the snapshot it describes, not of the package. */
+function indexEtag(p: Prepared, url: URL): string {
+  return url.searchParams.get("version") === "draft"
+    ? (p.fixture.draft?.etag ?? "idx-1")
+    : `published-${p.version}`;
+}
+
+/** The published snapshot of the same three-or-more entries. */
+function publishedEntries(p: Prepared): Record<string, { text: string; inline: boolean }> {
+  const out: Record<string, { text: string; inline: boolean }> = {
+    "manifest.json": { text: manifestJson(p), inline: true },
+    "SKILL.md": { text: p.fixture.skillMd, inline: true },
+  };
+  for (const [path, text] of Object.entries(p.fixture.extraFiles ?? {})) {
+    out[path] = { text, inline: true };
+  }
+  return out;
+}
+
+function manifestJson(p: Prepared): string {
+  return JSON.stringify({
+    afps_version: "0.2",
+    type: "skill",
+    name: p.fixture.id,
+    version: p.version,
+    description: MANIFEST_DESCRIPTION,
+  });
+}
+
 /** Flat map of every draft entry, and whether the index inlines its text. */
 function draftEntries(p: Prepared): Record<string, { text: string; inline: boolean }> {
   const draft = p.fixture.draft!;
   const out: Record<string, { text: string; inline: boolean }> = {
-    "manifest.json": {
-      text: JSON.stringify({
-        afps_version: "0.2",
-        type: "skill",
-        name: p.fixture.id,
-        version: p.version,
-        description: MANIFEST_DESCRIPTION,
-      }),
-      inline: true,
-    },
+    "manifest.json": { text: manifestJson(p), inline: true },
     "SKILL.md": { text: draftSkillMd(p), inline: true },
   };
   for (const [path, text] of Object.entries(draft.inlineFiles ?? {})) {

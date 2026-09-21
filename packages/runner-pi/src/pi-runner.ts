@@ -305,13 +305,12 @@ const KEEP_RECENT_FRACTION = 0.1;
  * Operators can disable compaction entirely with
  * `MODEL_COMPACTION_ENABLED=false`, read from this process's env. Two things
  * put it there and nothing else does: for a platform-launched run,
- * `buildRuntimePiEnv`'s `disableModelCompaction` option is the only writer of
- * the key (`packages/runner-pi/src/container-env.ts`); an embedder driving
- * `PiRunner` in its own process sets the variable directly. Same plumbing as
- * `MODEL_RETRY_ENABLED` — which this comment used to claim it mirrored while
- * the key had no writer at all, so the claim held for the pattern and not for
- * the wiring. Useful when stacking external compaction middleware. See
- * appstrate#445.
+ * `buildRuntimePiEnv` forwards the key from the API host's own `process.env`
+ * (`packages/runner-pi/src/container-env.ts`, which carries why it is a
+ * forward and not an option); an embedder driving `PiRunner` in its own
+ * process sets the variable directly. `MODEL_RETRY_ENABLED` is the other key
+ * on that same forward. Useful when stacking external compaction middleware.
+ * See appstrate#445.
  *
  * Returns TWO members, and the split is load-bearing. `compaction` is exactly
  * the Pi SDK's `CompactionSettings` and is what gets handed to it. `contextWindow`

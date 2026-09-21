@@ -31,7 +31,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
@@ -167,12 +167,13 @@ describe("resolveLiveIntegrationCredentials", () => {
     token = startTokenServer();
     await seedPackage({
       id: INTEGRATION_ID,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
       draftManifest: gmailManifest(token.url),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION_ID);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION_ID);
     // Per-space OAuth client → makes the auth refreshable (buildIntegrationOAuthRefreshContext).
     const [oauthClient] = await db
       .insert(integrationOauthClients)
@@ -584,11 +585,15 @@ describe("resolveLiveIntegrationCredentials", () => {
     // Agent requires `delete`; the refresh narrows the grant to read+send only.
     await seedPackage({
       id: "@creds/agent-deleter",
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "agent",
       draftManifest: agentManifest("@creds/agent-deleter", ["delete_message"]),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@creds/agent-deleter");
+    await activatePackage(
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+      "@creds/agent-deleter",
+    );
     const connId = await seedConnection({
       userId: ctx.user.id,
       scopes: ["read", "send", "delete"],
@@ -608,11 +613,12 @@ describe("resolveLiveIntegrationCredentials", () => {
     // Agent requires only `read`; the refresh shrinks delete away but keeps read.
     await seedPackage({
       id: "@creds/agent-reader",
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "agent",
       draftManifest: agentManifest("@creds/agent-reader", ["list_messages"]),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@creds/agent-reader");
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@creds/agent-reader");
     const connId = await seedConnection({
       userId: ctx.user.id,
       scopes: ["read", "send", "delete"],

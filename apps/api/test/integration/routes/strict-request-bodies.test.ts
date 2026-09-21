@@ -19,7 +19,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedInstalledPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
 import webhooksModule from "../../../src/modules/webhooks/index.ts";
 import oidcModule from "../../../src/modules/oidc/index.ts";
 
@@ -58,8 +58,8 @@ describe("unknown request-body fields are refused, not stripped", () => {
   // `generation_config_override`. It used to answer 200 and change nothing.
   it("spaces — PUT /api/spaces/{spaceId}/packages/{scope}/{name}", async () => {
     const packageId = "@strictbodies/pkg";
-    await seedPackage({ id: packageId, orgId: ctx.orgId });
-    await seedInstalledPackage(ctx.defaultSpaceId, packageId);
+    await seedPackage({ id: packageId, orgId: ctx.orgId, homeSpaceId: ctx.defaultSpaceId });
+    await seedSpacePackage(ctx.defaultSpaceId, packageId);
 
     const put = (body: Record<string, unknown>) =>
       app.request(`/api/spaces/${ctx.defaultSpaceId}/packages/${packageId}`, {
@@ -69,7 +69,10 @@ describe("unknown request-body fields are refused, not stripped", () => {
       });
 
     await expectUnknownField(await put({ generation_config: { temperature: 0.4 } }));
-    expect((await put({ enabled: false })).status).toBe(200);
+    // `enabled` is not a field of this body either: activation has its own pair
+    // of doors, and a retired name must fail rather than be dropped in silence.
+    await expectUnknownField(await put({ enabled: false }));
+    expect((await put({ generationConfig: null })).status).toBe(200);
   });
 
   it("proxies — POST /api/proxies", async () => {

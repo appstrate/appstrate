@@ -45,7 +45,13 @@ export function CataloguePreview({
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const { currentOrg } = useOrg();
-  const installedIn = spaces.filter((space) => item.installed_in.includes(space.id));
+  // Placed AND switched on: a placement that exists but is off does not run
+  // here, and this line answers "where does it run".
+  const installedIn = spaces.filter((space) =>
+    item.placements.some(
+      (placement) => placement.space_id === space.id && placement.state === "active",
+    ),
+  );
 
   return (
     <div>

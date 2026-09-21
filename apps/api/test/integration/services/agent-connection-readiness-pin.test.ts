@@ -30,8 +30,9 @@ import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { resolveAgentConnectionReadiness } from "../../../src/services/integration-pins-service.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageVersion, seedInstalledPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedPackageVersion, seedSpacePackage } from "../../helpers/seed.ts";
 import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
+import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
 
 const INTEG = "@readyorg/integ";
 const SERVER = "@readyorg/server";
@@ -110,7 +111,7 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
       .update(packages)
       .set({ draftManifest: integManifest("9.9.9", ["read"]) })
       .where(eq(packages.id, INTEG));
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
 
     // One accessible oauth2 connection granted `read` only — sufficient for the
     // draft's requirement, short of the published one's.
@@ -132,14 +133,22 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
       orgId: ctx.orgId,
       type: "agent",
       source: "local",
+      homeSpaceId: ctx.defaultSpaceId,
       draftManifest: agentManifest({ withIntegration: true }),
     });
+    // Readiness reports the SPACE's switch too, so an agent nothing activated
+    // here would block on that instead of on the scope gap this suite is about.
+    await seedSpacePackage(ctx.defaultSpaceId, AGENT);
 
     const readiness = await resolveAgentConnectionReadiness({
       scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       agentPackageId: AGENT,
       actor: { type: "user", id: ctx.user.id },
       canConfigureIntegrations: true,
+      // The selector is the ROUTER's decision now, and the service takes it as
+      // given. `draft` is what the route hands over for a caller who may write
+      // the agent — which is this fixture's author.
+      version: "draft",
     });
 
     // THE negative control. Unseeded, the cascade reads the draft (which needs
@@ -163,13 +172,22 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
       orgId: ctx.orgId,
       type: "agent",
       source: "local",
+      homeSpaceId: ctx.defaultSpaceId,
       draftManifest: agentManifest({ withIntegration: true }),
     });
+    // Same reason as above: the agent has to be ACTIVE here, or every verdict
+    // below carries `agent_not_active` and says nothing about the selector.
+    await seedSpacePackage(ctx.defaultSpaceId, AGENT);
     await seedPackageVersion({
       packageId: AGENT,
       version: "1.0.0",
       manifest: agentManifest({ withIntegration: false }),
     });
+    await uploadPackageZip(
+      AGENT,
+      "1.0.0",
+      buildMinimalZip(agentManifest({ withIntegration: false }), "Published prompt.", "prompt.md"),
+    );
 
     const base = {
       scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },

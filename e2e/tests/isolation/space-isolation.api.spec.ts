@@ -24,7 +24,7 @@ import { createApiClient } from "../../helpers/api-client.ts";
 
 test.describe("Cross-space resource isolation", () => {
   // spaceA = default space (from fixture), spaceB = custom space
-  // Agent is installed in both spaces so we can create resources in both contexts
+  // The agent is active in both spaces so resources can be created in both contexts
 
   // ─── Webhooks ──────────────────────────────
   // Webhooks are org-scoped routes (not space-scoped). The `level` field in the

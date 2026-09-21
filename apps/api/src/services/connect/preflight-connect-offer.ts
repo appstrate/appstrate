@@ -24,7 +24,7 @@
  * unscoped `fetchIntegrationManifest` read is safe ONLY because the ids
  * reaching this function are the ones readiness just resolved for this org and
  * space (the agent declared them and `listActiveIntegrationIds` confirmed each
- * is installed and enabled HERE).
+ * is ACTIVE HERE).
  */
 
 import { buildConnectUrl, connectClaimsFor } from "./connect-session.ts";

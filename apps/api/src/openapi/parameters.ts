@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
+
 /**
  * Reusable OpenAPI parameter definitions.
  */
@@ -123,7 +125,7 @@ export const parameters = {
       "whitespace around the separators is tolerated and nothing else is:\n\n" +
       "- `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.\n" +
       "- `space` (optional) — a `spc_` space id. Must be paired with `role`.\n" +
-      "- `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. " +
+      `- \`role\` (optional) — \`preset:<${SPACE_ROLE_PRESETS.join("|")}>\` or \`custom:<srl_ id>\`. ` +
       "Must be paired with `space`.\n\n" +
       "Example: `org_role=member; space=spc_…; role=preset:viewer`.\n\n" +
       "The persona is enforced server-side: `permissions`, the space role and every listing are " +
@@ -135,7 +137,7 @@ export const parameters = {
       "carry a persona — only a cookie session and the CLI/instance token, which authenticate the " +
       "user themselves, can), `403 view_as_forbidden` " +
       "(the real org role is not owner/admin, or the role is not one the caller could grant in " +
-      "that space, or previewing a custom role where the `custom_roles` feature is off), " +
+      "that space), " +
       "`404 view_as_not_found` (the space is not in the org, the custom role does not exist, or " +
       "the organization named alongside the persona is not one the caller belongs to). A 404 " +
       "carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain " +
@@ -173,16 +175,5 @@ export const parameters = {
     required: true,
     description: "Package name",
     schema: { type: "string" },
-  },
-  PackageActiveFilter: {
-    name: "active",
-    in: "query" as const,
-    required: false,
-    description:
-      "When `true`, narrows the list to packages installed and enabled in the current " +
-      "space — system packages with no install row drop out. Integrations are the one " +
-      "exception: they are filtered on effective activation, so an environment-provided " +
-      "system integration stays listed even though it has no install row.",
-    schema: { type: "string", enum: ["true"] as const },
   },
 } as const;

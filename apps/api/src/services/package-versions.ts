@@ -408,7 +408,8 @@ export async function deletePackageVersion(packageId: string, version: string): 
       .select({ id: packageVersions.id })
       .from(packageVersions)
       .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
-      .limit(1);
+      .limit(1)
+      .for("update");
 
     if (!row) return false;
 
@@ -693,7 +694,7 @@ export async function createVersionFromDraft(params: {
   // A schema-valid mcp-server draft can still point at a companion file that
   // is absent from the stored payload. Reparse the exact bytes about to become
   // immutable so publish enforces the same executable-archive invariant as
-  // create/import/install.
+  // create and import.
   //
   // Keyed on `pkg.type` ALONE. This used to also require
   // `finalManifest.type === "mcp-server"`, exempting a row whose stored

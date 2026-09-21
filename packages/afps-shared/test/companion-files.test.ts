@@ -285,3 +285,45 @@ describe("checkCompanionFiles — other package types are untouched", () => {
     expect(checkCompanionFiles({ type: "integration" }, companionFilesFromRecord({}))).toBeNull();
   });
 });
+
+describe("checkCompanionFiles — mcp-server entry_point spelling", () => {
+  const enc = new TextEncoder();
+  const serverBytes = enc.encode("export {};\n");
+
+  function check(entryPoint: string, files: Record<string, Uint8Array>) {
+    return checkCompanionFiles(
+      { type: "mcp-server", server: { entry_point: entryPoint } },
+      companionFilesFromRecord(files),
+    );
+  }
+
+  it("accepts a flat archive entry named exactly as declared", () => {
+    expect(check("server.js", { "server.js": serverBytes })).toBeNull();
+  });
+
+  // Regression: every mcp-server under this repo's `system-packages/` declares
+  // the MCPB-conventional `./entry` form while the archive stores the entry
+  // flat. An exact `has()` made those packages importable through the on-disk
+  // system-package loader and REJECTED through `POST /api/packages/import`.
+  it("accepts a `./`-prefixed entry_point against a flat archive entry", () => {
+    expect(check("./server.js", { "server.js": serverBytes })).toBeNull();
+  });
+
+  it("accepts a `./`-prefixed entry_point against a `./`-prefixed entry", () => {
+    expect(check("./server.js", { "./server.js": serverBytes })).toBeNull();
+  });
+
+  it("still reports a genuinely missing payload", () => {
+    const violation = check("./server.js", { "manifest.json": serverBytes });
+    expect(violation?.reason).toBe("MCP_SERVER_MISSING_ENTRY_POINT");
+    expect(violation?.path).toBe("./server.js");
+  });
+
+  // Normalising `./` must not turn into path resolution: a declared parent
+  // traversal stays unresolved and unmatched.
+  it("does not resolve `..` segments", () => {
+    expect(check("../server.js", { "server.js": serverBytes })?.reason).toBe(
+      "MCP_SERVER_MISSING_ENTRY_POINT",
+    );
+  });
+});

@@ -3,7 +3,7 @@
 /**
  * Platform-side bundle import — takes a parsed multi-package {@link Bundle}
  * and registers every embedded package (one packages row + one
- * packageVersions row + stored ZIP) in the current org, then installs
+ * packageVersions row + stored ZIP) in the current org, then activates
  * the root in the current space.
  *
  * Conflict semantics (spec §9.2):
@@ -54,15 +54,15 @@ import { assertArchiveContentConforms } from "./package-items/config.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import { postInstallPackage } from "./post-install-package.ts";
 import { buildBundleFromUploadedAfps, type BundleAssemblyScope } from "./bundle-assembly.ts";
-import { installPackage } from "./space-packages.ts";
+import { activatePackage } from "./space-packages.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import { logger } from "../lib/logger.ts";
 import {
   collectConnectLoginWarnings,
   collectMetaWarnings,
   collectRetiredDependencyKeyWarnings,
-} from "./integration-install-warnings.ts";
-import { collectAgentInstallWarnings } from "./agent-install-warnings.ts";
+} from "./integration-import-warnings.ts";
+import { collectAgentImportWarnings } from "./agent-import-warnings.ts";
 
 // Pinned mtime — must match the bundle writer exactly for cross-format
 // integrity parity. Anchored at 1980-01-02T12:00Z so fflate's local-TZ
@@ -170,7 +170,7 @@ export async function detectBundleConflicts(
     // dest has no prior row). Same-instance cross-org collisions are
     // rare in production but possible if two orgs publish the same
     // scoped name — surface a clear 409 rather than silently failing
-    // to install.
+    // to import.
     const [existingPkg] = await db
       .select({ orgId: packages.orgId })
       .from(packages)
@@ -233,11 +233,11 @@ interface ImportedPackageResult {
 
 interface ImportBundleResult {
   imported: ImportedPackageResult[];
-  root_installed: boolean;
+  root_active: boolean;
   root_package_id: string;
   root_version: string;
   /**
-   * Non-blocking install-time warnings (AFPS §7.7) — surfaces
+   * Non-blocking import-time warnings (AFPS §7.7) — surfaces
    * `connect.login` selector/criteria patterns the Appstrate runtime engine
    * cannot evaluate (XPath, multi-value JSONPath, xpath criteria). Empty
    * array when no integration manifest in the bundle hits a limitation.
@@ -286,7 +286,7 @@ interface BundleImportPreflight {
 
 /**
  * Import every package in {@link bundle} into the org registry, then
- * install the root in the calling space. Callers SHOULD run
+ * activate the root in the calling space. Callers SHOULD run
  * {@link detectBundleConflicts} first for a complete conflict report, but
  * correctness does not depend on it: ownership is re-checked here,
  * atomically with each write, so a concurrent cross-org race resolves to a
@@ -296,6 +296,7 @@ export async function importBundle(
   bundle: Bundle,
   scope: BundleAssemblyScope,
   userId: string,
+  mayShareRoot?: (packageId: string) => Promise<boolean>,
 ): Promise<ImportBundleResult> {
   const imported: ImportedPackageResult[] = [];
   const warnings: string[] = [];
@@ -328,7 +329,7 @@ export async function importBundle(
         // source — rejecting here would abort the ENTIRE bundle (every
         // co-packaged skill and integration with it) on a legacy agent, with no
         // recourse for the operator. Drop the retired ids and surface them as
-        // install warnings below.
+        // import warnings below.
         return parsePackageZip(getReconstructedPackage(), { retiredRuntimeTools: "drop" });
       } catch (err) {
         throw invalidRequest(`Invalid package '${identity}' in bundle: ${getErrorMessage(err)}`);
@@ -343,7 +344,7 @@ export async function importBundle(
       parsedZip = parseIncomingPackage();
       // Deployment policy can change after a version was first imported.
       // Re-evaluate warnings on every import, including equivalent reuse.
-      for (const w of collectAgentInstallWarnings(parsedZip.manifest)) {
+      for (const w of collectAgentImportWarnings(parsedZip.manifest)) {
         warnings.push(`${identity}: ${w}`);
       }
     }
@@ -398,7 +399,7 @@ export async function importBundle(
     // Surface `_meta` policy warnings for all package types — the validator
     // soft-fails malformed namespace keys to console.warn only (per AFPS §10.1
     // "consumers MUST NOT reject unknown `_meta` keys"). Lift them to the
-    // install-warning channel so publishers see them.
+    // import-warning channel so publishers see them.
     for (const w of collectMetaWarnings(parsedZip.manifest)) {
       warnings.push(`${identity}: ${w}`);
     }
@@ -439,6 +440,9 @@ export async function importBundle(
         .values({
           id: packageId,
           orgId: scope.orgId,
+          // The importing space owns what it imports: it is the home whose
+          // `<type>:write` governs the package from here on.
+          homeSpaceId: scope.spaceId,
           type: parsedZip.type,
           source: "local",
           draftManifest: parsedZip.manifest,
@@ -484,6 +488,7 @@ export async function importBundle(
         zipBuffer: Buffer.from(getReconstructedPackage()),
         draftManifest: parsedZip.manifest,
         version,
+        homeSpaceId: scope.spaceId,
       });
     } catch (err) {
       // Post-install (version snapshot + storage upload) failed. If this
@@ -522,26 +527,39 @@ export async function importBundle(
     });
   }
 
-  // Install root in the space (idempotent — no-op if already there).
+  // ACTIVATE the root in the space (idempotent — a no-op when it is already on).
+  //
+  // A root the import CREATED is homed here, so the placement rule is already
+  // satisfied. A root that existed and lives in ANOTHER space is not: this is a
+  // re-import into a second space, and activating it there is the same act as
+  // `POST /api/spaces/{id}/packages` — it needs the offer. So it takes the same
+  // door: when the caller holds `<type>:share` in the root's home, the offer is
+  // written with the placement, in one transaction; when they do not,
+  // `activatePackage` refuses and the result says `root_active: false`.
   const rootParsed = parsePackageIdentity(bundle.root);
   if (!rootParsed) {
     throw invalidRequest("Bundle root identity is invalid");
   }
-  let rootInstalled = false;
+  let rootActive = false;
   try {
-    await installPackage(scope, rootParsed.packageId);
-    rootInstalled = true;
+    const mayShare = (await mayShareRoot?.(rootParsed.packageId)) ?? false;
+    await activatePackage(scope, rootParsed.packageId, mayShare ? { shareBy: userId } : undefined);
+    rootActive = true;
   } catch (err) {
-    // Conflict or already-installed is fine — surface the root id + swallow.
-    logger.debug("Root install skipped", {
+    // An unreachable or unofferable root is what a caller has to diagnose, and
+    // the response only says `false`. WARN, carrying the refusal's own message:
+    // a bundle that imported its packages and then failed to place its root is
+    // an operator-visible outcome, not a debugging detail.
+    logger.warn("Bundle root not activated in space", {
       packageId: rootParsed.packageId,
+      spaceId: scope.spaceId,
       err: getErrorMessage(err),
     });
   }
 
   return {
     imported,
-    root_installed: rootInstalled,
+    root_active: rootActive,
     root_package_id: rootParsed.packageId,
     root_version: rootParsed.version,
     warnings,
@@ -556,15 +574,15 @@ export async function importBundle(
  * version.
  *
  * ALL-OR-NOTHING, and preflight. One invalid agent aborts the WHOLE bundle —
- * "the bundle minus its root" is not a smaller success, it is a half-installed
+ * "the bundle minus its root" is not a smaller success, it is a half-imported
  * set. Running it here (pure reads, before `detectBundleConflicts` and before
  * the first write) means the refusal costs no rollback.
  *
  * A SELF-CONTAINED bundle is judged too. Its integrations are not in the
- * registry yet, so a DB-only validator hit "integration not installed → skip
+ * registry yet, so a DB-only validator hit "integration not in the catalog → skip
  * silently" and waved the agent straight into an immutable version. The catalog
  * handed to the validator is therefore the post-import
- * `incoming ∪ already-installed` catalog: every manifest the bundle carries,
+ * `incoming ∪ already-present` catalog: every manifest the bundle carries,
  * keyed by package id, is resolved together with existing versions and
  * dist-tags. Same map covers the mcp-servers a local integration references.
  */
@@ -581,7 +599,7 @@ async function assertBundleAgentsExposeCallableTools(bundle: Bundle, orgId: stri
     const parsed = parsePackageIdentity(identity);
     // System packages are authoritative platform inputs. The importer ignores
     // carried copies below, so letting one participate in validation would
-    // judge a manifest the runtime will never install.
+    // judge a manifest the runtime will never import.
     if (!parsed || isSystemPackage(parsed.packageId)) continue;
     const versions = carried.get(parsed.packageId) ?? [];
     versions.push({
@@ -653,6 +671,7 @@ export async function handleImportBundle(
   scope: BundleAssemblyScope,
   userId: string,
   authorize: (bundle: Bundle) => Promise<void>,
+  mayShareRoot?: (packageId: string) => Promise<boolean>,
 ): Promise<ImportBundleResult> {
   const { bundle, conflicts } = await preflightBundleImport(bytes, scope, authorize);
   if (conflicts.length > 0) {
@@ -665,5 +684,5 @@ export async function handleImportBundle(
       .join("; ");
     throw conflict("bundle_conflict", `Bundle conflicts with existing packages: ${summary}`);
   }
-  return importBundle(bundle, scope, userId);
+  return importBundle(bundle, scope, userId, mayShareRoot);
 }

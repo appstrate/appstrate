@@ -4,9 +4,9 @@ import { describe, expect, it } from "bun:test";
 import { _resetCacheForTesting } from "@appstrate/env";
 import { AGENT_RESOURCES_META_KEY } from "@appstrate/core/validation";
 import {
-  collectAgentInstallWarnings,
+  collectAgentImportWarnings,
   collectAgentResourceWarnings,
-} from "../../src/services/agent-install-warnings.ts";
+} from "../../src/services/agent-import-warnings.ts";
 import {
   _setRunLimitsForTesting,
   type AgentResourcePolicy,
@@ -112,7 +112,7 @@ describe("collectAgentResourceWarnings", () => {
   });
 });
 
-describe("collectAgentInstallWarnings", () => {
+describe("collectAgentImportWarnings", () => {
   it("composes timeout and resource warnings without changing timeout wording", () => {
     const previousAdapter = process.env.RUN_ADAPTER;
     process.env.RUN_ADAPTER = "docker";
@@ -127,7 +127,7 @@ describe("collectAgentInstallWarnings", () => {
     );
 
     try {
-      expect(collectAgentInstallWarnings(agent({ memory_mb: 4096 }, { timeout: 10800 }))).toEqual([
+      expect(collectAgentImportWarnings(agent({ memory_mb: 4096 }, { timeout: 10800 }))).toEqual([
         "timeout: declared 10800s exceeds this deployment's ceiling — runs will be capped at 900s.",
         `_meta["${AGENT_RESOURCES_META_KEY}"].memory_mb: declared 4096 MiB exceeds this deployment's effective ceiling — runs will use 1536 MiB.`,
       ]);

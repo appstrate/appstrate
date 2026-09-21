@@ -36,7 +36,6 @@ import { Spinner } from "../spinner";
 import { ListToolbar } from "../list-toolbar";
 import { Badge } from "@appstrate/ui/components/badge";
 import { ErrorState, EmptyState } from "../page-states";
-import { useActivateIntegration } from "../../hooks/use-integrations";
 import type { ResourceEntry } from "./types";
 import { caretRange } from "./utils";
 import { IntegrationToolPicker } from "./integration-tool-picker";
@@ -53,6 +52,10 @@ import {
   TableRow,
 } from "@appstrate/ui/components/table";
 import { useModalParam } from "../../hooks/use-modal-param";
+import { useSetPackageActive } from "../../hooks/use-library";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { useCurrentSpaceGrant } from "../../hooks/use-permissions";
+import { maySetPackageActive } from "../../lib/package-permissions";
 
 type ResourceEntriesUpdater = ResourceEntry[] | ((prev: ResourceEntry[]) => ResourceEntry[]);
 
@@ -140,28 +143,33 @@ export function ResourceSection({
   const resourceId = useId();
   const [search, setSearch] = useState("");
   const [selection, setSelection] = useState<string[]>([]);
-  // Integrations must be active (installed + enabled) in this app to be
-  // usable. Filter server-side (`?active=true`) so the editor never pulls the
-  // full catalogue — only active integrations are offered.
-  const {
-    data: items,
-    isLoading,
-    error,
-  } = usePackageList(type, {
-    activeOnly: type === "integration",
-  });
+  // The picker offers what this space RUNS: activation governs what a space
+  // offers — hints, CLI sync, this list — so the index (placed here and
+  // switched on, every type) is the offer. It is narrower than what a manifest
+  // may declare: resolving a DECLARED dependency name stays org-wide (RBAC
+  // §6.9, `services/package-catalog.ts`), so an agent can legally depend on a
+  // package this space does not run, and the entry below stays visible for it.
+  const { data: items, isLoading, error } = usePackageList(type);
   const upload = useUploadPackage(type);
-  const activate = useActivateIntegration();
+  const setActive = useSetPackageActive();
+  const currentSpaceId = useCurrentSpaceId();
+  // The tree's ONE activation verdict, the same one the library and the package
+  // dropdown ask: the type's grant in THIS space, or owning it (RBAC §3.6).
+  // Offering the cure to somebody the route will refuse is a worse sentence
+  // than saying so on the button.
+  const spaceGrant = useCurrentSpaceGrant();
+  const canActivate = maySetPackageActive(spaceGrant, "integration", true);
 
   const selectedMap = new Map(selectedEntries.map((e) => [e.id, e]));
 
   // A declared dependency the catalog does not return: an integration that is no
-  // longer active here (uninstalled/disabled since), or a skill that is simply
-  // not installed. Either way it must stay VISIBLE — it is in the manifest and
+  // longer active here (switched off since), or a skill that is simply not
+  // placed here. Either way it must stay VISIBLE — it is in the manifest and
   // the run-time gate will reject it (`integration_not_active` /
   // `missing_skill`), so hiding it makes the editor claim the agent declares
-  // less than it does. This used to be integration-only, which is how a declared
-  // skill missing from the catalogue rendered as "no skill at all".
+  // less than it does. The rule covers every dependency family, not just
+  // integrations: a declared skill absent from the catalogue must read as a
+  // flagged row, never as "no skill at all".
   // Ids declared when the editor opened. Kept because the flagged rows below are
   // derived from what is CURRENTLY selected: unchecking one removed it from that
   // set, so the row vanished from the screen entirely and the only way back was
@@ -363,7 +371,7 @@ export function ResourceSection({
           })}
 
           {/* Declared but not usable here: an integration that is not active in
-              this space, or a skill that is not installed. Flagged rather
+              this space, or a skill that is not placed here. Flagged rather
               than hidden, because the run gate rejects them.
 
               For an integration the row also carries the cure. The message says
@@ -396,10 +404,22 @@ export function ResourceSection({
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={activate.isPending}
-                  onClick={() => activate.mutate({ params: { path: { packageId: id } } })}
+                  disabled={setActive.isPending || !currentSpaceId || !canActivate}
+                  title={canActivate ? undefined : t("library.cannotActivate", { ns: "common" })}
+                  onClick={() => {
+                    if (!currentSpaceId || !canActivate) return;
+                    setActive.mutate(
+                      { spaceId: currentSpaceId, packageId: id, active: true },
+                      {
+                        onSuccess: () =>
+                          toast.success(t("integrations.activate.success", { ns: "settings" })),
+                        onError: () =>
+                          toast.error(t("integrations.activate.error", { ns: "settings" })),
+                      },
+                    );
+                  }}
                 >
-                  {activate.isPending ? <Spinner /> : t("editor.activateIntegration")}
+                  {setActive.isPending ? <Spinner /> : t("editor.activateIntegration")}
                 </Button>
               )}
             </div>
@@ -446,8 +466,13 @@ export function ResourceSection({
               }),
           ])
         }
-        onActivate={(id) => activate.mutate({ params: { path: { packageId: id } } })}
-        activating={activate.isPending}
+        // One door for every family (#1437): activating is a space placement
+        // switch, not an integration-only verb.
+        onActivate={(id) => {
+          if (!currentSpaceId || !canActivate) return;
+          setActive.mutate({ spaceId: currentSpaceId, packageId: id, active: true });
+        }}
+        activating={setActive.isPending}
       />
     );
   }

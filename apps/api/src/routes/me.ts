@@ -47,6 +47,7 @@ import { getActor } from "../lib/actor.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
 import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
 import { callerPermissions } from "../lib/permissions.ts";
+import { isUserPrincipal } from "../lib/principal.ts";
 import { requireSpaceContext } from "../middleware/space-context.ts";
 import { getSpaceScope, type ActorScope, type SpaceScope } from "../lib/scope.ts";
 import {
@@ -58,8 +59,10 @@ import {
   deleteIntegrationConnection,
   listUsableIntegrationsForActor,
 } from "../services/integration-connections.ts";
-import { listRunnableAgents, listInstalledSkills } from "../services/space-packages.ts";
+import { listRunnableAgents, listActiveSkills } from "../services/space-packages.ts";
+import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { listRecentForActor } from "../services/state/runs.ts";
+import { canReadRuns } from "../lib/run-visibility.ts";
 import { getEndUser } from "../services/end-users.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { unauthorized, invalidRequest } from "../lib/errors.ts";
@@ -72,24 +75,21 @@ const router = new Hono<AppEnv>();
  * Derive the authority boundary of the presented credential for the
  * `/me/connections` surface (list + delete).
  *
- * An API key authenticates as its CREATOR (`c.get("user")` is the key's
- * creator), but the key itself is bound to one org + one space and its
- * bearer is a long-lived secret that may be handed to a third-party
- * space. The cross-org/cross-space view is an interactive-dashboard
- * feature — it must never be reachable with an API key, or a leaked key
- * could enumerate (and destructively delete) the creator's connections in
- * every org they belong to. The API-key auth branch always pins both ids
- * on the context; their absence under `api_key` is an auth-pipeline bug,
- * so fail closed rather than fall back to the global view.
+ * `user_global` is the `user` principal — the person themselves, by any
+ * transport. Every other kind is `bound`: an API key (org + space), a
+ * third-party OAuth client (org only), an end-user token (org + space). Each
+ * authenticates as its issuer, but its bearer is a credential that may be held
+ * by somebody else, so the cross-org dashboard view must never be reachable
+ * with one — a leaked key could otherwise enumerate (and destructively delete)
+ * the creator's connections in every org they belong to. On `main` an end-user
+ * token took the global view. The org id is always pinned for a bound
+ * credential; its absence is an auth-pipeline bug, so fail closed.
  */
 function getMeConnectionAuthority(c: Context<AppEnv>): MeConnectionAuthority {
-  if (c.get("authMethod") !== "api_key") return { kind: "user_global" };
+  if (isUserPrincipal(c)) return { kind: "user_global" };
   const orgId = c.get("orgId");
-  const spaceId = c.get("spaceId");
-  if (!orgId || !spaceId) {
-    throw unauthorized("API key is missing its org/space binding");
-  }
-  return { kind: "space_scoped", orgId, spaceId };
+  if (!orgId) throw unauthorized("Credential is missing its organization binding");
+  return { kind: "bound", orgId, spaceId: c.get("spaceId") };
 }
 
 /**
@@ -135,10 +135,16 @@ router.get("/orgs", async (c) => {
   const user = c.get("user");
   if (!user) throw unauthorized("Authentication required");
 
-  // API keys are bound to a single org — filter at the DB level so a
-  // compromised key cannot enumerate every org the creator belongs to.
-  // Same rule as `GET /api/orgs` keeps the two paths in lockstep.
-  const orgIdFilter = c.get("authMethod") === "api_key" ? c.get("orgId") : undefined;
+  // A delegate is bound to a single org — filter at the DB level so a
+  // compromised key cannot enumerate every org the creator belongs to. No
+  // binding is an auth-pipeline bug, and the unfiltered listing is the very
+  // enumeration above: fail closed. Same rule as `GET /api/orgs` keeps the two
+  // paths in lockstep.
+  const orgId = c.get("orgId");
+  if (!isUserPrincipal(c) && !orgId) {
+    throw unauthorized("Credential is missing its organization binding");
+  }
+  const orgIdFilter = isUserPrincipal(c) ? undefined : orgId;
   const orgs = await getUserOrganizations(user.id, orgIdFilter);
   // Once for the listing: the persona names one org, and one this listing
   // cannot place is refused rather than ignored.
@@ -174,9 +180,9 @@ router.get("/orgs", async (c) => {
  * they're a member of — the connection list belongs to the user, not to any
  * org/space, so org context is skipped entirely.
  *
- * For an API key: hard-scoped to the key's bound (org, space) pair —
- * the key authenticates as its creator, but its bearer must not be able to
- * enumerate the creator's connections in other orgs/spaces
+ * For every other kind: hard-scoped to its binding — its org, and its space
+ * when it pins one. Such a credential authenticates as its issuer, but its
+ * bearer must not be able to enumerate the issuer's connections elsewhere
  * (see {@link getMeConnectionAuthority}). Source-grouped (one group per
  * package) in both cases.
  */
@@ -221,9 +227,13 @@ router.get("/integration-pins", requireSpaceContext(), async (c) => {
     return c.json(listResponse([]));
   }
   const agentPackageId = c.req.query("agent_package_id");
-  if (!agentPackageId) {
-    return c.json(listResponse([]));
-  }
+  // An omitted parameter is an empty list, not a 400 — the picker renders
+  // before it has an agent to ask about, exactly as it does for an end-user
+  // above. The DELETE below refuses instead, because deleting nothing in
+  // particular is not a coherent request. The spec is what was wrong here:
+  // it marked the parameter `required` and documented a 400 this route has
+  // never raised.
+  if (!agentPackageId) return c.json(listResponse([]));
   const scope = getSpaceScope(c);
   const pins = await listMemberPinsForAgent(scope, agentPackageId, user.id);
   return c.json(listResponse(pins));
@@ -291,10 +301,10 @@ router.delete("/integration-pins", requireSpaceContext(), async (c) => {
  *
  * Space context is implicit — the connection row carries `space_id`,
  * we re-derive scope from it instead of asking the SPA to send a header
- * for a per-row operation. EXCEPT for API-key callers: the key is bound to
- * one (org, space) and a delete outside that boundary is refused (a
- * leaked key must not be able to destroy the creator's credentials in other
- * orgs/spaces), so the key's own scope is used instead of the row-derived one.
+ * for a per-row operation. EXCEPT for a bound credential: a delete outside its
+ * binding is refused (a leaked key must not be able to destroy the creator's
+ * credentials in other orgs/spaces), so its own scope is used instead of the
+ * row-derived one.
  */
 router.delete("/connections/:connectionId", async (c) => {
   const connectionId = c.req.param("connectionId")!;
@@ -327,14 +337,14 @@ router.delete("/connections/:connectionId", async (c) => {
 
   // Scope selection depends on the credential's authority:
   //
-  //   - API key (`space_scoped`): the key is bound to one (org, space).
-  //     A connection outside that space short-circuits to 204 (same
-  //     non-disclosure as the "row not found" branch — a probing key learns
-  //     nothing), and the delete itself runs under the KEY'S `SpaceScope`, so
-  //     the service's space∈org assertion and its `spaceId` WHERE filter
-  //     both enforce the boundary in SQL.
+  //   - A bound credential: when it pins a space, a connection outside that
+  //     space short-circuits to 204 (same non-disclosure as the "row not
+  //     found" branch — a probing key learns nothing). The delete then runs
+  //     under the CREDENTIAL's `SpaceScope`, so the service's space∈org
+  //     assertion and its `spaceId` WHERE filter both enforce the binding in
+  //     SQL; an org-only credential is held to its org by that same assertion.
   //
-  //   - Interactive user credential (`user_global`): pass an `ActorScope`
+  //   - A `user` principal (`user_global`): pass an `ActorScope`
   //     (spaceId only, no orgId) deliberately. `/me/connections` is an
   //     actor-ownership boundary, not a space∈org one: a connection belongs to
   //     its owner regardless of which org the caller is currently scoped to.
@@ -346,11 +356,11 @@ router.delete("/connections/:connectionId", async (c) => {
   //     a different org. Ownership is still fully enforced downstream by the
   //     actor filter.
   let scope: SpaceScope | ActorScope;
-  if (authority.kind === "space_scoped") {
-    if (row.spaceId !== authority.spaceId) {
+  if (authority.kind === "bound") {
+    if (authority.spaceId && row.spaceId !== authority.spaceId) {
       return c.body(null, 204);
     }
-    scope = { orgId: authority.orgId, spaceId: authority.spaceId };
+    scope = { orgId: authority.orgId, spaceId: row.spaceId };
   } else {
     scope = { spaceId: row.spaceId } satisfies ActorScope;
   }
@@ -406,16 +416,35 @@ router.get("/context", requireSpaceContext(), async (c) => {
   const permissions = callerPermissions(c);
   const canRun = permissions.has("agents:run");
   const canReadSkills = permissions.has("skills:read");
-  const [connections, runnable, installedSkills, recentRuns] = await Promise.all([
-    listUsableIntegrationsForActor(scope, actor),
+  // Runs and connections are enrichments like the two above, and they carry
+  // more than a hint: `recent_runs` names packages, statuses and error strings,
+  // and `connections` names the accounts attached in this space. A credential
+  // whose ceiling excludes `runs:read` is refused by `GET /api/runs`, so it
+  // must not read the same rows through this payload either. The route itself
+  // stays open — a role without runs still needs its identity and org.
+  const mayReadRuns = canReadRuns(permissions);
+  const mayReadIntegrations = permissions.has("integrations:read");
+  // Resolved once for both hint listings: `home_writable` is what tells the
+  // model whether a draft-only package is THIS caller's to run, and computing
+  // it needs the caller's reach over every space, not the package rows.
+  const accessible = await packageAccessSpaces(c);
+  const homeWritable = (pkg: Parameters<typeof homeWireForCaller>[0]) =>
+    homeWireForCaller(pkg, accessible).home_writable;
+  const [connections, runnable, activeSkills, recentRuns] = await Promise.all([
+    mayReadIntegrations
+      ? listUsableIntegrationsForActor(scope, actor)
+      : Promise.resolve([] as Awaited<ReturnType<typeof listUsableIntegrationsForActor>>),
     canRun
-      ? listRunnableAgents(scope)
+      ? listRunnableAgents(scope, { homeWritable })
       : Promise.resolve({ agents: [], truncated: false, total: 0 }),
     canReadSkills
-      ? listInstalledSkills(scope)
+      ? listActiveSkills(scope, { homeWritable })
       : Promise.resolve({ skills: [], truncated: false, total: 0 }),
-    // The caller's own recent runs (actor-scoped) — no extra permission needed.
-    listRecentForActor(scope, actor),
+    // Actor-scoped, but still a runs read: the same permission `GET /api/runs`
+    // asks for (`runs:read` ∨ `runs:read-all`, `canReadRuns`).
+    mayReadRuns
+      ? listRecentForActor(scope, actor)
+      : Promise.resolve([] as Awaited<ReturnType<typeof listRecentForActor>>),
   ]);
 
   return c.json({
@@ -431,9 +460,9 @@ router.get("/context", requireSpaceContext(), async (c) => {
     agents: runnable.agents,
     agents_truncated: runnable.truncated,
     agents_total: runnable.total,
-    skills: installedSkills.skills,
-    skills_truncated: installedSkills.truncated,
-    skills_total: installedSkills.total,
+    skills: activeSkills.skills,
+    skills_truncated: activeSkills.truncated,
+    skills_total: activeSkills.total,
   });
 });
 

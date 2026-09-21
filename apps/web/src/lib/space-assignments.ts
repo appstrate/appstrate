@@ -30,19 +30,6 @@ export function assignmentsFor(
   return role === "admin" ? [] : assignments;
 }
 
-/**
- * Only `guest` is constrained: it has no implicit access anywhere, so the API
- * refuses an empty list (400). `member` falls back to the org's open spaces.
- */
-export function validateSpaceAssignments(
-  role: AssignableOrgRole,
-  assignments: SpaceAssignment[],
-  message: string,
-): true | string {
-  if (role !== "guest") return true;
-  return assignments.length > 0 ? true : message;
-}
-
 /** A loaded catalog must still contain each selection; never silently drop stale rows. */
 export function hasUnavailableAssignments(
   drafts: AssignmentDraft[],

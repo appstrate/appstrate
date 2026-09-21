@@ -24,6 +24,7 @@
 import { resolve } from "node:path";
 import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
 import { collectModuleOpenApi, stripModuleContributions } from "./lib/module-openapi.ts";
+import { format, resolveConfig } from "prettier";
 
 const BASELINE_PATH = resolve(import.meta.dir, "../apps/api/src/openapi/baseline.json");
 
@@ -439,7 +440,17 @@ const fullCurrentSpec = JSON.parse(JSON.stringify(openApiSpec));
 const currentSpec = stripModuleContributions(fullCurrentSpec, ownedContributions);
 
 if (updateBaseline) {
-  await Bun.write(BASELINE_PATH, JSON.stringify(currentSpec, null, 2) + "\n");
+  // Formatted through Prettier, not just `JSON.stringify(…, null, 2)`.
+  // The two disagree on this file by ~4950 lines while the SPEC is
+  // byte-identical, so a raw write buries every real change in formatting
+  // churn AND leaves `bun run check` red on `format:check` until somebody
+  // runs Prettier by hand. Formatting here makes a no-op regeneration
+  // produce a no-op diff, which is what lets the diff be read at all.
+  const formatted = await format(JSON.stringify(currentSpec, null, 2), {
+    ...(await resolveConfig(BASELINE_PATH)),
+    filepath: BASELINE_PATH,
+  });
+  await Bun.write(BASELINE_PATH, formatted);
   console.log(`\n  Baseline updated: ${BASELINE_PATH}`);
   console.log(
     `  Endpoints: ${Object.entries(currentSpec.paths || {}).reduce((n: number, [, m]) => n + Object.keys(m as object).length, 0)} (core only; module paths excluded)`,

@@ -407,6 +407,19 @@ describe("isSafeArchivePath", () => {
       // segment reads as relative. The backslash form is caught above.
       "C:/Users/x.md",
       "c:/x.md",
+      // Signature-RECORD delimiters. The `.afps` reader refuses a comma or a
+      // CR/LF outright (one `path,sha256,bytes` line per entry), so admitting
+      // them here published packages that broke every consuming run.
+      "a,b.md",
+      "docs/q1,q2/report.md",
+      "a\nb.md",
+      "a\rb.md",
+      // `__proto__`: refused by `assertPath`, so an entry admitted here could
+      // afterwards be neither renamed nor deleted; and unusable as a key in any
+      // plain-object accumulator, where it hits the `Object.prototype` setter.
+      "__proto__",
+      "__proto__/x.md",
+      "docs/__proto__/x.md",
     ]) {
       expect({ path, safe: isSafeArchivePath(path) }).toEqual({ path, safe: false });
     }
@@ -425,6 +438,9 @@ describe("isSafeArchivePath", () => {
       "dir//x",
       "./dotted.md",
       "C:/drive.md",
+      "with,comma.md",
+      "with\nnewline.md",
+      "__proto__/x.md",
     ]) {
       entries[path] = encoder.encode("x");
     }
@@ -436,6 +452,19 @@ describe("isSafeArchivePath", () => {
         kept: isSafeArchivePath(path),
       });
     }
+  });
+
+  it("returns a null-prototype map, so no entry name can be a magic key", () => {
+    // `__proto__` is refused by the predicate above, so nothing should reach
+    // the accumulator — but an accumulator that has no magic keys AT ALL is
+    // what makes that guarantee survive a future regression in the filter.
+    // On a plain `{}`, `files["__proto__"] = bytes` runs the
+    // `Object.prototype` setter: the entry is not created, and the object's
+    // own prototype is replaced by attacker-supplied bytes.
+    const files = unzipArtifact(zipArtifact({ "a.txt": new TextEncoder().encode("ok") }));
+
+    expect(Object.getPrototypeOf(files)).toBeNull();
+    expect(files["a.txt"]).toBeDefined();
   });
 });
 

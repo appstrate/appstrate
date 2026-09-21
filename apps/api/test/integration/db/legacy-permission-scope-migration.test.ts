@@ -36,10 +36,10 @@ import {
   oauthClient,
   oauthConsent,
   oauthRefreshToken,
-  packages,
 } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { seedPackage } from "../../helpers/seed.ts";
 
 const MIGRATION = new URL(
   "../../../../../packages/db/drizzle/0046_legacy_permission_scope_strings.sql",
@@ -398,7 +398,7 @@ describe("migration 0046 — documents:* → files:* in every stored scope colum
       // permissions — named in the migration header as deliberately excluded.
       // `packages.id` is the `@scope/name` package id (CHECK `packages_id_format`).
       const packageId = "@test/scope-migration-integration";
-      await db.insert(packages).values({ id: packageId, orgId: ctx.orgId, type: "integration" });
+      await seedPackage({ id: packageId, orgId: ctx.orgId, type: "integration" });
       const granted = ["https://www.googleapis.com/auth/documents.readonly", "documents:read"];
       const connectionId = crypto.randomUUID();
       await db.insert(integrationConnections).values({

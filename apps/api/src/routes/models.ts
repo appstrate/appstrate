@@ -74,7 +74,14 @@ export const createModelSchema = z
     contextWindow: z.number().int().positive().optional(),
     maxTokens: z.number().int().positive().optional(),
     reasoning: z.boolean().optional(),
-    cost: modelCostSchema.optional(),
+    // Closed HERE, not in `modelCostSchema` itself: that schema doubles as the
+    // reader of STORED rows (`appstrate-event-sink.ts`, `model-registry.ts`),
+    // where a row carrying a future key must keep parsing or its tokens bill at
+    // zero. At the REQUEST site the opposite is true — an open object strips a
+    // misspelt `cache_read`/`cache_write` and returns 201 on a row that then
+    // bills cache tokens at an absent rate, while the same typo one level up
+    // (`costs`) is a 400.
+    cost: modelCostSchema.strict().optional(),
     /**
      * Model-alias flag (LLM-gateway alias pattern). When true, this model's
      * `id` becomes a public alias and its real binding (modelId, provider,
@@ -102,7 +109,8 @@ export const updateModelSchema = z
     contextWindow: z.number().int().positive().nullable().optional(),
     maxTokens: z.number().int().positive().nullable().optional(),
     reasoning: z.boolean().nullable().optional(),
-    cost: modelCostSchema.nullable().optional(),
+    // `.strict()` for the same reason as on create — see the note there.
+    cost: modelCostSchema.strict().nullable().optional(),
     aliased: z.boolean().optional(),
   })
   .strict()

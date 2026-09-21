@@ -15,5 +15,5 @@ const CATALOGUE_KINDS: PackageType[] = ["agent", "skill", "mcp-server", "integra
 
 export function useCatalogueKinds(): PackageType[] {
   const { can } = usePermissions();
-  return CATALOGUE_KINDS.filter((type) => can(PACKAGE_PERMISSIONS[type].install));
+  return CATALOGUE_KINDS.filter((type) => can(PACKAGE_PERMISSIONS[type].activate));
 }

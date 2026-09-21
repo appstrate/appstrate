@@ -6,6 +6,8 @@ import { useTranslation } from "react-i18next";
 import { AlertTriangle, Building, HardDrive, Smile, Trash2, Upload } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
+import { Label } from "@appstrate/ui/components/label";
+import { Switch } from "@appstrate/ui/components/switch";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { formatBytes } from "@appstrate/core/format";
 import { $api } from "../../api/client";
@@ -14,6 +16,7 @@ import { InlineTextSetting } from "../../components/settings/inline-text-setting
 import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useOrgStorage } from "../../hooks/use-org-storage";
+import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
 import { getUsageBarColor, USAGE_WARN } from "../../lib/usage-severity";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../../components/confirm-modal";
@@ -60,6 +63,8 @@ export function OrgSettingsGeneralPage() {
   const navigate = useNavigate();
   const { currentOrg } = useOrg();
   const { can } = usePermissions();
+  const { data: orgSettings } = useOrgSettings();
+  const updateSettingsMutation = useUpdateOrgSettings();
   const canUpdateOrg = can("org:update");
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
@@ -274,6 +279,43 @@ export function OrgSettingsGeneralPage() {
           </div>
         </>
       )}
+
+      {/* Main's restrict-package-copy setting (#1437), in this app's own
+          grammar: a labelled switch in a SettingsGroup, not a card with an
+          Activer/Désactiver button. The two other blocks main renders here are
+          NOT carried over — collaborator SSO lives on its own page (`oauth.tsx`)
+          and the MCP endpoint under Préférences, so repeating them here would
+          be a second place to change one setting. */}
+      <SettingsGroup title={t("orgSettings.distributionTitle")}>
+        <SettingRow
+          variant="toggle"
+          label={
+            <Label htmlFor="restrict-package-copy" className="cursor-pointer">
+              {t("orgSettings.restrictCopyTitle")}
+            </Label>
+          }
+          description={t("orgSettings.restrictCopyDesc")}
+          status={updateSettingsMutation.isPending && <Spinner />}
+        >
+          <Switch
+            id="restrict-package-copy"
+            checked={orgSettings?.restrict_package_copy ?? false}
+            disabled={!can("org:settings") || updateSettingsMutation.isPending}
+            onCheckedChange={(checked) =>
+              updateSettingsMutation.mutate(
+                {
+                  params: { path: { orgId: currentOrg.id } },
+                  body: { restrict_package_copy: checked === true },
+                },
+                {
+                  onError: (error) =>
+                    toast.error(t("error.prefix", { message: getErrorMessage(error) })),
+                },
+              )
+            }
+          />
+        </SettingRow>
+      </SettingsGroup>
 
       {can("org:delete") && (
         <>

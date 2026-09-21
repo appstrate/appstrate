@@ -58,7 +58,7 @@ export const scheduleInputSchema = z
  * `input.schema`. Neither member was otherwise bounded: `values` is pruned to
  * the schema's declared properties at the write route, but a declared string's
  * LENGTH is not, and `locked` is stored verbatim without being pruned at all.
- * The column is read on every run launch (`getInstalledPackageSettings`) and on
+ * The column is read on every run launch (`getSpacePackageSettings`) and on
  * every agent-detail load, so a bloated row is paid for on the hot path, not
  * merely at rest.
  */

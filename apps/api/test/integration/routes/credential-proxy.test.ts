@@ -84,6 +84,9 @@ async function seedIntegrationWithConnection(ctx: TestContext): Promise<void> {
     orgId: ctx.orgId,
     type: "integration",
     source: "local",
+    // Homed in the space: a `space_packages` row only speaks for a space the
+    // package is PLACED in.
+    homeSpaceId: ctx.defaultSpaceId,
     draftManifest: gmailManifest(),
   });
   // Activate the integration in the default space.
@@ -314,6 +317,7 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
+      homeSpaceId: ctx.defaultSpaceId,
       draftManifest: gmailManifest(),
     });
     await db.insert(spacePackages).values({

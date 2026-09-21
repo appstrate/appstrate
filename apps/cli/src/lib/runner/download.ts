@@ -26,7 +26,11 @@ import {
 } from "./constants.ts";
 import type { RunnerExec, RunnerFs, RunnerHttp } from "./exec.ts";
 import type { ProgressFn } from "../download.ts";
-import { APPSTRATE_MINISIGN_PUBKEY, parseChecksumLine } from "../self-update.ts";
+import {
+  APPSTRATE_MINISIGN_PUBKEY,
+  parseChecksumLine,
+  resolveTargetVersion,
+} from "../self-update.ts";
 import { stripVersionPrefix } from "@appstrate/core/semver";
 
 /** Hex SHA-256 of a byte buffer via Bun's baked-in hasher. */
@@ -49,19 +53,57 @@ export function parseSha256(text: string): string {
 }
 
 /**
- * Build the daemon asset URLs for a version tag (`1.2.3` or `latest`). The
- * daemon's digest is a line in the release-wide `checksums.txt` (minisign
+ * Turn the lockstep daemon version into a PINNED release tag.
+ *
+ * `resolveDaemonVersion()` (commands/runner.ts) yields the literal `"latest"`
+ * for a dev build of the CLI, and that is what `runner install` and
+ * `runner update` pass down. It is resolved here the same way
+ * `appstrate self-update` resolves it — list the GitHub Releases and take the
+ * newest platform `v<semver>` tag — instead of being turned into a
+ * `releases/latest/download` URL.
+ *
+ * Why not the redirect: GitHub's "latest" is whichever NON-prerelease Release
+ * was created last, whatever its tag. A `cli@`, `core@` or `afps-shared@`
+ * Release carries no runner assets, so the moment one of them is marked latest
+ * (the failure `make_latest: false` in the three npm publish workflows exists
+ * to prevent) every URL built off it 404s. Listing lets the CLI pick a release
+ * that actually ships `appstrate-runner-<arch>` + the signed `checksums.txt`,
+ * so nothing outside `release.yml` can steer a daemon install.
+ *
+ * Anything that is not `"latest"` is already a pin and passes straight through.
+ */
+export async function resolveDaemonReleaseVersion(
+  version: string,
+  http: Pick<RunnerHttp, "fetchText">,
+): Promise<string> {
+  if (version !== "latest") return version;
+  return resolveTargetVersion(undefined, { fetchText: (url) => http.fetchText(url) });
+}
+
+/**
+ * Build the daemon asset URLs for a PINNED version tag (`1.2.3` or `v1.2.3`).
+ * The daemon's digest is a line in the release-wide `checksums.txt` (minisign
  * signed), so those two URLs anchor the trust.
+ *
+ * `"latest"` is deliberately NOT accepted — see
+ * {@link resolveDaemonReleaseVersion}, which every caller goes through first.
+ * A caller that reaches here with `"latest"` has a bug, and a loud throw beats
+ * `releases/latest/download` handing back three 404s (or, worse, assets from a
+ * release this daemon was never built against).
  */
 export function daemonUrls(
   version: string,
   arch: RunnerArch,
 ): { binary: string; checksums: string; checksumsSig: string } {
+  if (version === "latest") {
+    throw new Error(
+      `daemonUrls requires a pinned release version, got "latest" — resolve it through ` +
+        `resolveDaemonReleaseVersion() first (GitHub's releases/latest is not guaranteed ` +
+        `to be a platform v* release carrying the runner assets).`,
+    );
+  }
   const asset = daemonAssetName(arch);
-  const base =
-    version === "latest"
-      ? `${APPSTRATE_RELEASE_BASE}/latest/download`
-      : `${APPSTRATE_RELEASE_BASE}/download/v${stripVersionPrefix(version)}`;
+  const base = `${APPSTRATE_RELEASE_BASE}/download/v${stripVersionPrefix(version)}`;
   return {
     binary: `${base}/${asset}`,
     checksums: `${base}/checksums.txt`,
@@ -96,7 +138,11 @@ export async function downloadDaemon(opts: {
   destPath: string;
   onProgress?: ProgressFn;
 }): Promise<{ stagedPath: string }> {
-  const urls = daemonUrls(opts.version, opts.arch);
+  // A dev CLI passes "latest"; turn it into a concrete platform `v*` release
+  // BEFORE any URL is built (see resolveDaemonReleaseVersion). Every message
+  // below then names the release that was actually fetched, not "latest".
+  const version = await resolveDaemonReleaseVersion(opts.version, opts.http);
+  const urls = daemonUrls(version, opts.arch);
   const asset = daemonAssetName(opts.arch);
   // Fixed staged name (no pid suffix): a retry after a crash/SIGKILL simply
   // overwrites the previous partial file instead of accumulating hidden ~70 MB
@@ -119,7 +165,7 @@ export async function downloadDaemon(opts: {
       opts.http.fetchBinary(urls.checksumsSig),
     ]);
   } catch (err) {
-    throw asRunnerAssetError(err, opts.version, asset);
+    throw asRunnerAssetError(err, version, asset);
   }
   await verifyDaemonSignature({ exec: opts.exec, fs: opts.fs, checksumsTxt, checksumsSig });
 
@@ -129,7 +175,7 @@ export async function downloadDaemon(opts: {
   try {
     ({ sha256: actual } = await opts.http.fetchToFile(urls.binary, stagedPath, opts.onProgress));
   } catch (err) {
-    throw asRunnerAssetError(err, opts.version, asset);
+    throw asRunnerAssetError(err, version, asset);
   }
   try {
     const expected = parseChecksumLine(checksumsTxt, asset);
@@ -155,13 +201,17 @@ export async function downloadDaemon(opts: {
  * omitted them (the decoupled firecracker/daemon build jobs failed for this
  * tag). The daemon version is locked to the CLI, so the fix is to pin a CLI
  * release that shipped runner assets.
+ *
+ * `version` is always a resolved platform tag here (`downloadDaemon` runs
+ * `resolveDaemonReleaseVersion` first), so the message names the release the
+ * operator has to act on — never the un-actionable word "latest".
  */
 function asRunnerAssetError(err: unknown, version: string, asset: string): Error {
   const msg = err instanceof Error ? err.message : String(err);
   if (/HTTP 404/.test(msg)) {
-    const vlabel = version === "latest" ? "the latest release" : `release v${version}`;
     return new Error(
-      `Runner asset "${asset}" is missing from ${vlabel} (HTTP 404). This release was ` +
+      `Runner asset "${asset}" is missing from release v${stripVersionPrefix(version)} ` +
+        `(HTTP 404). This release was ` +
         `published WITHOUT runner assets — the firecracker/daemon build jobs are decoupled ` +
         `from the core release (release.yml) and likely failed for this tag. The daemon ` +
         `version is locked to the CLI version, so pin a CLI release that shipped runner ` +

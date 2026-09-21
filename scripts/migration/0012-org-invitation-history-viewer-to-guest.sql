@@ -1,11 +1,18 @@
 -- 0012 — the invitations `0008` deliberately left reading `viewer`.
 --
--- Run in the same maintenance window as
--- `scripts/migration/0008-org-viewer-to-guest.sql`, right after it, and BEFORE
--- the release that carries `packages/db/drizzle/0059_drop_org_viewer.sql`.
--- `0059` recreates the `org_role` type without `viewer` and cannot cast a row
--- still holding the value; its section A refuses the deploy and names this file
--- rather than failing on the cast.
+-- Run AFTER the drizzle batch — which carries both
+-- `packages/db/drizzle/0056_space_roles.sql` and
+-- `packages/db/drizzle/0059_drop_org_viewer.sql`, in ONE transaction — in the
+-- same maintenance window as `scripts/migration/0008-org-viewer-to-guest.sql`
+-- and right after it. There is no "before `0059`" to aim at: nothing runs
+-- between the two migrations, so this file runs once the type has already lost
+-- `viewer` (which is why every comparison below is `::text` — see "WHY THE
+-- COMPARISONS ARE `::text`"). `0059` recreates the `org_role` type without
+-- `viewer` and cannot cast a row still holding the value; its section A refuses
+-- the deploy and names this file rather than failing on the cast — a refusal
+-- that fires on a database whose watermark ALREADY sat past `0056`, not here.
+-- Why there is no "two releases" branch to put this file in the middle of:
+-- `scripts/migration/README.md` → "Release beta.58" § 4c.
 --
 -- ═══ WHY `0008` LEFT THESE ═══
 --
@@ -65,6 +72,26 @@
 -- longer match). Run `0008` FIRST; if this script's "before" count includes
 -- pending rows it means `0008` has not run, and `0059` will say so too.
 --
+-- ═══ WHY THE COMPARISONS ARE `::text` ═══
+--
+-- `role = 'viewer'` is the natural spelling and it is wrong here. `0059`
+-- recreates `org_role` without `viewer`, and from that moment the bare literal
+-- no longer parses as a value of the type: Postgres casts it BEFORE comparing,
+-- so the predicate raises `22P02 invalid input value for enum org_role:
+-- "viewer"` — even against zero rows. `role::text = 'viewer'` compares strings
+-- and returns 0 instead.
+--
+-- Which is not a hypothetical for this file. Drizzle applies the whole pending
+-- batch in ONE transaction, so a deployment whose watermark sits before `0056`
+-- takes `0056` … `0059` together and only then runs the row scripts — and the
+-- README's "four zeros" branch says to run this one anyway, as a witness. A
+-- bare literal would answer that with an opaque `22P02` in the middle of a
+-- stopped-traffic window, on a database that has nothing to do. `0059`'s own
+-- guard is spelled `::text` for exactly this reason; see its "WHY THE
+-- COMPARISONS ARE `::text`" section, which is the authority.
+--
+-- `status` is untouched: it is a `text` column, not this enum.
+--
 -- Idempotent: the WHERE is exactly the condition it removes, so a second run
 -- matches zero rows. One transaction, fenced, no INSERT and no DELETE.
 --
@@ -85,13 +112,13 @@ SET LOCAL statement_timeout = '60s';
 -- is missing".
 SELECT
   (SELECT count(*) FROM org_invitations
-     WHERE role = 'viewer' AND status <> 'pending')  AS history_before,
+     WHERE role::text = 'viewer' AND status <> 'pending')  AS history_before,
   (SELECT count(*) FROM org_invitations
-     WHERE role = 'viewer' AND status = 'pending')   AS pending_before;
+     WHERE role::text = 'viewer' AND status = 'pending')   AS pending_before;
 
 UPDATE org_invitations
 SET role = 'guest'
-WHERE role = 'viewer' AND status <> 'pending';
+WHERE role::text = 'viewer' AND status <> 'pending';
 
 -- ═══ VERIFY (after) — `history_after` must print 0 ═══
 --
@@ -99,10 +126,10 @@ WHERE role = 'viewer' AND status <> 'pending';
 -- script is not what makes it 0 — `0008` is.
 SELECT
   (SELECT count(*) FROM org_invitations
-     WHERE role = 'viewer' AND status <> 'pending')  AS history_after,
+     WHERE role::text = 'viewer' AND status <> 'pending')  AS history_after,
   (SELECT count(*) FROM org_invitations
-     WHERE role = 'viewer' AND status = 'pending')   AS pending_after,
+     WHERE role::text = 'viewer' AND status = 'pending')   AS pending_after,
   (SELECT count(*) FROM org_invitations
-     WHERE role = 'guest' AND status <> 'pending')   AS history_guest_after;
+     WHERE role = 'guest' AND status <> 'pending')         AS history_guest_after;
 
 COMMIT;

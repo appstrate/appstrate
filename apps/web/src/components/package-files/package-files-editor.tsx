@@ -300,6 +300,9 @@ function DraftFilePane({
           onChange={onChange}
           language={languageForPath(entry.path)}
           readOnly={disabled}
+          // The region label above stops being announced the moment Monaco
+          // takes focus; inside the textarea the open file has to name itself.
+          ariaLabel={entry.path}
         />
       )}
     </div>

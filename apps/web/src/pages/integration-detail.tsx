@@ -83,12 +83,11 @@ import { PackageVersionsSection } from "../components/package-detail/package-ver
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Modal } from "../components/modal";
-import { usePermissions } from "../hooks/use-permissions";
+import { usePermissions, useHomeSpaceName, useCurrentSpaceGrant } from "../hooks/use-permissions";
+import { maySetPackageActive } from "../lib/package-permissions";
 import { usePackageDetail, useDeletePackage, usePackageDownload } from "../hooks/use-packages";
 import {
   useIntegrationDetail,
-  useActivateIntegration,
-  useDeactivateIntegration,
   useIntegrationClients,
   useSetDefaultIntegrationClient,
   useCreateIntegrationOAuthClient,
@@ -109,6 +108,8 @@ import {
   type IntegrationManifestAuth,
   type IntegrationDetailWire,
 } from "../hooks/use-integrations";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useSetPackageActive } from "../hooks/use-library";
 import {
   Table,
   TableHeader,
@@ -601,6 +602,7 @@ function IntegrationSettings({
   canConfigure,
   onActivate,
   activationPending,
+  canActivate,
   definition,
   isOwned,
 }: {
@@ -610,6 +612,8 @@ function IntegrationSettings({
   canConfigure: boolean;
   onActivate: () => void;
   activationPending: boolean;
+  /** `maySetPackageActive` for this space — the hint names no button the route would refuse. */
+  canActivate: boolean;
   /**
    * The package draft, present when the reader may change the definition: its
    * sections are then edited here, in place. Absent, Définition stays a read.
@@ -831,7 +835,13 @@ function IntegrationSettings({
                     </p>
                   );
                 if (!detail.active)
-                  return <ActivationHint onActivate={onActivate} pending={activationPending} />;
+                  return (
+                    <ActivationHint
+                      onActivate={onActivate}
+                      pending={activationPending}
+                      canActivate={canActivate}
+                    />
+                  );
                 if (section === "access")
                   return (
                     <IntegrationAccessRules
@@ -870,7 +880,11 @@ function IntegrationSettings({
         </div>
       ) : !detail.active ? (
         <div className="p-6">
-          <ActivationHint onActivate={onActivate} pending={activationPending} />
+          <ActivationHint
+            onActivate={onActivate}
+            pending={activationPending}
+            canActivate={canActivate}
+          />
         </div>
       ) : (
         <div className="p-6">
@@ -1507,17 +1521,28 @@ function ConnectionsTable({
  * yet active — connecting and governance are meaningless until the
  * integration is activated for this space.
  */
-function ActivationHint({ onActivate, pending }: { onActivate: () => void; pending: boolean }) {
-  const { t } = useTranslation("settings");
+function ActivationHint({
+  onActivate,
+  pending,
+  canActivate,
+}: {
+  onActivate: () => void;
+  pending: boolean;
+  /** The page's one activation verdict — the hint must not offer what the header hides. */
+  canActivate: boolean;
+}) {
+  const { t } = useTranslation(["settings", "common"]);
   return (
     <div
       className="border-border bg-muted/30 rounded-md border p-6 text-center"
       data-testid="activation-hint"
     >
       <p className="text-muted-foreground mb-3 text-sm">{t("integrations.activate.hint")}</p>
-      <Button size="sm" onClick={onActivate} disabled={pending} data-testid="detail-activate-btn">
-        {t("integrations.btn.activate")}
-      </Button>
+      {canActivate && (
+        <Button size="sm" onClick={onActivate} disabled={pending} data-testid="detail-activate-btn">
+          {t("integrations.btn.activate")}
+        </Button>
+      )}
     </div>
   );
 }
@@ -1529,13 +1554,32 @@ export function IntegrationDetailPage() {
   const { data: detail, isLoading, error } = useIntegrationDetail(packageId || undefined);
   const { data: pkg } = usePackageDetail("integration", packageId || undefined);
   const { data: integrations } = useIntegrations();
-  const activate = useActivateIntegration();
-  const deactivate = useDeactivateIntegration();
+  // ONE pair of doors for every package family: an integration is activated in
+  // a space by `POST /api/spaces/{id}/packages` and switched off by its
+  // `DELETE`, exactly like an agent or a skill. The row and its settings
+  // survive the deactivation — connections were never held there anyway.
+  const setActive = useSetPackageActive();
+  const currentSpaceId = useCurrentSpaceId();
   const deletePkg = useDeletePackage("integration");
   const downloadPackage = usePackageDownload(scope, name);
   const { can } = usePermissions();
+  // The package's own detail response is the authority on its home — both the
+  // id (withheld unless this caller reaches that space) and the write verdict.
+  const homeSpaceId = pkg?.home_space_id;
+  const homeWritable = pkg?.home_writable;
+  const homeDeletable = pkg?.home_deletable;
+  const homeShareable = pkg?.home_shareable;
+  const homeSpaceName = useHomeSpaceName(homeSpaceId);
   const canConfigure = can("integrations:configure");
-  const canActivate = can("integrations:install");
+  // The tree's ONE activation verdict, and deliberately not
+  // `can("integrations:install")`: `can()` unions the org and space permission
+  // sets, and that union does not carry RBAC §3.6 — owning the space IS the
+  // authorization, so a guest in their own personal space holds `operator`,
+  // no `integrations:install`, and the route accepts all the same. A second
+  // spelling here hides a control the server takes, right beside the dropdown
+  // below, which asks `maySetPackageActive` and would offer its mirror image.
+  const spaceGrant = useCurrentSpaceGrant();
+  const canActivate = maySetPackageActive(spaceGrant, "integration", true);
   // Hash-driven like the agent page, so the tab can be LINKED to. Needed
   // because "an administrator must register an OAuth client" is only useful if
   // it can point at the screen where that happens.
@@ -1583,7 +1627,23 @@ export function IntegrationDetailPage() {
   const isBuiltIn = source === "system";
   // Org-owned packages are editable regardless of scope name; only system packages are read-only.
   const isOwned = !isBuiltIn;
-  const onActivate = () => activate.mutate({ params: { path: { packageId } } });
+  const setActivation = (next: boolean, onSuccess?: () => void) => {
+    if (!currentSpaceId) return;
+    setActive.mutate(
+      { spaceId: currentSpaceId, packageId, active: next },
+      {
+        onSuccess: () => {
+          toast.success(
+            t(next ? "integrations.activate.success" : "integrations.deactivate.success"),
+          );
+          onSuccess?.();
+        },
+        onError: () =>
+          toast.error(t(next ? "integrations.activate.error" : "integrations.deactivate.error")),
+      },
+    );
+  };
+  const onActivate = () => setActivation(true);
 
   return (
     <div>
@@ -1596,6 +1656,7 @@ export function IntegrationDetailPage() {
           type: "integration",
           version,
           icon: typeof m.icon === "string" ? m.icon : undefined,
+          homeSpaceName,
         }}
         isHistoricalVersion={false}
         activeSubpage={{
@@ -1612,7 +1673,7 @@ export function IntegrationDetailPage() {
               <Button
                 size="sm"
                 onClick={onActivate}
-                disabled={activate.isPending}
+                disabled={setActive.isPending}
                 data-testid="detail-activate-btn"
               >
                 {t("integrations.btn.activate")}
@@ -1625,6 +1686,10 @@ export function IntegrationDetailPage() {
               isOwned={isOwned}
               isBuiltIn={isBuiltIn}
               isHistoricalVersion={false}
+              homeSpaceId={homeSpaceId}
+              homeWritable={homeWritable}
+              homeDeletable={homeDeletable}
+              homeShareable={homeShareable}
               downloadVersion={version}
               onDownload={downloadPackage}
               onFork={() => setForkOpen(true)}
@@ -1632,7 +1697,7 @@ export function IntegrationDetailPage() {
               showEdit={false}
               canDeactivate={active}
               onDeactivate={() => setConfirmDeactivate(true)}
-              deactivatePending={deactivate.isPending}
+              activationPending={setActive.isPending}
               canDeletePackage={!!pkg && pkg.agents.length === 0}
               onDeletePackage={() => setConfirmDelete(true)}
             />
@@ -1663,7 +1728,11 @@ export function IntegrationDetailPage() {
           className="bg-card mt-0 space-y-8 rounded-lg border p-6 shadow-sm"
         >
           {!active ? (
-            <ActivationHint onActivate={onActivate} pending={activate.isPending} />
+            <ActivationHint
+              onActivate={onActivate}
+              pending={setActive.isPending}
+              canActivate={canActivate}
+            />
           ) : detail.auths.length === 0 ? (
             <p className="text-muted-foreground text-sm">{t("integration.auth.none")}</p>
           ) : (
@@ -1687,7 +1756,8 @@ export function IntegrationDetailPage() {
             blockUserConnections={detail.block_user_connections}
             canConfigure={canConfigure}
             onActivate={onActivate}
-            activationPending={activate.isPending}
+            activationPending={setActive.isPending}
+            canActivate={canActivate}
             definition={isOwned && can("integrations:write") && pkg ? pkg : undefined}
             isOwned={isOwned}
           />
@@ -1720,13 +1790,8 @@ export function IntegrationDetailPage() {
         title={t("btn.confirm", { ns: "common" })}
         description={t("integrations.deactivate.confirm")}
         variant="default"
-        isPending={deactivate.isPending}
-        onConfirm={() =>
-          deactivate.mutate(
-            { params: { path: { packageId } } },
-            { onSuccess: () => setConfirmDeactivate(false) },
-          )
-        }
+        isPending={setActive.isPending}
+        onConfirm={() => setActivation(false, () => setConfirmDeactivate(false))}
       />
 
       <ConfirmModal

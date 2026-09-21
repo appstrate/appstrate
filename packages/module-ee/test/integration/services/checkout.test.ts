@@ -5,6 +5,7 @@ import { truncateEeTables } from "../../helpers/db.ts";
 import { seedBillingAccount } from "../../helpers/seed.ts";
 import { resetStripeMock, setCheckoutResponse, requests } from "../../helpers/stripe.ts";
 import { createCheckoutSession } from "../../../src/stripe/checkout.ts";
+import { getPlans } from "../../../src/config.ts";
 import { useEeTestSeams } from "../../helpers/setup.ts";
 
 useEeTestSeams();
@@ -123,6 +124,23 @@ describe("createCheckoutSession", () => {
     const body = checkoutReq!.body!;
     expect(body["metadata[orgId]"]).toBe(orgId);
     expect(body["metadata[planId]"]).toBe("pro");
+
+    // The PRICE, which is what the org is actually charged. The metadata above
+    // is the platform's own bookkeeping — it is what the webhook reads back to
+    // decide which plan the account now holds — and Stripe never looks at it
+    // when it bills. So a `line_items` frozen on the wrong plan invoices `pro`
+    // subscribers at the `starter` rate indefinitely, while every assertion in
+    // this file (this one's own title included) stays green and the account row
+    // reads `pro`. The only other price assertion in the repo lives in
+    // `test/live/stripe-contract.test.ts`, which needs `STRIPE_LIVE_SECRET_KEY`
+    // and does not run in the gate.
+    const plans = getPlans();
+    expect(body["line_items[0][price]"]).toBe(plans.pro.stripePriceId!);
+    expect(body["line_items[0][quantity]"]).toBe("1");
+    // The control that keeps the line above from being satisfied by any price
+    // at all: `starter` is the neighbour a hard-coded plan would most plausibly
+    // freeze on, and the two ids differ in the test env by construction.
+    expect(body["line_items[0][price]"]).not.toBe(plans.starter.stripePriceId!);
   });
 
   /**

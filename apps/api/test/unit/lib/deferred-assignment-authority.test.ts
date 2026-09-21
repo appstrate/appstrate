@@ -24,11 +24,19 @@ describe("deferred space assignments — who can author one", () => {
     expect([...holders].sort()).toEqual([...ORG_ROLES_WITH_FULL_ACCESS].sort());
   });
 
-  it("gives every full-access org role the admin preset in any space", async () => {
+  // "any space" means any TEAM space: a personal space answers to its owner
+  // alone and to no org role (RBAC spec §3.6), which is why the row here says
+  // `ownerUserId: null` explicitly rather than by omission.
+  it("gives every full-access org role the admin preset in any team space", async () => {
     const { resolveSpaceRole } = await import("../../../src/lib/space-role.ts");
     for (const role of ORG_ROLES_WITH_FULL_ACCESS) {
       expect(
-        resolveSpaceRole(role, { id: "spc_x", visibility: "private", defaultRole: "viewer" }, null),
+        resolveSpaceRole(
+          role,
+          { id: "spc_x", visibility: "private", defaultRole: "viewer", ownerUserId: null },
+          null,
+          "usr_x",
+        ),
         `${role} must reach every space as preset admin, or the deferred path's guarantee fails`,
       ).toEqual({ kind: "preset", preset: "admin" });
     }

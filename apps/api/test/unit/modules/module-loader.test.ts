@@ -742,7 +742,7 @@ describe("module-loader", () => {
     });
   });
 
-  // Guards the module-side of the zero-footprint invariant from CLAUDE.md:
+  // Guards the module-side of the zero-footprint invariant from AGENTS.md:
   // with an empty module set, the loader contributes nothing — no module
   // routes mount, no module feature flags flip, no module hooks register, no
   // module public paths leak. Core routes/features/hooks (agents, runs, auth,

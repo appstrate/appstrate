@@ -43,6 +43,24 @@ class SkillSyncError extends Error {
   }
 }
 
+/**
+ * `--source draft` NAMES the working copy, and every route that honours the
+ * selector — the package detail as much as the file index and file content —
+ * reserves that act to whoever may write the package: they answer
+ * `403 draft_not_writable` to everybody else. "HTTP 403 Forbidden" would send
+ * that reader hunting for a permission on the sync itself, so the refusal says
+ * whose copy it is and what to run instead. One definition, called from each
+ * of the three: a reader who hits the earliest refusal must not get a thinner
+ * message than one whose grant is revoked mid-sync.
+ */
+function draftRefusal(packageId: string, status: number, what: string): SkillSyncError | null {
+  if (status !== 403) return null;
+  return new SkillSyncError(
+    `The draft of ${packageId} is the author's working copy${what}`,
+    "`--source draft` reads it, which needs `skills:write` on the skill in its home space. Sync the published artifact with `--source published`.",
+  );
+}
+
 interface SkillListRow {
   id: string;
   source?: string;
@@ -75,9 +93,17 @@ export interface PlannedSkill extends ResolvedSkill {
 /**
  * Sorted by package id, which is what makes collision resolution reproducible
  * rather than server-order dependent. System packages are the platform's.
+ *
+ * The index listing IS the ACTIVE set, not merely the placed one. Activation is
+ * what a space OFFERS — a skill switched off there is one somebody decided the
+ * space would not use, and writing it into the local Claude Code checkout anyway
+ * would hand the switch no meaning outside the dashboard. A skill switched back
+ * on reappears on the next sync, because the sync reads this list every time.
  */
 export async function listSyncableSkills(profileName: string, spaceId?: string): Promise<string[]> {
-  const rows = await apiList<SkillListRow>(profileName, "/api/packages/skills", { spaceId });
+  const rows = await apiList<SkillListRow>(profileName, "/api/packages/skills", {
+    spaceId,
+  });
   return rows
     .filter((row) => row.source !== "system" && typeof row.id === "string" && row.id.length > 0)
     .map((row) => row.id)
@@ -145,24 +171,39 @@ async function resolveDraft(
   try {
     detail = await apiFetch<DraftDetail>(
       profileName,
-      `/api/packages/skills/${encodePackageIdPath(packageId)}`,
+      `/api/packages/skills/${encodePackageIdPath(packageId)}?version=draft`,
       { spaceId },
     );
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return null;
+    if (err instanceof ApiError) {
+      if (err.status === 404) return null;
+      // This request names `?version=draft` as well, so for a non-author it is
+      // the FIRST one refused — before `/files` below ever runs. Relaying the
+      // raw 403 here is what would lose the actionable refusal entirely.
+      throw draftRefusal(packageId, err.status, ".") ?? err;
+    }
     throw err;
   }
   // A draft has no immutable digest: the change token is the index ETag and
   // `lock_version`, the two values that DO move with its content.
+  // BOTH requests name `?version=draft`, never leaving it to the route's
+  // default: omitted, detail and file routes alike serve the definition the
+  // DETAIL page renders — the published version for anyone who cannot write
+  // the package — and the sync would read one definition's metadata against
+  // the other's bytes, then write published bytes into a ledger that calls
+  // them a draft.
   const res = await apiFetchRaw(
     profileName,
-    `/api/packages/${encodePackageIdPath(packageId)}/files`,
+    `/api/packages/${encodePackageIdPath(packageId)}/files?version=draft`,
     { spaceId },
   );
   if (!res.ok) {
-    throw new SkillSyncError(
-      `Draft file index for ${packageId} failed: HTTP ${res.status} ${res.statusText}`,
-      "Re-run without `--source draft`, or check that the skill still exists.",
+    throw (
+      draftRefusal(packageId, res.status, ".") ??
+      new SkillSyncError(
+        `Draft file index for ${packageId} failed: HTTP ${res.status} ${res.statusText}`,
+        "Re-run without `--source draft`, or check that the skill still exists.",
+      )
     );
   }
   const etag = res.headers.get("etag") ?? "";
@@ -264,7 +305,7 @@ async function fetchDraftFiles(
     (
       await apiFetch<{ entries?: FileIndexEntry[] }>(
         profileName,
-        `/api/packages/${encoded}/files`,
+        `/api/packages/${encoded}/files?version=draft`,
         { spaceId: skill.spaceId },
       )
     ).entries ??
@@ -289,12 +330,15 @@ async function fetchDraftFiles(
   const fetched = await mapWithConcurrency(remaining, MAX_CONCURRENCY, async (entry) => {
     const res = await apiFetchRaw(
       profileName,
-      `/api/packages/${encoded}/files/content?path=${encodeURIComponent(entry.path)}`,
+      `/api/packages/${encoded}/files/content?version=draft&path=${encodeURIComponent(entry.path)}`,
       { spaceId: skill.spaceId },
     );
     if (!res.ok) {
-      throw new SkillSyncError(
-        `Draft file "${entry.path}" of ${packageId} failed: HTTP ${res.status} ${res.statusText}`,
+      throw (
+        draftRefusal(packageId, res.status, `, and "${entry.path}" is part of it.`) ??
+        new SkillSyncError(
+          `Draft file "${entry.path}" of ${packageId} failed: HTTP ${res.status} ${res.statusText}`,
+        )
       );
     }
     return new Uint8Array(await res.arrayBuffer());

@@ -19,7 +19,7 @@
  *      modules can layer their own definitions on top. Module-specific
  *      integration tests live in `<module>/test/integration/`.
  *
- * `bun test` runs the whole suite in a single process (see CLAUDE.md
+ * `bun test` runs the whole suite in a single process (see AGENTS.md
  * "Testing"), so any test file that legitimately empties the registry
  * to exercise it in isolation MUST call this from its `afterAll` to
  * restore the baseline — otherwise the next file in the run sees an

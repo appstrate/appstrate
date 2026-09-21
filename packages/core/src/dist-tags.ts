@@ -10,16 +10,21 @@ export function isValidDistTag(tag: string): boolean {
 }
 
 /**
- * Tags that cannot be manually set or removed:
- *   - `latest` — platform-managed, reassigned automatically on publish/delete.
- *   - `draft` / `published` — reserved `version_ref` selector keywords. The
- *     run-version resolver (`agent-version-resolver.ts` in apps/api) resolves
- *     these keywords BEFORE dist-tag lookup, so a dist-tag with either name
- *     would be permanently shadowed and unreachable.
+ * Tag names a caller may not name as a version selector:
+ *   - `latest` — platform-managed. It is the ONLY dist-tag the platform ever
+ *     writes: publish points it at the new version, and deleting a version
+ *     retargets or drops it. There is no route that creates a tag.
+ *   - `draft` / `published` — reserved selector keywords. Every resolver
+ *     (`agent-version-resolver.ts` in apps/api) answers these two BEFORE it
+ *     looks a dist-tag up, so a tag so named could never be reached.
+ *
+ * The one consumer is dependency-override validation
+ * (`services/input-parser.ts`): a caller may pin a dependency to a version
+ * spec, and these three words are not specs a pin may carry.
  */
 const PROTECTED_TAGS = new Set(["latest", "draft", "published"]);
 
-/** Check whether `tag` is a protected tag that cannot be manually set or removed. */
+/** Check whether `tag` is a protected name a version selector may not carry. */
 export function isProtectedTag(tag: string): boolean {
   return PROTECTED_TAGS.has(tag);
 }

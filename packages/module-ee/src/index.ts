@@ -194,11 +194,11 @@ const eeModule: AppstrateModule = {
     ];
   },
 
-  // `custom_roles` gates the platform's own `POST/PATCH/DELETE /api/roles`
-  // (RBAC spec §9): the space-role data model, the presets and the read routes
-  // are OSS, but DEFINING a custom bundle is the EE surface, and EE is the
-  // module that licenses it today.
-  features: { billing: true, custom_roles: true },
+  // One flag, and it is the module's own surface: `billing` is what tells the
+  // dashboard that plan, usage and checkout exist here. Custom space roles are
+  // NOT gated — the whole of `/api/roles` is OSS (RBAC spec §9), so this module
+  // licenses nothing that belongs to the platform.
+  features: { billing: true },
 
   // RBAC contribution: billing is org-level (a plan is bought by the
   // organization, not by one of its spaces) and session-only — neither

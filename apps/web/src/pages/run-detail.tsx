@@ -25,6 +25,7 @@ import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
 import type { components } from "../api/client";
 import { formatDateField } from "../lib/format-date";
 import { isPublishedFileLogEvent } from "../lib/files";
+import { replayVersion } from "../lib/version-selector";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
 import { runKeys, invalidateRunLogs } from "../lib/query-keys";
 import { inlineRunDisplayName, runPageTitle } from "../lib/run-title";
@@ -57,6 +58,12 @@ export function RunDetailPage() {
   const spaceId = useCurrentSpaceId();
   const { can, ready: permissionsReady } = usePermissions();
   const canReadAgent = can("agents:read");
+  // A run PROVES the agent was active here once; it does not prove it still is.
+  // Deactivating is an ordinary, reversible gesture now, so "Relancer" answers
+  // to the same gate as the detail page's Run button and the card's launcher —
+  // said before the click rather than collected as a 404 after it. The verdict
+  // rides this very response (`AgentDetail.active`), resolved for the space the
+  // page is read from; the Re-run control renders only once it has landed.
   const { data: agent } = usePackageDetail("agent", isInlinePath ? undefined : packageId);
   const { data: run, isLoading, error } = useRun(runId);
   const runNumber = run?.runNumber ?? stateNumber;
@@ -271,7 +278,11 @@ export function RunDetailPage() {
                 if (canReadAgent) setInputOpen(true);
                 // The API conceals resolved input from runners: replay that
                 // snapshot server-side, keeping its parameters.
-                else runAgent.mutate({ rerun_from: run.id, version: run.version_ref });
+                else
+                  runAgent.mutate({
+                    rerun_from: run.id,
+                    version: replayVersion(run.version_ref, agent?.home_writable),
+                  });
               }}
               onCancel={() => cancelRun.mutate(runId!)}
             />
@@ -287,12 +298,11 @@ export function RunDetailPage() {
           onClose={() => setInputOpen(false)}
           agent={agent}
           onSubmit={(input) => {
-            // Re-run the SAME definition the original run executed:
-            // `version_ref` is "draft" or a concrete semver. Pre-#636 this
-            // passed version_label, which silently re-ran the published
-            // version for runs that had executed a dirty draft.
+            // Re-run the SAME definition the original run executed, as far as
+            // this caller may: `version_ref` is "draft" or a concrete semver,
+            // and only an author replays a draft (see `replayVersion`).
             runAgent.mutate(
-              { input, version: run.version_ref },
+              { input, version: replayVersion(run.version_ref, agent.home_writable) },
               { onSuccess: () => setInputOpen(false) },
             );
           }}

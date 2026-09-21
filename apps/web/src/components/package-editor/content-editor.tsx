@@ -32,6 +32,14 @@ interface ContentEditorProps {
   language: string;
   height?: string;
   readOnly?: boolean;
+  /**
+   * What the editor announces itself as. Monaco's default is the generic
+   * "Editor content; press Alt+F1 for options", and `onMount` focuses the
+   * textarea straight away — so the region label the caller wrote around this
+   * pane is announced before the focus lands and never again. Whatever names
+   * the pane (a file path, a manifest's filename) belongs here too.
+   */
+  ariaLabel?: string;
 }
 
 export function ContentEditor({
@@ -40,6 +48,7 @@ export function ContentEditor({
   language,
   height = "500px",
   readOnly = false,
+  ariaLabel,
 }: ContentEditorProps) {
   const { resolvedTheme } = useTheme();
   const handleMount: OnMount = useCallback((editor) => {
@@ -57,6 +66,7 @@ export function ContentEditor({
         onMount={handleMount}
         options={{
           readOnly,
+          ariaLabel,
           minimap: { enabled: false },
           wordWrap: language === "markdown" ? "on" : "off",
           fontSize: 13,

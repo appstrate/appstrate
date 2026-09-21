@@ -2,7 +2,7 @@
 
 import { createOrgItem } from "./package-items/crud.ts";
 import { CONFIG_BY_TYPE } from "./package-items/config.ts";
-import { installPackage } from "./space-packages.ts";
+import { activatePackage } from "./space-packages.ts";
 import { logger } from "../lib/logger.ts";
 
 const HELLO_WORLD_MANIFEST = {
@@ -64,14 +64,15 @@ export async function provisionDefaultAgentForOrg(
         description: HELLO_WORLD_MANIFEST.description,
         content: HELLO_WORLD_PROMPT,
         createdBy,
+        homeSpaceId: defaultSpaceId,
       },
       CONFIG_BY_TYPE.agent,
       manifest,
     );
 
-    // Install in the default space so it's visible immediately
-    await installPackage({ orgId, spaceId: defaultSpaceId }, packageId).catch((e: unknown) =>
-      logger.warn("Failed to auto-install hello-world in default space", {
+    // Activate it in the default space so it runs immediately
+    await activatePackage({ orgId, spaceId: defaultSpaceId }, packageId).catch((e: unknown) =>
+      logger.warn("Failed to auto-activate hello-world in default space", {
         packageId,
         defaultSpaceId,
         err: String(e),

@@ -14,7 +14,7 @@
 import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedPackageShare } from "../../helpers/seed.ts";
 import { proxyCall } from "../../../src/services/credential-proxy/core.ts";
 import { createMockOAuthServer, type MockOAuthServer } from "../../helpers/oauth-server.ts";
 import {
@@ -73,6 +73,10 @@ async function setup(
     source: "local",
     draftManifest: oauthManifest(packageId),
   });
+  // The OFFER is the PLACEMENT: a `space_packages` row only speaks for a space
+  // the package is placed in, so switching an unplaced integration on leaves it
+  // inactive.
+  await seedPackageShare(ctx.defaultSpaceId, packageId);
   await db.insert(spacePackages).values({
     spaceId: ctx.defaultSpaceId,
     packageId,
@@ -124,6 +128,10 @@ async function setupSystemPinned(
     source: "local",
     draftManifest: oauthManifest(packageId),
   });
+  // The OFFER is the PLACEMENT: a `space_packages` row only speaks for a space
+  // the package is placed in, so switching an unplaced integration on leaves it
+  // inactive.
+  await seedPackageShare(ctx.defaultSpaceId, packageId);
   await db.insert(spacePackages).values({
     spaceId: ctx.defaultSpaceId,
     packageId,

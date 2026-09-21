@@ -19,9 +19,9 @@
  *   - an Arazzo Selector Object
  *     (`{ context, selector, type: "jsonpath"|"xpath"|"jsonpointer" }`).
  *
- * KNOWN LIMITATIONS (documented for manifest authors, surfaced as install-time
- * warnings — see `apps/api/src/services/integration-install-warnings.ts` — but
- * never install-blocking so spec-valid manifests still install):
+ * KNOWN LIMITATIONS (documented for manifest authors, surfaced as import-time
+ * warnings — see `apps/api/src/services/integration-import-warnings.ts` — but
+ * never blocking, so a spec-valid manifest still imports):
  *   - `success_criteria` evaluation supports `type` omitted/`"simple"`
  *     (runtime-expression equality), `"jsonpath"`, and `"regex"` (AFPS §7.7).
  *     `"xpath"` is parsed but conservatively fails — there is no XML evaluator

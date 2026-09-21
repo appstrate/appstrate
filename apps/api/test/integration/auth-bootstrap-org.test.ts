@@ -158,11 +158,17 @@ describe("Bootstrap org after-hook (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
     const [org] = await db.select().from(organizations).limit(1);
     expect(org).toBeDefined();
 
-    // Default space created (mirrors POST /api/orgs)
+    // Default space AND the owner's personal space, both inside the org
+    // transaction (`provisionOrg`, RBAC spec §3.6) — mirrors POST /api/orgs.
     const spaceRows = await db.select().from(spaces).where(eq(spaces.orgId, org!.id));
-    expect(spaceRows).toHaveLength(1);
-    expect(spaceRows[0]!.isDefault).toBe(true);
-    expect(spaceRows[0]!.name).toBe("Default");
+    expect(spaceRows).toHaveLength(2);
+    const defaultSpaces = spaceRows.filter((row) => row.isDefault);
+    expect(defaultSpaces).toHaveLength(1);
+    expect(defaultSpaces[0]!.name).toBe("Default");
+    expect(defaultSpaces[0]!.ownerUserId).toBeNull();
+    const personal = spaceRows.filter((row) => row.ownerUserId !== null);
+    expect(personal).toHaveLength(1);
+    expect(personal[0]!.visibility).toBe("private");
 
     // hello-world agent provisioned in the org's namespace
     const orgPackages = await db.select().from(packages).where(eq(packages.orgId, org!.id));

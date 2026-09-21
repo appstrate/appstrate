@@ -9,7 +9,7 @@ export const endUsersPaths = {
       tags: ["End Users"],
       summary: "Create an end-user",
       description:
-        "Create a new end-user within a space. At least one of name, email, or externalId should be provided for identification.",
+        "Create a new end-user within a space. At least one of name, email, or externalId should be provided for identification. The space named by `X-Space-Id` must be a TEAM space: a personal space takes no end-users (409 `personal_space_takes_no_end_users`), because an end-user is an external identity signing in to a space that exists for exactly one member and goes away with them.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -90,7 +90,7 @@ export const endUsersPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "Conflict — either a request with the same Idempotency-Key is already being processed (idempotency_in_progress), or the externalId is already in use by another end-user in the space (external_id_taken)",
+            "Conflict — a request with the same Idempotency-Key is already being processed (idempotency_in_progress), the externalId is already in use by another end-user in the space (external_id_taken), or the current space is a personal space (personal_space_takes_no_end_users; end-users are team-space only)",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

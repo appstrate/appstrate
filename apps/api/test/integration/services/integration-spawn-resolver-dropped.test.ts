@@ -35,7 +35,8 @@ import {
 } from "../../../src/services/run-context-builder.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedInstalledPackage, seedMcpServer, seedRun } from "../../helpers/seed.ts";
+import { seedPackage, seedPlacedPackage, seedMcpServer, seedRun } from "../../helpers/seed.ts";
+import { __resetSystemIntegrationsForTest } from "../../../src/services/integration-client-registry.ts";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
@@ -114,6 +115,12 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "droporg" });
+    // The activation default reads the system-integration registry, which is a
+    // BOOT constant: unread, it throws rather than quietly behaving as "none".
+    // This suite never mounts the app, so it states the empty deployment
+    // itself — otherwise the `not_active` case below degrades into
+    // `resolve_error` and stops asserting anything about activation.
+    __resetSystemIntegrationsForTest();
   });
 
   it("reports `not_found` when the declared integration package does not exist", async () => {
@@ -153,7 +160,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
       source: "local",
       draftManifest: { schema_version: "0.2", type: "integration", name: INTEG },
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
     await seedConnection();
 
     const { specs, dropped } = await resolve();
@@ -167,7 +174,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
     expect(dropped[0]!.detail).toContain("version");
   });
 
-  it("reports `not_installed` when the integration exists but is not installed in the space", async () => {
+  it("reports `not_active` when the integration exists but is not active in the space", async () => {
     await seedServer();
     await seedPackage({
       id: INTEG,
@@ -182,7 +189,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
     const { specs, dropped } = await resolve();
 
     expect(specs).toHaveLength(0);
-    expect(dropped).toEqual([{ integrationId: INTEG, reason: "not_installed" }]);
+    expect(dropped).toEqual([{ integrationId: INTEG, reason: "not_active" }]);
   });
 
   it("reports `mcp_server_unresolved` (with a detail) when the referenced server package is missing", async () => {
@@ -193,7 +200,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
       source: "local",
       draftManifest: integManifest(MISSING_SERVER),
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
     await seedConnection();
 
     const { specs, dropped } = await resolve();
@@ -214,7 +221,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
       source: "local",
       draftManifest: integManifest(SERVER),
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
     // No connection seeded.
 
     const { specs, dropped } = await resolve();
@@ -232,7 +239,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
       source: "local",
       draftManifest: integManifest(SERVER),
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
     await seedConnection();
 
     const { specs, dropped } = await resolve();
@@ -263,7 +270,7 @@ describe("recordDroppedIntegrations — run_logs marker", () => {
   it("writes ONE warn row per dropped integration, naming the integration and the reason", async () => {
     const runId = await seedPendingRun();
     const dropped: DroppedIntegration[] = [
-      { integrationId: INTEG, reason: "not_installed" },
+      { integrationId: INTEG, reason: "not_active" },
       { integrationId: "@droporg/other", reason: "resolve_error", detail: "boom" },
     ];
 
@@ -284,11 +291,11 @@ describe("recordDroppedIntegrations — run_logs marker", () => {
 
     const first = rows.find((r) => r.data?.integrationId === INTEG);
     expect(first).toBeDefined();
-    expect(first!.data!.reason).toBe("not_installed");
+    expect(first!.data!.reason).toBe("not_active");
     // The message is what an operator reads on the run page — it must name the
     // integration, not just the reason code.
     expect(first!.message).toContain(INTEG);
-    expect(first!.message).toContain("not_installed");
+    expect(first!.message).toContain("not_active");
 
     const second = rows.find((r) => r.data?.integrationId === "@droporg/other");
     expect(second).toBeDefined();

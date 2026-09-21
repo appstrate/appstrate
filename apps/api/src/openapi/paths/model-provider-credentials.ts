@@ -607,7 +607,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Discover the models this credential serves",
       description:
-        "Discovers the models a credential serves. For API-key providers this is empirical: the credential's provider is asked once for its model listing (`GET <base_url>/models`) and the discovery candidates present in that listing are persisted as `available_model_ids`. For `offline`-validation providers (subscription: codex, claude-code) this is a no-op that reports the current list: NO upstream call is made and NOTHING is persisted, because their served set is derived from the provider definition and the pricing catalog on every read. Real per-model availability is validated at the first run on the Pi engine. Synchronous; rate limited to 6 requests per minute. On the listing path an auth failure, an unreadable listing or an empty intersection leaves the previously persisted list untouched.",
+        "Discovers the models a credential serves. For API-key providers this is empirical: the credential's provider is asked for its model listing (`GET <base_url>/models`) — a listing that declares a next page is followed to its end, under a page cap, a model cap and a per-page byte budget — and the discovery candidates present in that listing are persisted as `available_model_ids`. For `offline`-validation providers (subscription: codex, claude-code) this is a no-op that reports the current list: NO upstream call is made and NOTHING is persisted, because their served set is derived from the provider definition and the pricing catalog on every read. Real per-model availability is validated at the first run on the Pi engine. Synchronous; rate limited to 6 requests per minute. On the listing path an auth failure, an unreadable listing, a listing cut short by one of those caps, or an empty intersection leaves the previously persisted list untouched; a `429` from the provider is replayed once before the attempt is abandoned.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -626,12 +626,12 @@ export const modelProviderCredentialsPaths = {
                     type: "string",
                     enum: ["ok", "auth_failed", "nothing_verified", "no_candidates"],
                     description:
-                      "`ok` — list resolved (persisted on the listing path; derived, nothing written, for `offline`-validation providers). `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — the listing could not be read, or no candidate appeared in it; previous list kept. `no_candidates` — provider resolves no discovery candidate.",
+                      "`ok` — list resolved (persisted on the listing path; derived, nothing written, for `offline`-validation providers). `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — the listing could not be read, it was read but cut short by the page, model or byte cap (intersecting against a partial view would drop candidates sitting past it), or no candidate appeared in it; a provider `429` is replayed once before the read counts as failed. Previous list kept. `no_candidates` — provider resolves no discovery candidate.",
                   },
                   candidate_count: {
                     type: "integer",
                     description:
-                      "Number of discovery candidates the provider declares, after dedupe and cap — the same meaning on both paths. Not a request count: the listing path spends one request whatever the candidate count, and `offline`-validation providers (codex, claude-code) spend none. Not a count of what is served either: `available_model_ids` carries that.",
+                      "Number of discovery candidates the provider declares, after dedupe and cap — the same meaning on both paths. Not a request count: the listing path's requests are bounded by the listing's own pagination, not by the candidate count, and `offline`-validation providers (codex, claude-code) spend none. Not a count of what is served either: `available_model_ids` carries that.",
                   },
                   available_model_ids: {
                     type: ["array", "null"],

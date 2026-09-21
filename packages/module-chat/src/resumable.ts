@@ -134,7 +134,7 @@ let createClient: ResumableRedisFactory = createResumableRedis;
  * and hands out no reference to it, so without this seam "did it close?" is
  * unobservable and the only assertion left is the weaker "was the singleton
  * replaced?". Production never passes it; `mock.module()` is banned repo-wide
- * (see the root CLAUDE.md), so injection is the way.
+ * (see the root AGENTS.md), so injection is the way.
  */
 export function configureResumableStore(
   url: string | null,

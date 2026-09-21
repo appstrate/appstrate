@@ -82,13 +82,13 @@ spaceTest.describe("Cross-space run isolation", () => {
   );
 
   spaceTest(
-    "Custom space without agent installed cannot list agent runs",
+    "A space the agent is not placed in cannot list its runs",
     async ({ request, apiClient, orgContext, orgOnlyClient }) => {
       const scope = `@${orgContext.org.orgSlug}`;
       const agentName = `run-noaccess-${Date.now()}`;
       await createAgent(apiClient, scope, agentName);
 
-      // Custom space without the agent installed
+      // A custom space the agent was never placed in
       const customSpace = await createSpace(orgOnlyClient, `RunNoAccess-${Date.now()}`);
       const customClient = createApiClient(request, {
         cookie: orgContext.auth.cookie,
@@ -109,7 +109,7 @@ spaceTest.describe("Cross-space run isolation", () => {
       const agentName = `run-space-${Date.now()}`;
       await createAgent(apiClient, scope, agentName);
 
-      // Install agent in custom space
+      // Activate the agent in the custom space
       const customSpace = await createSpace(orgOnlyClient, `RunSpace-${Date.now()}`);
       await orgOnlyClient.post(`/spaces/${customSpace.id}/packages`, {
         packageId: `${scope}/${agentName}`,

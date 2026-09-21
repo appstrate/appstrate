@@ -204,7 +204,7 @@ export function initSystemIntegrations(rawOverride?: unknown[]): void {
       // the entry would leave the operator believing the integration is offered
       // while every downstream failure blames space state instead of the
       // env var — a dropped membership surfaces as "Integration 'X' is not
-      // installed in this space", a dropped client as "Administrator must
+      // active in this space", a dropped client as "Administrator must
       // register OAuth client credentials for …". The entry schema embeds
       // `clients` and validates atomically, so ONE mistyped nested client takes
       // its integration's membership down with it: `describeIssues` names the
@@ -354,6 +354,16 @@ function ensureInitialized(): {
  */
 export function isSystemIntegration(integrationId: string): boolean {
   return ensureInitialized().ids.has(integrationId);
+}
+
+/**
+ * Every integration id the deployment OFFERS, in declaration order. Same
+ * predicate as {@link isSystemIntegration}, as a list — the SQL half of the
+ * activation rule (`services/package-activation.ts`) needs the set itself,
+ * because a query cannot call a function per row.
+ */
+export function listSystemIntegrationIds(): string[] {
+  return [...ensureInitialized().ids];
 }
 
 /** Resolve a system client by its id, or `null` when unknown. */

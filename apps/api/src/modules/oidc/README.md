@@ -161,7 +161,7 @@ End-user-facing routes under `/api/oauth/*` resolve the target space from the `c
 
 The OAuth 2.1 / OIDC protocol endpoints themselves (`/api/auth/oauth2/authorize`, `/token`, `/introspect`, `/revoke`, `/userinfo`, plus `/api/auth/jwks` and `/api/auth/.well-known/openid-configuration`) are wired by Better Auth's `oauthProvider` + `jwt` plugins — they are not registered in this module's router. They follow RFC 6749 / RFC 8414 / RFC 7662 / RFC 7009 exactly and are therefore deliberately omitted from the Appstrate OpenAPI spec; satellites consume them through discovery. See _Better Auth plugins contributed_ below for the wiring details.
 
-`oauth-clients` is a core RBAC resource added to `apps/api/src/lib/permissions.ts` in the same PR (per CLAUDE.md: modules that introduce new RBAC resources must edit `permissions.ts` alongside).
+`oauth-clients` is a core RBAC resource added to `apps/api/src/lib/permissions.ts` in the same PR (per AGENTS.md: modules that introduce new RBAC resources must edit `permissions.ts` alongside).
 
 ### Authorized devices — CLI sessions (PR #269)
 

@@ -34,7 +34,7 @@
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { sql } from "drizzle-orm";
 import { db, toRows, getPGliteClient, reservePgConnection } from "@appstrate/db/client";
-import { SPACE_ID_RE } from "../../../src/lib/ids.ts";
+import { SPACE_ID_RE } from "@appstrate/db/ids";
 
 const SCRIPT = new URL(
   "../../../../../scripts/migration/0003-application-ids-to-space-ids.sql",
@@ -313,8 +313,14 @@ const SEED = `
   --    row. With no row on either table there was nothing for those steps to
   --    suppress, so deleting both from the script changed no test outcome. The
   --    trigger test below now watches them fire.
-  INSERT INTO packages (id, org_id, type, created_by)
-  VALUES ('@m0003/agent', '${ORG}', 'agent', 'u_m0003_platform');
+  -- Homed in the pre-rename default space, because that is the only row an
+  -- organization's package can be: \`packages_org_package_has_home\` (drizzle
+  -- \`0067\`) rejects an org package with no home. It also makes
+  -- \`packages.home_space_id\` a NON-VACUOUS term in the survivor sweep below —
+  -- the FK is in the catalog either way, but only a row proves the script
+  -- re-mints it.
+  INSERT INTO packages (id, org_id, home_space_id, type, created_by)
+  VALUES ('@m0003/agent', '${ORG}', '${APP_A}', 'agent', 'u_m0003_platform');
 
   INSERT INTO runs (id, org_id, space_id, package_id, user_id, status)
   VALUES ('run_m0003_a', '${ORG}', '${APP_A}', '@m0003/agent', 'u_m0003_platform', 'success');
@@ -413,7 +419,8 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
              (SELECT space_id FROM webhooks WHERE id = 'wh_m0003_app')                  AS webhook,
              (SELECT space_id FROM webhooks WHERE id = 'wh_m0003_org')                  AS webhook_org,
              (SELECT referenced_space_id FROM oauth_clients WHERE id = 'oc_m0003_a')    AS oauth_client,
-             (SELECT referenced_space_id FROM oauth_clients WHERE id = 'oc_m0003_i')    AS oauth_client_instance
+             (SELECT referenced_space_id FROM oauth_clients WHERE id = 'oc_m0003_i')    AS oauth_client_instance,
+             (SELECT home_space_id FROM packages WHERE id = '@m0003/agent')            AS package_home
     `);
     expect(child).toEqual({
       api_key: SPC_A,
@@ -425,6 +432,7 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
       webhook_org: null, // an org-level webhook has no space and must stay NULL
       oauth_client: SPC_A,
       oauth_client_instance: null,
+      package_home: SPC_A,
     });
   });
 
@@ -456,12 +464,14 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
       SELECT 'audit_events.space_id',
              (SELECT count(*)::int FROM audit_events WHERE space_id LIKE 'app\\_%')
     `);
-    // 19 FK columns + the constraint-less `audit_events.space_id`. Two of the
-    // 19 arrived with `0056_space_roles` (`space_members.space_id`,
-    // `chat_sessions.space_id`); 0003 derives the columns it rewrites FROM the
-    // FK set, so it covers them without an edit — which is exactly the property
-    // this count guards.
-    expect(survivors.length).toBe(20);
+    // 21 FK columns + the constraint-less `audit_events.space_id`. Two of the
+    // 21 arrived with `0056_space_roles` (`space_members.space_id`,
+    // `chat_sessions.space_id`), and two more with the personal-spaces work:
+    // `packages.home_space_id` (`0063_packages_home_space`) and
+    // `package_shares.space_id` (`0065_package_shares`). 0003 derives the
+    // columns it rewrites FROM the FK set, so it covers them without an edit —
+    // which is exactly the property this count guards.
+    expect(survivors.length).toBe(22);
     expect(survivors.filter((r) => r.n !== 0)).toEqual([]);
   });
 
@@ -472,7 +482,7 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
        WHERE contype = 'f' AND confrelid = 'public.spaces'::regclass
        ORDER BY 1, 2
     `);
-    expect(before.length).toBe(19);
+    expect(before.length).toBe(21);
 
     await replayScript();
 
@@ -482,17 +492,22 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
        WHERE contype = 'f' AND confrelid = 'public.spaces'::regclass
        ORDER BY 1, 2
     `);
-    // Byte-for-byte the same set, same names, same delete actions — all
-    // nineteen `c` (cascade). `audit_events` used to be one more entry at
-    // `n` (set null); `0055_schema_integrity_repairs` dropped that FK, because
-    // the SET NULL was doing exactly what the old comment here warned a wrong
-    // action would do — erasing the space attribution of every historical audit
-    // row — and doing it on purpose, on every space delete.
+    // Byte-for-byte the same set, same names, same delete actions — twenty of
+    // the twenty-one `c` (cascade), and exactly one `r` (restrict):
+    // `packages.home_space_id`, from `0063_packages_home_space`, where SET NULL
+    // would silently promote a package to the org catalogue on a space delete
+    // and WIDEN who may write it. `audit_events` carries no such FK —
+    // `0055_schema_integrity_repairs` dropped it, because SET NULL there erased
+    // the space attribution of every historical audit row on each space
+    // delete.
     //
-    // So the assertion inverts: a resurrected `n` now means either 0055 was
-    // reverted or the capture/restore invented an action of its own.
+    // So the assertion names its one exception instead of allowing any
+    // non-cascade action: a resurrected `n`, or a second `r`, means either 0055
+    // was reverted or the capture/restore invented an action of its own.
     expect(after).toEqual(before);
-    expect(after.filter((r) => r.d !== "c")).toEqual([]);
+    expect(after.filter((r) => r.d !== "c")).toEqual([
+      { child: "packages", conname: "packages_home_space_id_spaces_id_fk", d: "r" },
+    ]);
   });
 
   // ── Permission scope strings ───────────────────────────────────────────────

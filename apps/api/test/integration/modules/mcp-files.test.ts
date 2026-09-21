@@ -15,18 +15,26 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { spacePackages, packages, runs, uploads, chatSessions } from "@appstrate/db/schema";
+import {
+  packageShares,
+  spacePackages,
+  packages,
+  runs,
+  uploads,
+  chatSessions,
+} from "@appstrate/db/schema";
 import { uploadStream } from "@appstrate/db/storage";
 import type { Actor } from "@appstrate/connect";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
+  authHeaders,
   createTestContext,
   createTestUser,
   addOrgMember,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedApiKey, seedPackage, seedInstalledPackage, seedSpace } from "../../helpers/seed.ts";
+import { seedApiKey, seedPackage, seedSpacePackage, seedSpace } from "../../helpers/seed.ts";
 import { setPlatformApp } from "../../../src/lib/platform-app.ts";
 import { resetCatalog } from "../../../src/modules/mcp/catalog.ts";
 import { createUpload } from "../../../src/services/uploads.ts";
@@ -541,8 +549,16 @@ describe("mcp file-backed package workflow", () => {
 
   it("hides private catalog conflicts and rejects importing a package confined to another space", async () => {
     const hidden = await seedSpace({ orgId: ctx.orgId, visibility: "private" });
-    await seedPackage({ id: "@mcppkgdoc/file-server", orgId: ctx.orgId, type: "mcp-server" });
-    await seedInstalledPackage(hidden.id, "@mcppkgdoc/file-server");
+    // HOMED in the private space, which is what confines it: the home is a
+    // placement, so a package homed where the caller cannot look is a package
+    // they cannot reach.
+    await seedPackage({
+      id: "@mcppkgdoc/file-server",
+      orgId: ctx.orgId,
+      type: "mcp-server",
+      homeSpaceId: hidden.id,
+    });
+    await seedSpacePackage(hidden.id, "@mcppkgdoc/file-server");
     const runId = await seedRun(scope);
     const docId = await publishDoc(
       scope,
@@ -568,6 +584,64 @@ describe("mcp file-backed package workflow", () => {
       .from(spacePackages)
       .where(eq(spacePackages.packageId, "@mcppkgdoc/file-server"));
     expect(rows.map((row) => row.spaceId)).toEqual([hidden.id]);
+  });
+
+  it("places a root homed elsewhere by the same rule the REST import uses", async () => {
+    // R7 says a re-import places its root the way `POST /api/spaces/{id}/packages`
+    // does: the offer is written with the installation when the caller may make
+    // one. The REST import route passes `holdsPackageShareAuthority`; this tool
+    // passed NOTHING, so `mayShareRoot?.() ?? false` was the fail-closed
+    // answer for every caller and `root_active` was permanently `false`
+    // here. One act, two behaviours — decided by which door asked.
+    //
+    // The fixture homes the root in ANOTHER team space of the organization and
+    // places it nowhere else, which is the reachable half of that rule: a
+    // session owner reaches every team space, so they hold both the `write`
+    // that gets them past `authorizeBundlePackages` and the `share` that
+    // decides this, in the home. An API key is pinned to one space and never
+    // carries `share` at all, which is why this case is driven by a session.
+    const packageId = "@mcppkgdoc/file-server";
+    const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+    await seedPackage({
+      id: packageId,
+      orgId: ctx.orgId,
+      type: "mcp-server",
+      homeSpaceId: elsewhere.id,
+    });
+
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(
+      scope,
+      runId,
+      "server.afps",
+      "application/zip",
+      packageArchive(true),
+    );
+
+    const sessionHeaders = authHeaders(ctx);
+    const { envelope } = await rpc(sessionHeaders, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "import_package_file", arguments: { file_uri: `appfile://${docId}` } },
+    });
+    const result = toolData(envelope);
+    expect(result.isError, JSON.stringify(envelope)).toBe(false);
+    expect(result.data).toMatchObject({ root_package_id: packageId, root_active: true });
+
+    // The offer AND the installation, in the same transaction — asserting only
+    // the flag would pass on an install that placed the package with no
+    // audience row behind it.
+    const shares = await db
+      .select({ spaceId: packageShares.spaceId })
+      .from(packageShares)
+      .where(eq(packageShares.packageId, packageId));
+    expect(shares.map((row) => row.spaceId)).toEqual([ctx.defaultSpaceId]);
+    const installs = await db
+      .select({ spaceId: spacePackages.spaceId })
+      .from(spacePackages)
+      .where(eq(spacePackages.packageId, packageId));
+    expect(installs.map((row) => row.spaceId)).toEqual([ctx.defaultSpaceId]);
   });
 
   function packageArchive(includeEntryPoint: boolean, source = "// server\n"): Uint8Array {

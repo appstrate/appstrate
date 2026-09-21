@@ -34,7 +34,7 @@ const PACKAGE_ID = "@myorg/mailer";
  * so the org / space ids are `null` under `renderToStaticMarkup` — the
  * detail cache key carries those nulls verbatim.
  */
-const DETAIL_KEY = packageKeys.detail("agents", null, null, PACKAGE_ID, "draft");
+const DETAIL_KEY = packageKeys.detail("agents", null, null, PACKAGE_ID);
 
 /** `folder` was locked AFTER the schedule below froze `folder: "inbox"`. */
 const AGENT_DETAIL = {

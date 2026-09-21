@@ -6,7 +6,7 @@
  *
  * For each integration the agent declares the resolver:
  *
- *   1. Verifies the integration package exists + is installed in the
+ *   1. Verifies the integration package exists + is active in the
  *      run's space (`space_packages`).
  *   2. Loads the integration's bundle bytes — system packages from the
  *      in-memory registry (loaded at boot), local packages from object
@@ -19,7 +19,7 @@
  *      (one entry per env var, value taken from the credential field
  *      named in `from`).
  *
- * Integrations that are declared but not installed / not connected are
+ * Integrations that are declared but not active / not connected are
  * skipped rather than aborting the run — the agent still spins up without
  * the missing integration's tools. That degradation is never silent: every
  * skip is returned to the caller as a {@link DroppedIntegration} so the run
@@ -118,7 +118,7 @@ export type IntegrationDropReason =
   | "not_found"
   | "not_integration"
   | "invalid_manifest"
-  | "not_installed"
+  | "not_active"
   | "remote_source_invalid"
   | "local_server_ref_missing"
   | "mcp_server_unresolved"
@@ -161,7 +161,7 @@ function drop(reason: IntegrationDropReason, detail?: string): ResolveOneResult 
 
 /**
  * Return one `IntegrationSpawnSpec` per integration that's (a) declared
- * on the agent, (b) installed in the space, AND (c) connected by
+ * on the agent, (b) active in the space, AND (c) connected by
  * the actor, ALONGSIDE one {@link DroppedIntegration} per integration that
  * failed any of those checks.
  *
@@ -210,7 +210,7 @@ export async function resolveIntegrationSpawns(
         // must NOT silently spawn without the integration's tools. resolveOne
         // raises a DEPENDENCY_UNRESOLVED BundleError for it; let it propagate so
         // the pipeline maps it to a structured 422 (#686), matching the skill
-        // closure (#666). Every other failure (not installed / not connected /
+        // closure (#666). Every other failure (not active / not connected /
         // missing referenced package) stays a per-integration skip — now a
         // MARKED one: the reason travels back to the caller in `dropped`.
         if (err instanceof BundleError && err.code === "DEPENDENCY_UNRESOLVED") throw err;
@@ -297,13 +297,13 @@ async function resolveOne(
   // default is honoured identically on both paths.
   const effectiveSelection = resolveEffectiveToolSelection(agentToolSelection, manifest);
 
-  // (b) Installed in the space
+  // (b) Active in the space
   if (!(await isIntegrationActive(integrationId, spaceId))) {
-    logger.info("integration not installed in space; skipping", {
+    logger.info("integration not active in space; skipping", {
       integrationId,
       spaceId,
     });
-    return drop("not_installed");
+    return drop("not_active");
   }
 
   // (c) Resolve connections + build spawnEnv from delivery.env mappings
@@ -391,7 +391,7 @@ async function resolveOne(
     }
     // P0-2 — SSRF floor on the manifest-supplied remote MCP URL. The sidecar
     // opens a credential-bearing Streamable HTTP / SSE client against this URL,
-    // so validate it here (install/boot resolution) before it reaches the wire.
+    // so validate it here (import/boot resolution) before it reaches the wire.
     // Route it through the canonical egress guard with the remote-MCP scheme
     // tier (`requireHttpsForUntrustedHost`): an operator-trusted internal host
     // may use plain http (LAN services routinely lack TLS), every other host
@@ -616,7 +616,7 @@ async function resolveOne(
     ...(apiCalls.length > 0 ? { apiCalls } : {}),
     // R8a defensive filter — surface `manifest.hidden_tools` to the
     // sidecar so the McpHost can drop them from `tools/list` at runtime,
-    // independent of whether the install-time catalog resolver already
+    // independent of whether the import-time catalog resolver already
     // removed them. This guards against fixtures / direct DB writes that
     // bypass `resolveIntegrationToolCatalog`. Under the wildcard branch
     // we also union in the connect-login tool name so the agent's LLM
@@ -1056,7 +1056,7 @@ async function resolveDeliveries(
   //
   // NEVER for `mtls`: routing a client-cert handshake through a proxy that
   // terminates TLS would break it (same reason `mtls + delivery.http` is
-  // rejected at install) — `delivery.files`/mtls runners reach upstream
+  // rejected at import) — `delivery.files`/mtls runners reach upstream
   // directly. We set the flag for any non-mtls local runner that declares an
   // outbound surface; when an http injection plan is ALSO present the sidecar
   // picks the MITM listener (which already provides egress) — `needsEgress`

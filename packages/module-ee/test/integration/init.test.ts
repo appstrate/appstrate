@@ -57,10 +57,12 @@ describe("EE module exports", () => {
   });
 
   describe("features", () => {
-    it("declares the billing and custom-roles feature flags", () => {
-      // `custom_roles` licenses the platform's own `/api/roles` write routes
-      // (RBAC spec §9) — the EE half of an otherwise OSS RBAC surface.
-      expect(eeModule.features).toEqual({ billing: true, custom_roles: true });
+    it("declares `billing` and nothing else", () => {
+      // `toEqual` on the WHOLE object, not a `billing` lookup: the point of the
+      // assertion is the absence. This module contributed `custom_roles` until
+      // custom space roles became OSS (RBAC spec §9), and a licence flag over
+      // platform-owned routes is what must not come back.
+      expect(eeModule.features).toEqual({ billing: true });
     });
   });
 

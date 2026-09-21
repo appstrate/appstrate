@@ -27,6 +27,12 @@ interface SharedHeaderDetail {
   icon?: string;
   /** Appstrate Agent presentation colour token. */
   color?: string;
+  /**
+   * Name of the space this package lives in — the one whose permissions decide
+   * who may edit it. Absent for the org catalog and for a home the reader
+   * cannot enter.
+   */
+  homeSpaceName?: string | null;
 }
 
 export function SharedHeader({
@@ -99,6 +105,14 @@ export function SharedHeader({
               <Badge variant="secondary" className="gap-1.5">
                 <ShieldCheck className="size-3" aria-hidden />
                 {t("packages.sourceBuiltIn", { ns: "settings" })}
+              </Badge>
+            )}
+            {/* Where the package LIVES, which is where it may be edited. A
+                badge like the ones beside it rather than main's bare span: the
+                header speaks one vocabulary. */}
+            {detail.homeSpaceName && (
+              <Badge variant="secondary">
+                {t("packages.homeSpace", { ns: "settings", space: detail.homeSpaceName })}
               </Badge>
             )}
             {detail.type !== "agent" && detail.version && (

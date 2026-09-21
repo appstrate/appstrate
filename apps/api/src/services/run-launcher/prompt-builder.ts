@@ -79,7 +79,7 @@ export async function buildPlatformSystemPrompt(
   // INTEGRATION.md (AFPS §3.5) so the LLM can read the integration's
   // API contract alongside the `{ns}__*` tools advertised via MCP
   // `tools/list`. Docs are pulled from `packages.draftContent` (captured
-  // at install time by `core/zip.ts`) — never re-fetched from storage.
+  // at import time by `core/zip.ts`) — never re-fetched from storage.
   let integrations: PlatformPromptIntegration[] | undefined;
   if (plan.integrations && plan.integrations.length > 0) {
     const docs = await fetchIntegrationPromptDocs(plan.integrations.map((i) => i.integrationId));

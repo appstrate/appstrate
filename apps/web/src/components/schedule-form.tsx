@@ -35,8 +35,9 @@ import { AgentVersionField } from "./package-version-select";
 import { ActorSelect, type ActorValue } from "./actor-select";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
-// Sentinel for the schedule's "inherit" version choice — no pin stored; the
-// agent's version resolution applies at fire time.
+// Sentinel for the schedule's "inherit" version choice — nothing stored; the
+// agent's version resolution applies at fire time, which means the latest
+// published version.
 const VERSION_INHERIT = "__inherit__";
 
 /** Stable "no agent loaded yet" layers — a per-render literal would change
@@ -115,7 +116,13 @@ interface ScheduleFormProps {
   persistedModelId?: string | null;
   persistedGenerationConfig?: ModelGenerationSettings | null;
   persistedProxyId?: string | null;
-  persistedVersion?: string | null;
+  /**
+   * Whether the caller may write the package — i.e. whether the working
+   * copy is theirs to run. Gates the `draft` option: offering it to anyone
+   * else turns a server refusal (`403 draft_not_writable`) into a clickable
+   * dead end.
+   */
+  homeWritable?: boolean;
   /** Package id needed by RunOverridesPanel to fetch versions. */
   packageId?: string;
   /**
@@ -150,7 +157,7 @@ export function ScheduleForm({
   persistedModelId,
   persistedGenerationConfig,
   persistedProxyId,
-  persistedVersion,
+  homeWritable,
   packageId,
   agents,
   selectedAgentId,
@@ -193,25 +200,32 @@ export function ScheduleForm({
     if (defaultValues?.proxy_id_override) v.proxy_id_override = defaultValues.proxy_id_override;
     return v;
   });
-  // Version override lives outside the model/proxy panel: a schedule
-  // "inherits" (no pin → resolve at fire time) or pins a specific version.
+  // Version override lives outside the model/proxy panel: a schedule either
+  // "inherits" (nothing stored → resolve at fire time) or freezes one version.
   // `undefined` = inherit (no override stored).
   const [versionOverride, setVersionOverride] = useState<string | undefined>(
     defaultValues?.version_override ?? undefined,
   );
-  // Default to the inherit option (its label surfaces the agent's pinned
-  // version) rather than `persistedVersion` directly — the latter has no
-  // matching item when the agent has no published versions, which would render
-  // the trigger blank.
   const versionSelectValue = versionOverride ?? VERSION_INHERIT;
   const setVersion = (next: string) => {
-    // Selecting the inherit option, or re-selecting the agent's own pinned
-    // version, means "no override" — the schedule follows the agent's
-    // resolution at fire time rather than freezing a redundant pin.
-    setVersionOverride(
-      next === VERSION_INHERIT || next === (persistedVersion ?? "latest") ? undefined : next,
-    );
+    // Only the inherit option means "no override". Every other pick is stored
+    // as written, including one that happens to name today's latest version:
+    // an explicit choice stays explicit, and a publish tomorrow must not move
+    // a schedule its author deliberately froze.
+    setVersionOverride(next === VERSION_INHERIT ? undefined : next);
   };
+  // Naming the working copy is an author's act, and the route judges
+  // `version_override` (403 `draft_not_writable`) on every write that decides
+  // it. Echoing back the value the row already holds decides nothing, so a
+  // reader who only moves the cron of someone else's draft schedule must not be
+  // refused for a choice they did not make. Send the key only on a real change;
+  // an absent key leaves the stored value untouched, per the route's optional
+  // rule. The route ignores an unchanged value too, so either half alone spares
+  // that reader the refusal — both exist because a client must not CLAIM an act
+  // its user did not make, and a route must not judge one it was not asked for.
+  const versionOverrideChanged =
+    (versionOverride ?? null) !== (defaultValues?.version_override ?? null);
+
   const initialOverridesNonEmpty =
     !!defaultValues?.model_id_override ||
     !!defaultValues?.generation_config_override ||
@@ -282,7 +296,7 @@ export function ScheduleForm({
           model_id_override: overrides.model_id_override ?? null,
           generation_config_override: overrides.generation_config_override ?? null,
           proxy_id_override: overrides.proxy_id_override ?? null,
-          version_override: versionOverride ?? null,
+          ...(versionOverrideChanged ? { version_override: versionOverride ?? null } : {}),
           connection_overrides: overrides.connection_overrides ?? null,
         }
       : {
@@ -495,13 +509,16 @@ export function ScheduleForm({
                   value={versionSelectValue}
                   onChange={setVersion}
                   leadingOptions={[
-                    {
-                      value: VERSION_INHERIT,
-                      label: persistedVersion
-                        ? t("run.overrides.versionInheritPinned", { version: persistedVersion })
-                        : t("run.overrides.versionInheritLatest"),
-                    },
-                    { value: "draft", label: t("run.overrides.versionDraft") },
+                    { value: VERSION_INHERIT, label: t("run.overrides.versionInheritLatest") },
+                    // The working copy belongs to whoever can write the
+                    // package; for everybody else the schedule would be
+                    // refused at every fire, so the option is not offered.
+                    // It IS listed when the schedule already holds it, though:
+                    // a reader opening someone else's draft schedule must see
+                    // what it says, not a blank trigger with no matching item.
+                    ...(homeWritable || versionOverride === "draft"
+                      ? [{ value: "draft", label: t("run.overrides.versionDraft") }]
+                      : []),
                   ]}
                 />
                 <RunOverridesPanel

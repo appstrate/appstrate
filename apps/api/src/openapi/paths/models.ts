@@ -116,6 +116,9 @@ export const modelsPaths = {
                     cacheRead: { type: "number" },
                     cacheWrite: { type: "number" },
                   },
+                  // Closed like the body around it: a stripped `cache_read`
+                  // would store a row that bills cache tokens at no rate.
+                  additionalProperties: false,
                 },
                 aliased: {
                   type: "boolean",
@@ -480,6 +483,9 @@ export const modelsPaths = {
                     cacheRead: { type: "number" },
                     cacheWrite: { type: "number" },
                   },
+                  // Closed like the body around it: a stripped `cache_read`
+                  // would store a row that bills cache tokens at no rate.
+                  additionalProperties: false,
                 },
                 aliased: {
                   type: "boolean",

@@ -8,8 +8,9 @@
  *     written (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`). The served set
  *     is a pure function of (definition, catalog), resolved on read by
  *     `resolveCredentialModelIds`; discovery reports the current list.
- *   - listing (API-key providers): ONE `GET <baseUrl>/models`
- *     (`listServedModels`), intersected with the discovery candidates and
+ *   - listing (API-key providers): `GET <baseUrl>/models` (`listServedModels`) —
+ *     a listing that declares a next page is followed to its end, under a page
+ *     cap, a model cap and a per-page byte budget — intersected with the discovery candidates and
  *     persisted as `available_model_ids` — the seed gate's authorization
  *     record, read only through `resolveCredentialModelIds`. AUTH_FAILED never
  *     persists; RATE_LIMITED is retried once; any other failure, a truncated

@@ -6,7 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import { $api, type components } from "../api/client";
 import { useOrgOnlyScope } from "./use-org-scope";
-import { usePermissions } from "./use-permissions";
+import { usePermissions, useSpaceGrant } from "./use-permissions";
 
 export type RoleObject = components["schemas"]["RoleObject"];
 /** Preset key a space membership may carry (`SpaceAssignment.preset_role`). */
@@ -129,10 +129,16 @@ export function memberRoleValue(
  * `enabled: false` fetches NEITHER — for a picker that is mounted but currently
  * asking about no space at all, where the org catalog is not the fallback the
  * caller wants but a request for nothing.
+ *
+ * The space arm is gated on THAT space's own grant, not on `can`: `can` answers
+ * over the space the caller is standing in, and a picker may ask about another
+ * one (the share dialog asks about a package's home). Reading the row loses
+ * nothing — the server unions the org half into every space's `permissions`.
  */
 export function useSpaceRoleOptions(spaceId?: string, enabled = true) {
   const { t } = useTranslation("settings");
   const { can } = usePermissions();
+  const grant = useSpaceGrant(spaceId);
   const scope = useOrgOnlyScope();
   const orgQuery = useRoles(enabled && !spaceId && can("roles:read"));
   const spaceQuery = $api.useQuery(
@@ -144,9 +150,12 @@ export function useSpaceRoleOptions(spaceId?: string, enabled = true) {
         enabled &&
         scope.enabled &&
         !!spaceId &&
-        (can("space-members:invite") ||
-          can("space-members:change-role") ||
-          can("space-settings:write")),
+        (grant?.permissions ?? []).some(
+          (permission) =>
+            permission === "space-members:invite" ||
+            permission === "space-members:change-role" ||
+            permission === "space-settings:write",
+        ),
       select: (e) => e.data,
     },
   );

@@ -23,7 +23,7 @@ import {
   seedSpace,
   seedSpaceMember,
   seedPackage,
-  seedInstalledPackage,
+  seedSpacePackage,
 } from "../../helpers/seed.ts";
 
 const app = getTestApp();
@@ -35,7 +35,7 @@ describe("API keys carry their creator's authority in the key's space", () => {
     await truncateAll();
     owner = await createTestContext({ orgSlug: "keyspace" });
     await seedPackage({ orgId: owner.orgId, id: "@keyspace/agent", type: "agent" });
-    await seedInstalledPackage(owner.defaultSpaceId, "@keyspace/agent");
+    await seedSpacePackage(owner.defaultSpaceId, "@keyspace/agent");
   });
 
   it("a builder cannot mint api-keys:create, and a space admin can", async () => {
@@ -96,7 +96,7 @@ describe("API keys carry their creator's authority in the key's space", () => {
   it("a key stops working the moment its creator loses the space", async () => {
     const closed = await seedSpace({ orgId: owner.orgId, visibility: "closed" });
     await seedPackage({ orgId: owner.orgId, id: "@keyspace/other", type: "agent" });
-    await seedInstalledPackage(closed.id, "@keyspace/other");
+    await seedSpacePackage(closed.id, "@keyspace/other");
 
     const creator = await createTestUser();
     await addOrgMember(owner.orgId, creator.id, "member");

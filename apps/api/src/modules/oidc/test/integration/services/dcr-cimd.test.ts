@@ -888,6 +888,90 @@ describe("self-service token audience restriction (RFC 8707 / RFC 9728)", () => 
     expect(String(json.error)).toBe("invalid_target");
   });
 
+  // ── The client the PROVIDER authenticates as, not the one the body names ──
+  //
+  // `extractClientCredentials` in `@better-auth/oauth-provider` resolves the
+  // Basic header BEFORE `body.client_id` and never compares the two, and
+  // `normalizeClientAuthenticationParameters` refuses Basic + `client_secret`
+  // while ACCEPTING Basic + `client_id`. A gate that read the body first read a
+  // different client than the one being authenticated: a self-service client
+  // presented in the header with any unknown id in the body resolved to a row
+  // that does not exist, which reads as "not self-service", and the confinement
+  // never applied. A DCR registration naming no `token_endpoint_auth_method`
+  // defaults to `client_secret_basic` and is issued a secret, so this is the
+  // ordinary registration path rather than an exotic one.
+  async function registerBasicSelfServiceClient(): Promise<{ id: string; secret: string }> {
+    const { status, json } = await register({
+      client_name: "Claude Code (basic)",
+      redirect_uris: ["http://localhost:9914/callback"],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      // Deliberately unset: the provider's default is `client_secret_basic`.
+      scope: "openid profile email offline_access",
+    });
+    expect([200, 201]).toContain(status);
+    expect(String(json.token_endpoint_auth_method)).toBe("client_secret_basic");
+    return { id: String(json.client_id), secret: String(json.client_secret) };
+  }
+
+  async function tokenWithBasic(
+    client: { id: string; secret: string },
+    bodyClientId: string,
+    resource: string,
+  ) {
+    const res = await app.request("/api/auth/oauth2/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        authorization: `Basic ${btoa(`${client.id}:${client.secret}`)}`,
+      },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code: "irrelevant-code",
+        client_id: bodyClientId,
+        redirect_uri: "http://localhost:9914/callback",
+        code_verifier: "x".repeat(43),
+        resource,
+      }).toString(),
+    });
+    return {
+      status: res.status,
+      json: (await res.json().catch(() => ({}))) as Record<string, unknown>,
+    };
+  }
+
+  it("confines a self-service client presented in Basic while the body names an unknown id", async () => {
+    const client = await registerBasicSelfServiceClient();
+    const { status, json } = await tokenWithBasic(
+      client,
+      "not-a-registered-client",
+      getEnv().APP_URL,
+    );
+    expect(status).toBe(400);
+    expect(String(json.error)).toBe("invalid_target");
+  });
+
+  it("confines it just the same when the body names ANOTHER registered client", async () => {
+    const client = await registerBasicSelfServiceClient();
+    await ensureCliClient();
+    const { status, json } = await tokenWithBasic(
+      client,
+      APPSTRATE_CLI_CLIENT_ID,
+      getEnv().APP_URL,
+    );
+    expect(status).toBe(400);
+    expect(String(json.error)).toBe("invalid_target");
+  });
+
+  it("still lets that Basic client bind to a per-org MCP audience", async () => {
+    // The positive control: the gate confines the audience, it does not refuse
+    // the client outright — otherwise the two tests above would pass for the
+    // wrong reason.
+    const client = await registerBasicSelfServiceClient();
+    const { json } = await tokenWithBasic(client, client.id, getMcpOrgResourceUri(ORG_ID));
+    expect(String(json.error ?? "")).not.toBe("invalid_target");
+  });
+
   it("lets an operator-provisioned client name the platform audience in its assertion", async () => {
     await ensureCliClient();
     const { status, json } = await tokenWithAssertion(getEnv().APP_URL, {

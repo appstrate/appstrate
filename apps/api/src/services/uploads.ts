@@ -41,7 +41,7 @@ import { UPLOAD_URI_PREFIX, UPLOAD_ID_RE } from "@appstrate/core/file-uri";
 import { MAX_FILENAME_LEN, sanitizeFilename } from "@appstrate/core/naming";
 import { getEnv } from "@appstrate/env";
 import type { Actor } from "@appstrate/connect";
-import { prefixedId } from "../lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 import { logger } from "../lib/logger.ts";
 import {
   invalidRequest,

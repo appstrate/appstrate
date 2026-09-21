@@ -37,7 +37,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { oauthClient } from "@appstrate/db/schema";
-import { prefixedId } from "../../../lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 
 /**
  * Deterministic `client_id` for the Appstrate CLI. Stable across every

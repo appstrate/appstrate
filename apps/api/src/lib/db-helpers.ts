@@ -14,8 +14,12 @@ import { logger } from "./logger.ts";
  * service that merges system-registry entries with database rows.
  */
 
-/** The transaction handle passed to a `db.transaction` callback. */
-type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+/**
+ * The transaction handle passed to a `db.transaction` callback — the type a
+ * function REQUIRING a transaction takes. Exported so no service re-derives it
+ * from `db.transaction`: a spelling copied by hand is a spelling that drifts.
+ */
+export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
  * A Drizzle executor — the root `db`, or a transaction handle a caller already
@@ -23,7 +27,7 @@ type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * transaction and commit (or roll back) with it, and defaults to `db` when
  * there is no transaction to join.
  */
-export type DbOrTx = typeof db | DbTransaction;
+export type DbOrTx = typeof db | Tx;
 
 // --- Scoped WHERE builder ---
 
@@ -231,13 +235,13 @@ export function buildUpdateSet(
 
 interface SetExactlyOneDefaultOptions {
   /** Clear `is_default` across the whole scope. Runs first. */
-  clear: (tx: DbTransaction) => Promise<unknown>;
+  clear: (tx: Tx) => Promise<unknown>;
   /**
    * Flag the single chosen row as default. Runs after `clear`. Pass `null` to
    * clear only — e.g. when promoting a system default, which carries no DB row
    * and is handled by the resolution cascade.
    */
-  set: ((tx: DbTransaction) => Promise<unknown>) | null;
+  set: ((tx: Tx) => Promise<unknown>) | null;
 }
 
 /**
@@ -274,7 +278,7 @@ interface DefaultPointer {
    * otherwise. Counts rows EXCLUDING `newRowId`, so it must run AFTER the
    * insert — equivalent to the pre-insert `isFirst` check it replaces.
    */
-  promoteIfFirst(tx: DbTransaction, orgId: string, newRowId: string): Promise<void>;
+  promoteIfFirst(tx: Tx, orgId: string, newRowId: string): Promise<void>;
   /**
    * Set (or clear, with `null`) the pointer. A system id is trusted via
    * `isSystem`; a custom id must be UUID-shaped AND an org-owned row, else
@@ -288,7 +292,7 @@ interface DefaultPointer {
    * single-new-row count doesn't apply), so callers never hand-roll the
    * pointer-column read/write — keeping the field name owned here.
    */
-  setDefaultIfUnset(tx: DbTransaction, orgId: string, id: string): Promise<boolean>;
+  setDefaultIfUnset(tx: Tx, orgId: string, id: string): Promise<boolean>;
   /**
    * After a row is deleted, clear the pointer iff it still names the deleted id
    * — so a now-dangling pointer never outlives its row.
@@ -334,7 +338,7 @@ export function createDefaultPointer(opts: CreateDefaultPointerOptions): Default
     return row?.value ?? null;
   }
 
-  async function promoteIfFirst(tx: DbTransaction, orgId: string, newRowId: string): Promise<void> {
+  async function promoteIfFirst(tx: Tx, orgId: string, newRowId: string): Promise<void> {
     const existing = await tx
       .select({ id: table.id })
       .from(table)
@@ -359,7 +363,7 @@ export function createDefaultPointer(opts: CreateDefaultPointerOptions): Default
     await db.update(organizations).set(set).where(eq(organizations.id, orgId));
   }
 
-  async function setDefaultIfUnset(tx: DbTransaction, orgId: string, id: string): Promise<boolean> {
+  async function setDefaultIfUnset(tx: Tx, orgId: string, id: string): Promise<boolean> {
     const [org] = await tx
       .select({ value: pointerColumn })
       .from(organizations)

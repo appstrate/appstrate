@@ -13,7 +13,7 @@ import type { EndUserInfo, ListEnvelope } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { notFound, ApiError } from "../lib/errors.ts";
 import { listResponse } from "../lib/list-response.ts";
-import { prefixedId } from "../lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 import { buildUpdateSet } from "../lib/db-helpers.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";

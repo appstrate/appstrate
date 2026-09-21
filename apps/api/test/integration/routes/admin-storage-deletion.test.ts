@@ -59,6 +59,10 @@ const oidcLikeStrategy: AuthStrategy = {
       orgSlug: currentCtx.org.slug,
       orgRole: "owner",
       authMethod: "oauth2-dashboard",
+      // The real `oauth2-dashboard` kind: a third-party client under a ceiling.
+      // This surface refuses it, and refuses a `user` by the wrong transport
+      // too — it wants a cookie session.
+      principalKind: "delegate",
       spaceId: currentCtx.defaultSpaceId,
       // Deliberately generous: the point is that NO scope set substitutes for
       // an authentic platform session on this surface.

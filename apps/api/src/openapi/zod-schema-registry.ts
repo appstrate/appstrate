@@ -77,6 +77,8 @@ import {
   packageJsonCreateSchema,
   packageJsonCreateWithContentSchema,
   packageJsonUpdateSchema,
+  packageHomeSpaceSchema,
+  shareTargetSchema,
   createVersionBodySchema,
 } from "../routes/packages.ts";
 
@@ -86,7 +88,7 @@ import {
   updateSpaceSchema,
   addSpaceMemberSchema,
   updateSpaceMemberSchema,
-  installPackageSchema,
+  activatePackageSchema,
   updatePackageSchema,
 } from "../routes/spaces.ts";
 
@@ -448,14 +450,14 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   {
     method: "POST",
     path: "/api/spaces/{spaceId}/packages",
-    jsonSchema: toJsonSchema(installPackageSchema),
-    description: "Install package in space",
+    jsonSchema: toJsonSchema(activatePackageSchema),
+    description: "Activate a package in a space",
   },
   {
     method: "PUT",
     path: "/api/spaces/{spaceId}/packages/{scope}/{name}",
     jsonSchema: toJsonSchema(updatePackageSchema),
-    description: "Update installed package config",
+    description: "Configure a space package",
   },
 
   // ─── Package draft CRUD (the shared JSON body of every package type) ────
@@ -510,6 +512,20 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/packages/skills/{scope}/{name}",
     jsonSchema: toJsonSchema(packageJsonUpdateSchema),
     description: "Update a draft skill package",
+  },
+
+  {
+    method: "PUT",
+    path: "/api/packages/{scope}/{name}/home",
+    jsonSchema: toJsonSchema(packageHomeSpaceSchema),
+    description: "Move a package to another home space",
+  },
+
+  {
+    method: "POST",
+    path: "/api/packages/{scope}/{name}/shares",
+    jsonSchema: toJsonSchema(shareTargetSchema),
+    description: "Share a package with a person or a space",
   },
 
   {
@@ -686,8 +702,6 @@ export const EXEMPT_REQUEST_BODIES: Record<string, string> = {
   // ─── Empty bodies (documented for shape, never parsed) ──────────────────
   "POST /api/runs/{runId}/events/heartbeat":
     "empty body — the HMAC covers the zero-length payload; the handler reads nothing",
-  "POST /api/integrations/{packageId}/activate":
-    "empty body — activation is a flag upsert with no parameters",
 
   // ─── Not ours to validate: framework- or provider-owned wire ────────────
   //

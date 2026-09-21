@@ -29,7 +29,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections, organizationMembers } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
@@ -109,6 +109,7 @@ describe("GET /api/integrations/:packageId/connections — own ∪ org-shared", 
 
     await seedPackage({
       id: INTEGRATION,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
@@ -131,7 +132,7 @@ describe("GET /api/integrations/:packageId/connections — own ∪ org-shared", 
         tools_policy: { search: {} },
       }),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
   });
 
   it("returns another member's SHARED connection", async () => {

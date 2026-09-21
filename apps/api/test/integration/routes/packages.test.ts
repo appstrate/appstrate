@@ -6,6 +6,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
   createTestContext,
+  createTestUser,
   authHeaders,
   addOrgMember,
   type TestContext,
@@ -15,13 +16,14 @@ import {
   seedPackage,
   seedPackageVersion,
   seedSpace,
-  seedInstalledPackage,
+  seedSpaceMember,
+  seedSpacePackage,
 } from "../../helpers/seed.ts";
 import {
   initSystemIntegrations,
   __resetSystemIntegrationsForTest,
 } from "../../../src/services/integration-client-registry.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { assertDbMissing, assertDbHas } from "../../helpers/assertions.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
 import {
@@ -69,10 +71,14 @@ describe("Packages API", () => {
     it("returns agents owned by the org", async () => {
       await seedAgent({
         id: "@pkgorg/list-agent",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@pkgorg/list-agent");
+      await activatePackage(
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        "@pkgorg/list-agent",
+      );
 
       const res = await app.request("/api/packages/agents", {
         headers: authHeaders(ctx),
@@ -127,6 +133,7 @@ describe("Packages API", () => {
     it("returns seeded skill", async () => {
       await seedPackage({
         id: "@pkgorg/my-skill",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         type: "skill",
         createdBy: ctx.user.id,
@@ -138,7 +145,7 @@ describe("Packages API", () => {
         },
         draftContent: "# My Skill\nDo something useful.",
       });
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@pkgorg/my-skill");
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@pkgorg/my-skill");
 
       const res = await app.request("/api/packages/skills", {
         headers: authHeaders(ctx),
@@ -181,8 +188,13 @@ describe("Packages API", () => {
     }
 
     it("does not list an agent installed only in another space of the same org", async () => {
-      await seedAgent({ id: "@pkgorg/space-a-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage(
+      await seedAgent({
+        id: "@pkgorg/space-a-agent",
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      await activatePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@pkgorg/space-a-agent",
       );
@@ -201,6 +213,7 @@ describe("Packages API", () => {
     it("does not list a skill installed only in another space of the same org", async () => {
       await seedPackage({
         id: "@pkgorg/space-a-skill",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         type: "skill",
         createdBy: ctx.user.id,
@@ -212,7 +225,7 @@ describe("Packages API", () => {
         },
         draftContent: "# Space A",
       });
-      await installPackage(
+      await activatePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@pkgorg/space-a-skill",
       );
@@ -235,10 +248,11 @@ describe("Packages API", () => {
     it("returns agent detail with versionCount and hasUnarchivedChanges", async () => {
       await seedAgent({
         id: "@pkgorg/detail-agent",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await installPackage(
+      await activatePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@pkgorg/detail-agent",
       );
@@ -258,10 +272,11 @@ describe("Packages API", () => {
     it("accepts an encoded @ scope", async () => {
       await seedAgent({
         id: "@pkgorg/encoded-detail-agent",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await installPackage(
+      await activatePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@pkgorg/encoded-detail-agent",
       );
@@ -278,10 +293,11 @@ describe("Packages API", () => {
     it("returns hasUnarchivedChanges false when no changes since last version", async () => {
       await seedAgent({
         id: "@pkgorg/versioned-agent",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await installPackage(
+      await activatePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@pkgorg/versioned-agent",
       );
@@ -345,6 +361,7 @@ describe("Packages API", () => {
     it("returns skill detail", async () => {
       await seedPackage({
         id: "@pkgorg/detail-skill",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         type: "skill",
         createdBy: ctx.user.id,
@@ -356,7 +373,7 @@ describe("Packages API", () => {
         },
         draftContent: "# Detail Skill",
       });
-      await installPackage(
+      await activatePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@pkgorg/detail-skill",
       );
@@ -413,8 +430,14 @@ describe("Packages API", () => {
     });
 
     it("returns 200 from custom space when skill is installed", async () => {
+      const customApp = await seedSpace({
+        orgId: ctx.orgId,
+        name: "Skill Installed",
+        createdBy: ctx.user.id,
+      });
       await seedPackage({
         id: "@pkgorg/installed-skill",
+        homeSpaceId: customApp.id,
         orgId: ctx.orgId,
         type: "skill",
         createdBy: ctx.user.id,
@@ -426,13 +449,7 @@ describe("Packages API", () => {
         },
         draftContent: "# Installed",
       });
-
-      const customApp = await seedSpace({
-        orgId: ctx.orgId,
-        name: "Skill Installed",
-        createdBy: ctx.user.id,
-      });
-      await installPackage({ orgId: ctx.orgId, spaceId: customApp.id }, "@pkgorg/installed-skill");
+      await activatePackage({ orgId: ctx.orgId, spaceId: customApp.id }, "@pkgorg/installed-skill");
 
       const res = await app.request("/api/packages/skills/@pkgorg/installed-skill", {
         headers: { ...authHeaders(ctx), "X-Space-Id": customApp.id },
@@ -441,6 +458,266 @@ describe("Packages API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.id).toBe("@pkgorg/installed-skill");
+    });
+  });
+
+  // ═══════════════════════════════════════════════
+  // GET /api/packages/{skills,integrations,mcp-servers}/:scope/:name
+  //   — WHICH definition the page renders
+  // ═══════════════════════════════════════════════
+
+  /**
+   * The agent page and the file explorer answer "which definition am I looking
+   * at" from the same two functions (RBAC spec §6.10, R8). These three types
+   * did not: their detail handler served `packages.draft_content` and
+   * `draft_manifest` to every reader, so the Content tab of a published skill
+   * showed the author's working copy while the Files tab of the SAME package,
+   * in the same second, showed the published bytes.
+   *
+   * Reading a draft is not an escalation — R1 opened it to every reader of the
+   * package deliberately, and no executable or exportable form is reachable
+   * from here. What was wrong is that the question had two answers.
+   *
+   * The caller that discriminates is a space `viewer`: `<type>:read` without
+   * `<type>:write`. An org owner writes everything and would prove nothing.
+   */
+  describe("which definition a package detail renders", () => {
+    const id = "@pkgorg/definition-skill";
+    // Real SKILL.md frontmatter: the write path gates on it (#1252), so a
+    // fixture without it would prove the echo case against a 400.
+    const DRAFT_BODY =
+      "---\nname: definition-skill\ndescription: the author's working copy\n---\n\n# work in progress\n";
+    const PUBLISHED_BODY =
+      "---\nname: definition-skill\ndescription: the published skill\n---\n\n# released\n";
+    const EDITED_BODY =
+      "---\nname: definition-skill\ndescription: edited after publishing\n---\n\n# edited\n";
+    const draftManifest = {
+      name: id,
+      version: "0.2.0",
+      type: "skill",
+      display_name: "Draft display name",
+      description: "draft description",
+    };
+    const publishedManifest = {
+      ...draftManifest,
+      version: "0.1.0",
+      display_name: "Published display name",
+      description: "published description",
+    };
+
+    /** A CLOSED space, so every role in it is an explicit membership row. */
+    let homeId: string;
+
+    beforeEach(async () => {
+      homeId = (
+        await seedSpace({ orgId: ctx.orgId, name: "Definition Home", visibility: "closed" })
+      ).id;
+      await seedPackage({
+        id,
+        orgId: ctx.orgId,
+        type: "skill",
+        homeSpaceId: homeId,
+        createdBy: ctx.user.id,
+        draftManifest,
+        draftContent: DRAFT_BODY,
+      });
+      await seedSpacePackage(homeId, id);
+    });
+
+    /** A member of the org holding `preset` in the package's home space. */
+    async function memberIn(preset: "viewer" | "builder"): Promise<Record<string, string>> {
+      const user = await createTestUser();
+      await addOrgMember(ctx.orgId, user.id, "member");
+      await seedSpaceMember({ spaceId: homeId, userId: user.id, presetRole: preset });
+      return { Cookie: user.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": homeId };
+    }
+
+    /** Publish `0.1.0` with a manifest AND a body that differ from the draft. */
+    async function publish(): Promise<void> {
+      const zip = buildMinimalZip(publishedManifest, PUBLISHED_BODY, "SKILL.md");
+      await uploadPackageZip(id, "0.1.0", zip);
+      const row = await seedPackageVersion({
+        packageId: id,
+        version: "0.1.0",
+        manifest: publishedManifest,
+        integrity: computeIntegrity(new Uint8Array(zip)),
+        artifactSize: zip.byteLength,
+      });
+      await db
+        .insert(packageDistTags)
+        .values({ packageId: id, tag: "latest", versionId: row.id })
+        .onConflictDoUpdate({
+          target: [packageDistTags.packageId, packageDistTags.tag],
+          set: { versionId: row.id, updatedAt: new Date() },
+        });
+    }
+
+    async function detail(
+      headers: Record<string, string>,
+      query = "",
+    ): Promise<{ status: number; body: any }> {
+      const res = await app.request(`/api/packages/skills/${id}${query}`, { headers });
+      return { status: res.status, body: await res.json() };
+    }
+
+    it("serves the PUBLISHED definition to a reader who cannot write, with no ?version", async () => {
+      await publish();
+      const { status, body } = await detail(await memberIn("viewer"));
+      expect(status).toBe(200);
+      expect(body.definition).toBe("published");
+      expect(body.content).toBe(PUBLISHED_BODY);
+      // Every field projected off the manifest moves with it, or the page
+      // would caption published bytes with the draft's own title.
+      expect(body.manifest).toMatchObject({ version: "0.1.0" });
+      expect(body.name).toBe("Published display name");
+      expect(body.description).toBe("published description");
+      expect(body.version).toBe("0.1.0");
+    });
+
+    it("serves the DRAFT to the same reader when nothing is published", async () => {
+      // A readable package whose page 404s is a link the listing just made and
+      // cannot honour. The draft is the only definition that exists here, so it
+      // is the one shown — and `definition` says so, which is what the SPA
+      // renders as "never published, you are seeing work in progress".
+      const { status, body } = await detail(await memberIn("viewer"));
+      expect(status).toBe(200);
+      expect(body.definition).toBe("draft");
+      expect(body.content).toBe(DRAFT_BODY);
+      expect(body.version).toBe("0.2.0");
+    });
+
+    it("serves the DRAFT to a writer with no ?version, even once published", async () => {
+      await publish();
+      const { status, body } = await detail(await memberIn("builder"));
+      expect(status).toBe(200);
+      expect(body.definition).toBe("draft");
+      expect(body.content).toBe(DRAFT_BODY);
+      expect(body.name).toBe("Draft display name");
+    });
+
+    it("refuses an EXPLICIT ?version=draft to a reader who cannot write", async () => {
+      await publish();
+      const { status, body } = await detail(await memberIn("viewer"), "?version=draft");
+      expect(status, JSON.stringify(body)).toBe(403);
+      expect(body).toMatchObject({ code: "draft_not_writable" });
+      expect(JSON.stringify(body)).not.toContain(DRAFT_BODY);
+    });
+
+    it("honours an EXPLICIT ?version=draft for a writer", async () => {
+      // The discriminating control: the refusal above is about the AUTHORITY,
+      // not about the word `draft`.
+      await publish();
+      const { status, body } = await detail(await memberIn("builder"), "?version=draft");
+      expect(status).toBe(200);
+      expect(body.definition).toBe("draft");
+      expect(body.content).toBe(DRAFT_BODY);
+    });
+
+    it("serves an explicit published version to a reader who cannot write", async () => {
+      await publish();
+      const { status, body } = await detail(await memberIn("viewer"), "?version=0.1.0");
+      expect(status).toBe(200);
+      expect(body.definition).toBe("published");
+      expect(body.content).toBe(PUBLISHED_BODY);
+    });
+
+    it("404s a version spec that resolves to nothing", async () => {
+      await publish();
+      const { status } = await detail(await memberIn("viewer"), "?version=9.9.9");
+      expect(status).toBe(404);
+    });
+
+    it("calls a SYSTEM package published, and refuses its named draft", async () => {
+      // A system package ships its definition with the platform: its stored
+      // tree IS the published one, so `definition` must not label it `draft`
+      // and make the SPA claim it was never published. The named `draft` is
+      // still nobody's to ask for — nobody writes a platform-shipped package.
+      const sysId = "@appstrate/definition-system-skill";
+      await seedPackage({
+        id: sysId,
+        orgId: null,
+        source: "system",
+        type: "skill",
+        draftManifest: { name: sysId, version: "1.0.0", type: "skill" },
+        draftContent: "# system",
+      });
+      await seedSpacePackage(homeId, sysId);
+      const headers = await memberIn("viewer");
+
+      const res = await app.request(`/api/packages/skills/${sysId}`, { headers });
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as any).definition).toBe("published");
+
+      const named = await app.request(`/api/packages/skills/${sysId}?version=draft`, { headers });
+      expect(named.status).toBe(403);
+    });
+
+    it("echoes the DRAFT a write just produced, published version or not", async () => {
+      // A save is read back as the bytes it wrote. Left to the default
+      // selector, an author who publishes and then edits would get their new
+      // save echoed as the version they are now ahead of.
+      await publish();
+      const owner = { ...authHeaders(ctx), "X-Space-Id": homeId };
+      const current = await detail(owner, "?version=draft");
+      const res = await app.request(`/api/packages/skills/${id}`, {
+        method: "PUT",
+        headers: { ...owner, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: EDITED_BODY,
+          manifest: draftManifest,
+          lock_version: current.body.lock_version,
+        }),
+      });
+      const body = (await res.json()) as any;
+      expect(res.status, JSON.stringify(body)).toBe(200);
+      expect(body.definition).toBe("draft");
+      expect(body.content).toBe(EDITED_BODY);
+    });
+
+    it("applies the same rule to an mcp-server, whose content IS its manifest", async () => {
+      // The third type has no companion file at all (`PACKAGE_CONTENT_ENTRY`
+      // is `null`), so its published `content` is the manifest text — the exact
+      // inverse of what `applyDraftOverlay` puts in the draft column.
+      const mcpId = "@pkgorg/definition-mcp";
+      const mcpDraft = mcpServerManifest({ name: mcpId, version: "0.2.0" });
+      const mcpPublished = mcpServerManifest({ name: mcpId, version: "0.1.0" });
+      await seedPackage({
+        id: mcpId,
+        orgId: ctx.orgId,
+        type: "mcp-server",
+        homeSpaceId: homeId,
+        createdBy: ctx.user.id,
+        draftManifest: mcpDraft,
+        draftContent: JSON.stringify(mcpDraft, null, 2),
+      });
+      await seedSpacePackage(homeId, mcpId);
+      const zip = zipArtifact(
+        {
+          "manifest.json": new TextEncoder().encode(JSON.stringify(mcpPublished, null, 2)),
+          "server.js": new TextEncoder().encode("// published server"),
+        },
+        6,
+      );
+      await uploadPackageZip(mcpId, "0.1.0", Buffer.from(zip));
+      const row = await seedPackageVersion({
+        packageId: mcpId,
+        version: "0.1.0",
+        manifest: mcpPublished,
+        integrity: computeIntegrity(new Uint8Array(zip)),
+        artifactSize: zip.byteLength,
+      });
+      await db
+        .insert(packageDistTags)
+        .values({ packageId: mcpId, tag: "latest", versionId: row.id });
+
+      const res = await app.request(`/api/packages/mcp-servers/${mcpId}`, {
+        headers: await memberIn("viewer"),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.definition).toBe("published");
+      expect(body.version).toBe("0.1.0");
+      expect(JSON.parse(body.content as string)).toMatchObject({ version: "0.1.0" });
     });
   });
 
@@ -588,10 +865,10 @@ describe("Packages API", () => {
   });
 
   // ═══════════════════════════════════════════════
-  // GET /api/packages/integrations?active=true — agent-editor picker
+  // GET /api/packages/integrations — the index, i.e. the ACTIVE set
   // ═══════════════════════════════════════════════
 
-  describe("GET /api/packages/integrations?active=true (agent-editor picker)", () => {
+  describe("GET /api/packages/integrations (the active set)", () => {
     const ENV_SYSTEM = "@pkgorg/gmail"; // env SYSTEM integration, no install row
     const PLAIN = "@pkgorg/clickup"; // org integration, not installed
     const INSTALLED = "@pkgorg/notion"; // org integration, installed + enabled
@@ -614,10 +891,21 @@ describe("Packages API", () => {
       ]);
       // gmail ships as a system-source package (visible in the catalogue with
       // no install row, like the real one).
-      await seedPackage({ id: ENV_SYSTEM, orgId: null, type: "integration", source: "system" });
+      await seedPackage({
+        id: ENV_SYSTEM,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: null,
+        type: "integration",
+        source: "system",
+      });
       await seedPackage({ id: PLAIN, orgId: ctx.orgId, type: "integration" });
-      await seedPackage({ id: INSTALLED, orgId: ctx.orgId, type: "integration" });
-      await seedInstalledPackage(ctx.defaultSpaceId, INSTALLED, { enabled: true });
+      await seedPackage({
+        id: INSTALLED,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        type: "integration",
+      });
+      await seedSpacePackage(ctx.defaultSpaceId, INSTALLED, { enabled: true });
     });
 
     afterEach(() => {
@@ -625,7 +913,7 @@ describe("Packages API", () => {
     });
 
     async function activeIds(): Promise<Set<string>> {
-      const res = await app.request("/api/packages/integrations?active=true", {
+      const res = await app.request("/api/packages/integrations", {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(200);
@@ -649,7 +937,7 @@ describe("Packages API", () => {
     });
 
     it("excludes a SYSTEM integration with a sticky explicit disable", async () => {
-      await seedInstalledPackage(ctx.defaultSpaceId, ENV_SYSTEM, { enabled: false });
+      await seedSpacePackage(ctx.defaultSpaceId, ENV_SYSTEM, { enabled: false });
       const ids = await activeIds();
       expect(ids.has(ENV_SYSTEM)).toBe(false);
     });
@@ -1214,7 +1502,7 @@ describe("Packages API", () => {
   });
 
   // ═══════════════════════════════════════════════
-  // Niveau 2 Phase 1 — install-time integration scope validation
+  // Niveau 2 Phase 1 — import-time integration scope validation
   // (assertAgentIntegrationScopesValid in routes/packages.ts)
   // ═══════════════════════════════════════════════
 
@@ -2075,6 +2363,7 @@ describe("Packages API", () => {
     it("returns seeded versions", async () => {
       await seedAgent({
         id: "@pkgorg/versioned-agent",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
@@ -2521,16 +2810,18 @@ describe("Packages API", () => {
 
       await seedAgent({
         id: "@pkgorg/my-agent",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@pkgorg/my-agent");
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@pkgorg/my-agent");
       await seedAgent({
         id: "@isolatedorg/their-agent",
+        homeSpaceId: otherCtx.defaultSpaceId,
         orgId: otherCtx.orgId,
         createdBy: otherCtx.user.id,
       });
-      await installPackage(
+      await activatePackage(
         { orgId: otherCtx.orgId, spaceId: otherCtx.defaultSpaceId },
         "@isolatedorg/their-agent",
       );
@@ -3302,10 +3593,10 @@ describe("Packages API", () => {
       // Pin the id the rest of the test reads its rows by — a change in how the
       // route derives it would otherwise surface as "row not found".
       expect(((await res.json()) as { id: string }).id).toBe(targetId);
-      // The route auto-installs the fork in the calling space, which is
-      // what satisfies the explorer's `hasPackageAccess` gate below — so no
-      // install of our own, which would 409 as `already_installed`. The `200`
-      // asserted in `fileIndex` is the proof that it happened.
+      // The route activates the fork in the calling space, which is what
+      // satisfies the explorer's `isPackageActiveHere` gate below — so no
+      // activation of our own. The `200` asserted in `fileIndex` is the proof
+      // that it happened.
     }
 
     async function draftContentOf(packageId: string): Promise<string | null> {

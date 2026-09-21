@@ -125,6 +125,15 @@ export interface McpToolContext {
   /** The caller's org+space scope (org fixed by the endpoint/token; space resolved). */
   scope: SpaceScope;
   authorizeBundle: Parameters<typeof buildPackageFileTools>[0]["authorizeBundle"];
+  /**
+   * Whether the caller may OFFER a package from its home space — the
+   * predicate `import_package_file` needs to place a re-imported root the
+   * same way the REST import route places it. Optional so a non-HTTP caller
+   * (a unit test, an in-process consumer with no request) can omit it and
+   * get the fail-closed answer: the root is not activated and the result
+   * says so.
+   */
+  mayShareRoot?: Parameters<typeof buildPackageFileTools>[0]["mayShareRoot"];
   /** In-process dispatcher (defaults to the platform app at request time). */
   dispatch: Dispatch;
   /**
@@ -836,8 +845,10 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
         version: {
           type: "string",
           description:
-            "Agent version selector (kind:agent). Omit for the latest published version; pass " +
-            "`draft` to run the working copy of a draft-only agent.",
+            "Agent version selector (kind:agent). Omit to run the latest PUBLISHED version — " +
+            "404 `no_published_version` when the agent has none. `draft` runs the author's " +
+            "working copy and is reserved to callers who may write the agent " +
+            "(403 `draft_not_writable` otherwise).",
         },
         input: {
           type: "object",
@@ -915,8 +926,10 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
             'Which connection to use per integration (either kind): `{ "@scope/integration": ' +
             '"<connection_id>" }`, exactly one connection id per integration. This is the retry ' +
             "path for a `412 must_choose_connection` launch error — that error lists the " +
-            "ambiguous integration and its `candidate_connection_ids`; pick one id from that " +
-            "list and retry the SAME call with it here. Each key is the integration id itself " +
+            "ambiguous integration and its `candidate_connections`, each with a `label`, an " +
+            "`account_id` and `owned_by_actor`; pick one candidate's `id` and retry the SAME " +
+            "call with it here. Those fields are what tells the candidates apart, so read them " +
+            "rather than listing connections separately. Each key is the integration id itself " +
             "(`@scope/integration`) — NOT the `integrations.<id>` field path the error reports " +
             "it under, which matches no integration and is ignored. TOP-LEVEL argument, " +
             "alongside `manifest`/`input` — pass the object itself; JSON-encoding it is " +

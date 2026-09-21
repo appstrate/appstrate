@@ -20,7 +20,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedPackageShare } from "../../helpers/seed.ts";
 import { spacePackages, integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
@@ -48,6 +48,10 @@ async function installAndConnect(
   authKey: string,
   fields: Record<string, string>,
 ): Promise<void> {
+  // The OFFER is the PLACEMENT: a `space_packages` row only speaks for a space
+  // the package is placed in, so switching an unplaced integration on leaves it
+  // inactive — which is not the fixture any of these cases mean to build.
+  await seedPackageShare(ctx.defaultSpaceId, packageId);
   await db.insert(spacePackages).values({
     spaceId: ctx.defaultSpaceId,
     packageId,

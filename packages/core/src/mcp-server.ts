@@ -199,7 +199,7 @@ function canonicaliseMount(path: string): string {
  * Returns `undefined` when absent (default: no workspace access).
  *
  * Validation is strict — a malformed entry throws rather than being
- * silently degraded. The platform's install-time package validator
+ * silently degraded. The platform's import-time package validator
  * (`mcpServerManifestSchema` superRefine) runs this and surfaces the
  * throw as a schema issue, so a bad `_meta.workspace` is normally
  * rejected at upload. Spawn-time callers (`integration-spawn-resolver`)
@@ -234,7 +234,7 @@ export function getMcpServerWorkspaceMount(
 
   // `mount` omitted → default. Present but not a non-empty string →
   // reject rather than silently coerce to the default, so a typo
-  // (`mount: ["/data"]`, `mount: 42`) surfaces at install time instead
+  // (`mount: ["/data"]`, `mount: 42`) surfaces at import time instead
   // of producing a `/workspace` mount the author never asked for.
   if (raw.mount !== undefined && (typeof raw.mount !== "string" || raw.mount.length === 0)) {
     throw new Error(

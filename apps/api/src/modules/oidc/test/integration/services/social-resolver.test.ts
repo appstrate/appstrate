@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { prefixedId } from "../../../../../lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 import { db } from "@appstrate/db/client";
 import {
   user as userTable,

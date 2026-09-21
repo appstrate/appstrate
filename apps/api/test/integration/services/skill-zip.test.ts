@@ -24,6 +24,7 @@ import { packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
+import { seedPackage } from "../../helpers/seed.ts";
 import { tryParseSkillOnlyZip } from "../../../src/services/skill-zip.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
 import { createPackageVersion } from "../../../src/services/package-versions.ts";
@@ -128,7 +129,7 @@ describe("tryParseSkillOnlyZip", () => {
   it("returns unchanged when SKILL.md matches the existing draftContent", async () => {
     const ctx = await createTestContext({ orgSlug: "skill-same" });
     const packageId = `@${ctx.org.slug}/my-skill`;
-    await db.insert(packages).values({
+    await seedPackage({
       id: packageId,
       orgId: ctx.orgId,
       type: "skill",
@@ -147,7 +148,7 @@ describe("tryParseSkillOnlyZip", () => {
   it("bumps the patch when the latest published version is known and content changed", async () => {
     const ctx = await createTestContext({ orgSlug: "skill-bump" });
     const packageId = `@${ctx.org.slug}/my-skill`;
-    await db.insert(packages).values({
+    await seedPackage({
       id: packageId,
       orgId: ctx.orgId,
       type: "skill",

@@ -412,7 +412,58 @@ describe("resolveConnections — fallback (cascade layer 5)", () => {
     });
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]!.code).toBe("must_choose_connection");
-    expect(result.errors[0]!.candidateConnectionIds).toEqual(expect.arrayContaining([a.id, b.id]));
+    expect(result.errors[0]!.candidateConnections?.map((c) => c.id)).toEqual(
+      expect.arrayContaining([a.id, b.id]),
+    );
+  });
+
+  it("must_choose candidates carry what tells them apart, not just ids", () => {
+    // The whole point of the payload: a caller with no picker (API, MCP) must
+    // be able to choose from the error alone. Two rows differing only by label
+    // and ownership are indistinguishable by id.
+    const mine = conn({ label: "web server", accountId: "root@web-01" });
+    const shared = conn({
+      authKey: "pat",
+      label: "database",
+      accountId: "root@db-01",
+      userId: "user_other",
+      sharedWithOrg: true,
+    });
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [mine, shared],
+      pins: [],
+      actorUserId: USER_ID,
+    });
+    expect(result.errors[0]!.code).toBe("must_choose_connection");
+    expect(result.errors[0]!.candidateConnections).toEqual(
+      expect.arrayContaining([
+        { id: mine.id, label: "web server", accountId: "root@web-01", ownedByActor: true },
+        { id: shared.id, label: "database", accountId: "root@db-01", ownedByActor: false },
+      ]),
+    );
+    // …and the snake_case projection the 412 envelope carries — the wire names
+    // are what an API or MCP caller parses to pick without a second call.
+    expect(translateResolutionError(result.errors[0]!)).toMatchObject({
+      field: `integrations.${INTEG}`,
+      code: "must_choose_connection",
+      candidate_connections: expect.arrayContaining([
+        { id: mine.id, label: "web server", account_id: "root@web-01", owned_by_actor: true },
+        { id: shared.id, label: "database", account_id: "root@db-01", owned_by_actor: false },
+      ]),
+    });
+  });
+
+  it("must_choose candidates keep a null label rather than inventing one", () => {
+    const a = conn({ accountId: "acc_a" });
+    const b = conn({ authKey: "pat", accountId: "acc_b" });
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [a, b],
+      pins: [],
+      actorUserId: USER_ID,
+    });
+    expect(result.errors[0]!.candidateConnections?.map((c) => c.label)).toEqual([null, null]);
   });
 
   it("auto-resolves the single HEALTHY candidate even when a dead sibling exists", () => {
@@ -438,8 +489,9 @@ describe("resolveConnections — fallback (cascade layer 5)", () => {
       pins: [],
     });
     expect(result.errors[0]!.code).toBe("must_choose_connection");
-    expect(result.errors[0]!.candidateConnectionIds).toEqual(expect.arrayContaining([a.id, b.id]));
-    expect(result.errors[0]!.candidateConnectionIds!).not.toContain(dead.id);
+    const ids = result.errors[0]!.candidateConnections!.map((c) => c.id);
+    expect(ids).toEqual(expect.arrayContaining([a.id, b.id]));
+    expect(ids).not.toContain(dead.id);
   });
 
   it("emits needs_reconnection when EVERY candidate is flagged", () => {
@@ -861,7 +913,7 @@ describe("resolveConnections — agent dep `auth_key` (AFPS §4.1)", () => {
     // SAW both candidates (no auth_key filter pre-narrowed them).
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]!.code).toBe("must_choose_connection");
-    expect(result.errors[0]!.candidateConnectionIds).toEqual(
+    expect(result.errors[0]!.candidateConnections?.map((c) => c.id)).toEqual(
       expect.arrayContaining([oauthConn.id, patConn.id]),
     );
   });

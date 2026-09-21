@@ -67,7 +67,6 @@
   "list.create": "New agent",
   "list.createItem": "New {{type}}",
   "list.empty": "No agents available.",
-  "list.emptyHint": "Add an agent in the <1>agents/</1> directory or import an AFPS package",
   "list.badgeBuiltIn": "System",
   "list.badgeAutoInstalled": "Auto",
   "list.filter.origin": "Origin",
@@ -83,7 +82,6 @@
   "detail.run": "Run",
   "detail.connectionWarning": "Integration connections required before running",
   "detail.deleteConfirm": "Delete agent \"{{name}}\"? This will permanently remove it from the organization.",
-  "detail.deleteConfirmWithSpaces": "Delete agent \"{{name}}\"? It is currently installed in: {{spaces}}. This will permanently remove it from all spaces.",
   "detail.tabRuns": "Runs",
   "detail.actions.agent": "Agent",
   "detail.actions.execution": "Execution",
@@ -737,7 +735,6 @@
   "run.overrides.proxyNone": "No proxy",
   "run.overrides.versionLabel": "Version",
   "run.overrides.versionInheritLatest": "Latest",
-  "run.overrides.versionInheritPinned": "Pinned (v{{version}})",
   "run.overrides.versionDraft": "Draft (working copy)",
   "run.overrides.dependencyLabel": "Dependencies (skills)",
   "run.overrides.dependencyHint": "For this run, pick each skill's version. \"Inherit\" keeps the manifest pin; \"Draft\" runs the skill's working copy.",
@@ -946,5 +943,13 @@
   "version.draftAhead": "The draft holds changes that are in no version yet.",
   "version.compare": "Compare",
   "version.compareWithDraft": "Compare with the draft",
-  "version.history": "Version history"
+  "version.history": "Version history",
+  "detail.titleNeverPublished": "This agent has no published version. Only its author may run the working copy — ask them to publish one.",
+  "detail.titleNotActive": "This agent is not active in this space. Activate it from its page to run it here.",
+  "detail.deactivatedHere": "Switched off in this space",
+  "detail.activate": "Activate",
+  "detail.draftReadOnly": "No published version: you are reading the author's work in progress. It cannot be run until a version is published.",
+  "error.draftNotWritable": "The draft is the author's working copy: only someone who can edit this package may run it. Run the latest published version instead.",
+  "run.overrides.versionPublished": "Latest published version",
+  "detail.integrationInactive": "Integration not active in this space — activate it to connect."
 }

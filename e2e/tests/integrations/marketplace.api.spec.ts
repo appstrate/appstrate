@@ -7,7 +7,8 @@
  * Verifies the public REST surface end-to-end against a live API:
  *   - `GET /api/integrations` returns a list envelope
  *   - `GET /api/integrations/{pkgId}` returns 404 for an unknown package
- *   - `POST /api/integrations/{pkgId}/activate` returns 404 for an unknown package
+ *   - `POST /api/spaces/{spaceId}/packages` — the ONE activation door, for every
+ *     package family — returns 404 for an unknown package
  *   - `GET /api/integrations/{pkgId}/oauth-clients/{key}` returns 404 when none configured
  *   - The route shape — including the `@scope/name` path segment in URLs —
  *     parses correctly under the production Hono regex matcher
@@ -41,10 +42,15 @@ test.describe("Integration marketplace API surface", () => {
     expect(res.status()).toBe(404);
   });
 
-  test("POST /api/integrations/{packageId}/activate returns 404 for unknown integration", async ({
+  test("Activating an unknown integration is a 404 on the spaces door", async ({
     apiClient,
+    orgContext,
   }) => {
-    const res = await apiClient.post("/integrations/@official/does-not-exist/activate", {});
+    // There is no `/api/integrations/{id}/activate` any more: an integration is
+    // switched on in a space exactly like an agent or a skill.
+    const res = await apiClient.post(`/spaces/${orgContext.org.defaultSpaceId}/packages`, {
+      packageId: "@official/does-not-exist",
+    });
     expect(res.status()).toBe(404);
   });
 

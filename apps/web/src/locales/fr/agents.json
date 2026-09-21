@@ -67,7 +67,6 @@
   "list.create": "Nouvel agent",
   "list.createItem": "Nouveau {{type}}",
   "list.empty": "Aucun agent disponible.",
-  "list.emptyHint": "Ajoutez un agent dans le répertoire <1>agents/</1> ou importez un package AFPS",
   "list.badgeBuiltIn": "Système",
   "list.badgeAutoInstalled": "Auto",
   "list.filter.origin": "Origine",
@@ -83,7 +82,6 @@
   "detail.run": "Lancer",
   "detail.connectionWarning": "Connexions d'intégration requises pour le lancement",
   "detail.deleteConfirm": "Supprimer définitivement l'agent \"{{name}}\" de l'organisation ?",
-  "detail.deleteConfirmWithSpaces": "Supprimer définitivement l'agent \"{{name}}\" ? Il est actuellement installé dans : {{spaces}}. Il sera retiré de tous les espaces.",
   "detail.tabRuns": "Runs",
   "detail.actions.agent": "Agent",
   "detail.actions.execution": "Exécution",
@@ -737,7 +735,6 @@
   "run.overrides.proxyNone": "Aucun proxy",
   "run.overrides.versionLabel": "Version",
   "run.overrides.versionInheritLatest": "Dernière version",
-  "run.overrides.versionInheritPinned": "Épinglée (v{{version}})",
   "run.overrides.versionDraft": "Brouillon (copie de travail)",
   "run.overrides.dependencyLabel": "Dépendances (skills)",
   "run.overrides.dependencyHint": "Pour cette exécution, choisissez la version de chaque skill. « Hériter » garde le pin du manifeste ; « Brouillon » exécute la copie de travail du skill.",
@@ -946,5 +943,13 @@
   "version.draftAhead": "Le brouillon contient des modifications qui ne sont dans aucune version.",
   "version.compare": "Comparer",
   "version.compareWithDraft": "Comparer au brouillon",
-  "version.history": "Historique des versions"
+  "version.history": "Historique des versions",
+  "detail.titleNeverPublished": "Cet agent n'a aucune version publiée. Seul son auteur peut lancer la copie de travail ; demandez-lui de publier une version.",
+  "detail.titleNotActive": "Cet agent n'est pas actif dans cet espace. Activez-le depuis sa page pour pouvoir le lancer ici.",
+  "detail.deactivatedHere": "Désactivé dans cet espace",
+  "detail.activate": "Activer",
+  "detail.draftReadOnly": "Aucune version publiée : vous lisez le travail en cours de l'auteur. Il ne peut pas être lancé tant qu'une version n'est pas publiée.",
+  "error.draftNotWritable": "Le brouillon est la copie de travail de l'auteur : seul quelqu'un qui peut modifier ce package peut le lancer. Lancez la dernière version publiée.",
+  "run.overrides.versionPublished": "Dernière version publiée",
+  "detail.integrationInactive": "Intégration non active dans cet espace — activez-la pour la connecter."
 }

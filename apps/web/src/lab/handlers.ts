@@ -333,13 +333,26 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
             type,
             rows.map((pkg) => ({
               ...pkg,
-              installed_in: f.library.spaces
-                .filter((space) =>
-                  activeIdsFor(type as "agent", space.id).has(pkg.id) && pkg.source !== "system"
-                    ? true
-                    : pkg.installed_in.includes(space.id),
-                )
-                .map((space) => space.id),
+              // The overlay the lists use, expressed as PLACEMENTS: a package a
+              // catalogue activated in a space is placed there and running.
+              placements: f.library.spaces.flatMap((space) => {
+                const existing = pkg.placements.find((p) => p.space_id === space.id);
+                const activated =
+                  pkg.source !== "system" && activeIdsFor(type as "agent", space.id).has(pkg.id);
+                if (existing) {
+                  return [{ ...existing, state: activated ? ("active" as const) : existing.state }];
+                }
+                return activated
+                  ? [
+                      {
+                        space_id: space.id,
+                        via: "shared" as const,
+                        state: "active" as const,
+                        shared_by: null,
+                      },
+                    ]
+                  : [];
+              }),
             })),
           ]),
         ),

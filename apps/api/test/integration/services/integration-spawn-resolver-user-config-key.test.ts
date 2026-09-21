@@ -27,7 +27,7 @@ import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedInstalledPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
   mcpServerManifest,
@@ -63,7 +63,7 @@ async function seedAll(ctx: TestContext, opts: SeedOpts, credBag: Record<string,
       tools_policy: { call: {} },
     }),
   });
-  await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+  await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
   const serverManifest = mcpServerManifest({
     name: SERVER,
     version: "0.1.0",

@@ -23,12 +23,11 @@ import {
   type BundlePackage,
 } from "@appstrate/afps-runtime/bundle";
 import { DbPackageCatalog } from "./run-launcher/db-package-catalog.ts";
-import { DraftPackageCatalog } from "./run-launcher/draft-package-catalog.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import { resolveVersion } from "./package-versions.ts";
 import { db } from "@appstrate/db/client";
-import { packageVersions, spacePackages } from "@appstrate/db/schema";
-import { and, eq } from "drizzle-orm";
+import { packageVersions } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
 import { ApiError, notFound } from "../lib/errors.ts";
 import { formatPackageIdentity } from "@appstrate/afps-runtime/bundle";
 import type { LoadedPackage } from "../types/index.ts";
@@ -73,18 +72,21 @@ export async function buildBundleFromUploadedAfps(
 /**
  * Resolve the version of a package that should be exported.
  *
- * Resolution order:
- *   1. Explicit `versionSpec` (exact / dist-tag / semver range) — fails
- *      with 404 if unresolvable.
- *   2. The version currently installed in the space (`space_packages.version_id`).
- *   3. The `"latest"` dist-tag of the package.
+ * Resolution order — TWO steps, the same two a run has (#636):
+ *   1. Explicit `versionSpec` (exact / dist-tag / semver range) — 404 if
+ *      unresolvable.
+ *   2. The `"latest"` dist-tag of the package.
+ *
+ * There is no per-space step between them. A placement carries no version,
+ * so "the version this space runs" and "the latest published version" are the
+ * same sentence; an export that answered anything else would hand the CLI
+ * different bytes from the ones a server-side run of the same agent executes.
  *
  * Returns the resolved `version` string. Throws `notFound` if no version
  * exists for the package.
  */
 export async function resolveExportVersion(
   packageId: string,
-  scope: BundleAssemblyScope,
   versionSpec?: string | null,
 ): Promise<string> {
   if (versionSpec) {
@@ -100,15 +102,6 @@ export async function resolveExportVersion(
     if (!row) throw notFound(`Version '${versionSpec}' not found for '${packageId}'`);
     return row.version;
   }
-
-  // Installed version pin
-  const [installed] = await db
-    .select({ version: packageVersions.version })
-    .from(spacePackages)
-    .innerJoin(packageVersions, eq(packageVersions.id, spacePackages.versionId))
-    .where(and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.packageId, packageId)))
-    .limit(1);
-  if (installed) return installed.version;
 
   // Fall back to "latest"
   const latestId = await resolveVersion(packageId, "latest");
@@ -140,7 +133,7 @@ export async function buildBundleForAgentExport(
   scope: BundleAssemblyScope,
   opts: { versionSpec?: string | null; metadata?: BundleMetadata } = {},
 ): Promise<Bundle> {
-  const version = await resolveExportVersion(packageId, scope, opts.versionSpec);
+  const version = await resolveExportVersion(packageId, opts.versionSpec);
   const zip = await downloadVersionZip(packageId, version);
   if (!zip) {
     throw notFound(`Artifact missing for '${packageId}@${version}'`);
@@ -150,16 +143,22 @@ export async function buildBundleForAgentExport(
 }
 
 /**
- * Build a Bundle from the agent's DRAFT state (the `packages.draftManifest`
- * + `packages.draftContent` columns and on-the-fly draft skill resolution
- * via {@link DraftPackageCatalog}).
+ * Build a Bundle whose ROOT is the agent's DRAFT state (the
+ * `packages.draftManifest` + `packages.draftContent` columns) and whose
+ * dependencies are the PUBLISHED versions its manifest pins select.
  *
- * This mirrors the dashboard "Run" semantic — running an agent that has
- * never been published, or that has uncommitted edits since its last
- * publish, must produce the same observable behaviour as clicking Run in
- * the UI. The CLI's run-by-id flow consumes this path so `appstrate run
- * @scope/agent` doesn't fail with `no_published_version` when the
- * dashboard would happily run the same agent.
+ * The draft is the root and only the root. `?source=draft` is the export of a
+ * `version=draft` run, so it must hand the CLI the bytes that run executes —
+ * and a server-side `version=draft` run without `dependency_overrides` resolves
+ * `dependencies.skills` against published versions
+ * (`RunPackageCatalog`, the #666 rule). Walking the closure against draft
+ * state instead would ship the working copy of a skill the caller may not even
+ * write, which the run route refuses with `403 draft_not_writable` — one
+ * selector cannot mean two sets of bytes depending on which door asked. A
+ * dependency whose pin resolves to nothing fails here exactly as it fails a
+ * run: `422 dependency_unresolved`, naming the skill, never a silent draft
+ * fallback. Running a skill's working copy stays possible, by the one act that
+ * says so: `dependency_overrides`, which carries its own write-authority gate.
  *
  * Failure mode: if the manifest's `name` / `version` are missing or
  * malformed (e.g. a half-written draft), throws a 400 — drafts must
@@ -191,8 +190,5 @@ export async function buildBundleFromAgentDraft(
     files: rootFiles,
     integrity: "",
   };
-  return buildBundleFromCatalog(root, new DraftPackageCatalog({ orgId: scope.orgId }), {
-    metadata,
-    depTypes: ["skills"],
-  });
+  return buildBundleFromDb(root, scope, metadata);
 }

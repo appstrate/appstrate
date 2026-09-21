@@ -48,8 +48,19 @@ export interface ValidationFieldError {
  * `code`; all are optional.
  */
 export interface ResolutionFieldError extends ValidationFieldError {
-  /** `must_choose_connection` — connection ids the caller may pick from. */
-  candidate_connection_ids?: string[];
+  /**
+   * `must_choose_connection` — the connections the caller may pick from, each
+   * carrying the fields that tell them apart (`label`, `account_id`,
+   * `owned_by_actor`). Pick one and send its `id` back in the request's
+   * `connection_overrides` map. Ids alone would force a second round-trip
+   * through the connection list before the caller could choose.
+   */
+  candidate_connections?: {
+    id: string;
+    label: string | null;
+    account_id: string;
+    owned_by_actor: boolean;
+  }[];
   /** `needs_reconnection` / `insufficient_scopes` — the existing connection's id to UPDATE in place. */
   connection_id?: string;
   /** `insufficient_scopes` — OAuth scopes the selected tools require that the connection lacks. */

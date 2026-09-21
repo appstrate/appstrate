@@ -547,11 +547,9 @@ export const packagePersistence = pgTable(
  * (`UPDATE … WHERE cost IS NULL OR cost < new`) so the value never
  * regresses. This table remains the single source of truth — `runs.cost`
  * is only a cache of `SUM(llm_usage.cost_usd)`, and this table is the ONLY
- * ledger summed into it. `credential_proxy_usage` used to be named here as
- * the deliberate non-summand; it was dropped in migration 0049 (write-only,
- * no reader, no retention sweep). A future metered credential provider must
- * route its cost rows through THIS table with a new `source` value rather
- * than growing a second ledger — that is what keeps `runs.cost` a single SUM.
+ * ledger summed into it. A future metered credential provider must route its
+ * cost rows through THIS table with a new `source` value rather than growing a
+ * second ledger — that is what keeps `runs.cost` a single SUM.
  *
  * A call is attributable to exactly one principal: either an API key
  * (`api_key_id`) or a JWT-authenticated user (`user_id`). The `CHECK`

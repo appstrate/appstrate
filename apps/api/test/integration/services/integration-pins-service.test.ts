@@ -21,13 +21,15 @@ import {
   addOrgMember,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedSpace } from "../../helpers/seed.ts";
+import { seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
 import { integrationConnections } from "@appstrate/db/schema";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
 import {
   validatePinTarget,
   listAccessibleConnections,
+  listAgentsConsumingIntegration,
   loadConnectionOwnership,
+  upsertIntegrationPin,
 } from "../../../src/services/integration-pins-service.ts";
 
 const INTEGRATION = "@official/gmail";
@@ -201,6 +203,80 @@ describe("integration-pins-service — DB access/ownership", () => {
         id: ctx.user.id,
       });
       expect(list.map((c) => c.id)).toEqual([visible]);
+    });
+  });
+
+  // ─── the ONE activation rule, on the two readers that used to take a
+  //     `space_packages` row as the answer ────────────────────────────────
+  describe("activation — a row is not the answer", () => {
+    function agentManifest(id: string): Record<string, unknown> {
+      return {
+        name: id,
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.2",
+        display_name: `Agent ${id}`,
+        dependencies: { integrations: { [INTEGRATION]: "^1.0.0" } },
+      };
+    }
+
+    /** An agent declaring INTEGRATION, homed where told, with a row HERE. */
+    async function seedConsumingAgent(
+      id: string,
+      opts: { homeSpaceId: string; enabled?: boolean },
+    ): Promise<void> {
+      await seedPackage({
+        id,
+        orgId: ctx.orgId,
+        type: "agent",
+        homeSpaceId: opts.homeSpaceId,
+        draftManifest: agentManifest(id),
+      });
+      await seedSpacePackage(scope.spaceId, id, { enabled: opts.enabled ?? true });
+    }
+
+    it("listAgentsConsumingIntegration lists only the agents this space RUNS", async () => {
+      const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+      await seedConsumingAgent("@pinsorg/runs-here", { homeSpaceId: scope.spaceId });
+      // Switched OFF: the row is the space's decision, and it says no.
+      await seedConsumingAgent("@pinsorg/switched-off", {
+        homeSpaceId: scope.spaceId,
+        enabled: false,
+      });
+      // ORPHAN: a row here, but homed elsewhere and offered to nobody.
+      await seedConsumingAgent("@pinsorg/orphan", { homeSpaceId: elsewhere.id });
+
+      const listed = await listAgentsConsumingIntegration(scope, INTEGRATION);
+      expect(listed.map((a) => a.packageId)).toEqual(["@pinsorg/runs-here"]);
+    });
+
+    it("a pin is refused for an agent this space does not RUN", async () => {
+      const connectionId = await seedConnection({
+        spaceId: scope.spaceId,
+        userId: memberId,
+        sharedWithOrg: true,
+      });
+      await seedConsumingAgent("@pinsorg/pin-off", {
+        homeSpaceId: scope.spaceId,
+        enabled: false,
+      });
+
+      await expect(
+        upsertIntegrationPin(scope, INTEGRATION, {
+          agentPackageId: "@pinsorg/pin-off",
+          connectionId,
+          createdBy: ctx.user.id,
+        }),
+      ).rejects.toThrow(/not active in this space/i);
+
+      // Same agent, switched ON — the pin lands.
+      await seedSpacePackage(scope.spaceId, "@pinsorg/pin-off", { enabled: true });
+      const pin = await upsertIntegrationPin(scope, INTEGRATION, {
+        agentPackageId: "@pinsorg/pin-off",
+        connectionId,
+        createdBy: ctx.user.id,
+      });
+      expect(pin.connection_id).toBe(connectionId);
     });
   });
 

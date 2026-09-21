@@ -180,7 +180,7 @@ scope: the doc says those stay.
 > feature branch, and false of `origin/main`, which had been bumped to `>=9.0.0`
 > hours earlier. Run `git -C <repo> fetch -q origin` first, then read from
 > `origin/main`. Also confirm each repo's path before sweeping it: the workspace
-> layout in `CLAUDE.md` is not always where a clone actually lives. Out-of-tree consumers are the ONE
+> layout in `AGENTS.md` is not always where a clone actually lives. Out-of-tree consumers are the ONE
 > legitimate reason a shape survives its in-tree caller — so a finding here must
 > state whether the consumer still needs it (check the consumer's source, do not
 > assume). Also flag test fixtures that pin a retired shape, which is how a

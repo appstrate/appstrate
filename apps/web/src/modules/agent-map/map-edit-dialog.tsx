@@ -37,7 +37,8 @@ import {
 import { fileTextOperation, packageUpdateBody } from "../../lib/package-file-drafts";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useUpdatePackage } from "../../hooks/use-mutations";
-import { useActivateIntegration } from "../../hooks/use-integrations";
+import { useSetPackageActive } from "../../hooks/use-library";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { agentMapQueryKeyPrefix } from "./use-agent-map";
 import { LibraryPicker, type LibraryCandidate } from "./library-picker";
 
@@ -140,7 +141,8 @@ function MapEditForm({
   const { t } = useTranslation(["agents", "agent-map", "common"]);
   const qc = useQueryClient();
   const update = useUpdatePackage("agent", packageId);
-  const activate = useActivateIntegration();
+  const setActive = useSetPackageActive();
+  const currentSpaceId = useCurrentSpaceId();
   const [draftPrompt, setDraftPrompt] = useState(prompt);
   const [entries, setEntries] = useState<ResourceEntry[]>(() =>
     kind === "skills" || kind === "integrations" ? getResourceEntries(manifest, kind) : [],
@@ -222,7 +224,14 @@ function MapEditForm({
     const activated: ResourceEntry[] = [];
     for (const candidate of staged) {
       try {
-        await activate.mutateAsync({ params: { path: { packageId: candidate.id } } });
+        // Staging a catalogue integration ACTIVATES it in this space, the one
+        // door every family now uses (#1437).
+        if (!currentSpaceId) throw new Error("no space");
+        await setActive.mutateAsync({
+          spaceId: currentSpaceId,
+          packageId: candidate.id,
+          active: true,
+        });
         activated.push({ id: candidate.id, version: caretRange(candidate.version) });
       } catch {
         /* toast already shown; keep going so one failure doesn't sink the rest */

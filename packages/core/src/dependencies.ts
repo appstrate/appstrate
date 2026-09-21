@@ -32,7 +32,7 @@ export interface Dependencies {
  *
  * A table rather than a chain of per-key `if`s so the two directions that
  * consume it — the author-input rejection ({@link findRetiredDependencyKeys},
- * folded into `validateManifest`) and the install-time warning (API layer) —
+ * folded into `validateManifest`) and the import-time warning (API layer) —
  * can never enumerate a different set, and so adding a future retirement is
  * one line here.
  *

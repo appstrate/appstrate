@@ -17,7 +17,7 @@
 
 import { Hono, type Context, type Next } from "hono";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { AppEnv } from "../../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../../middleware/rate-limit.ts";
 import { idempotency } from "../../middleware/idempotency.ts";
@@ -27,7 +27,7 @@ import {
   enterSpaceContext,
 } from "@appstrate/core/permissions";
 import { pinnedSpaceScopeGuard } from "../../middleware/guards.ts";
-import { notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
+import { conflict, notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
 import { spaceAssignmentSchema } from "../../lib/space-role-assignment.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../../lib/list-response.ts";
@@ -38,7 +38,7 @@ import { db } from "@appstrate/db/client";
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
 import { user, spaces } from "@appstrate/db/schema";
 import { validateSpaceInOrg } from "../../lib/space-lookup.ts";
-import { callerOrgRole } from "../../lib/view-as.ts";
+import { callerOrgRole, callerPersonalOwnerId } from "../../lib/view-as.ts";
 import { requireOrgPathMembership } from "../../middleware/org-path-context.ts";
 import { getOrgSettings } from "../../services/organizations.ts";
 import { listSessionsForOrg, revokeFamilyForOrgAdmin } from "./services/cli-tokens.ts";
@@ -509,8 +509,24 @@ export function createOidcRouter() {
         }
       } else {
         // space-level: the space must belong to the caller's org.
-        if (!(await validateSpaceInOrg(data.referencedSpaceId, orgId))) {
-          throw forbidden("referencedSpaceId must belong to the current organization");
+        const space = await validateSpaceInOrg(data.referencedSpaceId, orgId);
+        if (!space) {
+          throw notFound("Space not found");
+        }
+        // A personal space takes no OAuth client, for the same reason it takes
+        // no API key (RBAC spec §3.6): a client is an automation identity that
+        // outlives its creator's session, and its end-users would sign in to a
+        // space that exists for exactly one person and goes away with them.
+        // A 409, not a 404: only that space's owner reaches it at all, so
+        // naming the reason discloses nothing.
+        if (space.ownerUserId !== null) {
+          if (space.ownerUserId !== callerPersonalOwnerId(c)) {
+            throw notFound("Space not found");
+          }
+          throw conflict(
+            "personal_space_takes_no_oauth_clients",
+            "A personal space takes no OAuth client: it belongs to one member and is removed when they leave. Register the client in a team space.",
+          );
         }
       }
 
@@ -527,17 +543,21 @@ export function createOidcRouter() {
   );
 
   // Combined list: org-level clients for the org + space-level clients
-  // for every space the org owns. The admin UI renders both in one table.
+  // for every TEAM space the org owns. The admin UI renders both in one table.
   router.get(
     "/api/oauth/clients",
     rateLimit(300),
     requireModulePermission("oauth-clients", "read"),
     async (c) => {
       const orgId = c.get("orgId");
+      // Team spaces only. A personal space registers no client (refused at
+      // creation above), and enumerating them here would name a member's
+      // private space to every other administrator — the same backstop
+      // `applySpaceAssignments` carries (RBAC spec §3.6).
       const appRows = await db
         .select({ id: spaces.id })
         .from(spaces)
-        .where(eq(spaces.orgId, orgId));
+        .where(and(eq(spaces.orgId, orgId), isNull(spaces.ownerUserId)));
       const clients = await listClientsForOrgAndApps(
         orgId,
         appRows.map((a) => a.id),

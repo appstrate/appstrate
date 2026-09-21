@@ -27,7 +27,7 @@ import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useSpaceResolver } from "./hooks/use-current-space";
-import { RequirePermission } from "./components/require-permission";
+import { RequirePermission, RequireOrgCatalogAdmin } from "./components/require-permission";
 import { useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "./components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
@@ -92,7 +92,10 @@ const IntegrationDetailPage = lazy(() =>
   import("./pages/integration-detail").then((m) => ({ default: m.IntegrationDetailPage })),
 );
 const OrgSettingsLibraryPage = lazy(() =>
-  import("./pages/library-page").then((m) => ({ default: m.OrgSettingsLibraryPage })),
+  import("./pages/library-page").then((m) => ({ default: m.LibraryPage })),
+);
+const SpacePackagesPage = lazy(() =>
+  import("./pages/library-page").then((m) => ({ default: m.SpacePackagesPage })),
 );
 const EndUsersPage = lazy(() =>
   import("./pages/end-users-page").then((m) => ({ default: m.EndUsersPage })),
@@ -413,9 +416,11 @@ export function App() {
       <Route
         path="library"
         element={
-          <RequirePermission permission="spaces:read">
+          // Main's guard (#1437): the org library ACTS on every space's
+          // placements, which `spaces:read` does not authorize.
+          <RequireOrgCatalogAdmin>
             <OrgSettingsLibraryPage />
-          </RequirePermission>
+          </RequireOrgCatalogAdmin>
         }
       />
       <Route
@@ -826,14 +831,17 @@ export function App() {
                 </RequirePermission>
               }
             />
+            {/* No current-space permission gate: write authority is the
+                package's HOME space (`home_writable` on its own read, RBAC spec
+                §6.9), which the caller may hold while only READING the space
+                they are browsing from. The editor page renders the no-access
+                panel from that field instead. */}
             <Route
               path="/agents/:scope/:name/edit"
               element={
-                <RequirePermission permission="agents:write">
-                  <LazyRoute>
-                    <PackageEditorPage type="agent" />
-                  </LazyRoute>
-                </RequirePermission>
+                <LazyRoute>
+                  <PackageEditorPage type="agent" />
+                </LazyRoute>
               }
             />
             <Route
@@ -968,14 +976,14 @@ export function App() {
                 </RequirePermission>
               }
             />
+            {/* Same as the agent editor above: the home decides, not the
+                current space. */}
             <Route
               path="/skills/:scope/:name/edit"
               element={
-                <RequirePermission permission="skills:write">
-                  <LazyRoute>
-                    <PackageEditorPage type="skill" />
-                  </LazyRoute>
-                </RequirePermission>
+                <LazyRoute>
+                  <PackageEditorPage type="skill" />
+                </LazyRoute>
               }
             />
             <Route
@@ -1011,11 +1019,9 @@ export function App() {
             <Route
               path="/mcp-servers/:scope/:name/edit"
               element={
-                <RequirePermission permission="mcp-servers:write">
-                  <LazyRoute>
-                    <PackageEditorPage type="mcp-server" />
-                  </LazyRoute>
-                </RequirePermission>
+                <LazyRoute>
+                  <PackageEditorPage type="mcp-server" />
+                </LazyRoute>
               }
             />
             <Route
@@ -1034,6 +1040,16 @@ export function App() {
                 <RequirePermission permission="mcp-servers:read">
                   <LazyRoute>
                     <UnifiedPackageDetailPage type="mcp-server" />
+                  </LazyRoute>
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="/space/packages"
+              element={
+                <RequirePermission permission="spaces:read">
+                  <LazyRoute>
+                    <SpacePackagesPage />
                   </LazyRoute>
                 </RequirePermission>
               }

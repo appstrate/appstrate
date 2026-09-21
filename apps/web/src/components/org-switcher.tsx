@@ -26,6 +26,7 @@ import { useOrg } from "../hooks/use-org";
 import { $api } from "../api/client";
 import { useSpaces } from "../hooks/use-spaces";
 import { usePermissions } from "../hooks/use-permissions";
+import { spaceLabel } from "../lib/space-label";
 import { useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -105,7 +106,12 @@ export function OrgSwitcher({
   const needle = query.trim().toLowerCase();
   const matches = (name: string) => !needle || name.toLowerCase().includes(needle);
   const shownOrgs = orgs.filter((o) => matches(o.name));
-  const shownSpaces = (exploredSpaces.data ?? []).filter((a) => matches(a.name));
+  // "Mon espace" sits above the team spaces, and is called by the reader's own
+  // word rather than the French the server stored once (`spaceLabel`): the wire
+  // deliberately never says whose space it is (RBAC spec §3.6).
+  const shownSpaces = (exploredSpaces.data ?? [])
+    .filter((a) => matches(spaceLabel(a, t)))
+    .sort((a, b) => Number(Boolean(b.personal)) - Number(Boolean(a.personal)));
 
   /**
    * The one place the context is applied — and it is applied whole. Switching
@@ -382,37 +388,54 @@ export function OrgSwitcher({
                 {t("switcher.workspacesEmpty")}
               </p>
             ) : (
-              shownSpaces.map((app) => {
+              shownSpaces.map((app, index) => {
                 const isCurrent = app.id === currentSpaceId && !isExploringElsewhere;
+                // One heading per group, printed on the first row of each: the
+                // personal space is a different KIND of place, not a space that
+                // sorts first.
+                const heading =
+                  index === 0 && app.personal
+                    ? t("spaces.personal.switcherGroup", { ns: "settings" })
+                    : !app.personal && (index === 0 || shownSpaces[index - 1]?.personal)
+                      ? t("spaces.personal.teamGroup", { ns: "settings" })
+                      : null;
                 return (
-                  <div
-                    key={app.id}
-                    className={cn(
-                      "hover:bg-accent flex items-center rounded-md",
-                      isCurrent && "bg-primary-soft hover:bg-primary-soft",
+                  <div key={`group-${app.id}`}>
+                    {heading && (
+                      <p className="text-muted-foreground px-2 pt-2 pb-1 text-[11px] font-semibold tracking-wide uppercase">
+                        {heading}
+                      </p>
                     )}
-                  >
-                    {/* The end of the pick: org AND workspace applied together. */}
-                    <button
-                      type="button"
-                      data-testid={`app-item-${app.id}`}
-                      onClick={() => applyContext(exploredId ?? currentOrg.id, app.id)}
-                      className="flex min-w-0 flex-1 items-center justify-start gap-2.5 p-2 text-left"
+                    <div
+                      key={app.id}
+                      className={cn(
+                        "hover:bg-accent flex items-center rounded-md",
+                        isCurrent && "bg-primary-soft hover:bg-primary-soft",
+                      )}
                     >
-                      <span className="truncate text-sm font-medium">{app.name}</span>
-                      {isCurrent && <Check size={15} className="text-primary ml-auto shrink-0" />}
-                    </button>
-                    {isCurrent && (
-                      <Link
-                        to="/workspace-settings"
-                        state={openAsModal(location)}
-                        onClick={closeSwitcherAndSidebar}
-                        aria-label={t("workspaceSettings.pageTitle", { ns: "settings" })}
-                        className="text-muted-foreground hover:text-foreground shrink-0 p-2"
+                      {/* The end of the pick: org AND workspace applied together. */}
+                      <button
+                        type="button"
+                        data-testid={`app-item-${app.id}`}
+                        disabled={app.access !== undefined && app.access !== "member"}
+                        onClick={() => applyContext(exploredId ?? currentOrg.id, app.id)}
+                        className="flex min-w-0 flex-1 items-center justify-start gap-2.5 p-2 text-left disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        <Settings size={15} />
-                      </Link>
-                    )}
+                        <span className="truncate text-sm font-medium">{spaceLabel(app, t)}</span>
+                        {isCurrent && <Check size={15} className="text-primary ml-auto shrink-0" />}
+                      </button>
+                      {isCurrent && (
+                        <Link
+                          to="/workspace-settings"
+                          state={openAsModal(location)}
+                          onClick={closeSwitcherAndSidebar}
+                          aria-label={t("workspaceSettings.pageTitle", { ns: "settings" })}
+                          className="text-muted-foreground hover:text-foreground shrink-0 p-2"
+                        >
+                          <Settings size={15} />
+                        </Link>
+                      )}
+                    </div>
                   </div>
                 );
               })

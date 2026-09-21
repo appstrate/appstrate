@@ -11,9 +11,10 @@
  * running alone have zero dependency on module schemas.
  */
 import { db } from "./db.ts";
-import { prefixedId, SPACE_ID_RE } from "../../src/lib/ids.ts";
+import { prefixedId, SPACE_ID_RE } from "@appstrate/db/ids";
 import {
   packages,
+  packageShares,
   spacePackages,
   runs,
   runLogs,
@@ -25,11 +26,17 @@ import {
   orgModels,
   orgInvitations,
   packageVersions,
+  packageDistTags,
   spaceMembers,
   spaceRoles,
+  user as userTable,
 } from "@appstrate/db/schema";
-import { eq, type InferInsertModel, type InferSelectModel } from "drizzle-orm";
+import { and, eq, type InferInsertModel, type InferSelectModel } from "drizzle-orm";
 import { mcpServerManifest } from "./integration-manifests.ts";
+import { zipArtifact } from "@appstrate/core/zip";
+import { computeIntegrity } from "@appstrate/core/integrity";
+import * as storage from "@appstrate/db/storage";
+import { AGENT_PACKAGES_BUCKET, versionZipKey } from "../../src/services/package-storage-keys.ts";
 
 // ─── Packages / Agents ───────────────────────────────────
 
@@ -37,12 +44,37 @@ type PackageInsert = Partial<InferInsertModel<typeof packages>> & {
   orgId: string | null;
 };
 
+/**
+ * An organization's package is always homed in one of its spaces
+ * (`packages_org_package_has_home`), and the home of one that belongs to no
+ * team is the organization's DEFAULT space — so a fixture that names no home
+ * gets that one, exactly as the platform would. Passing `homeSpaceId`
+ * explicitly still wins, including `null` for the two rows allowed to be
+ * homeless: a system package (`orgId: null`) and an inline run's shadow row
+ * (`ephemeral: true`).
+ *
+ * Resolved per call rather than cached: `truncateAll` runs between tests, so a
+ * remembered id would point at a space that no longer exists.
+ */
+async function defaultSpaceIdOf(orgId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ id: spaces.id })
+    .from(spaces)
+    .where(and(eq(spaces.orgId, orgId), eq(spaces.isDefault, true)))
+    .limit(1);
+  return row?.id ?? null;
+}
+
 export async function seedPackage(
   overrides: PackageInsert,
 ): Promise<InferSelectModel<typeof packages>> {
   const orgSlug = overrides.id?.split("/")[0]?.replace("@", "") ?? "testorg";
   const name = overrides.id?.split("/")[1] ?? `agent-${crypto.randomUUID().slice(0, 8)}`;
   const id = overrides.id ?? `@${orgSlug}/${name}`;
+  const homeSpaceId =
+    "homeSpaceId" in overrides || overrides.orgId === null || overrides.ephemeral === true
+      ? (overrides.homeSpaceId ?? null)
+      : await defaultSpaceIdOf(overrides.orgId);
 
   const [pkg] = await db
     .insert(packages)
@@ -58,6 +90,7 @@ export async function seedPackage(
       },
       draftContent: "Test prompt content",
       ...overrides,
+      homeSpaceId,
     })
     .returning();
   return pkg!;
@@ -71,7 +104,7 @@ export const seedAgent = seedPackage;
  * `space_packages` row the runtime gate requires for a package to be
  * usable in that space. Idempotent.
  */
-export async function seedInstalledPackage(
+export async function seedSpacePackage(
   spaceId: string,
   packageId: string,
   overrides?: Partial<InferInsertModel<typeof spacePackages>>,
@@ -81,10 +114,101 @@ export async function seedInstalledPackage(
     .values({ spaceId, packageId, ...overrides })
     .onConflictDoUpdate({
       target: [spacePackages.spaceId, spacePackages.packageId],
-      // Apply overrides on conflict so callers can flip e.g. `enabled` on an
-      // already-installed package; no-op write when there are none.
+      // Apply overrides on conflict so callers can flip e.g. `enabled` on a
+      // package the space already holds a row for; no-op write when there are
+      // none.
       set: overrides && Object.keys(overrides).length > 0 ? overrides : { spaceId },
     });
+}
+
+/**
+ * The state the activation door leaves behind for a package the space does NOT
+ * home: the OFFER that places it, plus the `space_packages` row that switches
+ * it on. Two writes, because they are two facts — and a row without the offer
+ * behind it is an ORPHAN, which the platform reads as nothing at all
+ * (`services/package-activation.ts`).
+ *
+ * Reach for this whenever a fixture means "this space runs that package" and
+ * the package lives somewhere else. {@link seedSpacePackage} stays the raw row,
+ * for the cases that assert what an orphan gets — and for a package the space
+ * already homes, where the home IS the placement.
+ */
+export async function seedPlacedPackage(
+  spaceId: string,
+  packageId: string,
+  overrides?: Partial<InferInsertModel<typeof spacePackages>>,
+): Promise<void> {
+  await seedPackageShare(spaceId, packageId);
+  await seedSpacePackage(spaceId, packageId, overrides);
+}
+
+/**
+ * Offer a package to a space (`package_shares`) — the PLACEMENT that makes it
+ * readable and installable there (RBAC spec §6.9, §6.10).
+ *
+ * A fixture for the sharer's act, not for the recipient's: it writes the offer
+ * and nothing else, so a test can set up "this space was offered the package"
+ * without going through `POST …/shares` and its authority checks. Pair it with
+ * {@link seedSpacePackage} when the space should also have taken it up.
+ * `sharedBy` is nullable for the same reason `scripts/migration/0016` leaves it
+ * null: nobody in particular made this offer.
+ */
+export async function seedPackageShare(
+  spaceId: string,
+  packageId: string,
+  sharedBy: string | null = null,
+): Promise<void> {
+  await db.insert(packageShares).values({ spaceId, packageId, sharedBy }).onConflictDoNothing();
+}
+
+/**
+ * Publish a version of a package: upload a real AFPS archive, record the
+ * `package_versions` row that matches its integrity, and move the `latest`
+ * dist-tag onto it.
+ *
+ * The BYTES matter. Outside its home a package runs its latest published
+ * version, and the resolver reads that version's prompt out of storage — a
+ * row with no object behind it answers `422 version_artifact_unavailable`,
+ * which would make a fixture fail for a reason no test meant to assert.
+ *
+ * The manifest and content default to the package's own draft, which is what
+ * "the author published what they have" looks like and keeps a suite's
+ * assertions about the draft true of the published version too.
+ */
+export async function seedPublishedVersion(
+  packageId: string,
+  version: string,
+  opts?: { manifest?: Record<string, unknown>; content?: string },
+): Promise<InferSelectModel<typeof packageVersions>> {
+  const [pkg] = await db.select().from(packages).where(eq(packages.id, packageId)).limit(1);
+  if (!pkg) throw new Error(`seedPublishedVersion: package ${packageId} is not seeded`);
+  const manifest = opts?.manifest ?? {
+    ...(pkg.draftManifest as Record<string, unknown>),
+    name: packageId,
+    version,
+    type: pkg.type,
+  };
+  const content = opts?.content ?? pkg.draftContent ?? "content";
+  const zip = zipArtifact({
+    "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
+    [pkg.type === "skill" ? "SKILL.md" : "prompt.md"]: new TextEncoder().encode(content),
+  });
+  await storage.uploadFile(AGENT_PACKAGES_BUCKET, versionZipKey(packageId, version), zip);
+  const row = await seedPackageVersion({
+    packageId,
+    version,
+    manifest,
+    integrity: computeIntegrity(zip),
+    artifactSize: zip.byteLength,
+  });
+  await db
+    .insert(packageDistTags)
+    .values({ packageId, tag: "latest", versionId: row.id })
+    .onConflictDoUpdate({
+      target: [packageDistTags.packageId, packageDistTags.tag],
+      set: { versionId: row.id, updatedAt: new Date() },
+    });
+  return row;
 }
 
 // ─── Package Versions ─────────────────────────────────────
@@ -118,6 +242,8 @@ type McpServerInsert = {
   version?: string;
   serverType?: "node" | "python" | "binary" | "uv";
   entryPoint?: string;
+  /** The space that HOMES it — one of the two placements. */
+  homeSpaceId?: string;
 };
 
 /**
@@ -140,6 +266,7 @@ export async function seedMcpServer(overrides: McpServerInsert): Promise<void> {
     type: "mcp-server",
     source: "local",
     draftManifest: manifest,
+    ...(overrides.homeSpaceId ? { homeSpaceId: overrides.homeSpaceId } : {}),
   });
   await seedPackageVersion({ packageId: overrides.id, version, manifest });
 }
@@ -208,6 +335,32 @@ export async function seedSpace(overrides: SpaceInsert): Promise<InferSelectMode
     })
     .returning();
   return space!;
+}
+
+/**
+ * A space of `orgId` that NOBODY else in the organization reaches: a stranger's
+ * PERSONAL space (RBAC spec §3.6). Returns its id.
+ *
+ * This is the home to give a package a fixture means to keep OUT of the calling
+ * space's reach. A homeless organization package is not an option — every one
+ * has a home (`packages_org_package_has_home`) — and a private TEAM space is
+ * not one either: an organization owner or admin holds `admin` in every team
+ * space, private included, so only a personal space is genuinely unreachable.
+ *
+ * The owner is a bare `user` row, not a signed-in test user: nothing ever
+ * authenticates as them, and a session would only slow the fixture down.
+ */
+export async function seedUnreachableSpace(orgId: string, name = "Out of reach"): Promise<string> {
+  const ownerUserId = crypto.randomUUID();
+  await db.insert(userTable).values({
+    id: ownerUserId,
+    name: `Stranger ${ownerUserId.slice(0, 8)}`,
+    email: `stranger-${ownerUserId}@test.com`,
+    emailVerified: false,
+    realm: "platform",
+  });
+  const space = await seedSpace({ orgId, name, ownerUserId, visibility: "private" });
+  return space.id;
 }
 
 // ─── Space roles (custom bundles) ─────────────────────────

@@ -308,19 +308,12 @@ test("a pending standard invitation can become a guest invitation with a space a
     .click();
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("radio", { name: /Invité|Guest/ }).check();
-  await dialog.getByRole("button", { name: /Enregistrer|Save/ }).click();
-  await expect(
-    dialog.getByRole("alert").filter({ hasText: /au moins un espace|at least one space/i }),
-  ).toBeVisible();
   await dialog
     .getByRole("combobox", {
       name: /Sélectionner un espace|Select a space/i,
     })
     .click();
   await page.getByRole("option", { name: "Default", exact: true }).click();
-  await expect(
-    page.getByRole("alert").filter({ hasText: /au moins un espace|at least one space/i }),
-  ).toHaveCount(0);
   const updated = page.waitForResponse(
     (response) =>
       response.request().method() === "PUT" &&

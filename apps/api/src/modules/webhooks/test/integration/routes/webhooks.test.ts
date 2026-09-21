@@ -10,7 +10,11 @@ import {
   orgOnlyHeaders,
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
-import { seedApiKey, seedSpace } from "../../../../../../test/helpers/seed.ts";
+import {
+  seedApiKey,
+  seedSpace,
+  seedUnreachableSpace,
+} from "../../../../../../test/helpers/seed.ts";
 
 const app = getTestApp();
 
@@ -359,6 +363,68 @@ describe("Webhooks API", () => {
     });
   });
 
+  describe("the idempotency cache is not a way past the permission", () => {
+    // The cache key is `idem:{orgId}:{spaceId}:{key}` — it carries no caller
+    // identity — and a cached replay returns the stored response WITHOUT
+    // reaching the handler. So whatever proves the grant has to run BEFORE
+    // `idempotency()`, which is what every other mount does. This route's
+    // response is the one that carries the webhook SECRET.
+    it("403s a member replaying the creator's key, instead of handing back the secret", async () => {
+      const key = "11111111-2222-3333-4444-555555555555";
+      const body = JSON.stringify(webhookPayload());
+
+      const created = await app.request("/api/webhooks", {
+        method: "POST",
+        headers: {
+          ...authHeaders(ctx),
+          "Content-Type": "application/json",
+          "Idempotency-Key": key,
+        },
+        body,
+      });
+      expect(created.status).toBe(201);
+      const secret = ((await created.json()) as { secret?: string }).secret;
+      expect(typeof secret).toBe("string");
+
+      // Same org, same space, same key, byte-identical body — no webhook grant.
+      const asMember = await memberContext(ctx, "member");
+      const replayed = await app.request("/api/webhooks", {
+        method: "POST",
+        headers: {
+          ...authHeaders(asMember),
+          "Content-Type": "application/json",
+          "Idempotency-Key": key,
+        },
+        body,
+      });
+      expect(replayed.status).toBe(403);
+      expect(await replayed.text()).not.toContain(secret!);
+    });
+
+    it("still replays to the creator — the guard confines, it does not disable", async () => {
+      // The positive control: without it the test above would pass with
+      // idempotency broken outright.
+      const key = "66666666-7777-8888-9999-000000000000";
+      const body = JSON.stringify(webhookPayload());
+      const send = () =>
+        app.request("/api/webhooks", {
+          method: "POST",
+          headers: {
+            ...authHeaders(ctx),
+            "Content-Type": "application/json",
+            "Idempotency-Key": key,
+          },
+          body,
+        });
+
+      const first = await send();
+      expect(first.status).toBe(201);
+      const replay = await send();
+      expect(replay.status).toBe(201);
+      expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
+    });
+  });
+
   describe("API key space scope (issue #172 extension)", () => {
     async function setupCrossSpaceFixture() {
       const otherSpace = await seedSpace({ orgId: ctx.orgId, name: "Webhook Other Space" });
@@ -623,5 +689,85 @@ describe("webhooks vs org-webhooks (level-dependent guard)", () => {
       });
       expect(removed.status).toBe(204);
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// `?spaceId=` must not be an existence oracle. Every space read in the
+// platform answers a space it may not see with ONE sentence and ONE status
+// (`getSpace`, `requireSpaceFromParam`, `applySpacePermissions`), so that a
+// refusal never says "this id exists". This route validated the filter's
+// space itself, and used to answer 403 for an unknown id while a LIVE
+// personal space of another member — a row that does belong to the org —
+// got past that check and was refused 404 further down. The pair of answers
+// was the leak (RBAC spec §3.6).
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("GET /api/webhooks?spaceId= is not a space existence oracle", () => {
+  let ctx: TestContext;
+
+  // Well-formed (`spc_` + a canonical UUID, so `assertSpaceId` passes and the
+  // 400 path is out of the picture) and seeded by nothing: no such row exists.
+  const ABSENT_SPACE_ID = "spc_00000000-0000-4000-8000-000000000000";
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "webhook-oracle" });
+  });
+
+  const list = (spaceId: string, headers: Record<string, string>) =>
+    app.request(`/api/webhooks?spaceId=${spaceId}`, { headers });
+
+  /**
+   * The problem body with everything REQUEST-specific neutralised: the two
+   * per-request members (`requestId`, `instance`), and the id the caller itself
+   * put in the query, which the uniform 404 echoes back — echoing the caller's
+   * own input tells it nothing it did not already know. Everything else —
+   * `status`, `code`, `type`, `title` and the sentence around the id — has to
+   * match, and that is what the comparison below asserts.
+   */
+  async function normalisedProblem(res: Response, spaceId: string) {
+    const body = (await res.json()) as Record<string, unknown>;
+    delete body.requestId;
+    delete body.instance;
+    if (typeof body.detail === "string") {
+      body.detail = body.detail.replaceAll(spaceId, "<spaceId>");
+    }
+    return body;
+  }
+
+  it("404s a well-formed spaceId that names no space at all", async () => {
+    const res = await list(ABSENT_SPACE_ID, authHeaders(ctx));
+    expect(res.status).toBe(404);
+  });
+
+  it("answers another member's LIVE personal space with the SAME body", async () => {
+    // `seedUnreachableSpace` is the fixture the placement tests use for this:
+    // a private space owned by somebody else, which an org owner reaches in no
+    // other way. The row exists and belongs to the org — that is the whole
+    // point, since it is the case that used to get a different status.
+    const personalSpaceId = await seedUnreachableSpace(ctx.orgId, "Stranger's space");
+
+    const absent = await list(ABSENT_SPACE_ID, authHeaders(ctx));
+    const personal = await list(personalSpaceId, authHeaders(ctx));
+
+    expect(personal.status).toBe(404);
+    expect(personal.status).toBe(absent.status);
+    // The assertion that closes the oracle: statuses alone would still pass if
+    // the two refusals carried different sentences or codes.
+    expect(await normalisedProblem(personal, personalSpaceId)).toEqual(
+      await normalisedProblem(absent, ABSENT_SPACE_ID),
+    );
+  });
+
+  it("still 403s a caller holding no webhook grant at all", async () => {
+    // The positive control. Without it the two cases above would pass just as
+    // well if the route answered 404 to everyone: the missing PERMISSION is not
+    // a missing space, and it keeps its own status. The 403 is raised by the
+    // route guard, before the filter's space is ever looked up.
+    const asMember = await memberContext(ctx, "member");
+    const res = await list(ABSENT_SPACE_ID, orgOnlyHeaders(asMember));
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { detail: string }).detail).toContain("org-webhooks:read");
   });
 });

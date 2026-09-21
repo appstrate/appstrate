@@ -120,11 +120,11 @@ describe("handleImportBundle — integration packages", () => {
     const afps = buildIntegrationAfps({ manifest: validManifest() });
     await handleImportBundle(afps, scope, ctx.user.id, noAuthorize);
 
-    const summary = await getIntegration(ctx.orgId, "@official/gmail");
+    const summary = await getIntegration(scope, "@official/gmail");
     expect(summary).not.toBeNull();
     expect(summary!.manifest.display_name).toBe("Gmail");
 
-    const list = await listIntegrations(ctx.orgId);
+    const list = await listIntegrations(scope);
     expect(list.length).toBe(1);
     expect(list[0]!.id).toBe("@official/gmail");
   });

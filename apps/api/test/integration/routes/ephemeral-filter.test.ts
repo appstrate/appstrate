@@ -11,9 +11,9 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedPackageShare } from "../../helpers/seed.ts";
 import { insertShadowPackage } from "../../../src/services/inline-run.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import type { AgentManifest } from "../../../src/types/index.ts";
 
 const app = getTestApp();
@@ -38,10 +38,11 @@ describe("ephemeral filter — catalog endpoints hide inline shadows", () => {
     // empty lists by accident.
     await seedPackage({
       id: "@ephemfilter/real-agent",
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
     });
-    await installPackage(
+    await activatePackage(
       { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       "@ephemfilter/real-agent",
     );
@@ -79,7 +80,7 @@ describe("ephemeral filter — catalog endpoints hide inline shadows", () => {
     expect(res.status).toBe(404);
   });
 
-  it("installPackage rejects a shadow id as if it did not exist", async () => {
+  it("activatePackage rejects a shadow id as if it did not exist", async () => {
     // Belt-and-braces: the catalog filter should prevent the UI path, but the
     // service layer itself must refuse to install an ephemeral shadow under any
     // circumstance — otherwise a crafted API call could bypass the filter.
@@ -89,8 +90,11 @@ describe("ephemeral filter — catalog endpoints hide inline shadows", () => {
     const [shadow] = await db.select().from(packages).where(eq(packages.ephemeral, true));
     expect(shadow).toBeDefined();
 
+    // Offered too, so the refusal below is the EPHEMERAL filter and not the
+    // placement rule — an unplaced package 404s for a different reason.
+    await seedPackageShare(ctx.defaultSpaceId, shadow!.id);
     await expect(
-      installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, shadow!.id),
+      activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, shadow!.id),
     ).rejects.toMatchObject({
       status: 404,
     });

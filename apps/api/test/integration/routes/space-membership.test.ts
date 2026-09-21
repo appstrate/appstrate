@@ -22,12 +22,7 @@ import {
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import {
-  seedSpace,
-  seedSpaceMember,
-  seedPackage,
-  seedInstalledPackage,
-} from "../../helpers/seed.ts";
+import { seedSpace, seedSpaceMember, seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 
 const app = getTestApp();
@@ -36,6 +31,7 @@ interface SpaceItem {
   id: string;
   visibility: SpaceVisibility;
   default_role: SpaceRolePreset;
+  personal: boolean;
   access: "member" | "none";
   role: { kind: string; key: string; name: string } | null;
   permissions: string[];
@@ -53,7 +49,7 @@ describe("space membership", () => {
     await truncateAll();
     owner = await createTestContext({ orgSlug: "membership" });
     await seedPackage({ orgId: owner.orgId, id: "@membership/agent", type: "agent" });
-    await seedInstalledPackage(owner.defaultSpaceId, "@membership/agent");
+    await seedSpacePackage(owner.defaultSpaceId, "@membership/agent");
   });
 
   const member = (role: OrgRole) => memberContext(owner, role);
@@ -162,19 +158,39 @@ describe("space membership", () => {
       const asMember = await member("member");
       const asGuest = await explicitMember(closed.id, "guest", "operator");
 
-      const ownerIds = (await listSpaces(owner)).map((s) => s.id).sort();
-      expect(ownerIds).toEqual([owner.defaultSpaceId, closed.id, priv.id].sort());
+      // Every listing carries the CALLER's own personal space, provisioned by
+      // this very request (RBAC spec §3.6) — and nobody else's, which is the
+      // property the team-space assertions below would otherwise hide.
+      const team = (items: SpaceItem[]) => items.filter((s) => !s.personal);
+      const own = (items: SpaceItem[]) => items.filter((s) => s.personal);
+
+      const ownerItems = await listSpaces(owner);
+      expect(
+        team(ownerItems)
+          .map((s) => s.id)
+          .sort(),
+      ).toEqual([owner.defaultSpaceId, closed.id, priv.id].sort());
+      expect(own(ownerItems)).toHaveLength(1);
+      expect(own(ownerItems)[0]!.visibility).toBe("private");
+      expect(own(ownerItems)[0]!.access).toBe("member");
 
       const memberItems = await listSpaces(asMember);
-      expect(memberItems.map((s) => s.id).sort()).toEqual([owner.defaultSpaceId, closed.id].sort());
+      expect(
+        team(memberItems)
+          .map((s) => s.id)
+          .sort(),
+      ).toEqual([owner.defaultSpaceId, closed.id].sort());
+      expect(own(memberItems)).toHaveLength(1);
       // The closed space is listed so the member can ask for it — and marked
       // unenterable, which is the whole reason it is listed rather than hidden.
       expect(memberItems.find((s) => s.id === closed.id)!.access).toBe("none");
       expect(memberItems.find((s) => s.id === owner.defaultSpaceId)!.access).toBe("member");
 
       const guestItems = await listSpaces(asGuest);
-      expect(guestItems.map((s) => s.id)).toEqual([closed.id]);
-      expect(guestItems[0]!.access).toBe("member");
+      expect(team(guestItems).map((s) => s.id)).toEqual([closed.id]);
+      expect(guestItems.find((s) => s.id === closed.id)!.access).toBe("member");
+      // A guest gets one too: it is the vehicle a package is shared into.
+      expect(own(guestItems)).toHaveLength(1);
     });
 
     it("GET /:id is visible exactly when the listing would show it", async () => {

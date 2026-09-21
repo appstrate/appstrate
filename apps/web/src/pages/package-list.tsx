@@ -2,7 +2,7 @@
 
 import { type ReactNode, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Trans, useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next";
 import { Layers, LibraryBig, Plus, type LucideIcon, Upload } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
@@ -14,6 +14,7 @@ import { PageHeader, type BreadcrumbEntry } from "../components/page-header";
 import { PackageCollection } from "../components/package-collection";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { ImportModal } from "../components/import-modal";
+import { SpaceLibraryHint } from "../components/space-library-hint";
 import { usePermissions } from "../hooks/use-permissions";
 import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
@@ -110,7 +111,7 @@ export function PackageList() {
   const navigate = useNavigate();
   const location = useLocation();
   const creation = useCreationHandoff("agent", can("agents:write"));
-  const canActivate = can(PACKAGE_PERMISSIONS.agent.install);
+  const canActivate = can(PACKAGE_PERMISSIONS.agent.activate);
 
   const items: CardItem[] | undefined = agents?.map((f) => ({
     id: f.id,
@@ -134,7 +135,7 @@ export function PackageList() {
         isLoading={isLoading}
         error={error}
         emptyMessage={t("list.empty")}
-        emptyHint={<Trans t={t} i18nKey="list.emptyHint" components={{ 1: <code /> }} />}
+        emptyHint={<SpaceLibraryHint type="agent" />}
         emptyIcon={Layers}
         extraActions={
           can("agents:write") || canActivate ? (

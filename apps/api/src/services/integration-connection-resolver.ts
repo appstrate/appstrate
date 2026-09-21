@@ -29,6 +29,8 @@ import { db } from "@appstrate/db/client";
 import {
   integrationConnections,
   integrationPins,
+  packageShares,
+  packages,
   spacePackages,
   integrationOrgDefaults,
 } from "@appstrate/db/schema";
@@ -48,6 +50,7 @@ import {
   manifestAuthKeySet,
   manifestHasRequiredAuth,
   type IntegrationManifest,
+  type ConnectionCandidate,
   type ConnectionOverrides,
   type ConnectionResolutionError,
   type ConnectionResolutionResult,
@@ -60,6 +63,7 @@ import { actorOrSharedFilter } from "../lib/actor.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "./integration-service.ts";
 import { listOrgDefaultsForResolver } from "./integration-org-defaults-service.ts";
+import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
 
 // ─────────────────────────────────── Types ────────────────────────────────────
 
@@ -448,14 +452,19 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   }
 
   if (healthy.length > 1) {
-    // >1 healthy — caller must pick. Surface the LIVE candidate ids so the UI
-    // renders a picker (label + accountId + shared/owned badge). The picker
+    // >1 healthy — caller must pick. Surface the LIVE candidates, each with the
+    // fields that tell them apart (label, accountId, owned/shared), not just
+    // their ids: a caller with no picker — an API client, an MCP model reading
+    // the 412 — chooses from the error alone instead of fetching the connection
+    // list to learn which uuid is which account. The dashboard is not that
+    // caller: its modal embeds the shared picker, whose candidate list is a
+    // superset (it also offers the dead rows, with a renew button). That picker
     // writes a member pin, so the next run skips this branch and resolves via
     // layer 5.
     return errorOf(args, {
       code: "must_choose_connection",
       message: `Multiple connections available for ${args.integrationId} — pick one.`,
-      candidateConnectionIds: healthy.map((c) => c.id),
+      candidateConnections: healthy.map((c) => candidateOf(args, c)),
     });
   }
 
@@ -529,18 +538,38 @@ function oauthScopesForAuth(args: ResolveOneArgs, authKey: string): string[] {
   });
 }
 
+/**
+ * Whose account a row is. Relayed on the two connection-bound connect-flow
+ * codes because both remedies re-consent THAT row: the UI offers the repair
+ * only to its owner, and the connect-offer mint refuses to sign claims against
+ * a colleague's credential (`connectOfferTarget`). Also rides on every
+ * `must_choose_connection` candidate, where it is a disambiguator rather than
+ * a permission: "my account" vs "the one the org shares" is often the only
+ * thing separating two otherwise identical rows.
+ */
+function isOwnedByActor(args: ResolveOneArgs, conn: ConnectionRow): boolean {
+  return (
+    (args.actorUserId !== null && conn.userId === args.actorUserId) ||
+    (args.actorEndUserId !== null && conn.endUserId === args.actorEndUserId)
+  );
+}
+
+/** Project a candidate row onto the picker-facing shape carried by the 412. */
+function candidateOf(args: ResolveOneArgs, conn: ConnectionRow): ConnectionCandidate {
+  return {
+    id: conn.id,
+    label: conn.label,
+    accountId: conn.accountId,
+    ownedByActor: isOwnedByActor(args, conn),
+  };
+}
+
 function checkHealth(
   args: ResolveOneArgs,
   conn: ConnectionRow,
   source: ResolvedConnection["source"],
 ): ResolveOneResult {
-  // Whose account this row is. Relayed on both connection-bound connect-flow
-  // codes because both remedies re-consent THIS row: the UI offers the repair
-  // only to its owner, and the connect-offer mint refuses to sign claims
-  // against a colleague's credential (`connectOfferTarget`).
-  const ownedByActor =
-    (args.actorUserId !== null && conn.userId === args.actorUserId) ||
-    (args.actorEndUserId !== null && conn.endUserId === args.actorEndUserId);
+  const ownedByActor = isOwnedByActor(args, conn);
 
   if (conn.needsReconnection) {
     // A reconnect is a connect flow, so it carries the same relay as the other
@@ -658,7 +687,7 @@ interface ResolveConnectionsForRunInput {
    * caller already refused them for a more precise reason.
    *
    * The readiness gate passes the ids it flagged `integration_not_active`. An
-   * integration that is not installed/enabled in the space has no business also
+   * integration that is not ACTIVE in the space has no business also
    * producing a `not_connected` — the run is refused either way, but the second
    * error names a remedy (connect your account) that does not apply and, for a
    * caller opted into the connect-offer relay, gets a live link minted for it.
@@ -792,10 +821,19 @@ export function translateResolutionError(e: ConnectionResolutionError): Resoluti
     code: e.code,
     title,
     message: e.message,
-    // Smuggle the candidate ids on must_choose_connection so the modal
-    // can render a picker.
-    ...(e.candidateConnectionIds && e.candidateConnectionIds.length > 0
-      ? { candidate_connection_ids: e.candidateConnectionIds }
+    // Smuggle the candidates on must_choose_connection so a caller with no
+    // picker of its own names its choice straight from the error, without a
+    // second round-trip through the connection list to learn which uuid is
+    // which.
+    ...(e.candidateConnections && e.candidateConnections.length > 0
+      ? {
+          candidate_connections: e.candidateConnections.map((c) => ({
+            id: c.id,
+            label: c.label,
+            account_id: c.accountId,
+            owned_by_actor: c.ownedByActor,
+          })),
+        }
       : {}),
     // The connect-flow relay, on every code a connect flow can clear: the
     // kickoff computes no scopes of its own, so it forwards `required_scopes`
@@ -971,10 +1009,22 @@ export async function isUserConnectionCreationBlocked(
   spaceId: string,
   integrationId: string,
 ): Promise<boolean> {
+  // PLACEMENT, not activation (`placementReadFilter` + its `packageShares`
+  // join): the flag is this space's decision about an integration it HOLDS, so
+  // an ORPHAN row is nobody's decision here. `enabled` is deliberately NOT
+  // required — a lock on a switched-off integration is still the space's call.
   const rows = await db
     .select({ blocked: spacePackages.blockUserConnections })
     .from(spacePackages)
-    .where(and(eq(spacePackages.spaceId, spaceId), eq(spacePackages.packageId, integrationId)))
+    .innerJoin(packages, eq(packages.id, spacePackages.packageId))
+    .leftJoin(packageShares, placementShareJoin(spacePackages.packageId, spaceId))
+    .where(
+      and(
+        eq(spacePackages.spaceId, spaceId),
+        eq(spacePackages.packageId, integrationId),
+        placementReadFilter(spaceId),
+      ),
+    )
     .limit(1);
   if (rows[0]?.blocked === true) return true;
   const defaults = await db

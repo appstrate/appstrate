@@ -169,7 +169,7 @@ const OPERATOR_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> =
     // Schedules: read only — choosing the execution identity is governance (#738).
     "schedules:read",
     "persistence:read",
-    // Browse the catalog + self-connect; install/uninstall is preset admin.
+    // Browse the catalog + self-connect; activation is preset admin.
     "integrations:read",
     "integrations:connect",
     "integrations:disconnect",
@@ -283,7 +283,7 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "proxies:read",
   "proxies:write",
   "proxies:delete",
-  // Integrations (author/edit the manifest + browse catalog + install/connect
+  // Integrations (author/edit the manifest + browse catalog + activate/connect
   // via API key for headless flows, incl. end-user OAuth via Appstrate-User
   // header)
   "integrations:read",

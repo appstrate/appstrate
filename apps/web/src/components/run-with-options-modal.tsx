@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { defaultRunVersion, VERSION_DRAFT, VERSION_PUBLISHED } from "../lib/version-selector";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
@@ -27,14 +28,6 @@ interface RunWithOptionsSubmit {
   overrides: RunOverridesValue;
   dependencyOverrides: Record<string, string>;
 }
-
-/**
- * Default version selector — `draft` (the working copy), matching the plain
- * "Lancer" button. The dashboard's run path forces `?version=draft` rather than
- * omitting it (`useRunAgent`), so the editor always runs the draft regardless
- * of the server's published-by-default for API/MCP callers (#636).
- */
-const DEFAULT_VERSION = "draft";
 
 interface RunWithOptionsModalProps {
   open: boolean;
@@ -102,7 +95,14 @@ function RunWithOptionsForm({
   const [inputData, setInputData] = useState<Record<string, unknown>>(() =>
     storedInputValues(agent.input),
   );
-  const [version, setVersion] = useState<string>(DEFAULT_VERSION);
+  // Draft is the author's working copy and the server refuses it to anyone who
+  // cannot WRITE the package in its home (403 `draft_not_writable`), so the
+  // modal neither defaults to it nor offers it outside that circle. Everyone
+  // else starts on the latest published version — the same thing an omitted
+  // selector resolves to, said explicitly because a `<Select>` needs a value.
+  const [version, setVersion] = useState<string>(
+    defaultRunVersion(agent.home_writable) ?? VERSION_PUBLISHED,
+  );
   const [overrides, setOverrides] = useState<RunOverridesValue>({});
   const [dependencyOverrides, setDependencyOverrides] = useState<Record<string, string>>({});
   const inputFormRef = useRef<AgentInputFormHandle>(null);
@@ -113,7 +113,17 @@ function RunWithOptionsForm({
   // Version-pinned input wrapper / skills (fall back to the draft the parent
   // passed while the version-aware detail is still loading).
   const inputWrapper: SchemaWrapper = deps?.inputWrapper ?? agent.input;
-  const skills = deps?.skills ?? agent.dependencies.skills ?? [];
+  // The fallback is the WIRE shape, so `home_writable` is renamed here rather
+  // than left absent — an absent one silently hides the draft option for the
+  // one render before the version-aware detail lands.
+  const skills =
+    deps?.skills ??
+    (agent.dependencies.skills ?? []).map((s) => ({
+      id: s.id,
+      homeWritable: s.home_writable,
+      ...(s.version ? { version: s.version } : {}),
+      ...(s.name ? { name: s.name } : {}),
+    }));
 
   const fire = (input: Record<string, unknown>) =>
     onSubmit({ input, version, overrides, dependencyOverrides });
@@ -129,16 +139,21 @@ function RunWithOptionsForm({
         onSubmit={fire}
       />
 
-      {/* Run version — default `draft` (= plain "Lancer", which forces draft).
-          The only leading option is `draft`; a run has no schedule-style
-          "inherit" to defer to. Any published version is an explicit pick,
+      {/* Run version — a run has no schedule-style "inherit" to defer to, so
+          the single leading option is whatever this caller's default is:
+          the working copy for an author, the latest published version for
+          everyone else. Any other published version is an explicit pick,
           applied verbatim. */}
       <AgentVersionField
         packageId={agent.id}
         label={t("run.overrides.versionLabel")}
         value={version}
         onChange={setVersion}
-        leadingOptions={[{ value: DEFAULT_VERSION, label: t("run.overrides.versionDraft") }]}
+        leadingOptions={[
+          agent.home_writable
+            ? { value: VERSION_DRAFT, label: t("run.overrides.versionDraft") }
+            : { value: VERSION_PUBLISHED, label: t("run.overrides.versionPublished") },
+        ]}
       />
 
       {deps && (

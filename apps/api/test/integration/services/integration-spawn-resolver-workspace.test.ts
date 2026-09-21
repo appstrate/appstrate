@@ -24,7 +24,7 @@ import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedInstalledPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
   mcpServerManifest,
@@ -118,7 +118,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
       source: "local",
       draftManifest: integrationManifest(),
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
     await seedMcpServer(ctx, { mount: "/workspace", access: "rw" });
     await seedConnection(ctx);
 
@@ -140,7 +140,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
       source: "local",
       draftManifest: integrationManifest(),
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
     await seedMcpServer(ctx); // no workspace declaration
     await seedConnection(ctx);
 
@@ -162,7 +162,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
       source: "local",
       draftManifest: integrationManifest(),
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
     await seedMcpServer(ctx, { mount: "/scratch" });
     await seedConnection(ctx);
 
@@ -200,7 +200,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
         tools_policy: { clone_repo: {} },
       }),
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
     // Seed an mcp-server with the SAME name + a workspace declaration —
     // a remote integration must not consult it.
     await seedMcpServer(ctx, { mount: "/workspace", access: "rw" });
@@ -224,7 +224,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
       source: "local",
       draftManifest: integrationManifest(),
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
     await seedMcpServer(ctx, { access: "rw" });
     await seedConnection(ctx);
 

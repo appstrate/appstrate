@@ -32,7 +32,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import {
   seedPackage,
-  seedInstalledPackage,
+  seedSpacePackage,
   seedRun,
   seedSchedule,
   seedApiKey,
@@ -59,10 +59,14 @@ describe("run + schedule GET routes — read permission", () => {
       id: AGENT_ID,
       type: "agent",
       orgId: ctx.orgId,
+      // HOMED here. The read routes resolve the agent by the placement rule
+      // (home, offer, or system), so a row with neither is an orphan no space
+      // reads — the state `scripts/migration/0016` repairs, not a fixture.
+      homeSpaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
       draftManifest: { name: AGENT_ID, version: "0.1.0", type: "agent" },
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, AGENT_ID);
+    await seedSpacePackage(ctx.defaultSpaceId, AGENT_ID);
 
     const run = await seedRun({
       orgId: ctx.orgId,

@@ -15,7 +15,7 @@
  *    reads the manifest at the version the agent's pin resolves to. Semver
  *    ranges and dist-tags are not resolvable in SQL.
  *  - It looked only at `package_versions`, so mutable drafts were invisible
- *    even though an installed package makes them selector-runnable and the
+ *    even though an ACTIVE package makes them selector-runnable and the
  *    editor's Run button explicitly executes the draft.
  *  - It ignored `dependency_overrides`, which can point one dependency at
  *    `draft` per schedule, changing which manifest is judged.
@@ -33,6 +33,7 @@ import { eq, and } from "drizzle-orm";
 
 import { validateAgentIntegrationSelections } from "./integration-scope-validation.ts";
 import { getLatestVersionInfo, getVersionDetail } from "./package-versions.ts";
+import { isPackageActiveHere } from "./space-packages.ts";
 
 interface Finding {
   packageId: string;
@@ -40,8 +41,12 @@ interface Finding {
   artifact: string;
   integrationId: string;
   reason: string;
-  /** Spaces where this package is installed, making this artifact explicitly selectable. */
-  installedIn: string[];
+  /**
+   * Spaces where this package is ACTIVE — placed here AND switched on — making
+   * this artifact explicitly selectable. A `space_packages` row nothing places,
+   * or one switched off, runs nowhere and is not reported.
+   */
+  placedIn: string[];
   /**
    * Spaces where a normal run/export path selects this artifact without
    * an explicit version selector. These findings block rollout.
@@ -159,23 +164,28 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
     // Every artifact a run can reach: the mutable draft (editor Run button,
     // `version=draft`) plus each published version (pin, dist-tag, or range).
     const manifestByLabel = new Map<string, Record<string, unknown>>();
-    const labelByVersionId = new Map<number, string>();
     const draftManifest = asManifest(agent.draftManifest);
     if (draftManifest) manifestByLabel.set("draft", draftManifest);
     for (const v of versions) {
       const m = asManifest(v.manifest);
       if (m) manifestByLabel.set(v.version, m);
-      labelByVersionId.set(v.id, v.version);
     }
     const latest = await getLatestVersionInfo(agent.id);
 
-    const installs = await db
-      .select({
-        spaceId: spacePackages.spaceId,
-        versionId: spacePackages.versionId,
-      })
+    // The ONE activation rule, asked once per space holding a row for this
+    // agent (`isPackageActiveHere`): an operator report that named rows would
+    // name spaces where the agent cannot run at all.
+    const rowSpaces = await db
+      .select({ spaceId: spacePackages.spaceId })
       .from(spacePackages)
       .where(eq(spacePackages.packageId, agent.id));
+    const rowVerdicts = await Promise.all(
+      rowSpaces.map(async (row) => ({
+        spaceId: row.spaceId,
+        active: await isPackageActiveHere({ orgId, spaceId: row.spaceId }, agent.id),
+      })),
+    );
+    const placements = rowVerdicts.filter((row) => row.active);
     const agentSchedules = await db
       .select({
         id: schedules.id,
@@ -186,8 +196,8 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
       .from(schedules)
       .where(and(eq(schedules.packageId, agent.id), eq(schedules.enabled, true)));
 
-    // One consumer = one (artifact, overrides) pair to judge. Installs carry no
-    // dependency overrides of their own; schedules do.
+    // One consumer = one (artifact, overrides) pair to judge. Placements carry
+    // no dependency overrides of their own; schedules do.
     interface Consumer {
       label: string;
       overrides: Record<string, string> | null;
@@ -196,20 +206,16 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
       schedule?: { id: string; nextRunAt: string | null };
     }
     const consumers: Consumer[] = [];
-    for (const i of installs) {
-      // Installation grants access to the PACKAGE, not one immutable artifact:
-      // `/run?version=` accepts draft, exact, tag and range, and the editor's
-      // Run button explicitly selects the draft. A version_id is a default pin,
-      // not a permission boundary, so every artifact remains visible in the
-      // audit. Only the latest published version (normal run default) and the
-      // installed version pin (bundle/export default) block rollout; drafts and
-      // historical versions that need an explicit selector are warnings.
+    for (const i of placements) {
+      // A placement grants access to the PACKAGE, not one immutable artifact:
+      // `/run?version=` accepts draft, exact, tag and range, and an author can
+      // still select the draft. So every artifact remains visible in the audit.
+      // What BLOCKS a rollout is only what runs by DEFAULT, and a placement
+      // carries no version: that default is the latest published
+      // version, and nothing else. Drafts and historical versions need an
+      // explicit selector and are warnings.
       const activeLabels = new Set<string>();
       if (latest?.version) activeLabels.add(latest.version);
-      if (i.versionId !== null) {
-        const installedLabel = labelByVersionId.get(i.versionId);
-        if (installedLabel) activeLabels.add(installedLabel);
-      }
       for (const label of manifestByLabel.keys()) {
         consumers.push({
           label,
@@ -245,11 +251,11 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
         artifact: label,
         integrationId: e.integrationId,
         reason: e.reason,
-        installedIn: [],
+        placedIn: [],
         activeIn: [],
         schedules: [],
       };
-      if (c?.space && !f.installedIn.includes(c.space)) f.installedIn.push(c.space);
+      if (c?.space && !f.placedIn.includes(c.space)) f.placedIn.push(c.space);
       if (c?.activeSpace && !f.activeIn.includes(c.activeSpace)) f.activeIn.push(c.activeSpace);
       if (c?.schedule && !f.schedules.some((s) => s.id === c.schedule!.id))
         f.schedules.push(c.schedule);
@@ -278,7 +284,7 @@ function asManifest(value: unknown): Record<string, unknown> | null {
 
 /** Explicitly selectable or scheduled; useful for inventory and warnings. */
 export function isReachable(f: Finding): boolean {
-  return f.installedIn.length > 0 || f.schedules.length > 0;
+  return f.placedIn.length > 0 || f.schedules.length > 0;
 }
 
 /**

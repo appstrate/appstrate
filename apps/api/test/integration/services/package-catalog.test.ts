@@ -10,14 +10,16 @@ describe("package-catalog", () => {
   let userId: string;
   let orgId: string;
   let orgSlug: string;
+  let defaultSpaceId: string;
 
   beforeEach(async () => {
     await truncateAll();
     const { cookie: _cookie, ...user } = await createTestUser();
     userId = user.id;
-    const { org } = await createTestOrg(userId, { slug: "testorg" });
-    orgId = org.id;
-    orgSlug = org.slug;
+    const created = await createTestOrg(userId, { slug: "testorg" });
+    orgId = created.org.id;
+    orgSlug = created.org.slug;
+    defaultSpaceId = created.defaultSpaceId;
   });
 
   // ── getPackage ────────────────────────────────────────────
@@ -115,12 +117,31 @@ describe("package-catalog", () => {
       } as unknown as Parameters<typeof resolveDeclaredSkills>[0];
     }
 
+    /**
+     * The declaring agent, homed in the org's default space — the anchor every
+     * call below is judged from (RBAC spec §6.9). `seedPackage` homes an org
+     * package in the default space, so the seeded skills are placed beside it.
+     */
+    let declaredBy: { packageId: string; spaceId: string };
+
+    beforeEach(async () => {
+      const id = `@${orgSlug}/dep-agent`;
+      await seedPackage({
+        orgId,
+        id,
+        type: "agent",
+        draftManifest: { name: id, version: "0.1.0", type: "agent" },
+      });
+      declaredBy = { packageId: id, spaceId: defaultSpaceId };
+    });
+
     it("resolves a declared skill and enriches it from the catalog", async () => {
       await seedSkill(`@${orgSlug}/my-skill`, "My Skill");
 
       const declared = await resolveDeclaredSkills(
         agentManifest({ [`@${orgSlug}/my-skill`]: "^0.1.0" }),
         orgId,
+        declaredBy,
       );
 
       expect(declared).toHaveLength(1);
@@ -138,6 +159,7 @@ describe("package-catalog", () => {
       const declared = await resolveDeclaredSkills(
         agentManifest({ "@nonexistent/skill": "*" }),
         orgId,
+        declaredBy,
       );
 
       expect(declared).toEqual([{ id: "@nonexistent/skill", version: "*", resolved: false }]);
@@ -154,6 +176,7 @@ describe("package-catalog", () => {
       const declared = await resolveDeclaredSkills(
         agentManifest({ [`@${orgSlug}/not-a-skill`]: "^0.1.0" }),
         orgId,
+        declaredBy,
       );
 
       expect(declared[0]!.resolved).toBe(false);
@@ -172,13 +195,14 @@ describe("package-catalog", () => {
       const declared = await resolveDeclaredSkills(
         agentManifest({ "@foreignorg/leaky-skill": "^0.1.0" }),
         orgId,
+        declaredBy,
       );
 
       expect(declared[0]!.resolved).toBe(false);
     });
 
     it("returns an empty array (and reads no rows) when nothing is declared", async () => {
-      const declared = await resolveDeclaredSkills(agentManifest({}), orgId);
+      const declared = await resolveDeclaredSkills(agentManifest({}), orgId, declaredBy);
       expect(declared).toEqual([]);
     });
   });

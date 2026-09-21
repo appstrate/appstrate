@@ -10,7 +10,7 @@ import {
   listPinnedSlots,
   scopeFromActor,
 } from "./state/package-persistence.ts";
-import { getInstalledPackageSettings } from "./space-packages.ts";
+import { getSpacePackageSettings } from "./space-packages.ts";
 import type { Actor } from "../lib/actor.ts";
 import { buildAgentPackage } from "./package-storage.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
@@ -137,14 +137,14 @@ export async function buildRunContext(params: {
   generationConfig: ModelGenerationSettings;
   /**
    * Integrations the agent declared that this run will start WITHOUT (not
-   * installed / not connected / unresolvable). Empty on the happy path. The
+   * active / not connected / unresolvable). Empty on the happy path. The
    * caller MUST surface these — see {@link recordDroppedIntegrations}.
    */
   droppedIntegrations: DroppedIntegration[];
 }> {
   const { runId, agent, orgId, spaceId, actor, input, files } = params;
 
-  // Skip getInstalledPackageSettings when all values are already provided by the caller (from preflight)
+  // Skip getSpacePackageSettings when all values are already provided by the caller (from preflight)
   const skipSettingsFetch =
     params.modelId !== undefined &&
     params.proxyId !== undefined &&
@@ -181,7 +181,7 @@ export async function buildRunContext(params: {
   const persistenceScope = scopeFromActor(actor);
   const [spaceSettings, previousCheckpoint, agentPackageResult, latestVersion, pinnedSlotRows] =
     await Promise.all([
-      skipSettingsFetch ? null : getInstalledPackageSettings(spaceId, agent.id),
+      skipSettingsFetch ? null : getSpacePackageSettings({ orgId, spaceId }, agent.id),
       getCheckpoint(agent.id, spaceId, persistenceScope),
       buildAgentPackage(agent, orgId, params.dependencyOverrides ?? null),
       params.overrideVersionLabel

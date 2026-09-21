@@ -12,11 +12,13 @@
  *
  * The bundle export was the remaining looser door to the same bytes. It is
  * registered under `agents:read` alone, and while the ROOT agent is narrowed to
- * `manifest.json` + `prompt.md`, every dependency goes in whole: the draft path
- * reads `downloadPackageFiles` unfiltered (`DraftPackageCatalog.fetch`) and the
- * published path extracts the entire stored artifact (`DbPackageCatalog.fetch`).
- * So an `agents:read`-only credential was 403'd on the file explorer and served
- * the identical `SKILL.md` here.
+ * `manifest.json` + `prompt.md`, every dependency goes in whole:
+ * `DbPackageCatalog.fetch` extracts the entire stored artifact, for a
+ * `?source=draft` export as for a published one (the draft is the ROOT and only
+ * the root — the closure is the published one, so the archive carries the bytes
+ * a server-side `version=draft` run would execute). So an `agents:read`-only
+ * credential was 403'd on the file explorer and served the identical `SKILL.md`
+ * here.
  *
  * The scoped API key is the only credential that can express "authenticated for
  * this org, without `skills:read`" — every org ROLE that carries `agents:read`
@@ -25,11 +27,11 @@
  * is a no-op for sessions.
  *
  * What deliberately did NOT change: dependency resolution stays org-scoped in
- * both catalogs, so a skill that is not installed in the calling space is
- * still exported. That is the rule the RUN path uses (`DraftPackageCatalog` is
- * shared with `RunPackageCatalog`). Under private-space RBAC, exporting those
- * bytes also requires live catalog reachability. Scope tests install the skill
- * in the caller's space; a separate private-space case verifies visibility.
+ * the catalog, so a skill that is not installed in the calling space is still
+ * exported. That is the rule the RUN path uses. Under private-space RBAC,
+ * exporting those bytes also requires live catalog reachability. Scope tests
+ * install the skill in the caller's space; a separate private-space case
+ * verifies visibility.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -42,18 +44,18 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import {
+  seedApiKey,
+  seedSpacePackage,
   seedPackage,
   seedPackageVersion,
-  seedApiKey,
   seedSpace,
-  seedInstalledPackage,
 } from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
 import { buildAgentPackage } from "../../../src/services/package-storage.ts";
 import { eq } from "drizzle-orm";
-import { packageDistTags, spacePackages } from "@appstrate/db/schema";
+import { packageDistTags, packages, spacePackages } from "@appstrate/db/schema";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { readBundleFromBuffer } from "@appstrate/afps-runtime/bundle";
@@ -152,13 +154,14 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
     // Root agent: declares the skill, installed in the default space.
     await seedPackage({
       id: AGENT_ID,
+      homeSpaceId: ctx.defaultSpaceId,
       type: "agent",
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: agentManifest(AGENT_ID, { withSkillDep: true }),
       draftContent: "You are the agent.",
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT_ID);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT_ID);
     await publish(AGENT_ID, "1.0.0", agentManifest(AGENT_ID, { withSkillDep: true }), {
       "prompt.md": enc("You are the agent."),
     });
@@ -167,13 +170,14 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
     // version. Installed in the caller's space so type-scope tests isolate authorization.
     await seedPackage({
       id: SKILL_ID,
+      homeSpaceId: ctx.defaultSpaceId,
       type: "skill",
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: skillManifest("1.0.0"),
       draftContent: SKILL_MD,
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, SKILL_ID);
+    await seedSpacePackage(ctx.defaultSpaceId, SKILL_ID);
     await uploadPackageFiles("skills", ctx.orgId, SKILL_ID, {
       "manifest.json": enc(JSON.stringify(skillManifest("1.0.0"), null, 2)),
       "SKILL.md": enc(SKILL_MD),
@@ -185,9 +189,18 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
 
   it("hides a dependency confined to a private space in both draft and published exports", async () => {
     const hidden = await seedSpace({ orgId: ctx.orgId, visibility: "private" });
+    // CONFINED: the home moves with the installation. A package is present in a
+    // space through its home or a share (RBAC spec §6.9), so leaving the home
+    // in the caller's own space would keep it readable there and this test
+    // would pass on a package that was never confined at all.
     await db.delete(spacePackages).where(eq(spacePackages.packageId, SKILL_ID));
-    await seedInstalledPackage(hidden.id, SKILL_ID);
-    const key = await keyWithScopes(ctx, ["agents:read", "skills:read"]);
+    await db.update(packages).set({ homeSpaceId: hidden.id }).where(eq(packages.id, SKILL_ID));
+    await seedSpacePackage(hidden.id, SKILL_ID);
+    // `agents:write` rides along because `?source=draft` answers to the AGENT's
+    // write authority (handing over a working copy is running it, once
+    // `--local` is in the picture). Without it the draft half would 403 on that
+    // rule and prove nothing about the confined dependency.
+    const key = await keyWithScopes(ctx, ["agents:read", "agents:write", "skills:read"]);
     for (const source of ["draft", "published"]) {
       const response = await app.request(`/api/agents/${AGENT_ID}/bundle?source=${source}`, {
         headers: bearer(key),
@@ -226,7 +239,10 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
   // ── Positive controls: whoever legitimately exports still exports
 
   it("serves ?source=draft once the key also holds skills:read", async () => {
-    const rawKey = await keyWithScopes(ctx, ["agents:read", "skills:read"]);
+    // `agents:write` too: the draft export is reserved to the agent's authors,
+    // which is a rule of its own (`runs-version-selection.test.ts`). What this
+    // case isolates is the DEPENDENCY scope on top of it.
+    const rawKey = await keyWithScopes(ctx, ["agents:read", "agents:write", "skills:read"]);
 
     const res = await app.request(`/api/agents/${AGENT_ID}/bundle?source=draft`, {
       headers: bearer(rawKey),
@@ -264,13 +280,19 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
     // membership row, not of the session.
     for (const role of ["owner", "admin", "member"] as const) {
       const headers = authHeaders(await memberContext(ctx, role));
-
-      for (const source of ["draft", "published"]) {
-        const res = await app.request(`/api/agents/${AGENT_ID}/bundle?source=${source}`, {
-          headers,
-        });
-        expect(`${role}/${source}: ${res.status}`).toBe(`${role}/${source}: 200`);
-      }
+      const res = await app.request(`/api/agents/${AGENT_ID}/bundle?source=published`, {
+        headers,
+      });
+      expect(`${role}/published: ${res.status}`).toBe(`${role}/published: 200`);
+    }
+    // The DRAFT export is a different question — it answers to `agents:write`
+    // in the agent's home, not to `skills:read` — so it is asserted on the
+    // roles that hold it. A `member` who does not author the agent is refused
+    // there by that rule, which `runs-version-selection.test.ts` owns.
+    for (const role of ["owner", "admin"] as const) {
+      const headers = authHeaders(await memberContext(ctx, role));
+      const res = await app.request(`/api/agents/${AGENT_ID}/bundle?source=draft`, { headers });
+      expect(`${role}/draft: ${res.status}`).toBe(`${role}/draft: 200`);
     }
   });
 
@@ -280,14 +302,17 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
     // dependency ships no skill bytes and needs no skill scope.
     await seedPackage({
       id: BARE_AGENT_ID,
+      homeSpaceId: ctx.defaultSpaceId,
       type: "agent",
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: agentManifest(BARE_AGENT_ID, { withSkillDep: false }),
       draftContent: "Bare agent.",
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, BARE_AGENT_ID);
-    const rawKey = await keyWithScopes(ctx, ["agents:read"]);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, BARE_AGENT_ID);
+    // No `skills:read` — that is the point. `agents:write` is the draft
+    // export's own gate and is orthogonal to the dependency scope under test.
+    const rawKey = await keyWithScopes(ctx, ["agents:read", "agents:write"]);
 
     const res = await app.request(`/api/agents/${BARE_AGENT_ID}/bundle?source=draft`, {
       headers: bearer(rawKey),
@@ -301,7 +326,13 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
   // ── The regression that would hurt most: the run path is untouched
 
   it("still resolves the same draft dependency on the RUN path", async () => {
+    // Unplaced in the calling space: no installation AND no home there, which
+    // is what makes the `/files` 404 at the end of this test the space boundary.
+    // The home moves to a space of its own rather than away — an organization's
+    // package always has one (`packages_org_package_has_home`).
+    const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
     await db.delete(spacePackages).where(eq(spacePackages.packageId, SKILL_ID));
+    await db.update(packages).set({ homeSpaceId: elsewhere.id }).where(eq(packages.id, SKILL_ID));
     // `DraftPackageCatalog` is SHARED with the run path (`RunPackageCatalog`
     // routes a `"draft"` dependency override to it), so the fix stayed out of
     // its query on purpose. This pins the behaviour that tightening it would

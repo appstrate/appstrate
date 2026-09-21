@@ -23,7 +23,7 @@ import { db } from "../../helpers/db.ts";
 import { packages, runs } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedRun } from "../../helpers/seed.ts";
+import { seedPackage, seedRun } from "../../helpers/seed.ts";
 import {
   insertShadowPackage,
   deleteOrphanShadowPackage,
@@ -95,7 +95,7 @@ describe("deleteOrphanShadowPackage", () => {
   it("is a safe no-op on a non-ephemeral package id (suspenders scope check)", async () => {
     // A misdirected delete with a regular package id must NOT remove
     // the row — the DELETE is AND-scoped to `ephemeral = true`.
-    await db.insert(packages).values({
+    await seedPackage({
       id: "@orphanorg/regular",
       orgId: ctx.orgId,
       type: "agent",

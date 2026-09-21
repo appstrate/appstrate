@@ -7,7 +7,7 @@
  * The map is a READ-ONLY projection: it owns no data and computes no verdict of
  * its own. Every fact comes from the existing single source of truth for that
  * fact — the effective manifest (`resolveAgentRunVersion`), the app install
- * (`getInstalledPackageSettings`), the schedule table (`listPackageSchedules`), the
+ * (`getSpacePackageSettings`), the schedule table (`listPackageSchedules`), the
  * connection resolver (`resolveAgentConnectionReadiness`) and the readiness
  * gate (`collectAgentReadinessErrors`). Adding a check here would let the map
  * disagree with the run gate, which is the one thing it must never do.
@@ -30,14 +30,14 @@ import type { Context } from "hono";
 import type { AppEnv, LoadedPackage } from "../../types/index.ts";
 import type { ValidationFieldError } from "../../lib/errors.ts";
 import type { EnrichedSchedule } from "@appstrate/shared-types";
-import { getPackageWithAccess } from "../../services/package-catalog.ts";
+import { getPackageForRead } from "../../services/package-catalog.ts";
 import { resolveDeclaredSkills } from "../../services/package-catalog.ts";
 import {
   resolveAgentRunVersion,
   VERSION_SELECTOR_DRAFT,
 } from "../../services/agent-version-resolver.ts";
 import { listPackageSchedules } from "../../services/scheduler.ts";
-import { getInstalledPackageSettings } from "../../services/space-packages.ts";
+import { getSpacePackageSettings } from "../../services/space-packages.ts";
 import { resolveAgentConnectionReadiness } from "../../services/integration-pins-service.ts";
 import { collectAgentReadinessErrors } from "../../services/agent-readiness.ts";
 import { listOrgModels } from "../../services/org-models.ts";
@@ -364,7 +364,7 @@ export async function buildAgentMap(
   const canReadPersistence = c.get("permissions")?.has("persistence:read") ?? false;
   const persistenceScope = scopeFromActor(actor);
 
-  const loaded = await getPackageWithAccess(opts.itemId, orgId, spaceId);
+  const loaded = await getPackageForRead(opts.itemId, orgId, spaceId);
   if (!loaded) return null;
 
   // Default to the working copy, matching `connection-readiness` — a map of a
@@ -391,8 +391,8 @@ export async function buildAgentMap(
     memories,
   ] = await Promise.all([
     listPackageSchedules(scope, agent.id, actor, undefined),
-    resolveDeclaredSkills(agent.manifest, orgId),
-    getInstalledPackageSettings(spaceId, agent.id),
+    resolveDeclaredSkills(agent.manifest, orgId, { packageId: agent.id, spaceId }),
+    getSpacePackageSettings(scope, agent.id),
     // Skipped entirely when nothing is declared — the resolver would fan out
     // per integration for an empty answer.
     declaredIntegrations.length > 0

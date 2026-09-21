@@ -7,13 +7,13 @@
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { createAuthedContext } from "../../fixtures/browser.fixture.ts";
-import { createAgent, createSpace, installPackageInSpace } from "../../helpers/seed.ts";
+import { createAgent, createSpace, activatePackageInSpace } from "../../helpers/seed.ts";
 import { AgentsPage } from "../../pages/agents-page.ts";
 import { Sidebar } from "../../pages/sidebar.ts";
 import { WebhooksPage } from "../../pages/webhooks-page.ts";
 
 test.describe("Agent visibility in UI", () => {
-  test("Default space shows auto-installed agents on /agents page", async ({
+  test("Default space shows the agents authored in it on /agents", async ({
     authedPage: page,
     apiClient,
     browserCtx,
@@ -27,20 +27,20 @@ test.describe("Agent visibility in UI", () => {
     await agents.expectAgentVisible(agentName);
   });
 
-  test("Custom space shows only installed agents", async ({
+  test("Custom space shows only the agents placed there", async ({
     browser,
     apiClient,
     browserCtx,
     orgOnlyClient,
   }) => {
     const scope = `@${browserCtx.org.orgSlug}`;
-    const installedAgent = `ui-installed-${Date.now()}`;
+    const placedAgent = `ui-placed-${Date.now()}`;
     const hiddenAgent = `ui-hidden-${Date.now()}`;
-    await createAgent(apiClient, scope, installedAgent);
+    await createAgent(apiClient, scope, placedAgent);
     await createAgent(apiClient, scope, hiddenAgent);
 
     const customSpace = await createSpace(orgOnlyClient, `UI Custom ${Date.now()}`);
-    await installPackageInSpace(orgOnlyClient, customSpace.id, `${scope}/${installedAgent}`);
+    await activatePackageInSpace(orgOnlyClient, customSpace.id, `${scope}/${placedAgent}`);
 
     const context = await createAuthedContext(
       browser,
@@ -51,7 +51,7 @@ test.describe("Agent visibility in UI", () => {
     const customPage = await context.newPage();
     const agents = new AgentsPage(customPage);
     await agents.goto();
-    await agents.expectAgentVisible(installedAgent);
+    await agents.expectAgentVisible(placedAgent);
     await agents.expectAgentNotVisible(hiddenAgent);
     await context.close();
   });

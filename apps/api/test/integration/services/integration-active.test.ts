@@ -19,7 +19,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedPackageShare, seedSpace } from "../../helpers/seed.ts";
 import { spacePackages } from "@appstrate/db/schema";
 import {
   isIntegrationActive,
@@ -30,6 +30,7 @@ import {
   initSystemIntegrations,
   __resetSystemIntegrationsForTest,
 } from "../../../src/services/integration-client-registry.ts";
+import { isUserConnectionCreationBlocked } from "../../../src/services/integration-connection-resolver.ts";
 
 const SYSTEM_INTEGRATION = "@myorg/gmail";
 const DCR_INTEGRATION = "@myorg/remote-mcp";
@@ -57,9 +58,17 @@ describe("integration activation precedence", () => {
       },
       { id: DCR_INTEGRATION },
     ]);
-    await seedPackage({ id: SYSTEM_INTEGRATION, orgId: ctx.orgId, type: "integration" });
-    await seedPackage({ id: DCR_INTEGRATION, orgId: ctx.orgId, type: "integration" });
-    await seedPackage({ id: PLAIN_INTEGRATION, orgId: ctx.orgId, type: "integration" });
+    // Homed in the space under test: a `space_packages` row only speaks for a
+    // space the package is PLACED in, and what these cases separate is the
+    // activation precedence, not the placement.
+    const home = {
+      orgId: ctx.orgId,
+      type: "integration" as const,
+      homeSpaceId: ctx.defaultSpaceId,
+    };
+    await seedPackage({ id: SYSTEM_INTEGRATION, ...home });
+    await seedPackage({ id: DCR_INTEGRATION, ...home });
+    await seedPackage({ id: PLAIN_INTEGRATION, ...home });
   });
 
   afterEach(() => {
@@ -160,5 +169,49 @@ describe("integration activation precedence", () => {
 
     // Empty input → empty map (no query).
     expect((await resolveIntegrationActivations([], ctx.defaultSpaceId)).size).toBe(0);
+  });
+
+  /**
+   * An ORPHAN row — `space_packages` with neither a home nor a share behind it
+   * — is not this space's decision about anything, and `block_user_connections`
+   * is a decision. The flag's ENFORCER, `isUserConnectionCreationBlocked`
+   * (`services/integration-connection-resolver.ts`), already conjoins
+   * placement; this resolver feeds the Integrations LIST and the detail page.
+   * Read the row without the conjunct on one side only and the two disagree:
+   * the padlock renders while `POST …/connect` admits every member.
+   *
+   * The share is the discriminating control — same row, same read, one offer
+   * apart. Without it the first half would pass on any refusal at all.
+   */
+  it("reports blockUserConnections=false on an ORPHAN row carrying true, and true once a share PLACES it", async () => {
+    const ORPHANED = "@myorg/orphaned-lock";
+    const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+    await seedPackage({
+      id: ORPHANED,
+      orgId: ctx.orgId,
+      type: "integration",
+      homeSpaceId: elsewhere.id,
+    });
+    // The row, and ONLY the row: no home here, no offer here.
+    await db.insert(spacePackages).values({
+      spaceId: ctx.defaultSpaceId,
+      packageId: ORPHANED,
+      enabled: true,
+      blockUserConnections: true,
+    });
+
+    expect(
+      (await resolveIntegrationActivations([ORPHANED], ctx.defaultSpaceId)).get(ORPHANED),
+    ).toEqual({ active: false, blockUserConnections: false });
+    // …and the reader that ENFORCES the flag says the same thing, which is the
+    // agreement this conjunct exists to keep.
+    expect(await isUserConnectionCreationBlocked(ctx.defaultSpaceId, ORPHANED)).toBe(false);
+
+    await seedPackageShare(ctx.defaultSpaceId, ORPHANED);
+
+    expect(
+      (await resolveIntegrationActivations([ORPHANED], ctx.defaultSpaceId)).get(ORPHANED),
+    ).toEqual({ active: true, blockUserConnections: true });
+    expect(await isUserConnectionCreationBlocked(ctx.defaultSpaceId, ORPHANED)).toBe(true);
   });
 });
