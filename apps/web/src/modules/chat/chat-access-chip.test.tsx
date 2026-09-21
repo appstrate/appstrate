@@ -181,10 +181,9 @@ describe("the capability list", () => {
   ];
 
   it("puts each verdict in the SAME item as the capability it judges", () => {
-    // The regression: verdict and label as sibling `dd`/`dt` flattened by
-    // `display: contents`, verdict first — a screen reader paired row N's
-    // label with row N+1's verdict. One `li` per row, label then verdict,
-    // makes that pairing impossible.
+    // A screen reader reads each row as one unit: one `li` per capability,
+    // label then verdict, so a verdict can never be announced next to a
+    // neighbouring row's label.
     const html = render(<ChatCapabilityList capabilities={capabilities} />);
     const items = [...html.matchAll(/<li[^>]*>(.*?)<\/li>/g)].map((m) => m[1]!);
     expect(items).toHaveLength(2);

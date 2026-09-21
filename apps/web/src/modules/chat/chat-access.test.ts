@@ -14,11 +14,13 @@
 import { describe, expect, it } from "bun:test";
 import {
   CHAT_CAPABILITIES,
-  INTEGRATION_ACTIVATE_PERMISSION,
   resolveChatCapabilities,
   type ChatAccessContext,
 } from "./chat-access.ts";
-import type { SpaceGrant } from "../../lib/package-permissions.ts";
+import { PACKAGE_PERMISSIONS, type SpaceGrant } from "../../lib/package-permissions.ts";
+
+/** The grant `maySetPackageActive` reads for an integration in a team space. */
+const INTEGRATION_ACTIVATE_PERMISSION = PACKAGE_PERMISSIONS.integration.activate;
 
 /** A caller holding exactly `permissions`, standing in `space`. */
 function context(permissions: string[], space?: Partial<SpaceGrant>): ChatAccessContext {
@@ -83,6 +85,59 @@ describe("the capability table", () => {
   it("grants everything to a caller holding every underlying permission", () => {
     expect(Object.values(verdicts(context(EVERYTHING, {})))).toEqual(
       CHAT_CAPABILITIES.map(() => true),
+    );
+  });
+});
+
+describe("each row's own permission", () => {
+  // A row keyed on `invokes` alone — its own permission dropped — would still
+  // pass every "holds everything" case. Each case below removes ONLY what one
+  // row reads beyond the shared prerequisites, from a caller holding
+  // everything, and pins exactly which rows fall: that row, plus the rows that
+  // are defined as requiring it too, and no other.
+  const cases: { row: string; removes: string[]; refuses: string[] }[] = [
+    {
+      row: "callApi",
+      removes: ["mcp:invoke"],
+      // Every act dispatches through `mcp:invoke`; browsing does not.
+      refuses: CHAT_CAPABILITIES.map((c) => c.id).filter((id) => id !== "browseFiles"),
+    },
+    // `run_and_wait` also needs a run-read permission, so both fall together.
+    {
+      row: "readRuns",
+      removes: ["runs:read", "runs:read-all"],
+      refuses: ["runAgents", "readRuns"],
+    },
+    { row: "runAgents", removes: ["agents:run"], refuses: ["runAgents"] },
+    { row: "createAgents", removes: ["agents:write"], refuses: ["createAgents"] },
+    { row: "browseFiles", removes: ["files:read"], refuses: ["browseFiles"] },
+    {
+      row: "connectIntegrations",
+      removes: ["integrations:connect"],
+      refuses: ["connectIntegrations"],
+    },
+    // `{}` below is a TEAM space, where activation is the bare grant.
+    {
+      row: "activateIntegrations",
+      removes: [INTEGRATION_ACTIVATE_PERMISSION],
+      refuses: ["activateIntegrations"],
+    },
+    { row: "schedule", removes: ["schedules:write"], refuses: ["schedule"] },
+  ];
+
+  it("covers every row of the table", () => {
+    expect(cases.map((c) => c.row).sort()).toEqual(CHAT_CAPABILITIES.map((c) => c.id).sort());
+  });
+
+  it.each(cases)("refuses $row once only its own permission is gone", ({ removes, refuses }) => {
+    const without = verdicts(
+      context(
+        EVERYTHING.filter((p) => !removes.includes(p)),
+        {},
+      ),
+    );
+    expect(without).toEqual(
+      Object.fromEntries(CHAT_CAPABILITIES.map((c) => [c.id, !refuses.includes(c.id)])),
     );
   });
 });
@@ -160,7 +215,7 @@ describe("activating an integration", () => {
   it("is distinct from connecting an account", () => {
     // The distinction the chat's own system prompt has to explain when an
     // `integration_not_active` error lands: connecting is personal, activating
-    // is organization-wide. Holding one must never light up the other.
+    // is per space. Holding one must never light up the other.
     const team = { personal: false };
     const connector = verdicts(context([...CONVERSES, "integrations:connect"], team));
     expect(connector.connectIntegrations).toBe(true);

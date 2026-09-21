@@ -7,8 +7,8 @@
  * The assistant runs on the caller's own permissions: the platform-MCP bearer
  * it authorizes with carries exactly the caller's effective set, no
  * amplification (`packages/module-chat/src/prompt.ts`). So "what may the
- * assistant do" and "what may I do" are the same question — and until now the
- * only way to learn the answer was to ask for something and read the refusal.
+ * assistant do" and "what may I do" are the same question, and this table
+ * answers it before the caller has to ask for something and read the refusal.
  *
  * This file is the ANSWER SHAPE, not a gate. Nothing here authorizes anything;
  * every act is re-checked server-side at invoke time. What it must be is
@@ -23,11 +23,7 @@
  * did ("why did it refuse me").
  */
 
-import {
-  PACKAGE_PERMISSIONS,
-  maySetPackageActive,
-  type SpaceGrant,
-} from "../../lib/package-permissions";
+import { maySetPackageActive, type SpaceGrant } from "../../lib/package-permissions";
 import type { GateablePermission } from "../../hooks/use-permissions";
 
 /** What a capability predicate gets to look at. */
@@ -107,8 +103,13 @@ export const CHAT_CAPABILITIES: readonly ChatCapability[] = [
     held: (ctx) => invokes(ctx) && readsRuns(ctx) && ctx.can("agents:run"),
   },
   {
-    id: "authorAgents",
-    labelKey: "access.capability.authorAgents",
+    // CREATING only. A new agent lands in the current space, where
+    // `agents:write` is what the create route asks. Editing an EXISTING agent
+    // is authorized by the package's HOME space (`requirePackageInOrg()` in
+    // `apps/api/src/routes/packages.ts`), which for an agent shared from
+    // elsewhere is not this one — so this grant proves nothing about it.
+    id: "createAgents",
+    labelKey: "access.capability.createAgents",
     held: (ctx) => invokes(ctx) && ctx.can("agents:write"),
   },
   {
@@ -127,7 +128,8 @@ export const CHAT_CAPABILITIES: readonly ChatCapability[] = [
     held: (ctx) => reachesMcp(ctx) && ctx.can("files:read"),
   },
   {
-    // Connecting is personal; activating is organization-wide. The chat's own
+    // Connecting is personal; activating is per space
+    // (`POST /api/spaces/:spaceId/packages`). The chat's own
     // system prompt has to explain that distinction when an
     // `integration_not_active` error lands — showing both rows is what lets a
     // user see, before that happens, which half they hold.
@@ -172,9 +174,3 @@ export function resolveChatCapabilities(ctx: ChatAccessContext): ResolvedChatCap
     granted: converses && capability.held(ctx),
   }));
 }
-
-/**
- * The permission the activation row reads, re-exported so a test pins the
- * coupling rather than re-spelling the string.
- */
-export const INTEGRATION_ACTIVATE_PERMISSION = PACKAGE_PERMISSIONS.integration.activate;
