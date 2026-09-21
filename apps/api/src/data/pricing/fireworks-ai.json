@@ -1139,9 +1139,9 @@
       }
     },
     "cost": {
-      "input": 1.74,
-      "output": 3.48,
-      "cacheRead": 0.145
+      "input": 1.2,
+      "output": 1.2,
+      "cacheRead": 0.6
     }
   },
   "accounts/fireworks/models/deepseek-v4-pro-0813": {
@@ -5709,6 +5709,35 @@
       "cacheRead": 0.21
     }
   },
+  "accounts/fireworks/routers/glm-5p3-fast": {
+    "label": "Accounts/fireworks/routers/glm 5p3 Fast",
+    "contextWindow": 1048576,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": null,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
+    "cost": {
+      "input": 2.1,
+      "output": 6.6,
+      "cacheRead": 0.39
+    }
+  },
   "accounts/fireworks/routers/kimi-k2p6-fast": {
     "label": "Accounts/fireworks/routers/kimi K2p6 Fast",
     "contextWindow": 262144,
@@ -5957,9 +5986,9 @@
       }
     },
     "cost": {
-      "input": 1.74,
-      "output": 3.48,
-      "cacheRead": 0.145
+      "input": 1.2,
+      "output": 1.2,
+      "cacheRead": 0.6
     }
   },
   "deepseek-v4p1-flash": {
@@ -6176,6 +6205,37 @@
       "input": 2.1,
       "output": 6.6,
       "cacheRead": 0.21
+    }
+  },
+  "glm-5p3-fast": {
+    "label": "Glm 5p3 Fast",
+    "contextWindow": 1048576,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "supported",
+        "temperatureCompatible": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
+      }
+    },
+    "cost": {
+      "input": 2.1,
+      "output": 6.6,
+      "cacheRead": 0.39
     }
   },
   "gpt-oss-120b": {

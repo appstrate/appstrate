@@ -194,7 +194,7 @@
   },
   "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8": {
     "label": "Qwen/Qwen3 Coder 480B A35B Instruct FP8",
-    "contextWindow": 256000,
+    "contextWindow": 262144,
     "maxTokens": null,
     "capabilities": [
       "text"
@@ -578,7 +578,7 @@
   },
   "deepseek-ai/DeepSeek-V3.1": {
     "label": "Deepseek Ai/DeepSeek V3.1",
-    "contextWindow": 128000,
+    "contextWindow": 131072,
     "maxTokens": 16384,
     "capabilities": [
       "text",
@@ -677,6 +677,27 @@
       "input": 1.32,
       "output": 3.96,
       "cacheRead": 0.13
+    }
+  },
+  "deepseek-ai/DeepSeek-V4.1-Flash": {
+    "label": "Deepseek Ai/DeepSeek V4.1 Flash",
+    "contextWindow": 1048576,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 0.3,
+      "output": 1.2,
+      "cacheRead": 0.006
     }
   },
   "google/gemma-3n-E4B-it": {
@@ -1172,7 +1193,7 @@
   },
   "zai-org/GLM-4.5-Air-FP8": {
     "label": "Zai Org/GLM 4.5 Air FP8",
-    "contextWindow": 128000,
+    "contextWindow": 131072,
     "maxTokens": null,
     "capabilities": [
       "text"
