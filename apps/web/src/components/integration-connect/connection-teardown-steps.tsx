@@ -18,7 +18,10 @@ export function ConnectionTeardownSteps({ connectionId }: { connectionId: string
   if (!data || data.length === 0) return null;
 
   return (
-    <div className="mt-4">
+    // `min-w-0`: this is a grid item of the dialog, and a grid item's automatic
+    // minimum width is its content's — a long shell line would widen the dialog
+    // instead of scrolling inside the copy block.
+    <div className="mt-4 min-w-0">
       <HandoffSteps steps={data} />
     </div>
   );
