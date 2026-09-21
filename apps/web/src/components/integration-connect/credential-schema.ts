@@ -18,31 +18,17 @@ export interface CredentialFieldSchema {
   default?: string;
 }
 
-/**
- * Credential names the PLATFORM produces, declared by the auth's
- * `_meta["dev.appstrate/provisioning"].provides` (AFPS §10). They stay in
- * `credentials.schema` — that schema describes the stored shape, and the server
- * validates the merged bag against it — but asking a user to type a value the
- * platform is about to mint would be worse than useless: it suggests they were
- * supposed to have one. Display only; the server strips these names from the
- * request body whatever the manifest claims.
- */
-function provisionedFieldNames(auth: IntegrationManifestAuth): Set<string> {
-  // The generated type declares `_meta` as `{}` (the spec leaves it open), so
-  // it has to be widened before a vendor key can be read out of it.
-  const meta = auth._meta as Record<string, unknown> | undefined;
-  const block = meta?.["dev.appstrate/provisioning"] as { provides?: unknown } | undefined;
-  const provides = block?.provides;
-  return new Set(
-    Array.isArray(provides) ? provides.filter((p): p is string => typeof p === "string") : [],
-  );
+/** The auth's `credentials.schema.properties`, or `undefined` if it declares none. */
+function schemaProperties(auth: IntegrationManifestAuth): Record<string, unknown> | undefined {
+  const schema = auth.credentials?.schema as { properties?: Record<string, unknown> } | undefined;
+  const props = schema?.properties;
+  return props && typeof props === "object" ? props : undefined;
 }
 
 /** Per-field presentation, keyed by credential name. */
 export function fieldSchemas(auth: IntegrationManifestAuth): Record<string, CredentialFieldSchema> {
-  const schema = auth.credentials?.schema as { properties?: Record<string, unknown> } | undefined;
-  const props = schema?.properties;
-  if (!props || typeof props !== "object") return {};
+  const props = schemaProperties(auth);
+  if (!props) return {};
   const out: Record<string, CredentialFieldSchema> = {};
   for (const [name, raw] of Object.entries(props)) {
     if (raw && typeof raw === "object") out[name] = raw;
@@ -50,13 +36,18 @@ export function fieldSchemas(auth: IntegrationManifestAuth): Record<string, Cred
   return out;
 }
 
-/** The credential fields the form should ask the user for. */
+/**
+ * The credential fields the form should ask the user for: the declared
+ * properties, verbatim.
+ *
+ * Nothing is filtered out here. A credential the PLATFORM mints is already
+ * absent from the schema `GET /api/integrations/connect/context` serves — the
+ * server owns that list, since which names a provisioning kind owns is a
+ * property of the provisioner, not of the manifest.
+ */
 export function deriveFieldNames(auth: IntegrationManifestAuth): string[] {
-  const schema = auth.credentials?.schema as { properties?: Record<string, unknown> } | undefined;
-  if (schema?.properties && typeof schema.properties === "object") {
-    const provisioned = provisionedFieldNames(auth);
-    return Object.keys(schema.properties).filter((name) => !provisioned.has(name));
-  }
+  const props = schemaProperties(auth);
+  if (props) return Object.keys(props);
   if (auth.type === "api_key") return ["api_key"];
   if (auth.type === "basic") return ["username", "password"];
   // AFPS §7.5 — mtls credential schema SHOULD describe a client cert and

@@ -13,25 +13,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   backs (`source.kind: "local"`, the second first-party one after
   `@appstrate/github-git`). One connection is one key on one Unix account, and
   **that account is the boundary**: what the agent can do is exactly what the
-  account can do. Grant root only if you mean it; otherwise create a dedicated
-  user and restrict it with what the system already gives you — sudoers, groups,
-  a restricted shell. Appstrate narrows nothing further, and the setup guide says
-  so in as many words, because a posture nobody chose is a posture nobody holds.
-  The private key lives in the keyring and is delivered to the runner as a file
-  (`delivery.files`, `/run/secrets/ssh_key`, `0600`); it never enters the agent
-  container.
-
-  That is a deliberate reversal. An earlier cut of this work generated a
-  forced-command dispatcher — `command=` in `authorized_keys`, one exact-match
-  arm per allowed verb — and `ssh_exec` sent only a verb NAME. It was dropped
-  for two reasons. It made a connection's capability **fixed at creation**: the
-  dispatcher's path carried the key's own fingerprint, so adding one verb meant
-  a new key, a new dispatcher and a new connection, with the old one left
-  orphaned on the machine. And its central argument was circular — shell
-  injection is a threat only while you are constraining WHICH commands run;
-  once the account may run what it may run, `a; b` is exactly as authorised as
-  `a`. The state of the art agrees: Teleport brokers hosts and records sessions
-  and has no per-command policy either, deferring to sudoers and SELinux.
+  account can do. `ssh_exec` hands its string to that account's login shell —
+  SSH `exec` has no argv at the protocol level, so there is no narrower
+  payload. Grant root only if you mean it; otherwise create a dedicated user
+  and restrict it with what the system already gives you — sudoers, groups, a
+  restricted shell. Appstrate narrows nothing further, and the setup guide says
+  so in as many words, because a posture nobody chose is a posture nobody
+  holds. The private key lives in the keyring and is delivered to the runner as
+  a file (`delivery.files`, `/run/secrets/ssh_key`, `0600`); it never enters
+  the agent container.
 
   **Read-only is a property of the AGENT, not of the connection.** The platform
   grants tools per agent (`toolAllowlist`, enforced sidecar-side), so an agent
@@ -61,19 +51,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the ed25519 pair itself, straight into the credential envelope: never
   displayed, never typed, never readable again. A pasted key is almost always
   the user's PERSONAL key, already installed on ten other machines, so the
-  blast radius of an Appstrate credential used to leave Appstrate; a minted
-  pair is used nowhere else.
+  blast radius of an Appstrate credential would leave Appstrate; a minted pair
+  is used nowhere else.
 
   The form asks for what only the user can answer — host, port, account, and
-  the target's own host key. The line is "can the platform produce this better
-  than the user can", not "can it produce it at all". The host key is the case
-  that decides the difference: the platform CAN fetch it, and an earlier cut of
-  this work did, with `ssh-keyscan`. But a scan is an unauthenticated first
-  contact — precisely what a machine-in-the-middle answers — while the user is
-  already on a shell there, creating the Unix account the guide asks for. So
-  they read it off the machine (`awk '{print $1" "$2}'
-/etc/ssh/ssh_host_ed25519_key.pub`) and the platform opens no SSH socket at
-  any point.
+  the target's own host key. The host key is read off the machine
+  (`awk '{print $1" "$2}' /etc/ssh/ssh_host_ed25519_key.pub`) from a session
+  the user already authenticated, because a remote scan is by definition an
+  unauthenticated first contact — precisely what a machine-in-the-middle
+  answers. The platform opens no SSH socket at any point, and its image ships
+  no SSH client.
 
   After creation the connect page shows the one block to paste on the target. It
   authorises the public key on the named account with `restrict` — no port
@@ -81,28 +68,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   that account has no login shell, since sshd would then run nothing and the
   failure would only surface mid-run. It prints the host's own fingerprint, of
   the key type actually pinned, so it can be compared against the one pasted
-  into the form. The same screen carries
-  the block that REMOVES the key: deleting the connection destroys the private
-  half and nothing else, because the platform cannot reach the target.
+  into the form. The same screen carries the block that REMOVES the key:
+  deleting the connection destroys the private half and nothing else, because
+  the platform cannot reach the target.
 
   Nothing about either block is stored. Both are derived on demand from the
   credential bundle the keyring already holds — an `openssh-key-v1` container
   carries its own public half in the clear, and the fingerprint is a pure
   function of the pinned host key — so `GET /api/me/connections/{id}/handoff`
-  rebuilds exactly what the connect screen showed, months later, by the same
-  function. A column would have bought a permanent migration for data that
-  cannot be missing, and a stored copy could drift from the key it claims to
-  remove.
+  hands back the removal block due at deletion, months later, from the same
+  function that rendered the install block.
 
   The mechanism is generic, not SSH-specific: an auth opts in with
-  `_meta["dev.appstrate/provisioning"]` (AFPS §10), declaring in `provides` the
-  names the platform owns — one declaration, read by the form to hide those
-  fields and checked server-side against the kind's floor. The hosted form
-  strips them from the request body, so a crafted submit cannot supply its own
-  key. The programmatic `connect/fields` import runs no provisioner by design
-  (the caller already holds the credential), which is why the shape constraints
-  the SSH runtime depends on live in `credentials.schema` — validated on both
-  doors — rather than in the provisioner.
+  `_meta["dev.appstrate/provisioning"]` (AFPS §10), naming the KIND and nothing
+  else. WHICH credentials a kind mints is a property of the provisioner, so it
+  is declared once, in the platform code beside it — a manifest is immutable
+  once published, and a copy of that list inside one could only drift from the
+  provisioner it describes. The hosted form is handed a schema with those names
+  already removed, so the browser is told what to ask for rather than working
+  it out. Both doors then refuse a field the platform mints: the hosted form
+  strips those names from the request body, and the programmatic
+  `POST …/connect/fields` import rejects a submission carrying one, so no path
+  lets a caller bring its own key. What the user DOES supply is shape-checked
+  by the auth's `credentials.schema` (`pattern`), validated on both doors
+  alike — against the FULL schema, which still describes the stored shape.
 
   A target the RUNNER could not reach is refused at the form rather than
   persisted: the platform's usual egress guard honours
@@ -112,8 +101,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   floor — the predicate the runner's listener uses — and not that guard. It
   checks literals only; a NAME resolving to a private address meets the
   runner's own CONNECT gate at run time, which is the gate that was always
-  going to decide. The platform image gains nothing for any of this: it opens
-  no SSH socket, so it ships no SSH client.
+  going to decide.
 
 ### Fixed
 

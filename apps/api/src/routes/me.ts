@@ -378,26 +378,20 @@ router.delete("/connections/:connectionId", async (c) => {
 });
 
 /**
- * `GET /api/me/connections/:connectionId/handoff` — what the platform minted
- * for this connection and what the user must do with it.
+ * `GET /api/me/connections/:connectionId/handoff` — what is due on the user's
+ * own machine when this connection is deleted: the `deferred` steps, and only
+ * those. Deleting a minted credential destroys the platform's half and nothing
+ * else — its public key stays authorized on the target, which the platform
+ * cannot reach — so the teardown block has to remain available afterwards.
  *
- * Two things live here. The block that AUTHORISES the key on the target, which
- * the screen after the connect form also shows but keeps nowhere: that page
- * authenticates with a page cookie destroyed on submit, so closing the window
- * used to strand the connection with no way to install its key. And the block
- * that REMOVES it, which is due at deletion — only a MINTED credential leaves
- * anything behind, because deleting the connection destroys the platform's
- * half and nothing else: its public key stays authorized on the target, where
- * the platform has no access.
+ * The install half belongs to the connect-submit response: the connect portal
+ * shows it once, on the screen right after the form, and this endpoint does not
+ * re-serve it.
  *
- * Both are DERIVED on demand, never stored, by the same `handoffStepsFor` the
- * submit path calls. A column would have bought a permanent migration for data
- * that cannot be missing, and a stored copy could drift from the key it claims
- * to remove. Callers pick what they need off `deferred`.
- *
- * Computed here rather than on the connection LIST because it costs a
- * decryption, and a list must not pay it for every row to serve the one row
- * the user is acting on.
+ * DERIVED on demand, never stored, by the same `handoffStepsFor` the submit
+ * path calls, so the block that removes a key cannot drift from the one that
+ * installed it. Computed here rather than on the connection LIST because it
+ * costs a decryption, which a list must not pay per row.
  *
  * Non-disclosure matches the DELETE beside it: an unknown, malformed or
  * not-owned id answers an empty list rather than a 404, so a caller probing
@@ -445,7 +439,8 @@ router.get("/connections/:connectionId/handoff", async (c) => {
     );
     const credentials = await getIntegrationConnectionCredentialFields(connectionId);
     if (!credentials) return empty();
-    return c.json(listResponse([...handoffStepsFor(auth, credentials)]));
+    const steps = handoffStepsFor(auth, credentials);
+    return c.json(listResponse(steps.filter((s) => s.kind === "command" && s.deferred === true)));
   } catch (err) {
     // A manifest that no longer loads must not block a deletion — the user can
     // still delete, they just get no removal block.

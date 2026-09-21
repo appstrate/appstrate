@@ -67,7 +67,7 @@
             "user": {
               "type": "string",
               "title": "Compte Unix sur la cible",
-              "description": "Le compte dédié qui portera la clé — pas root. Ce que l'agent peut faire, c'est ce que ce compte peut faire.",
+              "description": "Le compte qui portera la clé : c'est LUI la frontière. Ce que l'agent peut faire, c'est exactement ce que ce compte peut faire. Un compte dédié et restreint par défaut ; root seulement en connaissance de cause.",
               "pattern": "^[a-z_][a-z0-9_-]{0,31}$"
             },
             "host_key": {
@@ -109,8 +109,7 @@
           "required": true
         },
         "dev.appstrate/provisioning": {
-          "kind": "ssh_keypair",
-          "provides": ["private_key"]
+          "kind": "ssh_keypair"
         }
       }
     }

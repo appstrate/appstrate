@@ -11,14 +11,22 @@
  *   2. hand the private key to the real `ssh-keygen -y` and require it to
  *      derive the same public line. That is the only check that speaks for
  *      OpenSSH itself, so it runs wherever the binary exists.
+ *
+ * The reader is tested the other way round: containers forged HERE, with the
+ * inner fields a caller of `POST .../connect/fields` gets to choose, because
+ * what comes out of that parser is interpolated into a script run as root.
  */
 
 import { describe, it, expect } from "bun:test";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { generateOpenSshEd25519KeyPair, fingerprintPublicKey } from "../../src/lib/openssh-key.ts";
+import {
+  generateOpenSshEd25519KeyPair,
+  fingerprintPublicKey,
+  publicKeyFromOpenSshPrivateKey,
+} from "../../src/lib/openssh-key.ts";
 
 /**
  * A forward cursor over the container. The format is a run of length-prefixed
@@ -95,7 +103,7 @@ describe("generateOpenSshEd25519KeyPair", () => {
     expect(c.keyCount).toBe(1);
   });
 
-  it("carries the same public point in the blob, the private section and the .pub line", () => {
+  it("carries the same public point in the blob, the private section and the derived line", () => {
     const kp = generateOpenSshEd25519KeyPair("appstrate");
     const c = decodeContainer(kp.privateKey);
 
@@ -107,9 +115,9 @@ describe("generateOpenSshEd25519KeyPair", () => {
     expect(point.length).toBe(32);
     expect(pub.offset).toBe(c.publicBlob.length);
 
-    // The emitted authorized_keys line must encode exactly that blob.
-    const [, emittedBase64] = kp.publicKey.split(/\s+/);
-    expect(Buffer.from(emittedBase64!, "base64").equals(c.publicBlob)).toBe(true);
+    // The line the platform derives must encode exactly that blob.
+    const [, derivedBase64] = publicKeyFromOpenSshPrivateKey(kp.privateKey).split(/\s+/);
+    expect(Buffer.from(derivedBase64!, "base64").equals(c.publicBlob)).toBe(true);
 
     // Private section: checkint ×2, type, point, seed||point, comment, padding.
     const sec = reader(c.privateSection);
@@ -141,38 +149,138 @@ describe("generateOpenSshEd25519KeyPair", () => {
     for (let i = 0; i < pad.length; i++) expect(pad[i]).toBe(i + 1);
   });
 
-  it("reports the fingerprint ssh-keygen -l would print, over the decoded blob", () => {
+  it("mints a different key every call", () => {
+    const a = generateOpenSshEd25519KeyPair("appstrate");
+    const b = generateOpenSshEd25519KeyPair("appstrate");
+    expect(a.privateKey).not.toBe(b.privateKey);
+    expect(publicKeyFromOpenSshPrivateKey(a.privateKey)).not.toBe(
+      publicKeyFromOpenSshPrivateKey(b.privateKey),
+    );
+  });
+});
+
+// ─────────────────── containers forged with hostile fields ───────────────────
+
+function sshString(value: Buffer | string): Buffer {
+  const bytes = typeof value === "string" ? Buffer.from(value, "utf8") : value;
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(bytes.length);
+  return Buffer.concat([len, bytes]);
+}
+
+function uint32(n: number): Buffer {
+  const b = Buffer.alloc(4);
+  b.writeUInt32BE(n);
+  return b;
+}
+
+/**
+ * An `openssh-key-v1` container with arbitrary inner fields — what a caller of
+ * `POST .../connect/fields` can store, since that door runs no provisioner and
+ * the manifest's `pattern` only pins the PEM armour.
+ */
+function forgeContainer(
+  opts: { keyType?: string; comment?: string; point?: Buffer; blob?: Buffer } = {},
+): string {
+  const keyType = opts.keyType ?? "ssh-ed25519";
+  const point = opts.point ?? randomBytes(32);
+  const blob = opts.blob ?? Buffer.concat([sshString(keyType), sshString(point)]);
+  const privateSection = Buffer.concat([
+    Buffer.alloc(8), // the two checkints
+    sshString(keyType),
+    sshString(point),
+    sshString(Buffer.concat([randomBytes(32), point])),
+    sshString(opts.comment ?? ""),
+  ]);
+  const container = Buffer.concat([
+    Buffer.from("openssh-key-v1\0", "binary"),
+    sshString("none"),
+    sshString("none"),
+    sshString(""),
+    uint32(1),
+    sshString(blob),
+    sshString(privateSection),
+  ]);
+  return (
+    "-----BEGIN OPENSSH PRIVATE KEY-----\n" +
+    container.toString("base64") +
+    "\n-----END OPENSSH PRIVATE KEY-----\n"
+  );
+}
+
+describe("publicKeyFromOpenSshPrivateKey", () => {
+  it("returns the bare `ssh-ed25519 <base64>` pair, never the container's comment", () => {
+    const kp = generateOpenSshEd25519KeyPair("appstrate @myorg/ssh");
+    expect(publicKeyFromOpenSshPrivateKey(kp.privateKey)).toMatch(/^ssh-ed25519 [A-Za-z0-9+/]+=*$/);
+    expect(publicKeyFromOpenSshPrivateKey(kp.privateKey)).not.toContain("myorg");
+  });
+
+  it("drops a hostile comment instead of carrying it out of the container", () => {
+    const pem = forgeContainer({ comment: "x'; touch /tmp/PWNED; echo '\n" });
+    const line = publicKeyFromOpenSshPrivateKey(pem);
+    expect(line).toMatch(/^ssh-ed25519 [A-Za-z0-9+/]+=*$/);
+  });
+
+  it.each([
+    ["a non-ed25519 key type", forgeContainer({ keyType: "ssh-rsa" })],
+    ["a key type carrying shell syntax", forgeContainer({ keyType: "ssh-ed25519'; id; echo '" })],
+    ["a short public point", forgeContainer({ point: randomBytes(31) })],
+    [
+      "a blob with trailing bytes",
+      forgeContainer({
+        blob: Buffer.concat([
+          sshString("ssh-ed25519"),
+          sshString(randomBytes(32)),
+          Buffer.from("junk"),
+        ]),
+      }),
+    ],
+    ["a truncated public blob", forgeContainer({ blob: sshString("") })],
+    ["armour with no container in it", "-----BEGIN OPENSSH PRIVATE KEY-----\nnope\n"],
+  ])("refuses %s", (_label, pem) => {
+    expect(() => publicKeyFromOpenSshPrivateKey(pem)).toThrow();
+  });
+});
+
+describe("fingerprintPublicKey", () => {
+  it("reports what ssh-keygen -l prints, over the decoded blob", () => {
     const kp = generateOpenSshEd25519KeyPair("appstrate");
-    const [, base64] = kp.publicKey.split(/\s+/);
+    const [type, base64] = publicKeyFromOpenSshPrivateKey(kp.privateKey).split(/\s+/);
     const expected =
       "SHA256:" +
       createHash("sha256")
         .update(Buffer.from(base64!, "base64"))
         .digest("base64")
         .replace(/=+$/, "");
-    expect(kp.fingerprint).toBe(expected);
-    // Same answer whether it is recomputed from the line we emitted…
-    expect(fingerprintPublicKey(kp.publicKey)).toBe(expected);
+    expect(fingerprintPublicKey(`${type} ${base64}`)).toBe(expected);
   });
 
-  it("mints a different key every call", () => {
-    const a = generateOpenSshEd25519KeyPair("appstrate");
-    const b = generateOpenSshEd25519KeyPair("appstrate");
-    expect(a.publicKey).not.toBe(b.publicKey);
-    expect(a.privateKey).not.toBe(b.privateKey);
-  });
-});
-
-describe("fingerprintPublicKey", () => {
-  it("drops the host column of an ssh-keyscan line", () => {
-    const kp = generateOpenSshEd25519KeyPair("appstrate");
-    const [type, base64] = kp.publicKey.split(/\s+/);
-    expect(fingerprintPublicKey(`[example.test]:2222 ${type} ${base64}`)).toBe(kp.fingerprint);
-    expect(fingerprintPublicKey(`${type} ${base64}`)).toBe(kp.fingerprint);
+  it("accepts an ssh-rsa line", () => {
+    expect(fingerprintPublicKey("ssh-rsa AAAAB3NzaC1yc2E=")).toStartWith("SHA256:");
   });
 
-  it("refuses a line that carries no key", () => {
-    expect(() => fingerprintPublicKey("ssh-ed25519")).toThrow(/not an SSH public key/);
+  /**
+   * ONE form, `<type> <base64>` — EXACTLY the shape the manifest's `host_key`
+   * pattern admits on both connection doors, down to the single space. A
+   * three-column `ssh-keyscan` line, a trailing comment and a type outside the
+   * two supported are all refused rather than half-read into a column that
+   * happens to look like base64; so is any whitespace the pattern refuses,
+   * since a reader looser than the pattern accepts values the other door does
+   * not.
+   */
+  it.each([
+    ["an ssh-keyscan line", "[example.test]:2222 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5"],
+    ["a trailing comment", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 agent@host"],
+    ["an unsupported type", "ecdsa-sha2-nistp256 AAAAE2VjZHNh"],
+    ["a line that carries no key", "ssh-ed25519"],
+    ["base64 that is not", "ssh-ed25519 not-base64!"],
+    ["a tab between the columns", "ssh-ed25519\tAAAAC3NzaC1lZDI1NTE5"],
+    ["a doubled space", "ssh-ed25519  AAAAC3NzaC1lZDI1NTE5"],
+    ["leading whitespace", " ssh-ed25519 AAAAC3NzaC1lZDI1NTE5"],
+    ["a trailing newline", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5\n"],
+    ["an embedded newline", "ssh-ed25519\nAAAAC3NzaC1lZDI1NTE5"],
+  ])("refuses %s", (_label, line) => {
+    expect(() => fingerprintPublicKey(line)).toThrow(/not an SSH public key/);
   });
 });
 
@@ -205,7 +313,7 @@ describe.if(sshKeygen !== null)("cross-check against the real ssh-keygen", () =>
 
       // ssh-keygen echoes the comment it read out of the container, so the
       // whole line must match — which also proves the comment round-tripped.
-      expect(out.trim()).toBe(kp.publicKey);
+      expect(out.trim()).toBe(`${publicKeyFromOpenSshPrivateKey(kp.privateKey)} appstrate`);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -216,14 +324,16 @@ describe.if(sshKeygen !== null)("cross-check against the real ssh-keygen", () =>
     try {
       const kp = generateOpenSshEd25519KeyPair("appstrate");
       const pubPath = join(dir, "id_ed25519.pub");
-      writeFileSync(pubPath, kp.publicKey + "\n");
+      writeFileSync(pubPath, publicKeyFromOpenSshPrivateKey(kp.privateKey) + "\n");
 
       const proc = Bun.spawn([sshKeygen!, "-l", "-f", pubPath], { stdout: "pipe" });
       const out = await new Response(proc.stdout).text();
       await proc.exited;
 
       // `256 SHA256:… comment (ED25519)` — the fingerprint is the 2nd field.
-      expect(out.trim().split(/\s+/)[1]).toBe(kp.fingerprint);
+      expect(out.trim().split(/\s+/)[1]).toBe(
+        fingerprintPublicKey(publicKeyFromOpenSshPrivateKey(kp.privateKey)),
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

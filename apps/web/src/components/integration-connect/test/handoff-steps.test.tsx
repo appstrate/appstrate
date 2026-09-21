@@ -82,15 +82,4 @@ describe("HandoffSteps", () => {
     const markup = render(<HandoffSteps steps={[STEPS[2]!]} />);
     expect(markup.split("Retirer cette clé plus tard")).toHaveLength(2);
   });
-
-  /**
-   * A kind this build does not know must not blank the page: the other steps
-   * still carry what the user has to do. Only a forward-compatibility property
-   * — a provisioner shipped by a module can add one.
-   */
-  it("skips an unknown kind without dropping its neighbours", () => {
-    const steps = [{ kind: "sorcery", label: "???" } as unknown as HandoffStep, STEPS[1]!];
-    const markup = render(<HandoffSteps steps={steps} />);
-    expect(markup).toContain("SHA256:YJK");
-  });
 });

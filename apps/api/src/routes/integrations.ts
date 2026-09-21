@@ -92,7 +92,12 @@ import {
   usesAutoProvisionedClient,
 } from "../services/integration-connections.ts";
 import { resolveStrategy } from "../services/connect/registry.ts";
-import { handoffStepsFor, provisionCredentials } from "../services/connect/provisioning.ts";
+import {
+  authWithoutMintedCredentials,
+  handoffStepsFor,
+  provisionCredentials,
+  readProvisioning,
+} from "../services/connect/provisioning.ts";
 import { createConnectRunExecutor } from "../services/connect/connect-run-launcher.ts";
 import { getCurrentScopesGranted } from "../services/integration-scope-resolver.ts";
 import { isUserConnectionCreationBlocked } from "../services/integration-connection-resolver.ts";
@@ -267,11 +272,11 @@ const noSecretWithPublicClient = (b: {
  *   - `"none"` WITH a secret → the caller resolved a credential and then said
  *     it would not be used;
  *   - a secret-based method (or no method at all, which means "the manifest's
- *     method applies") WITHOUT a secret → the request that cannot succeed.
- *     This is the one that used to return 201: `client_secret` defaulted to
- *     `""` and the storage encoder read that emptiness as "public", so an
- *     admin who declared `client_secret_basic` and forgot the secret got a
- *     PUBLIC client back and a token endpoint answering HTTP 400 later.
+ *     method applies") WITHOUT a secret → a request that cannot succeed.
+ *     Refused here rather than stored: an empty `client_secret` reads as
+ *     "public" to the storage encoder, so an admin who declared
+ *     `client_secret_basic` and forgot the secret would get a PUBLIC client
+ *     back and a token endpoint answering HTTP 400 later.
  */
 export const oauthClientCreateSchema = oauthClientSchema
   .refine(noSecretWithPublicClient, {
@@ -699,16 +704,17 @@ export function createIntegrationsRouter() {
   // form, no end-user interaction. The interactive path is the Connect portal
   // (`connect/session`) — use that whenever a human/agent supplies the secret.
   //
-  // This door deliberately runs NO provisioner: there is nothing to mint for a
-  // credential the caller already has, and a `private_key` arriving here is
-  // the caller's own by definition. Which means an invariant an integration's
-  // RUNTIME depends on cannot live in `services/connect/provisioning.ts` — it
-  // would hold on the hosted form and nowhere else. It belongs in the auth's
-  // `credentials.schema`, which `FieldsStrategy` validates on BOTH doors:
-  // `@appstrate/ssh` carries `pattern` for exactly that reason (the Unix
-  // account is concatenated into ssh's destination argument, a verb name must
-  // never be a shell string), and `@appstrate/ssh-mcp` re-checks the verb
-  // shape on the way out.
+  // This door runs NO provisioner, so it refuses any name the auth declares as
+  // platform-minted (`readProvisioning` below): accepting one would let a
+  // caller plant a key of its own and have the platform hand the target an
+  // install block for it. A provisioning auth connects through the portal.
+  //
+  // The invariants an integration's RUNTIME depends on therefore cannot live
+  // in `services/connect/provisioning.ts` — that runs on one door only. They
+  // belong in the auth's `credentials.schema`, which `FieldsStrategy`
+  // validates on BOTH doors: `@appstrate/ssh` carries `pattern` for exactly
+  // that reason (the Unix account is concatenated into ssh's destination
+  // argument, so it must never be a shell string).
   router.post(
     "/:packageId{@[^/]+/[^/]+}/auths/:authKey/connect/fields",
     requirePermission("integrations", "connect"),
@@ -730,6 +736,15 @@ export function createIntegrationsRouter() {
         if (auth.type === "oauth2") {
           throw invalidRequest(
             `Auth '${authKey}' is type '${auth.type}' — use the OAuth flow, not the fields flow`,
+          );
+        }
+        // A minted name supplied by the caller is a key the platform did not
+        // make and would nonetheless install on the target. Refuse it here.
+        const minted = readProvisioning(auth)?.provides.find((name) => name in body.credentials);
+        if (minted) {
+          throw invalidRequest(
+            `\`${minted}\` is minted by the platform, not submitted — create this connection ` +
+              "through the connect portal (`connect/session`)",
           );
         }
         // A `custom` + `connect.tool` (runAt:"link") auth resolves to the
@@ -797,11 +812,11 @@ export function createIntegrationsRouter() {
       //     what that account already authorized. Empty for a fresh connect
       //     (no row yet), so fresh connects stay at the default scope set.
       //
-      // The kickoff deliberately does NOT walk the space's agents — that
-      // would leak unrelated agents' scopes into a plain "connect" and made the
-      // integration page's connect request more than its defaults. Scope
-      // upgrades are an explicit, per-agent action on the agent's Connexions
-      // tab. Endpoint validation + client lookup live in OAuth2Strategy.begin.
+      // The kickoff deliberately does NOT walk the space's agents — that would
+      // leak unrelated agents' scopes into a plain "connect" and ask for more
+      // than the integration page's defaults. Scope upgrades are an explicit,
+      // per-agent action on the agent's Connexions tab. Endpoint validation +
+      // client lookup live in OAuth2Strategy.begin.
       const granted = body.connection_id
         ? await getCurrentScopesGranted({
             scope,
@@ -1057,11 +1072,13 @@ export function createIntegrationsRouter() {
       auth_key: claims.auth_key,
       display_name: manifest.display_name ?? claims.package_id,
       icon: manifest.icon ?? null,
-      auth,
-      // AFPS §7.10 publisher instructions. The integration detail page has
-      // shown these since they existed; the hosted form — the surface where
-      // someone is ACTUALLY being asked to produce a credential — did not, so
-      // the guidance reached everyone except the person who needed it.
+      // Without the credentials the platform mints: the form renders the
+      // schema it is given, and nobody is asked to type a value about to be
+      // generated. Display only — the submit door below validates against the
+      // FULL manifest schema and drops those names whatever the body carries.
+      auth: authWithoutMintedCredentials(auth),
+      // AFPS §7.10 publisher instructions, rendered on the form itself: this
+      // is the surface where someone is asked to produce the credential.
       setup_guide: manifest.setup_guide ?? null,
       connection_id: claims.connection_id ?? null,
       csrf: claims.csrf ?? null,
@@ -1087,13 +1104,13 @@ export function createIntegrationsRouter() {
       if (auth.type === "oauth2") {
         throw invalidRequest("This integration uses OAuth — open the connect link instead");
       }
-      // Credentials the platform derives rather than asks for (an SSH key pair
-      // and the target's host key). Runs BEFORE `complete` so the provisioned
-      // values are persisted in the same envelope as the submitted ones, and
-      // so a provisioning failure (unreachable host, blocked address) is a 400
+      // Credentials the platform mints rather than asks for (for SSH, the key
+      // pair). Runs BEFORE `complete` so the minted values are persisted in
+      // the same envelope as the submitted ones, and so a provisioning failure
+      // (a blocked address, a field the minting needs and cannot use) is a 400
       // on the form instead of a connection nobody can use. This is the ONLY
-      // door that provisions — see the note on `connect/fields` for what that
-      // means for any invariant the runtime depends on.
+      // door that provisions — `connect/fields` refuses a provisioned name
+      // outright.
       const provisioned = await provisionCredentials(auth, body.credentials, {
         integrationId: claims.package_id,
       });
@@ -1113,10 +1130,10 @@ export function createIntegrationsRouter() {
       );
       clearConnectPageCookie(c);
       // The half that must reach the target host — a public key and a
-      // fingerprint, never a secret. DERIVED from the bundle that was just
-      // persisted, by the same function `GET /api/me/connections/{id}/handoff`
-      // calls later, so what the user installs and what they are handed at
-      // deletion cannot drift apart.
+      // fingerprint, never a secret. DERIVED from the bundle just persisted,
+      // by the same `handoffStepsFor` that `GET /api/me/connections/{id}/handoff`
+      // re-derives the teardown half from, so the block installed here and the
+      // one handed back at deletion cannot drift apart.
       //
       // It is carried on this response rather than fetched, because THIS
       // caller cannot fetch it: the hosted portal authenticates with a page

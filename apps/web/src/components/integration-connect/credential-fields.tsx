@@ -39,9 +39,7 @@ export function CredentialFields({ auth, values, onChange }: CredentialFieldsPro
         const isMultiline = MULTILINE_FIELD_PATTERN.test(field);
         const schema = schemas[field];
         // Three sources, most specific first: a localized override, then the
-        // manifest's own `title`, then the raw name. The manifest rung used to
-        // be missing entirely, so every integration declaring a title showed
-        // its users a bare `snake_case` key instead.
+        // manifest's own `title`, then the raw name.
         const labelKey = `integration.connect.fields.${field}.label`;
         const labelText = t(labelKey, { defaultValue: schema?.title ?? field });
         const description = schema?.description;

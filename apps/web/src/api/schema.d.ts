@@ -1527,6 +1527,8 @@ export interface paths {
         /**
          * Import a connection by submitting credentials directly (programmatic)
          * @description Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).
+         *
+         *     This door runs no provisioner, so a credential name the platform mints for the kind the auth declares (`_meta["dev.appstrate/provisioning"].kind`) is refused with a 400 naming the field: submitting one would have the platform hand the target an install block for a key it did not mint. An auth that mints such a name — and requires it — is therefore connectable only through the Connect portal (`initiateIntegrationConnect`).
          */
         post: operations["importIntegrationConnection"];
         delete?: never;
@@ -1935,8 +1937,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * What the platform minted for this connection, and what to do with it
-         * @description For a connection whose credentials the platform MINTED, the ordered steps the user owns on their own machine: the block that authorises the key on the target, the fingerprint to compare, and — flagged `deferred` — the block that takes the key back off once the connection is deleted. Deleting it destroys the platform's half and nothing else, since the platform has no access to the target. DERIVED from the credential bundle on demand, never stored: every step is a pure function of the key it describes. An empty list for a pasted credential, and for an unknown, malformed or not-owned id (same non-disclosure as the DELETE beside it).
+         * What is due on the target when this connection is deleted
+         * @description For a connection whose credentials the platform MINTED, the steps the user owns on their own machine AT DELETION — the `deferred` ones, and only those: the block that takes the key back off the target. Deleting the connection destroys the platform's half and nothing else, since the platform has no access to the target. The steps that were due at CREATION (installing the key, comparing the fingerprint) come back from `submitIntegrationConnect`, which the connect portal shows once on the screen right after the form; this endpoint does not re-serve them. DERIVED from the credential bundle on demand, never stored: every step is a pure function of the key it describes. An empty list for an auth that mints nothing, and for an unknown, malformed or not-owned id (same non-disclosure as the DELETE beside it).
          */
         get: operations["getMyConnectionHandoff"];
         put?: never;
@@ -5390,7 +5392,7 @@ export interface components {
             note?: string;
             /** @description `kind: command` — shell to run on the target. Never executed by the platform. */
             shell?: string;
-            /** @description `kind: command` — due when the connection is deleted, not now. A delete confirmation renders these; the screen that follows creation renders the rest. */
+            /** @description `kind: command` — due when the connection is deleted, not now. `getMyConnectionHandoff` returns exactly these; the connect submit response carries them alongside the steps due immediately. */
             deferred?: boolean;
             /** @description `kind: value` — a value to read or compare. */
             value?: string;
@@ -11305,6 +11307,7 @@ export interface operations {
                         auth_key: string;
                         display_name: string;
                         icon?: string | null;
+                        /** @description The auth declaration the form renders as-is. Credentials the platform mints for itself (an auth declaring `_meta["dev.appstrate/provisioning"]`, AFPS §10) are removed from `credentials.schema.properties` and `.required` here, so nobody is asked to type a value about to be generated; everything else is the manifest's own text. Display only: a submitted bag is validated against the full manifest schema and those names are dropped from it whatever it carries. */
                         auth: {
                             [key: string]: unknown;
                         };
@@ -11439,7 +11442,7 @@ export interface operations {
                             /** Format: date-time */
                             updatedAt: string;
                         };
-                        /** @description Present when the auth declares `_meta["dev.appstrate/provisioning"]`: what the user must now do with the material the platform minted. Public halves only — the private key is sealed in the connection's envelope and is never returned. Returned once; nothing persists it. */
+                        /** @description Present when the auth declares `_meta["dev.appstrate/provisioning"]`: what the user must now do with the material the platform minted. Public halves only — the private key is sealed in the connection's envelope and is never returned. Every step is DERIVED from the stored credential bundle, so this is the one surface that renders the install steps; the teardown ones (`deferred`) are re-derived later by `getMyConnectionHandoff`. */
                         provisioned?: {
                             /** @description Ordered handoff steps. A list rather than named fields so a new provisioning kind ships without a front-end branch. */
                             steps: components["schemas"]["HandoffStep"][];
@@ -13145,7 +13148,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Ordered handoff steps (possibly empty) */
+            /** @description Deferred handoff steps, due at deletion (possibly empty) */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];

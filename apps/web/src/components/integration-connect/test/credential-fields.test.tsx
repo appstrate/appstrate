@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The one credential-entry surface. Its whole job is turning an auth manifest
- * into inputs, and it used to read only the property NAMES — so a manifest's
- * `title` and `description` reached nobody, and every integration declaring
- * them showed its users a bare `snake_case` key with no explanation.
+ * The one credential-entry surface. Its whole job is turning the auth served by
+ * `GET /api/integrations/connect/context` into inputs — every declared field,
+ * and only those, with the labels, descriptions and defaults it declares.
  *
- * Two behaviours are load-bearing enough to pin: what is shown (labels,
- * descriptions, declared defaults) and what is NOT (credentials the platform
- * mints for itself — asking someone to type a value about to be generated is
- * worse than useless, it suggests they should have one).
+ * It filters NOTHING. A credential the platform mints for itself is already
+ * absent from that schema, stripped server-side, because which names a
+ * provisioning kind owns is a property of the provisioner rather than of the
+ * manifest. A second filter here could only ever disagree with the first.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -22,7 +21,10 @@ import type { IntegrationManifestAuth } from "../../../hooks/use-integrations.ts
 await i18nReady;
 await i18n.changeLanguage("fr");
 
-/** An auth shaped like @appstrate/ssh: five fields typed, one provisioned. */
+/**
+ * The @appstrate/ssh auth AS THE CONTEXT ENDPOINT SERVES IT: the minted
+ * `private_key` is already gone, so these four are what the form must ask for.
+ */
 const SSH_AUTH = {
   type: "custom",
   credentials: {
@@ -30,7 +32,6 @@ const SSH_AUTH = {
       type: "object",
       required: ["host", "user"],
       properties: {
-        private_key: { type: "string", title: "Clé privée Appstrate" },
         host: { type: "string", title: "Hôte", description: "Nom DNS ou adresse IP publique." },
         port: { type: "string", title: "Port SSH", default: "22" },
         user: { type: "string", title: "Compte Unix sur la cible" },
@@ -41,7 +42,6 @@ const SSH_AUTH = {
   _meta: {
     "dev.appstrate/provisioning": {
       kind: "ssh_keypair",
-      provides: ["private_key"],
     },
   },
 } as unknown as IntegrationManifestAuth;
@@ -60,24 +60,33 @@ function inputTag(markup: string, field: string): string | null {
   return m ? m[0] : null;
 }
 
-describe("CredentialFields — provisioned credentials", () => {
-  it("renders no input for a credential the platform mints", () => {
-    const markup = html(SSH_AUTH);
-    for (const hidden of ["private_key"]) {
-      expect(inputTag(markup, hidden)).toBeNull();
-    }
-  });
-
-  it("still renders the fields only the user can answer", () => {
+describe("CredentialFields — the served schema, verbatim", () => {
+  it("renders an input for every field the auth declares", () => {
     const markup = html(SSH_AUTH);
     for (const shown of ["host", "port", "user", "host_key"]) {
       expect(inputTag(markup, shown)).not.toBeNull();
     }
+    // And nothing it does not declare.
+    expect(inputTag(markup, "private_key")).toBeNull();
   });
 
-  it("keeps every field when the auth declares no provisioning", () => {
-    const plain = { ...SSH_AUTH, _meta: {} } as unknown as IntegrationManifestAuth;
-    expect(inputTag(html(plain), "private_key")).not.toBeNull();
+  /**
+   * The regression this replaces a client-side filter with: the form must not
+   * re-derive what to hide. Were it to read `_meta` again, the two answers
+   * could differ — and the one that matters is the server's.
+   */
+  it("renders a declared field even when the auth provisions its kind", () => {
+    const withMinted = {
+      type: "custom",
+      credentials: {
+        schema: {
+          type: "object",
+          properties: { private_key: { type: "string", title: "Clé privée Appstrate" } },
+        },
+      },
+      _meta: { "dev.appstrate/provisioning": { kind: "ssh_keypair" } },
+    } as unknown as IntegrationManifestAuth;
+    expect(inputTag(html(withMinted), "private_key")).not.toBeNull();
   });
 });
 
@@ -108,7 +117,7 @@ describe("CredentialFields — manifest-declared presentation", () => {
 });
 
 describe("initialCredentialValues", () => {
-  it("seeds exactly the defaults that are shown, and nothing provisioned", () => {
+  it("seeds exactly the defaults that are shown", () => {
     // A default the form displays but does not seed would be a value under the
     // user's eyes that never reaches the server.
     expect(initialCredentialValues(SSH_AUTH)).toEqual({

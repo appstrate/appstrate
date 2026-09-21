@@ -47,9 +47,8 @@ export function HostedConnectPage() {
   const [phase, setPhase] = useState<Phase>("loading");
   const [context, setContext] = useState<ConnectContext | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
-  // Material the platform minted that has to reach the target host. Returned
-  // once by `/connect/submit`; nothing persists it, and nothing here is secret —
-  // the private half never leaves the server.
+  // What the user must now do on the target host for the minted credential to
+  // work. Nothing here is secret — the private half never leaves the server.
   const [provisioned, setProvisioned] = useState<{ steps: HandoffStep[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Technical reason behind a context-load failure (HTTP status or network
@@ -107,13 +106,11 @@ export function HostedConnectPage() {
         params: { header: { "x-connect-csrf": context.csrf } },
         body: { credentials: values },
       });
-      // A provisioning auth hands back material the user must now install on
-      // their own machine, and this page holds the only copy — nothing
-      // persists it and no endpoint re-serves it. The completion signal is
-      // therefore WITHHELD here: the opener (`useHostedConnectPopup`) closes
-      // this window the instant it sees `ok: true`, which would take the block
-      // away before it could be read. It is announced on the user's own
-      // "I installed the key" instead.
+      // A provisioning auth hands back an install block, and this is the only
+      // screen that shows it. The completion signal is therefore WITHHELD
+      // here: the opener (`useHostedConnectPopup`) closes this window the
+      // instant it sees `ok: true`, which would take the block away before it
+      // could be read. It is announced on the user's own "I ran it" instead.
       const minted = data?.provisioned;
       if (minted) {
         setProvisioned(minted);

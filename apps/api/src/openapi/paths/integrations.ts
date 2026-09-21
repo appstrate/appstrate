@@ -754,7 +754,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Import a connection by submitting credentials directly (programmatic)",
       description:
-        "Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).",
+        'Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).\n\nThis door runs no provisioner, so a credential name the platform mints for the kind the auth declares (`_meta["dev.appstrate/provisioning"].kind`) is refused with a 400 naming the field: submitting one would have the platform hand the target an install block for a key it did not mint. An auth that mints such a name — and requires it — is therefore connectable only through the Connect portal (`initiateIntegrationConnect`).',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -972,7 +972,12 @@ export const integrationsPaths = {
                   auth_key: { type: "string" },
                   display_name: { type: "string" },
                   icon: { type: ["string", "null"] },
-                  auth: { type: "object", additionalProperties: true },
+                  auth: {
+                    type: "object",
+                    additionalProperties: true,
+                    description:
+                      'The auth declaration the form renders as-is. Credentials the platform mints for itself (an auth declaring `_meta["dev.appstrate/provisioning"]`, AFPS §10) are removed from `credentials.schema.properties` and `.required` here, so nobody is asked to type a value about to be generated; everything else is the manifest\'s own text. Display only: a submitted bag is validated against the full manifest schema and those names are dropped from it whatever it carries.',
+                  },
                   setup_guide: {
                     type: ["object", "null"],
                     description:
@@ -1049,7 +1054,7 @@ export const integrationsPaths = {
                   provisioned: {
                     type: "object",
                     description:
-                      'Present when the auth declares `_meta["dev.appstrate/provisioning"]`: what the user must now do with the material the platform minted. Public halves only — the private key is sealed in the connection\'s envelope and is never returned. Returned once; nothing persists it.',
+                      'Present when the auth declares `_meta["dev.appstrate/provisioning"]`: what the user must now do with the material the platform minted. Public halves only — the private key is sealed in the connection\'s envelope and is never returned. Every step is DERIVED from the stored credential bundle, so this is the one surface that renders the install steps; the teardown ones (`deferred`) are re-derived later by `getMyConnectionHandoff`.',
                     required: ["steps"],
                     properties: {
                       steps: {

@@ -318,11 +318,11 @@ export function PreferencesConnectionsPage() {
   } | null>(null);
 
   /**
-   * Everything the platform minted for this connection, derived server side
-   * from the credential bundle. Fetched only while the confirmation is open:
-   * it costs a decryption, so the list must not pay it for every row to serve
-   * the one row being acted on. Empty for a pasted credential, which left
-   * nothing on a target.
+   * What deleting this connection leaves behind on a target — the endpoint
+   * returns only the steps due AT deletion, and an empty list when the
+   * credential was not minted. Fetched only while the confirmation is open: it
+   * costs a decryption, so the list must not pay it for every row to serve the
+   * one row being acted on.
    */
   const handoff = $api.useQuery(
     "get",
@@ -331,17 +331,11 @@ export function PreferencesConnectionsPage() {
     { enabled: !!confirmState, select: (e) => e.data },
   );
 
-  /**
-   * Only what is due AT deletion. The endpoint also carries the block that
-   * INSTALLED the key, which has no business in a confirmation about removing
-   * it — and `deferred` is dropped on the way out because this is the moment
-   * those steps stop being "later".
-   */
+  // `deferred` is dropped because this is the moment those steps stop being
+  // "later": `HandoffSteps` collapses a deferred step behind a "keep for
+  // later" summary, which is the wrong affordance inside this confirmation.
   const teardownSteps = useMemo(
-    () =>
-      (handoff.data ?? [])
-        .filter((step) => step.deferred)
-        .map((step) => ({ ...step, deferred: false })),
+    () => (handoff.data ?? []).map((step) => ({ ...step, deferred: false })),
     [handoff.data],
   );
 

@@ -26,7 +26,6 @@ import {
   buildConnectUrl,
   connectClaimsFor,
 } from "../../../src/services/connect/connect-session.ts";
-import { generateOpenSshEd25519KeyPair } from "../../../src/lib/openssh-key.ts";
 
 const app = getTestApp();
 
@@ -610,10 +609,10 @@ describe("hosted connect portal — a fault while resolving scopes (issue #1352)
  *
  * The provisioner's own guards are unit-tested; what only this level can show
  * is WHICH routes run it. There are two doors onto `FieldsStrategy`: the
- * hosted form, which provisions, and the programmatic import, which does not.
- * The invariants the SSH integration relies on therefore cannot live in the
- * provisioner alone — they live in `credentials.schema`, which both doors
- * validate.
+ * hosted form, which provisions, and the programmatic import, which does not
+ * — and therefore refuses any name the auth declares as platform-minted.
+ * The invariants the SSH integration relies on cannot live in the provisioner
+ * alone: they live in `credentials.schema`, which both doors validate.
  */
 async function provisionedManifest(name = "@myorg/ssh"): Promise<IntegrationManifest> {
   // Read the SHIPPED manifest rather than restating its schema here: the
@@ -634,6 +633,47 @@ async function provisionedManifest(name = "@myorg/ssh"): Promise<IntegrationMani
   return manifest;
 }
 
+/**
+ * What the hosted form actually asks for: everything except `private_key`,
+ * which the platform mints and the render context therefore never offers.
+ */
+const SSH_FORM_FIELDS = {
+  host: "ssh.example.test",
+  port: "22",
+  user: "agent",
+  host_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5",
+} as const;
+
+/** Mint a session, follow the dispatch, and come back with the page cookie + CSRF nonce. */
+async function openConnectForm(ctx: TestContext, packageId: string, authKey: string) {
+  const token = await mintSession(ctx, packageId, authKey);
+  const start = await app.request(
+    `/api/integrations/connect/start?token=${encodeURIComponent(token)}`,
+    { redirect: "manual" },
+  );
+  const cookie = `appstrate_connect=${readSetCookie(start)}`;
+  const contextRes = await app.request("/api/integrations/connect/context", {
+    headers: { Cookie: cookie },
+  });
+  const context = (await contextRes.json()) as { csrf: string };
+  return { cookie, csrf: context.csrf };
+}
+
+/** The whole hosted-form round trip: open it, then post the credentials it asks for. */
+async function submitConnectForm(
+  ctx: TestContext,
+  packageId: string,
+  authKey: string,
+  credentials: Record<string, unknown>,
+) {
+  const { cookie, csrf } = await openConnectForm(ctx, packageId, authKey);
+  return app.request("/api/integrations/connect/submit", {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/json", "x-connect-csrf": csrf },
+    body: JSON.stringify({ credentials }),
+  });
+}
+
 describe("hosted connect portal — credential provisioning", () => {
   let ctx: TestContext;
   beforeEach(async () => {
@@ -642,28 +682,8 @@ describe("hosted connect portal — credential provisioning", () => {
     await seedIntegration(ctx.orgId, await provisionedManifest("@myorg/ssh"));
   });
 
-  const openForm = async () => {
-    const token = await mintSession(ctx, "@myorg/ssh", "primary");
-    const start = await app.request(
-      `/api/integrations/connect/start?token=${encodeURIComponent(token)}`,
-      { redirect: "manual" },
-    );
-    const cookie = `appstrate_connect=${readSetCookie(start)}`;
-    const ctxRes = await app.request("/api/integrations/connect/context", {
-      headers: { Cookie: cookie },
-    });
-    const context = (await ctxRes.json()) as { csrf: string };
-    return { cookie, csrf: context.csrf };
-  };
-
-  const submit = async (credentials: Record<string, unknown>) => {
-    const { cookie, csrf } = await openForm();
-    return app.request("/api/integrations/connect/submit", {
-      method: "POST",
-      headers: { Cookie: cookie, "Content-Type": "application/json", "x-connect-csrf": csrf },
-      body: JSON.stringify({ credentials }),
-    });
-  };
+  const submit = async (credentials: Record<string, unknown>) =>
+    submitConnectForm(ctx, "@myorg/ssh", "primary", credentials);
 
   const importFields = async (credentials: Record<string, unknown>) =>
     app.request("/api/integrations/@myorg/ssh/auths/primary/connect/fields", {
@@ -671,6 +691,33 @@ describe("hosted connect portal — credential provisioning", () => {
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ credentials }),
     });
+
+  /**
+   * WHICH credentials the platform mints is answered once, in the provisioner
+   * table, and the form learns it from the schema it is served — not from a
+   * second list inside an immutable manifest. So the render context must be
+   * the one place that answer reaches the browser.
+   */
+  it("serves a schema the form can render verbatim, minus what it mints", async () => {
+    const { cookie } = await openConnectForm(ctx, "@myorg/ssh", "primary");
+    const res = await app.request("/api/integrations/connect/context", {
+      headers: { Cookie: cookie },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      auth: {
+        credentials: { schema: { properties: Record<string, unknown>; required: string[] } };
+      };
+    };
+    const schema = body.auth.credentials.schema;
+    // Asked for: exactly the four fields only the user can answer. The minted
+    // one is gone from BOTH halves — left in `required` it would be a field
+    // the form cannot satisfy.
+    expect(Object.keys(schema.properties).sort()).toEqual(["host", "host_key", "port", "user"]);
+    expect(schema.required).not.toContain("private_key");
+    // And nothing secret rides along on the way.
+    expect(JSON.stringify(body)).not.toContain("PRIVATE KEY");
+  });
 
   /**
    * The provisioner runs INSIDE the submit route, so a target the runner could
@@ -688,54 +735,67 @@ describe("hosted connect portal — credential provisioning", () => {
   });
 
   /**
-   * The programmatic import never runs a provisioner — it is the "I already
-   * hold this credential" door. What bounds it is the manifest schema, and the
-   * account name is the field whose shape the SSH runner depends on: it is
+   * The programmatic import runs no provisioner, so a `private_key` arriving
+   * there is one the CALLER made. Accepting it would have the platform render
+   * a root install block for an attacker-held key — the whole point of minting
+   * the pair. Any credential named in `provides` is refused at the door.
+   */
+  it("refuses a caller-supplied private_key on the programmatic import", async () => {
+    const res = await importFields({
+      private_key: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n-----END OPENSSH PRIVATE KEY-----\n",
+      host: "ssh.example.test",
+      user: "agent",
+      host_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5",
+    });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(await res.json())).toMatch(/private_key.*minted by the platform/);
+
+    const rows = await db.select().from(integrationConnections);
+    expect(rows).toHaveLength(0);
+  });
+
+  /**
+   * The account name is the field whose shape the SSH runner depends on: it is
    * concatenated into ssh's destination argument, so an `-o`-shaped value
-   * would be read as an option rather than a user.
+   * would be read as an option rather than a user. `credentials.schema` is
+   * what bounds it, and the hosted form is now the only door onto this auth.
    */
   it.each([
     ["an account name shaped like an ssh option", { user: "-oProxyCommand=x" }],
     ["a host shaped like an ssh option", { host: "-oProxyCommand=x" }],
-    ["a private key that is not an OpenSSH container", { private_key: "-----BEGIN RSA KEY-----" }],
-  ])("refuses %s on the programmatic import too", async (_label, override) => {
-    const res = await importFields({
-      private_key: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n-----END OPENSSH PRIVATE KEY-----\n",
-      host: "ssh.example.test",
-      user: "agent",
-      host_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5",
-      ...override,
-    });
+    ["a host key that is not a public key line", { host_key: "not-a-key" }],
+  ])("refuses %s on the hosted form", async (_label, override) => {
+    const res = await submit({ ...SSH_FORM_FIELDS, ...override });
     expect(res.status).toBe(400);
-    expect(JSON.stringify(await res.json())).toMatch(/declared schema/);
+
+    const rows = await db.select().from(integrationConnections);
+    expect(rows).toHaveLength(0);
   });
 
-  it("accepts a well-shaped bag on the programmatic import", async () => {
-    // The positive control for the four refusals above: same door, same
-    // fields, and the only difference is that every value is in shape.
-    const res = await importFields({
-      private_key: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n-----END OPENSSH PRIVATE KEY-----\n",
-      host: "ssh.example.test",
-      user: "agent",
-      host_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5",
-    });
+  it("accepts a well-shaped bag on the hosted form and mints the key", async () => {
+    // The positive control for the refusals above: same door, same fields, and
+    // the only difference is that every value is in shape.
+    const res = await submit(SSH_FORM_FIELDS);
     expect(res.status).toBe(200);
+    const body = (await res.json()) as { provisioned?: { steps: Array<{ kind: string }> } };
+    // The user never typed a private key — the platform made one, and handed
+    // back the install block for its public half.
+    expect(body.provisioned?.steps.map((s) => s.kind)).toEqual(["command", "value", "command"]);
   });
 });
 
 /**
- * Both blocks have to be available LATER than the screen that first showed
- * them. The removal one because deleting a connection destroys the platform's
- * half of a minted credential and nothing else, so its public key stays
- * authorized on the customer's machine. The install one because the screen
- * that showed it authenticates with a page cookie destroyed on submit, so it
- * is the only copy in existence until this endpoint.
+ * What is due AT DELETION has to be available long after the screen that first
+ * showed it: deleting a connection destroys the platform's half of a minted
+ * credential and nothing else, so its public key stays authorized on the
+ * customer's machine. That is the endpoint's whole job — the steps due at
+ * creation belong to the submit response and are not re-served here.
  *
- * Nothing persists either — both are derived from the credential bundle,
- * because an `openssh-key-v1` container carries its own public half in the
- * clear and a stored copy could drift from the key it claims to remove.
+ * Nothing persists any of it: both halves are derived from the credential
+ * bundle, because an `openssh-key-v1` container carries its own public half in
+ * the clear and a stored copy could drift from the key it claims to remove.
  */
-describe("me/connections/:id/handoff — derived, not stored", () => {
+describe("me/connections/:id/handoff — the teardown half, derived", () => {
   let ctx: TestContext;
   beforeEach(async () => {
     await truncateAll();
@@ -744,21 +804,14 @@ describe("me/connections/:id/handoff — derived, not stored", () => {
     await seedIntegration(ctx.orgId, apiKeyManifest("@myorg/gmail"));
   });
 
-  const importSsh = async (privateKey: string) => {
-    const res = await app.request("/api/integrations/@myorg/ssh/auths/primary/connect/fields", {
-      method: "POST",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({
-        credentials: {
-          private_key: privateKey,
-          host: "ssh.example.test",
-          user: "agent",
-          host_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5",
-        },
-      }),
-    });
+  /** The only door onto a provisioning auth: the hosted form, which mints the key. */
+  const connectSsh = async () => {
+    const res = await submitConnectForm(ctx, "@myorg/ssh", "primary", SSH_FORM_FIELDS);
     expect(res.status).toBe(200);
-    return (await res.json()) as { id: string };
+    return (await res.json()) as {
+      connection: { id: string };
+      provisioned: { steps: Array<Record<string, unknown>> };
+    };
   };
 
   const handoffOf = async (connectionId: string) => {
@@ -769,22 +822,22 @@ describe("me/connections/:id/handoff — derived, not stored", () => {
     return (await res.json()) as { data: Array<Record<string, unknown>> };
   };
 
-  it("derives a removal block naming the very key the connection holds", async () => {
-    const pair = generateOpenSshEd25519KeyPair("appstrate @myorg/ssh");
-    const conn = await importSsh(pair.privateKey);
+  it("returns the removal block, and nothing that was due at creation", async () => {
+    const { connection, provisioned } = await connectSsh();
 
-    const { data } = await handoffOf(conn.id);
-    // Install block, fingerprint, removal block — the same three the connect
-    // screen showed, rebuilt from the keyring alone.
-    expect(data.map((s) => s.kind)).toEqual(["command", "value", "command"]);
-    const step = data.find((s) => s.deferred)!;
-    expect(step).toBeDefined();
-    expect(step.kind).toBe("command");
+    const { data } = await handoffOf(connection.id);
+    // Exactly the deferred subset of what the submit response carried —
+    // rebuilt from the keyring alone, so the block that removes the key cannot
+    // disagree with the one that installed it.
+    expect(data).toEqual(provisioned.steps.filter((s) => s.deferred === true));
+    expect(data).toHaveLength(1);
+    expect(data.every((s) => s.deferred === true)).toBe(true);
 
-    // The base64 of THIS key, so the command removes its line and no other —
-    // which is exactly the property a stored copy could lose.
-    const base64 = pair.publicKey.split(/\s+/)[1]!;
-    expect(step.shell).toContain(`grep -vF '${base64}'`);
+    // The base64 of the key this connection actually holds, so the command
+    // removes its line and no other — the property a stored copy could lose.
+    const installBlock = String(provisioned.steps[0]!.shell);
+    const base64 = /restrict ssh-ed25519 ([A-Za-z0-9+/=]+)/.exec(installBlock)![1]!;
+    expect(data[0]!.shell).toContain(`grep -vF '${base64}'`);
   });
 
   it("is empty for an auth that mints nothing", async () => {
@@ -810,11 +863,10 @@ describe("me/connections/:id/handoff — derived, not stored", () => {
   });
 
   it("refuses to derive one for someone else's connection", async () => {
-    const pair = generateOpenSshEd25519KeyPair("appstrate @myorg/ssh");
-    const conn = await importSsh(pair.privateKey);
+    const { connection } = await connectSsh();
 
     const other = await createTestContext({ orgSlug: "otherorg" });
-    const res = await app.request(`/api/me/connections/${conn.id}/handoff`, {
+    const res = await app.request(`/api/me/connections/${connection.id}/handoff`, {
       headers: authHeaders(other),
     });
     expect(res.status).toBe(200);

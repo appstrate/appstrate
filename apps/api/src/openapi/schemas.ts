@@ -1899,11 +1899,12 @@ export const schemas = {
     },
   },
   /**
-   * One step a user must run or check after the platform minted a credential
-   * for them. Shared by the two surfaces that hand these out — the connect
-   * submit response and `GET /api/me/connections/{id}/handoff` — because both
-   * render the SAME derived list and a second copy of this shape is a second
-   * thing the SPA's renderer can drift from.
+   * One step a user must run or check on their own machine because the
+   * platform minted a credential for them. Shared by the two surfaces that
+   * hand these out — the connect submit response (every step) and
+   * `GET /api/me/connections/{id}/handoff` (the `deferred` ones) — because
+   * both derive them from the same bundle through the same renderer, and a
+   * second copy of this shape is a second thing the SPA can drift from.
    */
   HandoffStep: {
     type: "object",
@@ -1920,7 +1921,7 @@ export const schemas = {
       deferred: {
         type: "boolean",
         description:
-          "`kind: command` — due when the connection is deleted, not now. A delete confirmation renders these; the screen that follows creation renders the rest.",
+          "`kind: command` — due when the connection is deleted, not now. `getMyConnectionHandoff` returns exactly these; the connect submit response carries them alongside the steps due immediately.",
       },
       value: { type: "string", description: "`kind: value` — a value to read or compare." },
     },

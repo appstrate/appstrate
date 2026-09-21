@@ -7,8 +7,6 @@
  * The server returns these as an ordered list of typed steps, so this renders
  * the list and nothing else knows what SSH is. A second provisioning kind — an
  * SSH certificate authority, an mTLS client cert — ships without a branch here.
- * It replaced three hand-written sections (a block, a fingerprint, a teardown
- * block) that each had their own markup and their own localised heading.
  *
  * Labels and notes are SERVER text, exactly like `setup_guide`'s: the wording
  * belongs to whatever minted the material, and half of it (a shell block) is
@@ -95,14 +93,13 @@ export function HandoffSteps({ steps }: { steps: readonly HandoffStep[] }) {
 
   return (
     <div className="space-y-5" data-testid="handoff-steps">
-      {now.map((step, i) => {
-        // An unknown kind is skipped rather than rendered as an empty box: a
-        // provisioner shipped by a module can add one, and the steps around it
-        // still carry what the user has to do.
-        if (step.kind === "command") return <CommandStep key={i} step={step} index={i} />;
-        if (step.kind === "value") return <ValueStep key={i} step={step} index={i} />;
-        return null;
-      })}
+      {now.map((step, i) =>
+        step.kind === "command" ? (
+          <CommandStep key={i} step={step} index={i} />
+        ) : (
+          <ValueStep key={i} step={step} index={i} />
+        ),
+      )}
 
       {later.map((step, i) =>
         step.kind !== "command" ? null : (
