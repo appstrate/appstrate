@@ -33,14 +33,18 @@ describe("client scope vocabulary", () => {
     }
   });
 
-  it("refuses `agents:run-inline` at every level while admitting `agents:run`", () => {
-    // A deliberate exclusion, not an incidental one: an end-user is an external
-    // identity impersonating through a space, and a client that could acquire
-    // this scope by consent would have the platform execute a manifest of the
-    // embedding app's own composition. Launching an agent someone in the org
-    // published is the end-user-shaped half, and stays in the vocabulary.
+  it("admits `agents:run-inline` on instance and org clients but refuses it on a space client", () => {
+    // Dashboard-only, not absent: a dashboard token is capped by the subject's
+    // live role, but a space client's tokens are end-user tokens, and an
+    // end-user must never have the platform execute a manifest of the
+    // embedding app's own composition. `agents:run` — launching an agent
+    // someone in the org published — stays requestable at every level.
+    expect(invalidScopesIn(["openid", "agents:run-inline"], "org")).toEqual([]);
+    expect(invalidScopesIn(["openid", "agents:run-inline"], "instance")).toEqual([]);
+    expect(invalidScopesIn(["openid", "agents:run", "agents:run-inline"], "space")).toEqual([
+      "agents:run-inline",
+    ]);
     for (const level of ["instance", "org", "space"] as const) {
-      expect(invalidScopesIn(["agents:run-inline"], level), level).toEqual(["agents:run-inline"]);
       expect(invalidScopesIn(["agents:run"], level), level).toEqual([]);
     }
   });

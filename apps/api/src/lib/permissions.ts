@@ -265,8 +265,9 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   // Grantable, unlike `agents:share`: `appstrate run ./agent.afps` is the
   // headless inline flow (`POST /api/runs/remote`, `source.kind: "inline"` —
   // see `apps/cli/src/commands/run.ts`), and it authenticates with a key. The
-  // creator ceiling is what bounds it: only `admin`/`builder` hold the grant,
-  // so only they can mint a key that carries it. What the separation buys is
+  // creator ceiling is what bounds it: only a creator who holds the grant
+  // (`admin`, `builder`, `operator`, or a custom role naming it — never
+  // `runner`) can mint a key that carries it. What the separation buys is
   // that a key scoped for launching published agents no longer executes
   // whatever manifest its holder composes.
   "agents:run-inline",

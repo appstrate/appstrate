@@ -325,6 +325,7 @@
   "oauthClients.scopeLabels.offline_access": "Rester connecté (jeton de rafraîchissement)",
   "oauthClients.scopeLabels.agents:read": "Lister vos agents",
   "oauthClients.scopeLabels.agents:run": "Lancer des agents pour vous",
+  "oauthClients.scopeLabels.agents:run-inline": "Exécuter des agents composés à la volée, sans publication",
   "oauthClients.scopeLabels.runs:read": "Consulter votre historique d'exécutions",
   "oauthClients.scopeLabels.runs:read-all": "Consulter toutes les exécutions de l'espace, pas seulement les vôtres",
   "oauthClients.scopeLabels.runs:cancel": "Annuler vos exécutions en cours",

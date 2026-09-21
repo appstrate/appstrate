@@ -10,9 +10,11 @@
  * long-running remote run.
  *
  * Both routes authenticate via JWT bearer (interactive CLI) or API key
- * with the `agents:run` scope (headless — GitHub Action, CI). HMAC-signed
- * event ingestion lives in a separate router (`runs-events.ts`) because
- * its auth model is fundamentally different.
+ * (headless — GitHub Action, CI). Creation asks for the grant `source.kind`
+ * names: `agents:run` for `registry`, `agents:run-inline` for `inline`; the
+ * sink extension takes either. HMAC-signed event ingestion lives in a
+ * separate router (`runs-events.ts`) because its auth model is
+ * fundamentally different.
  *
  * Contract: this router plus `openapi/paths/runs.ts`; the sink-credential
  * shape is owned by `services/run-creation.ts`. There is no `docs/specs/`
@@ -458,7 +460,7 @@ export function createRunsRemoteRouter() {
   );
 
   // PATCH /api/runs/:runId/sink/extend — push out sink_expires_at for a
-  // long-running remote run. Same auth as creation: agents:run. Runs are
+  // long-running remote run. Either creation grant (see the guard). Runs are
   // space-scoped but this route resolves the run by id (not space path), so
   // tenancy AND run visibility are both predicates on the UPDATE below.
   router.patch(

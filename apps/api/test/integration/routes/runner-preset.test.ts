@@ -364,6 +364,80 @@ describe("runner preset", () => {
     }
   });
 
+  describe("POST /api/runs/remote — the grant follows `source.kind`", () => {
+    // One route, two capabilities: the route-level guard only asserts the
+    // disjunction, so every case below holds ONE of the two grants and passes
+    // it. What refuses is the branch's own assertion — the exact message is
+    // what tells it apart from the disjunction's (`agents:run|agents:run-inline`).
+    const remote = (source: Record<string, unknown>) =>
+      JSON.stringify({ source, spaceId: owner.defaultSpaceId, input: {} });
+    const inlineSource = () => {
+      const parsed = JSON.parse(inlineBody()) as { manifest: unknown; prompt: string };
+      return { kind: "inline", manifest: parsed.manifest, prompt: parsed.prompt };
+    };
+    const registrySource = () => ({ kind: "registry", packageId: AGENT_ID, stage: "published" });
+    const INLINE_DENIED = "Insufficient permissions: agents:run-inline required";
+    const RUN_DENIED = "Insufficient permissions: agents:run required";
+
+    it("refuses a runner the inline source — the host a manifest runs on changes nothing", async () => {
+      const res = await app.request("/api/runs/remote", {
+        method: "POST",
+        headers: authHeaders(runner, { "Content-Type": "application/json" }),
+        body: remote(inlineSource()),
+      });
+      expect(res.status).toBe(403);
+      expect(await res.text()).toContain(INLINE_DENIED);
+    });
+
+    it("lets the operator's inline source past that assertion", async () => {
+      // The control for the case above: same body, the adjacent preset. It may
+      // fail further on; it must not fail on the grant.
+      const res = await app.request("/api/runs/remote", {
+        method: "POST",
+        headers: authHeaders(operator, { "Content-Type": "application/json" }),
+        body: remote(inlineSource()),
+      });
+      expect(await res.text()).not.toContain(INLINE_DENIED);
+    });
+
+    it("refuses a key scoped `agents:run-inline` alone the registry source", async () => {
+      // `run-inline` does not imply `run`: composing is not a licence to launch
+      // what the catalog holds.
+      const key = await seedApiKey({
+        orgId: owner.orgId,
+        spaceId: owner.defaultSpaceId,
+        createdBy: owner.user.id,
+        scopes: ["agents:run-inline"],
+      });
+      const res = await app.request("/api/runs/remote", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
+        body: remote(registrySource()),
+      });
+      expect(res.status).toBe(403);
+      expect(await res.text()).toContain(RUN_DENIED);
+    });
+  });
+
+  it("refuses a key scoped `agents:run` alone the inline route", async () => {
+    // The key-side mirror of the runner refusal: a key minted for launching
+    // published agents — by an admin, who holds both — no longer executes a
+    // manifest its holder composes.
+    const key = await seedApiKey({
+      orgId: owner.orgId,
+      spaceId: owner.defaultSpaceId,
+      createdBy: owner.user.id,
+      scopes: ["agents:run"],
+    });
+    const res = await app.request("/api/runs/inline", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
+      body: inlineBody(),
+    });
+    expect(res.status).toBe(403);
+    expect(await res.text()).toContain("Insufficient permissions: agents:run-inline required");
+  });
+
   it("serves connection readiness — the integrations a launcher connects", async () => {
     const res = await app.request(`/api/agents/${AGENT_PATH}/connection-readiness`, {
       headers: authHeaders(runner),

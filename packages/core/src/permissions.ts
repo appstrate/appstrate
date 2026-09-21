@@ -88,7 +88,8 @@ export interface CoreResources {
   // vocabulary: an end-user is an external identity impersonating through a
   // space, and letting an embedding app have the platform execute a manifest of
   // its own composition is exactly the silent escalation that allowlist exists
-  // to prevent.
+  // to prevent. An OAuth client may still request it for a DASHBOARD user,
+  // whose token is capped by that user's own role.
   agents: "read" | "write" | "configure" | "delete" | "run" | "run-inline" | "share";
   skills: "read" | "write" | "delete" | "share";
   // AFPS §3.4 — standalone MCP Bundle (MCPB) packages. Browse/import/delete

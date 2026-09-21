@@ -41,12 +41,14 @@ export const OIDC_IDENTITY_SCOPE_SET: ReadonlySet<string> = new Set(OIDC_IDENTIT
  */
 export const OIDC_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permission>([
   "agents:read",
-  // `agents:run` only. `agents:run-inline` stays out: an embedding app that
-  // acquired it through a user-consented OAuth flow could have the platform
-  // execute a manifest of its own composition — arbitrary code against that
-  // end-user's connections — which is exactly the silent escalation this
-  // allowlist exists to prevent. Running an agent someone in the org authored
-  // and published is the end-user-shaped half of that capability.
+  // `agents:run` only. `agents:run-inline` stays out of the END-USER set: an
+  // embedding app that acquired it through a user-consented OAuth flow could
+  // have the platform execute a manifest of its own composition — arbitrary
+  // code against that end-user's connections — which is exactly the silent
+  // escalation this allowlist exists to prevent. Running an agent someone in
+  // the org authored and published is the end-user-shaped half of that
+  // capability. Dashboard tokens can still carry it — see
+  // {@link OIDC_DASHBOARD_ONLY_SCOPES}.
   "agents:run",
   "runs:read",
   "runs:cancel",
@@ -87,11 +89,18 @@ export const OIDC_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permission>(
  * from the vocabulary entirely, the scope could not be asked for at all and
  * every dashboard token was silently capped at its own runs (issue #1372).
  *
+ * `agents:run-inline` is here for the same reason: an end-user token must never
+ * execute a body-supplied manifest, but a dashboard user's token is capped by
+ * that user's live authority — the org and space roles, re-read per request —
+ * so it reaches exactly the members who could compose an inline run from the
+ * dashboard, and a `runner` never.
+ *
  * Self-service (DCR / CIMD) registrants are unaffected: their ceiling is
  * {@link getSelfServiceScopes}, which lists no core action scope.
  */
 export const OIDC_DASHBOARD_ONLY_SCOPES: ReadonlySet<Permission> = new Set<Permission>([
   "runs:read-all",
+  "agents:run-inline",
 ]);
 
 /**
