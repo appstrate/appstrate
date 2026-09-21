@@ -709,7 +709,8 @@ export function createIntegrationsRouter() {
   // `services/connect/provisioning.ts`). Runtime invariants therefore live in
   // the auth's `credentials.schema`, validated on both doors — not in the
   // provisioner.
-  // Schema `pattern`s (e.g. `@appstrate/ssh`'s `user`) guard here; the account check is hosted-only.
+  // An auth that declares provisioning (`@appstrate/ssh`) never connects here:
+  // submitting a minted name is refused below, and omitting it fails `required`.
   router.post(
     "/:packageId{@[^/]+/[^/]+}/auths/:authKey/connect/fields",
     requirePermission("integrations", "connect"),

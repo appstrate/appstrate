@@ -345,10 +345,6 @@ const CASES: Record<string, Case> = {
     accountId: "user@example.com",
     source_doc: "login.salesforce.com/.well-known/openid-configuration — claims_supported",
   },
-  // Slack has no usable userinfo endpoint: every Web API method answers HTTP
-  // 200 with `{"ok": false}` on a bad token, so the manifest declares none and
-  // identity is read straight off the `oauth.v2.access` token response — the
-  // first of the three layers `extractIdentity` is handed.
   // The one mapping whose source is not a third-party payload: an SSH identity
   // is read off the credential bag the platform itself assembled. The account
   // key is the HOST, not the Unix user — one dedicated account is reused, so
@@ -364,6 +360,10 @@ const CASES: Record<string, Case> = {
     accountId: "vps.example.com",
     source_doc: "the platform's own credential bag — services/connect/provisioning.ts",
   },
+  // Slack has no usable userinfo endpoint: every Web API method answers HTTP
+  // 200 with `{"ok": false}` on a bad token, so the manifest declares none and
+  // identity is read straight off the `oauth.v2.access` token response — the
+  // first of the three layers `extractIdentity` is handed.
   "@appstrate/slack": {
     authKey: "primary",
     source: {

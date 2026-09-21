@@ -15,6 +15,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
+import { existsSync } from "node:fs";
 import { lstat, mkdtemp, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -477,23 +478,32 @@ const defaultSshd = () =>
     version: "sshd: illegal option -- V\nOpenSSH_9.2p1, OpenSSL 3.0",
   }));
 
+/** The host's PATH without every directory that holds an `sshd`. */
+function hostPathWithoutSshd(): string {
+  return (process.env.PATH ?? "/usr/bin:/bin")
+    .split(":")
+    .filter((dir) => dir !== "" && !existsSync(join(dir, "sshd")))
+    .join(":");
+}
+
 async function runScript(
   body: string,
-  opts: { home?: string; bin?: string; sshd?: string } = {},
+  opts: { home?: string; bin?: string; sshd?: string | null; shell?: string[] } = {},
 ): Promise<ShellRun> {
   const file = join(await mkdtemp(join(tmpdir(), "ssh-handoff-")), "script.sh");
   await writeFile(file, body + "\n", { mode: 0o700 });
-  const proc = Bun.spawn(["sh", file], {
+  const proc = Bun.spawn([...(opts.shell ?? ["sh"]), file], {
     // A fresh environment but for PATH — these blocks are pasted into a root
     // shell whose environment the platform knows nothing about. `HOME` is the
     // one the fake `su` above hands the payload, standing in for the account's;
-    // `bin` heads the PATH, so a test can make one binary fail.
+    // `bin` heads the PATH, so a test can make one binary fail. `sshd: null`
+    // puts no sshd on the PATH at all, the host's included.
     env: {
       PATH: [
         opts.bin,
-        opts.sshd ?? (await defaultSshd()),
+        opts.sshd === null ? undefined : (opts.sshd ?? (await defaultSshd())),
         await fakeSuPath(),
-        process.env.PATH ?? "/usr/bin:/bin",
+        opts.sshd === null ? hostPathWithoutSshd() : (process.env.PATH ?? "/usr/bin:/bin"),
       ]
         .filter(Boolean)
         .join(":"),
@@ -682,15 +692,87 @@ describe("the install block refuses an sshd older than OpenSSH 7.2", () => {
   it.each([
     ["an sshd that is not OpenSSH", "dropbear v2022.83"],
     ["an sshd that answers nothing", ""],
-    ["no sshd at all", "sh: sshd: not found"],
     ["a version with no minor", "OpenSSH_7"],
   ])("warns and installs anyway under %s", async (_label, version) => {
     const { run, keys } = await installUnder(version);
+    expectWarnedAndInstalled(run, keys);
+  });
+
+  function expectWarnedAndInstalled(run: ShellRun, keys: string) {
     expect(run.code).toBe(0);
     expect(run.stderr).toContain("could not read the OpenSSH version");
     // One line: the key line may still work, so it is a warning, not a stop.
     expect(run.stderr.split("\n").filter((l) => l.includes("OpenSSH"))).toHaveLength(1);
-    expect(await Bun.file(keys).text()).toContain("restrict ssh-ed25519");
+    return expect(Bun.file(keys).text()).resolves.toContain("restrict ssh-ed25519");
+  }
+
+  /**
+   * No `sshd` on the PATH sends the block to its `/usr/sbin/sshd` fallback,
+   * which the host running the suite may well have. So the PATH drops every
+   * directory holding an sshd, and the ONE fallback literal is rewritten to a
+   * path that does not exist — as the shadow tests above do for /etc/shadow.
+   */
+  it("warns and installs anyway with no sshd at all", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ssh-version-"));
+    const shell = installShell(minted);
+    expect(shell.split("/usr/sbin/sshd")).toHaveLength(2);
+    const run = await runScript(shell.replace("/usr/sbin/sshd", join(home, "no-sshd")), {
+      home,
+      sshd: null,
+    });
+    await expectWarnedAndInstalled(run, join(home, ".ssh", "authorized_keys"));
+    expect(run.stderr).toContain(join(home, "no-sshd"));
+  });
+
+  /**
+   * A root shell with `pipefail` set runs the pasted block with it too. An sshd
+   * too old for `-V` exits non-zero, so a version read that answered for that
+   * status would come back empty and turn the refusal into a warning. dash has
+   * no pipefail, so this runs under bash.
+   */
+  describe("under an inherited pipefail", () => {
+    const pipefail = ["bash", "-o", "pipefail"];
+
+    it("still refuses an sshd that rejects -V", async () => {
+      const home = await mkdtemp(join(tmpdir(), "ssh-version-"));
+      const run = await runScript(installShell(minted), {
+        home,
+        shell: pipefail,
+        sshd: await sshdStub({
+          version: "sshd: illegal option -- V\nOpenSSH_6.6.1p1 Ubuntu-2ubuntu2.13, OpenSSL 1.0.1f",
+        }),
+      });
+      expect(run.code).toBe(1);
+      expect(run.stderr).toContain("OpenSSH 6.6.1 is older than 7.2");
+      expect(await Bun.file(join(home, ".ssh", "authorized_keys")).exists()).toBe(false);
+    });
+
+    it("still installs under a current sshd, and reads its usepam through a failing -T", async () => {
+      const home = await mkdtemp(join(tmpdir(), "ssh-version-"));
+      const shell = installShell(minted);
+      const shadow = join(home, "shadow");
+      await writeFile(shadow, "agent:!:1::::::\n");
+      const run = await runScript(shell.replace("/etc/shadow", shadow), {
+        home,
+        shell: pipefail,
+        // -T prints `usepam yes`, then exits non-zero.
+        sshd: await binWith(
+          "sshd",
+          [
+            'case "$1" in',
+            "  -V) echo 'OpenSSH_9.2p1, OpenSSL 3.0' >&2; exit 1 ;;",
+            "  -T) echo 'usepam yes'; exit 1 ;;",
+            "esac",
+          ].join("\n"),
+        ),
+      });
+      expect(run.code).toBe(0);
+      expect(run.stderr).not.toContain("OpenSSH");
+      expect(run.stderr).not.toContain("is locked");
+      expect(await Bun.file(join(home, ".ssh", "authorized_keys")).text()).toContain(
+        "restrict ssh-ed25519",
+      );
+    });
   });
 });
 
