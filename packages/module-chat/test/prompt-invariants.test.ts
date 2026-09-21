@@ -240,9 +240,9 @@ describe("the persona without inline composition", () => {
     // The full persona invites building agents (`manage agents`, skills); the
     // reduced one must override that, since its token cannot write an agent.
     expect(REDUCED).toContain("when no existing agent matches, say so plainly and stop");
-    expect(REDUCED).toContain("do not create or modify an agent");
+    expect(REDUCED).toContain("Do not create or modify an agent");
     expect(SYSTEM_PROMPT).not.toContain("when no existing agent matches");
-    expect(SYSTEM_PROMPT).not.toContain("do not create or modify an agent");
+    expect(SYSTEM_PROMPT).not.toContain("Do not create or modify an agent");
   });
 
   it("is materially shorter — the point is not to pay for what is refused", () => {

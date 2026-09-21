@@ -56,7 +56,7 @@ import {
 } from "../../services/files.ts";
 import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
-import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
+import { VIEW_AS_HEADER, canComposeInline } from "@appstrate/core/permissions";
 import { asString, textResult } from "./tool-results.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 
@@ -793,7 +793,7 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 
 /**
  * `run_and_wait` arguments that exist only for `kind:"inline"`. Declared only
- * to a caller {@link offersInlineRuns} admits. The launch allowlist
+ * to a caller who may compose inline (`canComposeInline`). The launch allowlist
  * (`RUN_AND_WAIT_ARGUMENT_NAMES`) still knows them either way: an agent-only
  * caller that sends one reaches the route and takes its 403, the one refusal
  * that owns the rule.
@@ -873,20 +873,9 @@ const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
   },
 };
 
-/**
- * Whether `run_and_wait` advertises `kind:"inline"` to this caller.
- *
- * The launch route is the gate (`POST /api/runs/inline` requires
- * `agents:write` and `agents:run`); this mirrors it and only decides what the
- * model is TOLD — a schema offering a kind the route refuses sends the model
- * into a 403 it could not have predicted.
- */
-export function offersInlineRuns(permissions: ReadonlySet<string>): boolean {
-  return permissions.has("agents:write") && permissions.has("agents:run");
-}
-
 function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
-  const inline = offersInlineRuns(ctx.permissions);
+  // The route is the gate; this only decides what the model is told.
+  const inline = canComposeInline((p) => ctx.permissions.has(p));
   // Descriptor spans that only make sense for `kind:"inline"`. Absent, not
   // contradicted, for a caller who cannot launch one.
   const ifInline = (text: string) => (inline ? text : "");

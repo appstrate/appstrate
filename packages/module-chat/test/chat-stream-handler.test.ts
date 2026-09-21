@@ -647,7 +647,7 @@ describe("handleChatStream", () => {
 
     /** The one argument a model needs to compose an inline agent, whatever the prose. */
     const INLINE_MARKER = 'kind:"inline"';
-    const REDUCED_MARKER = "Agent authoring is not available in this turn";
+    const REDUCED_MARKER = "Do not create or modify an agent in this turn";
 
     const BUILDER = new Set(["agents:read", "agents:run", "agents:write"]);
 

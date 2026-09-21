@@ -2,6 +2,7 @@
 
 import {
   SPACE_LEVEL_PERMISSIONS,
+  canComposeInline,
   type OrgRole,
   type SpaceLevelPermission,
 } from "@appstrate/core/permissions";
@@ -349,7 +350,7 @@ describe("composing an inline agent", () => {
   it("takes `agents:write` and `agents:run`, so only `admin` and `builder` compose", () => {
     const composes = (preset: Parameters<typeof presetPermissions>[0]) => {
       const granted = presetPermissions(preset);
-      return granted.has("agents:write") && granted.has("agents:run");
+      return canComposeInline((p) => granted.has(p));
     };
     for (const preset of ["admin", "builder"] as const) expect(composes(preset), preset).toBe(true);
     for (const preset of ["operator", "runner", "viewer"] as const) {

@@ -366,8 +366,10 @@ describe("runner preset", () => {
   it("lets a builder through the inline guard", async () => {
     const builder = await memberContext(owner, "member", "builder");
     for (const path of INLINE_PATHS) {
-      const text = await (await postInline(path, builder)).text();
-      expect(`${path}: ${passedGuard(text)}`).toBe(`${path}: true`);
+      const res = await postInline(path, builder);
+      expect(`${path}: ${res.status !== 403 && passedGuard(await res.text())}`).toBe(
+        `${path}: true`,
+      );
     }
   });
 
@@ -415,8 +417,9 @@ describe("runner preset", () => {
 
     it("lets a builder's inline source past the guard", async () => {
       const builder = await memberContext(owner, "member", "builder");
-      const text = await (await postRemote(builder, inlineSource())).text();
-      expect(passedGuard(text)).toBe(true);
+      const res = await postRemote(builder, inlineSource());
+      expect(res.status).not.toBe(403);
+      expect(passedGuard(await res.text())).toBe(true);
     });
 
     it("asks only `agents:run` of the registry source", async () => {

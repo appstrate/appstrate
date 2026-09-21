@@ -146,6 +146,14 @@ export type CorePermission = {
 }[CoreResource];
 
 /**
+ * Whether a caller may compose an inline agent (see `CoreResources.agents`).
+ * Takes a membership test so a `Set`, an array or a UI `can()` all fit.
+ */
+export function canComposeInline(has: (permission: CorePermission) => boolean): boolean {
+  return has("agents:write") && has("agents:run");
+}
+
+/**
  * Runtime mirror of `CoreResources`: `satisfies` catches a missing resource,
  * `packages/core/test/permissions.test.ts` a missing action. Needed at runtime because
  * the level sets below and the custom-role validator (RBAC spec §3.3) enumerate it.

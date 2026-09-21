@@ -41,6 +41,7 @@ import { registerStopController, unregisterStopController } from "./stop-registr
 import { setActiveStream, clearActiveStream } from "./resumable.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 import type { UsageRejection } from "@appstrate/core/module";
+import { canComposeInline } from "@appstrate/core/permissions";
 import { classifyClientTurnError, clientTurnErrorMarker } from "./turn-error.ts";
 import {
   ModelGenerationError,
@@ -318,8 +319,7 @@ export async function handleChatStream(
   // MCP `run_and_wait` descriptor on the same turn: one prompt-cache miss.
   const authoring = body.agent_authoring !== false;
   const permissions = turnPermissions(c.get("permissions"), authoring);
-  const canComposeInline =
-    permissions.includes("agents:write") && permissions.includes("agents:run");
+  const composeInline = canComposeInline((p) => permissions.includes(p));
   const phaseAStart = Date.now();
 
   // ── Preamble phase B (overlapped with A) ─────────────────────────────────
@@ -463,7 +463,7 @@ export async function handleChatStream(
   // (`pi-chat/engine.ts`). Re-applying it to this prompt matched nothing — and
   // could only misfire, since the context block below carries org-authored agent
   // names and would be truncated at any that happened to spell the heading.
-  let system = buildSystemPrompt({ canComposeInline });
+  let system = buildSystemPrompt({ canComposeInline: composeInline });
   if (contextBlock) system += `\n\n${contextBlock}`;
 
   // Which credential the turn spends. One engine drives them both.

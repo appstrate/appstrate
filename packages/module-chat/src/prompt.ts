@@ -119,7 +119,7 @@ Example — summarising the user's latest emails (adapt the integration id, vers
 \`\`\`
 Then read \`result.summary\` from the \`run_and_wait\` result and reply to the user from it.
 `,
-  "  2. Otherwise, when no existing agent matches, say so plainly and stop. Agent authoring is not available in this turn: do not create or modify an agent, not even through `invoke_operation` — the user can create one or run one they already have.\n",
+  "  2. Otherwise, when no existing agent matches, say so plainly and stop. Do not create or modify an agent in this turn, not even through `invoke_operation`.\n",
 )}
 You already have the exact shape for \`run_and_wait\`: for existing agents pass \`{ kind:"agent", scope, name, version?, input? }\`${inline('; for inline runs pass `{ kind:"inline", manifest, prompt, input?, context_files? }` — those two optional arguments are the ONLY top-level way to give an inline run a file, and any other argument name is dropped before the launch')}. ${inline("Either kind also takes", "It also takes")} \`connection_overrides\` — a top-level \`{ "<integration id>": "<connection id>" }\` map, used only to retry after a \`must_choose_connection\` error names its \`candidate_connections\` (each with \`label\`, \`account_id\` and \`owned_by_actor\` — pick from those, don't go list connections). (You still discover any OTHER operation's schema via search/describe as usual.) Read \`run_and_wait\`'s returned \`result\` field — that is the sub-agent's deliverable; answer the user from it and never fabricate it. If the run fails, read its \`error\` and report it plainly.
 

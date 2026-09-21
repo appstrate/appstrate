@@ -55,7 +55,7 @@ import { createInsufficientScopeError } from "better-auth/oauth2";
 import { APIError } from "better-auth/api";
 import { createMcpServer } from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
-import { requireModulePermission } from "@appstrate/core/permissions";
+import { canComposeInline, requireModulePermission } from "@appstrate/core/permissions";
 import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib/errors.ts";
 import { getActor } from "../../lib/actor.ts";
 import { assertSpaceId } from "../../lib/ids.ts";
@@ -79,7 +79,6 @@ import {
   buildMcpTools,
   buildFileResourceProvider,
   FORWARDED_AUTH_HEADERS,
-  offersInlineRuns,
   type Dispatch,
   type McpObserver,
 } from "./tools.ts";
@@ -181,7 +180,7 @@ export function buildServerInstructions(
     : "Give the caller that `connect_url` to open, in one short sentence, and end your turn — do NOT poll, loop, wait, or run in the same turn.";
   // Every inline-run span below follows `run_and_wait`'s own descriptor: a
   // caller who cannot compose is not told about a kind the route refuses.
-  const inline = offersInlineRuns(permissions);
+  const inline = canComposeInline((p) => permissions.has(p));
   const runOps = inline ? "`runAgent`/`runInline`" : "`runAgent`";
   const packageImportGuidance = packageImportAvailable
     ? "Call `import_package_file` only when validation returns BOTH `valid: true` AND `importable: true`, and the user asked to add the package."
