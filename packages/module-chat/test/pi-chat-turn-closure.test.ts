@@ -282,3 +282,67 @@ describe("closePiTurn", () => {
     });
   });
 });
+
+describe("the model a turn bound to", () => {
+  const MODEL = { id: "mdl_opus", label: "Claude Opus 5" } as const;
+
+  it("is stamped on a turn that simply finished", async () => {
+    const chunks = closePiTurn({
+      finishReason: "stop",
+      streamStarted: true,
+      aborted: false,
+      abortReason: undefined,
+      stepCount: 2,
+      stepCapReached: false,
+      model: MODEL,
+      newId: () => "unused",
+    }).chunks;
+
+    expect(turnMetadataFromMessage(await assemble(chunks))).toMatchObject({
+      modelId: "mdl_opus",
+      modelLabel: "Claude Opus 5",
+    });
+  });
+
+  it("is stamped on a turn that FAILED — which model failed is the question asked of one", async () => {
+    // The discriminating half of the test above: a stamp that only survived the
+    // happy path would leave every error card unattributed, which is exactly
+    // the case where the user needs to know what answered.
+    const chunks = closePiTurn({
+      error: new Error("upstream 503"),
+      finishReason: "error",
+      streamStarted: false,
+      aborted: false,
+      abortReason: undefined,
+      stepCount: 0,
+      stepCapReached: false,
+      model: MODEL,
+      newId: () => "assistant-error",
+    }).chunks;
+
+    expect(turnMetadataFromMessage(await assemble(chunks))).toMatchObject({
+      modelId: "mdl_opus",
+      modelLabel: "Claude Opus 5",
+      errorCategory: "upstream_unavailable",
+    });
+  });
+
+  it("is absent — not guessed — on a turn that never bound one", async () => {
+    // Every message written before this shipped is this case, and so is a turn
+    // that died in setup. A reader must see nothing, never a default.
+    const chunks = closePiTurn({
+      finishReason: "stop",
+      streamStarted: true,
+      aborted: false,
+      abortReason: undefined,
+      stepCount: 1,
+      stepCapReached: false,
+      newId: () => "unused",
+    }).chunks;
+
+    const turn = turnMetadataFromMessage(await assemble(chunks));
+    expect(turn).not.toBeNull();
+    expect(turn?.modelId).toBeUndefined();
+    expect(turn?.modelLabel).toBeUndefined();
+  });
+});

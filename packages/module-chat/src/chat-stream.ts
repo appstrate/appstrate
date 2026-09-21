@@ -599,6 +599,10 @@ export async function handleChatStream(
         slot,
         modelBinding,
         presetId: chosen.id,
+        // The same string the picker shows (`model-select.tsx` renders
+        // `label ?? modelId`), so the transcript and the composer never
+        // disagree about what the model is called.
+        modelLabel: chosen.label ?? chosen.modelId,
         orgId,
         userId: user.id,
         chatSessionId: meteringSessionId,

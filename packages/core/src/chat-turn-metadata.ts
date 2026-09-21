@@ -145,6 +145,35 @@ export interface AppstrateTurnMetadata {
   toolStepBudgetReached?: boolean;
   maxStepsReached: boolean;
   lastToolName?: string;
+  /**
+   * Which model answered this turn. TWO fields, one fact, two lifetimes — the
+   * same split `runs` makes between `llm_usage.model` (the preset id) and
+   * `runs.model_label` (the snapshot that outlives the model row):
+   *
+   *  - `modelId` is the org-model PRESET id the turn bound to — the id
+   *    `/api/models` serves. Reopening a conversation re-seeds the composer's
+   *    picker from the newest turn carrying one. It MAY dangle: deleting an org
+   *    model does not rewrite history, and a dangling id simply loses the
+   *    re-seed and falls back to the client's own default.
+   *  - `modelLabel` is the display name frozen at write time, so a transcript
+   *    still says which model answered after that model is gone. For an ALIASED
+   *    model it is the alias label — the value `/api/models` serves and the
+   *    picker renders — never the hidden backing id.
+   *
+   * OPTIONAL like `errorCategory`: every row written before this shipped has
+   * neither, and a turn that died before binding a model has neither either.
+   * Readers degrade to showing nothing, never to a guess.
+   *
+   * ⚠️ NEITHER is input to the history projection. `buildStructuredPiTurn`
+   * stamps every historical assistant message with `HISTORY_MODEL_SENTINEL` on
+   * purpose, so Pi's `isSameModel` test FAILS and its cross-model tool-call-id
+   * normalization and Responses-API unpaired-item scrub both run. Feeding a
+   * real model id back into that projection would re-enable `isSameModel` and
+   * break replay for every conversation that ever switched models. These fields
+   * exist to be SHOWN, not to be replayed.
+   */
+  modelId?: string;
+  modelLabel?: string;
 }
 
 export interface ChatMessageMetadata {

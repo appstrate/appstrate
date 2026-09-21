@@ -47,6 +47,7 @@ import { resolveAttachmentContent, UNNAMED_FILE } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
+import { turnModelLabel } from "./turn-model.ts";
 import {
   FileAttachment,
   ATTACHMENT_CHIP_CLASS,
@@ -385,6 +386,30 @@ function ThinkingIndicator() {
   );
 }
 
+/**
+ * Which model answered this turn, at low emphasis, in the row the action bar
+ * already reserves — so a model switch mid-conversation is VISIBLE where it
+ * happened instead of being inferred from the composer's current selection.
+ *
+ * Always rendered rather than revealed on hover: the point is that a reader
+ * scrolling a transcript notices the change without looking for it. Absent on
+ * every turn that carries no model (see `turn-model.ts`), which is also what
+ * keeps it off user messages and server-authored notices.
+ */
+function TurnModelBadge() {
+  // A plain string selector — never a derived object. See `turn-error-state.ts`.
+  const label = useAuiState((s) => turnModelLabel(s.message));
+  if (label === null) return null;
+  return (
+    // `min-w-0` is what lets `truncate` actually shrink inside the flex row —
+    // without it a long model name would push the action bar out instead of
+    // ellipsing. Capped so it never crowds the bar on a narrow viewport.
+    <span className="text-muted-foreground max-w-[14rem] min-w-0 truncate text-xs" title={label}>
+      {label}
+    </span>
+  );
+}
+
 function TurnLimitNotice() {
   const reached = useAuiState((s) => turnLimitReached(sourceMessage(s.message)));
   if (!reached) return null;
@@ -459,7 +484,8 @@ function AssistantMessage() {
         <TurnLimitNotice />
         <MessageError />
       </div>
-      <div className="mt-1 flex h-7 items-center gap-1">
+      <div className="mt-1 flex h-7 items-center gap-2">
+        <TurnModelBadge />
         {/* Space permanently reserved (fixed h-7 wrapper) and the bar ALWAYS
             mounted, revealed by opacity only. `hideWhenRunning`/`autohide`
             would unmount it and collapse every assistant message by the bar's

@@ -22,6 +22,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -72,10 +73,13 @@ import {
   getCompatibleGenerationSettings,
   getGenerationSettings,
   getSelectedModel,
+  seedConversationModel,
+  setActiveConversation,
   setGenerationSettings,
   setModelGenerationCapabilities,
   setSelectedModel,
 } from "./model-store.ts";
+import { latestTurnModelId } from "./turn-model.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
 
@@ -425,6 +429,11 @@ const Conversation = memo(function Conversation({
     gcTime: 0,
   });
 
+  // Stable identity for the seed array. `useChat` reads it once at mount, but
+  // `ConversationInner` also keys a layout effect on it — and `?? []` minted a
+  // fresh array on every render, re-running that effect for nothing.
+  const initialMessages = useMemo(() => history.data ?? [], [history.data]);
+
   if (persistedAtMount && history.isPending) {
     return (
       <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
@@ -437,7 +446,7 @@ const Conversation = memo(function Conversation({
       id={id}
       getHeaders={getHeaders}
       isPersisted={persistedAtMount}
-      initialMessages={history.data ?? []}
+      initialMessages={initialMessages}
       {...rest}
     />
   );
@@ -456,6 +465,25 @@ function ConversationInner({
 }: ConversationProps & { initialMessages: UIMessage[] }) {
   const queryClient = useQueryClient();
   const spaceId = spaceIdFromHeaders(getHeaders);
+
+  // Bind the model store to THIS conversation, and seed it from the
+  // conversation's own transcript (the newest turn carrying a model id).
+  //
+  // This is what stops a reopened conversation from silently continuing on
+  // whatever model the picker happened to hold: the transcript is the authority
+  // for what a conversation is on, and the stored default only answers for one
+  // that has no transcript yet.
+  //
+  // A LAYOUT effect, so the composer never paints one frame of the stored
+  // default before the seed lands; and ordered attach-then-seed, because
+  // `seedConversationModel` ignores an id that is not the active conversation.
+  // `initialMessages` is `useChat`'s mount-time seed and never mutates, so this
+  // runs once per conversation.
+  useLayoutEffect(() => {
+    setActiveConversation(id);
+    const seeded = latestTurnModelId(initialMessages);
+    if (seeded) seedConversationModel(id, seeded);
+  }, [id, initialMessages]);
 
   // Header builder invoked by the transport at request/reconnect time. It reads
   // the model from the external store, NOT from React state: `useChat` recreates
