@@ -7,12 +7,10 @@
  * before anything is minted, and whether the script it renders can be made to
  * carry shell syntax.
  *
- * The dispatcher tests below RUN the generated script's forced command with
- * `sh`, rather than asserting on its text. Its text looked right for every
- * case while the sftp subsystem — three of the five tools — was refused before
- * a single packet, because `command=` intercepts a subsystem request too and
- * nothing in the script said so. A text assertion cannot see that; executing
- * the arm can.
+ * The install script is EXECUTED here, not just asserted on, for the one arm
+ * that must hold before anything is touched: an account that cannot run a
+ * login shell. The rest is text, because the block now does one thing —
+ * authorise a key — and the account it authorises is the whole policy.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -20,6 +18,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
+import { publicKeyFromOpenSshPrivateKey } from "../../src/lib/openssh-key.ts";
 import {
   handoffStepsFor,
   provisionCredentials,
@@ -31,7 +30,7 @@ const SSH_AUTH = {
   _meta: {
     "dev.appstrate/provisioning": {
       kind: "ssh_keypair",
-      provides: ["private_key", "read_only"],
+      provides: ["private_key"],
     },
   },
 };
@@ -70,7 +69,7 @@ describe("readProvisioning", () => {
   it("reads the declared kind and the names the platform owns", () => {
     expect(readProvisioning(SSH_AUTH)).toEqual({
       kind: "ssh_keypair",
-      provides: ["private_key", "read_only"],
+      provides: ["private_key"],
     });
   });
 
@@ -85,10 +84,8 @@ describe("readProvisioning", () => {
     // The connect form hides fields by reading `provides`. A manifest that
     // forgets one would put a mintable secret back in front of the user, and
     // the two sides would disagree with nothing failing.
-    const auth = {
-      _meta: { "dev.appstrate/provisioning": { kind: "ssh_keypair", provides: ["private_key"] } },
-    };
-    expect(() => readProvisioning(auth)).toThrow(/must list read_only in `provides`/);
+    const auth = { _meta: { "dev.appstrate/provisioning": { kind: "ssh_keypair" } } };
+    expect(() => readProvisioning(auth)).toThrow(/must list private_key in `provides`/);
   });
 });
 
@@ -155,25 +152,6 @@ describe("provisionCredentials — input validation", () => {
       provisionCredentials(SSH_AUTH, { ...badHostFree, user: "agent", port }, ctx),
     ).rejects.toThrow(/`port` must be a number between 1 and 65535/);
   });
-
-  it.each(["rm -rf /", "Hostname", "a;b", "../../etc", "hostname uptime"])(
-    "refuses %s as a verb name",
-    async (allowed_verbs) => {
-      await expect(
-        provisionCredentials(SSH_AUTH, { ...badHostFree, user: "agent", allowed_verbs }, ctx),
-      ).rejects.toThrow(/is not a valid name|implements/);
-    },
-  );
-
-  it("refuses a verb the generated dispatcher cannot implement", async () => {
-    await expect(
-      provisionCredentials(
-        SSH_AUTH,
-        { ...badHostFree, user: "agent", allowed_verbs: "deploy_latest" },
-        ctx,
-      ),
-    ).rejects.toThrow(/deploy_latest is not among them/);
-  });
 });
 
 /**
@@ -205,74 +183,22 @@ describe("provisionCredentials — what gets minted and rendered", () => {
 
   it("installs the very key it minted — the two halves cannot drift", async () => {
     const res = (await provisionCredentials(SSH_AUTH, { ...base }, stubCtx))!;
-    expect(installShell(res)).toMatch(
-      /restrict,command="\/usr\/local\/bin\/appstrate-dispatch-[0-9a-f]{12}"/,
-    );
+    const publicKey = publicKeyFromOpenSshPrivateKey(res.private_key!);
+    expect(installShell(res)).toContain(`'restrict ${publicKey}'`);
   });
 
   /**
-   * Two connections to one host must not share a dispatcher: the second paste
-   * would overwrite the first and hand its key the second's verb list.
+   * `restrict` narrows the KEY (no forwarding, no pty); the account narrows
+   * what it may DO. There is deliberately no `command=`: a forced-command
+   * dispatcher froze the connection's capability at creation, because its path
+   * carried the key's fingerprint, so one more verb meant one more key.
    */
-  it("gives every minted key its own dispatcher path", async () => {
-    const a = (await provisionCredentials(SSH_AUTH, { ...base }, stubCtx))!;
-    const b = (await provisionCredentials(SSH_AUTH, { ...base }, stubCtx))!;
-    const pathOf = (script: string) => /appstrate-dispatch-[0-9a-f]{12}/.exec(script)?.[0];
-    expect(pathOf(installShell(a))).toBeDefined();
-    expect(pathOf(installShell(a))).not.toBe(pathOf(installShell(b)));
-  });
-
-  it("renders one exact-match arm per allowed verb, and a refusing default", async () => {
-    const res = (await provisionCredentials(
-      SSH_AUTH,
-      { ...base, allowed_verbs: "hostname, disk_usage" },
-      stubCtx,
-    ))!;
-    const script = installShell(res);
-    expect(script).toContain("    hostname) exec hostname ;;");
-    expect(script).toContain("    disk_usage) exec df -h / ;;");
-    // Not requested — must not be reachable on the target either.
-    expect(script).not.toContain("whoami)");
-    expect(script).toContain("refused verb");
-    // The dispatcher must never hand the request to a shell.
-    expect(script).not.toContain("eval");
-    expect(res.allowed_verbs).toBe("hostname,disk_usage");
-  });
-
-  /**
-   * Emptying a permission field has to NARROW it. The form seeds the
-   * manifest's declared default, so clearing that box used to hand back the
-   * full set of five — more than the three it had been showing.
-   */
-  it.each([
-    ["absent", undefined],
-    ["cleared", ""],
-    ["nothing but separators", " , , "],
-  ])("allows no verb at all when the list is %s", async (_label, allowed_verbs) => {
-    const res = (await provisionCredentials(
-      SSH_AUTH,
-      { ...base, ...(allowed_verbs === undefined ? {} : { allowed_verbs }) },
-      stubCtx,
-    ))!;
-    expect(res.allowed_verbs).toBe("");
-  });
-
-  /**
-   * `*` is a FORM shorthand, never a stored value. What lands in the keyring is
-   * the explicit list, because `allowed_verbs` is what tells an operator what
-   * the agent may do — and because the dispatcher is written to the target once,
-   * so a stored `*` would start lying the day a verb is added to the catalogue.
-   */
-  it("expands the * shorthand to the explicit list before persisting it", async () => {
-    const res = (await provisionCredentials(SSH_AUTH, { ...base, allowed_verbs: "*" }, stubCtx))!;
-    expect(res.allowed_verbs).toBe("hostname,uptime,disk_usage,memory,whoami");
-    expect(res.allowed_verbs).not.toContain("*");
-
-    // Every one of them is reachable on the target, not just recorded here.
-    const script = installShell(res);
-    for (const verb of ["hostname", "uptime", "disk_usage", "memory", "whoami"]) {
-      expect(script).toContain(`    ${verb}) exec `);
-    }
+  it("authorises the key with restrict and no forced command", async () => {
+    const script = installShell((await provisionCredentials(SSH_AUTH, { ...base }, stubCtx))!);
+    expect(script).toContain("'restrict ssh-ed25519 ");
+    expect(script).not.toContain("command=");
+    expect(script).not.toContain("DISPATCH");
+    expect(script).not.toContain("SSH_ORIGINAL_COMMAND");
   });
 
   it("points the fingerprint check at the key type it actually pinned", async () => {
@@ -292,8 +218,8 @@ describe("provisionCredentials — what gets minted and rendered", () => {
 
   it("refuses to install a key on an account that cannot run a forced command", async () => {
     // A forced command runs through the login shell. The guide used to
-    // recommend nologin, which refuses every verb — and the failure only
-    // surfaced mid-run, as a verb that ran and produced nothing.
+    // recommend nologin, under which sshd runs nothing — and the failure only
+    // surfaced mid-run, as a command that produced nothing.
     const res = (await provisionCredentials(SSH_AUTH, { ...base }, stubCtx))!;
     expect(installShell(res)).toContain("*/nologin|*/false)");
   });
@@ -348,10 +274,8 @@ describe("provisionCredentials — what gets minted and rendered", () => {
     // What `getIntegrationConnectionCredentialFields` hands back months later:
     // the stored names, nothing else, order not preserved.
     const readBack = {
-      read_only: res.read_only!,
       host_key: res.host_key!,
       user: res.user!,
-      allowed_verbs: res.allowed_verbs!,
       port: res.port!,
       private_key: res.private_key!,
       host: res.host!,
@@ -380,12 +304,13 @@ describe("provisionCredentials — what gets minted and rendered", () => {
 
   it("hands back the block that takes the key back off the target", async () => {
     const res = (await provisionCredentials(SSH_AUTH, { ...base }, stubCtx))!;
-    const keyBase64 = /restrict,command="[^"]+" ssh-ed25519 (\S+)/.exec(installShell(res))?.[1];
+    const keyBase64 = /'restrict ssh-ed25519 (\S+)/.exec(installShell(res))?.[1];
     expect(keyBase64).toBeDefined();
     // Matched on the key's own base64 with `grep -F`, so it removes exactly
     // this connection's line — deleting the connection here cannot do it.
     expect(revokeShell(res)).toContain(`grep -vF '${keyBase64}'`);
-    expect(revokeShell(res)).toMatch(/rm -f "\$tmp" \/usr\/local\/bin\/appstrate-dispatch-/);
+    // Nothing else to undo: the block installed one authorized_keys line.
+    expect(revokeShell(res)).not.toContain("appstrate-dispatch");
   });
 
   /**
@@ -401,20 +326,18 @@ describe("provisionCredentials — what gets minted and rendered", () => {
    * A bogus PRIVATE key would be a credential the platform did not mint, which
    * is the whole reason this list exists.
    */
-  it("drops a client-supplied private key or read-only flag, and keeps the host key", async () => {
+  it("drops a client-supplied private key, and keeps the host key", async () => {
     const fields: Record<string, unknown> = {
       ...base,
       private_key: "-----BEGIN OPENSSH PRIVATE KEY-----\nattacker\n",
-      read_only: "0",
     };
     const res = (await provisionCredentials(SSH_AUTH, fields, stubCtx))!;
     expect(res.private_key).not.toContain("attacker");
-    expect(res.read_only).toBe("1");
     expect(fields.private_key).toBeUndefined();
-    expect(fields.read_only).toBeUndefined();
 
     // Supplied, therefore honoured — and still in the bag, because nothing
-    // strips a name the platform does not own.
+    // strips a name the platform does not own. `private_key` is the whole of
+    // what it owns now.
     expect(res.host_key).toBe(HOST_KEY);
     expect(fields.host_key).toBe(HOST_KEY);
   });
@@ -441,13 +364,6 @@ describe("provisionCredentials — what gets minted and rendered", () => {
 });
 
 // ───────────────── the generated script, actually executed ─────────────────
-
-/** Pull the forced command out of the install block's quoted heredoc. */
-function extractDispatcher(script: string): string {
-  const m = /<<'DISPATCH'\n([\s\S]*?)\nDISPATCH\n/.exec(script);
-  if (!m) throw new Error("no dispatcher heredoc in the install script");
-  return m[1]!;
-}
 
 interface ShellRun {
   stdout: string;
@@ -493,79 +409,6 @@ describe("the generated install script", () => {
     expect(run.code).toBe(1);
     expect(run.stderr).toContain("shell de login");
     expect(run.stderr).not.toContain("authorized_keys");
-  });
-});
-
-describe("the generated dispatcher, run as sshd would run it", () => {
-  const dispatcherFor = async (allowed_verbs?: string) => {
-    const res = (await provisionCredentials(
-      SSH_AUTH,
-      { ...base, ...(allowed_verbs === undefined ? {} : { allowed_verbs }) },
-      stubCtx,
-    ))!;
-    return extractDispatcher(installShell(res));
-  };
-
-  it("runs an allowed verb", async () => {
-    const run = await runScript(await dispatcherFor("hostname"), {
-      SSH_ORIGINAL_COMMAND: "hostname",
-    });
-    expect(run.code).toBe(0);
-    expect(run.stdout.trim()).not.toBe("");
-  });
-
-  it("refuses anything that is not an exact verb, with exit 42", async () => {
-    for (const command of ["hostname; id", "uptime", "hostname ", "../../bin/sh"]) {
-      const run = await runScript(await dispatcherFor("hostname"), {
-        SSH_ORIGINAL_COMMAND: command,
-      });
-      expect({ command, code: run.code }).toEqual({ command, code: 42 });
-      expect(run.stderr).toContain("refused verb");
-    }
-  });
-
-  it("reports an empty request as exit 2", async () => {
-    expect((await runScript(await dispatcherFor("hostname"))).code).toBe(2);
-    expect(
-      (await runScript(await dispatcherFor("hostname"), { SSH_ORIGINAL_COMMAND: "" })).code,
-    ).toBe(2);
-  });
-
-  /**
-   * The one that was missing. sshd routes a `subsystem sftp` request through
-   * the SAME forced command, handing it the subsystem line from sshd_config
-   * (measured against OpenSSH 9.2: `/usr/lib/openssh/sftp-server`). Without an
-   * arm for it the session is refused and `ssh_read_file`, `ssh_list_dir` and
-   * `ssh_write_file` all die with an opaque "Connection closed".
-   */
-  it.each([
-    // Measured, not guessed: the first is what Debian 12 / OpenSSH 9.2 hands
-    // the forced command, the SECOND is what Ubuntu 24.04 / OpenSSH 9.6 hands
-    // it — same path, trailing space — and the fourth is the `Subsystem sftp
-    // internal-sftp -f AUTHPRIV -l INFO` many distributions ship. A glob on
-    // the whole string matched only the first.
-    "/usr/lib/openssh/sftp-server",
-    "/usr/lib/openssh/sftp-server ",
-    "/usr/lib/ssh/sftp-server",
-    "internal-sftp -f AUTHPRIV -l INFO",
-    "/usr/libexec/sftp-server -e",
-    "internal-sftp",
-    "sftp-server",
-  ])("routes the sftp subsystem (%p) instead of refusing it", async (subsystem) => {
-    const run = await runScript(await dispatcherFor("hostname"), {
-      SSH_ORIGINAL_COMMAND: subsystem,
-    });
-    // Either the binary was found and exec'd, or exit 3 says it is absent on
-    // THIS machine. What must never happen is the refusing default (42) or the
-    // no-verb arm (2) — those are what kill the subsystem.
-    expect([2, 42]).not.toContain(run.code);
-    expect(run.stderr).not.toContain("refused verb");
-  });
-
-  it("opens sftp read-only, matching the connection's read_only", async () => {
-    // `-R` is the target's own enforcement; `SSH_READ_ONLY` server-side is the
-    // half that a wrong platform could get wrong.
-    expect(await dispatcherFor("hostname")).toContain('exec "$candidate" -R');
   });
 });
 

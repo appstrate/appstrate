@@ -5,7 +5,7 @@
   "schema_version": "0.1",
   "display_name": "SSH",
   "icon": "mdi:console-network",
-  "description": "Reach a host over SSH from an agent — a VPS, a NAS, a build box, anything with sshd and no HTTP API. One connection is one key, one host and one capability profile: the key is the identity, and what it may do is enforced on the target by `restrict` + `command=` in authorized_keys. The private key lives in the platform keyring and is delivered to the @appstrate/ssh-mcp runner as a file; it never reaches the agent container. Backs the local mcp-server, which shells out to the `ssh` / `sftp` clients of the bun runner image.",
+  "description": "Reach a host over SSH from an agent — a VPS, a NAS, a build box, anything with sshd and no HTTP API. One connection is one key on one Unix account: THAT ACCOUNT is the boundary. What the agent can do is exactly what the account can do, so grant root only if you mean it, and otherwise create a dedicated user and restrict it with the tools the system already gives you (sudoers, groups, a restricted shell). Appstrate does not narrow it further. A read-only agent is expressed by the TOOLS it is granted: give it ssh_probe, ssh_read_file and ssh_list_dir, and withhold ssh_exec and ssh_write_file. The private key lives in the platform keyring and is delivered to the @appstrate/ssh-mcp runner as a file; it never reaches the agent container.",
   "license": "Apache-2.0",
   "keywords": ["ssh", "sftp", "remote", "server", "ops"],
   "source": {
@@ -18,13 +18,19 @@
   "setup_guide": {
     "steps": [
       {
-        "label": "Créez un compte Unix dédié sur le serveur cible — pas root. Laissez-lui un shell POSIX (/bin/sh) : un forced command SSH passe par le shell de login, donc un compte en nologin refuserait tous les verbes. Ce qui restreint la clé, c'est restrict + command=, pas l'absence de shell. Le rayon d'action de l'agent est celui de ce compte."
+        "label": "Décidez du COMPTE UNIX, c'est toute la question de sécurité. L'agent pourra faire exactement ce que ce compte peut faire — ni plus, ni moins. Pour un accès root, indiquez root en connaissance de cause. Sinon créez un compte dédié et restreignez-le comme vous restreindriez n'importe quel utilisateur : sudoers, groupes, shell restreint. Appstrate ne rétrécit rien au-delà."
+      },
+      {
+        "label": "Laissez-lui un shell POSIX (/bin/sh). SSH exécute toute commande via le shell de login : un compte en nologin ne ferait rien, et l'échec n'apparaîtrait qu'en plein run."
       },
       {
         "label": "Sur ce même serveur, relevez sa clé publique d'hôte : `awk '{print $1\" \"$2}' /etc/ssh/ssh_host_ed25519_key.pub` (ou `ssh_host_rsa_key.pub` sur un sshd trop ancien). C'est l'identité du SERVEUR. Appstrate ne va pas la chercher lui-même : un relevé à distance se fait sur une première connexion non authentifiée, exactement ce qu'un intercepteur sait répondre. Vous, vous êtes déjà sur la machine."
       },
       {
         "label": "Indiquez ci-dessous l'hôte, le port, ce compte et la clé d'hôte relevée. Appstrate génère la paire de clés lui-même : la clé privée n'est ni affichée ni saisie nulle part — elle naît chiffrée dans le trousseau."
+      },
+      {
+        "label": "Côté agent, choisissez ses outils. Un agent qui ne doit RIEN modifier reçoit ssh_probe, ssh_read_file et ssh_list_dir, et pas ssh_exec ni ssh_write_file — un outil qu'il n'a pas, plutôt qu'une règle qu'il pourrait contourner par le discours. C'est par agent, donc la même connexion sert un lecteur et un rédacteur."
       }
     ]
   },
@@ -69,20 +75,6 @@
               "title": "Clé publique de l'hôte",
               "description": "Relevée par vous sur la machine, puis épinglée. C'est l'identité du SERVEUR, pas la vôtre. Tout changement refuse la connexion — il n'y a pas d'acceptation à la première connexion, personne ne signe dans un run autonome.",
               "pattern": "^(ssh-ed25519|ssh-rsa) [A-Za-z0-9+/]+=*$"
-            },
-            "allowed_verbs": {
-              "type": "string",
-              "title": "Verbes autorisés",
-              "default": "hostname,uptime,disk_usage",
-              "description": "Liste de noms séparés par des virgules. Seul le NOM part sur le fil : c'est le dispatcher installé sur la cible qui décide ce qu'il exécute, jamais une commande envoyée d'ici. La commande d'installation générée implémente hostname, uptime, disk_usage, memory et whoami. Saisissez * pour les autoriser tous — le formulaire le remplace par la liste explicite, pour que la connexion dise toujours ce que l'agent peut faire. Un champ vide n'autorise AUCUN verbe.",
-              "pattern": "^$|^[a-z][a-z0-9_]{0,31}(,[a-z][a-z0-9_]{0,31})*$"
-            },
-            "read_only": {
-              "type": "string",
-              "title": "Lecture seule",
-              "default": "1",
-              "description": "Refuse ssh_write_file côté serveur, et fait poser `sftp-server -R` par la commande d'installation. Défense en profondeur : la barrière qui compte est le compte Unix sur la cible.",
-              "pattern": "^[01]$"
             }
           }
         }
@@ -109,12 +101,6 @@
           },
           "SSH_HOST_KEY": {
             "value": "{$credential.host_key}"
-          },
-          "SSH_ALLOWED_VERBS": {
-            "value": "{$credential.allowed_verbs}"
-          },
-          "SSH_READ_ONLY": {
-            "value": "{$credential.read_only}"
           }
         }
       },
@@ -124,7 +110,7 @@
         },
         "dev.appstrate/provisioning": {
           "kind": "ssh_keypair",
-          "provides": ["private_key", "read_only"]
+          "provides": ["private_key"]
         }
       }
     }

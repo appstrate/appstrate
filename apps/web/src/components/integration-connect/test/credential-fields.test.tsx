@@ -22,7 +22,7 @@ import type { IntegrationManifestAuth } from "../../../hooks/use-integrations.ts
 await i18nReady;
 await i18n.changeLanguage("fr");
 
-/** An auth shaped like @appstrate/ssh: five fields typed, two provisioned. */
+/** An auth shaped like @appstrate/ssh: five fields typed, one provisioned. */
 const SSH_AUTH = {
   type: "custom",
   credentials: {
@@ -35,15 +35,13 @@ const SSH_AUTH = {
         port: { type: "string", title: "Port SSH", default: "22" },
         user: { type: "string", title: "Compte Unix sur la cible" },
         host_key: { type: "string", title: "Clé publique de l'hôte" },
-        allowed_verbs: { type: "string", title: "Verbes autorisés", default: "hostname" },
-        read_only: { type: "string", title: "Lecture seule", default: "1" },
       },
     },
   },
   _meta: {
     "dev.appstrate/provisioning": {
       kind: "ssh_keypair",
-      provides: ["private_key", "read_only"],
+      provides: ["private_key"],
     },
   },
 } as unknown as IntegrationManifestAuth;
@@ -65,14 +63,14 @@ function inputTag(markup: string, field: string): string | null {
 describe("CredentialFields — provisioned credentials", () => {
   it("renders no input for a credential the platform mints", () => {
     const markup = html(SSH_AUTH);
-    for (const hidden of ["private_key", "read_only"]) {
+    for (const hidden of ["private_key"]) {
       expect(inputTag(markup, hidden)).toBeNull();
     }
   });
 
   it("still renders the fields only the user can answer", () => {
     const markup = html(SSH_AUTH);
-    for (const shown of ["host", "port", "user", "host_key", "allowed_verbs"]) {
+    for (const shown of ["host", "port", "user", "host_key"]) {
       expect(inputTag(markup, shown)).not.toBeNull();
     }
   });
@@ -115,7 +113,6 @@ describe("initialCredentialValues", () => {
     // user's eyes that never reaches the server.
     expect(initialCredentialValues(SSH_AUTH)).toEqual({
       port: "22",
-      allowed_verbs: "hostname",
     });
   });
 });

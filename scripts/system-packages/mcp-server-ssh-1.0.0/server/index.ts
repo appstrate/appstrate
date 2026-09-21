@@ -16,26 +16,36 @@
  *     THIS process at `SSH_PRIVATE_KEY_PATH`, read by `ssh` itself, and no
  *     tool returns or accepts key material.
  *
- *  2. There is no free-form command tool. `ssh_exec` sends the NAME of a verb
- *     from a closed allowlist, verbatim, and the target's `command=`
- *     dispatcher decides what it means. SSH `exec` always runs through the
- *     remote login shell (`$SHELL -c "…"`) — there is no argv at the protocol
- *     level — so a string this process rendered would be shell input on the
- *     far side. A bare token from a closed list is the only payload that is
- *     safe to send, and a target that ignores the token (no `command=`) only
- *     ever receives that token.
+ *  2. The Unix account IS the boundary, and this server does not pretend to be
+ *     a second one. `ssh_exec` hands its string to that account's login shell:
+ *     SSH `exec` has no argv at the protocol level, so there is no narrower
+ *     payload to send. What the account may do is the whole of what an agent
+ *     may do through this connection, and restricting it — a dedicated user,
+ *     sudoers, a restricted shell — is the operator's act on their own machine.
  *
- *  3. Capabilities are separate TOOLS. The platform grants tools per agent
- *     (`toolAllowlist`, enforced sidecar-side), so read-only means a tool the
- *     agent does not have rather than a branch it might talk its way past.
+ *     This replaced a closed verb allowlist with a generated `command=`
+ *     dispatcher. That design refused any command it had not itself
+ *     implemented, which made the connection's capability fixed at creation:
+ *     adding one verb meant a new key, a new dispatcher and a new connection,
+ *     because the dispatcher's path carried the key's own fingerprint. It also
+ *     argued in a circle — shell injection is only a threat while you are
+ *     trying to constrain WHICH commands run; once the account may run what it
+ *     may run, `a; b` is exactly as authorised as `a`. The state of the art
+ *     agrees: Teleport brokers hosts and records sessions, and has no
+ *     per-command policy either.
+ *
+ *  3. Capabilities are separate TOOLS, and that is where "read-only" lives.
+ *     The platform grants tools per agent (`toolAllowlist`, enforced
+ *     sidecar-side), so an agent that must not change the target is given
+ *     `ssh_probe` / `ssh_read_file` / `ssh_list_dir` and NOT `ssh_exec` or
+ *     `ssh_write_file` — a tool it does not have rather than a branch it might
+ *     talk its way past. Per-agent, so one connection serves both a reader and
+ *     a writer.
  *
  *  4. No trust-on-first-use. The connection carries the host's public key
- *     (`SSH_HOST_KEY`, the `ssh-keyscan` line); it is written to a private
- *     `known_hosts` and `StrictHostKeyChecking=yes` refuses anything else. In
- *     an autonomous run nobody is there to accept a new key.
- *
- *  5. The real boundary is on the target — a dedicated account, `restrict` and
- *     `command=` in authorized_keys. Everything here is defence in depth.
+ *     (`SSH_HOST_KEY`); it is written to a private `known_hosts` and
+ *     `StrictHostKeyChecking=yes` refuses anything else. In an autonomous run
+ *     nobody is there to accept a new key.
  *
  * Boot is lazy: `initialize` / `tools/list` answer with no env at all (the
  * conformance probe spawns the server that way), and a missing or malformed
@@ -63,9 +73,6 @@ export interface SshConfig {
   privateKeyPath: string;
   /** `keytype base64` taken from the pasted `ssh-keyscan` line. */
   hostKey: { type: string; key: string };
-  /** Closed verb allowlist. The bare name is the whole wire payload. */
-  verbs: readonly string[];
-  readOnly: boolean;
   /** CONNECT proxy to dial through, when the runner has no direct route. */
   proxyUrl: string | null;
 }
@@ -110,38 +117,6 @@ function required(env: NodeJS.ProcessEnv, name: string): string {
   return v.trim();
 }
 
-/**
- * A verb NAME. Enforced here and not only where the credential was written,
- * because design rule 2 is a property of this server: whatever the connection
- * carries, what leaves this process must be a bare token. A credential created
- * outside the hosted form — the programmatic `connect/fields` import, a
- * restored fixture — would otherwise be able to put a shell string in
- * `SSH_ALLOWED_VERBS` and have `ssh_exec` hand it to the remote login shell.
- *
- * A comma-separated list, matching the credential the platform persists. The
- * `*` shorthand the connect form accepts never reaches here — it is expanded
- * to the explicit list before the credential is written, so this reader has
- * one syntax and no wildcard to interpret.
- */
-const VERB_NAME_RE = /^[a-z][a-z0-9_]{0,31}$/;
-
-function parseVerbs(raw: string | undefined): string[] {
-  if (raw === undefined || raw.trim() === "") return [];
-  const verbs = raw
-    .split(",")
-    .map((v) => v.trim())
-    .filter((v) => v !== "");
-  const bad = verbs.filter((v) => !VERB_NAME_RE.test(v));
-  if (bad.length > 0) {
-    throw new Error(
-      `SSH_ALLOWED_VERBS carries ${bad.map((v) => JSON.stringify(v)).join(", ")}, which is not a ` +
-        "verb name (lowercase letters, digits and _ only). A verb is a NAME the target resolves, " +
-        "never a command rendered here.",
-    );
-  }
-  return verbs;
-}
-
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): SshConfig {
   const port = Number(env.SSH_PORT?.trim() || "22");
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
@@ -157,8 +132,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SshConfig {
     user: required(env, "SSH_USER"),
     privateKeyPath: required(env, "SSH_PRIVATE_KEY_PATH"),
     hostKey: parseHostKey(required(env, "SSH_HOST_KEY")),
-    verbs: parseVerbs(env.SSH_ALLOWED_VERBS),
-    readOnly: env.SSH_READ_ONLY === "1" || env.SSH_READ_ONLY === "true",
     proxyUrl: proxy,
   };
 }
@@ -226,7 +199,7 @@ export function buildSshOptions(
   return opts;
 }
 
-/** `ssh … user@host [command]` — `command` is a bare verb or nothing. */
+/** `ssh … user@host [command]` — the command is handed to the login shell. */
 export function buildSshArgs(
   cfg: SshConfig,
   knownHostsPath: string,
@@ -266,25 +239,6 @@ export function quoteSftpPath(path: string): string {
     throw new ProtocolError(`path cannot be used in an sftp batch: ${JSON.stringify(path)}`);
   }
   return `"${path}"`;
-}
-
-// ─────────────────────────────── verbs ────────────────────────────────
-
-/**
- * Resolve a requested verb against the allowlist — exact match only. A
- * prefix match would let `hostname; rm -rf /` through on the `hostname` arm,
- * which is the same mistake a target-side dispatcher must not make.
- */
-export function resolveVerb(cfg: SshConfig, requested: unknown): string {
-  if (typeof requested !== "string" || requested === "") {
-    throw new ProtocolError("`verb` must be a non-empty string");
-  }
-  if (!cfg.verbs.includes(requested)) {
-    throw new ProtocolError(
-      `verb '${requested}' is not in the allowlist. Allowed: ${cfg.verbs.join(", ") || "(none)"}`,
-    );
-  }
-  return requested;
 }
 
 // ─────────────────────────── subprocess runner ────────────────────────
@@ -538,33 +492,35 @@ export async function probeTool(deps: Deps = {}): Promise<Record<string, unknown
     port: cfg.port,
     user: cfg.user,
     host_key_fingerprint: fingerprint,
-    allowed_verbs: cfg.verbs,
-    read_only: cfg.readOnly,
     dialled_via: cfg.proxyUrl ? "CONNECT proxy" : "direct",
   };
 }
 
 export async function execTool(
-  args: { verb?: unknown },
+  args: { command?: unknown },
   deps: Deps = {},
 ): Promise<Record<string, unknown>> {
   const cfg = getConfig();
-  const verb = resolveVerb(cfg, args.verb);
+  if (typeof args.command !== "string" || args.command.trim() === "") {
+    throw new ProtocolError("`command` must be a non-empty string");
+  }
+  const command = args.command;
   const kh = await knownHostsFor(cfg, deps);
   const run = deps.run ?? runProcess;
-  logLine({ op: "exec", verb });
-  // A verb that never returns must not pin the runner forever.
-  const res = await run(["ssh", ...buildSshArgs(cfg, kh, verb)], { ceilingMs: 120_000 });
-  // A non-zero exit from the VERB is a result, not a transport failure — the
-  // dispatcher's refusal (exit 42 in the reference script) must reach the
-  // agent as data. Only ssh's own failures (255) are thrown.
+  logLine({ op: "exec" });
+  // A command that never returns must not pin the runner forever.
+  const res = await run(["ssh", ...buildSshArgs(cfg, kh, command)], { ceilingMs: 120_000 });
+  // A non-zero exit from the COMMAND is a result, not a transport failure, and
+  // must reach the agent as data. Only ssh's own failures (255) are thrown.
   if (res.code === 255) throw sshFailure("ssh", res);
   const out = truncateUtf8(res.stdout, EXEC_OUTPUT_BYTES);
   const err = truncateUtf8(res.stderr, EXEC_OUTPUT_BYTES);
   return {
-    verb,
-    // Echoed so the run journal records exactly what crossed the wire.
-    command_sent: verb,
+    // Echoed so the run journal records exactly what crossed the wire. SSH
+    // `exec` has no argv at the protocol level: this string is handed to the
+    // account's login shell verbatim, which is why what that account may do is
+    // the whole of what this tool may do.
+    command_sent: command,
     exit_code: res.code,
     stdout: out.text,
     stderr: err.text,
@@ -616,8 +572,6 @@ export async function writeFileTool(
   deps: Deps = {},
 ): Promise<Record<string, unknown>> {
   const cfg = getConfig();
-  if (cfg.readOnly)
-    throw new ProtocolError("this connection is configured read-only (SSH_READ_ONLY)");
   if (typeof args.path !== "string") throw new ProtocolError("`path` must be a string");
   if (typeof args.content !== "string") throw new ProtocolError("`content` must be a string");
   await knownHostsFor(cfg, deps);
@@ -653,6 +607,10 @@ interface JsonRpcResponse {
 /** Static — answered with no configuration, which is how the conformance probe spawns the server. */
 export const TOOLS = [
   {
+    // "WRITES" in a description is the signal a read-only grant is built from:
+    // an agent that must not change the target is given the tools WITHOUT it.
+    // `scripts/test/ssh-mcp.test.ts` pins both halves of that split, so a new
+    // tool cannot join the list without landing on one side or the other.
     name: "ssh_probe",
     description:
       "Connect, verify the pinned host key and authenticate, then report the effective policy. Executes nothing on the target and returns no remote data.",
@@ -661,11 +619,13 @@ export const TOOLS = [
   {
     name: "ssh_exec",
     description:
-      "Run ONE pre-declared verb on the remote host. `verb` must be a name from the connection's allowlist (see ssh_probe); arbitrary shell commands are not accepted.",
+      "Run a command on the remote host, as the connection's Unix account. WRITES: what this account may do is exactly what this tool may do — an agent that must not change the target should not be given this tool. The string is handed to the account's login shell, so shell syntax works and quoting is yours to get right.",
     inputSchema: {
       type: "object",
-      properties: { verb: { type: "string", description: "A verb name from the allowlist." } },
-      required: ["verb"],
+      properties: {
+        command: { type: "string", description: "Shell command to run on the target." },
+      },
+      required: ["command"],
     },
   },
   {
@@ -681,7 +641,7 @@ export const TOOLS = [
   {
     name: "ssh_write_file",
     description:
-      "Write a remote file over SFTP. Mutating — refused when the connection is read-only.",
+      "Write a remote file over SFTP. WRITES — withhold it from an agent that must not change the target.",
     inputSchema: {
       type: "object",
       properties: { path: { type: "string" }, content: { type: "string" } },
@@ -745,7 +705,7 @@ export async function handleRequest(
       const message = err instanceof Error ? err.message : String(err);
       const ms = Math.round(performance.now() - started);
       // Refusals and misconfiguration are tool RESULTS the agent can act on
-      // ("verb not allowed", "read-only"), reported as isError content rather
+      // (an unreadable path, a refused login), reported as isError content rather
       // than a protocol error that reads as a dead channel. Only a malformed
       // request is a protocol error.
       if (err instanceof ProtocolError) {

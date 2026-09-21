@@ -44,7 +44,6 @@ const {
   renderKnownHosts,
   buildSshArgs,
   buildSftpArgs,
-  resolveVerb,
   quoteSftpPath,
   parseSftpLs,
   truncateUtf8,
@@ -65,7 +64,6 @@ const ENV = {
   SSH_USER: "agent",
   SSH_PRIVATE_KEY_PATH: "/run/secrets/ssh_key",
   SSH_HOST_KEY: KEYSCAN_LINE,
-  SSH_ALLOWED_VERBS: "hostname,read_motd",
   SSH_READ_ONLY: "1",
 };
 
@@ -157,7 +155,7 @@ describe("handleRequest — protocol surface without any configuration", () => {
       jsonrpc: "2.0",
       id: 3,
       method: "tools/call",
-      params: { name: "ssh_exec", arguments: { verb: "hostname" } },
+      params: { name: "ssh_exec", arguments: { command: "hostname" } },
     });
     const result = res?.result as { isError?: boolean; content: Array<{ text: string }> };
     expect(result.isError).toBe(true);
@@ -189,8 +187,6 @@ describe("loadConfig / parseHostKey", () => {
     const cfg = loadConfig(ENV);
     expect(cfg.host).toBe("example.com");
     expect(cfg.port).toBe(22);
-    expect(cfg.verbs).toEqual(["hostname", "read_motd"]);
-    expect(cfg.readOnly).toBe(true);
     expect(cfg.hostKey.type).toBe("ssh-ed25519");
   });
 
@@ -209,45 +205,6 @@ describe("loadConfig / parseHostKey", () => {
     expect(() => parseHostKey("SHA256:abcdef")).toThrow(/ssh-keyscan/);
     expect(() => parseHostKey("example.com dsa AAAA")).toThrow(/ssh-keyscan/);
   });
-
-  it("reads a comma-separated list, trimming around the separators", () => {
-    expect(loadConfig({ ...ENV, SSH_ALLOWED_VERBS: "hostname, uptime ,disk_usage" }).verbs).toEqual(
-      ["hostname", "uptime", "disk_usage"],
-    );
-  });
-
-  it.each([
-    ["empty", ""],
-    ["whitespace", "   "],
-    ["nothing but separators", " , , "],
-  ])("treats a %s verb list as no verbs", (_label, raw) => {
-    expect(loadConfig({ ...ENV, SSH_ALLOWED_VERBS: raw }).verbs).toEqual([]);
-  });
-
-  /**
-   * The `*` shorthand lives in the connect FORM and is expanded before the
-   * credential is written, so it must never arrive here. Reaching this reader
-   * means something persisted it raw — refuse rather than invent a meaning,
-   * which is what treating it as a verb name does.
-   */
-  it("refuses the * shorthand, which is expanded before persistence", () => {
-    expect(() => loadConfig({ ...ENV, SSH_ALLOWED_VERBS: "*" })).toThrow(/not a\s+verb name/);
-  });
-
-  /**
-   * Design rule 2 — "there is no free-form command tool" — is a property of
-   * THIS server, so it has to hold whatever wrote the credential. The hosted
-   * form's provisioner validates verb names, but the programmatic
-   * `connect/fields` import does not run one: without this check a bag created
-   * there could put a shell string in SSH_ALLOWED_VERBS and `ssh_exec` would
-   * hand it, verbatim, to the remote login shell.
-   */
-  it.each(["rm -rf /", "uptime; id", "Hostname", "../../etc", "a b"])(
-    "refuses %s: a verb is a NAME, never a command",
-    (allowed) => {
-      expect(() => loadConfig({ ...ENV, SSH_ALLOWED_VERBS: allowed })).toThrow(/not a\s+verb name/);
-    },
-  );
 
   /**
    * One reader of the proxy signal, shared with the ProxyCommand helper. Two
@@ -320,33 +277,6 @@ describe("buildSshArgs — the connection policy", () => {
   });
 });
 
-// ─────────────────────────────── verbs ───────────────────────────────
-
-describe("resolveVerb — exact match against a closed list", () => {
-  const cfg = loadConfig(ENV);
-
-  it("accepts a listed verb", () => {
-    expect(resolveVerb(cfg, "hostname")).toBe("hostname");
-  });
-
-  it("refuses anything not listed, including shell-shaped strings", () => {
-    for (const bad of [
-      "rm -rf /",
-      "hostname; id",
-      "hostname && cat /etc/shadow",
-      "HOSTNAME",
-      "host",
-      "",
-    ]) {
-      expect(() => resolveVerb(cfg, bad)).toThrow(/not in the allowlist|non-empty/);
-    }
-  });
-
-  it("refuses a non-string", () => {
-    expect(() => resolveVerb(cfg, { verb: "hostname" })).toThrow(/non-empty string/);
-  });
-});
-
 // ─────────────────────────── tool behaviour ──────────────────────────
 
 describe("ssh_exec via injected runner", () => {
@@ -358,7 +288,7 @@ describe("ssh_exec via injected runner", () => {
         jsonrpc: "2.0",
         id: 1,
         method: "tools/call",
-        params: { name: "ssh_exec", arguments: { verb: "hostname" } },
+        params: { name: "ssh_exec", arguments: { command: "hostname" } },
       },
       { run, knownHostsPath: join(scratch, "kh") },
     );
@@ -374,7 +304,7 @@ describe("ssh_exec via injected runner", () => {
     expect((res?.result as { isError?: boolean }).isError).toBeUndefined();
   });
 
-  it("refuses a verb outside the allowlist BEFORE spawning anything", async () => {
+  it("refuses a malformed request BEFORE spawning anything", async () => {
     restoreEnv = withEnv(ENV);
     const { run, calls } = stubRunner([]);
     const res = await handleRequest(
@@ -382,14 +312,14 @@ describe("ssh_exec via injected runner", () => {
         jsonrpc: "2.0",
         id: 2,
         method: "tools/call",
-        params: { name: "ssh_exec", arguments: { verb: "cat /srv/data/canary.txt" } },
+        params: { name: "ssh_exec", arguments: { command: "" } },
       },
       { run, knownHostsPath: join(scratch, "kh") },
     );
     expect(calls).toHaveLength(0);
     const result = res?.result as { isError?: boolean; content: Array<{ text: string }> };
     expect(result.isError).toBe(true);
-    expect(result.content[0]!.text).toContain("not in the allowlist");
+    expect(result.content[0]!.text).toContain("non-empty string");
   });
 
   it("reports a host-key mismatch with a hint and never retries", async () => {
@@ -400,7 +330,7 @@ describe("ssh_exec via injected runner", () => {
         jsonrpc: "2.0",
         id: 3,
         method: "tools/call",
-        params: { name: "ssh_exec", arguments: { verb: "hostname" } },
+        params: { name: "ssh_exec", arguments: { command: "hostname" } },
       },
       { run, knownHostsPath: join(scratch, "kh") },
     );
@@ -411,23 +341,23 @@ describe("ssh_exec via injected runner", () => {
   });
 });
 
+/**
+ * There is no per-connection read-only flag any more. "Read-only" is a property
+ * of the AGENT: the platform grants tools per agent (`toolAllowlist`, enforced
+ * sidecar-side), so an agent that must not change the target is simply not
+ * given `ssh_exec` or `ssh_write_file`. This server therefore advertises which
+ * tools write, and that advertisement is what the grant is made from.
+ */
 describe("ssh_write_file", () => {
-  it("is refused by SSH_READ_ONLY without spawning", async () => {
-    restoreEnv = withEnv(ENV);
-    const { run, calls } = stubRunner([]);
-    const res = await handleRequest(
-      {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/call",
-        params: { name: "ssh_write_file", arguments: { path: "/x", content: "y" } },
-      },
-      { run, knownHostsPath: join(scratch, "kh") },
-    );
-    expect(calls).toHaveLength(0);
-    expect((res?.result as { content: Array<{ text: string }> }).content[0]!.text).toContain(
-      "read-only",
-    );
+  it("declares itself a writing tool, so a read-only agent is given the others", () => {
+    const listed = TOOLS as Array<{ name: string; description: string }>;
+    const writes = listed.filter((t) => t.description.includes("WRITES")).map((t) => t.name);
+    expect(writes.sort()).toEqual(["ssh_exec", "ssh_write_file"]);
+
+    // The complement is what a read-only agent is granted. Naming it here is
+    // what keeps a new reading tool from being forgotten in that grant.
+    const reads = listed.filter((t) => !t.description.includes("WRITES")).map((t) => t.name);
+    expect(reads.sort()).toEqual(["ssh_list_dir", "ssh_probe", "ssh_read_file"]);
   });
 
   it("puts a scratch file when writes are allowed", async () => {
@@ -479,8 +409,6 @@ describe("ssh_probe", () => {
     expect(payload).toMatchObject({
       reachable: true,
       host_key_fingerprint: "SHA256:e9BAhcGr5z9zvM6nYcXrEt2BkBrTfpCQ/QSvw/h2INc",
-      allowed_verbs: ["hostname", "read_motd"],
-      read_only: true,
       dialled_via: "direct",
     });
   });

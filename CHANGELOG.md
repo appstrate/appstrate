@@ -11,32 +11,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Agents can reach a host over SSH.** Two new system packages: the
   `@appstrate/ssh` integration and the `@appstrate/ssh-mcp` local mcp-server it
   backs (`source.kind: "local"`, the second first-party one after
-  `@appstrate/github-git`). One connection is one key, one host and one
-  capability profile — the key is the identity, and what it may do is enforced
-  on the TARGET by `restrict` + `command=` in `authorized_keys`, the only
-  boundary that stays true when the platform is wrong. The private key lives in
-  the keyring and is delivered to the runner as a file (`delivery.files`,
-  `/run/secrets/ssh_key`, `0600`); it never enters the agent container.
+  `@appstrate/github-git`). One connection is one key on one Unix account, and
+  **that account is the boundary**: what the agent can do is exactly what the
+  account can do. Grant root only if you mean it; otherwise create a dedicated
+  user and restrict it with what the system already gives you — sudoers, groups,
+  a restricted shell. Appstrate narrows nothing further, and the setup guide says
+  so in as many words, because a posture nobody chose is a posture nobody holds.
+  The private key lives in the keyring and is delivered to the runner as a file
+  (`delivery.files`, `/run/secrets/ssh_key`, `0600`); it never enters the agent
+  container.
 
-  There is deliberately **no free-form command tool**. `ssh_exec` sends the bare
-  NAME of a verb from the connection's closed allowlist — a shape the server
-  re-checks itself, so the rule holds whatever wrote the credential — and the
-  target's forced-command dispatcher decides what it means — SSH `exec` runs through the
-  remote login shell, so any string rendered on this side would be shell input
-  on the far side, and a command allowlist over a shell string cannot be made to
-  hold (Teleport has no per-command SSH policy either; it brokers hosts and
-  records sessions). Read and write are separate tools, so an agent's
-  `toolAllowlist` can withhold `ssh_write_file` sidecar-side. Host keys are
-  pinned from the connection's `host_key` with `StrictHostKeyChecking=yes`
-  against a per-process `known_hosts`; there is no trust-on-first-use, because
-  in an autonomous run nobody is there to accept.
+  That is a deliberate reversal. An earlier cut of this work generated a
+  forced-command dispatcher — `command=` in `authorized_keys`, one exact-match
+  arm per allowed verb — and `ssh_exec` sent only a verb NAME. It was dropped
+  for two reasons. It made a connection's capability **fixed at creation**: the
+  dispatcher's path carried the key's own fingerprint, so adding one verb meant
+  a new key, a new dispatcher and a new connection, with the old one left
+  orphaned on the machine. And its central argument was circular — shell
+  injection is a threat only while you are constraining WHICH commands run;
+  once the account may run what it may run, `a; b` is exactly as authorised as
+  `a`. The state of the art agrees: Teleport brokers hosts and records sessions
+  and has no per-command policy either, deferring to sudoers and SELinux.
+
+  **Read-only is a property of the AGENT, not of the connection.** The platform
+  grants tools per agent (`toolAllowlist`, enforced sidecar-side), so an agent
+  that must not change the target is given `ssh_probe`, `ssh_read_file` and
+  `ssh_list_dir` and not `ssh_exec` or `ssh_write_file` — a tool it does not
+  have rather than a rule it might talk its way past. Per-agent, so one
+  connection serves a reader and a writer at once. The server marks which of
+  its tools write, and a test pins both halves of that split so a new tool
+  cannot join without landing on one side.
+
+  Host keys are pinned from the connection's `host_key` with
+  `StrictHostKeyChecking=yes` against a per-process `known_hosts`; there is no
+  trust-on-first-use, because in an autonomous run nobody is there to accept.
 
   The server shells out to the `ssh`/`sftp` clients the bun runner image already
   bakes in, and reaches a proxied target through an OpenSSH `ProxyCommand` that
-  speaks HTTP CONNECT to the sidecar's egress listener. A forced command
-  intercepts the sftp SUBSYSTEM too, so the generated dispatcher carries an arm
-  for it that execs `sftp-server -R`; without one the session is refused before
-  a packet and the three file tools die on an opaque "Connection closed". A target on a private
+  speaks HTTP CONNECT to the sidecar's egress listener. A target on a private
   address is refused by the SSRF floor on that path — a public VPS works, a LAN
   box does not, and that is a decision, not a bug (#1228). Per-connection host
   scoping of the egress listener is #1458.
@@ -63,13 +75,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 /etc/ssh/ssh_host_ed25519_key.pub`) and the platform opens no SSH socket at
   any point.
 
-  After creation the connect page shows the one block to paste on the target —
-  it installs the public key with `restrict` + `command=`, writes the
-  forced-command dispatcher (an exact-match arm per allowed verb, plus the sftp
-  subsystem in read-only mode) at a path carrying that key's own fingerprint so
-  a second connection to the same host cannot widen the first one's verb list,
-  and prints the host's own fingerprint — of the key type actually pinned — so
-  it can be compared against the one shown on screen. The same screen carries
+  After creation the connect page shows the one block to paste on the target. It
+  authorises the public key on the named account with `restrict` — no port
+  forwarding, agent forwarding, X11 or pty — and refuses to touch anything if
+  that account has no login shell, since sshd would then run nothing and the
+  failure would only surface mid-run. It prints the host's own fingerprint, of
+  the key type actually pinned, so it can be compared against the one pasted
+  into the form. The same screen carries
   the block that REMOVES the key: deleting the connection destroys the private
   half and nothing else, because the platform cannot reach the target.
 

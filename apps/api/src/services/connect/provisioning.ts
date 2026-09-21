@@ -23,7 +23,7 @@
  *     "_meta": {
  *       "dev.appstrate/provisioning": {
  *         "kind": "ssh_keypair",
- *         "provides": ["private_key", "host_key", "read_only"]
+ *         "provides": ["private_key"]
  *       }
  *     }
  *
@@ -45,8 +45,6 @@
  * path that creates a connection — including the programmatic
  * `POST .../connect/fields` import, which never runs a provisioner.
  */
-
-import { createHash } from "node:crypto";
 
 import { invalidRequest } from "../../lib/errors.ts";
 import {
@@ -99,103 +97,6 @@ function requiredString(fields: SubmittedFields, name: string): string {
 }
 
 /**
- * Verbs the generated dispatcher knows how to run. A verb is a NAME on the
- * wire; the target decides what it executes, so the platform can only ship
- * implementations it can guarantee are read-only. Anything else is the
- * operator's to add by editing the script — and then to add here, in the
- * connection's allowlist.
- */
-const DEFAULT_VERBS: Record<string, string> = {
-  hostname: "exec hostname",
-  uptime: "exec uptime",
-  disk_usage: "exec df -h /",
-  memory: "exec free -h",
-  whoami: "exec id -un",
-};
-
-/** A verb name on the wire. Strict, because it is interpolated into a script. */
-const VERB_NAME_RE = /^[a-z][a-z0-9_]{0,31}$/;
-
-/**
- * Split an `allowed_verbs` value into its names. A comma-separated list, not
- * JSON: the value is typed into a single-line text input by a human, and a
- * JSON array made them balance brackets and quotes to say `hostname,uptime`.
- *
- * Shared by the two readers because they disagree on POLICY, not on syntax —
- * {@link parseVerbs} refuses a name it does not recognise, because it answers a
- * form submission someone can correct, while {@link sshHandoffSteps} drops it,
- * because it renders a block from a bundle that already exists and a refusal
- * there would deny a deletion its removal command.
- *
- * An absent or empty value is an empty list, never "all of them": emptying a
- * permission field has to narrow it, and a caller that omits it has declared
- * nothing to allow.
- */
-function verbNamesFrom(raw: unknown): string[] {
-  if (typeof raw !== "string") return [];
-  return raw
-    .split(",")
-    .map((v) => v.trim())
-    .filter((v) => v !== "");
-}
-
-/**
- * The form-only shorthand for "every verb the generated dispatcher implements".
- *
- * Expanded by {@link parseVerbs}, so what gets PERSISTED is always the explicit
- * list. Two reasons, and the second decides it. A stored `*` would make the
- * connection's capability profile unreadable, and `allowed_verbs` is precisely
- * what tells an operator what the agent may do. And it would be a promise this
- * design cannot keep: the dispatcher is written to the target ONCE, with a
- * fixed arm per verb, so a `*` meaning "whatever is implemented" starts lying
- * the day a verb is added to {@link DEFAULT_VERBS} — the script on the
- * customer's machine does not change with it.
- *
- * Deliberately ABSENT from the manifest's `credentials.schema.pattern`. That
- * schema describes the stored shape and is validated on both connect doors, so
- * leaving `*` out of it is what makes the programmatic `connect/fields` import
- * — which runs no provisioner — refuse the shorthand instead of persisting it
- * raw and failing at run time.
- */
-const ALL_VERBS = "*";
-
-/**
- * Parse the connection's verb allowlist.
- *
- * An absent or empty value means NO verbs, never "all of them". Emptying a
- * permission field has to narrow it: the connect form seeds the manifest's
- * declared default, so someone who clears that box is asking for less, and a
- * caller that omits the field entirely has declared nothing to allow. `*` is
- * the one way to ask for everything, and it is spelled out on the way in.
- */
-function parseVerbs(raw: unknown): string[] {
-  if (typeof raw === "string" && raw.trim() === ALL_VERBS) return Object.keys(DEFAULT_VERBS);
-
-  const verbs = verbNamesFrom(raw);
-  for (const verb of verbs) {
-    if (!VERB_NAME_RE.test(verb)) {
-      throw invalidRequest(
-        `verb ${JSON.stringify(verb)} is not a valid name — lowercase letters, digits and _ only`,
-      );
-    }
-  }
-
-  // Refuse a verb the generated script has no implementation for, rather than
-  // writing a dispatcher that refuses it at run time. A connection whose
-  // allowlist promises something the target cannot do is a lie the agent only
-  // discovers mid-run.
-  const unknown = verbs.filter((v) => !(v in DEFAULT_VERBS));
-  if (unknown.length > 0) {
-    throw invalidRequest(
-      `the generated dispatcher implements ${Object.keys(DEFAULT_VERBS).join(", ")} ` +
-        `(or "${ALL_VERBS}" for all of them) — ${unknown.join(", ")} is not among them; ` +
-        `add it to the script on the target first, then list it here`,
-    );
-  }
-  return verbs;
-}
-
-/**
  * Where a target keeps the public half of the host key we pinned. Enumerated
  * rather than derived: this path is interpolated into a script that runs as
  * root, and the set is exactly the two types the manifest's `host_key`
@@ -213,55 +114,47 @@ function hostKeyPubFile(hostKey: string): string {
   return path;
 }
 
-/**
- * One dispatcher per KEY, not per host: two connections to the same machine must
- * not share — and silently widen — a verb list. Derived from the public key so
- * the teardown can recompute the same path years later without it being stored.
- */
-function dispatchPathFor(publicKey: string): string {
-  const keyId = createHash("sha256").update(publicKey).digest("hex").slice(0, 12);
-  return `/usr/local/bin/appstrate-dispatch-${keyId}`;
-}
-
 /** The base64 field of an `authorized_keys` line — unique per key, and `grep -F`-safe. */
 function publicKeyBase64(publicKey: string): string {
   return publicKey.trim().split(/\s+/)[1] ?? "";
 }
 
 /**
- * Render the one block the user pastes on the target. Everything
- * interpolated is either platform-minted (the key, the dispatcher path, the
- * host-key file) or has been validated against a strict character class (the
- * account, the verbs), so nothing here can carry shell syntax across.
+ * Render the one block the user pastes on the target: it authorises the minted
+ * public key on the account they named, and nothing else.
  *
- * It ends by printing the host fingerprint: the user is already in a session
- * on that machine, authenticated by their own `known_hosts`, so comparing it
- * with what the connect screen shows costs one glance and is the only step
- * that can catch a machine-in-the-middle on the platform's scan.
+ * `restrict` turns off port forwarding, agent forwarding, X11 and pty. There is
+ * deliberately no `command=`. An earlier cut generated a forced-command
+ * dispatcher with one arm per allowed verb, which made the connection's
+ * capability fixed at creation — adding a verb meant a new key, a new
+ * dispatcher and a new connection, because the dispatcher's path carried the
+ * key's fingerprint. What an agent may do is now what the ACCOUNT may do, and
+ * narrowing that is the operator's act on their own machine: a dedicated user,
+ * sudoers, a restricted shell. The setup guide says so in as many words,
+ * because a posture that is not written down is a posture nobody chose.
+ *
+ * Everything interpolated is either platform-minted (the key, the host-key
+ * file) or validated against a strict character class (the account), so
+ * nothing here can carry shell syntax across.
+ *
+ * It ends by printing the host fingerprint: the user is already in a session on
+ * that machine, authenticated by their own `known_hosts`, so comparing it with
+ * what they pasted into the form costs one glance.
  */
-function renderInstallCommand(
-  user: string,
-  publicKey: string,
-  verbs: string[],
-  hostKeyPub: string,
-  dispatchPath: string,
-): string {
-  const cases = verbs.map((verb) => `    ${verb}) ${DEFAULT_VERBS[verb]} ;;`).join("\n");
-
+function renderInstallCommand(user: string, publicKey: string, hostKeyPub: string): string {
   return [
     `# Paste as root (or with sudo) on the target.`,
     `set -eu`,
     ``,
-    `# A forced command runs through the account's LOGIN SHELL, so an account`,
-    `# set to nologin refuses every verb — and it would only surface mid-run, as`,
-    `# a verb that ran and produced nothing. Refuse here instead. What restricts`,
-    `# this key is restrict + command=, not the absence of a shell.`,
+    `# sshd runs a command through the account's LOGIN SHELL, so an account set`,
+    `# to nologin runs nothing — and it would only surface mid-run, as a command`,
+    `# that produced no output. Refuse here instead.`,
     `login_shell=$(getent passwd ${user} 2>/dev/null | cut -d: -f7)`,
     `[ -n "\${login_shell:-}" ] || login_shell=$(awk -F: -v u=${user} '$1==u{print $7}' /etc/passwd)`,
     `case "\${login_shell:-}" in`,
     `  */nologin|*/false)`,
     `    echo "appstrate: le compte ${user} a pour shell \${login_shell}." >&2`,
-    `    echo "  Un forced command SSH passe par le shell de login : aucun verbe ne s'exécuterait." >&2`,
+    `    echo "  SSH passe par le shell de login : aucune commande ne s'exécuterait." >&2`,
     `    echo "  Donnez-lui /bin/sh, puis rejouez ce bloc." >&2`,
     `    exit 1 ;;`,
     `esac`,
@@ -271,48 +164,10 @@ function renderInstallCommand(
     `group=$(id -gn ${user})`,
     `install -d -m 700 -o ${user} -g "$group" ~${user}/.ssh`,
     ``,
-    `# The forced command. It NEVER executes what the client asked for: the`,
-    `# request arrives in SSH_ORIGINAL_COMMAND and is matched, exactly, against`,
-    `# this closed list. Matching by prefix would let "uptime; rm -rf /" through.`,
-    `#`,
-    `# The path carries THIS key's fingerprint, so a second Appstrate connection`,
-    `# to the same host installs its own dispatcher instead of overwriting this`,
-    `# one — one connection's verb list can never widen another's.`,
-    `cat > ${dispatchPath} <<'DISPATCH'`,
-    `#!/bin/sh`,
-    `request="\${SSH_ORIGINAL_COMMAND:-}"`,
-    ``,
-    `# sshd routes the sftp SUBSYSTEM through this same forced command, handing`,
-    `# it the \`Subsystem sftp …\` line from sshd_config VERBATIM. With no arm for`,
-    `# it the session dies before a packet and every file tool fails with an`,
-    `# opaque "Connection closed". That line is not a bare path: it carries its`,
-    `# arguments (\`internal-sftp -f AUTHPRIV -l INFO\` is a common default) and,`,
-    `# measured on Ubuntu 24.04 / OpenSSH 9.6, a TRAILING SPACE. So match the`,
-    `# program name only. A verb can contain neither a space nor a slash, so`,
-    `# nothing else can reach this arm.`,
-    `#`,
-    `# -R is sftp-server's read-only mode: the connection is read_only on the`,
-    `# platform side and the target enforces that rather than trusting it.`,
-    `case "\${request%% *}" in`,
-    `    */sftp-server|sftp-server|internal-sftp)`,
-    `        for candidate in /usr/lib/openssh/sftp-server /usr/lib/ssh/sftp-server \\`,
-    `                         /usr/libexec/openssh/sftp-server /usr/libexec/sftp-server; do`,
-    `            [ -x "$candidate" ] && exec "$candidate" -R`,
-    `        done`,
-    `        echo "appstrate-dispatch: sftp-server introuvable sur cette machine" >&2; exit 3 ;;`,
-    `esac`,
-    ``,
-    `case "$request" in`,
-    cases,
-    `    "") echo "appstrate-dispatch: no verb supplied" >&2; exit 2 ;;`,
-    `    *)  echo "appstrate-dispatch: refused verb: $request" >&2; exit 42 ;;`,
-    `esac`,
-    `DISPATCH`,
-    `chmod 0755 ${dispatchPath}`,
-    ``,
-    `# restrict turns off port forwarding, agent forwarding, X11 and pty.`,
-    `printf '%s\\n' 'restrict,command="${dispatchPath}" ${publicKey}' \\`,
-    `  >> ~${user}/.ssh/authorized_keys`,
+    `# restrict turns off port forwarding, agent forwarding, X11 and pty. What`,
+    `# this key may DO is what ${user} may do — restrict that account, not this`,
+    `# line, if the agent should be able to do less.`,
+    `printf '%s\\n' 'restrict ${publicKey}' >> ~${user}/.ssh/authorized_keys`,
     `chown ${user}:"$group" ~${user}/.ssh/authorized_keys`,
     `chmod 600 ~${user}/.ssh/authorized_keys`,
     ``,
@@ -334,7 +189,7 @@ function renderInstallCommand(
  * key's own base64 (`grep -F`, so none of its characters are a pattern), which
  * is what makes it remove exactly this connection's line and no other.
  */
-function renderRevokeCommand(user: string, publicKey: string, dispatchPath: string): string {
+function renderRevokeCommand(user: string, publicKey: string): string {
   return [
     `# Paste as root (or with sudo) on the target AFTER deleting the connection`,
     `# in Appstrate. Deleting it destroys the private half here and nothing`,
@@ -342,7 +197,7 @@ function renderRevokeCommand(user: string, publicKey: string, dispatchPath: stri
     `tmp=$(mktemp)`,
     `grep -vF '${publicKeyBase64(publicKey)}' ~${user}/.ssh/authorized_keys > "$tmp" || :`,
     `cat "$tmp" > ~${user}/.ssh/authorized_keys`,
-    `rm -f "$tmp" ${dispatchPath}`,
+    `rm -f "$tmp"`,
   ].join("\n");
 }
 
@@ -369,8 +224,6 @@ async function provisionSshKeyPair(
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw invalidRequest("`port` must be a number between 1 and 65535");
   }
-
-  const verbs = parseVerbs(fields["allowed_verbs"]);
 
   // Mirror the RUNNER's egress floor — deliberately WITHOUT the operator's
   // EGRESS_ALLOW_INTERNAL_HOSTS allowlist, which the runner's CONNECT listener
@@ -413,11 +266,6 @@ async function provisionSshKeyPair(
     port: String(port),
     user,
     host_key: hostKey,
-    allowed_verbs: verbs.join(","),
-    // Read-only is the floor the SERVER applies; the target's own dispatcher
-    // is the boundary that matters, and it runs nothing that writes (its
-    // sftp arm execs `sftp-server -R`).
-    read_only: "1",
   };
 }
 
@@ -462,22 +310,11 @@ function sshHandoffSteps(credentials: Record<string, unknown>): HandoffStep[] {
     return [];
   }
 
-  // Lenient, unlike `parseVerbs` on the way in. This bag did not necessarily
-  // come from a provisioner: `POST .../connect/fields` persists whatever the
-  // caller sent, checked against the manifest `pattern` and nothing else. A
-  // name that would not survive `parseVerbs` is dropped rather than refused,
-  // because refusing here would deny a deletion its removal block.
-  const verbs = verbNamesFrom(credentials.allowed_verbs).filter(
-    (v) => VERB_NAME_RE.test(v) && v in DEFAULT_VERBS,
-  );
-
-  const dispatchPath = dispatchPathFor(publicKey);
-
   return [
     {
       kind: "command",
       label: "À coller sur le serveur cible (en root, ou avec sudo)",
-      shell: renderInstallCommand(user, publicKey, verbs, hostKeyPub, dispatchPath),
+      shell: renderInstallCommand(user, publicKey, hostKeyPub),
     },
     {
       kind: "value",
@@ -491,7 +328,7 @@ function sshHandoffSteps(credentials: Record<string, unknown>): HandoffStep[] {
       kind: "command",
       deferred: true,
       label: "Retirer cette clé du serveur",
-      shell: renderRevokeCommand(user, publicKey, dispatchPath),
+      shell: renderRevokeCommand(user, publicKey),
       note:
         "Gardez ce bloc. Supprimer la connexion dans Appstrate détruit la moitié privée et " +
         "rien d'autre — Appstrate ne peut pas atteindre votre serveur pour retirer sa clé " +
@@ -552,7 +389,9 @@ const PROVISIONERS: Record<string, Provisioner> = {
 const REQUIRED_PROVIDES: Record<string, readonly string[]> = {
   // NOT `host_key`: the user supplies it, read off the target from a session
   // they authenticated themselves. Only what the platform actually mints.
-  ssh_keypair: ["private_key", "read_only"],
+  // `private_key` alone: it is the only thing the platform mints. Everything
+  // else on this auth is the user's to supply.
+  ssh_keypair: ["private_key"],
 };
 
 export interface ProvisioningDeclaration {

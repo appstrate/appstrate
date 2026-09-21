@@ -689,15 +689,14 @@ describe("hosted connect portal — credential provisioning", () => {
 
   /**
    * The programmatic import never runs a provisioner — it is the "I already
-   * hold this credential" door. What bounds it is the manifest schema, and
-   * these are the two fields whose shape the SSH runner depends on: the Unix
-   * account is concatenated into ssh's destination argument, and a verb is a
-   * NAME the target resolves, never a command rendered here.
+   * hold this credential" door. What bounds it is the manifest schema, and the
+   * account name is the field whose shape the SSH runner depends on: it is
+   * concatenated into ssh's destination argument, so an `-o`-shaped value
+   * would be read as an option rather than a user.
    */
   it.each([
     ["an account name shaped like an ssh option", { user: "-oProxyCommand=x" }],
-    ["a verb that is a shell string", { allowed_verbs: "uptime; id" }],
-    ["a read-only flag that is neither 0 nor 1", { read_only: "no" }],
+    ["a host shaped like an ssh option", { host: "-oProxyCommand=x" }],
     ["a private key that is not an OpenSSH container", { private_key: "-----BEGIN RSA KEY-----" }],
   ])("refuses %s on the programmatic import too", async (_label, override) => {
     const res = await importFields({
@@ -719,8 +718,6 @@ describe("hosted connect portal — credential provisioning", () => {
       host: "ssh.example.test",
       user: "agent",
       host_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5",
-      allowed_verbs: "hostname",
-      read_only: "1",
     });
     expect(res.status).toBe(200);
   });
@@ -788,8 +785,9 @@ describe("me/connections/:id/handoff — derived, not stored", () => {
     // which is exactly the property a stored copy could lose.
     const base64 = pair.publicKey.split(/\s+/)[1]!;
     expect(step.shell).toContain(`grep -vF '${base64}'`);
-    // And the dispatcher path is the one minting derived from the same key.
-    expect(step.shell).toMatch(/rm -f "\$tmp" \/usr\/local\/bin\/appstrate-dispatch-[0-9a-f]{12}/);
+    // And nothing else to undo: the install block authorised one line and
+    // wrote no script, so the removal has exactly one thing to take back.
+    expect(step.shell).not.toContain("appstrate-dispatch");
   });
 
   it("is empty for an auth that mints nothing", async () => {

@@ -368,7 +368,6 @@ const CASES: Record<string, Case> = {
       port: "22",
       user: "appstrate",
       host_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5",
-      read_only: "1",
     },
     accountId: "vps.example.com",
     source_doc: "the platform's own credential bag — services/connect/provisioning.ts",
