@@ -10,7 +10,6 @@
  * can never widen it.
  */
 
-import { useSyncExternalStore } from "react";
 import { BotIcon, BotOffIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
@@ -20,20 +19,12 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@appstrate/ui/components/tooltip";
-import {
-  getAgentAuthoringEnabled,
-  setAgentAuthoringEnabled,
-  subscribeAgentAuthoring,
-} from "./agent-authoring-store.ts";
+import { setAgentAuthoringEnabled, useAgentAuthoringEnabled } from "./agent-authoring-store.ts";
 import { useChatHost } from "./runtime-context.ts";
 
 export function AgentAuthoringToggle() {
   const { t, canAuthorAgents } = useChatHost();
-  const enabled = useSyncExternalStore(
-    subscribeAgentAuthoring,
-    getAgentAuthoringEnabled,
-    () => true,
-  );
+  const enabled = useAgentAuthoringEnabled();
   if (!canAuthorAgents) return null;
   return (
     <TooltipProvider delayDuration={300}>

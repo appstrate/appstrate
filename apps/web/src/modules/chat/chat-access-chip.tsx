@@ -22,7 +22,8 @@
  */
 
 import { useTranslation } from "react-i18next";
-import { CheckIcon, EyeIcon, ShieldIcon, XIcon } from "lucide-react";
+import { BotOffIcon, CheckIcon, EyeIcon, ShieldIcon, XIcon } from "lucide-react";
+import { useAgentAuthoringEnabled } from "@appstrate/module-chat/agent-authoring";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { cn } from "@appstrate/ui/cn";
@@ -40,6 +41,7 @@ export function ChatAccessChip() {
   const spaceId = useCurrentSpaceId();
   const { data: spaces } = useSpaces();
   const persona = useViewAs();
+  const authoring = useAgentAuthoringEnabled();
 
   // Nothing truthful to say until both lists have landed: `can` answers
   // `false` for a set still in flight, which renders exactly like a denial.
@@ -87,7 +89,10 @@ export function ChatAccessChip() {
         <p className="text-sm font-medium">{t("chat:access.title")}</p>
         <p className="text-muted-foreground mt-0.5 text-xs">{t("chat:access.subtitle")}</p>
 
-        <ChatCapabilityList capabilities={capabilities} />
+        <ChatCapabilityList
+          capabilities={capabilities}
+          turnedOff={authoring ? NOTHING_OFF : AUTHORING_OFF}
+        />
 
         <p className="text-muted-foreground mt-3 border-t pt-2 text-xs">
           {t("chat:access.roleLine", { org: orgRoleLabel, space: spaceRole ?? "—" })}
@@ -106,37 +111,55 @@ export function ChatAccessChip() {
  * the label followed by its spoken verdict, in DOM order, so the two can never
  * be read against a neighbouring row.
  */
+/** Rows the composer's agent-authoring switch turns off: granted, but not used this turn. */
+const AUTHORING_OFF: ReadonlySet<string> = new Set(["createAgents"]);
+const NOTHING_OFF: ReadonlySet<string> = new Set();
+
 export function ChatCapabilityList({
   capabilities,
+  turnedOff,
 }: {
   capabilities: readonly ResolvedChatCapability[];
+  turnedOff: ReadonlySet<string>;
 }) {
   const { t } = useTranslation(["chat"]);
   return (
     <ul className="mt-2 space-y-1">
-      {capabilities.map((capability) => (
-        <li key={capability.id} className="flex items-center gap-2 text-xs">
-          {capability.granted ? (
-            <CheckIcon
-              aria-hidden="true"
-              className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
-            />
-          ) : (
-            <XIcon aria-hidden="true" className="text-muted-foreground/60 size-3.5 shrink-0" />
-          )}
-          <span
-            className={cn(
-              capability.granted ? "text-foreground" : "text-muted-foreground line-through",
+      {capabilities.map((capability) => {
+        const off = capability.granted && turnedOff.has(capability.id);
+        return (
+          <li key={capability.id} className="flex items-center gap-2 text-xs">
+            {off ? (
+              <BotOffIcon aria-hidden="true" className="text-muted-foreground size-3.5 shrink-0" />
+            ) : capability.granted ? (
+              <CheckIcon
+                aria-hidden="true"
+                className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
+              />
+            ) : (
+              <XIcon aria-hidden="true" className="text-muted-foreground/60 size-3.5 shrink-0" />
             )}
-          >
-            {t(`chat:${capability.labelKey}`)}
-          </span>
-          <span className="sr-only">
-            {" — "}
-            {t(capability.granted ? "chat:access.granted" : "chat:access.denied")}
-          </span>
-        </li>
-      ))}
+            <span
+              className={cn(
+                off
+                  ? "text-muted-foreground"
+                  : capability.granted
+                    ? "text-foreground"
+                    : "text-muted-foreground line-through",
+              )}
+            >
+              {t(`chat:${capability.labelKey}`)}
+              {off && ` — ${t("chat:access.turnedOff")}`}
+            </span>
+            {!off && (
+              <span className="sr-only">
+                {" — "}
+                {t(capability.granted ? "chat:access.granted" : "chat:access.denied")}
+              </span>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }

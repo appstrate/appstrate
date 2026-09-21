@@ -184,7 +184,7 @@ describe("the capability list", () => {
     // A screen reader reads each row as one unit: one `li` per capability,
     // label then verdict, so a verdict can never be announced next to a
     // neighbouring row's label.
-    const html = render(<ChatCapabilityList capabilities={capabilities} />);
+    const html = render(<ChatCapabilityList capabilities={capabilities} turnedOff={new Set()} />);
     const items = [...html.matchAll(/<li[^>]*>(.*?)<\/li>/g)].map((m) => m[1]!);
     expect(items).toHaveLength(2);
 
@@ -202,5 +202,26 @@ describe("the capability list", () => {
     expect(items[1]).toContain(denied);
     expect(items[1]).not.toContain(granted);
     expect(items[1]!.indexOf(schedule)).toBeLessThan(items[1]!.indexOf(denied));
+  });
+
+  it("marks a granted row the composer switch turns off, without calling it refused", () => {
+    const create = [
+      {
+        id: "createAgents",
+        labelKey: "access.capability.createAgents",
+        held: () => true,
+        granted: true,
+      },
+    ];
+    const html = render(
+      <ChatCapabilityList capabilities={create} turnedOff={new Set(["createAgents"])} />,
+    );
+    expect(html).toContain(i18n.t("chat:access.turnedOff"));
+    expect(html).not.toContain(i18n.t("chat:access.denied"));
+    expect(html).not.toContain("line-through");
+
+    const on = render(<ChatCapabilityList capabilities={create} turnedOff={new Set()} />);
+    expect(on).not.toContain(i18n.t("chat:access.turnedOff"));
+    expect(on).toContain(i18n.t("chat:access.granted"));
   });
 });

@@ -7,10 +7,12 @@
 // download, authenticated image preview, staged upload) and the translator.
 // Lazy-loaded behind `features.chat`.
 
-import { useCallback, useEffect, useReducer } from "react";
+import { useCallback, useEffect, useLayoutEffect, useReducer } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChatPage, type OpenFile } from "@appstrate/module-chat/ui";
+import { bindAgentAuthoringUser } from "@appstrate/module-chat/agent-authoring";
+import { useAuth } from "../../hooks/use-auth";
 import { buildScopingHeaders } from "../../lib/scoping-headers";
 import { useViewAsHeader } from "../../stores/view-as-store";
 import { useCollapsedGlobalSidebar } from "../../hooks/use-collapsed-global-sidebar";
@@ -31,6 +33,9 @@ const COMPOSER_ACTIONS = <ChatAccessChip />;
 
 export function ChatModulePage() {
   useCollapsedGlobalSidebar();
+  // The agent-authoring preference is per user: bind it before the composer paints.
+  const userId = useAuth().user?.id ?? null;
+  useLayoutEffect(() => bindAgentAuthoringUser(userId), [userId]);
   // Conversation id lives in the URL (`/chat/:conversationId`) so a refresh or
   // deep-link restores the open conversation. `replace` keeps message/title
   // updates out of the back-history.
