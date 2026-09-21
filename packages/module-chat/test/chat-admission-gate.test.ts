@@ -89,7 +89,8 @@ function fakeContext(opts: {
     space: { id: opts.spaceId },
     principalKind: "user",
     orgRole: "member",
-    permissions: [],
+    // A Set, as `enterSpaceContext` writes and `ChatEnv` declares.
+    permissions: new Set<string>(),
   };
   const headers = new Headers({ "x-space-id": opts.spaceId });
   return {

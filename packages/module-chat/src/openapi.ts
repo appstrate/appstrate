@@ -285,6 +285,11 @@ export const chatPaths = {
                 },
                 modelId: { type: "string" },
                 generation: { $ref: "#/components/schemas/ModelGenerationSettings" },
+                agent_authoring: {
+                  type: "boolean",
+                  description:
+                    "Lets the assistant author agents (create, edit, compose inline) this turn; absent = on. Narrows the caller's own grants, never widens them.",
+                },
                 id: { type: "string", description: "Session id (the assistant-ui thread id)" },
               },
             },

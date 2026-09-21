@@ -6,10 +6,9 @@ import { packages, runs } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import {
-  addOrgMember,
   authHeaders,
   createTestContext,
-  createTestUser,
+  memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
 import {
@@ -18,7 +17,6 @@ import {
   seedPackage,
   seedPackageShare,
   seedSpace,
-  seedSpaceMember,
 } from "../../helpers/seed.ts";
 
 const app = getTestApp();
@@ -43,9 +41,7 @@ function body() {
 beforeEach(async () => {
   await truncateAll();
   ctx = await createTestContext({ orgSlug: "inline-rbac" });
-  const guest = await createTestUser();
-  await addOrgMember(ctx.orgId, guest.id, "guest");
-  await seedSpaceMember({ spaceId: ctx.defaultSpaceId, userId: guest.id, presetRole: "operator" });
+  const builder = await memberContext(ctx, "guest", "builder");
   const hidden = await seedSpace({ orgId: ctx.orgId, visibility: "private" });
   await seedPackage({
     id: skillId,
@@ -56,11 +52,11 @@ beforeEach(async () => {
     draftContent: "Private skill instructions",
   });
   await seedSpacePackage(hidden.id, skillId);
-  headers = { ...authHeaders(ctx), Cookie: guest.cookie };
+  headers = authHeaders(builder);
 });
 
 describe("inline dependency authorization", () => {
-  it("does not accept a private skill merely because its id was supplied by an operator", async () => {
+  it("does not accept a private skill because a builder supplied its id", async () => {
     const response = await app.request("/api/runs/inline/validate", {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },
@@ -90,7 +86,7 @@ describe("inline dependency authorization", () => {
     expect(await db.select().from(runs)).toEqual([]);
   });
 
-  it("accepts an operator's readable dependency installed in their own space", async () => {
+  it("accepts a builder's readable dependency installed in their own space", async () => {
     await seedPackageShare(ctx.defaultSpaceId, skillId);
     await seedSpacePackage(ctx.defaultSpaceId, skillId);
     const response = await app.request("/api/runs/inline/validate", {
@@ -106,7 +102,9 @@ describe("inline dependency authorization", () => {
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
-      scopes: ["agents:run"],
+      // The route guard, and nothing else: the 403 below must come from the
+      // missing `skills:read`, not from the key being unable to post at all.
+      scopes: ["agents:write", "agents:run"],
     });
     await seedPackageShare(ctx.defaultSpaceId, skillId);
     await seedSpacePackage(ctx.defaultSpaceId, skillId);
@@ -116,13 +114,14 @@ describe("inline dependency authorization", () => {
       body: JSON.stringify(body()),
     });
     expect(response.status).toBe(403);
+    expect(await response.text()).toContain("Insufficient permissions: skills:read required");
   });
   it("keeps an owner key pinned to A from selecting private B sources even with the read scope", async () => {
     const key = await seedApiKey({
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
-      scopes: ["agents:run", "skills:read"],
+      scopes: ["agents:write", "agents:run", "skills:read"],
     });
     const response = await app.request("/api/runs/inline/validate", {
       method: "POST",

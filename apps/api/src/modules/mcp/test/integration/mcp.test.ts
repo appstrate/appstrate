@@ -21,6 +21,12 @@ import { truncateAll, db } from "../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../test/helpers/redis.ts";
 import { createTestContext, orgOnlyHeaders } from "../../../../../test/helpers/auth.ts";
 import { seedApiKey, seedPackage } from "../../../../../test/helpers/seed.ts";
+import {
+  MCP_ACCEPT,
+  mcpPath,
+  mcpRpc,
+  type JsonRpcEnvelope,
+} from "../../../../../test/helpers/mcp.ts";
 import { setPlatformApp } from "../../../../lib/platform-app.ts";
 import { drainAudits, pendingAuditCount } from "../../../../services/audit.ts";
 import { getCatalog, resetCatalog } from "../../catalog.ts";
@@ -32,31 +38,7 @@ const app = getTestApp();
 // registerModuleRoutes; the test harness mounts modules inline).
 setPlatformApp(app);
 
-const MCP_ACCEPT = "application/json, text/event-stream";
-
-/** The per-org MCP endpoint for an org id (`X-Org-Id` header carries the same). */
-function mcpPath(headers: Record<string, string>): string {
-  return `/api/mcp/o/${headers["X-Org-Id"]}`;
-}
-
-interface JsonRpcEnvelope {
-  result?: Record<string, unknown>;
-  error?: { code: number; message: string };
-}
-
-/** POST a JSON-RPC message to the caller's per-org endpoint, parse the envelope. */
-async function rpc(
-  headers: Record<string, string>,
-  message: Record<string, unknown>,
-): Promise<{ status: number; envelope: JsonRpcEnvelope }> {
-  const res = await app.request(mcpPath(headers), {
-    method: "POST",
-    headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
-    body: JSON.stringify(message),
-  });
-  const text = await res.text();
-  return { status: res.status, envelope: text ? (JSON.parse(text) as JsonRpcEnvelope) : {} };
-}
+const rpc = mcpRpc(app);
 
 /** Parse the JSON payload a tool returns in its first text content block. */
 function toolPayload(envelope: JsonRpcEnvelope): {

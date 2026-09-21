@@ -61,6 +61,12 @@ export interface PiChatInput {
   modelBinding: ResolvedPiChatModelBinding;
   /** Appstrate preset id (org model row id) — stored as `llm_usage.model`. */
   presetId: string;
+  /**
+   * Display name of that preset (`label ?? modelId`, the value the picker
+   * renders). Frozen into the turn's closing metadata so a transcript still
+   * names the model after the org row is gone; never resolved back to a model.
+   */
+  modelLabel: string;
   orgId: string;
   userId: string;
   /** Chat session the turn belongs to (null for an ephemeral, unpersisted turn). */
@@ -610,6 +616,8 @@ export function runPiChat(input: PiChatInput): Response {
           // model-call count to the ceiling.
           stepCapReached: stepCap.fired(),
           ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
+          modelId: input.presetId,
+          modelLabel: input.modelLabel,
         });
         // Same invariant, second failure mode: a turn killed by the deadline
         // used to end in complete silence. The emitter gives it a REAL text part
@@ -666,6 +674,8 @@ export function runPiChat(input: PiChatInput): Response {
             stepCount: mapper.stepCount(),
             stepCapReached: stepCap?.fired() ?? false,
             ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
+            modelId: input.presetId,
+            modelLabel: input.modelLabel,
           });
           for (const chunk of closing.chunks) write(chunk);
         }

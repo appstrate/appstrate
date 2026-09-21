@@ -282,6 +282,10 @@ Reason: SIEM queries (Datadog, Splunk) need stable field names, and all other au
 
 **Why**: developer-platform surfaces modelled on the Stripe headless API convention (camelCase for developer-platform CRUD). End-to-end coherent (no impedance mismatch); flipping is a breaking change for external API consumers with zero user-visible benefit. Treat new fields on these specific surfaces the same way; for any new endpoint family, prefer snake_case wire per the Zone 1 default.
 
+#### Carve-out 4o — Chat message metadata (`appstrate.turn`)
+
+**File**: `packages/core/src/chat-turn-metadata.ts` (`AppstrateTurnMetadata`). Its fields (`finishReason`, `errorCategory`, `stepCount`, `modelId`, `modelLabel`, …) are **camelCase**: they ride the AI SDK's `messageMetadata` on the UI message stream and are persisted inside the stored message, a TS contract shared by the engine and the chat UI rather than a REST body.
+
 ---
 
 ### Zone 5 — Asymétries documentées (historical inconsistencies, low-impact)

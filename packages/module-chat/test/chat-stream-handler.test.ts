@@ -42,7 +42,8 @@ import { buildChatPlatformDeps, type ChatPlatformDeps } from "../src/platform-se
 import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
 import { errorHandler } from "../../../apps/api/src/middleware/error-handler.ts";
 import { initSystemModelProviderKeys } from "../../../apps/api/src/services/model-registry.ts";
-import { SYSTEM_PROMPT } from "../src/prompt.ts";
+import { buildSystemPrompt } from "../src/prompt.ts";
+import { chatLoopbackStrategy } from "../src/loopback-auth.ts";
 
 // The chat handler reads the system model registry; the HTTP harness initializes it at boot.
 initSystemModelProviderKeys();
@@ -254,6 +255,8 @@ describe("handleChatStream", () => {
       parts?: unknown[];
       /** The kind the auth pipeline resolved; production reaches here as `user` only. */
       principalKind?: PrincipalKind;
+      /** The composer's agent-authoring switch for this turn; omitted = on. */
+      agentAuthoring?: boolean;
     },
   ): Promise<Response> {
     // Real platform deps (the same context `init()` gets), with dispatch
@@ -284,6 +287,9 @@ describe("handleChatStream", () => {
           },
         ],
         ...(generation ? { generation } : {}),
+        ...(overrides?.agentAuthoring === undefined
+          ? {}
+          : { agent_authoring: overrides.agentAuthoring }),
       }),
     });
     return res;
@@ -480,7 +486,9 @@ describe("handleChatStream", () => {
     // (4) The system prompt was assembled from the caller context. There are no
     // inline MCP instructions on this path: the engine's own handshake delivers
     // them, and it is handed the org-scoped URL to open it with.
-    expect(input.system).toContain(SYSTEM_PROMPT.slice(0, 64));
+    expect(input.system).toContain(
+      buildSystemPrompt({ canComposeInline: false, canAuthorAgents: false }).slice(0, 64),
+    );
     expect(input.system).toContain(CONTEXT_ORG_MARKER);
     expect(input.platformMcp.url).toContain(`/api/mcp/o/${encodeURIComponent(ctx.orgId)}`);
     expect(input.platformMcp.headers.Authorization).toMatch(/^Bearer /);
@@ -626,4 +634,69 @@ describe("handleChatStream", () => {
     expect(second.calls[0]!.system).not.toContain("provider timed out");
     expect(second.calls[0]!.system).not.toContain("@acme/report");
   }, 20_000);
+
+  describe("the composer's agent-authoring switch", () => {
+    /** The permission set the turn's platform-MCP bearer actually carries. */
+    async function tokenPermissions(input: PiChatInput): Promise<string[]> {
+      const authorization = input.platformMcp?.headers?.Authorization;
+      expect(typeof authorization).toBe("string");
+      const resolved = await chatLoopbackStrategy.authenticate({
+        headers: new Headers({ authorization: authorization as string }),
+      } as never);
+      expect(resolved).not.toBeNull();
+      return [...(resolved!.permissions ?? [])].sort();
+    }
+
+    /** The one argument a model needs to compose an inline agent, whatever the prose. */
+    const INLINE_MARKER = 'kind:"inline"';
+    const REDUCED_MARKER = "Do not create or modify an agent in this turn";
+
+    const BUILDER = new Set(["agents:read", "agents:run", "agents:write"]);
+
+    async function turn(permissions: Set<string>, agentAuthoring?: boolean) {
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(mintSessionId(), undefined, engine, {
+        permissions,
+        ...(agentAuthoring === undefined ? {} : { agentAuthoring }),
+      });
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      const input = calls[0]!;
+      return { token: await tokenPermissions(input), system: input.system };
+    }
+
+    it("keeps `agents:write` and teaches inline composition when on", async () => {
+      const { token, system } = await turn(BUILDER, true);
+      expect(token).toEqual(["agents:read", "agents:run", "agents:write"]);
+      expect(system).toContain(INLINE_MARKER);
+      expect(system).not.toContain(REDUCED_MARKER);
+    });
+
+    it("drops only `agents:write` from the token and the inline teaching when off", async () => {
+      const { token, system } = await turn(BUILDER, false);
+      expect(token).toEqual(["agents:read", "agents:run"]);
+      expect(system).not.toContain(INLINE_MARKER);
+      expect(system).toContain(REDUCED_MARKER);
+    });
+
+    it("is on when the body carries no flag", async () => {
+      const { token, system } = await turn(BUILDER);
+      expect(token).toContain("agents:write");
+      expect(system).toContain(INLINE_MARKER);
+    });
+
+    it("never grants `agents:write` to a caller who lacks it", async () => {
+      const { token, system } = await turn(new Set(["agents:run"]), true);
+      expect(token).toEqual(["agents:run"]);
+      expect(system).not.toContain(INLINE_MARKER);
+    });
+
+    it("teaches inline composition only with `agents:run` as well", async () => {
+      const { token, system } = await turn(new Set(["agents:write"]), true);
+      expect(token).toEqual(["agents:write"]);
+      expect(system).not.toContain(INLINE_MARKER);
+      // It may still create agents: nothing tells it otherwise.
+      expect(system).not.toContain(REDUCED_MARKER);
+    });
+  });
 });

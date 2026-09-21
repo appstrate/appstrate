@@ -32,7 +32,8 @@ import { materializeUserAttachments } from "./attachments.ts";
 import { runPiChat, type PiChatInput } from "./pi-chat/engine.ts";
 import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
 import { acquirePiChatSlot, chatCapacityResponse } from "./pi-chat/concurrency.ts";
-import { SYSTEM_PROMPT, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
+import { turnPermissions } from "./turn-permissions.ts";
+import { buildSystemPrompt, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
 export type { ChatEnv } from "./prompt.ts";
 import { finalizeChatStream } from "./finalize-stream.ts";
 import { ensureSession, persistUserMessage, persistAssistantMessage } from "./persistence.ts";
@@ -40,6 +41,7 @@ import { registerStopController, unregisterStopController } from "./stop-registr
 import { setActiveStream, clearActiveStream } from "./resumable.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 import type { UsageRejection } from "@appstrate/core/module";
+import { canComposeInline } from "@appstrate/core/permissions";
 import { classifyClientTurnError, clientTurnErrorMarker } from "./turn-error.ts";
 import {
   ModelGenerationError,
@@ -153,6 +155,8 @@ export const chatStreamSchema = z.object({
     }),
   modelId: z.string().optional(),
   generation: modelGenerationSettingsSchema.optional(),
+  /** The composer's agent-authoring switch; absent = on. See {@link turnPermissions}. */
+  agent_authoring: z.boolean().optional(),
 });
 
 function clientErrorMessage(error: unknown): string {
@@ -283,7 +287,8 @@ export async function handleChatStream(
   // The proxy surfaces are bearer-only (cookies refused — CSRF model):
   // inference loopback calls carry a short-lived token only this process
   // can mint, scoped to llm-proxy:call + models:read. The MCP session keeps
-  // the caller's own credentials (full RBAC fidelity on tool calls).
+  // the caller's own grants (full RBAC fidelity on tool calls, narrowed by
+  // `turnPermissions` when agent authoring is off).
   //
   // The token lives 60 s, but a turn fans out into many inference calls over
   // many steps (with a run long-poll blocking for ~55s between them), so the
@@ -310,6 +315,12 @@ export async function handleChatStream(
   // against — reading it again from `/api/spaces` would be a second, divergent
   // answer (it also ignored an API key's pinned space).
   const modelId = c.req.header("X-Model-Id") ?? body.modelId;
+
+  // Flipping the switch changes the system prompt and, through the narrowed token, the
+  // MCP `run_and_wait` descriptor on the same turn: one prompt-cache miss.
+  const permissions = turnPermissions(c.get("permissions"), body.agent_authoring !== false);
+  const canAuthorAgents = permissions.includes("agents:write");
+  const composeInline = canComposeInline((p) => permissions.includes(p));
   const phaseAStart = Date.now();
 
   // ── Preamble phase B (overlapped with A) ─────────────────────────────────
@@ -345,6 +356,7 @@ export async function handleChatStream(
       deps,
       // UI language forwarded by the client; validated/defaulted in the builder.
       locale: c.req.header("X-Chat-Locale"),
+      canAuthorAgents,
     })
       .finally(() => {
         // Wall time of the block itself.
@@ -452,7 +464,10 @@ export async function handleChatStream(
   // (`pi-chat/engine.ts`). Re-applying it to this prompt matched nothing — and
   // could only misfire, since the context block below carries org-authored agent
   // names and would be truncated at any that happened to spell the heading.
-  let system = SYSTEM_PROMPT;
+  let system = buildSystemPrompt({
+    canComposeInline: composeInline,
+    canAuthorAgents,
+  });
   if (contextBlock) system += `\n\n${contextBlock}`;
 
   // Which credential the turn spends. One engine drives them both.
@@ -571,8 +586,8 @@ export async function handleChatStream(
   // The engine opens its OWN platform MCP connection (`/api/mcp/o/:org`), and
   // run_and_wait hits platform run routes with these headers. It must NEVER
   // receive the caller's raw cookie/Authorization (reusable far beyond chat).
-  // Hand it a short-lived, process-local bearer carrying EXACTLY the caller's
-  // already-resolved permissions (full RBAC fidelity, zero amplification) and
+  // Hand it a short-lived, process-local bearer carrying EXACTLY the turn's
+  // permissions (the caller's resolved set, narrowed by `turnPermissions`) and
   // NOT first-party-loopback (can't be replayed against the inference proxy).
   const mcpToken = mintMcpLoopbackToken(
     {
@@ -581,7 +596,7 @@ export async function handleChatStream(
       name: user.name,
       orgId,
       orgRole,
-      permissions: [...c.get("permissions")],
+      permissions,
       // The re-entered request carries no header, so without this the hop would
       // answer with the caller's real authority while a preview is on screen.
       viewAs: persona,
@@ -599,6 +614,10 @@ export async function handleChatStream(
         slot,
         modelBinding,
         presetId: chosen.id,
+        // The same string the picker shows (`model-select.tsx` renders
+        // `label ?? modelId`), so the transcript and the composer never
+        // disagree about what the model is called.
+        modelLabel: chosen.label ?? chosen.modelId,
         orgId,
         userId: user.id,
         chatSessionId: meteringSessionId,

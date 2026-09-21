@@ -153,8 +153,9 @@ export function mintLoopbackToken(
  * `permissions` MUST be the caller's already-resolved permission set (from
  * `c.get("permissions")`): the MCP meta-tools re-enter the platform in-process
  * and re-authorize each underlying operation against exactly this set, so
- * carrying the caller's own permissions preserves full RBAC fidelity WITHOUT
- * amplifying beyond what the caller could already do over REST. The token does
+ * carrying the caller's own permissions (narrowed by `turnPermissions` when the
+ * turn may not author agents) never amplifies beyond what the caller could
+ * already do over REST. The token does
  * NOT grant `firstPartyLoopback`, so — unlike the inference bearer — it can
  * never be replayed against the inference proxy.
  *

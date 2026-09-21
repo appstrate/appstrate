@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New export `ConnectionCandidate` (`@appstrate/core/integration`)** — one
   connection the caller may pick from on `must_choose_connection`, carrying
   `id`, `label`, `accountId` and `ownedByActor`.
+- **New export `canComposeInline` (`@appstrate/core/permissions`)** — whether
+  a caller may compose an inline agent: `agents:write` and `agents:run`. Takes a
+  membership test, so a `Set` or an array both fit.
+- **`AppstrateTurnMetadata` gains optional `modelId` and `modelLabel`
+  (`@appstrate/core/chat-turn-metadata`)** — the model a chat turn ran on,
+  stamped when the engine closes the turn. Additive: a turn the engine did not
+  close carries neither.
 
 ### Changed
 

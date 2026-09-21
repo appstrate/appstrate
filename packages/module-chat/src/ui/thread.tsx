@@ -47,6 +47,7 @@ import { resolveAttachmentContent, UNNAMED_FILE } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
+import { turnModelLabel } from "./turn-model.ts";
 import {
   FileAttachment,
   ATTACHMENT_CHIP_CLASS,
@@ -385,6 +386,26 @@ function ThinkingIndicator() {
   );
 }
 
+/** Always shown, not on hover, so a mid-conversation model switch is visible. */
+function TurnModelBadge() {
+  const { t } = useChatHost();
+  // A plain string selector — never a derived object. See `turn-error-state.ts`.
+  const label = useAuiState((s) => turnModelLabel(s.message));
+  if (label === null) return null;
+  const answeredBy = t("model.answeredBy", { model: label });
+  return (
+    // `min-w-0` lets `truncate` shrink inside the flex row. Assistive tech reads
+    // the full sentence: a bare model name says nothing out of context.
+    <span
+      className="text-muted-foreground max-w-[14rem] min-w-0 truncate text-xs"
+      title={answeredBy}
+    >
+      <span aria-hidden="true">{label}</span>
+      <span className="sr-only">{answeredBy}</span>
+    </span>
+  );
+}
+
 function TurnLimitNotice() {
   const reached = useAuiState((s) => turnLimitReached(sourceMessage(s.message)));
   if (!reached) return null;
@@ -459,7 +480,8 @@ function AssistantMessage() {
         <TurnLimitNotice />
         <MessageError />
       </div>
-      <div className="mt-1 flex h-7 items-center gap-1">
+      <div className="mt-1 flex h-7 items-center gap-2">
+        <TurnModelBadge />
         {/* Space permanently reserved (fixed h-7 wrapper) and the bar ALWAYS
             mounted, revealed by opacity only. `hideWhenRunning`/`autohide`
             would unmount it and collapse every assistant message by the bar's

@@ -41,30 +41,12 @@ import { createUpload } from "../../../src/services/uploads.ts";
 import { createFileFromStream, createFileFromUpload } from "../../../src/services/files.ts";
 import { zipSync } from "fflate";
 import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
+import { mcpRpc, type JsonRpcEnvelope } from "../../helpers/mcp.ts";
 
 const app = getTestApp();
 setPlatformApp(app);
 
-const MCP_ACCEPT = "application/json, text/event-stream";
-
-interface JsonRpcEnvelope {
-  result?: Record<string, unknown>;
-  error?: { code: number; message: string };
-}
-
-async function rpc(
-  headers: Record<string, string>,
-  message: Record<string, unknown>,
-  requestOrigin = "",
-): Promise<{ status: number; envelope: JsonRpcEnvelope }> {
-  const res = await app.request(`${requestOrigin}/api/mcp/o/${headers["X-Org-Id"]}`, {
-    method: "POST",
-    headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
-    body: JSON.stringify(message),
-  });
-  const text = await res.text();
-  return { status: res.status, envelope: text ? (JSON.parse(text) as JsonRpcEnvelope) : {} };
-}
+const rpc = mcpRpc(app);
 
 /** Parse the JSON a tool returns in its first text content block. */
 function toolData(envelope: JsonRpcEnvelope): { isError: boolean; data: Record<string, unknown> } {

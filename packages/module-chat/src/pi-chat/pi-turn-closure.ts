@@ -113,9 +113,16 @@ function buildPiTurnMetadata(input: {
   stepCount: number;
   stepCapReached: boolean;
   lastToolName?: string;
+  modelId: string;
+  modelLabel: string;
 }): ChatMessageMetadata {
   return mergeTurnMetadata(undefined, {
     finishReason: input.finishReason,
+    // Stamped on EVERY exit, the failed ones included: "which model failed" is
+    // the question a user asks of a turn that errored, and a turn that bound a
+    // model spent its budget whether or not it produced text.
+    modelId: input.modelId,
+    modelLabel: input.modelLabel,
     ...(input.clientError
       ? {
           errorCategory: input.clientError.category,
@@ -165,6 +172,10 @@ export function closePiTurn(input: {
   stepCount: number;
   stepCapReached: boolean;
   lastToolName?: string;
+  /** The preset the turn bound to, known before the first chunk. */
+  modelId: string;
+  /** Its display name frozen at write time — never resolved back into a model. */
+  modelLabel: string;
   newId?: () => string;
 }): PiTurnClosure {
   const newId = input.newId ?? (() => crypto.randomUUID());
@@ -191,6 +202,8 @@ export function closePiTurn(input: {
       stepCount: input.stepCount,
       stepCapReached: input.stepCapReached,
       ...(input.lastToolName ? { lastToolName: input.lastToolName } : {}),
+      modelId: input.modelId,
+      modelLabel: input.modelLabel,
     }),
   });
   return { chunks, deadlineReached: closure.deadlineReached };

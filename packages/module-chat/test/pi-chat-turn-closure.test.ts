@@ -20,6 +20,8 @@ import {
 } from "../src/pi-chat/pi-turn-closure.ts";
 
 const TEN_MINUTES = 10 * 60_000;
+/** Every exit stamps the model it bound to; the engine always has one. */
+const MODEL = { modelId: "mdl_opus", modelLabel: "Claude Opus 5" };
 
 async function assemble(chunks: UIMessageChunk[]): Promise<UIMessage | undefined> {
   const stream = new ReadableStream<UIMessageChunk>({
@@ -111,6 +113,7 @@ describe("closePiTurn", () => {
       abortReason: undefined,
       stepCount: 0,
       stepCapReached: false,
+      ...MODEL,
       lastToolName: "read_file",
       newId: () => "assistant-before-start",
     }).chunks;
@@ -144,6 +147,7 @@ describe("closePiTurn", () => {
         abortReason: undefined,
         stepCount: 3,
         stepCapReached: false,
+        ...MODEL,
         newId: () => "unused",
       }).chunks,
     ];
@@ -167,6 +171,7 @@ describe("closePiTurn", () => {
       abortReason: new ChatTurnDeadlineError(10),
       stepCount: 0,
       stepCapReached: false,
+      ...MODEL,
       newId: (() => {
         const ids = ["assistant-deadline", "deadline-notice"];
         return () => ids.shift()!;
@@ -191,6 +196,7 @@ describe("closePiTurn", () => {
       abortReason: new Error("stopped by user"),
       stepCount: 0,
       stepCapReached: false,
+      ...MODEL,
       newId: () => "assistant-stopped",
     });
 
@@ -221,6 +227,7 @@ describe("closePiTurn", () => {
       abortReason: new Error("stopped by user"),
       stepCount: 0,
       stepCapReached: false,
+      ...MODEL,
       newId: () => "assistant-aborted-with-error",
     });
 
@@ -241,6 +248,7 @@ describe("closePiTurn", () => {
       abortReason: undefined,
       stepCount: 4,
       stepCapReached: true,
+      ...MODEL,
       lastToolName: "run_and_wait",
     });
 
@@ -269,6 +277,7 @@ describe("closePiTurn", () => {
       abortReason: undefined,
       stepCount: 2,
       stepCapReached: false,
+      ...MODEL,
     });
 
     expect(closing.chunks.map((chunk) => chunk.type)).toEqual(["error", "finish"]);
@@ -279,6 +288,49 @@ describe("closePiTurn", () => {
     expect(turnMetadataFromMessage(await assemble(chunks))).toMatchObject({
       finishReason: "error",
       stepCount: 2,
+    });
+  });
+});
+
+describe("the model a turn bound to", () => {
+  it("is stamped on a turn that simply finished", async () => {
+    const chunks = closePiTurn({
+      finishReason: "stop",
+      streamStarted: true,
+      aborted: false,
+      abortReason: undefined,
+      stepCount: 2,
+      stepCapReached: false,
+      ...MODEL,
+      newId: () => "unused",
+    }).chunks;
+
+    expect(turnMetadataFromMessage(await assemble(chunks))).toMatchObject({
+      modelId: "mdl_opus",
+      modelLabel: "Claude Opus 5",
+    });
+  });
+
+  it("is stamped on a turn that FAILED — which model failed is the question asked of one", async () => {
+    // The discriminating half of the test above: a stamp that only survived the
+    // happy path would leave every error card unattributed, which is exactly
+    // the case where the user needs to know what answered.
+    const chunks = closePiTurn({
+      error: new Error("upstream 503"),
+      finishReason: "error",
+      streamStarted: false,
+      aborted: false,
+      abortReason: undefined,
+      stepCount: 0,
+      stepCapReached: false,
+      ...MODEL,
+      newId: () => "assistant-error",
+    }).chunks;
+
+    expect(turnMetadataFromMessage(await assemble(chunks))).toMatchObject({
+      modelId: "mdl_opus",
+      modelLabel: "Claude Opus 5",
+      errorCategory: "upstream_unavailable",
     });
   });
 });

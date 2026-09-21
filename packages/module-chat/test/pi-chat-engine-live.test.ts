@@ -34,6 +34,8 @@ import { logger } from "../src/logger.ts";
 import type { OrgModel } from "../src/llm.ts";
 
 const ANSWER = "Bonjour le monde";
+/** Distinct from the preset id, so a label defaulted to the id is caught. */
+const LIVE_MODEL_LABEL = "Live Preset (display)";
 
 interface Capture {
   /** Authorization header seen on each provider request. */
@@ -199,6 +201,7 @@ async function runTurn(
       slot: slot!,
       modelBinding: binding,
       presetId: "preset_live",
+      modelLabel: LIVE_MODEL_LABEL,
       orgId: "org_live",
       userId: "user_live",
       chatSessionId: null,
@@ -317,6 +320,35 @@ describe("runPiChat against a stub provider", () => {
     expect(JSON.stringify(chunks)).not.toContain("errorCategory");
   }, 30_000);
 
+  it("stamps the bound model on the finish of BOTH engine exits", async () => {
+    // `closePiTurn` only copies what it is handed (`pi-chat-turn-closure.test.ts`);
+    // what only the engine can show is that each of its two exits hands it the
+    // turn's model. The loop-returned exit is a normal turn; the escaped-
+    // exception exit is a stop that lands during setup (see the test above).
+    const finishTurn = (chunks: Array<{ type: string; [k: string]: unknown }>) =>
+      (
+        chunks.find((c) => c.type === "finish") as {
+          messageMetadata?: { appstrate?: { turn?: Record<string, unknown> } };
+        }
+      ).messageMetadata?.appstrate?.turn;
+
+    const completed = await runTurn(() => "loopback-model");
+    expect(finishTurn(completed.chunks)).toMatchObject({
+      finishReason: "stop",
+      modelId: "preset_live",
+      modelLabel: LIVE_MODEL_LABEL,
+    });
+
+    const stopped = new AbortController();
+    stopped.abort(new Error("stopped by user"));
+    const escaped = await runTurn(() => "unused", stopped.signal);
+    expect(finishTurn(escaped.chunks)).toMatchObject({
+      finishReason: "stop",
+      modelId: "preset_live",
+      modelLabel: LIVE_MODEL_LABEL,
+    });
+  }, 30_000);
+
   it("tears the live Pi session down when a stop lands mid-inference", async () => {
     // The two other stop cases in this file abort during CONSTRUCTION — one up
     // front, one on a wedged MCP handshake — so neither ever reaches
@@ -380,6 +412,7 @@ describe("runPiChat against a stub provider", () => {
         slot: slot!,
         modelBinding: binding,
         presetId: "preset_live",
+        modelLabel: LIVE_MODEL_LABEL,
         orgId: "org_live",
         userId: "user_live",
         chatSessionId: null,
@@ -469,6 +502,7 @@ describe("runPiChat against a stub provider", () => {
         slot: counted,
         modelBinding: binding,
         presetId: "preset_live",
+        modelLabel: LIVE_MODEL_LABEL,
         orgId: "org_live",
         userId: "user_live",
         chatSessionId: null,
@@ -541,6 +575,7 @@ describe("runPiChat against a stub provider", () => {
         },
         modelBinding: binding,
         presetId: "preset_live",
+        modelLabel: LIVE_MODEL_LABEL,
         orgId: "org_live",
         userId: "user_live",
         chatSessionId: null,

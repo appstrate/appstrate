@@ -311,12 +311,9 @@ describe("runner preset", () => {
     }
   });
 
-  it("refuses an inline run whose manifest declares a skill it cannot read", async () => {
-    // The inline routes take a manifest in the BODY, so a runner could name a
-    // skill there and reach through the composition it is not served on the
-    // agent detail. `assertPackageDependenciesAccessible` is what stops it, and
-    // it stops the dry-run validator on the same call.
-    const body = JSON.stringify({
+  /** A minimal inline manifest, judged by the composing guard. */
+  const inlineBody = () =>
+    JSON.stringify({
       manifest: {
         name: "@runner/inline",
         display_name: "Inline Agent",
@@ -324,29 +321,117 @@ describe("runner preset", () => {
         type: "agent",
         description: "Inline run",
         schema_version: "0.1",
-        dependencies: { skills: { [SKILL_ID]: "^1.0.0" } },
       },
       prompt: "Do the thing.",
       input: {},
     });
 
-    for (const path of ["/api/runs/inline", "/api/runs/inline/validate"]) {
-      const denied = await app.request(path, {
-        method: "POST",
-        headers: authHeaders(runner, { "Content-Type": "application/json" }),
-        body,
-      });
-      expect(`${path}: ${denied.status}`).toBe(`${path}: 403`);
+  const INLINE_PATHS = ["/api/runs/inline", "/api/runs/inline/validate"] as const;
+  const WRITE_DENIED = "Insufficient permissions: agents:write required";
+  const RUN_DENIED = "Insufficient permissions: agents:run required";
+  /** Neither half of the composing guard refused this response. */
+  const passedGuard = (text: string) => !text.includes(WRITE_DENIED) && !text.includes(RUN_DENIED);
+  const postInline = (path: string, ctx: TestContext) =>
+    app.request(path, {
+      method: "POST",
+      headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+      body: inlineBody(),
+    });
+  const keyFor = (scopes: string[]) =>
+    seedApiKey({
+      orgId: owner.orgId,
+      spaceId: owner.defaultSpaceId,
+      createdBy: owner.user.id,
+      scopes,
+    });
+  const keyHeaders = (rawKey: string) => ({
+    Authorization: `Bearer ${rawKey}`,
+    "Content-Type": "application/json",
+  });
 
-      // The control: the operator holds `skills:read`, so the same body gets
-      // past the dependency gate — whatever it answers, it is not a 403.
-      const allowed = await app.request(path, {
-        method: "POST",
-        headers: authHeaders(operator, { "Content-Type": "application/json" }),
-        body,
-      });
-      expect(`${path}: ${allowed.status !== 403}`).toBe(`${path}: true`);
+  it("refuses the inline surface to a runner and an operator (no `agents:write`)", async () => {
+    for (const path of INLINE_PATHS) {
+      for (const [label, ctx] of [
+        ["runner", runner],
+        ["operator", operator],
+      ] as const) {
+        const res = await postInline(path, ctx);
+        expect(`${label} ${path}: ${res.status}`).toBe(`${label} ${path}: 403`);
+        expect(await res.text()).toContain(WRITE_DENIED);
+      }
     }
+  });
+
+  it("lets a builder through the inline guard", async () => {
+    const builder = await memberContext(owner, "member", "builder");
+    for (const path of INLINE_PATHS) {
+      const res = await postInline(path, builder);
+      expect(`${path}: ${res.status !== 403 && passedGuard(await res.text())}`).toBe(
+        `${path}: true`,
+      );
+    }
+  });
+
+  it("refuses the inline route to a key missing either half", async () => {
+    for (const [scopes, denial] of [
+      [["agents:run"], WRITE_DENIED],
+      [["agents:write"], RUN_DENIED],
+    ] as const) {
+      const key = await keyFor([...scopes]);
+      const res = await app.request("/api/runs/inline", {
+        method: "POST",
+        headers: keyHeaders(key.rawKey),
+        body: inlineBody(),
+      });
+      expect(`${scopes}: ${res.status}`).toBe(`${scopes}: 403`);
+      expect(await res.text()).toContain(denial);
+    }
+  });
+
+  describe("POST /api/runs/remote", () => {
+    const remote = (source: Record<string, unknown>) =>
+      JSON.stringify({ source, spaceId: owner.defaultSpaceId, input: {} });
+    const inlineSource = () => {
+      const parsed = JSON.parse(inlineBody()) as { manifest: unknown; prompt: string };
+      return { kind: "inline", manifest: parsed.manifest, prompt: parsed.prompt };
+    };
+    const registrySource = () => ({ kind: "registry", packageId: AGENT_ID, stage: "published" });
+    const postRemote = (ctx: TestContext, source: Record<string, unknown>) =>
+      app.request("/api/runs/remote", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: remote(source),
+      });
+
+    it("refuses the inline source to a runner and an operator", async () => {
+      for (const [label, ctx] of [
+        ["runner", runner],
+        ["operator", operator],
+      ] as const) {
+        const res = await postRemote(ctx, inlineSource());
+        expect(`${label}: ${res.status}`).toBe(`${label}: 403`);
+        expect(await res.text()).toContain(WRITE_DENIED);
+      }
+    });
+
+    it("lets a builder's inline source past the guard", async () => {
+      const builder = await memberContext(owner, "member", "builder");
+      const res = await postRemote(builder, inlineSource());
+      expect(res.status).not.toBe(403);
+      expect(passedGuard(await res.text())).toBe(true);
+    });
+
+    it("asks only `agents:run` of the registry source", async () => {
+      for (const scopes of [["agents:run"], ["agents:write", "agents:run"]]) {
+        const key = await keyFor(scopes);
+        const res = await app.request("/api/runs/remote", {
+          method: "POST",
+          headers: keyHeaders(key.rawKey),
+          body: remote(registrySource()),
+        });
+        expect(`${scopes}: ${passedGuard(await res.text())}`).toBe(`${scopes}: true`);
+      }
+    });
   });
 
   it("serves connection readiness — the integrations a launcher connects", async () => {

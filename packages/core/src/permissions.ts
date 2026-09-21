@@ -73,6 +73,12 @@ export interface CoreResources {
   // grant of the `admin` and `builder` presets: it decides who runs a package
   // with whose credentials, so it is absent from the API-key allowlist for the
   // same reason `integrations:configure` is.
+  //
+  // Composing an inline agent (a manifest the request carries, declaring its
+  // own dependencies) is not a grant of its own: it takes `write` — the caller
+  // authors the manifest — AND `run` — it launches it. A `runner` holds `run`
+  // alone: it launches what it may not read, and composing is how it would
+  // reach around that.
   agents: "read" | "write" | "configure" | "delete" | "run" | "share";
   skills: "read" | "write" | "delete" | "share";
   // AFPS §3.4 — standalone MCP Bundle (MCPB) packages. Browse/import/delete
@@ -138,6 +144,14 @@ export type CoreAction<R extends CoreResource = CoreResource> = CoreResources[R]
 export type CorePermission = {
   [R in CoreResource]: `${R & string}:${CoreResources[R] & string}`;
 }[CoreResource];
+
+/**
+ * Whether a caller may compose an inline agent (see `CoreResources.agents`).
+ * Takes a membership test so a `Set` or an array both fit.
+ */
+export function canComposeInline(has: (permission: CorePermission) => boolean): boolean {
+  return has("agents:write") && has("agents:run");
+}
 
 /**
  * Runtime mirror of `CoreResources`: `satisfies` catches a missing resource,
