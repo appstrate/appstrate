@@ -11,8 +11,10 @@
  * process opens the tunnel and splices its own stdin/stdout onto the socket.
  * The SSH transcript rides the tunnel opaque; the proxy sees bytes.
  *
- * Reached by OpenSSH as a subprocess, never by an import — which is why
- * `knip.config.ts` lists it as an entry.
+ * Two surfaces: `index.ts` imports `proxyUrlFromEnv`, and OpenSSH execs the
+ * file as a program (`main` runs only under `import.meta.main`). That exec
+ * is an option string, not an import edge — which is why `knip.config.ts`
+ * lists the file as an entry.
  */
 
 import { connect, type Socket } from "node:net";

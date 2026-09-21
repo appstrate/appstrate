@@ -30,7 +30,7 @@
 import { invalidRequest } from "../../lib/errors.ts";
 import {
   fingerprintPublicKey,
-  generateOpenSshEd25519KeyPair,
+  generateOpenSshEd25519PrivateKey,
   parsePublicKeyLine,
   publicKeyFromOpenSshPrivateKey,
   type PublicKeyType,
@@ -245,7 +245,7 @@ async function provisionSshKeyPair(
 
   const target = { host, port: String(port), user };
   return {
-    private_key: reusableSshPrivateKey(existing, target) ?? generateOpenSshEd25519KeyPair(),
+    private_key: reusableSshPrivateKey(existing, target) ?? generateOpenSshEd25519PrivateKey(),
     ...target,
     host_key: hostKey,
   };

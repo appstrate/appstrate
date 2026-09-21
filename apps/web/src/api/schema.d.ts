@@ -1528,7 +1528,7 @@ export interface paths {
          * Import a connection by submitting credentials directly (programmatic)
          * @description Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).
          *
-         *     A credential the platform mints (auth declaring `_meta["dev.appstrate/provisioning"]`) is refused with a 400 naming the field; such an auth connects through the Connect portal (`initiateIntegrationConnect`).
+         *     A credential the platform mints (auth declaring `_meta["dev.appstrate/provisioning"]`) is refused with a 400 naming the field; such an auth connects through the Connect portal (`initiateIntegrationConnect`). An auth that declares provisioning on a non-system package, or names an unknown provisioning kind, is refused with a 400 whatever the body carries.
          */
         post: operations["importIntegrationConnection"];
         delete?: never;
@@ -11332,6 +11332,8 @@ export interface operations {
                     };
                 };
             };
+            /** @description The auth declares credential provisioning (`_meta["dev.appstrate/provisioning"]`, AFPS §10) on a non-system package, or names an unknown provisioning kind. */
+            400: components["responses"]["ValidationError"];
             404: components["responses"]["NotFound"];
         };
     };

@@ -31,7 +31,7 @@ function publicKeyBlob(rawPublicKey: Buffer): Buffer {
  * Mint an ed25519 pair as a PEM `OPENSSH PRIVATE KEY` (comment `appstrate`).
  * The public half is derived from it by {@link publicKeyFromOpenSshPrivateKey}.
  */
-export function generateOpenSshEd25519KeyPair(): string {
+export function generateOpenSshEd25519PrivateKey(): string {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
 
   // Both DER encodings are fixed-length for this curve (SPKI 44, PKCS#8 48),

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Provisioning turns a three-field form into a full credential bag. What is
- * worth pinning is therefore not "does it return a key" but the boundaries:
- * which names the client is allowed to influence, which hosts are refused
- * before anything is minted, and whether the script it renders can be made to
- * carry shell syntax.
+ * Provisioning turns a four-field form (host, port, user, host_key) into a
+ * full credential bag. What is worth pinning is therefore not "does it return
+ * a key" but the boundaries: which names the client is allowed to influence,
+ * which hosts are refused before anything is minted, and whether the script it
+ * renders can be made to carry shell syntax.
  *
  * Both generated blocks are EXECUTED here, not only asserted on: the install
  * block for the one arm that must hold before anything is touched (an account
@@ -313,8 +313,8 @@ describe("provisionCredentials — what gets minted and rendered", () => {
    *
    * Pinned two ways. A bag narrowed to exactly the columns the keyring holds —
    * no extras carried over from the request — must render byte-identically to
-   * the bag the provisioner returned; that is what makes the column, its
-   * migration and its drizzle snapshot unnecessary rather than merely absent.
+   * the bag the provisioner returned, so the handoff needs no column of its
+   * own.
    * And the list must be NON-EMPTY here, because `sshHandoffSteps` fails soft:
    * a regression that made the happy path fall into that branch would
    * otherwise hand the user nothing while every other assertion stayed green.

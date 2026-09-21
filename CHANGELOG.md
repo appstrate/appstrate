@@ -66,9 +66,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **The hosted connect form showed raw field names.** It derived inputs from the
   credential property NAMES only, so `title`, `description` and `default`
   declared in a manifest reached nobody, and a declared default was neither
-  shown nor submitted. The form now renders all three, seeds the defaults it
-  displays, and renders the manifest's AFPS §7.10 `setup_guide` — until now
-  shown only on the integration detail page.
+  shown nor submitted. The form renders all three and seeds the defaults it
+  displays.
 
 ### Security
 

@@ -49,7 +49,7 @@ function Step({ step, index }: { step: HandoffStep; index: number }) {
           {label}
           <span className="text-muted-foreground font-normal">
             {" — "}
-            {t("integration.connect.provisioned.deferredHint")}
+            {t("integration.connect.handoffPanel.deferredHint")}
           </span>
         </summary>
         <div className="mt-2 space-y-2">{body}</div>

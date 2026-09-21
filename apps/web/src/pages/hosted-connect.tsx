@@ -144,13 +144,13 @@ export function HostedConnectPage() {
         )}
 
         {phase === "done" && handoffSteps && (
-          <div className="space-y-5" data-testid="connect-provisioned">
+          <div className="space-y-5" data-testid="connect-handoff">
             <div>
               <h1 className="text-lg font-semibold">
-                {t("integration.connect.provisioned.title")}
+                {t("integration.connect.handoffPanel.title")}
               </h1>
               <p className="text-muted-foreground mt-1 text-sm">
-                {t("integration.connect.provisioned.body")}
+                {t("integration.connect.handoffPanel.body")}
               </p>
             </div>
 
@@ -159,14 +159,14 @@ export function HostedConnectPage() {
             <Button
               type="button"
               className="w-full"
-              data-testid="provisioned-done"
+              data-testid="handoff-done"
               onClick={() => {
                 // In a full tab `close()` is a no-op: fall back to the done message.
                 setHandoffSteps(null);
                 closeWindow();
               }}
             >
-              {t("integration.connect.provisioned.doneBtn")}
+              {t("integration.connect.handoffPanel.doneBtn")}
             </Button>
           </div>
         )}

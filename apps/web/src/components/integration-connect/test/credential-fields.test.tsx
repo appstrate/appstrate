@@ -21,7 +21,7 @@ const SSH_AUTH = {
   credentials: {
     schema: {
       type: "object",
-      required: ["host", "user"],
+      required: ["host", "user", "host_key"],
       properties: {
         host: { type: "string", title: "Hôte", description: "Nom DNS ou adresse IP publique." },
         port: { type: "string", title: "Port SSH", default: "22" },

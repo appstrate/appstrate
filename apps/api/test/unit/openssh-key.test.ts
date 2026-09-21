@@ -24,7 +24,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  generateOpenSshEd25519KeyPair,
+  generateOpenSshEd25519PrivateKey,
   fingerprintPublicKey,
   publicKeyFromOpenSshPrivateKey,
 } from "../../src/lib/openssh-key.ts";
@@ -93,9 +93,9 @@ function decodeContainer(pem: string): {
   };
 }
 
-describe("generateOpenSshEd25519KeyPair", () => {
+describe("generateOpenSshEd25519PrivateKey", () => {
   it("writes the openssh-key-v1 container with an unencrypted single key", () => {
-    const pem = generateOpenSshEd25519KeyPair();
+    const pem = generateOpenSshEd25519PrivateKey();
     const c = decodeContainer(pem);
 
     expect(c.magic).toBe("openssh-key-v1\0");
@@ -105,7 +105,7 @@ describe("generateOpenSshEd25519KeyPair", () => {
   });
 
   it("carries the same public point in the blob, the private section and the derived line", () => {
-    const pem = generateOpenSshEd25519KeyPair();
+    const pem = generateOpenSshEd25519PrivateKey();
     const c = decodeContainer(pem);
 
     // Public blob: string "ssh-ed25519", string <32-byte point>.
@@ -138,7 +138,7 @@ describe("generateOpenSshEd25519KeyPair", () => {
   });
 
   it("pads the private section to the cipher block size with 1,2,3,…", () => {
-    const pem = generateOpenSshEd25519KeyPair();
+    const pem = generateOpenSshEd25519PrivateKey();
     const c = decodeContainer(pem);
     expect(c.privateSection.length % 8).toBe(0);
 
@@ -151,8 +151,8 @@ describe("generateOpenSshEd25519KeyPair", () => {
   });
 
   it("mints a different key every call", () => {
-    const a = generateOpenSshEd25519KeyPair();
-    const b = generateOpenSshEd25519KeyPair();
+    const a = generateOpenSshEd25519PrivateKey();
+    const b = generateOpenSshEd25519PrivateKey();
     expect(a).not.toBe(b);
     expect(publicKeyFromOpenSshPrivateKey(a)).not.toBe(publicKeyFromOpenSshPrivateKey(b));
   });
@@ -209,7 +209,7 @@ function forgeContainer(
 
 describe("publicKeyFromOpenSshPrivateKey", () => {
   it("returns the bare `ssh-ed25519 <base64>` pair, never the container's comment", () => {
-    const pem = generateOpenSshEd25519KeyPair();
+    const pem = generateOpenSshEd25519PrivateKey();
     expect(publicKeyFromOpenSshPrivateKey(pem)).toMatch(/^ssh-ed25519 [A-Za-z0-9+/]+=*$/);
     expect(publicKeyFromOpenSshPrivateKey(pem)).not.toContain("appstrate");
   });
@@ -294,7 +294,7 @@ describe.if(sshKeygen !== null)("cross-check against the real ssh-keygen", () =>
   it("derives the same public key from our private key", async () => {
     const dir = mkdtempSync(join(tmpdir(), "appstrate-openssh-key-"));
     try {
-      const pem = generateOpenSshEd25519KeyPair();
+      const pem = generateOpenSshEd25519PrivateKey();
       const keyPath = join(dir, "id_ed25519");
       writeFileSync(keyPath, pem, { mode: 0o600 });
 
@@ -320,7 +320,7 @@ describe.if(sshKeygen !== null)("cross-check against the real ssh-keygen", () =>
   it("reports the same fingerprint as ssh-keygen -l", async () => {
     const dir = mkdtempSync(join(tmpdir(), "appstrate-openssh-key-"));
     try {
-      const pem = generateOpenSshEd25519KeyPair();
+      const pem = generateOpenSshEd25519PrivateKey();
       const pubPath = join(dir, "id_ed25519.pub");
       writeFileSync(pubPath, publicKeyFromOpenSshPrivateKey(pem) + "\n");
 
