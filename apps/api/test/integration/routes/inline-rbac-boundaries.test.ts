@@ -45,7 +45,12 @@ beforeEach(async () => {
   ctx = await createTestContext({ orgSlug: "inline-rbac" });
   const guest = await createTestUser();
   await addOrgMember(ctx.orgId, guest.id, "guest");
-  await seedSpaceMember({ spaceId: ctx.defaultSpaceId, userId: guest.id, presetRole: "operator" });
+  // `builder`, not `operator`: posting a caller-authored manifest is
+  // `agents:run-inline`, which only `admin`/`builder` hold. The subject of this
+  // file is what an inline manifest may REFERENCE, so the actor has to clear
+  // the route's own gate first — and a builder being refused the private skill
+  // below is the stronger statement anyway.
+  await seedSpaceMember({ spaceId: ctx.defaultSpaceId, userId: guest.id, presetRole: "builder" });
   const hidden = await seedSpace({ orgId: ctx.orgId, visibility: "private" });
   await seedPackage({
     id: skillId,
@@ -60,7 +65,7 @@ beforeEach(async () => {
 });
 
 describe("inline dependency authorization", () => {
-  it("does not accept a private skill merely because its id was supplied by an operator", async () => {
+  it("does not accept a private skill merely because its id was supplied by a builder", async () => {
     const response = await app.request("/api/runs/inline/validate", {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },
@@ -90,7 +95,7 @@ describe("inline dependency authorization", () => {
     expect(await db.select().from(runs)).toEqual([]);
   });
 
-  it("accepts an operator's readable dependency installed in their own space", async () => {
+  it("accepts a builder's readable dependency installed in their own space", async () => {
     await seedPackageShare(ctx.defaultSpaceId, skillId);
     await seedSpacePackage(ctx.defaultSpaceId, skillId);
     const response = await app.request("/api/runs/inline/validate", {
@@ -106,7 +111,9 @@ describe("inline dependency authorization", () => {
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
-      scopes: ["agents:run"],
+      // The route grant, and nothing else: the 403 below must come from the
+      // missing `skills:read`, not from the key being unable to post at all.
+      scopes: ["agents:run-inline"],
     });
     await seedPackageShare(ctx.defaultSpaceId, skillId);
     await seedSpacePackage(ctx.defaultSpaceId, skillId);
@@ -122,7 +129,7 @@ describe("inline dependency authorization", () => {
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
-      scopes: ["agents:run", "skills:read"],
+      scopes: ["agents:run-inline", "skills:read"],
     });
     const response = await app.request("/api/runs/inline/validate", {
       method: "POST",

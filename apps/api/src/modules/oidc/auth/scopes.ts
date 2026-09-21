@@ -41,6 +41,12 @@ export const OIDC_IDENTITY_SCOPE_SET: ReadonlySet<string> = new Set(OIDC_IDENTIT
  */
 export const OIDC_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permission>([
   "agents:read",
+  // `agents:run` only. `agents:run-inline` stays out: an embedding app that
+  // acquired it through a user-consented OAuth flow could have the platform
+  // execute a manifest of its own composition — arbitrary code against that
+  // end-user's connections — which is exactly the silent escalation this
+  // allowlist exists to prevent. Running an agent someone in the org authored
+  // and published is the end-user-shaped half of that capability.
   "agents:run",
   "runs:read",
   "runs:cancel",

@@ -73,7 +73,20 @@ export interface CoreResources {
   // grant of the `admin` and `builder` presets: it decides who runs a package
   // with whose credentials, so it is absent from the API-key allowlist for the
   // same reason `integrations:configure` is.
-  agents: "read" | "write" | "configure" | "delete" | "run" | "share";
+  //
+  // `run-inline` does NOT imply `run`, and is not derived from it. `run`
+  // launches a manifest a human composed, reviewed and pinned to a version;
+  // `run-inline` executes a manifest assembled at request time, declaring its
+  // own `dependencies.integrations` — arbitrary code in a container holding the
+  // space's credentials. A role that launches without auditing (`runner`) holds
+  // the first and never the second. It IS API-key grantable — `appstrate run
+  // ./agent.afps` is a headless inline run — and the creator ceiling bounds it
+  // to keys minted by someone who holds it. It is NOT in the OIDC end-user
+  // vocabulary: an end-user is an external identity impersonating through a
+  // space, and letting an embedding app have the platform execute a manifest of
+  // its own composition is exactly the silent escalation that allowlist exists
+  // to prevent.
+  agents: "read" | "write" | "configure" | "delete" | "run" | "run-inline" | "share";
   skills: "read" | "write" | "delete" | "share";
   // AFPS §3.4 — standalone MCP Bundle (MCPB) packages. Browse/import/delete
   // like skills; no editor surface (an mcp-server manifest is an AFPS-native
@@ -150,7 +163,7 @@ export const CORE_RESOURCE_ACTIONS = {
   roles: ["read", "write", "delete"],
   "space-settings": ["write"],
   "space-members": ["read", "invite", "remove", "change-role"],
-  agents: ["read", "write", "configure", "delete", "run", "share"],
+  agents: ["read", "write", "configure", "delete", "run", "run-inline", "share"],
   skills: ["read", "write", "delete", "share"],
   "mcp-servers": ["read", "write", "delete", "share"],
   runs: ["read", "read-all", "cancel", "delete"],

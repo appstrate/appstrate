@@ -715,7 +715,13 @@ export function createRunsRouter() {
     // each time the middleware is constructed. We read it at route-build
     // time; changes to the env require a reboot.
     rateLimit(getInlineRunLimits().rate_per_min),
-    requirePermission("agents", "run"),
+    // `agents:run-inline`, NOT `agents:run`. Launching a published agent runs a
+    // manifest a human composed and pinned; this surface runs one the caller
+    // supplies in the request body, declaring its own dependencies. The two are
+    // separate grants (see the catalog note in `@appstrate/core/permissions`),
+    // and this route asks for the one it is: a principal holding only
+    // `run-inline` reaches it, a principal holding only `run` does not.
+    requirePermission("agents", "run-inline"),
     idempotency(replayRun),
     async (c) => {
       const orgId = c.get("orgId");
@@ -847,7 +853,11 @@ export function createRunsRouter() {
   router.post(
     "/runs/inline/validate",
     rateLimit(getInlineRunLimits().rate_per_min),
-    requirePermission("agents", "run"),
+    // Same grant as the run surface it validates for: the dry run resolves the
+    // same dependencies and reports the same readiness, so gating it lower
+    // would hand a principal that cannot launch an inline agent a probe for
+    // what the space's manifests and connections would accept.
+    requirePermission("agents", "run-inline"),
     async (c) => {
       const orgId = c.get("orgId");
       const spaceId = c.get("spaceId");

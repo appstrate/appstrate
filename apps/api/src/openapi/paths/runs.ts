@@ -6,6 +6,14 @@ const inlineDependencyAuthorization =
   " Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.";
 
 /**
+ * The grant every caller-authored-manifest surface asks for. Separate from the
+ * dependency-read note above: that one is about WHAT an inline manifest may
+ * reference, this one about WHO may post one at all.
+ */
+const inlineRunPermission =
+  " **Permission:** `agents:run-inline` — NOT `agents:run`. Running a published agent executes a manifest someone in the space composed and pinned to a version; this surface executes one the request body carries, declaring its own dependencies. They are separate grants: the `admin` and `builder` space-role presets hold both, `operator` and `runner` hold only `agents:run`. It IS grantable to an API key (the headless `appstrate run ./agent.afps` flow needs it), bounded by the creator ceiling; it is NOT in the OIDC end-user scope vocabulary.";
+
+/**
  * One entry of the run input-file manifest. A TS const rather than a component
  * `$ref` because it is an inline detail of one response, not a published
  * contract object.
@@ -416,7 +424,8 @@ const canonicalRunsPaths = {
       summary: "Execute an inline agent (no persisted package)",
       description:
         "Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. The body is closed: an unknown field is a `400`, never a silently dropped value — `dependency_overrides` in particular is NOT honoured on this surface and is refused rather than ignored." +
-        inlineDependencyAuthorization,
+        inlineDependencyAuthorization +
+        inlineRunPermission,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -666,7 +675,8 @@ const canonicalRunsPaths = {
       summary: "Validate an inline manifest without firing a run",
       description:
         "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, input against the manifest schema, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json for validation failures (with the accumulated validation errors). Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`." +
-        inlineDependencyAuthorization,
+        inlineDependencyAuthorization +
+        inlineRunPermission,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1137,7 +1147,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "Create a remote-backed run (caller executes the agent)",
       description:
-        "Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply." +
+        "Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply.\n\n**Permission:** the required grant follows `source.kind` — `agents:run` for `registry` (a package the org already holds), `agents:run-inline` for `inline` (a manifest the body carries). A caller holding neither is refused before the body is read." +
         inlineDependencyAuthorization,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },

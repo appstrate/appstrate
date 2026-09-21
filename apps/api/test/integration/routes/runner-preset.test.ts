@@ -311,12 +311,9 @@ describe("runner preset", () => {
     }
   });
 
-  it("refuses an inline run whose manifest declares a skill it cannot read", async () => {
-    // The inline routes take a manifest in the BODY, so a runner could name a
-    // skill there and reach through the composition it is not served on the
-    // agent detail. `assertPackageDependenciesAccessible` is what stops it, and
-    // it stops the dry-run validator on the same call.
-    const body = JSON.stringify({
+  /** An inline manifest naming the skill the runner is not served. */
+  const inlineBody = () =>
+    JSON.stringify({
       manifest: {
         name: "@runner/inline",
         display_name: "Inline Agent",
@@ -330,22 +327,44 @@ describe("runner preset", () => {
       input: {},
     });
 
-    for (const path of ["/api/runs/inline", "/api/runs/inline/validate"]) {
-      const denied = await app.request(path, {
-        method: "POST",
-        headers: authHeaders(runner, { "Content-Type": "application/json" }),
-        body,
-      });
-      expect(`${path}: ${denied.status}`).toBe(`${path}: 403`);
+  const INLINE_PATHS = ["/api/runs/inline", "/api/runs/inline/validate"] as const;
 
-      // The control: the operator holds `skills:read`, so the same body gets
-      // past the dependency gate — whatever it answers, it is not a 403.
-      const allowed = await app.request(path, {
+  it("refuses both launch presets the inline surface outright — composing is not launching", async () => {
+    // The inline routes take a manifest in the BODY: whoever reaches them
+    // decides what code runs, which dependencies it declares and which of the
+    // space's connections it authenticates with. That is `agents:run-inline`,
+    // and neither `runner` nor `operator` holds it — they launch what someone
+    // else composed. The refusal is the route guard, BEFORE the body is read,
+    // so it does not depend on what the manifest happens to name.
+    for (const path of INLINE_PATHS) {
+      for (const [label, actor] of [
+        ["runner", runner],
+        ["operator", operator],
+      ] as const) {
+        const denied = await app.request(path, {
+          method: "POST",
+          headers: authHeaders(actor, { "Content-Type": "application/json" }),
+          body: inlineBody(),
+        });
+        expect(`${path} ${label}: ${denied.status}`).toBe(`${path} ${label}: 403`);
+        expect(await denied.text()).toContain("agents:run-inline");
+      }
+    }
+  });
+
+  it("lets a holder of the grant past that guard — the refusal is the permission, not the route", async () => {
+    // The discriminating control. Without it, a guard that refused EVERYONE
+    // would look exactly like the policy above. The owner holds
+    // `agents:run-inline` (preset `admin`), posts the SAME body to the SAME
+    // routes, and whatever it gets back is not that permission denial.
+    for (const path of INLINE_PATHS) {
+      const res = await app.request(path, {
         method: "POST",
-        headers: authHeaders(operator, { "Content-Type": "application/json" }),
-        body,
+        headers: authHeaders(owner, { "Content-Type": "application/json" }),
+        body: inlineBody(),
       });
-      expect(`${path}: ${allowed.status !== 403}`).toBe(`${path}: true`);
+      const text = await res.text();
+      expect(`${path}: ${text.includes("agents:run-inline")}`).toBe(`${path}: false`);
     }
   });
 

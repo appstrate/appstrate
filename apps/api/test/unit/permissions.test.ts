@@ -345,6 +345,54 @@ describe("runs:read-all", () => {
   });
 });
 
+describe("agents:run-inline", () => {
+  it("is held by builder and admin, and by neither operator, runner nor viewer", () => {
+    // `run` launches a manifest someone composed and pinned; `run-inline`
+    // executes one the request body carries. `admin`/`builder` derive the new
+    // action from the catalog — the point of asserting it is that the
+    // derivation reaches them and the three hand-enumerated presets stay out.
+    for (const preset of ["admin", "builder"] as const) {
+      expect(presetPermissions(preset).has("agents:run-inline"), preset).toBe(true);
+    }
+    for (const preset of ["operator", "runner", "viewer"] as const) {
+      expect(presetPermissions(preset).has("agents:run-inline"), preset).toBe(false);
+    }
+  });
+
+  it("does not follow from `agents:run`, in either direction", () => {
+    // The whole point of the split: `runner` and `operator` keep launching
+    // published agents and lose nothing else. A future refactor that derives
+    // one from the other fails here.
+    for (const preset of ["operator", "runner"] as const) {
+      expect(presetPermissions(preset).has("agents:run"), preset).toBe(true);
+      expect(presetPermissions(preset).has("agents:run-inline"), preset).toBe(false);
+    }
+    // And `viewer` holds neither — it looks, it does not launch.
+    expect(presetPermissions("viewer").has("agents:run")).toBe(false);
+  });
+
+  it("is API-key grantable, and only to a creator who holds it", () => {
+    // `appstrate run ./agent.afps` posts an inline source with a key, so the
+    // grant has to be mintable; the creator ceiling is what bounds it.
+    expect(API_KEY_ALLOWED_SCOPES.has("agents:run-inline")).toBe(true);
+    expect(validateScopes(["agents:run", "agents:run-inline"], inDefaultSpace("admin"))).toEqual([
+      "agents:run",
+      "agents:run-inline",
+    ]);
+    // A plain member holds `operator` in the default space: the wider scope
+    // narrows away silently, like any grant above its creator.
+    expect(validateScopes(["agents:run", "agents:run-inline"], inDefaultSpace("member"))).toEqual([
+      "agents:run",
+    ]);
+  });
+
+  it("is space-level, so it needs a space context to be held at all", () => {
+    expect(SPACE_LEVEL_PERMISSIONS.has("agents:run-inline" as SpaceLevelPermission)).toBe(true);
+    const orgOnly = effectivePermissions({ orgPermissions: orgPermissions("owner") });
+    expect(orgOnly.has("agents:run-inline" as Permission)).toBe(false);
+  });
+});
+
 describe("validateScopes", () => {
   it("filters scopes to the creator's effective set + API key allowlist", () => {
     const scopes = ["agents:read", "agents:write", "agents:run"];
