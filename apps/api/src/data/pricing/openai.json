@@ -56,21 +56,23 @@
     "maxTokens": 1024,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -81,7 +83,7 @@
   },
   "daybreak-blue-latest": {
     "label": "Daybreak Blue Latest",
-    "contextWindow": 1050000,
+    "contextWindow": 922000,
     "maxTokens": 128000,
     "capabilities": [
       "text",
@@ -146,14 +148,24 @@
     "contextWindow": 16385,
     "maxTokens": 4096,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unknown",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
-        "levels": {}
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
       }
     },
     "cost": {
@@ -166,14 +178,24 @@
     "contextWindow": 16385,
     "maxTokens": 4096,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unknown",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
-        "levels": {}
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
       }
     },
     "cost": {
@@ -186,14 +208,24 @@
     "contextWindow": 4096,
     "maxTokens": null,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unknown",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
-        "levels": {}
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
       }
     },
     "cost": {
@@ -206,14 +238,24 @@
     "contextWindow": 16385,
     "maxTokens": 4096,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unknown",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
-        "levels": {}
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
       }
     },
     "cost": {
@@ -226,14 +268,24 @@
     "contextWindow": 8192,
     "maxTokens": 4096,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unknown",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
-        "levels": {}
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
       }
     },
     "cost": {
@@ -246,14 +298,24 @@
     "contextWindow": 1047576,
     "maxTokens": 32768,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unknown",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
-        "levels": {}
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
       }
     },
     "cost": {
@@ -267,14 +329,24 @@
     "contextWindow": 1047576,
     "maxTokens": 32768,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unknown",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
-        "levels": {}
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
       }
     },
     "cost": {
@@ -288,14 +360,24 @@
     "contextWindow": 1047576,
     "maxTokens": 32768,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unknown",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
-        "levels": {}
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
       }
     },
     "cost": {
@@ -310,14 +392,24 @@
     "maxTokens": 16384,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unknown",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
-        "levels": {}
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
       }
     },
     "cost": {
@@ -331,14 +423,24 @@
     "contextWindow": 128000,
     "maxTokens": 16384,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unknown",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
-        "levels": {}
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
       }
     },
     "cost": {
@@ -352,14 +454,24 @@
     "contextWindow": 128000,
     "maxTokens": 16384,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unknown",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
-        "levels": {}
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
       }
     },
     "cost": {
@@ -373,21 +485,23 @@
     "contextWindow": 200000,
     "maxTokens": 100000,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -2030,21 +2144,22 @@
     "maxTokens": 128000,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
+          "off": "supported",
           "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },

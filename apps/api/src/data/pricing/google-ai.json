@@ -111,7 +111,7 @@
   "gemini-2.5-flash": {
     "label": "Gemini 2.5 Flash",
     "contextWindow": 1048576,
-    "maxTokens": 65535,
+    "maxTokens": 65536,
     "capabilities": [
       "text",
       "image",
@@ -143,7 +143,7 @@
   "gemini-2.5-flash-lite": {
     "label": "Gemini 2.5 Flash Lite",
     "contextWindow": 1048576,
-    "maxTokens": 65535,
+    "maxTokens": 65536,
     "capabilities": [
       "text",
       "image",
@@ -271,7 +271,7 @@
   "gemini-2.5-pro": {
     "label": "Gemini 2.5 Pro",
     "contextWindow": 1048576,
-    "maxTokens": 65535,
+    "maxTokens": 65536,
     "capabilities": [
       "text",
       "image",
@@ -302,11 +302,10 @@
   },
   "gemini-2.5-pro-preview-tts": {
     "label": "Gemini 2.5 Pro Preview Tts",
-    "contextWindow": 1048576,
-    "maxTokens": 65535,
+    "contextWindow": 8192,
+    "maxTokens": null,
     "capabilities": [
-      "text",
-      "image"
+      "text"
     ],
     "generation": {
       "temperature": "supported",
@@ -325,7 +324,7 @@
   "gemini-3-flash-preview": {
     "label": "Gemini 3 Flash Preview",
     "contextWindow": 1048576,
-    "maxTokens": 65535,
+    "maxTokens": 65536,
     "capabilities": [
       "text",
       "image",
@@ -517,7 +516,7 @@
   "gemini-3.5-flash": {
     "label": "Gemini 3.5 Flash",
     "contextWindow": 1048576,
-    "maxTokens": 65535,
+    "maxTokens": 65536,
     "capabilities": [
       "text",
       "image",
@@ -648,19 +647,21 @@
     "maxTokens": 65536,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
           "xhigh": "unsupported",
           "max": "unsupported"
         }
@@ -728,7 +729,39 @@
   "gemini-flash-latest": {
     "label": "Gemini Flash Latest",
     "contextWindow": 1048576,
-    "maxTokens": 65535,
+    "maxTokens": 65536,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "supported",
+        "temperatureCompatible": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
+    "cost": {
+      "input": 0.75,
+      "output": 3.75,
+      "cacheRead": 0.075
+    }
+  },
+  "gemini-flash-lite-latest": {
+    "label": "Gemini Flash Lite Latest",
+    "contextWindow": 1048576,
+    "maxTokens": 65536,
     "capabilities": [
       "text",
       "image",
@@ -757,41 +790,9 @@
       "cacheRead": 0.03
     }
   },
-  "gemini-flash-lite-latest": {
-    "label": "Gemini Flash Lite Latest",
-    "contextWindow": 1048576,
-    "maxTokens": 65535,
-    "capabilities": [
-      "text",
-      "image",
-      "reasoning"
-    ],
-    "generation": {
-      "temperature": "supported",
-      "reasoning": {
-        "supported": "supported",
-        "temperatureCompatible": "supported",
-        "adaptive": null,
-        "levels": {
-          "off": "supported",
-          "minimal": "supported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
-        }
-      }
-    },
-    "cost": {
-      "input": 0.1,
-      "output": 0.4,
-      "cacheRead": 0.01
-    }
-  },
   "gemini-omni-1.1-flash": {
     "label": "Gemini Omni 1.1 Flash",
-    "contextWindow": 131072,
+    "contextWindow": 1048576,
     "maxTokens": 65536,
     "capabilities": [
       "text",
@@ -854,7 +855,7 @@
   "gemini-pro-latest": {
     "label": "Gemini Pro Latest",
     "contextWindow": 1048576,
-    "maxTokens": 65535,
+    "maxTokens": 65536,
     "capabilities": [
       "text",
       "image",
@@ -878,9 +879,9 @@
       }
     },
     "cost": {
-      "input": 1.25,
-      "output": 10,
-      "cacheRead": 0.125
+      "input": 2,
+      "output": 12,
+      "cacheRead": 0.2
     }
   },
   "gemini-robotics-er-1.5-preview": {
@@ -973,9 +974,9 @@
       }
     },
     "cost": {
-      "input": 2,
-      "output": 10,
-      "cacheRead": 0.2
+      "input": 1,
+      "output": 5,
+      "cacheRead": 0.1
     }
   },
   "gemma-3-27b-it": {
