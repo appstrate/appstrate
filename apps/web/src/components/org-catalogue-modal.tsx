@@ -35,6 +35,7 @@
  * package that is not in it.
  */
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Boxes, Layers, LibraryBig, Wrench } from "lucide-react";
@@ -42,8 +43,12 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import type { PackageType } from "@appstrate/core/validation";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { MoveHomeSpaceDialog } from "./package-detail/move-home-space-dialog";
+import { SharePackageDialog } from "./package-detail/share-package-dialog";
+import { splitPackageRef } from "../lib/package-paths";
 import { useOrg } from "../hooks/use-org";
 import { useSpaces } from "../hooks/use-spaces";
+import { useRevokePackageShare } from "../hooks/use-package-shares";
 import { useAllIntegrations } from "../hooks/use-integrations";
 import { useLibrary, useSetPackageActive, type LibraryPackageItem } from "../hooks/use-library";
 import {
@@ -144,6 +149,7 @@ export function OrgCatalogueModal({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // The read has an address of its own: reload lands on it, Back leaves it.
   const preview = useModalParam("package");
+  const qc = useQueryClient();
 
   const scope = catalogueScope(rawScope);
   const discovering = scope === "discover";
@@ -156,8 +162,6 @@ export function OrgCatalogueModal({
     "agent";
   const kind = KINDS.find((k) => k.type === active)!;
   const orgName = currentOrg?.name ?? "";
-  const spaceName =
-    library?.spaces.find((space) => space.id === spaceId)?.name ?? t("catalogue.thisSpace");
 
   // Integrations resolve their activation server-side, and only their view
   // pays for the request.
@@ -222,6 +226,40 @@ export function OrgCatalogueModal({
     };
   };
   const canActivate = (item: CardItem) => canInstall(item, stateOf(item));
+  const rowOf = (item: CardItem) => ofKind.find((row) => row.id === item.id);
+  const writableOf = (item: CardItem) => rowOf(item)?.home_writable === true;
+  const shareableOf = (item: CardItem) => rowOf(item)?.home_shareable === true;
+  // Every space the package reaches through an OFFER: each one can be withdrawn,
+  // and withdrawing takes the activation it backs with it.
+  const sharedSpacesOf = (item: CardItem) =>
+    (rowOf(item)?.placements ?? [])
+      .filter((placement) => placement.via === "shared")
+      .map((placement) => ({ id: placement.space_id, name: spaceNameOf(placement.space_id) }));
+  const [moveHome, setMoveHome] = useState<CardItem | null>(null);
+  const [sharing, setSharing] = useState<CardItem | null>(null);
+  const revoke = useRevokePackageShare();
+  /**
+   * Withdraw the offer that places this package in that space.
+   *
+   * The target is the SPACE id, which is how `GET …/shares` publishes a space
+   * target; a share to a person publishes their user id instead, and the
+   * personal space it resolved to is never on the wire. So this withdraws the
+   * offers the matrix can show, and a person's own offer is withdrawn from the
+   * package's share dialog.
+   */
+  const revokeFrom = (item: CardItem, targetSpaceId: string) =>
+    revoke.mutate(
+      {
+        params: { path: { ...splitPackageRef(item.id), target: targetSpaceId } },
+      },
+      {
+        onSuccess: () => {
+          void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
+          toast.success(t("catalogue.revoked", { space: spaceNameOf(targetSpaceId) }));
+        },
+        onError: (err: unknown) => toast.error(getErrorMessage(err)),
+      },
+    );
 
   // The dimension worth narrowing is the STATE a row is in, which is what the
   // placement model made expressible: a package can be here and off, or here
@@ -313,11 +351,14 @@ export function OrgCatalogueModal({
             <CatalogueStatusBadge state={state} />
             <CatalogueRowMenu
               item={row}
-              state={state}
-              spaceName={spaceName}
-              isActivating={activate.isPending}
-              onActivate={activateOne}
+              homeWritable={writableOf(row) && !state.everywhere}
+              homeShareable={shareableOf(row) && !state.everywhere}
+              sharedSpaces={sharedSpacesOf(row)}
+              isPending={activate.isPending || revoke.isPending}
               onOpen={(item) => preview.open(item.id)}
+              onMoveHome={setMoveHome}
+              onShare={setSharing}
+              onRevoke={revokeFrom}
             />
           </span>
         </>
@@ -343,7 +384,12 @@ export function OrgCatalogueModal({
       }),
     onToggleAll: () => setSelected(allSelected ? new Set() : new Set(activatable)),
   });
-  const originColumn = useCatalogueOriginColumn(orgName);
+  const originColumn = useCatalogueOriginColumn(orgName, (item) => {
+    const home = placementById.get(item.id)?.homeSpaceId;
+    // `null` when the caller does not reach the home: the server withholds the
+    // id rather than naming a space they cannot enter (RBAC spec §6.9).
+    return home ? spaceNameOf(home) : null;
+  });
   const spaceColumns = useCatalogueSpaceColumns({
     spaces: spaceColumnsInput,
     type: active,
@@ -362,11 +408,15 @@ export function OrgCatalogueModal({
     return row ? integrationProtocol(row) : undefined;
   });
   const actionsColumn = useCatalogueActionsColumn({
-    spaceName,
-    isActivating: activate.isPending,
-    stateOf,
-    onActivate: activateOne,
+    isPending: activate.isPending || revoke.isPending,
+    placementOf: (item) => placementById.get(item.id),
+    writableOf,
+    shareableOf,
+    sharedSpacesOf,
     onOpen: (item) => preview.open(item.id),
+    onMoveHome: setMoveHome,
+    onShare: setSharing,
+    onRevoke: revokeFrom,
   });
 
   const show = (nextScope: CatalogueScope, nextType: PackageType) => {
@@ -540,6 +590,28 @@ export function OrgCatalogueModal({
               </Button>
             ) : undefined
           }
+        />
+      )}
+      {/* The two deeds that act on the package itself rather than on one of
+          its placements. They are the dialogs the package's own page mounts,
+          so the gesture reads the same from either surface. */}
+      {moveHome && (
+        <MoveHomeSpaceDialog
+          open
+          onClose={() => setMoveHome(null)}
+          packageId={moveHome.id}
+          type={active}
+          homeSpaceId={placementById.get(moveHome.id)?.homeSpaceId}
+        />
+      )}
+      {sharing && (
+        <SharePackageDialog
+          open
+          onClose={() => setSharing(null)}
+          packageId={sharing.id}
+          type={active}
+          homeSpaceId={placementById.get(sharing.id)?.homeSpaceId}
+          canPublish={writableOf(sharing)}
         />
       )}
     </PanelDialog>

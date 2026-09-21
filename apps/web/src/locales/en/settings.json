@@ -1303,8 +1303,6 @@
   "catalogue.column.activeIn": "Active in",
   "catalogue.activeHere": "Active here",
   "catalogue.everywhere": "Everywhere",
-  "catalogue.activateIn": "Install in {{space}}",
-  "catalogue.thisSpace": "this space",
   "catalogue.sourceOrg": "{{name}} (organisation)",
   "catalogue.sourceSystem": "Appstrate (system)",
   "catalogue.column.status": "Status",
@@ -1459,5 +1457,8 @@
   "catalogue.emptyPlacedHint": "What you add from Discover appears here, switched on or not.",
   "catalogue.emptyDiscover": "Nothing left to add.",
   "catalogue.emptyDiscoverHint": "Everything the organization and Appstrate offer is already in your spaces.",
-  "catalogue.spaceSwitch": "Activate {{package}} in {{space}}"
+  "catalogue.spaceSwitch": "Activate {{package}} in {{space}}",
+  "catalogue.revokeFrom": "Withdraw from {{space}}",
+  "catalogue.revoked": "Package withdrawn from {{space}}.",
+  "catalogue.homeSpaceHint": "Home space: {{space}}"
 }

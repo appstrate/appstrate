@@ -115,21 +115,46 @@ export function useCatalogueActiveColumn(
 }
 
 /**
- * Who provides it, in the organisation view only: that view now holds the org's
- * own packages AND what it installed from Appstrate, so the row must say which.
+ * Where the package comes FROM, in two words on one line: who provides it, and
+ * which space governs its draft.
+ *
+ * They are different facts — Tractr provides it, the space "Default" decides
+ * who may edit it — and a column each would cost the tier-3 budget a whole
+ * track (`column-tiers.test.tsx` measures it). So the home rides under the
+ * provider, the way Claude's connector list puts "Personnalisé" beside "Web"
+ * rather than in a column of its own.
+ *
+ * A system package has no home space: it is readable everywhere by being what
+ * it is, and there is nothing to name under it.
  */
-export function useCatalogueOriginColumn(orgName: string): DataColumn<CardItem> {
+export function useCatalogueOriginColumn(
+  orgName: string,
+  homeNameOf?: (item: CardItem) => string | null,
+): DataColumn<CardItem> {
   const { t } = useTranslation("settings");
   return {
     id: "origin",
     header: t("catalogue.origin"),
     width: "128px",
     tier: 3,
-    cell: (item) => (
-      <span className="text-muted-foreground truncate text-xs">
-        {item.source === "system" ? t("catalogue.sourceSystem") : orgName}
-      </span>
-    ),
+    cell: (item) => {
+      const home = item.source === "system" ? null : homeNameOf?.(item);
+      return (
+        <span className="flex min-w-0 flex-col">
+          <span className="text-muted-foreground truncate text-xs">
+            {item.source === "system" ? t("catalogue.sourceSystem") : orgName}
+          </span>
+          {home && (
+            <span
+              className="text-muted-foreground/70 truncate text-[0.68rem]"
+              title={t("catalogue.homeSpaceHint", { space: home })}
+            >
+              {home}
+            </span>
+          )}
+        </span>
+      );
+    },
   };
 }
 
@@ -156,17 +181,25 @@ export function useCatalogueStatusColumn(
  * the tick, and a column of identical buttons read as the table's content.
  */
 export function useCatalogueActionsColumn({
-  spaceName,
-  isActivating,
-  stateOf,
-  onActivate,
+  isPending,
+  placementOf,
+  writableOf,
+  shareableOf,
+  sharedSpacesOf,
   onOpen,
+  onMoveHome,
+  onShare,
+  onRevoke,
 }: {
-  spaceName: string;
-  isActivating: boolean;
-  stateOf: (item: CardItem) => CatalogueRowState;
-  onActivate: (item: CardItem) => void;
+  isPending: boolean;
+  placementOf: (item: CardItem) => CataloguePlacement | undefined;
+  writableOf: (item: CardItem) => boolean;
+  shareableOf: (item: CardItem) => boolean;
+  sharedSpacesOf: (item: CardItem) => { id: string; name: string }[];
   onOpen: (item: CardItem) => void;
+  onMoveHome: (item: CardItem) => void;
+  onShare: (item: CardItem) => void;
+  onRevoke: (item: CardItem, spaceId: string) => void;
 }): DataColumn<CardItem> {
   return {
     id: "actions",
@@ -177,11 +210,16 @@ export function useCatalogueActionsColumn({
     cell: (item) => (
       <CatalogueRowMenu
         item={item}
-        state={stateOf(item)}
-        spaceName={spaceName}
-        isActivating={isActivating}
-        onActivate={onActivate}
+        // A system package has no home to move and no audience to offer: it is
+        // readable everywhere by being what it is.
+        homeWritable={writableOf(item) && !placementOf(item)?.everywhere}
+        homeShareable={shareableOf(item) && !placementOf(item)?.everywhere}
+        sharedSpaces={sharedSpacesOf(item)}
+        isPending={isPending}
         onOpen={onOpen}
+        onMoveHome={onMoveHome}
+        onShare={onShare}
+        onRevoke={onRevoke}
       />
     ),
   };
@@ -249,7 +287,7 @@ export function useCatalogueSpaceColumns({
     // Controls, not content: the row's link is placed elsewhere, and the
     // switches below are raised over the overlay it stretches across the row.
     control: true,
-    width: "minmax(132px,1fr)",
+    width: "minmax(104px,1fr)",
     // The first space holds tier two, beside the name; the others wait for the
     // width the way any further column does. A caller with ONE space therefore
     // keeps the table it had, with the space named instead of implied.
@@ -286,7 +324,7 @@ export function useCatalogueSpaceColumns({
             onCheckedChange={(next) => onSetActive(item, space.id, next === true)}
           />
           {state === "offered" && (
-            <span className="text-muted-foreground text-[0.7rem]">
+            <span className="text-muted-foreground truncate text-[0.7rem]">
               {t("catalogue.offeredHere")}
             </span>
           )}

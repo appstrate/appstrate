@@ -30,10 +30,9 @@ import { useSpaceMemberColumns } from "../../pages/org-settings/space/space-memb
 import { useInvitationColumns } from "../invitation-columns.tsx";
 import {
   useCatalogueActionsColumn,
-  useCatalogueActiveColumn,
   useCatalogueOriginColumn,
   useCatalogueSelectColumn,
-  useCatalogueStatusColumn,
+  useCatalogueSpaceColumns,
 } from "../catalogue-columns.tsx";
 import { useUserSpaceColumns } from "../../pages/org-settings/user-space-columns.tsx";
 import { useSpaceColumns } from "../../pages/org-settings/space-columns.tsx";
@@ -89,10 +88,9 @@ function columnsFrom<T>(useColumns: () => DataColumn<T>[]): Track[] {
 
 const SETS = {
   // Composed exactly as `OrgCatalogueModal` composes it: the tick, the list's
-  // own set minus what a catalogue cannot answer, then where it already runs
-  // and the one deed.
+  // own set minus what a catalogue cannot answer, then provenance, one column
+  // per space, and the one deed.
   packageCatalogue: () => {
-    const state = { activeIn: [], activeHere: false, everywhere: false };
     return columnsFrom(() => [
       useCatalogueSelectColumn({
         selected: new Set<string>(),
@@ -104,16 +102,31 @@ const SETS = {
       ...usePackageColumns("agent").filter(
         (c) => !["state", "actions", "source", "keywords"].includes(c.id),
       ),
-      // The organisation view, the wider of the two.
+      // The organisation view, the wider of the two: provenance, then one
+      // column per space the caller reaches — three here, which is what the
+      // arithmetic below has to hold.
       useCatalogueOriginColumn("Tractr"),
-      useCatalogueStatusColumn(() => state),
-      useCatalogueActiveColumn(() => state),
+      ...useCatalogueSpaceColumns({
+        spaces: [
+          { id: "spc_a", name: "Default" },
+          { id: "spc_b", name: "Production" },
+          { id: "spc_c", name: "Bac à sable" },
+        ],
+        type: "agent",
+        placementOf: () => undefined,
+        busy: false,
+        onSetActive: () => {},
+      }),
       useCatalogueActionsColumn({
-        spaceName: "Default",
-        isActivating: false,
-        stateOf: () => state,
-        onActivate: () => {},
+        isPending: false,
+        placementOf: () => undefined,
+        writableOf: () => true,
+        shareableOf: () => true,
+        sharedSpacesOf: () => [],
         onOpen: () => {},
+        onMoveHome: () => {},
+        onShare: () => {},
+        onRevoke: () => {},
       }),
     ]);
   },
