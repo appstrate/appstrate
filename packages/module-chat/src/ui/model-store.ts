@@ -248,6 +248,21 @@ export function getCompatibleGenerationSettings(): ModelGenerationSettings {
   return result;
 }
 
+/**
+ * An edit made in the picker. The picker shows the settings reconciled against
+ * the selected model, so its value lacks what that model does not accept;
+ * those hidden keys are kept from the stored preference. Tuning the temperature
+ * in a conversation on a model without reasoning must not erase the reasoning
+ * level the default uses. A key the picker shows and the edit drops is cleared.
+ */
+export function editGenerationSettings(value: ModelGenerationSettings): void {
+  const shown = getCompatibleGenerationSettings();
+  const hidden = Object.fromEntries(
+    Object.entries(generationCache).filter(([key]) => !(key in shown)),
+  ) as ModelGenerationSettings;
+  setGenerationSettings({ ...hidden, ...value });
+}
+
 export function setGenerationSettings(value: ModelGenerationSettings): void {
   generationCache = value;
   try {

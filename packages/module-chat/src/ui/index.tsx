@@ -73,7 +73,7 @@ import {
   getSelectedModel,
   seedConversationModel,
   setActiveConversation,
-  setGenerationSettings,
+  editGenerationSettings,
   setModelCatalog,
   setSelectedModel,
 } from "./model-store.ts";
@@ -282,7 +282,7 @@ export function ChatPage({
           selectedId={selectedModel}
           onSelect={setSelectedModel}
           generation={generation}
-          onGenerationChange={setGenerationSettings}
+          onGenerationChange={editGenerationSettings}
         />
       </div>
     ),
@@ -477,6 +477,12 @@ function ConversationInner({
     const seeded = latestTurnModelId(initialMessages);
     if (seeded) seedConversationModel(id, seeded);
   }, [id, initialMessages]);
+
+  // Detach on unmount, in its own effect so a re-run of the one above never
+  // drops a pick made in this conversation. Without it, leaving the chat and
+  // coming back to the same conversation — continued elsewhere meanwhile —
+  // would keep the stale selection, since the store still names it active.
+  useLayoutEffect(() => () => setActiveConversation(null), []);
 
   // Header builder invoked by the transport at request/reconnect time. It reads
   // the model from the external store, NOT from React state: `useChat` recreates

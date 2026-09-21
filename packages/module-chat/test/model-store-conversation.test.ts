@@ -13,6 +13,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { ModelGenerationCapabilities } from "@appstrate/core/model-generation";
 import {
+  editGenerationSettings,
   getCompatibleGenerationSettings,
   getGenerationSettings,
   getSelectedModel,
@@ -192,6 +193,24 @@ describe("generation settings follow the model that is actually sent", () => {
 
     setActiveConversation("chs_new");
     expect(getCompatibleGenerationSettings()).toEqual({ reasoningLevel: "high" });
+  });
+
+  it("keeps the default's reasoning when a setting is edited on a model without it", () => {
+    // The picker shows `{}` on model-a; tuning the temperature there must not
+    // write `{ temperature }` over the stored `{ reasoningLevel: "high" }`.
+    setActiveConversation("chs_a");
+    seedConversationModel("chs_a", "model-a");
+    editGenerationSettings({ ...getCompatibleGenerationSettings(), temperature: 0.2 });
+
+    expect(getGenerationSettings()).toEqual({ reasoningLevel: "high", temperature: 0.2 });
+    expect(getCompatibleGenerationSettings()).toEqual({ temperature: 0.2 });
+  });
+
+  it("clears a shown setting the edit drops", () => {
+    setGenerationSettings({ reasoningLevel: "high", temperature: 0.2 });
+    editGenerationSettings({ reasoningLevel: "high" });
+
+    expect(getGenerationSettings()).toEqual({ reasoningLevel: "high" });
   });
 
   it("returns a stable snapshot while nothing changed", () => {
