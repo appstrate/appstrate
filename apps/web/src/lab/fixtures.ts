@@ -3843,8 +3843,8 @@ export const library: Json200<"/api/library", "get"> = {
           {
             space_id: "app_lab_sandbox",
             via: "shared" as const,
-            state: "active" as const,
-            shared_by: { user_id: USER_ID, name: "Olivier Tarbès" },
+            state: "none" as const,
+            shared_by: { user_id: "usr_lab_julie", name: "Julie Ferrand" },
           },
         ],
       },

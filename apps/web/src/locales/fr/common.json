@@ -158,5 +158,7 @@
   "library.cannotActivate": "Vous n'avez pas la permission d'activer ce package dans cet espace",
   "library.cannotDeactivate": "Vous n'avez pas la permission de désactiver ce package dans cet espace",
   "library.cannotShareHere": "Ce package n'est pas placé dans cet espace et vous n'avez pas la permission de l'y partager",
-  "library.title": "Bibliothèque de packages"
+  "library.title": "Bibliothèque de packages",
+  "catalogue.pendingOffers": "{{count}} package proposé, pas encore activé",
+  "catalogue.pendingOffers_other": "{{count}} packages proposés, pas encore activés"
 }

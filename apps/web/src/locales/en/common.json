@@ -158,5 +158,7 @@
   "library.cannotActivate": "You do not have permission to activate this package in this space",
   "library.cannotDeactivate": "You do not have permission to deactivate this package in this space",
   "library.cannotShareHere": "This package is not placed in this space and you may not share it here",
-  "library.title": "Package Library"
+  "library.title": "Package Library",
+  "catalogue.pendingOffers": "{{count}} package offered, not switched on yet",
+  "catalogue.pendingOffers_other": "{{count}} packages offered, not switched on yet"
 }

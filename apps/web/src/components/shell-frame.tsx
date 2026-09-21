@@ -22,6 +22,7 @@ import { ProductTabs } from "@/components/product-tabs";
 import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
 import { openAsModal } from "@/lib/modal-route";
 import { useCatalogueKinds } from "@/hooks/use-catalogue-kinds";
+import { usePendingOfferCount } from "@/hooks/use-pending-offers";
 import { useSettingsSections } from "@/pages/settings/use-settings-sections";
 import { cn } from "@appstrate/ui/cn";
 import {
@@ -30,6 +31,7 @@ import {
   SidebarFooter,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarTrigger,
@@ -51,6 +53,7 @@ export function ShellSidebar({
   // catalogue when there is a kind of package they may activate.
   const settingsSections = useSettingsSections();
   const catalogueKinds = useCatalogueKinds();
+  const pendingOffers = usePendingOfferCount();
   // The page route tree deliberately renders the modal's background location.
   // The address bar is therefore the source of truth for this one global
   // destination while settings are open.
@@ -97,6 +100,20 @@ export function ShellSidebar({
                 </Link>
               )}
             </SidebarMenuButton>
+            {/* Packages offered to a space this caller reaches and switched on
+                by nobody. The share route notifies a PERSON and says nothing
+                when the target is a team space, so without this an offer to the
+                team is visible only to whoever thinks to go and look. */}
+            {pendingOffers > 0 && (
+              <SidebarMenuBadge>
+                <span
+                  className="bg-primary text-primary-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium"
+                  aria-label={t("catalogue.pendingOffers", { count: pendingOffers })}
+                >
+                  {pendingOffers > 99 ? "99+" : pendingOffers}
+                </span>
+              </SidebarMenuBadge>
+            )}
           </SidebarMenuItem>
         </SidebarMenu>
         {/* Gated on what the surface actually holds: the rail decides. A caller
