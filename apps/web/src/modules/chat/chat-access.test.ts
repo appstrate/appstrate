@@ -102,16 +102,10 @@ describe("each row's own permission", () => {
     {
       row: "readRuns",
       removes: ["runs:read", "runs:read-all"],
-      refuses: ["runAgents", "composeAgents", "readRuns"],
+      refuses: ["runAgents", "readRuns"],
     },
-    // An on-the-fly agent is authored AND run, so composing needs both grants
-    // and falls with either.
-    { row: "runAgents", removes: ["agents:run"], refuses: ["runAgents", "composeAgents"] },
-    {
-      row: "createAgents",
-      removes: ["agents:write"],
-      refuses: ["createAgents", "composeAgents"],
-    },
+    { row: "runAgents", removes: ["agents:run"], refuses: ["runAgents"] },
+    { row: "createAgents", removes: ["agents:write"], refuses: ["createAgents"] },
     { row: "browseFiles", removes: ["files:read"], refuses: ["browseFiles"] },
     {
       row: "connectIntegrations",
@@ -128,9 +122,7 @@ describe("each row's own permission", () => {
   ];
 
   it("covers every row of the table", () => {
-    // `composeAgents` owns no permission of its own: it is the conjunction of
-    // the run and create rows, pinned by their cases above.
-    expect([...cases.map((c) => c.row), "composeAgents"].sort()).toEqual([...ROW_IDS].sort());
+    expect(cases.map((c) => c.row).sort()).toEqual([...ROW_IDS].sort());
   });
 
   it.each(cases)("refuses $row once only its own permission is gone", ({ removes, refuses }) => {
@@ -141,15 +133,6 @@ describe("each row's own permission", () => {
       ),
     );
     expect(without).toEqual(Object.fromEntries(ROW_IDS.map((id) => [id, !refuses.includes(id)])));
-  });
-});
-
-describe("composing an agent on the fly", () => {
-  it("needs both `agents:write` and `agents:run`, and neither alone", () => {
-    const base = [...CONVERSES, "runs:read"];
-    expect(verdicts(context([...base, "agents:write", "agents:run"])).composeAgents).toBe(true);
-    expect(verdicts(context([...base, "agents:write"])).composeAgents).toBe(false);
-    expect(verdicts(context([...base, "agents:run"])).composeAgents).toBe(false);
   });
 });
 

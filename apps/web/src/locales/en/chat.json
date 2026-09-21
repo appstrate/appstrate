@@ -76,7 +76,6 @@
   "access.previewing": "A role preview is active: these are the previewed role's permissions.",
   "access.capability.callApi": "Use the Appstrate API on your behalf",
   "access.capability.runAgents": "Run your agents",
-  "access.capability.composeAgents": "Compose agents on the fly",
   "access.capability.createAgents": "Create agents",
   "access.capability.readRuns": "See your runs",
   "access.capability.browseFiles": "Browse your files",

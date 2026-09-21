@@ -76,7 +76,6 @@
   "access.previewing": "Aperçu d'un rôle en cours : ce sont les droits du rôle prévisualisé.",
   "access.capability.callApi": "Utiliser l'API Appstrate en votre nom",
   "access.capability.runAgents": "Lancer vos agents",
-  "access.capability.composeAgents": "Composer des agents à la volée",
   "access.capability.createAgents": "Créer des agents",
   "access.capability.readRuns": "Consulter vos exécutions",
   "access.capability.browseFiles": "Parcourir vos fichiers",

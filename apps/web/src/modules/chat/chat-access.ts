@@ -7,7 +7,6 @@
  * server-side — but a row must never claim what the route would refuse.
  */
 
-import { canComposeInline } from "@appstrate/core/permissions";
 import { maySetPackageActive, type SpaceGrant } from "../../lib/package-permissions";
 import type { GateablePermission } from "../../hooks/use-permissions";
 
@@ -57,11 +56,6 @@ const CHAT_CAPABILITIES: readonly ChatCapability[] = [
     id: "runAgents",
     labelKey: "access.capability.runAgents",
     held: (ctx) => invokes(ctx) && readsRuns(ctx) && ctx.can("agents:run"),
-  },
-  {
-    id: "composeAgents",
-    labelKey: "access.capability.composeAgents",
-    held: (ctx) => invokes(ctx) && readsRuns(ctx) && canComposeInline(ctx.can),
   },
   {
     // Creating only: editing an existing agent is authorized by its HOME space,
