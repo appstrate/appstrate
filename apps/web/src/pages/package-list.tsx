@@ -142,7 +142,7 @@ export function PackageList() {
             <PageActionsMenu>
               {canActivate && (
                 <DropdownMenuItem asChild data-page-action="catalogue">
-                  <Link to="/catalogue/org/agent" state={openAsModal(location)}>
+                  <Link to="/catalogue/placed/agent" state={openAsModal(location)}>
                     <LibraryBig />
                     {t("catalogue.browse", { ns: "settings" })}
                   </Link>

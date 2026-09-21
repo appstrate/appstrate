@@ -146,7 +146,7 @@ export function IntegrationsPage() {
           <PageActionsMenu>
             {can("integrations:install") && (
               <DropdownMenuItem asChild data-page-action="catalogue">
-                <Link to="/catalogue/org/integration" state={openAsModal(location)}>
+                <Link to="/catalogue/placed/integration" state={openAsModal(location)}>
                   <LibraryBig />
                   {t("catalogue.browse")}
                 </Link>

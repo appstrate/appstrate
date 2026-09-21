@@ -3849,6 +3849,19 @@ export const library: Json200<"/api/library", "get"> = {
         ],
       },
       {
+        // Placed in no space at all: the subject of the catalogue's second
+        // half, and the state nothing else in this lab holds.
+        id: "@tractr/veille-concurrence",
+        name: "Veille concurrence",
+        description: "Surveille les annonces des concurrents et résume la semaine.",
+        source: "local",
+        home_space_id: "app_lab_default",
+        home_writable: true,
+        home_deletable: true,
+        home_shareable: true,
+        placements: [],
+      },
+      {
         id: "@tractr/debrief-appel",
         name: "Débrief d'appel",
         description: "Compte rendu d'un appel prospect.",

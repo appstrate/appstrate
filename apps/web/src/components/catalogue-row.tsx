@@ -13,7 +13,14 @@ import { canInstall } from "../lib/catalogue-install";
 import { TableRowActions } from "./table-row-actions";
 import type { CardItem } from "../pages/package-list";
 
-/** "Installé ici", "Préinstallé" or "Non installé" — said as a status, not left to a missing button. */
+/**
+ * Which of the three states this row is in, in the space on screen.
+ *
+ * Said as a status rather than left to the absence of a button, and said in the
+ * placement model's own words: a package is PLACED (by its home or by a share)
+ * and separately switched on, so "offered" is a placement nobody has switched
+ * on yet — not an invitation waiting for an answer.
+ */
 export function CatalogueStatusBadge({ state }: { state: CatalogueRowState }) {
   const { t } = useTranslation("settings");
   if (state.everywhere) return <UIBadge variant="secondary">{t("catalogue.everywhere")}</UIBadge>;
@@ -25,7 +32,9 @@ export function CatalogueStatusBadge({ state }: { state: CatalogueRowState }) {
       </UIBadge>
     );
   }
-  return <UIBadge variant="outline">{t("catalogue.notInstalled")}</UIBadge>;
+  if (state.offeredHere) return <UIBadge variant="warning">{t("catalogue.offeredHere")}</UIBadge>;
+  if (state.placedHere) return <UIBadge variant="outline">{t("catalogue.inactiveHere")}</UIBadge>;
+  return <UIBadge variant="outline">{t("catalogue.notPlaced")}</UIBadge>;
 }
 
 export function CatalogueRowMenu({

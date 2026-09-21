@@ -87,7 +87,7 @@ export function ItemTab({
                 <DropdownMenuItem asChild data-page-action="catalogue">
                   <Link
                     // A local MCP server is installed through its integration.
-                    to={`/catalogue/org/${type === "mcp-server" ? "integration" : type}`}
+                    to={`/catalogue/placed/${type === "mcp-server" ? "integration" : type}`}
                     state={openAsModal(location)}
                   >
                     <LibraryBig />

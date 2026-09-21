@@ -44,7 +44,13 @@ import type { PackageType } from "@appstrate/core/validation";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useOrg } from "../hooks/use-org";
 import { useAllIntegrations } from "../hooks/use-integrations";
-import { useLibrary, useSetPackageActive } from "../hooks/use-library";
+import { useLibrary, useSetPackageActive, type LibraryPackageItem } from "../hooks/use-library";
+import {
+  cataloguePlacement,
+  inPlacedTab,
+  type CataloguePlacement,
+  type PlacementState,
+} from "../lib/catalogue-placement";
 import { useModalParam } from "../hooks/use-modal-param";
 import { useCatalogueKinds } from "../hooks/use-catalogue-kinds";
 import { useLocalListParams } from "../lib/list-params";
@@ -78,7 +84,22 @@ import { RailGroup, RailHeader } from "./settings/rail-shell";
 import { SettingsHeading } from "./settings/settings-heading";
 import { Spinner } from "./spinner";
 
-export type CatalogueOrigin = "org" | "appstrate";
+/**
+ * The catalogue's first axis: what is already PLACED in a space this caller
+ * reaches, and what is not.
+ *
+ * It used to be provenance (the org's packages versus Appstrate's), which
+ * answered a question nobody asks first: a reader wants to know what they
+ * already have before knowing who made it. Provenance is a filter now.
+ *
+ * The old spellings (`org`, `appstrate`) still resolve — they are in links,
+ * in the navigation and in bookmarks — and land on the placed tab.
+ */
+export type CatalogueScope = "placed" | "discover";
+
+export function catalogueScope(raw: string): CatalogueScope {
+  return raw === "discover" ? "discover" : "placed";
+}
 
 const KINDS: Array<{ type: PackageType; icon: typeof Layers; titleKey: string }> = [
   { type: "agent", icon: Layers, titleKey: "packages.type.agents" },
@@ -100,15 +121,15 @@ function isPackageType(value: string): value is PackageType {
 }
 
 export function OrgCatalogueModal({
-  origin,
+  scope: rawScope,
   type,
   onSelect,
   onClose,
 }: {
   /** Both straight from the URL, so a link opens exactly one view. */
-  origin: string;
+  scope: string;
   type: string;
-  onSelect: (origin: CatalogueOrigin, type: PackageType) => void;
+  onSelect: (scope: CatalogueScope, type: PackageType) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
@@ -124,14 +145,9 @@ export function OrgCatalogueModal({
   // The read has an address of its own: reload lands on it, Back leaves it.
   const preview = useModalParam("package");
 
-  const fromAppstrate = origin === "appstrate";
-  const kinds = KINDS.filter((kind) => allowed.includes(kind.type));
-  // What Appstrate ships, per kind — read off the library rather than assumed,
-  // so a kind it ships nothing of simply is not offered there.
-  const appstrateKinds = kinds.filter((kind) =>
-    (library?.packages[kind.type] ?? []).some((item) => item.source === "system"),
-  );
-  const visibleKinds = fromAppstrate ? appstrateKinds : kinds;
+  const scope = catalogueScope(rawScope);
+  const discovering = scope === "discover";
+  const visibleKinds = KINDS.filter((kind) => allowed.includes(kind.type));
   const active =
     (isPackageType(type) && visibleKinds.some((k) => k.type === type)
       ? type
@@ -149,93 +165,95 @@ export function OrgCatalogueModal({
   const integrationById = new Map((integrations ?? []).map((row) => [row.id, row] as const));
   const spaces = library?.spaces ?? [];
 
-  /** Installed here and elsewhere, for one integration, from both reads. */
-  const integrationState = (id: string) => {
-    const activeHere = Boolean(integrationById.get(id)?.active);
-    const libraryRow = library?.packages.integration.find((row) => row.id === id);
-    const activeIn = spaces
-      .filter(
-        (space) =>
-          Boolean(
-            libraryRow?.placements.some(
-              (placement) => placement.space_id === space.id && placement.state === "active",
-            ),
-          ) ||
-          (space.id === spaceId && activeHere),
-      )
-      .map((space) => space.name);
-    return { activeHere, activeIn };
+  /**
+   * One row's placement, for every kind but the integrations.
+   *
+   * An INTEGRATION resolves its activation server-side: a system one is ON in a
+   * space that has no row at all (`resolveIntegrationActivations`), which the
+   * library cannot see because it reports rows. So that kind reads
+   * `/api/integrations` for "active here" and the library for the rest.
+   */
+  const placementOf = (item: LibraryPackageItem): CataloguePlacement => {
+    const base = cataloguePlacement(item, spaceId, {
+      // A system agent, skill or MCP server is readable in every space without
+      // being switched on; a system integration has a real switch.
+      everywhere: item.source === "system" && active !== "integration",
+    });
+    if (active !== "integration") return base;
+    const activeHere = Boolean(integrationById.get(item.id)?.active);
+    if (!activeHere || !spaceId || base.here === "active") return base;
+    return { ...base, here: "active", activeIn: [...base.activeIn, spaceId] };
   };
 
-  const ofKind = library?.packages[active] ?? [];
-  const stateById = new Map<string, CatalogueRowState>(
-    ofKind.map((item) => {
-      if (active === "integration") {
-        return [item.id, { ...integrationState(item.id), everywhere: false }] as const;
-      }
-      const everywhere = item.source === "system";
-      const activeHere = Boolean(
-        spaceId &&
-        item.placements.some(
-          (placement) => placement.space_id === spaceId && placement.state === "active",
-        ),
-      );
-      const activeIn = spaces
-        .filter((space) =>
-          item.placements.some(
-            (placement) => placement.space_id === space.id && placement.state === "active",
-          ),
-        )
-        .map((space) => space.name);
-      return [item.id, { activeIn, activeHere, everywhere }] as const;
-    }),
-  );
-  // Appstrate lists everything it provides, installed or not. The organisation
-  // lists what the org HAS: its own packages, plus what it installed from
-  // Appstrate — which is why Gmail, installed here, belongs in both.
   // Integrations split by execution, as on their page: remote (API or hosted
   // MCP) or local (an MCP server run in the sandbox).
   const [execution, setExecution] = useState<IntegrationExecution>("remote");
+  const ofKind = (library?.packages[active] ?? []) as LibraryPackageItem[];
+  const placementById = new Map(ofKind.map((item) => [item.id, placementOf(item)] as const));
+  const spaceNameOf = (id: string) => spaces.find((space) => space.id === id)?.name ?? id;
+  // The two halves of the first axis: what is already placed in a space this
+  // caller reaches, and what could still be placed there.
   const all = ofKind.filter((item) => {
     if (active === "integration") {
       const row = integrationById.get(item.id);
       if (row && integrationExecution(row) !== execution) return false;
     }
-    if (fromAppstrate) return item.source === "system";
-    if (item.source !== "system") return true;
-    const state = stateById.get(item.id);
-    return Boolean(state && !state.everywhere && (state.activeHere || state.activeIn.length > 0));
+    const placement = placementById.get(item.id);
+    return placement ? inPlacedTab(placement) !== discovering : false;
   });
-  const stateOf = (item: CardItem): CatalogueRowState =>
-    stateById.get(item.id) ?? { activeIn: [], activeHere: false, everywhere: false };
+  const stateOf = (item: CardItem): CatalogueRowState => {
+    const placement = placementById.get(item.id);
+    if (!placement) return { activeIn: [], activeHere: false, everywhere: false };
+    return {
+      activeIn: placement.activeIn.map(spaceNameOf),
+      activeHere: placement.here === "active",
+      placedHere: placement.here === "inactive",
+      offeredHere: placement.here === "offered",
+      everywhere: placement.everywhere,
+    };
+  };
   const canActivate = (item: CardItem) => canInstall(item, stateOf(item));
 
-  // Now that the panel shows what is already on, "where does this run?" is the
-  // dimension worth narrowing — not origin, which the rail decides, and not
-  // activity, which the library cannot answer.
-  const wheres = list.values("where", ["here", "elsewhere", "nowhere"] as const);
+  // The dimension worth narrowing is the STATE a row is in, which is what the
+  // placement model made expressible: a package can be here and off, or here
+  // and offered to nobody's answer yet. "Where does it run" was the closest
+  // this screen could say before, and it could not tell those two apart.
+  const states = list.values("state", ["active", "inactive", "offered"] as const);
   const rows = all.filter((item) => {
-    if (wheres.length === 0) return true;
-    const state = stateById.get(item.id);
-    if (!state) return false;
-    const here = state.activeHere || state.everywhere;
-    const elsewhere = state.everywhere || state.activeIn.some((name) => name !== spaceName);
-    return (
-      (wheres.includes("here") && here) ||
-      (wheres.includes("elsewhere") && elsewhere) ||
-      (wheres.includes("nowhere") && !here && !elsewhere)
-    );
+    if (states.length === 0) return true;
+    const placement = placementById.get(item.id);
+    if (!placement) return false;
+    // A system package is readable everywhere without a row: it is active here
+    // in every sense the reader cares about.
+    const here: PlacementState | null = placement.everywhere ? "active" : placement.here;
+    return here !== null && states.includes(here);
   });
-  const whereFilter: FilterSpec = {
-    id: "where",
-    label: t("catalogue.filter.where"),
-    values: wheres,
+  const stateFilter: FilterSpec = {
+    id: "state",
+    label: t("catalogue.filter.state"),
+    values: states,
     options: [
-      { value: "here", label: t("catalogue.filter.here", { space: spaceName }) },
-      { value: "elsewhere", label: t("catalogue.filter.elsewhere") },
-      { value: "nowhere", label: t("catalogue.filter.nowhere") },
+      { value: "active", label: t("catalogue.filter.active") },
+      { value: "inactive", label: t("catalogue.filter.inactive") },
+      { value: "offered", label: t("catalogue.filter.offered") },
     ],
-    onChange: list.setValues("where"),
+    onChange: list.setValues("state"),
+  };
+  // Provenance: an attribute of the package, not the question a reader asks
+  // first — which is why it stopped being the rail's axis.
+  const origins = list.values("origin", ["org", "system"] as const);
+  const shown = rows.filter(
+    (item) => origins.length === 0 || origins.includes(item.source === "system" ? "system" : "org"),
+  );
+  const originFilter: FilterSpec = {
+    id: "origin",
+    label: t("catalogue.filter.origin"),
+    values: origins,
+    options: [
+      { value: "org", label: t("catalogue.sourceOrg", { name: orgName }) },
+      { value: "system", label: t("catalogue.sourceSystem") },
+    ],
+    onChange: list.setValues("origin"),
   };
 
   const activateOne = (item: { id: string; displayName: string }) => {
@@ -257,7 +275,7 @@ export function OrgCatalogueModal({
     );
   };
 
-  const offered: CardItem[] = rows.map((item) => {
+  const offered: CardItem[] = shown.map((item) => {
     const row: CardItem = {
       id: item.id,
       displayName: item.name || item.id,
@@ -331,38 +349,32 @@ export function OrgCatalogueModal({
     onOpen: (item) => preview.open(item.id),
   });
 
-  const show = (nextOrigin: CatalogueOrigin, nextType: PackageType) => {
+  const show = (nextScope: CatalogueScope, nextType: PackageType) => {
     setSelected(new Set());
     list.reset();
     preview.close();
-    onSelect(nextOrigin, nextType);
+    onSelect(nextScope, nextType);
   };
 
-  // One group, never two: the kinds are the same four words under either
-  // origin, and a rail that lists them twice makes the reader compare two
-  // identical lists to find the difference. The origin is a SELECTOR at the
-  // head of the group, exactly where the settings rail puts the organisation
-  // and the workspace it is showing.
-  const originOptions = [
-    // The name, then what it is: "Tractr (organisation)", "Appstrate (système)".
-    // The label is what keeps an org that happens to be called something odd
-    // from reading like a second vendor.
-    { id: "org", name: t("catalogue.sourceOrg", { name: orgName }) },
-    ...(appstrateKinds.length > 0 ? [{ id: "appstrate", name: t("catalogue.sourceSystem") }] : []),
+  // One group, never two: the kinds are the same four words under either half
+  // of the axis, and a rail that lists them twice makes the reader compare two
+  // identical lists to find the difference. The scope is a SELECTOR at the head
+  // of the group, exactly where the settings rail puts the organisation and the
+  // workspace it is showing.
+  //
+  // What it selects is POSSESSION: what is already placed in a space you reach,
+  // or what you could still place there. Provenance moved to the filters — it
+  // describes a package, it is not the question a reader opens with.
+  const scopeOptions = [
+    { id: "placed", name: t("catalogue.scopePlaced") },
+    { id: "discover", name: t("catalogue.scopeDiscover") },
   ];
   const selector = (
     <ContextSelector
-      value={fromAppstrate ? "appstrate" : "org"}
-      label={t("catalogue.originSelector")}
-      options={originOptions}
-      onValueChange={(next) => {
-        const nextOrigin = next as CatalogueOrigin;
-        const entries = nextOrigin === "appstrate" ? appstrateKinds : kinds;
-        show(
-          nextOrigin,
-          entries.some((k) => k.type === active) ? active : (entries[0]?.type ?? active),
-        );
-      }}
+      value={scope}
+      label={t("catalogue.scopeSelector")}
+      options={scopeOptions}
+      onValueChange={(next) => show(catalogueScope(next), active)}
     />
   );
   const kindRows = visibleKinds.map((entry) => (
@@ -371,7 +383,7 @@ export function OrgCatalogueModal({
       icon={entry.icon}
       label={t(entry.titleKey)}
       active={entry.type === active}
-      onClick={() => show(fromAppstrate ? "appstrate" : "org", entry.type)}
+      onClick={() => show(scope, entry.type)}
     />
   ));
 
@@ -381,7 +393,7 @@ export function OrgCatalogueModal({
     <div className="flex h-full flex-col">
       <RailHeader icon={LibraryBig} title={t("catalogue.title")} />
       <div className="flex-1">
-        <RailGroup title={t("catalogue.origin")}>
+        <RailGroup title={t("catalogue.scopeSelector")}>
           {selector}
           <nav className="mt-1.5 flex flex-col gap-0.5" aria-label={t("catalogue.kinds")}>
             {kindRows}
@@ -406,7 +418,7 @@ export function OrgCatalogueModal({
             size="sm"
             aria-pressed={entry.type === active}
             className="aria-pressed:bg-accent shrink-0 gap-2 px-3"
-            onClick={() => show(fromAppstrate ? "appstrate" : "org", entry.type)}
+            onClick={() => show(scope, entry.type)}
           >
             <entry.icon className="size-4 shrink-0" />
             {t(entry.titleKey)}
@@ -449,8 +461,8 @@ export function OrgCatalogueModal({
           error={error instanceof Error ? error : null}
           holds={active}
           entity={t(kind.titleKey)}
-          emptyMessage={t("catalogue.empty")}
-          emptyHint={t("catalogue.emptyHint")}
+          emptyMessage={t(discovering ? "catalogue.emptyDiscover" : "catalogue.emptyPlaced")}
+          emptyHint={t(discovering ? "catalogue.emptyDiscoverHint" : "catalogue.emptyPlacedHint")}
           emptyIcon={kind.icon}
           list={list}
           view={view}
@@ -475,12 +487,13 @@ export function OrgCatalogueModal({
           // The page's own bar, not a panel variant of it: same icon-only
           // filter and column buttons, in the same place, at the same size.
           placement="page"
-          // The library says where a package is installed, not what runs or
-          // uses it, so the second dimension would filter on nothing. Origin
-          // is the rail here, so the bar keeps no filter of its own.
+          // The library says where a package is placed, not what runs or uses
+          // it, so the activity dimension would filter on nothing. Provenance
+          // is one of this bar's own filters now, in the shape every other
+          // filter here has, rather than the collection's built-in one.
           activityFilter={false}
           originFilter={false}
-          extraFilters={[whereFilter]}
+          extraFilters={discovering ? [originFilter] : [stateFilter, originFilter]}
           // A package this space has not activated cannot be run from here.
           cardRun={false}
           // A tick is a table affordance; in cards, each card carries its own
@@ -488,10 +501,9 @@ export function OrgCatalogueModal({
           leadingColumns={view === "table" ? [selectColumn] : []}
           dropColumns={CATALOGUE_DROPS}
           trailingColumns={[
-            ...(fromAppstrate ? [] : [originColumn]),
+            originColumn,
             ...(active === "integration" && execution === "remote" ? [protocolColumn] : []),
-            statusColumn,
-            activeColumn,
+            ...(discovering ? [] : [statusColumn, activeColumn]),
             actionsColumn,
           ]}
           rowAction={(item) => preview.open(item.id)}

@@ -23,6 +23,10 @@ export interface CatalogueRowState {
   activeIn: string[];
   /** Active in the space on screen: there is nothing left to do here. */
   activeHere: boolean;
+  /** Placed here and switched off: its per-space settings are kept. */
+  placedHere?: boolean;
+  /** Offered here and switched on by nobody — a placement whose state is `none`. */
+  offeredHere?: boolean;
   /**
    * Available in every space without being switched on at all — what a system
    * agent, skill or MCP server is. An integration is not: it has a real switch.
@@ -133,7 +137,7 @@ export function useCatalogueStatusColumn(
   return {
     id: "status",
     header: t("catalogue.column.status"),
-    width: "112px",
+    width: "128px",
     // Tier two: whether it is on HERE is the question every catalogue row is
     // read for, and it used to be an absence (no button) rather than a word.
     // Tier one holds the name and the "…" menu, whose items already say it.
