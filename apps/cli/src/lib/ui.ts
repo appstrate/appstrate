@@ -139,6 +139,12 @@ function requireTTY(message: string): void {
   }
 }
 
+/**
+ * `clack.isCancel` narrows to its private `unique symbol` while the prompts
+ * resolve to `T | symbol`, so the stock guard leaves `symbol` in the type.
+ */
+export const isCancel = clack.isCancel as (value: unknown) => value is symbol;
+
 export async function askText(
   message: string,
   initialValue?: string,
@@ -146,7 +152,7 @@ export async function askText(
 ): Promise<string> {
   requireTTY(message);
   const value = await clack.text({ message, initialValue, output: clackOutput(io) });
-  if (clack.isCancel(value)) {
+  if (isCancel(value)) {
     exitWithError(CANCELLED, io, EXIT_CANCELLED);
   }
   return value;
@@ -159,7 +165,7 @@ export async function confirm(
 ): Promise<boolean> {
   requireTTY(message);
   const value = await clack.confirm({ message, initialValue, output: clackOutput(io) });
-  if (clack.isCancel(value)) {
+  if (isCancel(value)) {
     exitWithError(CANCELLED, io, EXIT_CANCELLED);
   }
   return value;
@@ -198,7 +204,7 @@ export async function select<T>(
     initialValue,
     output: clackOutput(io),
   });
-  if (clack.isCancel(value)) {
+  if (isCancel(value)) {
     exitWithError(CANCELLED, io, EXIT_CANCELLED);
   }
   return value as T;

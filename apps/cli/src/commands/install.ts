@@ -25,6 +25,7 @@ import {
   logWarn,
   note,
   EXIT_CANCELLED,
+  isCancel as promptCancelled,
 } from "../lib/ui.ts";
 import {
   generateBootstrapToken,
@@ -828,7 +829,7 @@ async function ensurePortFree(
  */
 interface TierResolverDeps {
   select?: typeof clack.select;
-  isCancel?: typeof clack.isCancel;
+  isCancel?: typeof promptCancelled;
   /** Framed-note renderer; production is `note` from lib/ui.ts. */
   note?: (message: string, title?: string) => void;
   isDockerAvailable?: () => Promise<boolean>;
@@ -870,7 +871,7 @@ export async function resolveTier(
     throw new Error(`Invalid --tier value "${raw}". Expected 0, 1, 2, or 3.`);
   }
   const select = deps.select ?? clack.select;
-  const isCancel = deps.isCancel ?? clack.isCancel;
+  const isCancel = deps.isCancel ?? promptCancelled;
   // `renderNote`, not `note`: a local named after the import it falls back to
   // would shadow it and throw on its own initialiser.
   const renderNote = deps.note ?? note;
@@ -1048,7 +1049,7 @@ interface RunBackendInputs {
  */
 interface RunBackendResolverDeps {
   select?: typeof clack.select;
-  isCancel?: typeof clack.isCancel;
+  isCancel?: typeof promptCancelled;
   askText?: typeof askText;
   confirm?: typeof clack.confirm;
   detectLanIpv4?: () => string | null;
@@ -1171,7 +1172,7 @@ export async function resolveRunBackend(
   deps: RunBackendResolverDeps = {},
 ): Promise<RunBackendConfig> {
   const select = deps.select ?? clack.select;
-  const isCancel = deps.isCancel ?? clack.isCancel;
+  const isCancel = deps.isCancel ?? promptCancelled;
   const promptText = deps.askText ?? askText;
   const confirmPrompt = deps.confirm ?? clack.confirm;
   const detectIp = deps.detectLanIpv4 ?? detectLanIpv4;

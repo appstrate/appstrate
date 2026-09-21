@@ -27,7 +27,7 @@
     "@tailwindcss/typography": "^0.5.20",
     "@tanstack/react-query": "^5.102.8",
     "@tanstack/react-virtual": "^3.14.12",
-    "better-auth": "1.7.3",
+    "better-auth": "1.7.5",
     "i18next": "^26.4.2",
     "i18next-resources-to-backend": "^1.2.3",
     "lucide-react": "^1.45.0",
