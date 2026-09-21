@@ -5,7 +5,7 @@
   "schema_version": "0.1",
   "display_name": "SSH",
   "icon": "mdi:console-network",
-  "description": "Reach a host over SSH from an agent — a VPS, a NAS, a build box, anything with sshd and no HTTP API. One connection is one key on one Unix account: THAT ACCOUNT is the boundary. What the agent can do is exactly what the account can do, so grant root only if you mean it, and otherwise create a dedicated user and restrict it with the tools the system already gives you (sudoers, groups, a restricted shell). Appstrate does not narrow it further. A read-only agent is expressed by the TOOLS it is granted: give it ssh_probe, ssh_read_file and ssh_list_dir, and withhold ssh_exec and ssh_write_file. The private key lives in the platform keyring and is delivered to the @appstrate/ssh-mcp runner as a file; it never reaches the agent container.",
+  "description": "Reach a host over SSH from an agent — a VPS, a NAS, a build box, anything with sshd and no HTTP API. One connection is one key on one Unix account: THAT ACCOUNT is the boundary. What the agent can do is exactly what the account can do, so grant root only if you mean it, and otherwise create a dedicated user and restrict it with the tools the system already gives you (sudoers, groups, a restricted shell). Appstrate does not narrow it further. A read-only agent is expressed by the TOOLS it is granted: give it ssh_probe and ssh_read, and withhold ssh_exec, ssh_write_file and ssh_edit_file. The private key lives in the platform keyring and is delivered to the @appstrate/ssh-mcp runner as a file; it never reaches the agent container.",
   "license": "Apache-2.0",
   "keywords": ["ssh", "sftp", "remote", "server", "ops"],
   "source": {
@@ -30,7 +30,7 @@
         "label": "Indiquez ci-dessous l'hôte, le port, ce compte et la clé d'hôte relevée. Appstrate génère la paire de clés lui-même : la clé privée n'est ni affichée ni saisie nulle part — elle naît chiffrée dans le trousseau."
       },
       {
-        "label": "Côté agent, choisissez ses outils. Un agent qui ne doit RIEN modifier reçoit ssh_probe, ssh_read_file et ssh_list_dir, et pas ssh_exec ni ssh_write_file — un outil qu'il n'a pas, plutôt qu'une règle qu'il pourrait contourner par le discours. C'est par agent, donc la même connexion sert un lecteur et un rédacteur."
+        "label": "Côté agent, choisissez ses outils. Un agent qui ne doit RIEN modifier reçoit ssh_probe et ssh_read, et ni ssh_exec, ni ssh_write_file, ni ssh_edit_file — un outil qu'il n'a pas, plutôt qu'une règle qu'il pourrait contourner par le discours. C'est par agent, donc la même connexion sert un lecteur et un rédacteur."
       }
     ]
   },

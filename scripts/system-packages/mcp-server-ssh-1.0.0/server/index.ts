@@ -14,7 +14,7 @@
  *    accepts key material.
  *  - The Unix account is the only boundary. "Read-only" is a per-agent tool
  *    grant (`toolAllowlist`, enforced sidecar-side), never a branch in here —
- *    the tool descriptions say which tools write.
+ *    the tool descriptions and MCP annotations say which tools write.
  *  - No trust-on-first-use: the connection carries the host's public key
  *    (`SSH_HOST_KEY`), written to a private `known_hosts`, and
  *    `StrictHostKeyChecking=yes` refuses anything else.
@@ -135,6 +135,9 @@ export function buildSshOptions(
       ForwardAgent: "no",
       ForwardX11: "no",
       ConnectTimeout: "15",
+      // A peer that stops answering is dropped after ~45 s instead of hanging.
+      ServerAliveInterval: "15",
+      ServerAliveCountMax: "3",
       LogLevel: overrides.logLevel ?? "ERROR",
     }).flatMap(([key, value]) => ["-o", `${key}=${value}`]),
   ];
@@ -192,26 +195,143 @@ export function quoteSftpPath(path: string): string {
   return `"${path}"`;
 }
 
+/**
+ * `quoteSftpPath` for an `ls` operand. Quoting makes `*?[` literal, but sftp's
+ * `ls` still expands `{a,b}` inside quotes (measured, OpenSSH 10.2), which would
+ * list some other path under this one's name.
+ */
+function quoteSftpLsPath(path: string): string {
+  if (path.includes("{")) {
+    throw new ProtocolError(
+      `path cannot be listed over sftp (\`{\` is expanded): ${JSON.stringify(path)}; use ssh_exec`,
+    );
+  }
+  return quoteSftpPath(path);
+}
+
+// ────────────────────────────── limits ────────────────────────────────
+
+const EXEC_OUTPUT_BYTES = 64 * 1024;
+const EXEC_TIMEOUT_DEFAULT_S = 120;
+const EXEC_TIMEOUT_MAX_S = 600;
+// Sized for the largest transfer a tool makes — an 8 MiB `get` — at ~100 KiB/s,
+// the slow end of a proxied link; a stalled batch fails instead of pinning the runner.
+const SFTP_CEILING_MS = 120_000;
+// sftp stdout is only ever `ls` output; past this a listing is reported incomplete.
+const SFTP_OUTPUT_BYTES = 1024 * 1024;
+// SFTP has no ranged read, so any window of a file costs the whole file on the
+// runner; past this ceiling `sed -n` / `tail` through ssh_exec is the tool.
+const FILE_BYTES_MAX = 8 * 1024 * 1024;
+const READ_OUTPUT_BYTES = 256 * 1024;
+// The 2000-line window agent harnesses converge on; the byte cap, not the line
+// count, is what bounds a reply, so the maximum only stops absurd requests.
+const READ_LIMIT_DEFAULT = 2000;
+const READ_LIMIT_MAX = 10_000;
+const LINE_CHARS_MAX = 2000;
+const EDIT_CONTEXT_LINES = 3;
+const EDIT_SNIPPET_BYTES = 8 * 1024;
+
+// ────────────────────────────── utf-8 ─────────────────────────────────
+
+/**
+ * Largest prefix length ≤ `budget` ending on a character boundary; reads
+ * `bytes[budget]`. `Buffer.toString("utf8")` would decode a cut sequence to
+ * U+FFFD (measured on Bun 1.3), so the cut moves back by hand.
+ */
+function utf8Cut(bytes: Uint8Array, budget: number): number {
+  if (bytes.length <= budget) return bytes.length;
+  let cut = budget;
+  while (cut > 0 && (bytes[cut]! & 0b1100_0000) === 0b1000_0000) cut--;
+  return cut;
+}
+
+/**
+ * Bounded capture of one output stream: the first half of `budget` bytes, a
+ * rolling tail of the other half, and a count of what fell between. Memory
+ * stays near `budget` however much the process writes. Over budget it renders
+ * head and tail around an explicit marker: the end of a failing command's
+ * output is where its error is.
+ */
+export class OutputCapture {
+  private readonly half: number;
+  private readonly head: Buffer;
+  private headLen = 0;
+  private tail: Buffer[] = [];
+  private tailLen = 0;
+  private total = 0;
+
+  constructor(private readonly budget: number) {
+    this.half = Math.floor(budget / 2);
+    this.head = Buffer.alloc(this.half + 1); // +1: `utf8Cut` reads the byte past the cut
+  }
+
+  push(chunk: Uint8Array): void {
+    this.total += chunk.length;
+    let rest = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+    const room = this.head.length - this.headLen;
+    if (room > 0) {
+      const n = Math.min(room, rest.length);
+      rest.copy(this.head, this.headLen, 0, n);
+      this.headLen += n;
+      rest = rest.subarray(n);
+    }
+    if (rest.length === 0) return;
+    this.tail.push(Buffer.from(rest));
+    this.tailLen += rest.length;
+    while (this.tail.length > 1 && this.tailLen - this.tail[0]!.length >= this.half) {
+      this.tailLen -= this.tail.shift()!.length;
+    }
+  }
+
+  get truncated(): boolean {
+    return this.total > this.budget;
+  }
+
+  render(): string {
+    const head = this.head.subarray(0, this.headLen);
+    if (!this.truncated) return Buffer.concat([head, ...this.tail]).toString("utf8");
+    const cut = utf8Cut(head, this.half);
+    // Tail chunks are only dropped while `half` bytes remain, so when fewer are
+    // kept nothing was dropped and the head's spare byte joins them seamlessly.
+    const after = Buffer.concat([head.subarray(this.half), ...this.tail]);
+    let skip = after.length - this.half;
+    while (skip < after.length && (after[skip]! & 0b1100_0000) === 0b1000_0000) skip++;
+    const omitted = this.total - (after.length - skip) - cut;
+    return (
+      `${head.subarray(0, cut).toString("utf8")}\n` +
+      `[… ${omitted} bytes omitted: output over ${this.budget} bytes, head and tail kept …]\n` +
+      after.subarray(skip).toString("utf8")
+    );
+  }
+}
+
 // ─────────────────────────── subprocess runner ────────────────────────
 
 export interface RunResult {
   stdout: string;
   stderr: string;
-  code: number;
+  /** `null` when the ceiling fired: the process was killed before it reported one. */
+  code: number | null;
+  timedOut?: boolean;
+  /** The stream outgrew `outputBytes` and is rendered as a head+tail excerpt. */
+  stdoutTruncated?: boolean;
+  stderrTruncated?: boolean;
 }
 
 export interface RunOptions {
   stdin?: string;
   /** Resolve as code 0 once stderr matches, then kill — `ssh -N` never exits on success. */
   untilStderr?: RegExp;
-  /** Wall-clock ceiling. On expiry the process is killed and code 124 returned. */
+  /** Wall-clock ceiling. On expiry the process is killed; what it wrote so far is kept. */
   ceilingMs?: number;
+  /** Per-stream memory budget (default 64 KiB), see `OutputCapture`. */
+  outputBytes?: number;
 }
 
 /** Injectable so tests exercise the tool logic without an sshd. */
 export type Runner = (argv: string[], opts: RunOptions) => Promise<RunResult>;
 
-export const runProcess: Runner = async (argv, opts) => {
+export const runProcess: Runner = (argv, opts) => {
   // `Bun.spawn({ env })` REPLACES the environment. The proxy variables the
   // sidecar sets must reach ssh, and through it the ProxyCommand helper —
   // dropping them silently bypasses the egress listener.
@@ -221,108 +341,176 @@ export const runProcess: Runner = async (argv, opts) => {
     stdout: "pipe",
     stderr: "pipe",
   });
+  const budget = opts.outputBytes ?? EXEC_OUTPUT_BYTES;
+  const out = new OutputCapture(budget);
+  const err = new OutputCapture(budget);
+  const decoder = new TextDecoder();
+  let early = ""; // stderr decoded for `untilStderr`, first `budget` characters only
 
-  if (!opts.untilStderr && !opts.ceilingMs) {
-    const [stdout, stderr, code] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    return { stdout, stderr, code };
-  }
-
-  // Streaming path: watch stderr as it arrives, settle once — on the marker,
-  // on exit, or on the ceiling — and make sure the child is dead afterwards.
-  let stderr = "";
-  let settled = false;
-  let ceilingTimer: ReturnType<typeof setTimeout> | undefined;
-  const settle = (result: RunResult): RunResult => {
-    settled = true;
-    if (ceilingTimer !== undefined) clearTimeout(ceilingTimer);
-    try {
-      proc.kill();
-    } catch {
-      // already gone
-    }
-    return result;
-  };
-  const stdoutPromise = new Response(proc.stdout).text();
-
-  const watchStderr = (async (): Promise<RunResult | null> => {
-    const decoder = new TextDecoder();
-    for await (const chunk of proc.stderr as AsyncIterable<Uint8Array>) {
-      stderr += decoder.decode(chunk, { stream: true });
-      if (opts.untilStderr && opts.untilStderr.test(stderr)) {
-        return { stdout: "", stderr, code: 0 };
+  return new Promise<RunResult>((resolve) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Settle once — on the marker, on exit, or on the ceiling — and make sure
+    // the child is dead afterwards.
+    const settle = (code: number | null, timedOut: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        proc.kill();
+      } catch {
+        // already gone
       }
-    }
-    return null; // stream ended: the process exited — let `exited` report it
-  })();
-  const waitExit = (async (): Promise<RunResult> => {
-    const code = await proc.exited;
-    await watchStderr.catch(() => null);
-    return { stdout: await stdoutPromise.catch(() => ""), stderr, code };
-  })();
-  const ceiling = new Promise<RunResult>((resolve) => {
-    if (!opts.ceilingMs) return;
-    ceilingTimer = setTimeout(() => {
-      if (!settled)
-        resolve({
-          stdout: "",
-          stderr: stderr + `\n(killed after ${opts.ceilingMs} ms)`,
-          code: 124,
-        });
-    }, opts.ceilingMs);
+      resolve({
+        stdout: out.render(),
+        stderr: err.render() + (timedOut ? `\n(killed after ${opts.ceilingMs} ms)` : ""),
+        code,
+        timedOut,
+        stdoutTruncated: out.truncated,
+        stderrTruncated: err.truncated,
+      });
+    };
+    const drain = async (stream: ReadableStream<Uint8Array>, onChunk: (c: Uint8Array) => void) => {
+      for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) onChunk(chunk);
+    };
+    const stdoutDone = drain(proc.stdout, (c) => out.push(c)).catch(() => {});
+    const stderrDone = drain(proc.stderr, (c) => {
+      err.push(c);
+      if (!opts.untilStderr || early.length > budget) return;
+      early += decoder.decode(c, { stream: true });
+      if (opts.untilStderr.test(early)) settle(0, false);
+    }).catch(() => {});
+    void Promise.all([proc.exited, stdoutDone, stderrDone]).then(([code]) => settle(code, false));
+    if (opts.ceilingMs) timer = setTimeout(() => settle(null, true), opts.ceilingMs);
   });
-
-  const first = await Promise.race([watchStderr.then((r) => r ?? waitExit), waitExit, ceiling]);
-  return settle(first);
 };
 
 // ────────────────────────────── helpers ───────────────────────────────
 
-const EXEC_OUTPUT_BYTES = 64 * 1024;
-const READ_FILE_BYTES = 256 * 1024;
-
-/**
- * Byte-budget truncation that never emits a broken UTF-8 sequence:
- * `Buffer.toString("utf8")` decodes a partial tail to U+FFFD (measured on
- * Bun 1.3), so the cut is moved back to a character boundary by hand.
- */
-export function truncateUtf8(text: string, budget: number): { text: string; truncated: boolean } {
-  const bytes = Buffer.from(text, "utf8");
-  if (bytes.length <= budget) return { text, truncated: false };
-  let cut = budget;
-  while (cut > 0 && (bytes[cut]! & 0b1100_0000) === 0b1000_0000) cut--;
-  // On a lead byte (or ASCII) now; exclude its sequence if it overruns.
-  const lead = bytes[cut]!;
-  const seqLen = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : lead >= 0xc0 ? 2 : 1;
-  if (cut + seqLen <= budget) cut += seqLen;
-  return { text: bytes.subarray(0, cut).toString("utf8"), truncated: true };
+/** Output lines of an sftp batch without its `sftp> ` echoes; only the terminator is stripped. */
+function lsLines(output: string): string[] {
+  return output
+    .split("\n")
+    .map((l) => (l.endsWith("\r") ? l.slice(0, -1) : l))
+    .filter((l) => l !== "" && !l.startsWith("sftp>"));
 }
 
 /**
- * Parse `sftp> ls -la` output, skipping the echoed `sftp> …` command line and
- * `.`/`..`. sftp prefixes each entry with the path it was GIVEN, so `name` is
- * the last segment; `detail` is the line verbatim. Sorted by name, because
- * readdir order differs between filesystems.
+ * Parse `sftp> ls -la <path>` output for a directory. sftp prints each entry
+ * as `<path>/<name>` after metadata that never holds a `/`, and prints no
+ * symlink target (measured, OpenSSH 9.2 and 10.2) — so a name is everything
+ * after the first ` <path>/`, spaces and ` -> ` included. Sorted by name,
+ * because readdir order differs between filesystems.
  */
-export function parseSftpLs(output: string): Array<{ name: string; detail: string }> {
-  return output
-    .split("\n")
-    .map((l) => l.trimEnd())
-    .filter((l) => l !== "" && !l.startsWith("sftp>"))
-    .map((line) => {
-      const fields = line.trim().split(/\s+/);
-      // Everything after the 8 fixed columns, so names with spaces survive.
-      const rest = fields.length > 8 ? fields.slice(8).join(" ") : fields.at(-1)!;
-      // A symlink line is `name -> target`.
-      const arrow = rest.indexOf(" -> ");
-      const path = arrow === -1 ? rest : rest.slice(0, arrow);
-      return { name: path.slice(path.lastIndexOf("/") + 1), detail: line.trim() };
-    })
-    .filter((e) => e.name !== "." && e.name !== "..")
-    .sort((a, b) => a.name.localeCompare(b.name));
+export function parseSftpLs(output: string, path: string): Array<{ name: string; detail: string }> {
+  const prefix = ` ${path.endsWith("/") ? path : `${path}/`}`;
+  const entries: Array<{ name: string; detail: string }> = [];
+  for (const line of lsLines(output)) {
+    const at = line.indexOf(prefix);
+    if (at === -1) continue;
+    const name = line.slice(at + prefix.length);
+    if (name !== "" && name !== "." && name !== "..") entries.push({ name, detail: line });
+  }
+  return entries.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export type RemoteTarget =
+  | { kind: "directory"; entries: Array<{ name: string; detail: string }> }
+  | { kind: "file"; size: number };
+
+/**
+ * Classify `ls -la <path>` output. sftp stats (following symlinks) what it is
+ * given: a non-directory comes back as ONE line ending in ` <path>` verbatim
+ * with no `/` in the metadata before it; a directory as its entries, each
+ * `<path>/<name>` — so a lone entry whose name ends like the path still has
+ * that `/` in front of it, and is not mistaken for the path itself.
+ */
+export function classifyLs(output: string, path: string): RemoteTarget {
+  const lines = lsLines(output);
+  const line = lines.length === 1 ? lines[0]! : "";
+  const meta = line.slice(0, line.length - path.length - 1);
+  if (line.endsWith(` ${path}`) && !meta.includes("/") && !line.startsWith("d")) {
+    // `<perm> <links> <owner> <group> <size> <Mon> <day> <time|year>`, read from
+    // the right so an owner name with a space cannot shift the size.
+    const size = Number(meta.trim().split(/\s+/).at(-4));
+    if (!line.startsWith("-") || !Number.isSafeInteger(size)) {
+      throw new ProtocolError(`${path} is neither a regular file nor a directory: ${line}`);
+    }
+    return { kind: "file", size };
+  }
+  return { kind: "directory", entries: parseSftpLs(output, path) };
+}
+
+function splitLines(text: string): string[] {
+  const lines = text.split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  return lines;
+}
+
+/** Cut a line to `LINE_CHARS_MAX` code points; files are capped, so the array stays small. */
+function clipLine(line: string): string {
+  if (line.length <= LINE_CHARS_MAX) return line; // code points ≤ UTF-16 units
+  const chars = Array.from(line);
+  if (chars.length <= LINE_CHARS_MAX) return line;
+  const more = chars.length - LINE_CHARS_MAX;
+  return `${chars.slice(0, LINE_CHARS_MAX).join("")}… [line cut: ${more} more characters; ssh_exec shows it whole]`;
+}
+
+/**
+ * Lines `from`..`to` (1-based, inclusive) numbered like `cat -n`, stopping
+ * early once `budget` bytes are used. The first line always fits: `clipLine`
+ * bounds a line far below any budget used here.
+ */
+function renderLines(
+  lines: string[],
+  from: number,
+  to: number,
+  budget: number,
+): { text: string; last: number } {
+  let text = "";
+  let used = 0;
+  let last = from - 1;
+  for (let n = from; n <= to; n++) {
+    const row = `${String(n).padStart(6)}\t${clipLine(lines[n - 1]!)}\n`;
+    const size = Buffer.byteLength(row, "utf8");
+    if (used + size > budget && n > from) break;
+    text += row;
+    used += size;
+    last = n;
+  }
+  return { text, last };
+}
+
+/** UTF-8 text or a refusal — never U+FFFD garbage, and never a lossy round-trip for an edit. */
+function decodeText(bytes: Uint8Array, path: string): string {
+  const refuse = (why: string) =>
+    new ProtocolError(
+      `${path} ${why}; use ssh_exec for it (e.g. \`file\`, \`xxd\`, \`iconv -f latin1\`)`,
+    );
+  if (bytes.includes(0)) throw refuse("is binary (it contains NUL bytes)");
+  try {
+    // `ignoreBOM` keeps a byte-order mark in the text, so an edit writes it back.
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    throw refuse("is not UTF-8 text");
+  }
+}
+
+const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+function stringArg(value: unknown, name: string): string {
+  if (typeof value !== "string") throw new ProtocolError(`\`${name}\` must be a string`);
+  return value;
+}
+
+function intArg(value: unknown, name: string, fallback: number, min: number, max: number): number {
+  if (value === undefined) return fallback;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) {
+    throw new ProtocolError(
+      `\`${name}\` must be an integer from ${min} to ${max} (got ${JSON.stringify(value)})`,
+    );
+  }
+  return value;
 }
 
 function logLine(fields: Record<string, string | number | boolean>): void {
@@ -371,7 +559,7 @@ function getConfig(): SshConfig {
     cachedConfig = loadConfig();
     return cachedConfig;
   } catch (err) {
-    configError = err instanceof Error ? err.message : String(err);
+    configError = errorText(err);
     throw new ProtocolError(`server is misconfigured: ${configError}`);
   }
 }
@@ -442,7 +630,8 @@ function sshFailure(what: string, res: RunResult): Error {
       "forced command (ForceCommand in sshd_config, or command= in authorized_keys), it needs an " +
       "arm that execs sftp-server for this case. Appstrate installs no forced command of its own.";
   }
-  return new Error(`${what} failed (exit ${res.code}): ${tail}${hint}`);
+  const status = res.code === null ? "timed out" : `exit ${res.code}`;
+  return new Error(`${what} failed (${status}): ${tail}${hint}`);
 }
 
 export async function probeTool(deps: Deps = {}): Promise<Record<string, unknown>> {
@@ -472,82 +661,296 @@ export async function probeTool(deps: Deps = {}): Promise<Record<string, unknown
 }
 
 export async function execTool(
-  args: { command?: unknown },
+  args: { command?: unknown; timeout_seconds?: unknown },
   deps: Deps = {},
 ): Promise<Record<string, unknown>> {
-  const { cfg, kh, run } = await session(deps);
   if (typeof args.command !== "string" || args.command.trim() === "") {
     throw new ProtocolError("`command` must be a non-empty string");
   }
   const command = args.command;
-  logLine({ op: "exec" });
-  // A command that never returns must not pin the runner forever.
-  const res = await run(["ssh", ...buildSshArgs(cfg, kh, command)], { ceilingMs: 120_000 });
+  const timeoutS = intArg(
+    args.timeout_seconds,
+    "timeout_seconds",
+    EXEC_TIMEOUT_DEFAULT_S,
+    1,
+    EXEC_TIMEOUT_MAX_S,
+  );
+  const { cfg, kh, run } = await session(deps);
+  logLine({ op: "exec", timeout_s: timeoutS });
+  const res = await run(["ssh", ...buildSshArgs(cfg, kh, command)], {
+    ceilingMs: timeoutS * 1000,
+  });
+  const timedOut = res.timedOut === true;
   // A non-zero exit from the COMMAND is a result, not a transport failure, and
-  // must reach the agent as data. Only ssh's own failures (255) are thrown.
-  if (res.code === 255) throw sshFailure("ssh", res);
-  const out = truncateUtf8(res.stdout, EXEC_OUTPUT_BYTES);
-  const err = truncateUtf8(res.stderr, EXEC_OUTPUT_BYTES);
+  // must reach the agent as data. Only ssh's own failures (255) are thrown —
+  // which a command exiting 255 is indistinguishable from.
+  if (res.code === 255 && !timedOut) throw sshFailure("ssh", res);
   return {
     // Echoed so the run journal records exactly what crossed the wire.
     command_sent: command,
-    exit_code: res.code,
-    stdout: out.text,
-    stderr: err.text,
-    truncated: out.truncated || err.truncated,
+    timeout_seconds: timeoutS,
+    exit_code: res.code, // null on timeout: the killed client never learnt it
+    timed_out: timedOut,
+    stdout: res.stdout,
+    stderr: res.stderr,
+    truncated: res.stdoutTruncated === true || res.stderrTruncated === true,
+    // Killing the local client drops the connection; with no pty the remote
+    // side gets no signal, so the command itself may run on.
+    ...(timedOut && {
+      note:
+        `the call returned after ${timeoutS} s and the connection was dropped, but the remote ` +
+        "process may still be running; wrap long commands in `timeout` on the target",
+    }),
   };
 }
 
 async function sftpBatch({ cfg, kh, run }: Session, commands: string[]): Promise<RunResult> {
-  const res = await run(["sftp", ...buildSftpArgs(cfg, kh)], { stdin: commands.join("\n") + "\n" });
+  const res = await run(["sftp", ...buildSftpArgs(cfg, kh)], {
+    stdin: commands.join("\n") + "\n",
+    ceilingMs: SFTP_CEILING_MS,
+    outputBytes: SFTP_OUTPUT_BYTES,
+  });
   if (res.code !== 0) throw sshFailure("sftp", res);
   return res;
 }
 
-export async function readFileTool(
-  args: { path?: unknown },
-  deps: Deps = {},
-): Promise<Record<string, unknown>> {
-  const s = await session(deps);
-  if (typeof args.path !== "string") throw new ProtocolError("`path` must be a string");
+async function statPath(
+  s: Session,
+  path: string,
+  quoted: string,
+): Promise<{ target: RemoteTarget; incomplete: boolean }> {
+  // `-a`: a home directory's interesting contents are dotfiles, and plain
+  // `ls -l` hides them with no signal that anything was held back.
+  const res = await sftpBatch(s, [`ls -la ${quoted}`]);
+  if (!res.stdoutTruncated) return { target: classifyLs(res.stdout, path), incomplete: false };
+  // Keep the head, minus the line the excerpt marker cut through.
+  const head = res.stdout.slice(0, res.stdout.indexOf("\n[… "));
+  return {
+    target: classifyLs(head.slice(0, head.lastIndexOf("\n")), path),
+    incomplete: true,
+  };
+}
+
+/** Download a regular file whose `ls` size is known, as UTF-8 text. */
+async function fetchText(
+  s: Session,
+  path: string,
+  size: number,
+): Promise<{ bytes: Buffer; text: string }> {
+  const tooBig = (n: number) =>
+    new ProtocolError(
+      `${path} is ${n} bytes, over the ${FILE_BYTES_MAX}-byte ceiling for SFTP reads and edits; ` +
+        "use ssh_exec (sed -n, head, tail, grep) on it",
+    );
+  if (size > FILE_BYTES_MAX) throw tooBig(size);
   const scratch = scratchPath("get");
   try {
-    await sftpBatch(s, [`get ${quoteSftpPath(args.path)} ${quoteSftpPath(scratch)}`]);
+    await sftpBatch(s, [`get ${quoteSftpPath(path)} ${quoteSftpPath(scratch)}`]);
     const bytes = await readFile(scratch);
-    const out = truncateUtf8(bytes.toString("utf8"), READ_FILE_BYTES);
-    return { path: args.path, bytes: bytes.length, truncated: out.truncated, content: out.text };
+    if (bytes.length > FILE_BYTES_MAX) throw tooBig(bytes.length); // grew since `ls`
+    return { bytes, text: decodeText(bytes, path) };
   } finally {
     await rm(scratch, { force: true }).catch(() => {});
   }
 }
 
-export async function listDirTool(
-  args: { path?: unknown },
+/** The remote open was refused: the target is exactly as it was. */
+class WriteRefused extends Error {}
+
+/**
+ * Upload through a 0600 scratch file. `put` onto an existing path truncates and
+ * rewrites it in place, so its mode, owner, hard links and a symlink's target
+ * survive (measured; `-p` would copy the scratch mode instead). A NEW file is
+ * created with the scratch file's 0600.
+ */
+async function putFile(s: Session, path: string, data: string | Uint8Array): Promise<void> {
+  const scratch = scratchPath("put");
+  try {
+    await writeFile(scratch, data, { mode: 0o600 });
+    await sftpBatch(s, [`put ${quoteSftpPath(scratch)} ${quoteSftpPath(path)}`]);
+  } catch (err) {
+    // sftp's `dest open "<path>": <reason>` (identical in OpenSSH 9.2 and 10.2)
+    // is the open itself failing: nothing was truncated or written.
+    const refusal = /^sftp failed \(exit \d+\): (dest open ".*": .*)/.exec(errorText(err));
+    if (!refusal) throw err;
+    throw new WriteRefused(`write refused, ${path} unchanged: ${refusal[1]}`, { cause: err });
+  } finally {
+    await rm(scratch, { force: true }).catch(() => {});
+  }
+}
+
+function directoryListing(
+  path: string,
+  entries: Array<{ name: string; detail: string }>,
+  incomplete: boolean,
+): Record<string, unknown> {
+  let used = 0;
+  let n = 0;
+  for (; n < entries.length; n++) {
+    used += Buffer.byteLength(entries[n]!.detail) + Buffer.byteLength(entries[n]!.name) + 32;
+    if (used > READ_OUTPUT_BYTES) break;
+  }
+  const listing = { path, type: "directory", entries: entries.slice(0, n) };
+  if (!incomplete && n === entries.length) return { ...listing, truncated: false };
+  return {
+    ...listing,
+    truncated: true,
+    note:
+      `listing cut to ${n} entries (${READ_OUTPUT_BYTES}-byte budget), so this is a subset; ` +
+      "page through the directory with ssh_exec, e.g. `ls -la <dir> | sed -n '1,500p'` " +
+      "or `find <dir> -maxdepth 1 -name '<pattern>'`",
+  };
+}
+
+export async function readTool(
+  args: { path?: unknown; offset?: unknown; limit?: unknown },
   deps: Deps = {},
 ): Promise<Record<string, unknown>> {
+  const path = stringArg(args.path, "path");
+  const quoted = quoteSftpLsPath(path);
+  const offset = intArg(args.offset, "offset", 1, 1, Number.MAX_SAFE_INTEGER);
+  const limit = intArg(args.limit, "limit", READ_LIMIT_DEFAULT, 1, READ_LIMIT_MAX);
   const s = await session(deps);
-  if (typeof args.path !== "string") throw new ProtocolError("`path` must be a string");
-  // `-a`: a home directory's interesting contents are dotfiles, and plain
-  // `ls -l` hides them with no signal that anything was held back.
-  const res = await sftpBatch(s, [`ls -la ${quoteSftpPath(args.path)}`]);
-  return { path: args.path, entries: parseSftpLs(res.stdout) };
+  const { target, incomplete } = await statPath(s, path, quoted);
+  if (target.kind === "directory") {
+    if (args.offset !== undefined || args.limit !== undefined) {
+      throw new ProtocolError(`${path} is a directory; offset and limit apply to files only`);
+    }
+    return directoryListing(path, target.entries, incomplete);
+  }
+
+  const lines = splitLines((await fetchText(s, path, target.size)).text);
+  const file = { path, type: "file", bytes: target.size, total_lines: lines.length };
+  if (lines.length === 0) return { ...file, content: "[empty file]", next_offset: null };
+  if (offset > lines.length) {
+    throw new ProtocolError(`offset ${offset} is past the end of ${path} (${lines.length} lines)`);
+  }
+  const to = Math.min(lines.length, offset + limit - 1);
+  const { text, last } = renderLines(lines, offset, to, READ_OUTPUT_BYTES);
+  if (last === lines.length) return { ...file, content: text, next_offset: null };
+  const why = last < to ? `output cap of ${READ_OUTPUT_BYTES} bytes reached: ` : "";
+  return {
+    ...file,
+    content: `${text}[${why}lines ${offset}-${last} of ${lines.length} shown; call ssh_read with offset=${last + 1} to continue]`,
+    next_offset: last + 1,
+  };
 }
 
 export async function writeFileTool(
   args: { path?: unknown; content?: unknown },
   deps: Deps = {},
 ): Promise<Record<string, unknown>> {
-  const s = await session(deps);
-  if (typeof args.path !== "string") throw new ProtocolError("`path` must be a string");
-  if (typeof args.content !== "string") throw new ProtocolError("`content` must be a string");
-  const scratch = scratchPath("put");
-  try {
-    await writeFile(scratch, args.content, { mode: 0o600 });
-    await sftpBatch(s, [`put ${quoteSftpPath(scratch)} ${quoteSftpPath(args.path)}`]);
-    return { path: args.path, bytes: Buffer.byteLength(args.content, "utf8") };
-  } finally {
-    await rm(scratch, { force: true }).catch(() => {});
+  const path = stringArg(args.path, "path");
+  const quoted = quoteSftpLsPath(path);
+  const content = stringArg(args.content, "content");
+  const bytes = Buffer.byteLength(content, "utf8");
+  if (bytes > FILE_BYTES_MAX) {
+    throw new ProtocolError(
+      `\`content\` is ${bytes} bytes, over the ${FILE_BYTES_MAX}-byte ceiling`,
+    );
   }
+  const s = await session(deps);
+  // `put` onto a directory drops the file INSIDE it under the scratch name, so
+  // the target is stat'ed first; only "not found" means a new file.
+  const existing = await statPath(s, path, quoted).then(
+    ({ target }) => target,
+    (err: unknown) => {
+      if (/^sftp failed \(exit \d+\): Can't ls: ".*" not found/.test(errorText(err))) return null;
+      throw err;
+    },
+  );
+  if (existing?.kind === "directory") throw new ProtocolError(`${path} is a directory`);
+  try {
+    await putFile(s, path, content);
+  } catch (err) {
+    if (err instanceof WriteRefused) throw err;
+    // `put` truncates before it streams: a failure can leave the file cut short.
+    throw new Error(`write failed — ${path} may be truncated: ${errorText(err)}`, { cause: err });
+  }
+  return { path, bytes };
+}
+
+export async function editFileTool(
+  args: { path?: unknown; old_str?: unknown; new_str?: unknown; replace_all?: unknown },
+  deps: Deps = {},
+): Promise<Record<string, unknown>> {
+  const path = stringArg(args.path, "path");
+  const quoted = quoteSftpLsPath(path);
+  if (typeof args.old_str !== "string" || args.old_str === "") {
+    throw new ProtocolError(
+      "`old_str` must be a non-empty string; to create or replace a whole file, use ssh_write_file",
+    );
+  }
+  const oldStr = args.old_str;
+  const newStr = stringArg(args.new_str, "new_str");
+  if (oldStr === newStr) throw new ProtocolError("`old_str` and `new_str` are identical");
+  if (args.replace_all !== undefined && typeof args.replace_all !== "boolean") {
+    throw new ProtocolError("`replace_all` must be a boolean");
+  }
+  const s = await session(deps);
+  const { target } = await statPath(s, path, quoted);
+  if (target.kind === "directory") throw new ProtocolError(`${path} is a directory`);
+  const original = await fetchText(s, path, target.size);
+  const before = original.text;
+
+  const pieces = before.split(oldStr);
+  const count = pieces.length - 1;
+  if (count === 0) {
+    const crlf =
+      before.includes("\r\n") && oldStr.includes("\n") && !oldStr.includes("\r\n")
+        ? " The file has CRLF line endings: write each line break in old_str as \\r\\n."
+        : "";
+    throw new ProtocolError(
+      `old_str was not found in ${path}. It must match exactly, whitespace and indentation ` +
+        "included, without the line-number prefix ssh_read adds; read the file again if it may have changed." +
+        crlf,
+    );
+  }
+  if (count > 1 && args.replace_all !== true) {
+    throw new ProtocolError(
+      `old_str occurs ${count} times in ${path}; include more surrounding text to make it unique, ` +
+        "or set replace_all to replace every occurrence.",
+    );
+  }
+  // `split`/`join`, never `String.replace`: `$&` and `$1` in new_str are text.
+  const after = pieces.join(newStr);
+  const bytes = Buffer.byteLength(after, "utf8");
+  if (bytes > FILE_BYTES_MAX) {
+    throw new ProtocolError(`the edit would make ${path} ${bytes} bytes, over ${FILE_BYTES_MAX}`);
+  }
+
+  // Nothing locks the file between the `get` above and this `put`: a write
+  // landing in between is lost. A failed `put` may have truncated the file,
+  // so the original bytes go back once before the failure is reported.
+  try {
+    await putFile(s, path, after);
+  } catch (err) {
+    if (err instanceof WriteRefused) throw err;
+    const restored = await putFile(s, path, original.bytes).then(
+      () => true,
+      () => false,
+    );
+    throw new Error(
+      restored
+        ? `write failed; original restored: ${errorText(err)}`
+        : `write failed and restore failed — ${path} may be truncated: ${errorText(err)}`,
+      { cause: err },
+    );
+  }
+
+  const lines = splitLines(after);
+  const startLine = pieces[0]!.split("\n").length;
+  // Lines the replacement occupies: a trailing "\n" ends its last line, it does not open one.
+  const endLine = startLine + newStr.replace(/\n$/, "").split("\n").length - 1;
+  const from = Math.max(1, startLine - EDIT_CONTEXT_LINES);
+  const to = Math.min(lines.length, endLine + EDIT_CONTEXT_LINES);
+  const snippet = from <= to ? renderLines(lines, from, to, EDIT_SNIPPET_BYTES) : null;
+  return {
+    path,
+    replacements: count,
+    bytes,
+    snippet: snippet ? snippet.text + (snippet.last < to ? "[…]" : "") : "",
+  };
 }
 
 // ─────────────────────── MCP stdio JSON-RPC loop ─────────────────────
@@ -570,46 +973,96 @@ interface JsonRpcResponse {
  * Static — answered with no configuration, which is how the conformance probe
  * spawns the server. Each `description` must equal the manifest's (what the
  * platform shows when granting tools), and "WRITES" marks the tools a read-only
- * agent is NOT granted; `scripts/test/ssh-mcp.test.ts` pins both.
+ * agent is NOT granted, as `readOnlyHint: false` does for MCP clients;
+ * `scripts/test/ssh-mcp.test.ts` pins all three.
  */
+const READ_HINTS = { readOnlyHint: true, openWorldHint: true };
+const WRITE_HINTS = { readOnlyHint: false, destructiveHint: true, openWorldHint: true };
+
 export const TOOLS = [
   {
     name: "ssh_probe",
     description:
       "Connect, verify the pinned host key and authenticate, then report how the host was reached. Executes nothing on the target and returns no remote data. Read-only.",
     inputSchema: { type: "object", properties: {} },
+    annotations: READ_HINTS,
   },
   {
     name: "ssh_exec",
     description:
-      "Run a command on the remote host, as the connection's Unix account. WRITES — this tool can do anything that account can do; withhold it from an agent that must not change the target. The string is handed to the account's login shell, so shell syntax works and quoting is yours to get right.",
+      "Run a command on the remote host, as the connection's Unix account. WRITES — this tool can do anything that account can do; withhold it from an agent that must not change the target. The string is handed to the account's login shell, so shell syntax works and quoting is yours to get right. After `timeout_seconds` (default 120, max 600) the call returns with `timed_out: true` and `exit_code: null`, and the connection is dropped, but the remote process may keep running — wrap long commands in `timeout` on the target. Exit status 255 is reserved by ssh itself: a command exiting 255 is reported as an ssh failure. stdout and stderr over 64 KiB each keep their head and tail around an omission marker.",
     inputSchema: {
       type: "object",
       properties: {
         command: { type: "string", description: "Shell command to run on the target." },
+        timeout_seconds: {
+          type: "integer",
+          minimum: 1,
+          maximum: EXEC_TIMEOUT_MAX_S,
+          default: EXEC_TIMEOUT_DEFAULT_S,
+          description: "Wall-clock limit for the command, in seconds.",
+        },
       },
       required: ["command"],
     },
+    annotations: { ...WRITE_HINTS, idempotentHint: false },
   },
   {
-    name: "ssh_read_file",
-    description: "Read a remote file over SFTP (256 KiB cap). Read-only.",
-    inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
-  },
-  {
-    name: "ssh_list_dir",
-    description: "List a remote directory over SFTP, sorted by name. Read-only.",
-    inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+    name: "ssh_read",
+    description:
+      "Read a remote path over SFTP. A directory returns its entries, dotfiles included, sorted by name, cut at 256 KiB with a note saying so; `offset`/`limit` are refused on a directory. A UTF-8 text file returns its lines numbered like `cat -n`, from `offset` (1-based) for `limit` lines, at most 256 KiB per call; when more remains, the reply ends with the offset to read next. Binary or non-UTF-8 files and files over 8 MiB are refused — use ssh_exec for those. Relative paths start at the account's home directory; `~` is not expanded. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        offset: {
+          type: "integer",
+          minimum: 1,
+          default: 1,
+          description: "First line to return (files only).",
+        },
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: READ_LIMIT_MAX,
+          default: READ_LIMIT_DEFAULT,
+          description: "Number of lines to return (files only).",
+        },
+      },
+      required: ["path"],
+    },
+    annotations: READ_HINTS,
   },
   {
     name: "ssh_write_file",
     description:
-      "Write a remote file over SFTP. WRITES — withhold it from an agent that must not change the target.",
+      "Write a remote file over SFTP, creating or overwriting it (8 MiB at most; a directory is refused). An existing file keeps its mode; a new file is created 0600 — chmod it with ssh_exec if needed. Relative paths start at the account's home directory; `~` is not expanded. WRITES — withhold it from an agent that must not change the target.",
     inputSchema: {
       type: "object",
       properties: { path: { type: "string" }, content: { type: "string" } },
       required: ["path", "content"],
     },
+    annotations: { ...WRITE_HINTS, idempotentHint: true },
+  },
+  {
+    name: "ssh_edit_file",
+    description:
+      "Replace an exact string in a remote UTF-8 text file over SFTP, rewriting it in place so its mode, owner and links are kept. `old_str` must occur exactly once unless `replace_all` is set; copy it from ssh_read output without the line-number prefix, whitespace included. Relative paths start at the account's home directory; `~` is not expanded. WRITES — withhold it from an agent that must not change the target.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        old_str: { type: "string", description: "Exact text to replace; must not be empty." },
+        new_str: { type: "string", description: "Replacement text." },
+        replace_all: {
+          type: "boolean",
+          default: false,
+          description: "Replace every occurrence instead of requiring exactly one.",
+        },
+      },
+      required: ["path", "old_str", "new_str"],
+    },
+    annotations: { ...WRITE_HINTS, idempotentHint: false },
   },
 ];
 
@@ -628,9 +1081,9 @@ type ToolHandler = (args: Record<string, unknown>, deps: Deps) => Promise<Record
 const TOOL_HANDLERS = new Map<string, ToolHandler>([
   ["ssh_probe", (_args, deps) => probeTool(deps)],
   ["ssh_exec", execTool],
-  ["ssh_read_file", readFileTool],
-  ["ssh_list_dir", listDirTool],
+  ["ssh_read", readTool],
   ["ssh_write_file", writeFileTool],
+  ["ssh_edit_file", editFileTool],
 ]);
 
 export async function handleRequest(
@@ -666,7 +1119,7 @@ export async function handleRequest(
     try {
       return okResult(req.id, await handler(params.arguments ?? {}, deps));
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorText(err);
       const ms = Math.round(performance.now() - started);
       // Refusals and misconfiguration are tool RESULTS the agent can act on,
       // reported as isError content rather than a protocol error that reads as

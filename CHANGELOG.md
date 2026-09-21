@@ -17,9 +17,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   restricted shell. The private key reaches the runner as a file
   (`/run/secrets/ssh_key`, `0600`) and never enters the agent container.
   **Read-only is a property of the agent, not of the connection**: an agent that
-  must not change the target is granted `ssh_probe`, `ssh_read_file` and
-  `ssh_list_dir` and not `ssh_exec` or `ssh_write_file`, so one connection
-  serves a reader and a writer at once. The host key is pinned
+  must not change the target is granted `ssh_probe` and `ssh_read` and not
+  `ssh_exec`, `ssh_write_file` or `ssh_edit_file`, so one connection serves a
+  reader and a writer at once; every tool also carries the MCP
+  `readOnlyHint`/`destructiveHint` annotations. `ssh_read` lists a directory or
+  returns a file's lines numbered like `cat -n`, windowed by `offset`/`limit`;
+  `ssh_edit_file` replaces one exact string (or every occurrence) in place,
+  keeping the file's mode and owner (a failed write puts the original back);
+  `ssh_write_file` creates new files `0600` and refuses a directory. `ssh_exec`
+  takes a `timeout_seconds` (120 s by default, 600 s at most): when it expires
+  the call returns `timed_out: true`, `exit_code: null` and the output so far,
+  and drops the connection, but
+  **the remote process may keep running** — wrap long commands in `timeout` on
+  the target. Oversized output keeps its head and tail; every SFTP transfer is
+  bounded at 120 s and a dead connection is dropped by SSH keepalives. Exit
+  status 255 belongs to ssh itself, so a command exiting 255 reads as an ssh
+  failure. Paths are relative to the account's home; `~` is not expanded. The host key is pinned
   (`StrictHostKeyChecking=yes`) with no trust-on-first-use — in an autonomous
   run nobody is there to accept one. A target on a private address is refused by
   the SSRF floor on the runner's egress path: a public VPS works, a LAN box does
