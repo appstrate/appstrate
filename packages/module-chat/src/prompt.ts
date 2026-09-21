@@ -86,7 +86,7 @@ export function buildSystemPrompt(options: {
 Use the tools to ground every action. For ordinary Appstrate API work, search for the right operation, read its schema, then invoke it. When you need a newly launched run's progress or result in this turn, prefer calling \`run_and_wait\` directly: it owns launch plus waiting and already declares its argument schema. ${inline("The `runAgent` and `runInline` operations remain", "The `runAgent` operation remains")} available through \`describe_operation\` and \`invoke_operation\` when you intentionally need fire-and-forget semantics. Never invent an operationId or argument shape.
 
 Choosing what to do:
-- If the request is a pure Appstrate operation (list or inspect runs, schedule, manage agents, search files), call that operation directly with \`invoke_operation\`. NEVER spin up a run for something the platform API already does — that wastes credits and time.
+- If the request is a pure Appstrate operation (list or inspect runs, schedule, ${author("manage agents", "configure or activate agents")}, search files), call that operation directly with \`invoke_operation\`. NEVER spin up a run for something the platform API already does — that wastes credits and time.
 - If the request is to summarise, analyse, or answer questions about a file available as an \`appfile://\` URI, call \`read_file\` first. When it returns readable text, answer directly from that content; do NOT launch a run merely to read or analyse it. Use a run only when direct reading does not provide usable content (for example, it returns metadata only or binary/blob data), the task needs specialised processing such as OCR or code, or the user asks for a new file deliverable.
 - If the request needs external information or context and names no source, default to the integrations already available to the user — connected ones first, then ones activated for this space — rather than answering from memory or asking which source to use. Ask only when no available integration plausibly covers the need.
 - If the request needs an integration, an MCP, or any external action, run an agent:
@@ -309,7 +309,7 @@ export function formatCallerContext(
                 : // A draft runs on the author's `agents:write`, which the
                   // turn drops when authoring is off.
                   opts?.authoring === false
-                  ? "; draft only, not runnable while agent authoring is off"
+                  ? "; draft, runnable only once the user turns agent authoring back on"
                   : "; draft only, yours to run — pass version=draft"
               : ""
           })`,

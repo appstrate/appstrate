@@ -251,6 +251,10 @@ describe("the persona without inline composition", () => {
     expect(AUTHOR_ONLY).toContain(skills);
     expect(AUTHOR_ONLY).not.toContain("Do not create or modify an agent");
     expect(AUTHOR_ONLY).not.toContain('kind:"inline"');
+    // Configuring or activating stays open (`agents:configure`); "manage" would not.
+    expect(FULL).toContain("manage agents");
+    expect(REDUCED).not.toContain("manage agents");
+    expect(REDUCED).toContain("configure or activate agents");
   });
 
   it("is materially shorter — the point is not to pay for what is refused", () => {
