@@ -1902,9 +1902,14 @@ export const schemas = {
   // nothing to run is a step with no content.
   HandoffCommandStep: {
     type: "object",
-    required: ["kind", "label", "shell"],
+    required: ["kind", "id", "label", "shell"],
     properties: {
       kind: { type: "string", enum: ["command"] },
+      id: {
+        type: "string",
+        description:
+          "Stable identifier a client can key a translation on; `label`/`note` are the English default.",
+      },
       label: { type: "string" },
       shell: {
         type: "string",
@@ -1922,9 +1927,14 @@ export const schemas = {
   // required for the same reason `shell` is on the arm above.
   HandoffValueStep: {
     type: "object",
-    required: ["kind", "label", "value"],
+    required: ["kind", "id", "label", "value"],
     properties: {
       kind: { type: "string", enum: ["value"] },
+      id: {
+        type: "string",
+        description:
+          "Stable identifier a client can key a translation on; `label`/`note` are the English default.",
+      },
       label: { type: "string" },
       value: { type: "string" },
       note: { type: "string" },

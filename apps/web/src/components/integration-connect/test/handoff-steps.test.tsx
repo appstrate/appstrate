@@ -17,19 +17,27 @@ import { HandoffSteps, type HandoffStep } from "../handoff-steps.tsx";
 await i18nReady;
 await i18n.changeLanguage("fr");
 
+/**
+ * Ids the bundle carries no key for, on purpose: the structural assertions
+ * below then read the server's own text, and the localisation suite at the
+ * bottom owns both halves of the lookup.
+ */
 const STEPS: HandoffStep[] = [
   {
+    id: "demo_install",
     kind: "command",
     label: "Paste this on the target server",
     shell: "set -eu\ninstall -d ~agent/.ssh",
   },
   {
+    id: "demo_fingerprint",
     kind: "value",
     label: "Host fingerprint, pinned",
     value: "SHA256:YJK+IkPvWMR1nIl8CmsNEzIxSKBBIAZkrizRiuynnbw",
     note: "If it differs, someone is sitting in between.",
   },
   {
+    id: "demo_revoke",
     kind: "command",
     label: "Remove this key later",
     shell: "grep -vF 'AAAA' ~agent/.ssh/authorized_keys",
@@ -81,5 +89,58 @@ describe("HandoffSteps", () => {
   it("does not repeat the label inside a collapsed step", () => {
     const markup = render(<HandoffSteps steps={[STEPS[2]!]} />);
     expect(markup.split("Remove this key later")).toHaveLength(2);
+  });
+});
+
+/**
+ * A step's prose is the server's English until the bundle has a key for its
+ * `id`. Both directions matter: a kind the SPA has never heard of stays
+ * legible, and the one it ships keys for reads in the user's language. The
+ * harness renders in French.
+ */
+describe("HandoffSteps — prose keyed on the step id", () => {
+  it("renders the bundle text for an id it knows", () => {
+    const known: HandoffStep = {
+      id: "ssh_host_fingerprint",
+      kind: "value",
+      label: "Host fingerprint, pinned",
+      value: "SHA256:YJK+IkPvWMR1nIl8CmsNEzIxSKBBIAZkrizRiuynnbw",
+      note: "The command above prints the server's fingerprint as its last line.",
+    };
+    const markup = render(<HandoffSteps steps={[known]} />);
+
+    expect(markup).toContain("Empreinte de l'hôte, épinglée");
+    expect(markup).toContain("quelqu'un s'est intercalé");
+    expect(markup).not.toContain("Host fingerprint, pinned");
+  });
+
+  it("falls back to the server's own text for an id it does not know", () => {
+    // What a second provisioning kind looks like before anyone writes it a key.
+    const unknown: HandoffStep = {
+      id: "mtls_install",
+      kind: "command",
+      label: "Install the client certificate",
+      shell: "cp client.pem /etc/ssl/private/",
+      note: "The chain matters as much as the leaf.",
+    };
+    const markup = render(<HandoffSteps steps={[unknown]} />);
+
+    expect(markup).toContain("Install the client certificate");
+    expect(markup).toContain("The chain matters as much as the leaf.");
+  });
+
+  it("renders no note when the server sent none, key or no key", () => {
+    // `ssh_revoke` HAS a note key. A step arriving without a note must not grow
+    // one out of the bundle.
+    const noNote: HandoffStep = {
+      id: "ssh_revoke",
+      kind: "command",
+      label: "Remove this key from the server",
+      shell: "grep -vF 'AAAA' ~agent/.ssh/authorized_keys",
+    };
+    const markup = render(<HandoffSteps steps={[noNote]} />);
+
+    expect(markup).toContain("Retirer cette clé du serveur");
+    expect(markup).not.toContain("Gardez ce bloc");
   });
 });

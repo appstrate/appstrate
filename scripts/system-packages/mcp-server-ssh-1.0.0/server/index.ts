@@ -46,6 +46,7 @@
  * `tools/call` over line-delimited JSON-RPC.
  */
 
+import { rmSync } from "node:fs";
 import { mkdtemp, writeFile, readFile, rm, chmod } from "node:fs/promises";
 import { tmpdir, homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -365,9 +366,14 @@ export function truncateUtf8(text: string, budget: number): { text: string; trun
 }
 
 /**
- * Parse `sftp> ls -l` output into entries. Batch mode echoes each command as
+ * Parse `sftp> ls -la` output into entries. Batch mode echoes each command as
  * a `sftp> …` line, which is skipped. Sorted by name — readdir order differs
  * between filesystems, and a caller comparing output should not see that.
+ *
+ * sftp echoes the path it was GIVEN in front of every entry
+ * (`ls -la /home/agent` → `… /home/agent/t.txt`), so `name` is the last
+ * segment; `detail` keeps the line verbatim, link target included. `.` and
+ * `..` are dropped — the directory the caller just named is not a finding.
  */
 export function parseSftpLs(output: string): Array<{ name: string; detail: string }> {
   return output
@@ -376,11 +382,16 @@ export function parseSftpLs(output: string): Array<{ name: string; detail: strin
     .filter((l) => l !== "" && !l.startsWith("sftp>"))
     .map((line) => {
       const fields = line.trim().split(/\s+/);
-      // `-rw-r--r--    1 uid  gid  size  mon day  time  name…` — name is the
-      // remainder after the 8 fixed columns, so names with spaces survive.
-      const name = fields.length > 8 ? fields.slice(8).join(" ") : fields.at(-1)!;
-      return { name, detail: line.trim() };
+      // `-rw-r--r--    1 uid  gid  size  mon day  time  name…` — the remainder
+      // after the 8 fixed columns, so names with spaces survive.
+      const rest = fields.length > 8 ? fields.slice(8).join(" ") : fields.at(-1)!;
+      // A symlink line is `name -> target`; only the half before the arrow is
+      // a name.
+      const arrow = rest.indexOf(" -> ");
+      const path = arrow === -1 ? rest : rest.slice(0, arrow);
+      return { name: path.slice(path.lastIndexOf("/") + 1), detail: line.trim() };
     })
+    .filter((e) => e.name !== "." && e.name !== "..")
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -402,12 +413,23 @@ function logLine(fields: Record<string, string | number | boolean>): void {
  */
 let sessionDir: string | null = null;
 let knownHostsPath: string | null = null;
+let exitHookInstalled = false;
 
 async function ensureSession(cfg: SshConfig): Promise<string> {
   if (knownHostsPath) return knownHostsPath;
   const root = process.env.HOME && process.env.HOME !== "" ? homedir() : tmpdir();
   sessionDir = await mkdtemp(join(root, ".appstrate-ssh-"));
   await chmod(sessionDir, 0o700);
+  if (!exitHookInstalled) {
+    // Nothing else removes the directory: the stdin loop ending returns from
+    // `main` and the process exits, so `exit` is the last moment anything
+    // runs — and the only one where an unlink must be SYNCHRONOUS. Installed
+    // once per process, not once per directory, so nothing accumulates.
+    process.on("exit", () => {
+      if (sessionDir) rmSync(sessionDir, { recursive: true, force: true });
+    });
+    exitHookInstalled = true;
+  }
   knownHostsPath = join(sessionDir, "known_hosts");
   await writeFile(knownHostsPath, renderKnownHosts(cfg.host, cfg.port, cfg.hostKey), {
     mode: 0o600,
@@ -466,18 +488,25 @@ function sshFailure(what: string, res: RunResult): Error {
     hint =
       "\nhint: the pinned host key does not match — the target's key changed or SSH_HOST_KEY is wrong. Never accept a new key silently; reconnect the integration.";
   } else if (/permission denied \(publickey/i.test(tail)) {
+    // Three causes the client cannot tell apart — sshd sends the same refusal
+    // for all of them, so they are named together.
     hint =
       "\nhint: the target rejected the key — check authorized_keys on the dedicated account. " +
       "The `restrict` option the install block writes needs OpenSSH 7.2 or newer; an older sshd " +
-      "refuses the whole line as an unknown option, so the key is installed and never authenticates.";
+      "refuses the whole line as an unknown option, so the key is installed and never authenticates. " +
+      "On an sshd built WITHOUT PAM (Alpine), a locked account password (`user:!:` in /etc/shadow, " +
+      "what `adduser -D` and `useradd` leave behind) also refuses public-key login — unlock it with " +
+      "`echo '<user>:*' | chpasswd -e`, never `passwd -u`, which leaves an empty password on busybox.";
   } else if (/CONNECT refused by proxy/i.test(tail)) {
     hint = "\nhint: the egress proxy refused the target (private address or blocked host).";
-  } else if (what === "sftp" && /connection closed/i.test(tail)) {
-    // sshd routes the sftp SUBSYSTEM through a forced command when the account
-    // has one, and a forced command with no sftp arm refuses it before a single
-    // packet — which reads as a dead host unless it is named. Appstrate does
-    // not install one, so this is the operator's own `ForceCommand` or
-    // `command=`, and theirs to fix.
+  } else if (what === "sftp" && /^connection closed/i.test(tail)) {
+    // Last, and only when the channel dying is the FIRST thing said: sshd
+    // routes the sftp SUBSYSTEM through a forced command when the account has
+    // one, and a forced command with no sftp arm refuses it before a single
+    // packet — which reads as a dead host unless it is named. A
+    // `Connection closed` that FOLLOWS another diagnostic is that diagnostic's
+    // consequence and gets nothing from here. Appstrate installs no forced
+    // command, so this is the operator's own `ForceCommand` or `command=`.
     hint =
       "\nhint: the sftp subsystem was refused before the session opened. If this account has a " +
       "forced command (ForceCommand in sshd_config, or command= in authorized_keys), it needs an " +
@@ -576,7 +605,9 @@ export async function listDirTool(
 ): Promise<Record<string, unknown>> {
   const cfg = getConfig();
   if (typeof args.path !== "string") throw new ProtocolError("`path` must be a string");
-  const res = await sftpBatch(cfg, deps, [`ls -l ${quoteSftpPath(args.path)}`]);
+  // `-a` because a home directory's interesting contents are dotfiles, and
+  // plain `ls -l` hides them with no signal that anything was held back.
+  const res = await sftpBatch(cfg, deps, [`ls -la ${quoteSftpPath(args.path)}`]);
   return { path: args.path, entries: parseSftpLs(res.stdout) };
 }
 

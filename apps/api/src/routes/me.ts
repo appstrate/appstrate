@@ -453,6 +453,7 @@ router.get("/connections/:connectionId/handoff", async (c) => {
         ? [
             {
               kind: step.kind,
+              id: step.id,
               label: step.label,
               shell: step.shell,
               ...(step.note ? { note: step.note } : {}),

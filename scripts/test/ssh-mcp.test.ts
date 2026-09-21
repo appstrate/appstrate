@@ -406,6 +406,53 @@ describe("ssh_write_file", () => {
   });
 });
 
+describe("ssh_list_dir", () => {
+  // Dotfiles are most of what is worth seeing in a home directory, and plain
+  // `ls -l` hides them without saying so.
+  it("asks sftp for `ls -la`", async () => {
+    restoreEnv = withEnv(ENV);
+    const { run, calls } = stubRunner([{ stdout: "" }]);
+    await handleRequest(
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "ssh_list_dir", arguments: { path: "/home/agent" } },
+      },
+      { run, knownHostsPath: join(scratch, "kh") },
+    );
+    expect(calls[0]!.stdin).toBe('ls -la "/home/agent"\n');
+  });
+
+  const failWith = async (stderr: string): Promise<string> => {
+    restoreEnv = withEnv(ENV);
+    const { run } = stubRunner([{ stderr, code: 255 }]);
+    const res = await handleRequest(
+      {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "ssh_list_dir", arguments: { path: "/data" } },
+      },
+      { run, knownHostsPath: join(scratch, "kh") },
+    );
+    return (res?.result as { content: Array<{ text: string }> }).content[0]!.text;
+  };
+
+  it("names a forced command when the closed channel is all the target said", async () => {
+    expect(await failWith("Connection closed\n")).toMatch(/forced command/);
+  });
+
+  // A `Connection closed` that TRAILS a diagnostic is that diagnostic's
+  // consequence: a refused destination is not a forced command, and sending the
+  // operator to sshd_config over it costs an afternoon.
+  it("stays silent when the closed channel only trails another error", async () => {
+    const text = await failWith("hostname contains invalid characters\r\nConnection closed\r\n");
+    expect(text).toContain("invalid characters");
+    expect(text).not.toMatch(/forced command/);
+  });
+});
+
 describe("ssh_probe", () => {
   it("authenticates with -N (no session) and reports the fingerprint", async () => {
     restoreEnv = withEnv(ENV);
@@ -460,15 +507,31 @@ describe("quoteSftpPath", () => {
 });
 
 describe("parseSftpLs", () => {
-  it("skips the command echo, keeps names with spaces, sorts", () => {
-    const out = [
-      'sftp> ls -l "/data"',
-      "-rw-r--r--    1 1001     1001           27 Sep 18 08:40 motd.txt",
-      "-rw-r--r--    1 1001     1001            5 Sep 18 08:40 a file.txt",
-      "",
-    ].join("\n");
-    const entries = parseSftpLs(out);
-    expect(entries.map((e: { name: string }) => e.name)).toEqual(["a file.txt", "motd.txt"]);
+  // Shaped like the real thing: sftp echoes the command, prefixes every entry
+  // with the path it was GIVEN, and `-a` brings back `.`, `..` and dotfiles.
+  const OUT = [
+    'sftp> ls -la "/home/agent"',
+    "drwx------    5 1001     1001         4096 Sep 18 08:40 /home/agent/.",
+    "drwxr-xr-x    3 0        0            4096 Sep 18 08:39 /home/agent/..",
+    "drwx------    2 1001     1001         4096 Sep 18 08:40 /home/agent/.ssh",
+    "-rw-r--r--    1 1001     1001           27 Sep 18 08:40 /home/agent/motd.txt",
+    "-rw-r--r--    1 1001     1001            5 Sep 18 08:40 /home/agent/a file.txt",
+    "lrwxrwxrwx    1 1001     1001            8 Sep 18 08:40 /home/agent/latest -> motd.txt",
+    "",
+  ].join("\n");
+
+  it("names each entry by its basename, dotfiles kept, `.` and `..` dropped", () => {
+    expect(parseSftpLs(OUT).map((e: { name: string }) => e.name)).toEqual([
+      ".ssh",
+      "a file.txt",
+      "latest",
+      "motd.txt",
+    ]);
+  });
+
+  it("keeps the line verbatim in `detail`, a symlink's target included", () => {
+    const link = parseSftpLs(OUT).find((e: { name: string }) => e.name === "latest");
+    expect(link.detail).toContain("/home/agent/latest -> motd.txt");
   });
 });
 
@@ -586,5 +649,43 @@ describe("proxy-connect as a ProxyCommand subprocess", () => {
     await proc.exited;
     expect(seen).toMatch(/^CONNECT target\.example:22 HTTP\/1\.1\r\n/);
     expect(out).toBe("SSH-2.0-fake\r\n");
+  });
+});
+
+// ───────────────────────────── session dir ───────────────────────────
+
+// The session directory holds `known_hosts` and the sftp scratch files, and
+// nothing unlinks it while the server runs. A real child process is the only
+// way to observe the `exit` hook: the stdin loop ending is the normal end of
+// this server, and an in-process test never reaches it.
+describe("session directory", () => {
+  it("is removed when the process ends", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ssh-mcp-home-"));
+    const child = Bun.spawn(
+      [
+        "bun",
+        "-e",
+        `const { readdirSync } = await import("node:fs");
+         const server = await import(process.env.SERVER_ENTRY);
+         await server.probeTool({ run: async () => ({ stdout: "", stderr: "", code: 0 }) });
+         console.log(JSON.stringify(readdirSync(process.env.HOME)));`,
+      ],
+      {
+        env: {
+          ...process.env,
+          ...ENV,
+          HOME: home,
+          SERVER_ENTRY: join(SOURCES, serverDir, "server/index.ts"),
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    const whileRunning = JSON.parse((await new Response(child.stdout).text()).trim());
+    await child.exited;
+
+    expect(whileRunning).toEqual([expect.stringMatching(/^\.appstrate-ssh-/)]);
+    expect(await readdir(home)).toEqual([]);
+    await rm(home, { recursive: true, force: true });
   });
 });

@@ -269,6 +269,20 @@ describe("provisionCredentials — what gets minted and rendered", () => {
    * steps, not a front-end branch — which is only true while nothing here
    * depends on their order or their count.
    */
+  /**
+   * The `id` is what a localised client keys on, so it is part of the contract
+   * in a way the English beside it is not: renaming one silently drops a
+   * translation back to the server's own text.
+   */
+  it("names each step with an id that is stable for this kind", async () => {
+    const res = (await provisionCredentials(SSH_AUTH, { ...base }, null))!;
+    expect(stepsOf(res).map((s) => s.id)).toEqual([
+      "ssh_install",
+      "ssh_host_fingerprint",
+      "ssh_revoke",
+    ]);
+  });
+
   it("describes the handoff as typed steps, not named fields", async () => {
     const res = (await provisionCredentials(SSH_AUTH, { ...base }, null))!;
     expect(stepsOf(res).map((s) => s.kind)).toEqual(["command", "value", "command"]);
@@ -591,6 +605,60 @@ describe("the generated install script", () => {
     expect(run.code).toBe(0);
     expect(run.stdout).not.toContain("fingerprint of this host");
     expect(run.stderr).toContain("no fingerprint could be read");
+  });
+});
+
+/**
+ * A dedicated account created with no password (`adduser -D`, `useradd` with
+ * none) has a LOCKED password field, which an sshd built without PAM refuses
+ * even for public-key login — `Permission denied (publickey)` mid-run, the
+ * shape the login-shell guard exists to prevent. A PAM sshd accepts it, so the
+ * block warns and installs the key anyway.
+ *
+ * The check reads /etc/shadow, which no sandbox can write. So the ONE literal
+ * path is rewritten to a temp file and the otherwise untouched production text
+ * is executed — a seam in the renderer would exist for nothing but this test.
+ */
+describe("the install block warns about a locked password", () => {
+  async function installWithShadow(field: string | null) {
+    const home = await mkdtemp(join(tmpdir(), "ssh-shadow-"));
+    const res = (await provisionCredentials(SSH_AUTH, { ...base }, null))!;
+    const shell = installShell(res);
+    // Exactly one site, so the rewrite cannot silently miss or over-reach.
+    expect(shell.split("/etc/shadow")).toHaveLength(2);
+
+    let shadow = join(home, "absent-shadow");
+    if (field !== null) {
+      shadow = join(home, "shadow");
+      await writeFile(shadow, `root:*:1::::::\nagent:${field}:1::::::\n`);
+    }
+    return {
+      run: await runScript(shell.replace("/etc/shadow", shadow), { home }),
+      keys: () => readFile(join(home, ".ssh", "authorized_keys"), "utf8"),
+    };
+  }
+
+  it("warns, installs the key and still exits 0 for a locked account", async () => {
+    const { run, keys } = await installWithShadow("!");
+    expect(run.code).toBe(0);
+    expect(run.stderr).toContain("the password of agent is locked");
+    // The remedy is the one that keeps password login impossible.
+    expect(run.stderr).toContain("echo 'agent:*' | chpasswd -e");
+    expect(await keys()).toContain("restrict ssh-ed25519");
+  });
+
+  const FIELDS: Array<[string, string | null, boolean]> = [
+    ["a lock in front of a hash", "!$6$salt$hash", true],
+    ["the recommended `*`", "*", false],
+    ["a real hash", "$6$salt$hash", false],
+    ["no shadow file at all", null, false],
+  ];
+
+  it.each(FIELDS)("%s: warns = %p", async (_label, field, warns) => {
+    const { run, keys } = await installWithShadow(field);
+    expect(run.code).toBe(0);
+    expect(run.stderr.includes("is locked")).toBe(warns);
+    expect(await keys()).toContain("restrict ssh-ed25519");
   });
 });
 

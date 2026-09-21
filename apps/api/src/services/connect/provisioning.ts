@@ -51,13 +51,17 @@ import { isBlockedHost } from "@appstrate/afps-shared/ssrf";
  * Steps are DATA, not named fields: the SPA renders the list, so a new `kind`
  * ships without a front-end branch. Two shapes, both with a consumer today — a
  * block to run and a value to read; publisher prose is already `setup_guide`
- * (AFPS §7.10). Labels and notes are SERVER text — English, like every other
- * string this API emits, and not i18n keys: half of a step (the shell block) is
- * generated here anyway, so a catalogue could only ever hold the other half.
+ * (AFPS §7.10).
+ *
+ * Each step carries an `id`, stable per provisioning kind, and `label`/`note`
+ * in English beside it. A headless caller reads the English; the SPA keys a
+ * translation on the `id` and falls back to it. Two audiences, one payload.
  */
 export type HandoffStep =
   | {
       kind: "command";
+      /** Stable per kind. What a client keys a translation on. */
+      id: string;
       label: string;
       /** Shell to run on the target. Copied, never executed by the platform. */
       shell: string;
@@ -70,7 +74,7 @@ export type HandoffStep =
        */
       deferred?: boolean;
     }
-  | { kind: "value"; label: string; value: string; note?: string };
+  | { kind: "value"; id: string; label: string; value: string; note?: string };
 
 /** The submitted, not-yet-persisted credential bag. */
 type SubmittedFields = Record<string, unknown>;
@@ -154,6 +158,23 @@ function renderInstallCommand(user: string, publicKey: string, hostKeyPub: strin
     `    echo "  SSH runs commands through the login shell: none would execute." >&2`,
     `    echo "  Give the account /bin/sh, then run this block again." >&2`,
     `    exit 1 ;;`,
+    `esac`,
+    ``,
+    `# An account created with no password has a LOCKED password field, and an`,
+    `# sshd built WITHOUT PAM refuses a locked account even for public-key login`,
+    `# — the same mid-run "Permission denied (publickey)" the guard above exists`,
+    `# to prevent. One built with PAM accepts it, so this is a warning and the`,
+    `# key goes in either way. The shadow file is root's own to read, and the`,
+    `# pattern is quoted so an interactive shell reads no history expansion.`,
+    `pw=$(awk -F: -v u=${user} '$1==u{print $2}' /etc/shadow 2>/dev/null) || pw=`,
+    `case "\${pw:-}" in`,
+    `  '!'*)`,
+    `    echo "appstrate: the password of ${user} is locked." >&2`,
+    `    echo "  An sshd built without PAM refuses a locked account, key or not." >&2`,
+    `    echo "  To unlock it while keeping password login impossible:" >&2`,
+    `    echo "    echo '${user}:*' | chpasswd -e" >&2`,
+    `    echo "  Not passwd -u: on busybox it leaves the account with NO password." >&2`,
+    `    ;;`,
     `esac`,
     ``,
     `# restrict turns off port forwarding, agent forwarding, X11 and pty. What`,
@@ -338,11 +359,13 @@ function sshHandoffSteps(credentials: Record<string, unknown>): HandoffStep[] {
   return [
     {
       kind: "command",
+      id: "ssh_install",
       label: "Paste on the target server (as root, or with sudo)",
       shell: renderInstallCommand(user, publicKey, hostKeyPub),
     },
     {
       kind: "value",
+      id: "ssh_host_fingerprint",
       label: "Host fingerprint, pinned",
       value: fingerprint,
       note:
@@ -352,6 +375,7 @@ function sshHandoffSteps(credentials: Record<string, unknown>): HandoffStep[] {
     {
       kind: "command",
       deferred: true,
+      id: "ssh_revoke",
       label: "Remove this key from the server",
       shell: renderRevokeCommand(user, publicKey),
       note:

@@ -182,6 +182,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "filter.", // components/file-list-panel.tsx — t(`filter.${p}`)
   "integration.auth.type.", // components/integration-connect/{inline-connect-button,integration-connection-picker}.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
+  "integration.connect.handoff.", // components/integration-connect/handoff-steps.tsx — stepLabel()/stepNote()
   "library.tab.", // pages/library-page.tsx — t(`library.tab.${tab}`)
   "models.generation.levels.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
   "models.generation.levelsShort.", // packages/ui — model-generation-labels.ts buildGenerationLabels()

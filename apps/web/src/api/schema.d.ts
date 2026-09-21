@@ -5391,6 +5391,8 @@ export interface components {
              * @enum {string}
              */
             kind: "command";
+            /** @description Stable identifier a client can key a translation on; `label`/`note` are the English default. */
+            id: string;
             label: string;
             /** @description Shell to run on the target. The platform never runs it. */
             shell: string;
@@ -5405,6 +5407,8 @@ export interface components {
              * @enum {string}
              */
             kind: "value";
+            /** @description Stable identifier a client can key a translation on; `label`/`note` are the English default. */
+            id: string;
             label: string;
             value: string;
             note?: string;
