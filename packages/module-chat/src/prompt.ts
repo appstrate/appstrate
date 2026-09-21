@@ -223,6 +223,7 @@ export function formatCallerContext(
   raw: unknown,
   opts?: { locale?: string; now?: Date; canAuthorAgents?: boolean },
 ): string {
+  const author = opts?.canAuthorAgents ?? true;
   const ctx = (raw ?? {}) as CallerContext;
   const name = ctx.user?.name?.trim();
   const email = ctx.user?.email?.trim();
@@ -291,9 +292,9 @@ export function formatCallerContext(
     // verbatim" instruction lives in `buildSystemPrompt` for the same reason — see
     // the block-wide rule below.
     lines.push(
-      opts?.canAuthorAgents === false
-        ? `Integrations the user has connected: ${list}.`
-        : `Integrations the user has connected and could attach to an agent: ${list}.`,
+      author
+        ? `Integrations the user has connected and could attach to an agent: ${list}.`
+        : `Integrations the user has connected: ${list}.`,
     );
   } else {
     lines.push("The user has no connected integrations yet.");
@@ -312,9 +313,9 @@ export function formatCallerContext(
                 ? "; draft only, not runnable — nothing published and you do not author it"
                 : // A draft runs on the author's `agents:write`, which the
                   // turn drops when authoring is off.
-                  opts?.canAuthorAgents === false
-                  ? "; draft, not runnable in this turn — agent authoring is off or not granted here"
-                  : "; draft only, yours to run — pass version=draft"
+                  author
+                  ? "; draft only, yours to run — pass version=draft"
+                  : "; draft, not runnable in this turn — agent authoring is off or not granted here"
               : ""
           })`,
       );
@@ -322,7 +323,7 @@ export function formatCallerContext(
     if (ctx.agents_truncated) lines.push("(list truncated)");
   }
   // Skills attach to an agent the turn may author; otherwise they are noise.
-  if (ctx.skills?.length && opts?.canAuthorAgents !== false) {
+  if (ctx.skills?.length && author) {
     lines.push("", "## Skills you can attach to an agent");
     for (const s of ctx.skills) {
       const desc = s.description?.trim();

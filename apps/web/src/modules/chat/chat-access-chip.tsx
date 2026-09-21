@@ -47,7 +47,7 @@ export function ChatAccessChip() {
   const spaceRole = spaceRoleLabel(spaces?.find((s) => s.id === spaceId)?.role, (key) => t(key));
   const orgRoleLabel = t(`settings:${roleI18nKey(orgRole)}`);
   const roleLabel = spaceRole ?? orgRoleLabel;
-  const capabilities = resolveChatCapabilities({ can, spaceGrant });
+  const capabilities = resolveChatCapabilities({ can, spaceGrant, authoring });
 
   return (
     <Popover>
@@ -84,10 +84,7 @@ export function ChatAccessChip() {
         <p className="text-sm font-medium">{t("chat:access.title")}</p>
         <p className="text-muted-foreground mt-0.5 text-xs">{t("chat:access.subtitle")}</p>
 
-        <ChatCapabilityList
-          capabilities={capabilities}
-          turnedOff={authoring ? NOTHING_OFF : AUTHORING_OFF}
-        />
+        <ChatCapabilityList capabilities={capabilities} />
 
         <p className="text-muted-foreground mt-3 border-t pt-2 text-xs">
           {t("chat:access.roleLine", { org: orgRoleLabel, space: spaceRole ?? "—" })}
@@ -100,10 +97,6 @@ export function ChatAccessChip() {
   );
 }
 
-/** Rows the composer's agent-authoring switch turns off: granted, but not used this turn. */
-const AUTHORING_OFF: ReadonlySet<string> = new Set(["createAgents"]);
-const NOTHING_OFF: ReadonlySet<string> = new Set();
-
 /**
  * One list item per capability, the verdict INSIDE the item it judges. The
  * check/cross is decoration (`aria-hidden`); what a screen reader announces is
@@ -112,21 +105,20 @@ const NOTHING_OFF: ReadonlySet<string> = new Set();
  */
 export function ChatCapabilityList({
   capabilities,
-  turnedOff,
 }: {
   capabilities: readonly ResolvedChatCapability[];
-  turnedOff: ReadonlySet<string>;
 }) {
   const { t } = useTranslation(["chat"]);
   return (
     <ul className="mt-2 space-y-1">
       {capabilities.map((capability) => {
-        const off = capability.granted && turnedOff.has(capability.id);
+        const off = capability.verdict === "off";
+        const granted = capability.verdict === "granted";
         return (
           <li key={capability.id} className="flex items-center gap-2 text-xs">
             {off ? (
               <BotOffIcon aria-hidden="true" className="text-muted-foreground size-3.5 shrink-0" />
-            ) : capability.granted ? (
+            ) : granted ? (
               <CheckIcon
                 aria-hidden="true"
                 className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
@@ -138,7 +130,7 @@ export function ChatCapabilityList({
               className={cn(
                 off
                   ? "text-muted-foreground"
-                  : capability.granted
+                  : granted
                     ? "text-foreground"
                     : "text-muted-foreground line-through",
               )}
@@ -149,7 +141,7 @@ export function ChatCapabilityList({
             {!off && (
               <span className="sr-only">
                 {" — "}
-                {t(capability.granted ? "chat:access.granted" : "chat:access.denied")}
+                {t(granted ? "chat:access.granted" : "chat:access.denied")}
               </span>
             )}
           </li>

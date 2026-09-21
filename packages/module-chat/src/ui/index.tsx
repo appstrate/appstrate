@@ -147,7 +147,7 @@ export interface ChatPageProps {
   useFileImageSrc: UseFileImageSrc;
   uploadFile: UploadFile;
   t: ChatTranslate;
-  /** See `ChatHost.canAuthorAgents`. */
+  /** Whether the caller may create agents, resolved by the shell: the module resolves no RBAC. */
   canAuthorAgents: boolean;
 }
 
@@ -258,9 +258,8 @@ export function ChatPage({
       downloadFile,
       useFileImageSrc,
       t,
-      canAuthorAgents,
     }),
-    [onOpenFile, downloadFile, useFileImageSrc, t, canAuthorAgents],
+    [onOpenFile, downloadFile, useFileImageSrc, t],
   );
 
   // File attachments: the composer stages picked files through the HOST uploader
@@ -282,7 +281,7 @@ export function ChatPage({
   const composerSlot = useMemo(
     () => (
       <div className="flex items-center gap-2">
-        <AgentAuthoringToggle />
+        {canAuthorAgents ? <AgentAuthoringToggle /> : null}
         <ModelSelect
           models={models}
           selectedId={selectedModel}
@@ -293,7 +292,7 @@ export function ChatPage({
         {composerActions}
       </div>
     ),
-    [models, selectedModel, generation, composerActions],
+    [canAuthorAgents, models, selectedModel, generation, composerActions],
   );
 
   // The server's view of the ACTIVE conversation, reduced to two primitives so

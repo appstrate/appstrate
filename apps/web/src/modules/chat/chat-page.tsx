@@ -69,7 +69,7 @@ export function ChatModulePage() {
   // The same namespace's `t` is injected into the module, so the shell AROUND
   // those answers speaks the same language too — labels and aria-labels alike.
   const { t, i18n } = useTranslation("chat");
-  // The module resolves no RBAC of its own (see `ChatHost.canAuthorAgents`).
+  // The module resolves no RBAC of its own (see `ChatPageProps.canAuthorAgents`).
   const { can } = usePermissions();
   // The persona is read reactively and threaded through so this callback's
   // identity changes when the preview starts or ends. The module's SSE effects

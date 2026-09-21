@@ -12,14 +12,18 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { canAuthorAgents, resolveChatCapabilities, type ChatAccessContext } from "./chat-access.ts";
+import { resolveChatCapabilities, type ChatAccessContext } from "./chat-access.ts";
 import { PACKAGE_PERMISSIONS, type SpaceGrant } from "../../lib/package-permissions.ts";
 
 /** The grant `maySetPackageActive` reads for an integration in a team space. */
 const INTEGRATION_ACTIVATE_PERMISSION = PACKAGE_PERMISSIONS.integration.activate;
 
-/** A caller holding exactly `permissions`, standing in `space`. */
-function context(permissions: string[], space?: Partial<SpaceGrant>): ChatAccessContext {
+/** A caller holding exactly `permissions`, standing in `space`, agent authoring on unless said. */
+function context(
+  permissions: string[],
+  space?: Partial<SpaceGrant>,
+  authoring = true,
+): ChatAccessContext {
   const held = new Set(permissions);
   return {
     can: (permission) => held.has(permission),
@@ -27,14 +31,18 @@ function context(permissions: string[], space?: Partial<SpaceGrant>): ChatAccess
       space === undefined
         ? undefined
         : { permissions, personal: false, access: "member", ...space },
+    authoring,
   };
 }
 
 /** Every row id, in declaration order. */
 const ROW_IDS = resolveChatCapabilities(context([])).map((c) => c.id);
 
+/** Whether each row is granted: with authoring on, a row is either granted or denied. */
 function verdicts(ctx: ChatAccessContext): Record<string, boolean> {
-  return Object.fromEntries(resolveChatCapabilities(ctx).map((c) => [c.id, c.granted]));
+  return Object.fromEntries(
+    resolveChatCapabilities(ctx).map((c) => [c.id, c.verdict === "granted"]),
+  );
 }
 
 /**
@@ -136,28 +144,27 @@ describe("each row's own permission", () => {
   });
 });
 
-describe("the composer's agent-authoring button", () => {
-  it("answers exactly as the `createAgents` row, for every caller", () => {
-    // One rule for both: a button offered to a caller the chip marks as
-    // unable to create agents (or the reverse) would contradict itself.
-    const callers = [
-      [],
-      CONVERSES,
-      [...CONVERSES, "agents:write"],
-      ["chat:write", "mcp:read", "agents:write"],
-      ["mcp:read", "mcp:invoke", "agents:write"],
-      EVERYTHING,
-      EVERYTHING.filter((p) => p !== "chat:write"),
-      EVERYTHING.filter((p) => p !== "agents:write"),
-    ];
-    const answers = callers.map((permissions) => {
-      const ctx = context(permissions, {});
-      return [canAuthorAgents(ctx), verdicts(ctx).createAgents];
-    });
-    for (const [button, row] of answers) expect(button).toBe(row);
-    // Both answers occur, so the agreement above is not two constant `false`s.
-    expect(answers.map(([button]) => button)).toContain(true);
-    expect(answers.map(([button]) => button)).toContain(false);
+describe("the agent-authoring switch", () => {
+  function verdictOf(ctx: ChatAccessContext, id: string) {
+    return resolveChatCapabilities(ctx).find((c) => c.id === id)?.verdict;
+  }
+
+  it("turns off a held `createAgents` row, and only while it is off", () => {
+    expect(verdictOf(context(EVERYTHING, {}, false), "createAgents")).toBe("off");
+    expect(verdictOf(context(EVERYTHING, {}, true), "createAgents")).toBe("granted");
+  });
+
+  it("leaves a row the caller does not hold denied, not off", () => {
+    const without = EVERYTHING.filter((p) => p !== "agents:write");
+    expect(verdictOf(context(without, {}, false), "createAgents")).toBe("denied");
+  });
+
+  it("never turns off another row", () => {
+    const others = resolveChatCapabilities(context(EVERYTHING, {}, false)).filter(
+      (c) => c.id !== "createAgents",
+    );
+    expect(others.length).toBe(ROW_IDS.length - 1);
+    for (const c of others) expect(c.verdict).toBe("granted");
   });
 });
 

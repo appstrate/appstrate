@@ -176,15 +176,15 @@ describe("the capability list", () => {
   // The popover body is portalled and closed in this harness, so the list is
   // rendered on its own — it is the part whose structure carries the meaning.
   const capabilities = [
-    { id: "a", labelKey: "access.capability.runAgents", held: () => true, granted: true },
-    { id: "b", labelKey: "access.capability.schedule", held: () => false, granted: false },
-  ];
+    { id: "a", labelKey: "access.capability.runAgents", held: () => true, verdict: "granted" },
+    { id: "b", labelKey: "access.capability.schedule", held: () => false, verdict: "denied" },
+  ] as const;
 
   it("puts each verdict in the SAME item as the capability it judges", () => {
     // A screen reader reads each row as one unit: one `li` per capability,
     // label then verdict, so a verdict can never be announced next to a
     // neighbouring row's label.
-    const html = render(<ChatCapabilityList capabilities={capabilities} turnedOff={new Set()} />);
+    const html = render(<ChatCapabilityList capabilities={capabilities} />);
     const items = [...html.matchAll(/<li[^>]*>(.*?)<\/li>/g)].map((m) => m[1]!);
     expect(items).toHaveLength(2);
 
@@ -204,23 +204,21 @@ describe("the capability list", () => {
     expect(items[1]!.indexOf(schedule)).toBeLessThan(items[1]!.indexOf(denied));
   });
 
-  it("marks a granted row the composer switch turns off, without calling it refused", () => {
-    const create = [
+  it("marks a row the composer switch turns off, without calling it refused", () => {
+    const create = (verdict: "granted" | "off") => [
       {
         id: "createAgents",
         labelKey: "access.capability.createAgents",
         held: () => true,
-        granted: true,
+        verdict,
       },
     ];
-    const html = render(
-      <ChatCapabilityList capabilities={create} turnedOff={new Set(["createAgents"])} />,
-    );
+    const html = render(<ChatCapabilityList capabilities={create("off")} />);
     expect(html).toContain(i18n.t("chat:access.turnedOff"));
     expect(html).not.toContain(i18n.t("chat:access.denied"));
     expect(html).not.toContain("line-through");
 
-    const on = render(<ChatCapabilityList capabilities={create} turnedOff={new Set()} />);
+    const on = render(<ChatCapabilityList capabilities={create("granted")} />);
     expect(on).not.toContain(i18n.t("chat:access.turnedOff"));
     expect(on).toContain(i18n.t("chat:access.granted"));
   });

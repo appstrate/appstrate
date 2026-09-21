@@ -16,6 +16,8 @@ export interface ChatAccessContext {
   can: (permission: GateablePermission) => boolean;
   /** The caller's standing in the current space; `undefined` while it loads. */
   spaceGrant: SpaceGrant | undefined;
+  /** The composer's agent-authoring switch. */
+  authoring: boolean;
 }
 
 export interface ChatCapability {
@@ -23,6 +25,8 @@ export interface ChatCapability {
   /** Spelled in full, not built from `id`, so the locale guard checks it. */
   labelKey: string;
   held: (ctx: ChatAccessContext) => boolean;
+  /** A row the agent-authoring switch turns off: held, but not used this turn. */
+  authoring?: true;
 }
 
 /** The MCP transport admits nobody without `mcp:read` (`mcp/router.ts`). */
@@ -64,6 +68,7 @@ const CHAT_CAPABILITIES: readonly ChatCapability[] = [
     id: "createAgents",
     labelKey: "access.capability.createAgents",
     held: canAuthorAgents,
+    authoring: true,
   },
   {
     id: "readRuns",
@@ -96,8 +101,10 @@ const CHAT_CAPABILITIES: readonly ChatCapability[] = [
   },
 ];
 
+type ChatCapabilityVerdict = "granted" | "off" | "denied";
+
 export interface ResolvedChatCapability extends ChatCapability {
-  granted: boolean;
+  verdict: ChatCapabilityVerdict;
 }
 
 /** `chat:write` gates the turn itself: a `chat:read`-only caller holds no row. */
@@ -105,6 +112,10 @@ export function resolveChatCapabilities(ctx: ChatAccessContext): ResolvedChatCap
   const converses = ctx.can("chat:write");
   return CHAT_CAPABILITIES.map((capability) => ({
     ...capability,
-    granted: converses && capability.held(ctx),
+    verdict: !(converses && capability.held(ctx))
+      ? "denied"
+      : capability.authoring && !ctx.authoring
+        ? "off"
+        : "granted",
   }));
 }

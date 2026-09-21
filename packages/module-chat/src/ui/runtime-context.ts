@@ -122,12 +122,6 @@ export interface ChatHost {
   downloadFile: DownloadFile;
   useFileImageSrc: UseFileImageSrc;
   t: ChatTranslate;
-  /**
-   * May the assistant create agents for this caller? Shows the composer's
-   * agent-authoring toggle; the host resolves it, the module holds no RBAC, and
-   * the server re-checks the grant against the flag each turn sends.
-   */
-  canAuthorAgents: boolean;
 }
 
 const ChatHostContext = createContext<ChatHost | null>(null);

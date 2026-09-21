@@ -4,10 +4,10 @@
  * The composer's agent-authoring toggle: lets the caller keep the assistant to
  * published agents instead of creating new ones or composing one on the fly.
  *
- * A PREFERENCE inside the `agents:write` grant, so it is hidden outright for a
- * caller without it. The chat sends it with every turn (`agent_authoring`) and
- * the server intersects it with the grant: it narrows the turn's authority and
- * can never widen it.
+ * A PREFERENCE inside the `agents:write` grant: the host renders it only for a
+ * caller who may create agents. The chat sends it with every turn
+ * (`agent_authoring`) and the server intersects it with the grant: it narrows
+ * the turn's authority and can never widen it.
  */
 
 import { BotIcon, BotOffIcon } from "lucide-react";
@@ -23,9 +23,8 @@ import { setAgentAuthoringEnabled, useAgentAuthoringEnabled } from "./agent-auth
 import { useChatHost } from "./runtime-context.ts";
 
 export function AgentAuthoringToggle() {
-  const { t, canAuthorAgents } = useChatHost();
+  const { t } = useChatHost();
   const enabled = useAgentAuthoringEnabled();
-  if (!canAuthorAgents) return null;
   return (
     <TooltipProvider delayDuration={300}>
       <Tooltip>
