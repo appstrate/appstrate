@@ -60,5 +60,20 @@
   "model.settingsTitle": "Modèle et génération",
   "model.tabs.models": "Modèles",
   "model.tabs.configuration": "Configuration",
-  "generation.noneSupported": "Aucun réglage de génération disponible pour ce modèle."
+  "generation.noneSupported": "Aucun réglage de génération disponible pour ce modèle.",
+  "access.title": "Accès de l'assistant",
+  "access.subtitle": "L'assistant agit avec vos propres droits, jamais plus.",
+  "access.granted": "autorisé",
+  "access.denied": "refusé",
+  "access.roleLine": "Organisation : {{org}} · Espace : {{space}}",
+  "access.preview": "Prévisualiser un autre rôle",
+  "access.previewing": "Aperçu d'un rôle en cours : ce sont les droits du rôle prévisualisé.",
+  "access.capability.callApi": "Utiliser l'API Appstrate en votre nom",
+  "access.capability.runAgents": "Lancer vos agents",
+  "access.capability.authorAgents": "Créer et modifier des agents",
+  "access.capability.readRuns": "Consulter vos exécutions",
+  "access.capability.readFiles": "Lire et joindre vos fichiers",
+  "access.capability.connectIntegrations": "Connecter vos comptes",
+  "access.capability.activateIntegrations": "Activer une intégration pour l'espace",
+  "access.capability.schedule": "Programmer des exécutions"
 }

@@ -21,6 +21,7 @@ import {
   conversationSidebarReducer,
 } from "./conversation-sidebar-state";
 import { ConversationContextActions, ConversationSidebar } from "./conversation-sidebar";
+import { ChatAccessChip } from "./chat-access-chip";
 
 export function ChatModulePage() {
   useCollapsedGlobalSidebar();
@@ -115,7 +116,10 @@ export function ChatModulePage() {
           onConversationChange={onConversationChange}
           onOpenFile={presentFile}
           headerActions={
-            <ConversationContextActions state={sidebarState} dispatch={dispatchSidebar} />
+            <div className="flex items-center gap-2">
+              <ChatAccessChip />
+              <ConversationContextActions state={sidebarState} dispatch={dispatchSidebar} />
+            </div>
           }
           downloadFile={onDownloadFile}
           useFileImageSrc={useFileImageSrc}

@@ -60,5 +60,20 @@
   "model.settingsTitle": "Model and generation",
   "model.tabs.models": "Models",
   "model.tabs.configuration": "Configuration",
-  "generation.noneSupported": "No generation settings are available for this model."
+  "generation.noneSupported": "No generation settings are available for this model.",
+  "access.title": "Assistant access",
+  "access.subtitle": "The assistant acts with your own permissions, never more.",
+  "access.granted": "allowed",
+  "access.denied": "denied",
+  "access.roleLine": "Organization: {{org}} · Space: {{space}}",
+  "access.preview": "Preview another role",
+  "access.previewing": "A role preview is active: these are the previewed role's permissions.",
+  "access.capability.callApi": "Use the Appstrate API on your behalf",
+  "access.capability.runAgents": "Run your agents",
+  "access.capability.authorAgents": "Create and edit agents",
+  "access.capability.readRuns": "See your runs",
+  "access.capability.readFiles": "Read and attach your files",
+  "access.capability.connectIntegrations": "Connect your accounts",
+  "access.capability.activateIntegrations": "Activate an integration for the space",
+  "access.capability.schedule": "Schedule runs"
 }
