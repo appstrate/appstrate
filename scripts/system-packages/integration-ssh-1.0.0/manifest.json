@@ -73,9 +73,9 @@
             "allowed_verbs": {
               "type": "string",
               "title": "Verbes autorisés",
-              "default": "[\"hostname\", \"uptime\", \"disk_usage\"]",
-              "description": "Tableau JSON de noms. Seul le NOM part sur le fil : c'est le dispatcher installé sur la cible qui décide ce qu'il exécute, jamais une commande envoyée d'ici. La commande d'installation générée implémente hostname, uptime, disk_usage, memory et whoami. Un tableau vide — ou ce champ effacé — n'autorise AUCUN verbe.",
-              "pattern": "^\\[\\s*(\"[a-z][a-z0-9_]{0,31}\"\\s*(,\\s*\"[a-z][a-z0-9_]{0,31}\"\\s*)*)?\\]$"
+              "default": "hostname,uptime,disk_usage",
+              "description": "Liste de noms séparés par des virgules. Seul le NOM part sur le fil : c'est le dispatcher installé sur la cible qui décide ce qu'il exécute, jamais une commande envoyée d'ici. La commande d'installation générée implémente hostname, uptime, disk_usage, memory et whoami. Saisissez * pour les autoriser tous — le formulaire le remplace par la liste explicite, pour que la connexion dise toujours ce que l'agent peut faire. Un champ vide n'autorise AUCUN verbe.",
+              "pattern": "^$|^[a-z][a-z0-9_]{0,31}(,[a-z][a-z0-9_]{0,31})*$"
             },
             "read_only": {
               "type": "string",

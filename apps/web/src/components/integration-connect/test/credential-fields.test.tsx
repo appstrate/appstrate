@@ -35,7 +35,7 @@ const SSH_AUTH = {
         port: { type: "string", title: "Port SSH", default: "22" },
         user: { type: "string", title: "Compte Unix sur la cible" },
         host_key: { type: "string", title: "Clé publique de l'hôte" },
-        allowed_verbs: { type: "string", title: "Verbes autorisés", default: '["hostname"]' },
+        allowed_verbs: { type: "string", title: "Verbes autorisés", default: "hostname" },
         read_only: { type: "string", title: "Lecture seule", default: "1" },
       },
     },
@@ -115,7 +115,7 @@ describe("initialCredentialValues", () => {
     // user's eyes that never reaches the server.
     expect(initialCredentialValues(SSH_AUTH)).toEqual({
       port: "22",
-      allowed_verbs: '["hostname"]',
+      allowed_verbs: "hostname",
     });
   });
 });

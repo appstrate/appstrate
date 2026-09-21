@@ -65,7 +65,7 @@ const ENV = {
   SSH_USER: "agent",
   SSH_PRIVATE_KEY_PATH: "/run/secrets/ssh_key",
   SSH_HOST_KEY: KEYSCAN_LINE,
-  SSH_ALLOWED_VERBS: JSON.stringify(["hostname", "read_motd"]),
+  SSH_ALLOWED_VERBS: "hostname,read_motd",
   SSH_READ_ONLY: "1",
 };
 
@@ -210,13 +210,28 @@ describe("loadConfig / parseHostKey", () => {
     expect(() => parseHostKey("example.com dsa AAAA")).toThrow(/ssh-keyscan/);
   });
 
-  it("refuses a non-array verb list", () => {
-    expect(() => loadConfig({ ...ENV, SSH_ALLOWED_VERBS: '{"a":1}' })).toThrow(/array/);
-    expect(() => loadConfig({ ...ENV, SSH_ALLOWED_VERBS: "not json" })).toThrow(/JSON/);
+  it("reads a comma-separated list, trimming around the separators", () => {
+    expect(loadConfig({ ...ENV, SSH_ALLOWED_VERBS: "hostname, uptime ,disk_usage" }).verbs).toEqual(
+      ["hostname", "uptime", "disk_usage"],
+    );
   });
 
-  it("treats an empty verb list as no verbs", () => {
-    expect(loadConfig({ ...ENV, SSH_ALLOWED_VERBS: "" }).verbs).toEqual([]);
+  it.each([
+    ["empty", ""],
+    ["whitespace", "   "],
+    ["nothing but separators", " , , "],
+  ])("treats a %s verb list as no verbs", (_label, raw) => {
+    expect(loadConfig({ ...ENV, SSH_ALLOWED_VERBS: raw }).verbs).toEqual([]);
+  });
+
+  /**
+   * The `*` shorthand lives in the connect FORM and is expanded before the
+   * credential is written, so it must never arrive here. Reaching this reader
+   * means something persisted it raw — refuse rather than invent a meaning,
+   * which is what treating it as a verb name does.
+   */
+  it("refuses the * shorthand, which is expanded before persistence", () => {
+    expect(() => loadConfig({ ...ENV, SSH_ALLOWED_VERBS: "*" })).toThrow(/not a\s+verb name/);
   });
 
   /**
@@ -227,7 +242,7 @@ describe("loadConfig / parseHostKey", () => {
    * there could put a shell string in SSH_ALLOWED_VERBS and `ssh_exec` would
    * hand it, verbatim, to the remote login shell.
    */
-  it.each(['["rm -rf /"]', '["uptime; id"]', '["Hostname"]', '["../../etc"]', '["a b"]'])(
+  it.each(["rm -rf /", "uptime; id", "Hostname", "../../etc", "a b"])(
     "refuses %s: a verb is a NAME, never a command",
     (allowed) => {
       expect(() => loadConfig({ ...ENV, SSH_ALLOWED_VERBS: allowed })).toThrow(/not a\s+verb name/);

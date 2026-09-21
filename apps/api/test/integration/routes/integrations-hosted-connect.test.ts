@@ -696,7 +696,7 @@ describe("hosted connect portal — credential provisioning", () => {
    */
   it.each([
     ["an account name shaped like an ssh option", { user: "-oProxyCommand=x" }],
-    ["a verb that is a shell string", { allowed_verbs: '["uptime; id"]' }],
+    ["a verb that is a shell string", { allowed_verbs: "uptime; id" }],
     ["a read-only flag that is neither 0 nor 1", { read_only: "no" }],
     ["a private key that is not an OpenSSH container", { private_key: "-----BEGIN RSA KEY-----" }],
   ])("refuses %s on the programmatic import too", async (_label, override) => {
@@ -719,7 +719,7 @@ describe("hosted connect portal — credential provisioning", () => {
       host: "ssh.example.test",
       user: "agent",
       host_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5",
-      allowed_verbs: '["hostname"]',
+      allowed_verbs: "hostname",
       read_only: "1",
     });
     expect(res.status).toBe(200);

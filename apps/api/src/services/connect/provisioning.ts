@@ -117,30 +117,47 @@ const DEFAULT_VERBS: Record<string, string> = {
 const VERB_NAME_RE = /^[a-z][a-z0-9_]{0,31}$/;
 
 /**
- * The JSON shape of an `allowed_verbs` value, or null when it is not one.
+ * Split an `allowed_verbs` value into its names. A comma-separated list, not
+ * JSON: the value is typed into a single-line text input by a human, and a
+ * JSON array made them balance brackets and quotes to say `hostname,uptime`.
  *
- * Shared by the two readers because they disagree on POLICY, not on syntax:
- * {@link parseVerbs} refuses anything it does not recognise, because it is
- * answering a form submission someone can correct, while {@link sshHandoffSteps}
- * drops it, because it is rendering a block from a bundle that already exists
- * and a refusal there would deny a deletion its removal command. Keeping the
- * JSON handling in one place is what stops those two policies from drifting
- * into two different notions of what an allowlist even is.
+ * Shared by the two readers because they disagree on POLICY, not on syntax —
+ * {@link parseVerbs} refuses a name it does not recognise, because it answers a
+ * form submission someone can correct, while {@link sshHandoffSteps} drops it,
+ * because it renders a block from a bundle that already exists and a refusal
+ * there would deny a deletion its removal command.
  *
- * An absent or empty value is an empty list, never "all of them" — emptying a
- * permission field has to narrow it.
+ * An absent or empty value is an empty list, never "all of them": emptying a
+ * permission field has to narrow it, and a caller that omits it has declared
+ * nothing to allow.
  */
-function verbArrayFrom(raw: unknown): unknown[] | null {
-  if (raw === undefined || raw === null || raw === "") return [];
-  if (Array.isArray(raw)) return raw;
-  if (typeof raw !== "string") return null;
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
+function verbNamesFrom(raw: unknown): string[] {
+  if (typeof raw !== "string") return [];
+  return raw
+    .split(",")
+    .map((v) => v.trim())
+    .filter((v) => v !== "");
 }
+
+/**
+ * The form-only shorthand for "every verb the generated dispatcher implements".
+ *
+ * Expanded by {@link parseVerbs}, so what gets PERSISTED is always the explicit
+ * list. Two reasons, and the second decides it. A stored `*` would make the
+ * connection's capability profile unreadable, and `allowed_verbs` is precisely
+ * what tells an operator what the agent may do. And it would be a promise this
+ * design cannot keep: the dispatcher is written to the target ONCE, with a
+ * fixed arm per verb, so a `*` meaning "whatever is implemented" starts lying
+ * the day a verb is added to {@link DEFAULT_VERBS} — the script on the
+ * customer's machine does not change with it.
+ *
+ * Deliberately ABSENT from the manifest's `credentials.schema.pattern`. That
+ * schema describes the stored shape and is validated on both connect doors, so
+ * leaving `*` out of it is what makes the programmatic `connect/fields` import
+ * — which runs no provisioner — refuse the shorthand instead of persisting it
+ * raw and failing at run time.
+ */
+const ALL_VERBS = "*";
 
 /**
  * Parse the connection's verb allowlist.
@@ -148,21 +165,20 @@ function verbArrayFrom(raw: unknown): unknown[] | null {
  * An absent or empty value means NO verbs, never "all of them". Emptying a
  * permission field has to narrow it: the connect form seeds the manifest's
  * declared default, so someone who clears that box is asking for less, and a
- * caller that omits the field entirely has declared nothing to allow.
+ * caller that omits the field entirely has declared nothing to allow. `*` is
+ * the one way to ask for everything, and it is spelled out on the way in.
  */
 function parseVerbs(raw: unknown): string[] {
-  const parsed = verbArrayFrom(raw);
-  if (parsed === null) throw invalidRequest("`allowed_verbs` must be a JSON array of names");
-  if (parsed.length === 0) return [];
+  if (typeof raw === "string" && raw.trim() === ALL_VERBS) return Object.keys(DEFAULT_VERBS);
 
-  const verbs = parsed.map((v) => {
-    if (typeof v !== "string" || !VERB_NAME_RE.test(v)) {
+  const verbs = verbNamesFrom(raw);
+  for (const verb of verbs) {
+    if (!VERB_NAME_RE.test(verb)) {
       throw invalidRequest(
-        `verb ${JSON.stringify(v)} is not a valid name — lowercase letters, digits and _ only`,
+        `verb ${JSON.stringify(verb)} is not a valid name — lowercase letters, digits and _ only`,
       );
     }
-    return v;
-  });
+  }
 
   // Refuse a verb the generated script has no implementation for, rather than
   // writing a dispatcher that refuses it at run time. A connection whose
@@ -171,8 +187,9 @@ function parseVerbs(raw: unknown): string[] {
   const unknown = verbs.filter((v) => !(v in DEFAULT_VERBS));
   if (unknown.length > 0) {
     throw invalidRequest(
-      `the generated dispatcher implements ${Object.keys(DEFAULT_VERBS).join(", ")} — ` +
-        `add ${unknown.join(", ")} to the script on the target first, then list it here`,
+      `the generated dispatcher implements ${Object.keys(DEFAULT_VERBS).join(", ")} ` +
+        `(or "${ALL_VERBS}" for all of them) — ${unknown.join(", ")} is not among them; ` +
+        `add it to the script on the target first, then list it here`,
     );
   }
   return verbs;
@@ -396,7 +413,7 @@ async function provisionSshKeyPair(
     port: String(port),
     user,
     host_key: hostKey,
-    allowed_verbs: JSON.stringify(verbs),
+    allowed_verbs: verbs.join(","),
     // Read-only is the floor the SERVER applies; the target's own dispatcher
     // is the boundary that matters, and it runs nothing that writes (its
     // sftp arm execs `sftp-server -R`).
@@ -450,8 +467,8 @@ function sshHandoffSteps(credentials: Record<string, unknown>): HandoffStep[] {
   // caller sent, checked against the manifest `pattern` and nothing else. A
   // name that would not survive `parseVerbs` is dropped rather than refused,
   // because refusing here would deny a deletion its removal block.
-  const verbs = (verbArrayFrom(credentials.allowed_verbs) ?? []).filter(
-    (v): v is string => typeof v === "string" && VERB_NAME_RE.test(v) && v in DEFAULT_VERBS,
+  const verbs = verbNamesFrom(credentials.allowed_verbs).filter(
+    (v) => VERB_NAME_RE.test(v) && v in DEFAULT_VERBS,
   );
 
   const dispatchPath = dispatchPathFor(publicKey);

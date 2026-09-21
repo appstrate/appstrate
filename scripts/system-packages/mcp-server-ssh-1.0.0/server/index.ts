@@ -117,21 +117,21 @@ function required(env: NodeJS.ProcessEnv, name: string): string {
  * outside the hosted form — the programmatic `connect/fields` import, a
  * restored fixture — would otherwise be able to put a shell string in
  * `SSH_ALLOWED_VERBS` and have `ssh_exec` hand it to the remote login shell.
+ *
+ * A comma-separated list, matching the credential the platform persists. The
+ * `*` shorthand the connect form accepts never reaches here — it is expanded
+ * to the explicit list before the credential is written, so this reader has
+ * one syntax and no wildcard to interpret.
  */
 const VERB_NAME_RE = /^[a-z][a-z0-9_]{0,31}$/;
 
 function parseVerbs(raw: string | undefined): string[] {
   if (raw === undefined || raw.trim() === "") return [];
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error("SSH_ALLOWED_VERBS is not valid JSON (expected an array of verb names)");
-  }
-  if (!Array.isArray(parsed) || !parsed.every((v) => typeof v === "string")) {
-    throw new Error("SSH_ALLOWED_VERBS must be a JSON array of strings");
-  }
-  const bad = (parsed as string[]).filter((v) => !VERB_NAME_RE.test(v));
+  const verbs = raw
+    .split(",")
+    .map((v) => v.trim())
+    .filter((v) => v !== "");
+  const bad = verbs.filter((v) => !VERB_NAME_RE.test(v));
   if (bad.length > 0) {
     throw new Error(
       `SSH_ALLOWED_VERBS carries ${bad.map((v) => JSON.stringify(v)).join(", ")}, which is not a ` +
@@ -139,7 +139,7 @@ function parseVerbs(raw: string | undefined): string[] {
         "never a command rendered here.",
     );
   }
-  return parsed as string[];
+  return verbs;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): SshConfig {

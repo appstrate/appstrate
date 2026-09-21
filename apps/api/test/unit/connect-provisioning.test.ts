@@ -156,17 +156,7 @@ describe("provisionCredentials — input validation", () => {
     ).rejects.toThrow(/`port` must be a number between 1 and 65535/);
   });
 
-  it("refuses a verb list that is not a JSON array", async () => {
-    await expect(
-      provisionCredentials(
-        SSH_AUTH,
-        { ...badHostFree, user: "agent", allowed_verbs: "hostname" },
-        ctx,
-      ),
-    ).rejects.toThrow(/must be a JSON array/);
-  });
-
-  it.each(['["rm -rf /"]', '["Hostname"]', '["a;b"]', "[42]", '["../../etc"]'])(
+  it.each(["rm -rf /", "Hostname", "a;b", "../../etc", "hostname uptime"])(
     "refuses %s as a verb name",
     async (allowed_verbs) => {
       await expect(
@@ -179,10 +169,10 @@ describe("provisionCredentials — input validation", () => {
     await expect(
       provisionCredentials(
         SSH_AUTH,
-        { ...badHostFree, user: "agent", allowed_verbs: '["deploy_latest"]' },
+        { ...badHostFree, user: "agent", allowed_verbs: "deploy_latest" },
         ctx,
       ),
-    ).rejects.toThrow(/add deploy_latest to the script on the target first/);
+    ).rejects.toThrow(/deploy_latest is not among them/);
   });
 });
 
@@ -235,7 +225,7 @@ describe("provisionCredentials — what gets minted and rendered", () => {
   it("renders one exact-match arm per allowed verb, and a refusing default", async () => {
     const res = (await provisionCredentials(
       SSH_AUTH,
-      { ...base, allowed_verbs: '["hostname", "disk_usage"]' },
+      { ...base, allowed_verbs: "hostname, disk_usage" },
       stubCtx,
     ))!;
     const script = installShell(res);
@@ -246,7 +236,7 @@ describe("provisionCredentials — what gets minted and rendered", () => {
     expect(script).toContain("refused verb");
     // The dispatcher must never hand the request to a shell.
     expect(script).not.toContain("eval");
-    expect(JSON.parse(res.allowed_verbs!)).toEqual(["hostname", "disk_usage"]);
+    expect(res.allowed_verbs).toBe("hostname,disk_usage");
   });
 
   /**
@@ -257,14 +247,32 @@ describe("provisionCredentials — what gets minted and rendered", () => {
   it.each([
     ["absent", undefined],
     ["cleared", ""],
-    ["an explicit empty array", "[]"],
+    ["nothing but separators", " , , "],
   ])("allows no verb at all when the list is %s", async (_label, allowed_verbs) => {
     const res = (await provisionCredentials(
       SSH_AUTH,
       { ...base, ...(allowed_verbs === undefined ? {} : { allowed_verbs }) },
       stubCtx,
     ))!;
-    expect(JSON.parse(res.allowed_verbs!)).toEqual([]);
+    expect(res.allowed_verbs).toBe("");
+  });
+
+  /**
+   * `*` is a FORM shorthand, never a stored value. What lands in the keyring is
+   * the explicit list, because `allowed_verbs` is what tells an operator what
+   * the agent may do — and because the dispatcher is written to the target once,
+   * so a stored `*` would start lying the day a verb is added to the catalogue.
+   */
+  it("expands the * shorthand to the explicit list before persisting it", async () => {
+    const res = (await provisionCredentials(SSH_AUTH, { ...base, allowed_verbs: "*" }, stubCtx))!;
+    expect(res.allowed_verbs).toBe("hostname,uptime,disk_usage,memory,whoami");
+    expect(res.allowed_verbs).not.toContain("*");
+
+    // Every one of them is reachable on the target, not just recorded here.
+    const script = installShell(res);
+    for (const verb of ["hostname", "uptime", "disk_usage", "memory", "whoami"]) {
+      expect(script).toContain(`    ${verb}) exec `);
+    }
   });
 
   it("points the fingerprint check at the key type it actually pinned", async () => {
@@ -499,7 +507,7 @@ describe("the generated dispatcher, run as sshd would run it", () => {
   };
 
   it("runs an allowed verb", async () => {
-    const run = await runScript(await dispatcherFor('["hostname"]'), {
+    const run = await runScript(await dispatcherFor("hostname"), {
       SSH_ORIGINAL_COMMAND: "hostname",
     });
     expect(run.code).toBe(0);
@@ -508,7 +516,7 @@ describe("the generated dispatcher, run as sshd would run it", () => {
 
   it("refuses anything that is not an exact verb, with exit 42", async () => {
     for (const command of ["hostname; id", "uptime", "hostname ", "../../bin/sh"]) {
-      const run = await runScript(await dispatcherFor('["hostname"]'), {
+      const run = await runScript(await dispatcherFor("hostname"), {
         SSH_ORIGINAL_COMMAND: command,
       });
       expect({ command, code: run.code }).toEqual({ command, code: 42 });
@@ -517,9 +525,9 @@ describe("the generated dispatcher, run as sshd would run it", () => {
   });
 
   it("reports an empty request as exit 2", async () => {
-    expect((await runScript(await dispatcherFor('["hostname"]'))).code).toBe(2);
+    expect((await runScript(await dispatcherFor("hostname"))).code).toBe(2);
     expect(
-      (await runScript(await dispatcherFor('["hostname"]'), { SSH_ORIGINAL_COMMAND: "" })).code,
+      (await runScript(await dispatcherFor("hostname"), { SSH_ORIGINAL_COMMAND: "" })).code,
     ).toBe(2);
   });
 
@@ -544,7 +552,7 @@ describe("the generated dispatcher, run as sshd would run it", () => {
     "internal-sftp",
     "sftp-server",
   ])("routes the sftp subsystem (%p) instead of refusing it", async (subsystem) => {
-    const run = await runScript(await dispatcherFor('["hostname"]'), {
+    const run = await runScript(await dispatcherFor("hostname"), {
       SSH_ORIGINAL_COMMAND: subsystem,
     });
     // Either the binary was found and exec'd, or exit 3 says it is absent on
@@ -557,7 +565,7 @@ describe("the generated dispatcher, run as sshd would run it", () => {
   it("opens sftp read-only, matching the connection's read_only", async () => {
     // `-R` is the target's own enforcement; `SSH_READ_ONLY` server-side is the
     // half that a wrong platform could get wrong.
-    expect(await dispatcherFor('["hostname"]')).toContain('exec "$candidate" -R');
+    expect(await dispatcherFor("hostname")).toContain('exec "$candidate" -R');
   });
 });
 
