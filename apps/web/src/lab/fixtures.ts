@@ -251,6 +251,14 @@ export const spacesByOrg: Record<string, Space[]> = {
     },
     makeSpace("app_lab_default", ORG_ID, "Default", true),
     makeSpace("app_lab_sandbox", ORG_ID, "Bac à sable"),
+    // Every member has one (#1437): private, reached by its owner alone, and
+    // named by the reader rather than by the French the server stored. Without
+    // it in this list the whole notion was invisible here.
+    {
+      ...makeSpace("app_lab_personal", ORG_ID, "Mon espace"),
+      personal: true,
+      visibility: "private",
+    },
   ],
   org_lab_2: [makeSpace("app_lab_2_default", "org_lab_2", "Default", true)],
 };
