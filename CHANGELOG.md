@@ -49,7 +49,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   it authorises the public key on the named account with `restrict` (no port
   forwarding, agent forwarding, X11 or pty), performs every file operation as
   that account, and prints the host's own fingerprint to compare against the one
-  submitted. The same screen carries the block that REMOVES the key, and
+  submitted. The target must run **OpenSSH 7.2 or later**: an older sshd
+  rejects the whole `restrict` line, so the block reads the target's sshd
+  version first and refuses, writing nothing, below 7.2 (an unreadable version
+  — no sshd found, or not OpenSSH — is only warned on). Pin the host's ed25519
+  key; `ssh-rsa` only when the server has none. On a locked account password
+  the block warns unless `sshd -T` reports `usepam yes`, since only an sshd
+  without PAM refuses such an account. The same screen carries the block that REMOVES the key, and
   `GET /api/me/connections/{id}/handoff` hands that one back when the connection
   is deleted months later — neither block is stored, both are derived on demand.
   An auth opts into platform-minted credentials with

@@ -8,9 +8,10 @@
  * renders can be made to carry shell syntax.
  *
  * Both generated blocks are EXECUTED here, not only asserted on: the install
- * block for the one arm that must hold before anything is touched (an account
- * with no login shell), the revoke block for the three outcomes that would
- * otherwise destroy an `authorized_keys` instead of pruning it.
+ * block for the arms that must hold before anything is touched (an sshd too old
+ * for `restrict`, an account with no login shell), the revoke block for the
+ * three outcomes that would otherwise destroy an `authorized_keys` instead of
+ * pruning it.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
@@ -273,8 +274,8 @@ describe("provisionCredentials — what gets minted and rendered", () => {
   it("points the fingerprint check at the key type it actually pinned", async () => {
     expect(installShell(minted)).toContain("/etc/ssh/ssh_host_ed25519_key.pub");
 
-    // An sshd too old for ed25519 pins RSA — and reading an ed25519 file there
-    // would silently skip the check that the pinned key is this server's.
+    // A server with no ed25519 host key pins RSA — and reading an ed25519 file
+    // there would silently skip the check that the pinned key is this server's.
     const rsa = (await provisionCredentials(
       SSH_ID,
       SSH_AUTH,
@@ -445,9 +446,40 @@ async function binWith(name: string, body: string): Promise<string> {
   return dir;
 }
 
+/**
+ * A stand-in for `sshd`, which the install block asks twice: `-V` for its
+ * version, `-T` for whether it runs with PAM. `version` is the whole text it
+ * prints for `-V`, on stderr and with a failing status, as an sshd that does not
+ * know the flag answers — its usage text still carries the version. `config` is
+ * what `-T` prints; null makes `-T` fail, as it does run unprivileged.
+ */
+function sshdStub(opts: { version: string; config?: string | null }): Promise<string> {
+  const config = opts.config ?? null;
+  return binWith(
+    "sshd",
+    [
+      'case "$1" in',
+      `  -V) printf '%s\\n' '${opts.version}' >&2; exit 1 ;;`,
+      config === null ? "  -T) exit 1 ;;" : `  -T) printf '%s\\n' '${config}' ;;`,
+      "esac",
+    ].join("\n"),
+  );
+}
+
+/**
+ * Every run gets a current sshd whose `-T` fails unless the test says otherwise:
+ * what the host running the suite has installed is not the subject, and an
+ * unreadable `-T` is the case that keeps every warning on.
+ */
+let defaultSshdBin: Promise<string> | null = null;
+const defaultSshd = () =>
+  (defaultSshdBin ??= sshdStub({
+    version: "sshd: illegal option -- V\nOpenSSH_9.2p1, OpenSSL 3.0",
+  }));
+
 async function runScript(
   body: string,
-  opts: { home?: string; bin?: string } = {},
+  opts: { home?: string; bin?: string; sshd?: string } = {},
 ): Promise<ShellRun> {
   const file = join(await mkdtemp(join(tmpdir(), "ssh-handoff-")), "script.sh");
   await writeFile(file, body + "\n", { mode: 0o700 });
@@ -457,7 +489,12 @@ async function runScript(
     // one the fake `su` above hands the payload, standing in for the account's;
     // `bin` heads the PATH, so a test can make one binary fail.
     env: {
-      PATH: [opts.bin, await fakeSuPath(), process.env.PATH ?? "/usr/bin:/bin"]
+      PATH: [
+        opts.bin,
+        opts.sshd ?? (await defaultSshd()),
+        await fakeSuPath(),
+        process.env.PATH ?? "/usr/bin:/bin",
+      ]
         .filter(Boolean)
         .join(":"),
       ...(opts.home === undefined ? {} : { HOME: opts.home }),
@@ -525,14 +562,15 @@ describe("the generated install script", () => {
  * none) has a LOCKED password field, which an sshd built without PAM refuses
  * even for public-key login — `Permission denied (publickey)` mid-run, the
  * shape the login-shell guard exists to prevent. A PAM sshd accepts it, so the
- * block warns and installs the key anyway.
+ * block warns — unless `sshd -T` answers `usepam yes` — and installs the key
+ * either way.
  *
  * The check reads /etc/shadow, which no sandbox can write. So the ONE literal
  * path is rewritten to a temp file and the otherwise untouched production text
  * is executed — a seam in the renderer would exist for nothing but this test.
  */
 describe("the install block warns about a locked password", () => {
-  async function installWithShadow(field: string | null) {
+  async function installWithShadow(field: string | null, sshd?: string) {
     const home = await mkdtemp(join(tmpdir(), "ssh-shadow-"));
     const shell = installShell(minted);
     // Exactly one site, so the rewrite cannot silently miss or over-reach.
@@ -544,7 +582,7 @@ describe("the install block warns about a locked password", () => {
       await writeFile(shadow, `root:*:1::::::\nagent:${field}:1::::::\n`);
     }
     return {
-      run: await runScript(shell.replace("/etc/shadow", shadow), { home }),
+      run: await runScript(shell.replace("/etc/shadow", shadow), { home, sshd }),
       keys: () => readFile(join(home, ".ssh", "authorized_keys"), "utf8"),
     };
   }
@@ -570,6 +608,89 @@ describe("the install block warns about a locked password", () => {
     expect(run.code).toBe(0);
     expect(run.stderr.includes("is locked")).toBe(warns);
     expect(await keys()).toContain("restrict ssh-ed25519");
+  });
+
+  /**
+   * The lock only matters without PAM, and Debian, Ubuntu and CentOS all run
+   * sshd with it — warning there is a false alarm on the common case. So the
+   * block asks sshd itself. An sshd BUILT without PAM (Alpine) prints no
+   * `usepam` line at all, and an `-T` that fails says nothing: both still warn.
+   */
+  const PAM: Array<[string, string | null, boolean]> = [
+    ["usepam yes", "port 22\nusepam yes\npermitrootlogin no", false],
+    ["usepam no", "port 22\nusepam no", true],
+    ["no usepam line (built without PAM)", "port 22\npermitrootlogin no", true],
+    ["sshd -T failing", null, true],
+  ];
+
+  it.each(PAM)("a locked account with %s: warns = %p", async (_label, config, warns) => {
+    const sshd = await sshdStub({ version: "OpenSSH_9.2p1, OpenSSL 3.0", config });
+    const { run, keys } = await installWithShadow("!", sshd);
+    expect(run.code).toBe(0);
+    expect(run.stderr.includes("the password of agent is locked")).toBe(warns);
+    expect(await keys()).toContain("restrict ssh-ed25519");
+  });
+});
+
+/**
+ * `restrict` arrived in OpenSSH 7.2. An older sshd rejects the whole
+ * authorized_keys line as a bad option, so the key would be installed and never
+ * authenticate — the failure surfacing mid-run as `Permission denied`. The block
+ * refuses before writing anything. The version is read from the target's sshd,
+ * which prints it even for a `-V` it does not know (in its usage text).
+ */
+describe("the install block refuses an sshd older than OpenSSH 7.2", () => {
+  async function installUnder(version: string) {
+    const home = await mkdtemp(join(tmpdir(), "ssh-version-"));
+    const run = await runScript(installShell(minted), {
+      home,
+      sshd: await sshdStub({ version }),
+    });
+    return { run, keys: join(home, ".ssh", "authorized_keys") };
+  }
+
+  it.each([
+    ["6.6.1", "sshd: illegal option -- V\nOpenSSH_6.6.1p1 Ubuntu-2ubuntu2.13, OpenSSL 1.0.1f"],
+    ["6.9", "OpenSSH_6.9p1, OpenSSL 1.0.2"],
+    ["7.1", "OpenSSH_7.1p2, OpenSSL 1.0.2"],
+  ])("refuses %s and writes nothing", async (shown, version) => {
+    const { run, keys } = await installUnder(version);
+    expect(run.code).toBe(1);
+    expect(run.stderr).toContain(`OpenSSH ${shown} is older than 7.2`);
+    expect(run.stderr).toContain("'restrict'");
+    expect(await Bun.file(keys).exists()).toBe(false);
+    // Nothing after the refusal ran either.
+    expect(run.stdout).not.toContain("fingerprint");
+  });
+
+  it.each([
+    ["7.2", "OpenSSH_7.2p2 Ubuntu-4ubuntu2.10, OpenSSL 1.0.2g"],
+    ["7.4", "OpenSSH_7.4p1, OpenSSL 1.0.2k-fips"],
+    // A two-digit minor: a comparison on text would put 7.10 before 7.2.
+    ["7.10", "OpenSSH_7.10p1, OpenSSL 1.1.1"],
+    ["9.2", "OpenSSH_9.2p1 Debian-2+deb12u3, OpenSSL 3.0.13"],
+    // A two-digit major: a comparison on the first digit would refuse it.
+    ["10.3", "OpenSSH_10.3p1, OpenSSL 3.5.0"],
+  ])("installs under %s", async (_shown, version) => {
+    const { run, keys } = await installUnder(version);
+    expect(run.code).toBe(0);
+    expect(run.stderr).not.toContain("older than 7.2");
+    expect(run.stderr).not.toContain("could not read the OpenSSH version");
+    expect(await Bun.file(keys).text()).toContain("restrict ssh-ed25519");
+  });
+
+  it.each([
+    ["an sshd that is not OpenSSH", "dropbear v2022.83"],
+    ["an sshd that answers nothing", ""],
+    ["no sshd at all", "sh: sshd: not found"],
+    ["a version with no minor", "OpenSSH_7"],
+  ])("warns and installs anyway under %s", async (_label, version) => {
+    const { run, keys } = await installUnder(version);
+    expect(run.code).toBe(0);
+    expect(run.stderr).toContain("could not read the OpenSSH version");
+    // One line: the key line may still work, so it is a warning, not a stop.
+    expect(run.stderr.split("\n").filter((l) => l.includes("OpenSSH"))).toHaveLength(1);
+    expect(await Bun.file(keys).text()).toContain("restrict ssh-ed25519");
   });
 });
 

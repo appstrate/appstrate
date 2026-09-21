@@ -54,7 +54,7 @@
             "host_key": {
               "type": "string",
               "title": "Clé publique de l'hôte",
-              "description": "L'identité du SERVEUR, pas la vôtre. Relevez-la sur la machine elle-même : awk '{print $1\" \"$2}' /etc/ssh/ssh_host_ed25519_key.pub (ou ssh_host_rsa_key.pub sur un sshd ancien) — un relevé à distance passerait par une connexion non authentifiée, exactement ce qu'un intercepteur sait falsifier. Elle est épinglée : tout changement refuse la connexion, il n'y a pas d'acceptation à la première connexion.",
+              "description": "L'identité du SERVEUR, pas la vôtre. Relevez-la sur la machine elle-même : awk '{print $1\" \"$2}' /etc/ssh/ssh_host_ed25519_key.pub — ed25519 de préférence, ssh_host_rsa_key.pub seulement si le serveur n'a pas de clé ed25519. La cible doit faire tourner OpenSSH 7.2 ou plus récent. Un relevé à distance passerait par une connexion non authentifiée, exactement ce qu'un intercepteur sait falsifier. Elle est épinglée : tout changement refuse la connexion, il n'y a pas d'acceptation à la première connexion.",
               "pattern": "^(ssh-ed25519|ssh-rsa) [A-Za-z0-9+/]+=*$"
             }
           }
