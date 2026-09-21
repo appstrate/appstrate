@@ -785,9 +785,6 @@ describe("me/connections/:id/handoff — derived, not stored", () => {
     // which is exactly the property a stored copy could lose.
     const base64 = pair.publicKey.split(/\s+/)[1]!;
     expect(step.shell).toContain(`grep -vF '${base64}'`);
-    // And nothing else to undo: the install block authorised one line and
-    // wrote no script, so the removal has exactly one thing to take back.
-    expect(step.shell).not.toContain("appstrate-dispatch");
   });
 
   it("is empty for an auth that mints nothing", async () => {

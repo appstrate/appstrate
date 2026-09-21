@@ -456,13 +456,15 @@ function sshFailure(what: string, res: RunResult): Error {
   } else if (/CONNECT refused by proxy/i.test(tail)) {
     hint = "\nhint: the egress proxy refused the target (private address or blocked host).";
   } else if (what === "sftp" && /connection closed/i.test(tail)) {
-    // sshd routes the sftp SUBSYSTEM through the account's forced command. A
-    // dispatcher with no sftp arm refuses it and the session dies before a
-    // single packet — which reads as a dead host unless it is named.
+    // sshd routes the sftp SUBSYSTEM through a forced command when the account
+    // has one, and a forced command with no sftp arm refuses it before a single
+    // packet — which reads as a dead host unless it is named. Appstrate does
+    // not install one, so this is the operator's own `ForceCommand` or
+    // `command=`, and theirs to fix.
     hint =
-      "\nhint: the target's forced command has no sftp arm, so the subsystem is refused before " +
-      "the session opens. Re-run the install block the connect screen printed — the current one " +
-      "execs `sftp-server -R` for this case.";
+      "\nhint: the sftp subsystem was refused before the session opened. If this account has a " +
+      "forced command (ForceCommand in sshd_config, or command= in authorized_keys), it needs an " +
+      "arm that execs sftp-server for this case. Appstrate installs no forced command of its own.";
   }
   return new Error(`${what} failed (exit ${res.code}): ${tail}${hint}`);
 }

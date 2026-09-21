@@ -197,8 +197,6 @@ describe("provisionCredentials — what gets minted and rendered", () => {
     const script = installShell((await provisionCredentials(SSH_AUTH, { ...base }, stubCtx))!);
     expect(script).toContain("'restrict ssh-ed25519 ");
     expect(script).not.toContain("command=");
-    expect(script).not.toContain("DISPATCH");
-    expect(script).not.toContain("SSH_ORIGINAL_COMMAND");
   });
 
   it("points the fingerprint check at the key type it actually pinned", async () => {
@@ -309,8 +307,6 @@ describe("provisionCredentials — what gets minted and rendered", () => {
     // Matched on the key's own base64 with `grep -F`, so it removes exactly
     // this connection's line — deleting the connection here cannot do it.
     expect(revokeShell(res)).toContain(`grep -vF '${keyBase64}'`);
-    // Nothing else to undo: the block installed one authorized_keys line.
-    expect(revokeShell(res)).not.toContain("appstrate-dispatch");
   });
 
   /**

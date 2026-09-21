@@ -64,7 +64,6 @@ const ENV = {
   SSH_USER: "agent",
   SSH_PRIVATE_KEY_PATH: "/run/secrets/ssh_key",
   SSH_HOST_KEY: KEYSCAN_LINE,
-  SSH_READ_ONLY: "1",
 };
 
 /** Set process.env for the server's lazy config, restoring after. */
@@ -361,7 +360,7 @@ describe("ssh_write_file", () => {
   });
 
   it("puts a scratch file when writes are allowed", async () => {
-    restoreEnv = withEnv({ ...ENV, SSH_READ_ONLY: "0" });
+    restoreEnv = withEnv(ENV);
     const { run, calls } = stubRunner([{ code: 0 }]);
     await handleRequest(
       {
