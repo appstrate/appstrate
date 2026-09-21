@@ -161,7 +161,8 @@ upgrading the platform** — that is the supported recovery, and it is one round
 trip.
 
 Prefer `run_and_wait` when you need a newly launched run's progress or terminal
-result. `runAgent` / `runInline` remain fully discoverable and invokable for
+result. `runAgent` (and `runInline`, for a caller holding `agents:write` and
+`agents:run`) remain fully discoverable and invokable for
 intentional fire-and-forget flows (`202 { runId }`). Calling either and then
 polling `getRun` merely reimplements what `run_and_wait` already does, without
 its in-chat progress surface or `resource_link` deliverables.

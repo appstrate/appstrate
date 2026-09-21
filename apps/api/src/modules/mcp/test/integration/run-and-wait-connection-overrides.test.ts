@@ -48,6 +48,7 @@ import {
 import { _setOrchestratorForTesting } from "../../../../services/orchestrator/index.ts";
 import { setPlatformApp } from "../../../../lib/platform-app.ts";
 import { resetCatalog } from "../../catalog.ts";
+import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
 
 const app = getTestApp();
 // Wire in-process dispatch to the test app — without it `run_and_wait` has no
@@ -55,13 +56,7 @@ const app = getTestApp();
 // registerModuleRoutes; the test harness mounts modules inline).
 setPlatformApp(app);
 
-const MCP_ACCEPT = "application/json, text/event-stream";
 const INTEGRATION = "@mcpconn/svc";
-
-interface JsonRpcEnvelope {
-  result?: Record<string, unknown>;
-  error?: { code: number; message: string };
-}
 
 /** Call an MCP tool on the caller's per-org endpoint and parse its JSON payload. */
 async function callTool(

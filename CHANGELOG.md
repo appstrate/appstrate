@@ -23,8 +23,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   promotion sees a difference, and it is a refusal (403) where the stale read
   reported the swept row as merely missing (404). (#1439)
 
-## [1.0.0-beta.59] - 2026-09-18
-
 ### Added
 
 - **The chat composer shows what the assistant may do, and which model
@@ -37,6 +35,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   to published agents: off, the turn's MCP bearer is minted without
   `agents:write` (request body `agent_authoring`, absent = on; remembered per
   user and browser).
+
+### Changed
+
+- **BREAKING: composing an inline agent requires `agents:write` and
+  `agents:run`.** `POST /api/runs/inline`, `POST /api/runs/inline/validate` and
+  an `inline` source on `POST /api/runs/remote` asked `agents:run` alone; they
+  now also ask `agents:write` — composing a manifest is authoring an agent. The
+  `admin` and `builder` presets compose; `operator` (the default role of open
+  spaces), `runner` and `viewer` no longer do, and an OIDC end-user token can no
+  longer reach these routes. An API key with an explicit scope list needs
+  `agents:write` in it for `appstrate run ./agent.afps`. The platform MCP
+  `run_and_wait` tool and its server instructions offer `kind: "inline"` only to
+  a caller holding both grants.
+
+## [1.0.0-beta.59] - 2026-09-18
+
+### Added
 
 - **MCP Emails — one MCP surface over Gmail, Fastmail, iCloud, Yahoo, Zoho,
   Yandex and any IMAP/SMTP account the member has connected upstream.**
@@ -96,17 +111,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   it is stale — so read it off the resource.
 
 ### Changed
-
-- **BREAKING: composing an inline agent requires `agents:write` and
-  `agents:run`.** `POST /api/runs/inline`, `POST /api/runs/inline/validate` and
-  an `inline` source on `POST /api/runs/remote` asked `agents:run` alone; they
-  now also ask `agents:write` — composing a manifest is authoring an agent. The
-  `admin` and `builder` presets compose; `operator` (the default role of open
-  spaces), `runner` and `viewer` no longer do, and an OIDC end-user token can no
-  longer reach these routes. An API key with an explicit scope list needs
-  `agents:write` in it for `appstrate run ./agent.afps`. The platform MCP
-  `run_and_wait` tool and its server instructions offer `kind: "inline"` only to
-  a caller holding both grants.
 
 - **BREAKING (modules): every principal DECLARES what it is, and
   `@appstrate/core` goes to 11.0.0.** `AuthResolution` carries a required

@@ -290,7 +290,11 @@ export function formatCallerContext(
     // handshake; don't restate them here or the two drift. The "use the id
     // verbatim" instruction lives in `buildSystemPrompt` for the same reason — see
     // the block-wide rule below.
-    lines.push(`Integrations the user has connected and could attach to an agent: ${list}.`);
+    lines.push(
+      opts?.canAuthorAgents === false
+        ? `Integrations the user has connected: ${list}.`
+        : `Integrations the user has connected and could attach to an agent: ${list}.`,
+    );
   } else {
     lines.push("The user has no connected integrations yet.");
   }
@@ -309,7 +313,7 @@ export function formatCallerContext(
                 : // A draft runs on the author's `agents:write`, which the
                   // turn drops when authoring is off.
                   opts?.canAuthorAgents === false
-                  ? "; draft, runnable only once the user turns agent authoring back on"
+                  ? "; draft, not runnable in this turn — agent authoring is off or not granted here"
                   : "; draft only, yours to run — pass version=draft"
               : ""
           })`,

@@ -78,3 +78,14 @@ describe("MCP server instructions — connect bullet", () => {
     }
   });
 });
+
+describe("MCP server instructions — agent authoring", () => {
+  it("teaches tool selection and `dependencies.*` only to a caller holding `agents:write`", () => {
+    const withWrite = buildServerInstructions(new Set(["mcp:read", "agents:write"]), true);
+    const without = buildServerInstructions(permissions, true);
+    expect(withWrite).toContain("Integration tool selection");
+    expect(withWrite).toContain("building or configuring an agent");
+    expect(without).not.toContain("Integration tool selection");
+    expect(without).not.toContain("building or configuring an agent");
+  });
+});

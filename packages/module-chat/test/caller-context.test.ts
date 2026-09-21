@@ -126,7 +126,9 @@ describe("formatCallerContext", () => {
     const raw = { user: { name: "Ada" }, org: { role: "member" }, agents: [draft] };
     expect(formatCallerContext(raw, { canAuthorAgents: true })).toContain("yours to run");
     const off = formatCallerContext(raw, { canAuthorAgents: false });
-    expect(off).toContain("draft, runnable only once the user turns agent authoring back on");
+    expect(off).toContain(
+      "draft, not runnable in this turn — agent authoring is off or not granted here",
+    );
     // Distinct from the "draft only, not runnable" rule, which means never runnable.
     expect(off).not.toContain("draft only, not runnable");
     expect(off).not.toContain("version=draft");

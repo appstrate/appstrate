@@ -311,7 +311,7 @@ describe("runner preset", () => {
     }
   });
 
-  /** A minimal inline manifest: every case here stops at the composing guard. */
+  /** A minimal inline manifest, judged by the composing guard. */
   const inlineBody = () =>
     JSON.stringify({
       manifest: {
