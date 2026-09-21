@@ -3,16 +3,15 @@
 /**
  * `src/ui/turn-model.ts` — reading back which model answered a turn.
  *
- * The three cases that matter are the absent ones: a user message, a message
- * written before the fields shipped, and a message the engine did not close.
- * All three must read as "no model", never as a default, because the
- * badge that consumes this renders whatever it is handed.
+ * The cases that matter are the absent ones: a user message and a message the
+ * engine did not close. Both must read as "no model", never as a default,
+ * because the badge that consumes this renders whatever it is handed.
  */
 
 import { describe, expect, it } from "bun:test";
 import type { UIMessage } from "ai";
 import { mergeTurnMetadata } from "@appstrate/core/chat-turn-metadata";
-import { latestTurnModelId, turnModelId, turnModelLabel } from "../src/ui/turn-model.ts";
+import { latestTurnModelId, turnModelLabel } from "../src/ui/turn-model.ts";
 
 /** An assistant message carrying the metadata `closePiTurn` stamps. */
 function assistant(
@@ -41,21 +40,20 @@ const SONNET = { id: "mdl_sonnet", label: "Claude Sonnet 5" };
 describe("reading a turn's model", () => {
   it("returns the id and the frozen label", () => {
     const message = assistant("a", OPUS);
-    expect(turnModelId(message)).toBe("mdl_opus");
+    expect(latestTurnModelId([message])).toBe("mdl_opus");
     expect(turnModelLabel(message)).toBe("Claude Opus 5");
   });
 
   it("returns null for a turn that carries no model", () => {
     const message = assistant("a");
-    expect(turnModelId(message)).toBeNull();
+    expect(latestTurnModelId([message])).toBeNull();
     expect(turnModelLabel(message)).toBeNull();
   });
 
   it("returns null for a message with no turn metadata at all", () => {
-    // Every user turn, every server-authored notice, and every row written
-    // before the fields shipped.
+    // Every user turn and every server-authored notice.
     const user = { id: "u", role: "user", parts: [{ type: "text", text: "hi" }] } as UIMessage;
-    expect(turnModelId(user)).toBeNull();
+    expect(latestTurnModelId([user])).toBeNull();
     expect(turnModelLabel(user)).toBeNull();
   });
 });

@@ -40,7 +40,7 @@ describe("chat page session scope", () => {
           useFileImageSrc={() => null}
           uploadFile={async () => "upload://unused"}
           t={(key) => key}
-          canRunInline={false}
+          canAuthorAgents={false}
         />,
         { queryClient: qc },
       );

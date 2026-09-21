@@ -10,11 +10,10 @@
  * long-running remote run.
  *
  * Both routes authenticate via JWT bearer (interactive CLI) or API key
- * (headless — GitHub Action, CI). Creation asks for the grant `source.kind`
- * names: `agents:run` for `registry`, `agents:run-inline` for `inline`; the
- * sink extension takes either. HMAC-signed event ingestion lives in a
- * separate router (`runs-events.ts`) because its auth model is
- * fundamentally different.
+ * with the `agents:run` scope (headless — GitHub Action, CI); an inline
+ * `source` also takes `agents:write`. HMAC-signed
+ * event ingestion lives in a separate router (`runs-events.ts`) because
+ * its auth model is fundamentally different.
  *
  * Contract: this router plus `openapi/paths/runs.ts`; the sink-credential
  * shape is owned by `services/run-creation.ts`. There is no `docs/specs/`
@@ -31,7 +30,7 @@ import { FILE_URI_PREFIX, UPLOAD_URI_PREFIX } from "@appstrate/core/file-uri";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
-import { assertPermission, requireAnyPermission } from "../middleware/require-permission.ts";
+import { assertPermission, requirePermission } from "../middleware/require-permission.ts";
 import { invalidRequest, notFound, forbidden, ApiError } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { getActor } from "../lib/actor.ts";
@@ -194,13 +193,7 @@ export function createRunsRemoteRouter() {
   router.post(
     "/runs/remote",
     rateLimit(getPlatformRunLimits().per_org_global_rate_per_min),
-    // ONE route, TWO capabilities: `source.kind` decides which. `registry`
-    // launches a package this org already holds (`agents:run`); `inline` runs a
-    // manifest the request body carries (`agents:run-inline`). The discriminant
-    // is in the body, so the route-level guard can only assert the disjunction
-    // — each branch asserts the exact grant it needs before it does any work,
-    // and a caller holding neither never reaches the body read.
-    requireAnyPermission(["agents:run", "agents:run-inline"]),
+    requirePermission("agents", "run"),
     idempotency(),
     async (c) => {
       const body = await readJsonBody(c, CreateRemoteRunBodySchema);
@@ -257,8 +250,6 @@ export function createRunsRemoteRouter() {
       // placements stay ahead of every write this handler makes (the inline
       // branch's shadow package row is inserted after its own).
       if (src.kind === "registry") {
-        // The half of the route-level disjunction this branch is.
-        assertPermission(c, "agents", "run");
         // Server-resolved attribution. The runner names the package; we
         // load manifest+prompt from our own catalog. No fingerprint
         // reconciliation, no shadow row, no "Inline" badge.
@@ -338,11 +329,9 @@ export function createRunsRemoteRouter() {
           actor,
         });
       } else {
-        // The other half. A manifest supplied by the caller and executed with
-        // this space's connections is the `run-inline` grant, on this host or
-        // the runner's — where the container runs changes nothing about who
-        // composed what it executes.
-        assertPermission(c, "agents", "run-inline");
+        // Composing is a derived capability (`agents:write` on top of the
+        // route's `agents:run`) — see `CoreResources.agents`.
+        assertPermission(c, "agents", "write");
         // Inline path — the runner ships a manifest+prompt blob. Validate
         // structurally, then create a shadow LoadedPackage. All inline
         // runs land on a shadow ephemeral package ("Inline" badge in UI);
@@ -460,16 +449,13 @@ export function createRunsRemoteRouter() {
   );
 
   // PATCH /api/runs/:runId/sink/extend — push out sink_expires_at for a
-  // long-running remote run. Either creation grant (see the guard). Runs are
+  // long-running remote run. Same auth as creation: agents:run. Runs are
   // space-scoped but this route resolves the run by id (not space path), so
   // tenancy AND run visibility are both predicates on the UPDATE below.
   router.patch(
     "/runs/:runId/sink/extend",
     rateLimit(30),
-    // Held by anything that may have launched the run this extends — either
-    // kind. Gating on `agents:run` alone would let a principal start a remote
-    // INLINE run and then be refused the sink extension its own runner needs.
-    requireAnyPermission(["agents:run", "agents:run-inline"]),
+    requirePermission("agents", "run"),
     async (c) => {
       const runId = c.req.param("runId");
       if (!runId) throw invalidRequest("runId path parameter is required", "runId");

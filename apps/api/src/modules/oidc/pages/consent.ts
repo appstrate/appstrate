@@ -31,9 +31,6 @@ export const SCOPE_DESCRIPTIONS_FR: Record<string, string> = {
   offline_access: "Rester connecté (jeton de rafraîchissement)",
   "agents:read": "Lister vos agents",
   "agents:run": "Lancer des agents pour vous",
-  // Dashboard-only as well (`OIDC_DASHBOARD_ONLY_SCOPES`): executes a manifest
-  // supplied with the request, so never granted to an end-user.
-  "agents:run-inline": "Exécuter des agents composés à la volée, sans publication",
   "runs:read": "Consulter votre historique d'exécutions",
   // Supervision scope: only ever granted to a dashboard user whose role
   // already carries it (`OIDC_DASHBOARD_ONLY_SCOPES`), never to an end-user.

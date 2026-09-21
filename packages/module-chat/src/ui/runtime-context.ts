@@ -123,13 +123,11 @@ export interface ChatHost {
   useFileImageSrc: UseFileImageSrc;
   t: ChatTranslate;
   /**
-   * Does this caller hold `agents:run-inline`? The composer's inline-agents
-   * toggle is a PREFERENCE inside that grant, so it is only shown to someone
-   * who has it. A boolean, not a permission set: the module resolves no RBAC
-   * of its own, and nothing here gates anything — the server intersects the
-   * grant with the flag the composer sends.
+   * May the assistant create agents for this caller? Shows the composer's
+   * agent-authoring toggle; the host resolves it, the module holds no RBAC, and
+   * the server re-checks the grant against the flag each turn sends.
    */
-  canRunInline: boolean;
+  canAuthorAgents: boolean;
 }
 
 const ChatHostContext = createContext<ChatHost | null>(null);

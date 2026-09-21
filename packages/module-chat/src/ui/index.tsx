@@ -70,17 +70,16 @@ import { useSessions } from "./use-sessions.ts";
 import {
   subscribeGeneration,
   subscribeModel,
+  attachConversation,
   getCompatibleGenerationSettings,
-  getInlineAgentsEnabled,
   getSelectedModel,
-  seedConversationModel,
-  setActiveConversation,
   editGenerationSettings,
   setModelCatalog,
   setSelectedModel,
 } from "./model-store.ts";
+import { getAgentAuthoringEnabled } from "./agent-authoring-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
-import { InlineAgentsToggle } from "./inline-agents-toggle.tsx";
+import { AgentAuthoringToggle } from "./agent-authoring-toggle.tsx";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
 
@@ -137,11 +136,7 @@ export interface ChatPageProps {
   onOpenFile?: OpenFile;
   /** Optional host-owned actions displayed beside the conversation title. */
   headerActions?: ReactNode;
-  /**
-   * Optional host-owned controls displayed in the composer, beside the model
-   * picker. Pass a memoized node: it is part of the composer slot, and a new
-   * element on every host render would re-render the conversation with it.
-   */
+  /** Optional host-owned controls beside the model picker. Pass a memoized node. */
   composerActions?: ReactNode;
   /**
    * REQUIRED host services — the chat implements none of them itself (see
@@ -152,8 +147,8 @@ export interface ChatPageProps {
   useFileImageSrc: UseFileImageSrc;
   uploadFile: UploadFile;
   t: ChatTranslate;
-  /** Whether the caller holds `agents:run-inline`; see `ChatHost.canRunInline`. */
-  canRunInline: boolean;
+  /** See `ChatHost.canAuthorAgents`. */
+  canAuthorAgents: boolean;
 }
 
 export function ChatPage({
@@ -168,7 +163,7 @@ export function ChatPage({
   useFileImageSrc,
   uploadFile,
   t,
-  canRunInline,
+  canAuthorAgents,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -206,8 +201,6 @@ export function ChatPage({
   // function (see ConversationInner), so a switch applies to the very next send
   // without remounting the conversation. This hook only mirrors it for the picker.
   const selectedModel = useSyncExternalStore(subscribeModel, getSelectedModel, getSelectedModel);
-  // Reconciled against the SELECTED model, so the configuration tab shows
-  // exactly what the next send carries.
   const generation = useSyncExternalStore(
     subscribeGeneration,
     getCompatibleGenerationSettings,
@@ -216,9 +209,7 @@ export function ChatPage({
 
   // Runs on every catalog change (first load, refetch after `staleTime`), not
   // just on mount — a cached list served on re-entry still has to reconcile
-  // the selection. The store owns the rule (the selection is always a live
-  // model, whichever of catalog and conversation seed lands first); this only
-  // feeds it. External-store sync in an effect (no setState).
+  // the selection. External-store sync in an effect (no setState).
   useEffect(() => {
     if (modelsQuery.data) setModelCatalog(modelsQuery.data);
   }, [modelsQuery.data]);
@@ -267,9 +258,9 @@ export function ChatPage({
       downloadFile,
       useFileImageSrc,
       t,
-      canRunInline,
+      canAuthorAgents,
     }),
-    [onOpenFile, downloadFile, useFileImageSrc, t, canRunInline],
+    [onOpenFile, downloadFile, useFileImageSrc, t, canAuthorAgents],
   );
 
   // File attachments: the composer stages picked files through the HOST uploader
@@ -291,7 +282,7 @@ export function ChatPage({
   const composerSlot = useMemo(
     () => (
       <div className="flex items-center gap-2">
-        <InlineAgentsToggle />
+        <AgentAuthoringToggle />
         <ModelSelect
           models={models}
           selectedId={selectedModel}
@@ -437,9 +428,7 @@ const Conversation = memo(function Conversation({
     gcTime: 0,
   });
 
-  // Stable identity for the seed array. `useChat` reads it once at mount, but
-  // `ConversationInner` also keys a layout effect on it — and `?? []` minted a
-  // fresh array on every render, re-running that effect for nothing.
+  // Stable identity: `ConversationInner` keys its store-attach effect on it.
   const initialMessages = useMemo(() => history.data ?? [], [history.data]);
 
   if (persistedAtMount && history.isPending) {
@@ -474,31 +463,14 @@ function ConversationInner({
   const queryClient = useQueryClient();
   const spaceId = spaceIdFromHeaders(getHeaders);
 
-  // Bind the model store to THIS conversation, and pre-select the model of the
-  // conversation's newest turn carrying one.
-  //
-  // This is what stops a reopened conversation from silently continuing on
-  // whatever model the picker happened to hold. It is a pre-selection, not a
-  // lock: the user can switch, and the server honours `X-Model-Id` on every
-  // turn. A model the catalog no longer serves live is never pre-selected (the
-  // store refuses it, or prunes it when the catalog lands after this).
-  //
-  // A LAYOUT effect, so the composer never paints one frame of the stored
-  // default before the seed lands; and ordered attach-then-seed, because
-  // `seedConversationModel` ignores an id that is not the active conversation.
-  // `initialMessages` is `useChat`'s mount-time seed and never mutates, so this
-  // runs once per conversation.
+  // Pre-select the model of this conversation's newest turn. A layout effect,
+  // so the composer never paints one frame of the stored default first.
   useLayoutEffect(() => {
-    setActiveConversation(id);
-    const seeded = latestTurnModelId(initialMessages);
-    if (seeded) seedConversationModel(id, seeded);
+    attachConversation(id, latestTurnModelId(initialMessages));
   }, [id, initialMessages]);
 
-  // Detach on unmount, in its own effect so a re-run of the one above never
-  // drops a pick made in this conversation. Without it, leaving the chat and
-  // coming back to the same conversation — continued elsewhere meanwhile —
-  // would keep the stale selection, since the store still names it active.
-  useLayoutEffect(() => () => setActiveConversation(null), []);
+  // Detach on unmount, in its own effect so a re-run above never drops a pick.
+  useLayoutEffect(() => () => attachConversation(null, null), []);
 
   // Header builder invoked by the transport at request/reconnect time. It reads
   // the model from the external store, NOT from React state: `useChat` recreates
@@ -526,11 +498,8 @@ function ConversationInner({
             id: chatId,
             messages,
             generation: getCompatibleGenerationSettings(),
-            // Read at request time, like the model and the generation settings
-            // above and for the same reason: the transport is memoised and a
-            // value captured at mount would freeze this turn's choice to
-            // whatever it was when the conversation opened.
-            inline_agents: getInlineAgentsEnabled(),
+            // Read at request time, like the model above, for the same reason.
+            agent_authoring: getAgentAuthoringEnabled(),
           },
         }),
         // Native resume targets our per-session stream endpoint (the chat id is

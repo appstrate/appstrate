@@ -255,8 +255,8 @@ describe("handleChatStream", () => {
       parts?: unknown[];
       /** The kind the auth pipeline resolved; production reaches here as `user` only. */
       principalKind?: PrincipalKind;
-      /** The composer's inline switch for this turn; omitted = the default (on). */
-      inlineAgents?: boolean;
+      /** The composer's agent-authoring switch for this turn; omitted = on. */
+      agentAuthoring?: boolean;
     },
   ): Promise<Response> {
     // Real platform deps (the same context `init()` gets), with dispatch
@@ -287,7 +287,9 @@ describe("handleChatStream", () => {
           },
         ],
         ...(generation ? { generation } : {}),
-        ...(overrides?.inlineAgents === undefined ? {} : { inline_agents: overrides.inlineAgents }),
+        ...(overrides?.agentAuthoring === undefined
+          ? {}
+          : { agent_authoring: overrides.agentAuthoring }),
       }),
     });
     return res;
@@ -484,7 +486,7 @@ describe("handleChatStream", () => {
     // (4) The system prompt was assembled from the caller context. There are no
     // inline MCP instructions on this path: the engine's own handshake delivers
     // them, and it is handed the org-scoped URL to open it with.
-    expect(input.system).toContain(buildSystemPrompt({ canRunInline: true }).slice(0, 64));
+    expect(input.system).toContain(buildSystemPrompt({ canComposeInline: false }).slice(0, 64));
     expect(input.system).toContain(CONTEXT_ORG_MARKER);
     expect(input.platformMcp.url).toContain(`/api/mcp/o/${encodeURIComponent(ctx.orgId)}`);
     expect(input.platformMcp.headers.Authorization).toMatch(/^Bearer /);
@@ -631,7 +633,7 @@ describe("handleChatStream", () => {
     expect(second.calls[0]!.system).not.toContain("@acme/report");
   }, 20_000);
 
-  describe("the composer's inline-agents switch", () => {
+  describe("the composer's agent-authoring switch", () => {
     /** The permission set the turn's platform-MCP bearer actually carries. */
     async function tokenPermissions(input: PiChatInput): Promise<string[]> {
       const authorization = input.platformMcp?.headers?.Authorization;
@@ -643,82 +645,54 @@ describe("handleChatStream", () => {
       return [...(resolved!.permissions ?? [])].sort();
     }
 
-    /**
-     * The argument shape is the marker: `kind:"inline"` is the ONE thing a
-     * model needs to compose an inline agent, so asserting on its total
-     * absence is stronger than matching any one paragraph — a future edit that
-     * reintroduces the capability under different prose still fails here.
-     */
+    /** The one argument a model needs to compose an inline agent, whatever the prose. */
     const INLINE_MARKER = 'kind:"inline"';
-    /** A fragment every persona carries, inline or not — the discriminating control. */
-    const COMMON_MARKER = "You are Appstrate's assistant";
+    const REDUCED_MARKER = "Agent authoring is not available in this turn";
 
-    const HOLDER = new Set(["agents:run", "agents:run-inline"]);
+    const BUILDER = new Set(["agents:read", "agents:run", "agents:write"]);
 
-    it("keeps the grant and the instructions when the switch is on", async () => {
+    async function turn(permissions: Set<string>, agentAuthoring?: boolean) {
       const { engine, calls } = scriptedEngine();
       const res = await postChat(mintSessionId(), undefined, engine, {
-        permissions: HOLDER,
-        inlineAgents: true,
+        permissions,
+        ...(agentAuthoring === undefined ? {} : { agentAuthoring }),
       });
-
       expect(res.status).toBe(200);
       await collectUiChunks(res);
       const input = calls[0]!;
-      expect(await tokenPermissions(input)).toContain("agents:run-inline");
-      expect(input.system).toContain(INLINE_MARKER);
-      expect(input.system).toContain(COMMON_MARKER);
+      return { token: await tokenPermissions(input), system: input.system };
+    }
+
+    it("keeps `agents:write` and teaches inline composition when on", async () => {
+      const { token, system } = await turn(BUILDER, true);
+      expect(token).toEqual(["agents:read", "agents:run", "agents:write"]);
+      expect(system).toContain(INLINE_MARKER);
+      expect(system).not.toContain(REDUCED_MARKER);
     });
 
-    it("drops BOTH when the switch is off — the token, not just the prose", async () => {
-      // The prompt alone would be a suggestion. Narrowing the turn's bearer is
-      // what makes the switch real: the engine cannot mint a wider one, so the
-      // inline routes refuse it with the platform's own guard rather than a
-      // second policy written into the chat.
-      const { engine, calls } = scriptedEngine();
-      const res = await postChat(mintSessionId(), undefined, engine, {
-        permissions: HOLDER,
-        inlineAgents: false,
-      });
-
-      expect(res.status).toBe(200);
-      await collectUiChunks(res);
-      const input = calls[0]!;
-      const permissions = await tokenPermissions(input);
-      expect(permissions).not.toContain("agents:run-inline");
-      // Everything else survives — the switch narrows one grant, not the turn.
-      expect(permissions).toContain("agents:run");
-      expect(input.system).not.toContain(INLINE_MARKER);
-      expect(input.system).toContain(COMMON_MARKER);
+    it("drops only `agents:write` from the token and the inline teaching when off", async () => {
+      const { token, system } = await turn(BUILDER, false);
+      expect(token).toEqual(["agents:read", "agents:run"]);
+      expect(system).not.toContain(INLINE_MARKER);
+      expect(system).toContain(REDUCED_MARKER);
     });
 
-    it("defaults to on when the client sends no flag", async () => {
-      // Every client that predates the switch, and the CLI. Absent must not
-      // read as off, or upgrading would silently remove a capability.
-      const { engine, calls } = scriptedEngine();
-      const res = await postChat(mintSessionId(), undefined, engine, { permissions: HOLDER });
-
-      expect(res.status).toBe(200);
-      await collectUiChunks(res);
-      expect(await tokenPermissions(calls[0]!)).toContain("agents:run-inline");
-      expect(calls[0]!.system).toContain(INLINE_MARKER);
+    it("is on when the body carries no flag", async () => {
+      const { token, system } = await turn(BUILDER);
+      expect(token).toContain("agents:write");
+      expect(system).toContain(INLINE_MARKER);
     });
 
-    it("cannot be used to REACH inline without the grant", async () => {
-      // The switch is a ceiling the caller lowers on themselves. `true` from a
-      // caller who never held `agents:run-inline` adds nothing — and the
-      // persona does not teach a capability the platform would refuse.
-      const { engine, calls } = scriptedEngine();
-      const res = await postChat(mintSessionId(), undefined, engine, {
-        permissions: new Set(["agents:run"]),
-        inlineAgents: true,
-      });
+    it("never grants `agents:write` to a caller who lacks it", async () => {
+      const { token, system } = await turn(new Set(["agents:run"]), true);
+      expect(token).toEqual(["agents:run"]);
+      expect(system).not.toContain(INLINE_MARKER);
+    });
 
-      expect(res.status).toBe(200);
-      await collectUiChunks(res);
-      const input = calls[0]!;
-      expect(await tokenPermissions(input)).toEqual(["agents:run"]);
-      expect(input.system).not.toContain(INLINE_MARKER);
+    it("teaches inline composition only with `agents:run` as well", async () => {
+      const { token, system } = await turn(new Set(["agents:write"]), true);
+      expect(token).toEqual(["agents:write"]);
+      expect(system).not.toContain(INLINE_MARKER);
     });
   });
 });

@@ -325,7 +325,6 @@
   "oauthClients.scopeLabels.offline_access": "Stay signed in (refresh token)",
   "oauthClients.scopeLabels.agents:read": "List your agents",
   "oauthClients.scopeLabels.agents:run": "Run agents on your behalf",
-  "oauthClients.scopeLabels.agents:run-inline": "Run agents composed on the fly, without publishing",
   "oauthClients.scopeLabels.runs:read": "View your run history",
   "oauthClients.scopeLabels.runs:read-all": "View every run in the space, not only your own",
   "oauthClients.scopeLabels.runs:cancel": "Cancel your in-progress runs",

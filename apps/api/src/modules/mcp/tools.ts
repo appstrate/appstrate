@@ -792,11 +792,11 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 }
 
 /**
- * `run_and_wait` arguments that exist only for `kind:"inline"`. Declared to a
- * caller holding `agents:run-inline` and to no one else — see
- * `offersInlineRuns`. The launch allowlist (`RUN_AND_WAIT_ARGUMENT_NAMES`) still
- * knows them either way: an agent-only caller that sends one reaches the route
- * and takes its 403, the one refusal that owns the rule.
+ * `run_and_wait` arguments that exist only for `kind:"inline"`. Declared only
+ * to a caller {@link offersInlineRuns} admits. The launch allowlist
+ * (`RUN_AND_WAIT_ARGUMENT_NAMES`) still knows them either way: an agent-only
+ * caller that sends one reaches the route and takes its 403, the one refusal
+ * that owns the rule.
  */
 const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
   manifest: {
@@ -877,14 +877,12 @@ const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
  * Whether `run_and_wait` advertises `kind:"inline"` to this caller.
  *
  * The launch route is the gate (`POST /api/runs/inline` requires
- * `agents:run-inline`); this only decides what the model is TOLD. A caller
- * without the grant — a runner, a key minted without the scope, a chat turn
- * whose composer switch narrowed its loopback token — sees an agent-only tool,
- * because a schema offering a kind the route refuses sends the model into a
- * 403 it could not have predicted.
+ * `agents:write` and `agents:run`); this mirrors it and only decides what the
+ * model is TOLD — a schema offering a kind the route refuses sends the model
+ * into a 403 it could not have predicted.
  */
 export function offersInlineRuns(permissions: ReadonlySet<string>): boolean {
-  return permissions.has("agents:run-inline");
+  return permissions.has("agents:write") && permissions.has("agents:run");
 }
 
 function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {

@@ -23,6 +23,7 @@
 
 import { useTranslation } from "react-i18next";
 import { CheckIcon, EyeIcon, ShieldIcon, XIcon } from "lucide-react";
+import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { cn } from "@appstrate/ui/cn";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
@@ -55,10 +56,13 @@ export function ChatAccessChip() {
     <Popover>
       <PopoverTrigger asChild>
         {/* Same shape as the model picker it sits beside. */}
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           className={cn(
-            "border-input bg-background hover:bg-accent text-foreground inline-flex min-w-0 items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs",
+            "text-foreground hover:text-foreground h-auto gap-1.5 px-2.5 py-1 font-normal shadow-none [&_svg]:size-3.5",
+            "min-w-0",
             persona && "border-primary/40 bg-primary/5",
           )}
           // The accessible name CONTAINS the visible text (WCAG 2.5.3): a
@@ -71,7 +75,7 @@ export function ChatAccessChip() {
             <ShieldIcon className="text-muted-foreground size-3.5 shrink-0" />
           )}
           <span className="max-w-40 truncate font-medium">{roleLabel}</span>
-        </button>
+        </Button>
       </PopoverTrigger>
       <PopoverContent
         side="top"

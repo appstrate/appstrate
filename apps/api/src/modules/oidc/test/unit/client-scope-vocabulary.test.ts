@@ -33,22 +33,6 @@ describe("client scope vocabulary", () => {
     }
   });
 
-  it("admits `agents:run-inline` on instance and org clients but refuses it on a space client", () => {
-    // Dashboard-only, not absent: a dashboard token is capped by the subject's
-    // live role, but a space client's tokens are end-user tokens, and an
-    // end-user must never have the platform execute a manifest of the
-    // embedding app's own composition. `agents:run` — launching an agent
-    // someone in the org published — stays requestable at every level.
-    expect(invalidScopesIn(["openid", "agents:run-inline"], "org")).toEqual([]);
-    expect(invalidScopesIn(["openid", "agents:run-inline"], "instance")).toEqual([]);
-    expect(invalidScopesIn(["openid", "agents:run", "agents:run-inline"], "space")).toEqual([
-      "agents:run-inline",
-    ]);
-    for (const level of ["instance", "org", "space"] as const) {
-      expect(invalidScopesIn(["agents:run"], level), level).toEqual([]);
-    }
-  });
-
   it("has nothing to validate for an absent or empty scope list", () => {
     expect(invalidScopesIn(undefined, "space")).toEqual([]);
     expect(invalidScopesIn([], "space")).toEqual([]);

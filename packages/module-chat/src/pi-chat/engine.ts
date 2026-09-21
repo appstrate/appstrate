@@ -193,10 +193,6 @@ function settledWithin(work: Promise<unknown>, ms: number): Promise<boolean> {
 export function runPiChat(input: PiChatInput): Response {
   const { modelBinding, platformMcp, abortSignal, onError } = input;
   const model = modelBinding.model;
-  // Stamped on the turn's closing metadata by both exits below. The route has
-  // already resolved the preset, so this is a rename, not a lookup — and it is
-  // known before the first chunk, so no exit path can lose it.
-  const turnModel = { id: input.presetId, label: input.modelLabel };
   const startedAt = Date.now();
   const timings: TurnConstructionTimings = {
     mcpHandshakeMs: null,
@@ -620,7 +616,8 @@ export function runPiChat(input: PiChatInput): Response {
           // model-call count to the ceiling.
           stepCapReached: stepCap.fired(),
           ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
-          model: turnModel,
+          modelId: input.presetId,
+          modelLabel: input.modelLabel,
         });
         // Same invariant, second failure mode: a turn killed by the deadline
         // used to end in complete silence. The emitter gives it a REAL text part
@@ -677,7 +674,8 @@ export function runPiChat(input: PiChatInput): Response {
             stepCount: mapper.stepCount(),
             stepCapReached: stepCap?.fired() ?? false,
             ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
-            model: turnModel,
+            modelId: input.presetId,
+            modelLabel: input.modelLabel,
           });
           for (const chunk of closing.chunks) write(chunk);
         }

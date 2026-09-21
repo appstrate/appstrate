@@ -21,7 +21,7 @@ import {
 
 const TEN_MINUTES = 10 * 60_000;
 /** Every exit stamps the model it bound to; the engine always has one. */
-const MODEL = { id: "mdl_opus", label: "Claude Opus 5" } as const;
+const MODEL = { modelId: "mdl_opus", modelLabel: "Claude Opus 5" };
 
 async function assemble(chunks: UIMessageChunk[]): Promise<UIMessage | undefined> {
   const stream = new ReadableStream<UIMessageChunk>({
@@ -113,7 +113,7 @@ describe("closePiTurn", () => {
       abortReason: undefined,
       stepCount: 0,
       stepCapReached: false,
-      model: MODEL,
+      ...MODEL,
       lastToolName: "read_file",
       newId: () => "assistant-before-start",
     }).chunks;
@@ -147,7 +147,7 @@ describe("closePiTurn", () => {
         abortReason: undefined,
         stepCount: 3,
         stepCapReached: false,
-        model: MODEL,
+        ...MODEL,
         newId: () => "unused",
       }).chunks,
     ];
@@ -171,7 +171,7 @@ describe("closePiTurn", () => {
       abortReason: new ChatTurnDeadlineError(10),
       stepCount: 0,
       stepCapReached: false,
-      model: MODEL,
+      ...MODEL,
       newId: (() => {
         const ids = ["assistant-deadline", "deadline-notice"];
         return () => ids.shift()!;
@@ -196,7 +196,7 @@ describe("closePiTurn", () => {
       abortReason: new Error("stopped by user"),
       stepCount: 0,
       stepCapReached: false,
-      model: MODEL,
+      ...MODEL,
       newId: () => "assistant-stopped",
     });
 
@@ -227,7 +227,7 @@ describe("closePiTurn", () => {
       abortReason: new Error("stopped by user"),
       stepCount: 0,
       stepCapReached: false,
-      model: MODEL,
+      ...MODEL,
       newId: () => "assistant-aborted-with-error",
     });
 
@@ -248,7 +248,7 @@ describe("closePiTurn", () => {
       abortReason: undefined,
       stepCount: 4,
       stepCapReached: true,
-      model: MODEL,
+      ...MODEL,
       lastToolName: "run_and_wait",
     });
 
@@ -277,7 +277,7 @@ describe("closePiTurn", () => {
       abortReason: undefined,
       stepCount: 2,
       stepCapReached: false,
-      model: MODEL,
+      ...MODEL,
     });
 
     expect(closing.chunks.map((chunk) => chunk.type)).toEqual(["error", "finish"]);
@@ -301,7 +301,7 @@ describe("the model a turn bound to", () => {
       abortReason: undefined,
       stepCount: 2,
       stepCapReached: false,
-      model: MODEL,
+      ...MODEL,
       newId: () => "unused",
     }).chunks;
 
@@ -323,7 +323,7 @@ describe("the model a turn bound to", () => {
       abortReason: undefined,
       stepCount: 0,
       stepCapReached: false,
-      model: MODEL,
+      ...MODEL,
       newId: () => "assistant-error",
     }).chunks;
 

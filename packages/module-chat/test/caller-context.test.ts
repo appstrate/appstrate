@@ -114,6 +114,22 @@ describe("formatCallerContext", () => {
     expect(theirs).not.toContain("version=draft");
   });
 
+  it("advertises no draft as runnable when the turn may not author agents", () => {
+    // The turn's token then lacks `agents:write`, and a draft launch 403s.
+    const draft = {
+      package_id: "@acme/mine",
+      display_name: "Mine",
+      takes_input: false,
+      published: false,
+      home_writable: true,
+    };
+    const raw = { user: { name: "Ada" }, org: { role: "member" }, agents: [draft] };
+    expect(formatCallerContext(raw, { authoring: true })).toContain("yours to run");
+    const off = formatCallerContext(raw, { authoring: false });
+    expect(off).toContain("draft only, not runnable while agent authoring is off");
+    expect(off).not.toContain("version=draft");
+  });
+
   it("says nothing about the draft for a PUBLISHED agent", () => {
     // The negative control: the suffix is about the draft, not about authorship
     // — an author of a published agent gets the plain line.
@@ -376,6 +392,7 @@ describe("buildCallerContextBlock", () => {
       spaceId: "spc_1",
       user,
       deps,
+      authoring: true,
     });
     // Block is rendered from the dispatched payload, not from request context.
     expect(out).toContain("`@appstrate/gmail`");
@@ -395,6 +412,7 @@ describe("buildCallerContextBlock", () => {
       spaceId: "spc_1",
       user,
       deps,
+      authoring: true,
     });
     expect(out).toContain("Ada (ada@acme.com)");
   });
@@ -407,6 +425,7 @@ describe("buildCallerContextBlock", () => {
       spaceId: "spc_1",
       user,
       deps,
+      authoring: true,
     });
     expect(out).toBe("");
   });

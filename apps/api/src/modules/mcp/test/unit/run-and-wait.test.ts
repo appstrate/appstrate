@@ -10,6 +10,8 @@ import { buildMcpTools, type Dispatch } from "../../tools.ts";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
 
 const noExtra = {} as AppstrateRequestExtra;
+/** What composing an inline agent takes: authoring AND launching. */
+const COMPOSER = ["agents:write", "agents:run"];
 
 function parseResult(result: CallToolResult): Record<string, unknown> {
   const first = result.content[0];
@@ -100,9 +102,9 @@ function makeRunAndWait(opts: {
     // it: its second half polls `GET /api/runs/{id}` through the same dispatch,
     // under the caller's own scopes. A caller holding only `mcp:invoke` is
     // covered by its own case below, which asserts the refusal happens BEFORE
-    // the launch. `agents:run-inline` is there so the default descriptor is the
+    // the launch. `agents:write` + `agents:run` make the default descriptor the
     // full one; the agent-only descriptor has its own block below.
-    permissions: new Set(opts.permissions ?? ["mcp:invoke", "runs:read", "agents:run-inline"]),
+    permissions: new Set(opts.permissions ?? ["mcp:invoke", "runs:read", ...COMPOSER]),
     dispatch,
     actor: { type: "user", id: "user_1" },
     scope: { orgId: "org_1", spaceId: "spc_1" },
@@ -236,7 +238,7 @@ describe("run_and_wait", () => {
   });
 
   it("describes package authoring with the remaining file publisher", () => {
-    const instructions = buildServerInstructions(new Set(["mcp:read", "agents:run-inline"]));
+    const instructions = buildServerInstructions(new Set(["mcp:read", ...COMPOSER]));
 
     expect(instructions).toContain("python3 -m zipfile -c package.afps");
     expect(instructions).toContain("publish that archive with `publish_file`");
@@ -245,23 +247,24 @@ describe("run_and_wait", () => {
 
   // ── Advertised to the caller's grant ───────────────────────────────────
   //
-  // `POST /api/runs/inline` requires `agents:run-inline`, so a descriptor that
-  // offered `kind:"inline"` to a caller without it would send the model into a
-  // 403. Both halves are asserted on the same builder, so neither can pass by
-  // the text simply being gone.
+  // `POST /api/runs/inline` requires `agents:write` and `agents:run`, so a
+  // descriptor that offered `kind:"inline"` to a caller missing either would
+  // send the model into a 403. Both halves are asserted on the same builder, so
+  // neither can pass by the text simply being gone.
 
-  describe("without `agents:run-inline`", () => {
-    const agentOnly = () => makeRunAndWait({ permissions: ["mcp:invoke", "runs:read"] }).tool;
+  describe("without `agents:write` ∧ `agents:run`", () => {
+    const agentOnly = () =>
+      makeRunAndWait({ permissions: ["mcp:invoke", "runs:read", "agents:run"] }).tool;
 
-    it('offers `kind:"agent"` only', () => {
-      const properties = agentOnly().descriptor.inputSchema.properties as Record<
-        string,
-        Record<string, unknown>
-      >;
-      expect(properties.kind!.enum).toEqual(["agent"]);
-      expect(makeRunAndWait({}).tool.descriptor.inputSchema.properties).toMatchObject({
-        kind: { enum: ["agent", "inline"] },
-      });
+    it('offers `kind:"inline"` only when both are held', () => {
+      const kinds = (permissions: string[]) =>
+        (
+          makeRunAndWait({ permissions: ["mcp:invoke", "runs:read", ...permissions] }).tool
+            .descriptor.inputSchema.properties as Record<string, { enum?: string[] }>
+        ).kind!.enum;
+      expect(kinds(["agents:run"])).toEqual(["agent"]);
+      expect(kinds(["agents:write"])).toEqual(["agent"]);
+      expect(kinds(COMPOSER)).toEqual(["agent", "inline"]);
     });
 
     it("declares none of the inline-only arguments", () => {
@@ -294,8 +297,8 @@ describe("run_and_wait", () => {
         const instructions = buildServerInstructions(new Set(permissions), true);
         return instructions.slice(0, instructions.indexOf(OPERATION_INDEX_HEADING));
       };
-      const without = prose(["mcp:read", "mcp:invoke"]);
-      const withGrant = prose(["mcp:read", "mcp:invoke", "agents:run-inline"]);
+      const without = prose(["mcp:read", "mcp:invoke", "agents:run"]);
+      const withGrant = prose(["mcp:read", "mcp:invoke", ...COMPOSER]);
       expect(without).not.toMatch(/inline/i);
       expect(without).toContain("validate_package_file");
       expect(withGrant).toContain("runInline");

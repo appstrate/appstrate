@@ -32,6 +32,7 @@ import { materializeUserAttachments } from "./attachments.ts";
 import { runPiChat, type PiChatInput } from "./pi-chat/engine.ts";
 import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
 import { acquirePiChatSlot, chatCapacityResponse } from "./pi-chat/concurrency.ts";
+import { turnPermissions } from "./turn-permissions.ts";
 import { buildSystemPrompt, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
 export type { ChatEnv } from "./prompt.ts";
 import { finalizeChatStream } from "./finalize-stream.ts";
@@ -153,16 +154,8 @@ export const chatStreamSchema = z.object({
     }),
   modelId: z.string().optional(),
   generation: modelGenerationSettingsSchema.optional(),
-  /**
-   * The composer's "inline agents" switch, for THIS turn. Absent = on, which
-   * keeps every client that predates the switch — and the CLI — working
-   * unchanged.
-   *
-   * It is a CEILING the caller lowers on themselves, never a way to raise one:
-   * the turn's authority is `agents:run-inline` ∧ this flag, so `true` from a
-   * caller who does not hold the grant changes nothing.
-   */
-  inline_agents: z.boolean().optional(),
+  /** The composer's agent-authoring switch; absent = on. See {@link turnPermissions}. */
+  agent_authoring: z.boolean().optional(),
 });
 
 function clientErrorMessage(error: unknown): string {
@@ -321,17 +314,12 @@ export async function handleChatStream(
   // answer (it also ignored an API key's pinned space).
   const modelId = c.req.header("X-Model-Id") ?? body.modelId;
 
-  // May THIS turn compose an inline agent? Two conjuncts, and the order is the
-  // point: the RBAC grant is the ceiling, the composer's switch is the caller
-  // lowering it on themselves for this turn. `inline_agents: true` from a caller
-  // who does not hold `agents:run-inline` changes nothing, and an absent flag
-  // means on — so a client that predates the switch behaves as it always did.
-  //
-  // Flipping it changes the prompt-cache prefix twice over — the persona below
-  // and, through the narrowed token, the MCP `run_and_wait` descriptor — but
-  // both change on the same turn, so the switch costs one cache miss, not two.
-  const canRunInline =
-    c.get("permissions").has("agents:run-inline") && body.inline_agents !== false;
+  // Flipping the switch changes the persona and, through the narrowed token, the
+  // MCP `run_and_wait` descriptor on the same turn: one prompt-cache miss.
+  const authoring = body.agent_authoring !== false;
+  const permissions = turnPermissions(c.get("permissions"), authoring);
+  const canComposeInline =
+    permissions.includes("agents:write") && permissions.includes("agents:run");
   const phaseAStart = Date.now();
 
   // ── Preamble phase B (overlapped with A) ─────────────────────────────────
@@ -367,6 +355,7 @@ export async function handleChatStream(
       deps,
       // UI language forwarded by the client; validated/defaulted in the builder.
       locale: c.req.header("X-Chat-Locale"),
+      authoring,
     })
       .finally(() => {
         // Wall time of the block itself.
@@ -474,7 +463,7 @@ export async function handleChatStream(
   // (`pi-chat/engine.ts`). Re-applying it to this prompt matched nothing — and
   // could only misfire, since the context block below carries org-authored agent
   // names and would be truncated at any that happened to spell the heading.
-  let system = buildSystemPrompt({ canRunInline });
+  let system = buildSystemPrompt({ canComposeInline });
   if (contextBlock) system += `\n\n${contextBlock}`;
 
   // Which credential the turn spends. One engine drives them both.
@@ -593,8 +582,8 @@ export async function handleChatStream(
   // The engine opens its OWN platform MCP connection (`/api/mcp/o/:org`), and
   // run_and_wait hits platform run routes with these headers. It must NEVER
   // receive the caller's raw cookie/Authorization (reusable far beyond chat).
-  // Hand it a short-lived, process-local bearer carrying EXACTLY the caller's
-  // already-resolved permissions (full RBAC fidelity, zero amplification) and
+  // Hand it a short-lived, process-local bearer carrying EXACTLY the turn's
+  // permissions (the caller's resolved set, narrowed by `turnPermissions`) and
   // NOT first-party-loopback (can't be replayed against the inference proxy).
   const mcpToken = mintMcpLoopbackToken(
     {
@@ -603,17 +592,7 @@ export async function handleChatStream(
       name: user.name,
       orgId,
       orgRole,
-      // The turn's authority, not the caller's. Dropping the grant here is what
-      // makes the composer's switch REAL: the engine cannot mint a wider token,
-      // so `run_and_wait` with `kind:"inline"` — and `POST /api/runs/inline`
-      // by any other route the engine might reach — is refused by the platform
-      // guard PR #1475 added, not by a second policy written into the chat.
-      // One gate, narrowed; never two gates to keep in step. The MCP server
-      // reads the same narrowed set, so `run_and_wait` stops advertising the
-      // inline kind and its arguments for this turn too.
-      permissions: [...c.get("permissions")].filter(
-        (permission) => canRunInline || permission !== "agents:run-inline",
-      ),
+      permissions,
       // The re-entered request carries no header, so without this the hop would
       // answer with the caller's real authority while a preview is on screen.
       viewAs: persona,

@@ -151,7 +151,7 @@ otherwise get wrong.
 | `list_files`         | `mcp:read`   | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                  |
 
 `run_and_wait` declares the inline kind and its arguments (`manifest`, `prompt`,
-`context_files`) only to a caller holding `agents:run-inline`; anyone else is
+`context_files`) only to a caller holding both `agents:write` and `agents:run`; anyone else is
 offered `kind:"agent"` alone.
 
 This server advertises `tools: { listChanged: false }`, so a client that listed

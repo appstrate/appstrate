@@ -146,34 +146,11 @@ export interface AppstrateTurnMetadata {
   maxStepsReached: boolean;
   lastToolName?: string;
   /**
-   * Which model answered this turn. TWO fields, one fact, two lifetimes — the
-   * same split `runs` makes between `llm_usage.model` (the preset id) and
-   * `runs.model_label` (the snapshot that outlives the model row):
-   *
-   *  - `modelId` is the org-model PRESET id the turn bound to — the id
-   *    `/api/models` serves. Reopening a conversation pre-selects it in the
-   *    composer's picker (the newest turn carrying one) — a pre-selection, not
-   *    a lock: every turn runs on the `X-Model-Id` it is sent with. It MAY
-   *    dangle: deleting, disabling or disconnecting an org model does not
-   *    rewrite history, so the client only pre-selects an id the catalog
-   *    still serves live and otherwise falls back to the user's default.
-   *  - `modelLabel` is the display name frozen at write time, so a transcript
-   *    still says which model answered after that model is gone. For an ALIASED
-   *    model it is the alias label — the value `/api/models` serves and the
-   *    picker renders — never the hidden backing id.
-   *
-   * OPTIONAL like `errorCategory`: every row written before this shipped has
-   * neither, and neither does a message the Pi engine did not close (a
-   * server-authored notice). The engine stamps both on every exit.
-   * Readers degrade to showing nothing, never to a guess.
-   *
-   * ⚠️ NEITHER is input to the history projection. `buildStructuredPiTurn`
-   * stamps every historical assistant message with `HISTORY_MODEL_SENTINEL` on
-   * purpose, so Pi's `isSameModel` test FAILS and its cross-model tool-call-id
-   * normalization and Responses-API unpaired-item scrub both run. Feeding a
-   * real model id back into that projection would re-enable `isSameModel` and
-   * break replay for every conversation that ever switched models. These fields
-   * exist to be SHOWN, not to be replayed.
+   * Which model answered: `modelId` is the org-model preset id (it may dangle
+   * once that model is gone), `modelLabel` the display name frozen at write
+   * time. A turn the engine did not close carries neither. Display only: the
+   * history projection stamps `HISTORY_MODEL_SENTINEL` so Pi's `isSameModel`
+   * fails; a real id there would break replay across a model switch.
    */
   modelId?: string;
   modelLabel?: string;

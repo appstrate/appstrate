@@ -12,11 +12,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import {
-  CHAT_CAPABILITIES,
-  resolveChatCapabilities,
-  type ChatAccessContext,
-} from "./chat-access.ts";
+import { canAuthorAgents, resolveChatCapabilities, type ChatAccessContext } from "./chat-access.ts";
 import { PACKAGE_PERMISSIONS, type SpaceGrant } from "../../lib/package-permissions.ts";
 
 /** The grant `maySetPackageActive` reads for an integration in a team space. */
@@ -34,6 +30,9 @@ function context(permissions: string[], space?: Partial<SpaceGrant>): ChatAccess
   };
 }
 
+/** Every row id, in declaration order. */
+const ROW_IDS = resolveChatCapabilities(context([])).map((c) => c.id);
+
 function verdicts(ctx: ChatAccessContext): Record<string, boolean> {
   return Object.fromEntries(resolveChatCapabilities(ctx).map((c) => [c.id, c.granted]));
 }
@@ -49,7 +48,6 @@ const CONVERSES = ["chat:write", "mcp:read", "mcp:invoke"];
 const EVERYTHING = [
   ...CONVERSES,
   "agents:run",
-  "agents:run-inline",
   "agents:write",
   "runs:read",
   "runs:read-all",
@@ -63,16 +61,15 @@ describe("the capability table", () => {
   it("has unique ids and unique label keys", () => {
     // A duplicated label key is the copy-paste bug this table invites: two rows
     // render the same sentence and one capability silently stops being shown.
-    const ids = CHAT_CAPABILITIES.map((c) => c.id);
-    const labels = CHAT_CAPABILITIES.map((c) => c.labelKey);
-    expect(new Set(ids).size).toBe(ids.length);
+    const labels = resolveChatCapabilities(context([])).map((c) => c.labelKey);
+    expect(new Set(ROW_IDS).size).toBe(ROW_IDS.length);
     expect(new Set(labels).size).toBe(labels.length);
   });
 
   it("spells every label key in full, so the locale guard can see it", () => {
     // The reverse locale guard resolves string literals. A key built from `id`
     // would be invisible to it and could rot into an untranslated raw key.
-    for (const capability of CHAT_CAPABILITIES) {
+    for (const capability of resolveChatCapabilities(context([]))) {
       expect(capability.labelKey.startsWith("access.capability.")).toBe(true);
     }
   });
@@ -80,13 +77,11 @@ describe("the capability table", () => {
   it("grants nothing to a caller holding nothing", () => {
     // Includes the space-less case: `spaceGrant: undefined` is "not loaded",
     // which must read as no, never as yes.
-    expect(Object.values(verdicts(context([])))).toEqual(CHAT_CAPABILITIES.map(() => false));
+    expect(Object.values(verdicts(context([])))).toEqual(ROW_IDS.map(() => false));
   });
 
   it("grants everything to a caller holding every underlying permission", () => {
-    expect(Object.values(verdicts(context(EVERYTHING, {})))).toEqual(
-      CHAT_CAPABILITIES.map(() => true),
-    );
+    expect(Object.values(verdicts(context(EVERYTHING, {})))).toEqual(ROW_IDS.map(() => true));
   });
 });
 
@@ -101,7 +96,7 @@ describe("each row's own permission", () => {
       row: "callApi",
       removes: ["mcp:invoke"],
       // Every act dispatches through `mcp:invoke`; browsing does not.
-      refuses: CHAT_CAPABILITIES.map((c) => c.id).filter((id) => id !== "browseFiles"),
+      refuses: ROW_IDS.filter((id) => id !== "browseFiles"),
     },
     // `run_and_wait` also needs a run-read permission, so both fall together.
     {
@@ -109,10 +104,14 @@ describe("each row's own permission", () => {
       removes: ["runs:read", "runs:read-all"],
       refuses: ["runAgents", "composeAgents", "readRuns"],
     },
-    { row: "runAgents", removes: ["agents:run"], refuses: ["runAgents"] },
-    // Its own grant: `agents:run` does not imply it, nor it `agents:run`.
-    { row: "composeAgents", removes: ["agents:run-inline"], refuses: ["composeAgents"] },
-    { row: "createAgents", removes: ["agents:write"], refuses: ["createAgents"] },
+    // An on-the-fly agent is authored AND run, so composing needs both grants
+    // and falls with either.
+    { row: "runAgents", removes: ["agents:run"], refuses: ["runAgents", "composeAgents"] },
+    {
+      row: "createAgents",
+      removes: ["agents:write"],
+      refuses: ["createAgents", "composeAgents"],
+    },
     { row: "browseFiles", removes: ["files:read"], refuses: ["browseFiles"] },
     {
       row: "connectIntegrations",
@@ -129,7 +128,9 @@ describe("each row's own permission", () => {
   ];
 
   it("covers every row of the table", () => {
-    expect(cases.map((c) => c.row).sort()).toEqual(CHAT_CAPABILITIES.map((c) => c.id).sort());
+    // `composeAgents` owns no permission of its own: it is the conjunction of
+    // the run and create rows, pinned by their cases above.
+    expect([...cases.map((c) => c.row), "composeAgents"].sort()).toEqual([...ROW_IDS].sort());
   });
 
   it.each(cases)("refuses $row once only its own permission is gone", ({ removes, refuses }) => {
@@ -139,9 +140,41 @@ describe("each row's own permission", () => {
         {},
       ),
     );
-    expect(without).toEqual(
-      Object.fromEntries(CHAT_CAPABILITIES.map((c) => [c.id, !refuses.includes(c.id)])),
-    );
+    expect(without).toEqual(Object.fromEntries(ROW_IDS.map((id) => [id, !refuses.includes(id)])));
+  });
+});
+
+describe("composing an agent on the fly", () => {
+  it("needs both `agents:write` and `agents:run`, and neither alone", () => {
+    const base = [...CONVERSES, "runs:read"];
+    expect(verdicts(context([...base, "agents:write", "agents:run"])).composeAgents).toBe(true);
+    expect(verdicts(context([...base, "agents:write"])).composeAgents).toBe(false);
+    expect(verdicts(context([...base, "agents:run"])).composeAgents).toBe(false);
+  });
+});
+
+describe("the composer's agent-authoring button", () => {
+  it("answers exactly as the `createAgents` row, for every caller", () => {
+    // One rule for both: a button offered to a caller the chip marks as
+    // unable to create agents (or the reverse) would contradict itself.
+    const callers = [
+      [],
+      CONVERSES,
+      [...CONVERSES, "agents:write"],
+      ["chat:write", "mcp:read", "agents:write"],
+      ["mcp:read", "mcp:invoke", "agents:write"],
+      EVERYTHING,
+      EVERYTHING.filter((p) => p !== "chat:write"),
+      EVERYTHING.filter((p) => p !== "agents:write"),
+    ];
+    const answers = callers.map((permissions) => {
+      const ctx = context(permissions, {});
+      return [canAuthorAgents(ctx), verdicts(ctx).createAgents];
+    });
+    for (const [button, row] of answers) expect(button).toBe(row);
+    // Both answers occur, so the agreement above is not two constant `false`s.
+    expect(answers.map(([button]) => button)).toContain(true);
+    expect(answers.map(([button]) => button)).toContain(false);
   });
 });
 
@@ -239,7 +272,7 @@ describe("reaching the API at all", () => {
       ),
     );
     expect(noInvoke).toEqual({
-      ...Object.fromEntries(CHAT_CAPABILITIES.map((c) => [c.id, false])),
+      ...Object.fromEntries(ROW_IDS.map((id) => [id, false])),
       browseFiles: true,
     });
   });
@@ -251,7 +284,7 @@ describe("reaching the API at all", () => {
         {},
       ),
     );
-    expect(Object.values(noEndpoint)).toEqual(CHAT_CAPABILITIES.map(() => false));
+    expect(Object.values(noEndpoint)).toEqual(ROW_IDS.map(() => false));
   });
 });
 
@@ -263,7 +296,7 @@ describe("a caller who may read the chat but not write to it", () => {
     const viewer = verdicts(
       context(["chat:read", "mcp:read", "runs:read", "files:read", "agents:read"], {}),
     );
-    expect(Object.values(viewer)).toEqual(CHAT_CAPABILITIES.map(() => false));
+    expect(Object.values(viewer)).toEqual(ROW_IDS.map(() => false));
 
     const readOnlyEverything = verdicts(
       context(
@@ -271,6 +304,6 @@ describe("a caller who may read the chat but not write to it", () => {
         {},
       ),
     );
-    expect(Object.values(readOnlyEverything)).toEqual(CHAT_CAPABILITIES.map(() => false));
+    expect(Object.values(readOnlyEverything)).toEqual(ROW_IDS.map(() => false));
   });
 });

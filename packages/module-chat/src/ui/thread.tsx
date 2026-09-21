@@ -386,16 +386,7 @@ function ThinkingIndicator() {
   );
 }
 
-/**
- * Which model answered this turn, at low emphasis, in the row the action bar
- * already reserves — so a model switch mid-conversation is VISIBLE where it
- * happened instead of being inferred from the composer's current selection.
- *
- * Always rendered rather than revealed on hover: the point is that a reader
- * scrolling a transcript notices the change without looking for it. Absent on
- * every turn that carries no model (see `turn-model.ts`), which is also what
- * keeps it off user messages and server-authored notices.
- */
+/** Always shown, not on hover, so a mid-conversation model switch is visible. */
 function TurnModelBadge() {
   const { t } = useChatHost();
   // A plain string selector — never a derived object. See `turn-error-state.ts`.
@@ -403,11 +394,8 @@ function TurnModelBadge() {
   if (label === null) return null;
   const answeredBy = t("model.answeredBy", { model: label });
   return (
-    // `min-w-0` is what lets `truncate` actually shrink inside the flex row —
-    // without it a long model name would push the action bar out instead of
-    // ellipsing. Capped so it never crowds the bar on a narrow viewport. The
-    // visible text is the bare name; assistive tech reads the full sentence
-    // instead, since a bare model name out of context says nothing.
+    // `min-w-0` lets `truncate` shrink inside the flex row. Assistive tech reads
+    // the full sentence: a bare model name says nothing out of context.
     <span
       className="text-muted-foreground max-w-[14rem] min-w-0 truncate text-xs"
       title={answeredBy}

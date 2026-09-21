@@ -3,36 +3,15 @@
 /**
  * Currently selected chat model (org preset id).
  *
- * TWO scopes, deliberately:
- *
- *  - the localStorage value is the user's DEFAULT — what a NEW conversation
- *    starts on, and what a pick updates;
- *  - `activeModelId` is the model the OPEN conversation is on. It is seeded
- *    from that conversation's own history (the newest assistant turn carrying
- *    `modelId`) and overridden by an explicit pick.
- *
- * ONE slot, not a map: the conversation component is keyed by id and its
- * history query is `gcTime: 0`, so reopening a conversation refetches and
- * re-seeds from the transcript.
- *
- * The seed is a PRE-SELECTION, not a lock. The server honours whatever
- * `X-Model-Id` each turn carries, and switching models mid-conversation is
- * supported on purpose (the history projection is built to replay across a
- * switch). What the seed fixes is the silent case: reopening a conversation
- * answered by model A while the store held B continued it on B without the
- * user ever choosing to. It is not persisted — a reload re-derives it from the
- * transcript, and what it drops is an unsent pick.
- *
- * INVARIANT: once the catalog is known, the selection is always a live model
- * (listed, enabled, credential usable). A seed naming anything else is
- * refused, and a catalog that arrives after the seed prunes it — so the order
- * of the two loads does not matter.
- *
- * Generation settings are ONE global preference. The store only prunes the
- * stored value against the DEFAULT model (on a pick, or when the catalog
- * changes); what is shown and sent is reconciled against the model actually
- * selected, at read time, so opening an old conversation on a model without
- * reasoning never erases the reasoning level the default uses.
+ * Two scopes: the localStorage value is the user's DEFAULT, what a new
+ * conversation starts on; `activeModelId` is the OPEN conversation's model,
+ * seeded from its newest answered turn and overridden by a pick. The seed is a
+ * pre-selection, not a lock — the server honours each turn's `X-Model-Id`.
+ * INVARIANT: once the catalog is known, the selection is always a live model,
+ * whichever of catalog and seed lands first.
+ * Generation settings are ONE global preference, pruned only against the
+ * default model; what is shown and sent is reconciled against the selected
+ * model without writing back.
  *
  * Exposed as an external store (`useSyncExternalStore`) rather than React
  * state so the transport's per-request header builder can read the CURRENT
@@ -78,53 +57,33 @@ export function subscribeModel(listener: () => void): () => void {
 
 /** Conversation the composer is currently attached to (`null` = none mounted). */
 let activeConversationId: string | null = null;
-/** That conversation's model: seeded from its history, or set by a pick. */
 let activeModelId: string | null = null;
 
-/** The model this conversation is on, or the stored default for a new one. */
 export function getSelectedModel(): string | null {
   return activeModelId ?? cache;
 }
 
-/**
- * Attach the store to a conversation, clearing the previous one's model.
- *
- * Called on every conversation mount. The clear is the fix: without it, opening
- * a fresh chat after one answered by model A would inherit A instead of
- * starting on the user's stored default.
- */
-export function setActiveConversation(id: string | null): void {
-  if (activeConversationId === id) return;
-  activeConversationId = id;
-  activeModelId = null;
-  notifyModel();
+/** A seed never overrides a pick made while the history was in flight. */
+export function attachConversation(id: string | null, seedModelId: string | null): void {
+  let changed = false;
+  if (activeConversationId !== id) {
+    activeConversationId = id;
+    changed = activeModelId !== null;
+    activeModelId = null;
+  }
+  if (
+    id !== null &&
+    activeModelId === null &&
+    seedModelId !== null &&
+    (liveModelIds === null || liveModelIds.has(seedModelId))
+  ) {
+    activeModelId = seedModelId;
+    changed = true;
+  }
+  if (changed) notifyModel();
 }
 
-/**
- * Pre-select the open conversation's model from its own transcript.
- *
- * Ignored when the id is not the active conversation (a history load that
- * resolved after the user navigated away), when a model is already set (an
- * explicit pick made while the history was in flight is the user's, and the
- * transcript is older news), and when the catalog is known and does not serve
- * that model live — a deleted, disabled or disconnected model falls back to
- * the stored default instead of leaving the composer on a model every send
- * would be refused for. A seed that lands before the catalog is checked when
- * the catalog arrives (see {@link setModelCatalog}).
- */
-export function seedConversationModel(conversationId: string, modelId: string): void {
-  if (conversationId !== activeConversationId || activeModelId !== null) return;
-  if (liveModelIds !== null && !liveModelIds.has(modelId)) return;
-  activeModelId = modelId;
-  notifyModel();
-}
-
-/**
- * An explicit pick: it becomes the open conversation's model AND the stored
- * default for the next new chat — a pick is a statement of preference, not
- * only of this thread's binding. The stored generation settings follow it,
- * since they are kept compatible with the default.
- */
+/** A pick sets both the open conversation's model and the stored default. */
 export function setSelectedModel(id: string | null): void {
   const reconciled = reconcileModelGenerationSettings(
     generationCache,
@@ -153,25 +112,14 @@ function setDefaultModel(id: string | null): boolean {
   return true;
 }
 
-/**
- * The generation settings depend on the selected model (see
- * {@link getCompatibleGenerationSettings}), so a model change notifies both.
- */
+/** The compatible generation settings follow the selected model: notify both. */
 function notifyModel(): void {
+  recomputeCompatible();
   for (const l of listeners) l();
   for (const l of generationListeners) l();
 }
 
-/**
- * Load the org's chat catalog (`/api/models`, already narrowed to enabled,
- * chat-usable rows). Runs on every catalog change, not just the first.
- *
- * Restores the invariant that the selection is a live model: a conversation
- * model the catalog no longer serves live is dropped (the conversation falls
- * back to the default), and a stored default that is not live is replaced by
- * the org default, else the first live model. A dead model is listed — the
- * picker marks it — but is never kept selected nor adopted as the fallback.
- */
+/** Runs on every catalog change; a dead model is listed but never kept selected. */
 export function setModelCatalog(
   models: ReadonlyArray<{
     id: string;
@@ -205,56 +153,23 @@ export function subscribeGeneration(listener: () => void): () => void {
   return () => generationListeners.delete(listener);
 }
 
-/** The stored preference, as the user last set it. */
-export function getGenerationSettings(): ModelGenerationSettings {
-  return generationCache;
-}
+/** Cached so `useSyncExternalStore` sees one reference while nothing changed. */
+let compatibleCache: ModelGenerationSettings = {};
 
-let compatibleMemo: {
-  settings: ModelGenerationSettings;
-  modelId: string | null;
-  capabilities: ReadonlyMap<string, ModelGenerationCapabilities>;
-  result: ModelGenerationSettings;
-} | null = null;
-
-/**
- * The stored preference reconciled against the model that is SELECTED — the
- * one `X-Model-Id` carries — which may differ from the default the storage is
- * reconciled against. This is what a request sends and what the picker's
- * configuration tab shows; nothing is written back.
- *
- * Memoized on its inputs so it is a valid `useSyncExternalStore` snapshot
- * (same reference while nothing changed).
- */
-export function getCompatibleGenerationSettings(): ModelGenerationSettings {
+function recomputeCompatible(): void {
   const modelId = getSelectedModel();
-  if (
-    compatibleMemo?.settings === generationCache &&
-    compatibleMemo.modelId === modelId &&
-    compatibleMemo.capabilities === generationCapabilities
-  ) {
-    return compatibleMemo.result;
-  }
-  const result = reconcileModelGenerationSettings(
+  compatibleCache = reconcileModelGenerationSettings(
     generationCache,
     modelId === null ? undefined : generationCapabilities.get(modelId),
   );
-  compatibleMemo = {
-    settings: generationCache,
-    modelId,
-    capabilities: generationCapabilities,
-    result,
-  };
-  return result;
+}
+recomputeCompatible();
+
+export function getCompatibleGenerationSettings(): ModelGenerationSettings {
+  return compatibleCache;
 }
 
-/**
- * An edit made in the picker. The picker shows the settings reconciled against
- * the selected model, so its value lacks what that model does not accept;
- * those hidden keys are kept from the stored preference. Tuning the temperature
- * in a conversation on a model without reasoning must not erase the reasoning
- * level the default uses. A key the picker shows and the edit drops is cleared.
- */
+/** Keys the selected model hides are kept, so an edit never erases the default's. */
 export function editGenerationSettings(value: ModelGenerationSettings): void {
   const shown = getCompatibleGenerationSettings();
   const hidden = Object.fromEntries(
@@ -263,7 +178,7 @@ export function editGenerationSettings(value: ModelGenerationSettings): void {
   setGenerationSettings({ ...hidden, ...value });
 }
 
-export function setGenerationSettings(value: ModelGenerationSettings): void {
+function setGenerationSettings(value: ModelGenerationSettings): void {
   generationCache = value;
   try {
     if (Object.keys(value).length === 0) localStorage.removeItem(GENERATION_KEY);
@@ -271,57 +186,6 @@ export function setGenerationSettings(value: ModelGenerationSettings): void {
   } catch {
     // The settings remain available for this page even if persistence is unavailable.
   }
+  recomputeCompatible();
   for (const listener of generationListeners) listener();
-}
-
-// ---------------------------------------------------------------------------
-// Inline agents — the composer's execution switch
-//
-// A PREFERENCE, not a permission. The permission is `agents:run-inline`,
-// checked server-side; this only says whether the caller wants to spend it on
-// a given turn. Composing an inline agent costs a container plus its own LLM
-// budget and can send the assistant off building instead of answering, which
-// is why it is worth being able to turn off without changing anyone's role.
-//
-// Global (all conversations) and persisted, like the model default: it tracks
-// how the user wants the assistant to behave, not what one thread is about.
-// Default ON — a stored value is the only way it is off, so nobody loses a
-// capability by upgrading.
-// ---------------------------------------------------------------------------
-
-const INLINE_AGENTS_KEY = "appstrate.chat.inlineAgents";
-
-function readInlineAgents(): boolean {
-  if (typeof localStorage === "undefined") return true;
-  try {
-    // Only the exact opt-out string turns it off. Anything else — absent,
-    // corrupted, written by an older build — reads as the default.
-    return localStorage.getItem(INLINE_AGENTS_KEY) !== "off";
-  } catch {
-    return true;
-  }
-}
-
-let inlineAgentsCache = readInlineAgents();
-const inlineAgentsListeners = new Set<() => void>();
-
-export function subscribeInlineAgents(listener: () => void): () => void {
-  inlineAgentsListeners.add(listener);
-  return () => inlineAgentsListeners.delete(listener);
-}
-
-export function getInlineAgentsEnabled(): boolean {
-  return inlineAgentsCache;
-}
-
-export function setInlineAgentsEnabled(enabled: boolean): void {
-  if (inlineAgentsCache === enabled) return;
-  inlineAgentsCache = enabled;
-  try {
-    if (enabled) localStorage.removeItem(INLINE_AGENTS_KEY);
-    else localStorage.setItem(INLINE_AGENTS_KEY, "off");
-  } catch {
-    // ignore quota / unavailable storage — the choice just won't persist.
-  }
-  for (const listener of inlineAgentsListeners) listener();
 }

@@ -157,15 +157,6 @@ const OPERATOR_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> =
   new Set<SpaceLevelPermission>([
     "agents:read",
     "agents:run",
-    // Composing a one-off agent from the chat is USING the space, not
-    // authoring in it: the manifest is thrown away with the run, nothing is
-    // published, and the caller already reads the catalog it draws on. The
-    // preset that must NOT hold it is `runner`, which launches what it cannot
-    // read — a body-supplied manifest is exactly how it would reach around
-    // that. An operator in an `open` space is also what an ordinary member
-    // resolves to (`resolveSpaceRole`), so withholding it here would put the
-    // chat's inline composition behind an admin role for everyone.
-    "agents:run-inline",
     "skills:read",
     "mcp-servers:read",
     // `runs:read` alone — the runs this member launched. Seeing a colleague's
@@ -262,15 +253,6 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "agents:configure",
   "agents:delete",
   "agents:run",
-  // Grantable, unlike `agents:share`: `appstrate run ./agent.afps` is the
-  // headless inline flow (`POST /api/runs/remote`, `source.kind: "inline"` —
-  // see `apps/cli/src/commands/run.ts`), and it authenticates with a key. The
-  // creator ceiling is what bounds it: only a creator who holds the grant
-  // (`admin`, `builder`, `operator`, or a custom role naming it — never
-  // `runner`) can mint a key that carries it. What the separation buys is
-  // that a key scoped for launching published agents no longer executes
-  // whatever manifest its holder composes.
-  "agents:run-inline",
   // Skills
   "skills:read",
   "skills:write",

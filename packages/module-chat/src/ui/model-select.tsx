@@ -11,6 +11,7 @@
 import { useState } from "react";
 import { CheckIcon, ChevronDownIcon, SlidersHorizontalIcon } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
+import { Button } from "@appstrate/ui/components/button";
 import { ModelGenerationControls } from "@appstrate/ui/components/model-generation-controls";
 import { buildGenerationLabels } from "@appstrate/ui/components/model-generation-labels";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
@@ -72,8 +73,6 @@ export function ModelSelect({
   const active = models.find((m) => m.id === selectedId);
   const groups = groupByProvider(models);
   const hasOverrides = generation.temperature != null || generation.reasoningLevel != null;
-  // What the trigger's dot stands for, in words.
-  const flags = hasOverrides ? [t("model.customGeneration")] : [];
   const hasNoGenerationControls =
     active?.generation?.temperature === "unsupported" &&
     active.generation.reasoning.supported === "unsupported";
@@ -188,13 +187,20 @@ export function ModelSelect({
         </Tabs>
       </PopoverContent>
       <PopoverTrigger asChild>
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           className={cn(
-            "border-input bg-background hover:bg-accent text-foreground inline-flex max-w-64 items-center justify-start gap-1.5 rounded-md border px-2.5 py-1 text-left text-xs",
-            flags.length > 0 && "border-primary/40 bg-primary/5",
+            "text-foreground hover:text-foreground h-auto gap-1.5 px-2.5 py-1 font-normal shadow-none [&_svg]:size-3.5",
+            "max-w-64 justify-start text-left",
+            hasOverrides && "border-primary/40 bg-primary/5",
           )}
-          title={[t("model.settingsTitle"), ...flags].join(" · ")}
+          title={
+            hasOverrides
+              ? `${t("model.settingsTitle")} · ${t("model.customGeneration")}`
+              : t("model.settingsTitle")
+          }
         >
           <SlidersHorizontalIcon className="text-muted-foreground size-3.5 shrink-0" />
           {active ? (
@@ -202,14 +208,14 @@ export function ModelSelect({
           ) : (
             <span className="font-medium">{t("model.select")}</span>
           )}
-          {flags.length > 0 && (
+          {hasOverrides && (
             <>
               <span className="bg-primary size-1.5 rounded-full" aria-hidden="true" />
-              <span className="sr-only">{flags.join(", ")}</span>
+              <span className="sr-only">{t("model.customGeneration")}</span>
             </>
           )}
           <ChevronDownIcon className="text-muted-foreground size-3.5 shrink-0" />
-        </button>
+        </Button>
       </PopoverTrigger>
     </Popover>
   );

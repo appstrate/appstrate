@@ -89,9 +89,7 @@ function fakeContext(opts: {
     space: { id: opts.spaceId },
     principalKind: "user",
     orgRole: "member",
-    // A Set, as `enterSpaceContext` writes and `ChatEnv` declares. It was an
-    // array here for as long as nothing read it before the gate — the first
-    // reader that did (`canRunInline`) found `.has` missing.
+    // A Set, as `enterSpaceContext` writes and `ChatEnv` declares.
     permissions: new Set<string>(),
   };
   const headers = new Headers({ "x-space-id": opts.spaceId });
