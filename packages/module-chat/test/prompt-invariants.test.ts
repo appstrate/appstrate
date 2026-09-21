@@ -12,7 +12,7 @@ import { describe, expect, it } from "bun:test";
 import { buildSystemPrompt, formatCallerContext, normalizeChatLocale } from "../src/prompt.ts";
 
 /** The full persona; the reduced one has its own block at the end. */
-const FULL = buildSystemPrompt({ canComposeInline: true });
+const FULL = buildSystemPrompt({ canComposeInline: true, canAuthorAgents: true });
 
 describe("full persona invariants", () => {
   it("keeps the single-sub-agent rule for chained external actions", () => {
@@ -190,7 +190,9 @@ describe("caller-context prompt hygiene", () => {
 describe("the persona without inline composition", () => {
   // What a turn without `agents:write` ∧ `agents:run` is told. The platform
   // refuses the launch either way; this block is about not teaching it.
-  const REDUCED = buildSystemPrompt({ canComposeInline: false });
+  const REDUCED = buildSystemPrompt({ canComposeInline: false, canAuthorAgents: false });
+  /** `agents:write` without `agents:run`: may author agents, not compose one inline. */
+  const AUTHOR_ONLY = buildSystemPrompt({ canComposeInline: false, canAuthorAgents: true });
 
   it("teaches no way to compose one", () => {
     expect(REDUCED).not.toContain('kind:"inline"');
@@ -235,12 +237,20 @@ describe("the persona without inline composition", () => {
   });
 
   it("says to stop when no agent matches, without creating or modifying one", () => {
-    // The full persona invites building agents (`manage agents`, skills); the
-    // reduced one must override that, since its token cannot write an agent.
     expect(REDUCED).toContain("when no existing agent matches, say so plainly and stop");
     expect(REDUCED).toContain("Do not create or modify an agent");
     expect(FULL).not.toContain("when no existing agent matches");
     expect(FULL).not.toContain("Do not create or modify an agent");
+  });
+
+  it("forbids authoring and teaches skill declaration on `agents:write` alone, not on composing", () => {
+    const skills = "Skills are not run on their own";
+    expect(FULL).toContain(skills);
+    expect(REDUCED).not.toContain(skills);
+    // A caller who may write but not run: no inline, yet nothing forbids authoring.
+    expect(AUTHOR_ONLY).toContain(skills);
+    expect(AUTHOR_ONLY).not.toContain("Do not create or modify an agent");
+    expect(AUTHOR_ONLY).not.toContain('kind:"inline"');
   });
 
   it("is materially shorter — the point is not to pay for what is refused", () => {

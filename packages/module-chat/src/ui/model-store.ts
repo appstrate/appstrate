@@ -5,7 +5,7 @@
  *
  * Two scopes: the localStorage value is the user's DEFAULT, what a new
  * conversation starts on; `activeModelId` is the OPEN conversation's model,
- * seeded from its newest answered turn and overridden by a pick. The seed is a
+ * seeded from its newest turn that carries a model and overridden by a pick. The seed is a
  * pre-selection, not a lock — the server honours each turn's `X-Model-Id`.
  * INVARIANT: once the catalog is known, the selection is always a live model,
  * whichever of catalog and seed lands first.

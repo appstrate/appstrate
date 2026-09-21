@@ -486,7 +486,9 @@ describe("handleChatStream", () => {
     // (4) The system prompt was assembled from the caller context. There are no
     // inline MCP instructions on this path: the engine's own handshake delivers
     // them, and it is handed the org-scoped URL to open it with.
-    expect(input.system).toContain(buildSystemPrompt({ canComposeInline: false }).slice(0, 64));
+    expect(input.system).toContain(
+      buildSystemPrompt({ canComposeInline: false, canAuthorAgents: false }).slice(0, 64),
+    );
     expect(input.system).toContain(CONTEXT_ORG_MARKER);
     expect(input.platformMcp.url).toContain(`/api/mcp/o/${encodeURIComponent(ctx.orgId)}`);
     expect(input.platformMcp.headers.Authorization).toMatch(/^Bearer /);
@@ -693,6 +695,8 @@ describe("handleChatStream", () => {
       const { token, system } = await turn(new Set(["agents:write"]), true);
       expect(token).toEqual(["agents:write"]);
       expect(system).not.toContain(INLINE_MARKER);
+      // It may still create agents: nothing tells it otherwise.
+      expect(system).not.toContain(REDUCED_MARKER);
     });
   });
 });

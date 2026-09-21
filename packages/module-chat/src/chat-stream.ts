@@ -464,7 +464,10 @@ export async function handleChatStream(
   // (`pi-chat/engine.ts`). Re-applying it to this prompt matched nothing — and
   // could only misfire, since the context block below carries org-authored agent
   // names and would be truncated at any that happened to spell the heading.
-  let system = buildSystemPrompt({ canComposeInline: composeInline });
+  let system = buildSystemPrompt({
+    canComposeInline: composeInline,
+    canAuthorAgents: permissions.includes("agents:write"),
+  });
   if (contextBlock) system += `\n\n${contextBlock}`;
 
   // Which credential the turn spends. One engine drives them both.

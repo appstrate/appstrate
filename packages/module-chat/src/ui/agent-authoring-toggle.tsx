@@ -2,7 +2,7 @@
 
 /**
  * The composer's agent-authoring toggle: lets the caller keep the assistant to
- * existing agents instead of creating new ones or composing one on the fly.
+ * published agents instead of creating new ones or composing one on the fly.
  *
  * A PREFERENCE inside the `agents:write` grant, so it is hidden outright for a
  * caller without it. The chat sends it with every turn (`agent_authoring`) and

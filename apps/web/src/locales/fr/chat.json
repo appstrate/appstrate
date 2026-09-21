@@ -63,7 +63,7 @@
   "generation.noneSupported": "Aucun réglage de génération disponible pour ce modèle.",
   "agentAuthoring.label": "Création d'agents",
   "agentAuthoring.onTitle": "Création d'agents : activée",
-  "agentAuthoring.onHint": "L'assistant peut créer des agents et en composer à la volée pour une tâche ponctuelle (une exécution coûte un run). Cliquez pour qu'il s'en tienne à vos agents existants. Réglage mémorisé pour votre compte dans ce navigateur.",
+  "agentAuthoring.onHint": "L'assistant peut créer des agents et en composer à la volée pour une tâche ponctuelle (une exécution coûte un run). Cliquez pour qu'il s'en tienne à vos agents publiés. Réglage mémorisé pour votre compte dans ce navigateur.",
   "agentAuthoring.offTitle": "Création d'agents : désactivée",
   "agentAuthoring.offHint": "L'assistant s'en tient à vos agents publiés : il n'en crée ni n'en modifie aucun, et ne lance pas vos brouillons. Cliquez pour l'autoriser à créer des agents. Réglage mémorisé pour votre compte dans ce navigateur.",
   "access.title": "Accès de l'assistant",
