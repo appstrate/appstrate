@@ -39,7 +39,7 @@ import {
 import { spaceRoleLabel } from "../../hooks/use-roles";
 import { useSpaces } from "../../hooks/use-spaces";
 import { useViewAs } from "../../stores/view-as-store";
-import { resolveChatCapabilities } from "./chat-access";
+import { resolveChatCapabilities, type ResolvedChatCapability } from "./chat-access";
 
 export function ChatAccessChip() {
   const { t } = useTranslation(["chat", "settings"]);
@@ -59,6 +59,7 @@ export function ChatAccessChip() {
 
   const spaceRole = spaceRoleLabel(spaces?.find((s) => s.id === spaceId)?.role, (key) => t(key));
   const orgRoleLabel = t(`settings:${roleI18nKey(orgRole)}`);
+  const roleLabel = spaceRole ?? orgRoleLabel;
   const capabilities = resolveChatCapabilities({ can, spaceGrant });
 
   return (
@@ -73,14 +74,16 @@ export function ChatAccessChip() {
               "h-8 gap-1.5 px-2.5 text-xs",
               persona && "border-primary/40 bg-primary/5",
             )}
-            aria-label={t("chat:access.title")}
+            // The accessible name CONTAINS the visible text (WCAG 2.5.3): a
+            // voice user saying the role they see on the button reaches it.
+            aria-label={t("chat:access.triggerLabel", { role: roleLabel })}
           >
             {persona ? (
               <EyeIcon className="text-muted-foreground size-3.5 shrink-0" />
             ) : (
               <ShieldIcon className="text-muted-foreground size-3.5 shrink-0" />
             )}
-            <span className="max-w-40 truncate font-medium">{spaceRole ?? orgRoleLabel}</span>
+            <span className="max-w-40 truncate font-medium">{roleLabel}</span>
           </Button>
         </PopoverTrigger>
         <PopoverContent
@@ -93,30 +96,7 @@ export function ChatAccessChip() {
           <p className="text-sm font-medium">{t("chat:access.title")}</p>
           <p className="text-muted-foreground mt-0.5 text-xs">{t("chat:access.subtitle")}</p>
 
-          <dl className="mt-2 grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1">
-            {capabilities.map((capability) => (
-              <div key={capability.id} className="contents">
-                <dd className="flex items-center justify-center">
-                  {capability.granted ? (
-                    <CheckIcon className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                  ) : (
-                    <XIcon className="text-muted-foreground/60 size-3.5 shrink-0" />
-                  )}
-                  <span className="sr-only">
-                    {t(capability.granted ? "chat:access.granted" : "chat:access.denied")}
-                  </span>
-                </dd>
-                <dt
-                  className={cn(
-                    "text-xs",
-                    capability.granted ? "text-foreground" : "text-muted-foreground line-through",
-                  )}
-                >
-                  {t(`chat:${capability.labelKey}`)}
-                </dt>
-              </div>
-            ))}
-          </dl>
+          <ChatCapabilityList capabilities={capabilities} />
 
           <p className="text-muted-foreground mt-3 border-t pt-2 text-xs">
             {t("chat:access.roleLine", { org: orgRoleLabel, space: spaceRole ?? "—" })}
@@ -144,5 +124,46 @@ export function ChatAccessChip() {
       </Popover>
       {previewing && <ViewAsDialog onClose={() => setPreviewing(false)} />}
     </>
+  );
+}
+
+/**
+ * One list item per capability, the verdict INSIDE the item it judges. The
+ * check/cross is decoration (`aria-hidden`); what a screen reader announces is
+ * the label followed by its spoken verdict, in DOM order, so the two can never
+ * be read against a neighbouring row.
+ */
+export function ChatCapabilityList({
+  capabilities,
+}: {
+  capabilities: readonly ResolvedChatCapability[];
+}) {
+  const { t } = useTranslation(["chat"]);
+  return (
+    <ul className="mt-2 space-y-1">
+      {capabilities.map((capability) => (
+        <li key={capability.id} className="flex items-center gap-2 text-xs">
+          {capability.granted ? (
+            <CheckIcon
+              aria-hidden="true"
+              className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
+            />
+          ) : (
+            <XIcon aria-hidden="true" className="text-muted-foreground/60 size-3.5 shrink-0" />
+          )}
+          <span
+            className={cn(
+              capability.granted ? "text-foreground" : "text-muted-foreground line-through",
+            )}
+          >
+            {t(`chat:${capability.labelKey}`)}
+          </span>
+          <span className="sr-only">
+            {" — "}
+            {t(capability.granted ? "chat:access.granted" : "chat:access.denied")}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }

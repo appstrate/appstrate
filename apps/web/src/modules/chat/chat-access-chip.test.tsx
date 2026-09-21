@@ -29,7 +29,7 @@ const SPACE_ID = "spc_a";
 // dynamic imports below pull them in.
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
-const { ChatAccessChip } = await import("./chat-access-chip.tsx");
+const { ChatAccessChip, ChatCapabilityList } = await import("./chat-access-chip.tsx");
 const { orgStore } = await import("../../stores/org-store.ts");
 const { spaceStore } = await import("../../stores/space-store.ts");
 const { $api } = await import("../../api/client.ts");
@@ -47,7 +47,14 @@ const i18n = i18nModule.default;
 // component is actually mounted in.
 await i18n.loadNamespaces(["chat", "settings"]);
 
-/** One row of `GET /api/spaces`, with the caller's standing in it. */
+/**
+ * One row of `GET /api/spaces`, in a shape the server actually produces
+ * (`apps/api/src/routes/spaces.ts`, `toSpaceDto`): `access` is `"member"`
+ * exactly when `role` is non-null. An org member standing in an OPEN space is
+ * resolved to its `default_role` (`apps/api/src/lib/space-role.ts`), so a null
+ * role only comes back for a CLOSED space the caller has not joined — which
+ * the listing does include.
+ */
 function spaceFixture(role: { kind: "preset" | "custom"; key: string; name: string } | null) {
   return {
     object: "space" as const,
@@ -56,12 +63,12 @@ function spaceFixture(role: { kind: "preset" | "custom"; key: string; name: stri
     name: "Espace",
     isDefault: true,
     settings: {},
-    visibility: "open" as const,
+    visibility: role ? ("open" as const) : ("closed" as const),
     default_role: "operator",
     personal: false,
-    access: "member" as const,
+    access: role ? ("member" as const) : ("none" as const),
     role,
-    permissions: ["agents:run"],
+    permissions: role ? ["agents:run"] : [],
     created_by: null,
     createdAt: "2026-09-05T10:00:00Z",
     updatedAt: "2026-09-05T10:00:00Z",
@@ -144,9 +151,57 @@ describe("the chat access chip", () => {
   });
 
   it("falls back to the org role when the caller holds no role in the space", () => {
-    // An implicit reader of an open space carries no membership row; there is
-    // still a truthful thing to say about who they are.
+    // A closed space the caller has not joined: no space role to show, but
+    // there is still a truthful thing to say about who they are.
     const html = chip({ seedSpaces: true, spaceRole: null });
     expect(html).toContain(i18n.t("settings:orgSettings.roleMember"));
+  });
+
+  it("names its trigger with the visible role, not a label that hides it", () => {
+    // WCAG 2.5.3 label-in-name: an `aria-label` REPLACES the visible text, so
+    // one that omitted the role would leave a voice user unable to reach the
+    // button by saying what it shows.
+    const role = i18n.t("settings:roles.preset.operator");
+    const html = chip({
+      seedSpaces: true,
+      spaceRole: { kind: "preset", key: "operator", name: "operator" },
+    });
+    const label = /aria-label="([^"]*)"/.exec(html)?.[1];
+    expect(label).toBe(i18n.t("chat:access.triggerLabel", { role }));
+    expect(label).toContain(role);
+  });
+});
+
+describe("the capability list", () => {
+  // The popover body is portalled and closed in this harness, so the list is
+  // rendered on its own — it is the part whose structure carries the meaning.
+  const capabilities = [
+    { id: "a", labelKey: "access.capability.runAgents", held: () => true, granted: true },
+    { id: "b", labelKey: "access.capability.schedule", held: () => false, granted: false },
+  ];
+
+  it("puts each verdict in the SAME item as the capability it judges", () => {
+    // The regression: verdict and label as sibling `dd`/`dt` flattened by
+    // `display: contents`, verdict first — a screen reader paired row N's
+    // label with row N+1's verdict. One `li` per row, label then verdict,
+    // makes that pairing impossible.
+    const html = render(<ChatCapabilityList capabilities={capabilities} />);
+    const items = [...html.matchAll(/<li[^>]*>(.*?)<\/li>/g)].map((m) => m[1]!);
+    expect(items).toHaveLength(2);
+
+    const run = i18n.t("chat:access.capability.runAgents");
+    const schedule = i18n.t("chat:access.capability.schedule");
+    const granted = i18n.t("chat:access.granted");
+    const denied = i18n.t("chat:access.denied");
+
+    expect(items[0]).toContain(run);
+    expect(items[0]).toContain(granted);
+    expect(items[0]).not.toContain(denied);
+    expect(items[0]!.indexOf(run)).toBeLessThan(items[0]!.indexOf(granted));
+
+    expect(items[1]).toContain(schedule);
+    expect(items[1]).toContain(denied);
+    expect(items[1]).not.toContain(granted);
+    expect(items[1]!.indexOf(schedule)).toBeLessThan(items[1]!.indexOf(denied));
   });
 });

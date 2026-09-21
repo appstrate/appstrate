@@ -63,6 +63,7 @@
   "generation.noneSupported": "No generation settings are available for this model.",
   "access.title": "Assistant access",
   "access.subtitle": "The assistant acts with your own permissions, never more.",
+  "access.triggerLabel": "Assistant access: {{role}}",
   "access.granted": "allowed",
   "access.denied": "denied",
   "access.roleLine": "Organization: {{org}} · Space: {{space}}",
@@ -72,7 +73,7 @@
   "access.capability.runAgents": "Run your agents",
   "access.capability.authorAgents": "Create and edit agents",
   "access.capability.readRuns": "See your runs",
-  "access.capability.readFiles": "Read and attach your files",
+  "access.capability.browseFiles": "Browse your files",
   "access.capability.connectIntegrations": "Connect your accounts",
   "access.capability.activateIntegrations": "Activate an integration for the space",
   "access.capability.schedule": "Schedule runs"

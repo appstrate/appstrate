@@ -36,9 +36,16 @@ function verdicts(ctx: ChatAccessContext): Record<string, boolean> {
   return Object.fromEntries(resolveChatCapabilities(ctx).map((c) => [c.id, c.granted]));
 }
 
+/**
+ * What any acting row needs before its own permission: the turn itself
+ * (`chat:write`), the MCP endpoint (`mcp:read`) and the dispatching tools
+ * (`mcp:invoke`).
+ */
+const CONVERSES = ["chat:write", "mcp:read", "mcp:invoke"];
+
 /** Every permission any row reads — a caller who holds the lot. */
 const EVERYTHING = [
-  "mcp:invoke",
+  ...CONVERSES,
   "agents:run",
   "agents:write",
   "runs:read",
@@ -85,55 +92,127 @@ describe("seeing runs", () => {
     // `read-all` is the WIDER of the two and implies `read` (RBAC spec §3.4).
     // A row asking only for `read` would tell a space supervisor it cannot see
     // runs, which is the opposite of true.
-    expect(verdicts(context(["runs:read"])).readRuns).toBe(true);
-    expect(verdicts(context(["runs:read-all"])).readRuns).toBe(true);
-    expect(verdicts(context([])).readRuns).toBe(false);
+    expect(verdicts(context([...CONVERSES, "runs:read"])).readRuns).toBe(true);
+    expect(verdicts(context([...CONVERSES, "runs:read-all"])).readRuns).toBe(true);
+    expect(verdicts(context(CONVERSES)).readRuns).toBe(false);
+  });
+});
+
+describe("running an agent", () => {
+  it("is refused to a caller who may launch but not read runs", () => {
+    // `run_and_wait` refuses before launching without `runs:read` or
+    // `runs:read-all` (it could not poll the run it started). Keyed on
+    // `agents:run` alone, the row would promise exactly that refusal.
+    const launcher = verdicts(context([...CONVERSES, "agents:run"]));
+    expect(launcher.runAgents).toBe(false);
+    expect(verdicts(context([...CONVERSES, "agents:run", "runs:read"])).runAgents).toBe(true);
+    expect(verdicts(context([...CONVERSES, "agents:run", "runs:read-all"])).runAgents).toBe(true);
+  });
+});
+
+describe("browsing files", () => {
+  it("needs the MCP endpoint and `files:read`, not `mcp:invoke`", () => {
+    // `list_files` is not an `invoke_operation` call: the endpoint's
+    // `mcp:read` gate and the `GET /api/files` guard are the whole of it.
+    expect(verdicts(context(["chat:write", "mcp:read", "files:read"])).browseFiles).toBe(true);
+    expect(verdicts(context(["chat:write", "files:read"])).browseFiles).toBe(false);
   });
 });
 
 describe("activating an integration", () => {
   it("is granted in a TEAM space only with the activation grant", () => {
     expect(
-      verdicts(context([INTEGRATION_ACTIVATE_PERMISSION], { personal: false }))
+      verdicts(context([...CONVERSES, INTEGRATION_ACTIVATE_PERMISSION], { personal: false }))
         .activateIntegrations,
     ).toBe(true);
-    expect(verdicts(context([], { personal: false })).activateIntegrations).toBe(false);
+    expect(verdicts(context(CONVERSES, { personal: false })).activateIntegrations).toBe(false);
   });
 
   it("is granted in the caller's PERSONAL space WITHOUT that permission", () => {
-    // RBAC spec §3.6: the owner of a personal space holds `operator` there,
-    // which carries no activation grant — and the route accepts anyway. A row
-    // keyed on the bare permission would claim a refusal that never happens.
-    expect(verdicts(context([], { personal: true, access: "member" })).activateIntegrations).toBe(
-      true,
-    );
+    // RBAC spec §3.6: ownership is the authorization there, so the route skips
+    // the activation grant. It matters for a GUEST, who holds `operator` in
+    // their own space (`space-role.ts`) — no activation grant — and is
+    // accepted anyway. A row keyed on the bare permission would claim a
+    // refusal that never happens.
+    expect(
+      verdicts(context(CONVERSES, { personal: true, access: "member" })).activateIntegrations,
+    ).toBe(true);
   });
 
   it("is NOT granted by a personal space the caller cannot enter", () => {
     // `personal && access === "member"` is what stands in for "this one is
     // mine" — the owner's id is deliberately absent from the wire. Dropping
     // the second half would hand every personal space to every caller.
-    expect(verdicts(context([], { personal: true, access: "none" })).activateIntegrations).toBe(
-      false,
-    );
+    expect(
+      verdicts(context(CONVERSES, { personal: true, access: "none" })).activateIntegrations,
+    ).toBe(false);
+  });
+
+  it("is NOT granted by ownership alone when the assistant cannot invoke", () => {
+    // The ownership exemption is the ROUTE's; the assistant still has to
+    // reach the route, and `invoke_operation` refuses without `mcp:invoke`.
+    expect(
+      verdicts(context(["chat:write", "mcp:read"], { personal: true, access: "member" }))
+        .activateIntegrations,
+    ).toBe(false);
   });
 
   it("is distinct from connecting an account", () => {
     // The distinction the chat's own system prompt has to explain when an
     // `integration_not_active` error lands: connecting is personal, activating
     // is organization-wide. Holding one must never light up the other.
-    const connector = verdicts(context(["integrations:connect"], { personal: false }));
+    const team = { personal: false };
+    const connector = verdicts(context([...CONVERSES, "integrations:connect"], team));
     expect(connector.connectIntegrations).toBe(true);
     expect(connector.activateIntegrations).toBe(false);
   });
 });
 
 describe("reaching the API at all", () => {
-  it("is the `mcp:invoke` row, independent of every package permission", () => {
-    // Without it the assistant answers from its own words — the single most
-    // useful thing to know, and it must not be implied by holding agents.
-    const runner = verdicts(context(["agents:run", "runs:read", "files:read"]));
-    expect(runner.runAgents).toBe(true);
-    expect(runner.callApi).toBe(false);
+  it("gates every act on `mcp:invoke`, whatever package permission is held", () => {
+    // Every act goes through `invoke_operation` or `run_and_wait`, and both
+    // refuse without `mcp:invoke` before dispatching. A caller holding the
+    // package permissions but not it gets nothing but browsing — which is
+    // not an `invoke_operation` call.
+    const noInvoke = verdicts(
+      context(
+        EVERYTHING.filter((p) => p !== "mcp:invoke"),
+        {},
+      ),
+    );
+    expect(noInvoke).toEqual({
+      ...Object.fromEntries(CHAT_CAPABILITIES.map((c) => [c.id, false])),
+      browseFiles: true,
+    });
+  });
+
+  it("gates everything on the MCP endpoint's own `mcp:read`", () => {
+    const noEndpoint = verdicts(
+      context(
+        EVERYTHING.filter((p) => p !== "mcp:read"),
+        {},
+      ),
+    );
+    expect(Object.values(noEndpoint)).toEqual(CHAT_CAPABILITIES.map(() => false));
+  });
+});
+
+describe("a caller who may read the chat but not write to it", () => {
+  it("is shown no capability at all, whatever else they hold", () => {
+    // The `viewer` preset: `chat:read` and `mcp:read`, no `chat:write`. The
+    // turn itself (`POST /api/chat`) needs `chat:write`, so the assistant
+    // never gets the message that would make it act.
+    const viewer = verdicts(
+      context(["chat:read", "mcp:read", "runs:read", "files:read", "agents:read"], {}),
+    );
+    expect(Object.values(viewer)).toEqual(CHAT_CAPABILITIES.map(() => false));
+
+    const readOnlyEverything = verdicts(
+      context(
+        EVERYTHING.filter((p) => p !== "chat:write"),
+        {},
+      ),
+    );
+    expect(Object.values(readOnlyEverything)).toEqual(CHAT_CAPABILITIES.map(() => false));
   });
 });

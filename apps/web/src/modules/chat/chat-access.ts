@@ -51,40 +51,80 @@ export interface ChatCapability {
 }
 
 /**
+ * The platform-MCP endpoint admits nobody without `mcp:read`
+ * (`apps/api/src/modules/mcp/router.ts`, `requireModulePermission("mcp",
+ * "read")` on the transport path) — every tool the assistant has lives behind
+ * it, including the read-only ones.
+ */
+function reachesMcp({ can }: ChatAccessContext): boolean {
+  return can("mcp:read");
+}
+
+/**
+ * Every ACT the assistant performs goes through `invoke_operation` or
+ * `run_and_wait`, and both refuse before dispatching when the caller lacks
+ * `mcp:invoke` (`apps/api/src/modules/mcp/tools.ts`). The dispatched route then
+ * enforces its own permission on top — so a row is the conjunction, never
+ * either half alone.
+ */
+function invokes(ctx: ChatAccessContext): boolean {
+  return reachesMcp(ctx) && ctx.can("mcp:invoke");
+}
+
+/**
+ * The disjunction `canReadRuns` applies server-side
+ * (`apps/api/src/lib/run-visibility.ts`): `read-all` is the wider of the two
+ * and implies `read` (RBAC spec §3.4), so either opens every run-read surface.
+ */
+function readsRuns({ can }: ChatAccessContext): boolean {
+  return can("runs:read") || can("runs:read-all");
+}
+
+/**
  * Ordered from the widest to the narrowest, which is also roughly the order a
  * conversation hits them: reach the API at all, run something, look at what
- * ran, read the files it produced, then the two integration acts people
+ * ran, find the files it produced, then the two integration acts people
  * confuse for each other, then scheduling.
  */
 export const CHAT_CAPABILITIES: readonly ChatCapability[] = [
   {
-    // The whole tool surface. Without it the assistant answers from its own
+    // The whole acting surface. Without it the assistant answers from its own
     // words and nothing else — which is the single most useful thing to know.
     id: "callApi",
     labelKey: "access.capability.callApi",
-    held: ({ can }) => can("mcp:invoke"),
+    held: invokes,
   },
   {
+    // `run_and_wait`, the tool the assistant is told to prefer, refuses
+    // WITHOUT a run-read permission before launching — it would otherwise
+    // start a billed run whose status it cannot poll. The launch routes then
+    // ask `agents:run` (`POST /api/agents/…/run`, `POST /api/runs/inline`).
+    // A fire-and-forget `runAgent` through `invoke_operation` would still pass
+    // without run-read, but the assistant could never report its result, so
+    // this row does not count it as running an agent FOR the caller.
     id: "runAgents",
     labelKey: "access.capability.runAgents",
-    held: ({ can }) => can("agents:run"),
+    held: (ctx) => invokes(ctx) && readsRuns(ctx) && ctx.can("agents:run"),
   },
   {
     id: "authorAgents",
     labelKey: "access.capability.authorAgents",
-    held: ({ can }) => can("agents:write"),
+    held: (ctx) => invokes(ctx) && ctx.can("agents:write"),
   },
   {
-    // `read-all` is the wider of the two and implies `read` (RBAC spec §3.4),
-    // so either answers "may I see runs at all".
     id: "readRuns",
     labelKey: "access.capability.readRuns",
-    held: ({ can }) => can("runs:read") || can("runs:read-all"),
+    held: (ctx) => invokes(ctx) && readsRuns(ctx),
   },
   {
-    id: "readFiles",
-    labelKey: "access.capability.readFiles",
-    held: ({ can }) => can("files:read"),
+    // BROWSING, not reading: `list_files` needs no `mcp:invoke` but dispatches
+    // `GET /api/files`, which `files:read` gates. Reading an `appfile://` the
+    // caller attached goes through `read_file`, which applies the file ACL
+    // and NOT this permission — so a "read your files" row keyed on it would
+    // deny something the server allows.
+    id: "browseFiles",
+    labelKey: "access.capability.browseFiles",
+    held: (ctx) => reachesMcp(ctx) && ctx.can("files:read"),
   },
   {
     // Connecting is personal; activating is organization-wide. The chat's own
@@ -93,7 +133,7 @@ export const CHAT_CAPABILITIES: readonly ChatCapability[] = [
     // user see, before that happens, which half they hold.
     id: "connectIntegrations",
     labelKey: "access.capability.connectIntegrations",
-    held: ({ can }) => can("integrations:connect"),
+    held: (ctx) => invokes(ctx) && ctx.can("integrations:connect"),
   },
   {
     // NOT `can(PACKAGE_PERMISSIONS.integration.activate)`: in a personal space
@@ -102,12 +142,12 @@ export const CHAT_CAPABILITIES: readonly ChatCapability[] = [
     // shared with every other activation control in the SPA.
     id: "activateIntegrations",
     labelKey: "access.capability.activateIntegrations",
-    held: ({ spaceGrant }) => maySetPackageActive(spaceGrant, "integration", true),
+    held: (ctx) => invokes(ctx) && maySetPackageActive(ctx.spaceGrant, "integration", true),
   },
   {
     id: "schedule",
     labelKey: "access.capability.schedule",
-    held: ({ can }) => can("schedules:write"),
+    held: (ctx) => invokes(ctx) && ctx.can("schedules:write"),
   },
 ];
 
@@ -116,9 +156,21 @@ export interface ResolvedChatCapability extends ChatCapability {
   granted: boolean;
 }
 
-/** Every capability with its verdict, in declaration order. */
+/**
+ * Every capability with its verdict, in declaration order.
+ *
+ * `chat:write` gates the turn itself (`POST /api/chat`,
+ * `packages/module-chat/src/routes.ts`): a caller holding only `chat:read`
+ * — the `viewer` preset — can open past transcripts but never send the
+ * message that would make the assistant act, so every row is refused for
+ * them whatever else they hold.
+ */
 export function resolveChatCapabilities(ctx: ChatAccessContext): ResolvedChatCapability[] {
-  return CHAT_CAPABILITIES.map((capability) => ({ ...capability, granted: capability.held(ctx) }));
+  const converses = ctx.can("chat:write");
+  return CHAT_CAPABILITIES.map((capability) => ({
+    ...capability,
+    granted: converses && capability.held(ctx),
+  }));
 }
 
 /**

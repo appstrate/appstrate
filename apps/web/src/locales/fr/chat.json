@@ -63,6 +63,7 @@
   "generation.noneSupported": "Aucun réglage de génération disponible pour ce modèle.",
   "access.title": "Accès de l'assistant",
   "access.subtitle": "L'assistant agit avec vos propres droits, jamais plus.",
+  "access.triggerLabel": "Accès de l'assistant : {{role}}",
   "access.granted": "autorisé",
   "access.denied": "refusé",
   "access.roleLine": "Organisation : {{org}} · Espace : {{space}}",
@@ -72,7 +73,7 @@
   "access.capability.runAgents": "Lancer vos agents",
   "access.capability.authorAgents": "Créer et modifier des agents",
   "access.capability.readRuns": "Consulter vos exécutions",
-  "access.capability.readFiles": "Lire et joindre vos fichiers",
+  "access.capability.browseFiles": "Parcourir vos fichiers",
   "access.capability.connectIntegrations": "Connecter vos comptes",
   "access.capability.activateIntegrations": "Activer une intégration pour l'espace",
   "access.capability.schedule": "Programmer des exécutions"
