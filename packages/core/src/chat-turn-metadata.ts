@@ -148,9 +148,10 @@ export interface AppstrateTurnMetadata {
   /**
    * Which model answered: `modelId` is the org-model preset id (it may dangle
    * once that model is gone), `modelLabel` the display name frozen at write
-   * time. A turn the engine did not close carries neither. Display only: the
-   * history projection stamps `HISTORY_MODEL_SENTINEL` so Pi's `isSameModel`
-   * fails; a real id there would break replay across a model switch.
+   * time. A turn the engine did not close carries neither. It badges the
+   * message and pre-selects the conversation's model, but is never fed back to
+   * the engine: the history projection stamps `HISTORY_MODEL_SENTINEL` so Pi's
+   * `isSameModel` fails; a real id there would break replay across a model switch.
    */
   modelId?: string;
   modelLabel?: string;

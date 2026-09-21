@@ -795,8 +795,8 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
  * `run_and_wait` arguments that exist only for `kind:"inline"`. Declared only
  * to a caller who may compose inline (`canComposeInline`). The launch allowlist
  * (`RUN_AND_WAIT_ARGUMENT_NAMES`) still knows them either way: an agent-only
- * caller that sends one reaches the route and takes its 403, the one refusal
- * that owns the rule.
+ * caller that sends `kind:"inline"` anyway reaches the route and takes its 403,
+ * the one refusal that owns the rule.
  */
 const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
   manifest: {

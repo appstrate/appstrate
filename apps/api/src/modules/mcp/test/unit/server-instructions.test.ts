@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the MCP server `instructions` string — specifically the
- * connect bullet, which is the only place an MCP client is told how to act on a
- * readiness failure (#1207).
+ * Unit tests for the MCP server `instructions` string: the connect bullet —
+ * the only place an MCP client is told how to act on a readiness failure
+ * (#1207) — and the agent-authoring guidance gated on `agents:write`.
  *
- * Prose is not the contract and is not pinned here. Only the tokens a model
- * branches on are: the STATUS it must recognize (412, never 400), the field it
- * must read before reaching for a tool (`connect_url`), the operation and the
- * argument the fallback kickoff must carry (`initiateIntegrationConnect` with
- * `scopes` = the item's `required_scopes`), and the one thing that differs
- * between the two client kinds — delivery.
+ * Prose is not the contract. Only the tokens a model branches on are pinned:
+ * the STATUS it must recognize (412, never 400), the field it must read before
+ * reaching for a tool (`connect_url`), the operation and the argument the
+ * fallback kickoff must carry (`initiateIntegrationConnect` with `scopes` = the
+ * item's `required_scopes`), the one thing that differs between the two client
+ * kinds — delivery — and whether authoring guidance is present at all.
  */
 
 import { describe, it, expect } from "bun:test";
