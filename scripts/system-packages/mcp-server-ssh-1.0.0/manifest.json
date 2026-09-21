@@ -32,7 +32,7 @@
     },
     {
       "name": "ssh_list_dir",
-      "description": "List a remote directory over SFTP. Read-only."
+      "description": "List a remote directory over SFTP, sorted by name. Read-only."
     },
     {
       "name": "ssh_write_file",

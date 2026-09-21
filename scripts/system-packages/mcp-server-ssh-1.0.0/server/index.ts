@@ -23,17 +23,6 @@
  *     may do through this connection, and restricting it — a dedicated user,
  *     sudoers, a restricted shell — is the operator's act on their own machine.
  *
- *     This replaced a closed verb allowlist with a generated `command=`
- *     dispatcher. That design refused any command it had not itself
- *     implemented, which made the connection's capability fixed at creation:
- *     adding one verb meant a new key, a new dispatcher and a new connection,
- *     because the dispatcher's path carried the key's own fingerprint. It also
- *     argued in a circle — shell injection is only a threat while you are
- *     trying to constrain WHICH commands run; once the account may run what it
- *     may run, `a; b` is exactly as authorised as `a`. The state of the art
- *     agrees: Teleport brokers hosts and records sessions, and has no
- *     per-command policy either.
- *
  *  3. Capabilities are separate TOOLS, and that is where "read-only" lives.
  *     The platform grants tools per agent (`toolAllowlist`, enforced
  *     sidecar-side), so an agent that must not change the target is given
@@ -71,31 +60,31 @@ export interface SshConfig {
   port: number;
   user: string;
   privateKeyPath: string;
-  /** `keytype base64` taken from the pasted `ssh-keyscan` line. */
+  /** The host's own public key, as `<type> <base64>`. */
   hostKey: { type: string; key: string };
   /** CONNECT proxy to dial through, when the runner has no direct route. */
   proxyUrl: string | null;
 }
 
-const HOST_KEY_TYPES =
-  /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|ssh-ed25519-cert-v01@openssh\.com)$/;
-
 /**
- * Parse an `ssh-keyscan` line into its key type + key. The host column is
- * deliberately dropped: the user may have scanned an alias, and what is
- * pinned is the KEY, which `renderKnownHosts` binds to the connection's own
+ * Parse `<type> <base64>` — the exact form the integration manifest's
+ * `host_key` pattern admits, read by the operator off the target's own
+ * `/etc/ssh/ssh_host_*_key.pub`. No host column and no trailing comment: what
+ * is pinned is the KEY, which `renderKnownHosts` binds to the connection's own
  * host and port.
  */
 export function parseHostKey(raw: string): { type: string; key: string } {
-  const fields = raw.trim().split(/\s+/);
-  // `host type key [comment]` from ssh-keyscan, or `type key` pasted bare.
-  const start = fields.length >= 3 && HOST_KEY_TYPES.test(fields[1]!) ? 1 : 0;
-  const type = fields[start];
-  const key = fields[start + 1];
-  if (!type || !key || !HOST_KEY_TYPES.test(type) || !/^[A-Za-z0-9+/]+=*$/.test(key)) {
+  const [type, key, ...rest] = raw.trim().split(/\s+/);
+  if (
+    rest.length > 0 ||
+    !type ||
+    !key ||
+    !/^(ssh-ed25519|ssh-rsa)$/.test(type) ||
+    !/^[A-Za-z0-9+/]+=*$/.test(key)
+  ) {
     throw new Error(
-      "SSH_HOST_KEY must be the line printed by `ssh-keyscan -t ed25519 -p <port> <host>` " +
-        "(host, key type, base64 key). There is no trust-on-first-use fallback.",
+      "SSH_HOST_KEY must be `<type> <base64>` — ssh-ed25519 or ssh-rsa, and the base64 key, " +
+        "nothing else. There is no trust-on-first-use fallback.",
     );
   }
   return { type, key };
@@ -445,6 +434,14 @@ async function knownHostsFor(cfg: SshConfig, deps: Deps): Promise<string> {
   return deps.knownHostsPath ?? ensureSession(cfg);
 }
 
+/** Staging path for one sftp `get`/`put`, inside the 0700 session dir. */
+function scratchPath(prefix: string): string {
+  return join(
+    sessionDir ?? tmpdir(),
+    `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
+}
+
 function sshFailure(what: string, res: RunResult): Error {
   const tail = res.stderr.trim() || res.stdout.trim();
   let hint = "";
@@ -518,10 +515,7 @@ export async function execTool(
   const out = truncateUtf8(res.stdout, EXEC_OUTPUT_BYTES);
   const err = truncateUtf8(res.stderr, EXEC_OUTPUT_BYTES);
   return {
-    // Echoed so the run journal records exactly what crossed the wire. SSH
-    // `exec` has no argv at the protocol level: this string is handed to the
-    // account's login shell verbatim, which is why what that account may do is
-    // the whole of what this tool may do.
+    // Echoed so the run journal records exactly what crossed the wire.
     command_sent: command,
     exit_code: res.code,
     stdout: out.text,
@@ -545,10 +539,7 @@ export async function readFileTool(
   const cfg = getConfig();
   if (typeof args.path !== "string") throw new ProtocolError("`path` must be a string");
   await knownHostsFor(cfg, deps);
-  const scratch = join(
-    sessionDir ?? tmpdir(),
-    `get-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-  );
+  const scratch = scratchPath("get");
   try {
     await sftpBatch(cfg, deps, [`get ${quoteSftpPath(args.path)} ${quoteSftpPath(scratch)}`]);
     const bytes = await readFile(scratch);
@@ -577,10 +568,7 @@ export async function writeFileTool(
   if (typeof args.path !== "string") throw new ProtocolError("`path` must be a string");
   if (typeof args.content !== "string") throw new ProtocolError("`content` must be a string");
   await knownHostsFor(cfg, deps);
-  const scratch = join(
-    sessionDir ?? tmpdir(),
-    `put-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-  );
+  const scratch = scratchPath("put");
   try {
     await writeFile(scratch, args.content, { mode: 0o600 });
     await sftpBatch(cfg, deps, [`put ${quoteSftpPath(scratch)} ${quoteSftpPath(args.path)}`]);
@@ -606,22 +594,31 @@ interface JsonRpcResponse {
   error?: { code: number; message: string };
 }
 
-/** Static — answered with no configuration, which is how the conformance probe spawns the server. */
+/**
+ * Static — answered with no configuration, which is how the conformance probe
+ * spawns the server.
+ *
+ * Each `description` is byte-identical to the same tool's entry in the package
+ * manifest, and `scripts/test/ssh-mcp.test.ts` diffs the two: the manifest is
+ * what the platform shows when granting tools, this is what the agent reads,
+ * and the pair has drifted before.
+ *
+ * "WRITES" in a description is the signal a read-only grant is built from: an
+ * agent that must not change the target is given the tools WITHOUT it. The
+ * same test pins both halves of that split, so a new tool cannot join the list
+ * without landing on one side or the other.
+ */
 export const TOOLS = [
   {
-    // "WRITES" in a description is the signal a read-only grant is built from:
-    // an agent that must not change the target is given the tools WITHOUT it.
-    // `scripts/test/ssh-mcp.test.ts` pins both halves of that split, so a new
-    // tool cannot join the list without landing on one side or the other.
     name: "ssh_probe",
     description:
-      "Connect, verify the pinned host key and authenticate, then report the effective policy. Executes nothing on the target and returns no remote data.",
+      "Connect, verify the pinned host key and authenticate, then report how the host was reached. Executes nothing on the target and returns no remote data. Read-only.",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "ssh_exec",
     description:
-      "Run a command on the remote host, as the connection's Unix account. WRITES: what this account may do is exactly what this tool may do — an agent that must not change the target should not be given this tool. The string is handed to the account's login shell, so shell syntax works and quoting is yours to get right.",
+      "Run a command on the remote host, as the connection's Unix account. WRITES — this tool can do anything that account can do; withhold it from an agent that must not change the target. The string is handed to the account's login shell, so shell syntax works and quoting is yours to get right.",
     inputSchema: {
       type: "object",
       properties: {
@@ -764,10 +761,7 @@ async function main(): Promise<void> {
   }
 }
 
-const isEntry =
-  (import.meta as unknown as { main?: boolean }).main === true ||
-  process.env.SSH_MCP_FORCE_MAIN === "1";
-if (isEntry) {
+if ((import.meta as unknown as { main?: boolean }).main === true) {
   main().catch((err) => {
     process.stderr.write(
       `fatal: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`,

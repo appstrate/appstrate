@@ -5,7 +5,7 @@
  *
  * Every test here runs without an sshd: the tool logic takes an injectable
  * `Runner` (mirroring `fetchImpl` in the github-git suite), and the pure
- * helpers — argv construction, known_hosts rendering, verb resolution, sftp
+ * helpers — argv construction, known_hosts rendering, host-key parsing, sftp
  * quoting — are exercised directly. What the argv tests pin is the POLICY:
  * a missing `StrictHostKeyChecking=yes` or a stray `ForwardAgent` is a
  * security regression, not a style change.
@@ -55,15 +55,15 @@ const { parseConnectResponse, proxyUrlFromEnv } = await import(
   join(SOURCES, serverDir, "server/proxy-connect.ts")
 );
 
-const KEYSCAN_LINE =
-  "example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFmvXHvkoa0xnL5aW6L2fPdQ8Q0m2p8Zt1YxV3q7uJ9k";
+/** The one accepted form: `<type> <base64>`, exactly what the manifest's pattern admits. */
+const HOST_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFmvXHvkoa0xnL5aW6L2fPdQ8Q0m2p8Zt1YxV3q7uJ9k";
 
 const ENV = {
   SSH_HOST: "example.com",
   SSH_PORT: "22",
   SSH_USER: "agent",
   SSH_PRIVATE_KEY_PATH: "/run/secrets/ssh_key",
-  SSH_HOST_KEY: KEYSCAN_LINE,
+  SSH_HOST_KEY: HOST_KEY,
 };
 
 /** Set process.env for the server's lazy config, restoring after. */
@@ -132,19 +132,27 @@ describe("handleRequest — protocol surface without any configuration", () => {
 
   // The conformance gate spawns the server with an env allowlist that carries
   // no SSH_* variable, then diffs `tools/list` against the manifest, strictly.
-  it("lists exactly the five declared tools with no env", async () => {
+  // Names AND descriptions: the manifest is what the platform shows when
+  // granting tools, `tools/list` is what the agent reads, and two copies of
+  // one sentence drift unless something diffs them.
+  it("lists exactly the five declared tools, described as the manifest describes them", async () => {
     restoreEnv = withEnv({});
     const res = await handleRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" });
-    const names = (res?.result as { tools: Array<{ name: string }> }).tools
-      .map((t) => t.name)
-      .sort();
-    expect(names).toEqual([
+    const listed = (res?.result as { tools: Array<{ name: string; description: string }> }).tools;
+    const manifest = (await Bun.file(join(SOURCES, serverDir, "manifest.json")).json()) as {
+      tools: Array<{ name: string; description: string }>;
+    };
+    const byName = (ts: Array<{ name: string; description: string }>) =>
+      Object.fromEntries(ts.map((t) => [t.name, t.description]));
+
+    expect(Object.keys(byName(listed)).sort()).toEqual([
       "ssh_exec",
       "ssh_list_dir",
       "ssh_probe",
       "ssh_read_file",
       "ssh_write_file",
     ]);
+    expect(byName(listed)).toEqual(byName(manifest.tools));
     expect(TOOLS).toHaveLength(5);
   });
 
@@ -189,20 +197,26 @@ describe("loadConfig / parseHostKey", () => {
     expect(cfg.hostKey.type).toBe("ssh-ed25519");
   });
 
-  it("accepts the ssh-keyscan line and a bare `type key` pair alike", () => {
-    expect(parseHostKey(KEYSCAN_LINE).type).toBe("ssh-ed25519");
-    expect(parseHostKey("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFmv").key).toBe(
-      "AAAAC3NzaC1lZDI1NTE5AAAAIFmv",
-    );
+  it("accepts `<type> <base64>` and nothing else", () => {
+    expect(parseHostKey(HOST_KEY).type).toBe("ssh-ed25519");
+    expect(parseHostKey("ssh-rsa AAAAB3NzaC1yc2EAAAA=").key).toBe("AAAAB3NzaC1yc2EAAAA=");
   });
 
   // No trust-on-first-use: a host key that is absent or unparseable must fail
   // configuration, not fall through to an interactive prompt that nobody is
-  // there to answer.
+  // there to answer. One accepted form — a three-column `ssh-keyscan` line, a
+  // trailing comment and any other key type are all refused, not repaired.
   it("refuses a missing or malformed host key", () => {
     expect(() => loadConfig({ ...ENV, SSH_HOST_KEY: "" })).toThrow(/SSH_HOST_KEY is required/);
-    expect(() => parseHostKey("SHA256:abcdef")).toThrow(/ssh-keyscan/);
-    expect(() => parseHostKey("example.com dsa AAAA")).toThrow(/ssh-keyscan/);
+    expect(() => parseHostKey("SHA256:abcdef")).toThrow(/<type> <base64>/);
+    expect(() => parseHostKey(`example.com ${HOST_KEY}`)).toThrow(/<type> <base64>/);
+    expect(() => parseHostKey(`${HOST_KEY} root@example.com`)).toThrow(/<type> <base64>/);
+    expect(() => parseHostKey("ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTI=")).toThrow(
+      /<type> <base64>/,
+    );
+    expect(() => parseHostKey("ssh-ed25519-cert-v01@openssh.com AAAAIHNzaC1lZDI1")).toThrow(
+      /<type> <base64>/,
+    );
   });
 
   /**
@@ -222,7 +236,7 @@ describe("loadConfig / parseHostKey", () => {
 
 describe("renderKnownHosts", () => {
   it("uses the bare host on port 22 and the bracketed form otherwise", () => {
-    const hk = parseHostKey(KEYSCAN_LINE);
+    const hk = parseHostKey(HOST_KEY);
     expect(renderKnownHosts("example.com", 22, hk)).toBe(`example.com ssh-ed25519 ${hk.key}\n`);
     expect(renderKnownHosts("example.com", 2222, hk)).toBe(
       `[example.com]:2222 ssh-ed25519 ${hk.key}\n`,
@@ -255,7 +269,7 @@ describe("buildSshArgs — the connection policy", () => {
     expect(args.slice(-3)).toEqual(["-p", "22", "agent@example.com"]);
   });
 
-  it("appends the verb as the remote command, and nothing else", () => {
+  it("appends the command string as the last argv entry, and nothing else", () => {
     const args = buildSshArgs(loadConfig(ENV), "/kh", "hostname");
     expect(args.at(-1)).toBe("hostname");
     expect(args.at(-2)).toBe("agent@example.com");
@@ -279,9 +293,11 @@ describe("buildSshArgs — the connection policy", () => {
 // ─────────────────────────── tool behaviour ──────────────────────────
 
 describe("ssh_exec via injected runner", () => {
-  it("sends the bare verb and returns the verb's exit code as data", async () => {
+  // The command string reaches the login shell verbatim, and a non-zero exit
+  // is the COMMAND's result — data for the agent, not a transport failure.
+  it("hands the command to the login shell and returns its exit code as data", async () => {
     restoreEnv = withEnv(ENV);
-    const { run, calls } = stubRunner([{ stdout: "refused verb: rm -rf /\n", code: 42 }]);
+    const { run, calls } = stubRunner([{ stdout: "web-01\n", code: 42 }]);
     const res = await handleRequest(
       {
         jsonrpc: "2.0",
