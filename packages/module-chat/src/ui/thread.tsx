@@ -397,15 +397,23 @@ function ThinkingIndicator() {
  * keeps it off user messages and server-authored notices.
  */
 function TurnModelBadge() {
+  const { t } = useChatHost();
   // A plain string selector — never a derived object. See `turn-error-state.ts`.
   const label = useAuiState((s) => turnModelLabel(s.message));
   if (label === null) return null;
+  const answeredBy = t("model.answeredBy", { model: label });
   return (
     // `min-w-0` is what lets `truncate` actually shrink inside the flex row —
     // without it a long model name would push the action bar out instead of
-    // ellipsing. Capped so it never crowds the bar on a narrow viewport.
-    <span className="text-muted-foreground max-w-[14rem] min-w-0 truncate text-xs" title={label}>
-      {label}
+    // ellipsing. Capped so it never crowds the bar on a narrow viewport. The
+    // visible text is the bare name; assistive tech reads the full sentence
+    // instead, since a bare model name out of context says nothing.
+    <span
+      className="text-muted-foreground max-w-[14rem] min-w-0 truncate text-xs"
+      title={answeredBy}
+    >
+      <span aria-hidden="true">{label}</span>
+      <span className="sr-only">{answeredBy}</span>
     </span>
   );
 }

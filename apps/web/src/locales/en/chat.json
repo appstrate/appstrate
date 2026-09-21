@@ -44,6 +44,7 @@
   "run.status.done": "Finished",
   "run.filesTruncated": "Only the first 100 files are shown.",
   "model.needsReconnection": "Reconnection required",
+  "model.answeredBy": "Answered by {{model}}",
   "turn.error.credentialUnavailable": "The selected model is unavailable because of its access or billing configuration. Choose another model or fix its connection, then try again.",
   "turn.error.rateLimited": "The model reached its rate limit. Try again in a few moments.",
   "turn.error.upstreamUnavailable": "The model service is temporarily unavailable. Try again in a few moments.",

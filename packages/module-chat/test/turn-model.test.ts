@@ -4,8 +4,8 @@
  * `src/ui/turn-model.ts` — reading back which model answered a turn.
  *
  * The three cases that matter are the absent ones: a user message, a message
- * written before the fields shipped, and a turn that died before binding a
- * model. All three must read as "no model", never as a default, because the
+ * written before the fields shipped, and a message the engine did not close.
+ * All three must read as "no model", never as a default, because the
  * badge that consumes this renders whatever it is handed.
  */
 

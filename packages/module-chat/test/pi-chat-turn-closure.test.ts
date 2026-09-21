@@ -20,6 +20,8 @@ import {
 } from "../src/pi-chat/pi-turn-closure.ts";
 
 const TEN_MINUTES = 10 * 60_000;
+/** Every exit stamps the model it bound to; the engine always has one. */
+const MODEL = { id: "mdl_opus", label: "Claude Opus 5" } as const;
 
 async function assemble(chunks: UIMessageChunk[]): Promise<UIMessage | undefined> {
   const stream = new ReadableStream<UIMessageChunk>({
@@ -111,6 +113,7 @@ describe("closePiTurn", () => {
       abortReason: undefined,
       stepCount: 0,
       stepCapReached: false,
+      model: MODEL,
       lastToolName: "read_file",
       newId: () => "assistant-before-start",
     }).chunks;
@@ -144,6 +147,7 @@ describe("closePiTurn", () => {
         abortReason: undefined,
         stepCount: 3,
         stepCapReached: false,
+        model: MODEL,
         newId: () => "unused",
       }).chunks,
     ];
@@ -167,6 +171,7 @@ describe("closePiTurn", () => {
       abortReason: new ChatTurnDeadlineError(10),
       stepCount: 0,
       stepCapReached: false,
+      model: MODEL,
       newId: (() => {
         const ids = ["assistant-deadline", "deadline-notice"];
         return () => ids.shift()!;
@@ -191,6 +196,7 @@ describe("closePiTurn", () => {
       abortReason: new Error("stopped by user"),
       stepCount: 0,
       stepCapReached: false,
+      model: MODEL,
       newId: () => "assistant-stopped",
     });
 
@@ -221,6 +227,7 @@ describe("closePiTurn", () => {
       abortReason: new Error("stopped by user"),
       stepCount: 0,
       stepCapReached: false,
+      model: MODEL,
       newId: () => "assistant-aborted-with-error",
     });
 
@@ -241,6 +248,7 @@ describe("closePiTurn", () => {
       abortReason: undefined,
       stepCount: 4,
       stepCapReached: true,
+      model: MODEL,
       lastToolName: "run_and_wait",
     });
 
@@ -269,6 +277,7 @@ describe("closePiTurn", () => {
       abortReason: undefined,
       stepCount: 2,
       stepCapReached: false,
+      model: MODEL,
     });
 
     expect(closing.chunks.map((chunk) => chunk.type)).toEqual(["error", "finish"]);
@@ -284,8 +293,6 @@ describe("closePiTurn", () => {
 });
 
 describe("the model a turn bound to", () => {
-  const MODEL = { id: "mdl_opus", label: "Claude Opus 5" } as const;
-
   it("is stamped on a turn that simply finished", async () => {
     const chunks = closePiTurn({
       finishReason: "stop",
@@ -325,24 +332,5 @@ describe("the model a turn bound to", () => {
       modelLabel: "Claude Opus 5",
       errorCategory: "upstream_unavailable",
     });
-  });
-
-  it("is absent — not guessed — on a turn that never bound one", async () => {
-    // Every message written before this shipped is this case, and so is a turn
-    // that died in setup. A reader must see nothing, never a default.
-    const chunks = closePiTurn({
-      finishReason: "stop",
-      streamStarted: true,
-      aborted: false,
-      abortReason: undefined,
-      stepCount: 1,
-      stepCapReached: false,
-      newId: () => "unused",
-    }).chunks;
-
-    const turn = turnMetadataFromMessage(await assemble(chunks));
-    expect(turn).not.toBeNull();
-    expect(turn?.modelId).toBeUndefined();
-    expect(turn?.modelLabel).toBeUndefined();
   });
 });

@@ -54,7 +54,6 @@ export type { OpenFile } from "./runtime-context.ts";
 import { ThreadList, ActiveConversationTitle } from "./thread-list.tsx";
 import { ModelSelect } from "./model-select.tsx";
 import { fetchModels, type OrgModelOption } from "./models-data.ts";
-import { isModelLive } from "../model-liveness.ts";
 import {
   loadHistory,
   markSessionRead,
@@ -71,12 +70,11 @@ import {
   subscribeGeneration,
   subscribeModel,
   getCompatibleGenerationSettings,
-  getGenerationSettings,
   getSelectedModel,
   seedConversationModel,
   setActiveConversation,
   setGenerationSettings,
-  setModelGenerationCapabilities,
+  setModelCatalog,
   setSelectedModel,
 } from "./model-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
@@ -195,27 +193,21 @@ export function ChatPage({
   // function (see ConversationInner), so a switch applies to the very next send
   // without remounting the conversation. This hook only mirrors it for the picker.
   const selectedModel = useSyncExternalStore(subscribeModel, getSelectedModel, getSelectedModel);
+  // Reconciled against the SELECTED model, so the configuration tab shows
+  // exactly what the next send carries.
   const generation = useSyncExternalStore(
     subscribeGeneration,
-    getGenerationSettings,
-    getGenerationSettings,
+    getCompatibleGenerationSettings,
+    getCompatibleGenerationSettings,
   );
 
   // Runs on every catalog change (first load, refetch after `staleTime`), not
   // just on mount — a cached list served on re-entry still has to reconcile
-  // the stored selection. External-store sync in an effect (no setState).
+  // the selection. The store owns the rule (the selection is always a live
+  // model, whichever of catalog and conversation seed lands first); this only
+  // feeds it. External-store sync in an effect (no setState).
   useEffect(() => {
-    if (!modelsQuery.data) return;
-    const list = modelsQuery.data;
-    setModelGenerationCapabilities(list);
-    // Reconcile a stale/absent stored selection to the org default. A model
-    // whose credential went dead is listed (the picker marks it, unpickable)
-    // but must not be kept as the stored selection nor adopted as the
-    // fallback — the server would reject it on the next send.
-    const live = list.filter(isModelLive);
-    const cur = getSelectedModel();
-    if (cur && live.some((m) => m.id === cur)) return;
-    setSelectedModel((live.find((m) => m.is_default) ?? live[0])?.id ?? null);
+    if (modelsQuery.data) setModelCatalog(modelsQuery.data);
   }, [modelsQuery.data]);
 
   // Unread replies for conversations the user left mid-generation. `unread` is
@@ -466,13 +458,14 @@ function ConversationInner({
   const queryClient = useQueryClient();
   const spaceId = spaceIdFromHeaders(getHeaders);
 
-  // Bind the model store to THIS conversation, and seed it from the
-  // conversation's own transcript (the newest turn carrying a model id).
+  // Bind the model store to THIS conversation, and pre-select the model of the
+  // conversation's newest turn carrying one.
   //
   // This is what stops a reopened conversation from silently continuing on
-  // whatever model the picker happened to hold: the transcript is the authority
-  // for what a conversation is on, and the stored default only answers for one
-  // that has no transcript yet.
+  // whatever model the picker happened to hold. It is a pre-selection, not a
+  // lock: the user can switch, and the server honours `X-Model-Id` on every
+  // turn. A model the catalog no longer serves live is never pre-selected (the
+  // store refuses it, or prunes it when the catalog lands after this).
   //
   // A LAYOUT effect, so the composer never paints one frame of the stored
   // default before the seed lands; and ordered attach-then-seed, because

@@ -151,17 +151,20 @@ export interface AppstrateTurnMetadata {
    * `runs.model_label` (the snapshot that outlives the model row):
    *
    *  - `modelId` is the org-model PRESET id the turn bound to — the id
-   *    `/api/models` serves. Reopening a conversation re-seeds the composer's
-   *    picker from the newest turn carrying one. It MAY dangle: deleting an org
-   *    model does not rewrite history, and a dangling id simply loses the
-   *    re-seed and falls back to the client's own default.
+   *    `/api/models` serves. Reopening a conversation pre-selects it in the
+   *    composer's picker (the newest turn carrying one) — a pre-selection, not
+   *    a lock: every turn runs on the `X-Model-Id` it is sent with. It MAY
+   *    dangle: deleting, disabling or disconnecting an org model does not
+   *    rewrite history, so the client only pre-selects an id the catalog
+   *    still serves live and otherwise falls back to the user's default.
    *  - `modelLabel` is the display name frozen at write time, so a transcript
    *    still says which model answered after that model is gone. For an ALIASED
    *    model it is the alias label — the value `/api/models` serves and the
    *    picker renders — never the hidden backing id.
    *
    * OPTIONAL like `errorCategory`: every row written before this shipped has
-   * neither, and a turn that died before binding a model has neither either.
+   * neither, and neither does a message the Pi engine did not close (a
+   * server-authored notice). The engine stamps both on every exit.
    * Readers degrade to showing nothing, never to a guess.
    *
    * ⚠️ NEITHER is input to the history projection. `buildStructuredPiTurn`

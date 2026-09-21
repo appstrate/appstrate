@@ -6,7 +6,8 @@ import {
   getCompatibleGenerationSettings,
   getGenerationSettings,
   setGenerationSettings,
-  setModelGenerationCapabilities,
+  setActiveConversation,
+  setModelCatalog,
   setSelectedModel,
 } from "../src/ui/model-store.ts";
 
@@ -25,14 +26,15 @@ const NO_TEMPERATURE: ModelGenerationCapabilities = {
 };
 
 afterEach(() => {
+  setActiveConversation(null);
   setSelectedModel(null);
   setGenerationSettings({});
-  setModelGenerationCapabilities([]);
+  setModelCatalog([]);
 });
 
 describe("chat model generation settings", () => {
   it("removes stale settings when the selected model changes", () => {
-    setModelGenerationCapabilities([
+    setModelCatalog([
       { id: "model-a", generation: SUPPORTED },
       { id: "model-b", generation: NO_TEMPERATURE },
     ]);
@@ -45,7 +47,7 @@ describe("chat model generation settings", () => {
   });
 
   it("rechecks compatibility immediately before a request is built", () => {
-    setModelGenerationCapabilities([{ id: "model", generation: NO_TEMPERATURE }]);
+    setModelCatalog([{ id: "model", generation: NO_TEMPERATURE }]);
     setSelectedModel("model");
     setGenerationSettings({ temperature: 0.4 });
 

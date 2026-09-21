@@ -44,6 +44,7 @@
   "run.status.done": "Terminé",
   "run.filesTruncated": "Seuls les 100 premiers fichiers sont affichés.",
   "model.needsReconnection": "Reconnexion requise",
+  "model.answeredBy": "Répondu par {{model}}",
   "turn.error.credentialUnavailable": "Le modèle sélectionné est indisponible à cause de sa configuration d’accès ou de facturation. Choisissez un autre modèle ou corrigez sa connexion, puis réessayez.",
   "turn.error.rateLimited": "Le modèle a atteint sa limite de débit. Réessayez dans quelques instants.",
   "turn.error.upstreamUnavailable": "Le service du modèle est temporairement indisponible. Réessayez dans quelques instants.",

@@ -113,14 +113,15 @@ function buildPiTurnMetadata(input: {
   stepCount: number;
   stepCapReached: boolean;
   lastToolName?: string;
-  model?: TurnModel;
+  model: TurnModel;
 }): ChatMessageMetadata {
   return mergeTurnMetadata(undefined, {
     finishReason: input.finishReason,
     // Stamped on EVERY exit, the failed ones included: "which model failed" is
     // the question a user asks of a turn that errored, and a turn that bound a
     // model spent its budget whether or not it produced text.
-    ...(input.model ? { modelId: input.model.id, modelLabel: input.model.label } : {}),
+    modelId: input.model.id,
+    modelLabel: input.model.label,
     ...(input.clientError
       ? {
           errorCategory: input.clientError.category,
@@ -180,8 +181,8 @@ export function closePiTurn(input: {
   stepCount: number;
   stepCapReached: boolean;
   lastToolName?: string;
-  /** Absent only when the turn died before binding one. */
-  model?: TurnModel;
+  /** Known before the first chunk (the route resolved it), so every exit has it. */
+  model: TurnModel;
   newId?: () => string;
 }): PiTurnClosure {
   const newId = input.newId ?? (() => crypto.randomUUID());
@@ -208,7 +209,7 @@ export function closePiTurn(input: {
       stepCount: input.stepCount,
       stepCapReached: input.stepCapReached,
       ...(input.lastToolName ? { lastToolName: input.lastToolName } : {}),
-      ...(input.model ? { model: input.model } : {}),
+      model: input.model,
     }),
   });
   return { chunks, deadlineReached: closure.deadlineReached };

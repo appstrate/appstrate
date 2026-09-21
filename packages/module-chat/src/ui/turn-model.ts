@@ -6,13 +6,14 @@
  * ONE source: `AppstrateTurnMetadata.modelId` / `.modelLabel`, stamped by
  * `closePiTurn` on every exit and carried on the assistant message's
  * `metadata`. That rides the live stream (the `finish` chunk) and the stored
- * `content` alike, so a message shows the same model mid-stream, after a
- * reload, and after a resume — no second channel, no reconciliation.
+ * `content` alike, so a message shows the same model once its turn has
+ * finished live, after a reload, and after a resume — no second channel, no
+ * reconciliation. While a turn is still streaming it has no badge yet.
  *
  * Both readers degrade to `null` rather than to a guess: every message written
- * before this shipped carries neither field, and a turn that died before
- * binding a model never had one. Rendering "unknown model" there would be an
- * invention; rendering nothing is the truth.
+ * before this shipped carries neither field, and neither does a message the
+ * engine did not close (a server-authored notice). Rendering "unknown model"
+ * there would be an invention; rendering nothing is the truth.
  */
 
 import { turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
