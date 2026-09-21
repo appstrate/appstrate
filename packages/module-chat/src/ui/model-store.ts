@@ -273,3 +273,55 @@ export function setGenerationSettings(value: ModelGenerationSettings): void {
   }
   for (const listener of generationListeners) listener();
 }
+
+// ---------------------------------------------------------------------------
+// Inline agents — the composer's execution switch
+//
+// A PREFERENCE, not a permission. The permission is `agents:run-inline`,
+// checked server-side; this only says whether the caller wants to spend it on
+// a given turn. Composing an inline agent costs a container plus its own LLM
+// budget and can send the assistant off building instead of answering, which
+// is why it is worth being able to turn off without changing anyone's role.
+//
+// Global (all conversations) and persisted, like the model default: it tracks
+// how the user wants the assistant to behave, not what one thread is about.
+// Default ON — a stored value is the only way it is off, so nobody loses a
+// capability by upgrading.
+// ---------------------------------------------------------------------------
+
+const INLINE_AGENTS_KEY = "appstrate.chat.inlineAgents";
+
+function readInlineAgents(): boolean {
+  if (typeof localStorage === "undefined") return true;
+  try {
+    // Only the exact opt-out string turns it off. Anything else — absent,
+    // corrupted, written by an older build — reads as the default.
+    return localStorage.getItem(INLINE_AGENTS_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+let inlineAgentsCache = readInlineAgents();
+const inlineAgentsListeners = new Set<() => void>();
+
+export function subscribeInlineAgents(listener: () => void): () => void {
+  inlineAgentsListeners.add(listener);
+  return () => inlineAgentsListeners.delete(listener);
+}
+
+export function getInlineAgentsEnabled(): boolean {
+  return inlineAgentsCache;
+}
+
+export function setInlineAgentsEnabled(enabled: boolean): void {
+  if (inlineAgentsCache === enabled) return;
+  inlineAgentsCache = enabled;
+  try {
+    if (enabled) localStorage.removeItem(INLINE_AGENTS_KEY);
+    else localStorage.setItem(INLINE_AGENTS_KEY, "off");
+  } catch {
+    // ignore quota / unavailable storage — the choice just won't persist.
+  }
+  for (const listener of inlineAgentsListeners) listener();
+}

@@ -9,7 +9,13 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { SYSTEM_PROMPT, formatCallerContext, normalizeChatLocale } from "../src/prompt.ts";
+import { buildSystemPrompt, formatCallerContext, normalizeChatLocale } from "../src/prompt.ts";
+
+/**
+ * The persona a caller who may compose inline agents gets. Every invariant
+ * below is about THAT one; the reduced persona has its own block at the end.
+ */
+const SYSTEM_PROMPT = buildSystemPrompt({ canRunInline: true });
 
 describe("SYSTEM_PROMPT invariants", () => {
   it("keeps the single-sub-agent rule for chained external actions", () => {
@@ -183,5 +189,76 @@ describe("caller-context prompt hygiene", () => {
     ]) {
       expect(SYSTEM_PROMPT).toContain(imperative);
     }
+  });
+});
+
+describe("the persona without `agents:run-inline`", () => {
+  /**
+   * What a caller who cannot compose an inline agent is told. The gate is the
+   * platform's (`POST /api/runs/inline` asks for the grant, and the turn's
+   * loopback bearer is minted without it); this block is about the model not
+   * being taught a capability it will be refused, and about the ~1.5k tokens
+   * that teaching costs on every turn.
+   */
+  const REDUCED = buildSystemPrompt({ canRunInline: false });
+
+  it("teaches no way to compose one", () => {
+    // The argument shape is the marker: `kind:"inline"` is the one thing a
+    // model needs, so its total absence is stronger than matching any single
+    // paragraph — a rewrite that reintroduces the capability under different
+    // prose still fails here.
+    expect(REDUCED).not.toContain('kind:"inline"');
+    expect(REDUCED).not.toContain("PARTIAL canonical AFPS agent");
+    expect(REDUCED).not.toContain("Give EVERY inline run a task-specific identity");
+    expect(REDUCED).not.toContain("runInline");
+  });
+
+  it("keeps every rule that is not about composing one", () => {
+    // The discriminating half: a builder that returned a stub, or dropped the
+    // whole persona, would pass the block above and fail this one.
+    expect(REDUCED).toContain("You are Appstrate's assistant");
+    expect(REDUCED).toContain("Never quote run metrics");
+    expect(REDUCED).toContain("default to the integrations already available");
+    expect(REDUCED).toContain("call `read_file` first");
+    expect(REDUCED).toContain('{ kind:"agent", scope, name, version?, input? }');
+    expect(REDUCED).toContain("Respect the user's role");
+  });
+
+  it("names no argument `run_and_wait` only takes for an inline run", () => {
+    // The same turn's `run_and_wait` descriptor does not declare these (the
+    // MCP server builds it from the narrowed token), and `context_files` is
+    // refused for `kind:"agent"` anyway. A sentence OUTSIDE the inline spans
+    // that still names one — the attached-files paragraph did — teaches the
+    // model an argument it cannot pass.
+    for (const argument of ["context_files", "`manifest`", "`prompt`"]) {
+      expect(SYSTEM_PROMPT).toContain(argument);
+      expect(REDUCED).not.toContain(argument);
+    }
+    // What does work for an existing agent is still taught.
+    expect(REDUCED).toContain("under one of the agent's DECLARED file fields");
+    expect(REDUCED).toContain("`files` list");
+  });
+
+  it("does not offer composing one as the fallback for an unrunnable draft", () => {
+    // The one place the prose OFFERS inline as a remedy. Left in, it would send
+    // the model down a path the platform refuses, on the turn most likely to
+    // hit it.
+    expect(SYSTEM_PROMPT).toContain("offer to compose an inline agent instead");
+    expect(REDUCED).not.toContain("offer to compose an inline agent instead");
+    expect(REDUCED).toContain("there is no other way to run it");
+  });
+
+  it("says what to do when no existing agent matches", () => {
+    // Without the inline step the list ends at "prefer an existing agent",
+    // leaving the no-match case to the model's own improvisation.
+    expect(REDUCED).toContain("when no existing agent matches, say so plainly and stop");
+    expect(SYSTEM_PROMPT).not.toContain("when no existing agent matches");
+  });
+
+  it("is materially shorter — the point is not to pay for what is refused", () => {
+    expect(REDUCED.length).toBeLessThan(SYSTEM_PROMPT.length);
+    // Guards against a future edit that leaves the branch in place but empties
+    // it of anything worth omitting.
+    expect(SYSTEM_PROMPT.length - REDUCED.length).toBeGreaterThan(3_000);
   });
 });

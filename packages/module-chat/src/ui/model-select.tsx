@@ -72,6 +72,8 @@ export function ModelSelect({
   const active = models.find((m) => m.id === selectedId);
   const groups = groupByProvider(models);
   const hasOverrides = generation.temperature != null || generation.reasoningLevel != null;
+  // What the trigger's dot stands for, in words.
+  const flags = hasOverrides ? [t("model.customGeneration")] : [];
   const hasNoGenerationControls =
     active?.generation?.temperature === "unsupported" &&
     active.generation.reasoning.supported === "unsupported";
@@ -190,9 +192,9 @@ export function ModelSelect({
           type="button"
           className={cn(
             "border-input bg-background hover:bg-accent text-foreground inline-flex max-w-64 items-center justify-start gap-1.5 rounded-md border px-2.5 py-1 text-left text-xs",
-            hasOverrides && "border-primary/40 bg-primary/5",
+            flags.length > 0 && "border-primary/40 bg-primary/5",
           )}
-          title={t("model.settingsTitle")}
+          title={[t("model.settingsTitle"), ...flags].join(" · ")}
         >
           <SlidersHorizontalIcon className="text-muted-foreground size-3.5 shrink-0" />
           {active ? (
@@ -200,7 +202,12 @@ export function ModelSelect({
           ) : (
             <span className="font-medium">{t("model.select")}</span>
           )}
-          {hasOverrides && <span className="bg-primary size-1.5 rounded-full" aria-hidden="true" />}
+          {flags.length > 0 && (
+            <>
+              <span className="bg-primary size-1.5 rounded-full" aria-hidden="true" />
+              <span className="sr-only">{flags.join(", ")}</span>
+            </>
+          )}
           <ChevronDownIcon className="text-muted-foreground size-3.5 shrink-0" />
         </button>
       </PopoverTrigger>

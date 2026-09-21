@@ -285,6 +285,11 @@ export const chatPaths = {
                 },
                 modelId: { type: "string" },
                 generation: { $ref: "#/components/schemas/ModelGenerationSettings" },
+                inline_agents: {
+                  type: "boolean",
+                  description:
+                    "Whether the assistant may compose and launch an inline agent during this turn. Omit for the default, `true`. It is a ceiling the caller lowers on themselves: the turn's authority is `agents:run-inline` AND this flag, so `true` from a caller who does not hold that grant changes nothing. When the result is false the turn's loopback token is minted WITHOUT `agents:run-inline`, so the inline surfaces refuse it, the platform MCP `run_and_wait` tool no longer declares the inline kind or its arguments, and the persona omits the inline-composition instructions entirely.",
+                },
                 id: { type: "string", description: "Session id (the assistant-ui thread id)" },
               },
             },

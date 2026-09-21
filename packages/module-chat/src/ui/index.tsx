@@ -51,6 +51,7 @@ import type {
   UseFileImageSrc,
 } from "./runtime-context.ts";
 export type { OpenFile } from "./runtime-context.ts";
+
 import { ThreadList, ActiveConversationTitle } from "./thread-list.tsx";
 import { ModelSelect } from "./model-select.tsx";
 import { fetchModels, type OrgModelOption } from "./models-data.ts";
@@ -70,6 +71,7 @@ import {
   subscribeGeneration,
   subscribeModel,
   getCompatibleGenerationSettings,
+  getInlineAgentsEnabled,
   getSelectedModel,
   seedConversationModel,
   setActiveConversation,
@@ -78,6 +80,7 @@ import {
   setSelectedModel,
 } from "./model-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
+import { InlineAgentsToggle } from "./inline-agents-toggle.tsx";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
 
@@ -149,6 +152,8 @@ export interface ChatPageProps {
   useFileImageSrc: UseFileImageSrc;
   uploadFile: UploadFile;
   t: ChatTranslate;
+  /** Whether the caller holds `agents:run-inline`; see `ChatHost.canRunInline`. */
+  canRunInline: boolean;
 }
 
 export function ChatPage({
@@ -163,6 +168,7 @@ export function ChatPage({
   useFileImageSrc,
   uploadFile,
   t,
+  canRunInline,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -261,8 +267,9 @@ export function ChatPage({
       downloadFile,
       useFileImageSrc,
       t,
+      canRunInline,
     }),
-    [onOpenFile, downloadFile, useFileImageSrc, t],
+    [onOpenFile, downloadFile, useFileImageSrc, t, canRunInline],
   );
 
   // File attachments: the composer stages picked files through the HOST uploader
@@ -284,6 +291,7 @@ export function ChatPage({
   const composerSlot = useMemo(
     () => (
       <div className="flex items-center gap-2">
+        <InlineAgentsToggle />
         <ModelSelect
           models={models}
           selectedId={selectedModel}
@@ -518,6 +526,11 @@ function ConversationInner({
             id: chatId,
             messages,
             generation: getCompatibleGenerationSettings(),
+            // Read at request time, like the model and the generation settings
+            // above and for the same reason: the transport is memoised and a
+            // value captured at mount would freeze this turn's choice to
+            // whatever it was when the conversation opened.
+            inline_agents: getInlineAgentsEnabled(),
           },
         }),
         // Native resume targets our per-session stream endpoint (the chat id is

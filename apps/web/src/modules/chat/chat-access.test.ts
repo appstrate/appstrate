@@ -49,6 +49,7 @@ const CONVERSES = ["chat:write", "mcp:read", "mcp:invoke"];
 const EVERYTHING = [
   ...CONVERSES,
   "agents:run",
+  "agents:run-inline",
   "agents:write",
   "runs:read",
   "runs:read-all",
@@ -106,9 +107,11 @@ describe("each row's own permission", () => {
     {
       row: "readRuns",
       removes: ["runs:read", "runs:read-all"],
-      refuses: ["runAgents", "readRuns"],
+      refuses: ["runAgents", "composeAgents", "readRuns"],
     },
     { row: "runAgents", removes: ["agents:run"], refuses: ["runAgents"] },
+    // Its own grant: `agents:run` does not imply it, nor it `agents:run`.
+    { row: "composeAgents", removes: ["agents:run-inline"], refuses: ["composeAgents"] },
     { row: "createAgents", removes: ["agents:write"], refuses: ["createAgents"] },
     { row: "browseFiles", removes: ["files:read"], refuses: ["browseFiles"] },
     {

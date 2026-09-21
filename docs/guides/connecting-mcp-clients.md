@@ -150,6 +150,10 @@ otherwise get wrong.
 | `run_and_wait`       | `mcp:invoke` | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and returns when it reaches a terminal status. |
 | `list_files`         | `mcp:read`   | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                  |
 
+`run_and_wait` declares the inline kind and its arguments (`manifest`, `prompt`,
+`context_files`) only to a caller holding `agents:run-inline`; anyone else is
+offered `kind:"agent"` alone.
+
 This server advertises `tools: { listChanged: false }`, so a client that listed
 its tools before an upgrade is never told the set moved, and a name that is no
 longer registered answers `-32602 Unknown tool`. **Re-list your tools after

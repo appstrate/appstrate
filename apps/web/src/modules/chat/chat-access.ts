@@ -103,6 +103,15 @@ export const CHAT_CAPABILITIES: readonly ChatCapability[] = [
     held: (ctx) => invokes(ctx) && readsRuns(ctx) && ctx.can("agents:run"),
   },
   {
+    // `run_and_wait` with `kind:"inline"`: the same run-read precondition,
+    // then `POST /api/runs/inline` asks `agents:run-inline` — a grant of its
+    // own, not implied by `agents:run`. The one row the caller may also LOWER
+    // on themselves: the chip puts that preference on this row.
+    id: "composeAgents",
+    labelKey: "access.capability.composeAgents",
+    held: (ctx) => invokes(ctx) && readsRuns(ctx) && ctx.can("agents:run-inline"),
+  },
+  {
     // CREATING only. A new agent lands in the current space, where
     // `agents:write` is what the create route asks. Editing an EXISTING agent
     // is authorized by the package's HOME space (`requirePackageInOrg()` in

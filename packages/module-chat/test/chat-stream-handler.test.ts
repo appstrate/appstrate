@@ -42,7 +42,8 @@ import { buildChatPlatformDeps, type ChatPlatformDeps } from "../src/platform-se
 import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
 import { errorHandler } from "../../../apps/api/src/middleware/error-handler.ts";
 import { initSystemModelProviderKeys } from "../../../apps/api/src/services/model-registry.ts";
-import { SYSTEM_PROMPT } from "../src/prompt.ts";
+import { buildSystemPrompt } from "../src/prompt.ts";
+import { chatLoopbackStrategy } from "../src/loopback-auth.ts";
 
 // The chat handler reads the system model registry; the HTTP harness initializes it at boot.
 initSystemModelProviderKeys();
@@ -254,6 +255,8 @@ describe("handleChatStream", () => {
       parts?: unknown[];
       /** The kind the auth pipeline resolved; production reaches here as `user` only. */
       principalKind?: PrincipalKind;
+      /** The composer's inline switch for this turn; omitted = the default (on). */
+      inlineAgents?: boolean;
     },
   ): Promise<Response> {
     // Real platform deps (the same context `init()` gets), with dispatch
@@ -284,6 +287,7 @@ describe("handleChatStream", () => {
           },
         ],
         ...(generation ? { generation } : {}),
+        ...(overrides?.inlineAgents === undefined ? {} : { inline_agents: overrides.inlineAgents }),
       }),
     });
     return res;
@@ -480,7 +484,7 @@ describe("handleChatStream", () => {
     // (4) The system prompt was assembled from the caller context. There are no
     // inline MCP instructions on this path: the engine's own handshake delivers
     // them, and it is handed the org-scoped URL to open it with.
-    expect(input.system).toContain(SYSTEM_PROMPT.slice(0, 64));
+    expect(input.system).toContain(buildSystemPrompt({ canRunInline: true }).slice(0, 64));
     expect(input.system).toContain(CONTEXT_ORG_MARKER);
     expect(input.platformMcp.url).toContain(`/api/mcp/o/${encodeURIComponent(ctx.orgId)}`);
     expect(input.platformMcp.headers.Authorization).toMatch(/^Bearer /);
@@ -626,4 +630,95 @@ describe("handleChatStream", () => {
     expect(second.calls[0]!.system).not.toContain("provider timed out");
     expect(second.calls[0]!.system).not.toContain("@acme/report");
   }, 20_000);
+
+  describe("the composer's inline-agents switch", () => {
+    /** The permission set the turn's platform-MCP bearer actually carries. */
+    async function tokenPermissions(input: PiChatInput): Promise<string[]> {
+      const authorization = input.platformMcp?.headers?.Authorization;
+      expect(typeof authorization).toBe("string");
+      const resolved = await chatLoopbackStrategy.authenticate({
+        headers: new Headers({ authorization: authorization as string }),
+      } as never);
+      expect(resolved).not.toBeNull();
+      return [...(resolved!.permissions ?? [])].sort();
+    }
+
+    /**
+     * The argument shape is the marker: `kind:"inline"` is the ONE thing a
+     * model needs to compose an inline agent, so asserting on its total
+     * absence is stronger than matching any one paragraph — a future edit that
+     * reintroduces the capability under different prose still fails here.
+     */
+    const INLINE_MARKER = 'kind:"inline"';
+    /** A fragment every persona carries, inline or not — the discriminating control. */
+    const COMMON_MARKER = "You are Appstrate's assistant";
+
+    const HOLDER = new Set(["agents:run", "agents:run-inline"]);
+
+    it("keeps the grant and the instructions when the switch is on", async () => {
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(mintSessionId(), undefined, engine, {
+        permissions: HOLDER,
+        inlineAgents: true,
+      });
+
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      const input = calls[0]!;
+      expect(await tokenPermissions(input)).toContain("agents:run-inline");
+      expect(input.system).toContain(INLINE_MARKER);
+      expect(input.system).toContain(COMMON_MARKER);
+    });
+
+    it("drops BOTH when the switch is off — the token, not just the prose", async () => {
+      // The prompt alone would be a suggestion. Narrowing the turn's bearer is
+      // what makes the switch real: the engine cannot mint a wider one, so the
+      // inline routes refuse it with the platform's own guard rather than a
+      // second policy written into the chat.
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(mintSessionId(), undefined, engine, {
+        permissions: HOLDER,
+        inlineAgents: false,
+      });
+
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      const input = calls[0]!;
+      const permissions = await tokenPermissions(input);
+      expect(permissions).not.toContain("agents:run-inline");
+      // Everything else survives — the switch narrows one grant, not the turn.
+      expect(permissions).toContain("agents:run");
+      expect(input.system).not.toContain(INLINE_MARKER);
+      expect(input.system).toContain(COMMON_MARKER);
+    });
+
+    it("defaults to on when the client sends no flag", async () => {
+      // Every client that predates the switch, and the CLI. Absent must not
+      // read as off, or upgrading would silently remove a capability.
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(mintSessionId(), undefined, engine, { permissions: HOLDER });
+
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      expect(await tokenPermissions(calls[0]!)).toContain("agents:run-inline");
+      expect(calls[0]!.system).toContain(INLINE_MARKER);
+    });
+
+    it("cannot be used to REACH inline without the grant", async () => {
+      // The switch is a ceiling the caller lowers on themselves. `true` from a
+      // caller who never held `agents:run-inline` adds nothing — and the
+      // persona does not teach a capability the platform would refuse.
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(mintSessionId(), undefined, engine, {
+        permissions: new Set(["agents:run"]),
+        inlineAgents: true,
+      });
+
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      const input = calls[0]!;
+      expect(await tokenPermissions(input)).toEqual(["agents:run"]);
+      expect(input.system).not.toContain(INLINE_MARKER);
+    });
+  });
 });

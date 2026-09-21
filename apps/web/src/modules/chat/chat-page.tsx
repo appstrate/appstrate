@@ -22,6 +22,7 @@ import {
 } from "./conversation-sidebar-state";
 import { ConversationContextActions, ConversationSidebar } from "./conversation-sidebar";
 import { ChatAccessChip } from "./chat-access-chip";
+import { usePermissions } from "../../hooks/use-permissions";
 
 // One element for the page's lifetime: it sits in the composer slot, which the
 // chat memoizes, and the chip keeps itself current through its own hooks.
@@ -62,6 +63,9 @@ export function ChatModulePage() {
   // The same namespace's `t` is injected into the module, so the shell AROUND
   // those answers speaks the same language too — labels and aria-labels alike.
   const { t, i18n } = useTranslation("chat");
+  // The composer only offers the inline-agents toggle to a caller who holds the
+  // grant; the module resolves no RBAC of its own (see `ChatHost.canRunInline`).
+  const { can } = usePermissions();
   // The persona is read reactively and threaded through so this callback's
   // identity changes when the preview starts or ends. The module's SSE effects
   // depend on `getHeaders`, and a stream reads its URL once — without this they
@@ -127,6 +131,7 @@ export function ChatModulePage() {
           useFileImageSrc={useFileImageSrc}
           uploadFile={uploadFile}
           t={translate}
+          canRunInline={can("agents:run-inline")}
         />
       </div>
       <ConversationSidebar
