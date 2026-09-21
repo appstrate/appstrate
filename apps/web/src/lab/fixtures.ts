@@ -3965,9 +3965,12 @@ export const library: Json200<"/api/library", "get"> = {
             shared_by: { user_id: USER_ID, name: "Olivier Tarbès" },
           },
           {
+            // Switched OFF in the sandbox: an agent activated there declares
+            // Drive and cannot run without it, which is the case the catalogue
+            // has to raise before writing.
             space_id: "app_lab_sandbox",
             via: "shared" as const,
-            state: "active" as const,
+            state: "inactive" as const,
             shared_by: { user_id: USER_ID, name: "Olivier Tarbès" },
           },
         ],

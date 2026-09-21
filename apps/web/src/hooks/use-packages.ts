@@ -275,6 +275,10 @@ function useMovePackageHome(type: PackageType) {
 
 // Re-export factory hooks for direct use
 export {
+  // The imperative read, for a handler that has to KNOW before it writes: the
+  // catalogue asks an agent's manifest what it declares the moment a switch is
+  // flipped, rather than holding every row's detail open.
+  fetchPackageDetail,
   usePackageList,
   usePackageDetail,
   useUploadPackage,

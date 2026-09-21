@@ -33,7 +33,8 @@ import {
   spaceRoleAssignment,
   useSpaceRoleOptions,
 } from "../../hooks/use-roles";
-import { useCreateVersion } from "../../hooks/use-packages";
+import { useCreateVersion, usePackageDetail } from "../../hooks/use-packages";
+import { useIntegrations } from "../../hooks/use-integrations";
 import {
   shareTargetHandle,
   usePackageShares,
@@ -123,6 +124,16 @@ export function SharePackageDialog({
     { params: { path: { orgId: orgId ?? "" } } },
     { enabled: open && !!orgId },
   );
+  // Only an AGENT declares integrations; the other families have no closure a
+  // recipient has to hold.
+  const detail = usePackageDetail("agent", open && type === "agent" ? packageId : undefined);
+  // The names as a reader knows them, not the ids: the index is already loaded
+  // wherever this dialog opens from, so it costs nothing here.
+  const { data: integrationRows } = useIntegrations();
+  const declaredIntegrations = (detail.data?.dependencies.integrations ?? []).map((entry) => {
+    const row = integrationRows?.find((candidate) => candidate.id === entry.id);
+    return row?.manifest.display_name ?? entry.id.split("/").pop() ?? entry.id;
+  });
   const share = useSharePackage();
   const revoke = useRevokePackageShare();
   const publish = useCreateVersion(type, packageId);
@@ -285,6 +296,20 @@ export function SharePackageDialog({
                 ? t("packages.shareSpaceHint")
                 : t("packages.shareUseHint")}
           </p>
+          {/* What the recipient will have to do, said BEFORE the offer goes
+              out. An agent's skills travel with it — they are judged from its
+              home space — but its integrations are judged where the run starts,
+              so a recipient without them gets `integration_not_active` and no
+              explanation. This is the first failure of every share, and it is
+              avoidable with one sentence. */}
+          {declaredIntegrations.length > 0 && (
+            <p className="text-muted-foreground text-sm">
+              {t("packages.shareIntegrationsHint", {
+                count: declaredIntegrations.length,
+                list: declaredIntegrations.join(", "),
+              })}
+            </p>
+          )}
 
           {needsVersion && (
             <div

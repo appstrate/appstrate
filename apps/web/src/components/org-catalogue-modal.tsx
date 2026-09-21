@@ -45,9 +45,15 @@ import type { PackageType } from "@appstrate/core/validation";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { MoveHomeSpaceDialog } from "./package-detail/move-home-space-dialog";
 import { SharePackageDialog } from "./package-detail/share-package-dialog";
+import { ActivationClosureDialog } from "./catalogue-activation-dialog";
 import { splitPackageRef } from "../lib/package-paths";
 import { useOrg } from "../hooks/use-org";
 import { useSpaces } from "../hooks/use-spaces";
+import { fetchPackageDetail } from "../hooks/use-packages";
+import { packageKeys } from "../lib/query-keys";
+import { missingIntegrations, type MissingDependency } from "../lib/activation-closure";
+import { maySetPackageActive } from "../lib/package-permissions";
+import { useCurrentOrgId } from "../hooks/use-org";
 import { useRevokePackageShare } from "../hooks/use-package-shares";
 import { useAllIntegrations } from "../hooks/use-integrations";
 import { useLibrary, useSetPackageActive, type LibraryPackageItem } from "../hooks/use-library";
@@ -140,6 +146,7 @@ export function OrgCatalogueModal({
   const { t } = useTranslation(["settings", "agents", "common"]);
   const allowed = useCatalogueKinds();
   const spaceId = useCurrentSpaceId();
+  const orgId = useCurrentOrgId();
   const { currentOrg } = useOrg();
   const { data: library, isLoading, error } = useLibrary();
   const activate = useSetPackageActive();
@@ -235,6 +242,17 @@ export function OrgCatalogueModal({
     (rowOf(item)?.placements ?? [])
       .filter((placement) => placement.via === "shared")
       .map((placement) => ({ id: placement.space_id, name: spaceNameOf(placement.space_id) }));
+  /**
+   * An activation waiting on a question: switching an agent on in a space its
+   * integrations do not run gives an agent that cannot start, and nothing said
+   * so. The switch asks before writing, and only when there is something to
+   * ask — every other activation stays one click.
+   */
+  const [closure, setClosure] = useState<{
+    item: CardItem;
+    spaceId: string;
+    missing: MissingDependency[];
+  } | null>(null);
   const [moveHome, setMoveHome] = useState<CardItem | null>(null);
   const [sharing, setSharing] = useState<CardItem | null>(null);
   const revoke = useRevokePackageShare();
@@ -390,18 +408,54 @@ export function OrgCatalogueModal({
     // id rather than naming a space they cannot enter (RBAC spec §6.9).
     return home ? spaceNameOf(home) : null;
   });
+  const setActive = (item: CardItem, targetSpaceId: string, next: boolean) =>
+    activate.mutate(
+      { spaceId: targetSpaceId, packageId: item.id, active: next },
+      { onError: (err: unknown) => toast.error(getErrorMessage(err)) },
+    );
+
+  /**
+   * Switching a package on, with the one question worth asking first.
+   *
+   * Only an AGENT has a closure the target space has to hold: its skills travel
+   * with it (judged from its home), its integrations do not. The manifest is
+   * read at the moment of the click rather than held open for every row —
+   * turning a switch on is rare, and holding a detail per row is not.
+   */
+  const onSetActive = async (item: CardItem, targetSpaceId: string, next: boolean) => {
+    if (!next || active !== "agent") return setActive(item, targetSpaceId, next);
+    let declared: { id: string }[] = [];
+    try {
+      const detail = await qc.fetchQuery({
+        queryKey: packageKeys.detail("agents", orgId ?? "", spaceId ?? "", item.id, null),
+        queryFn: () => fetchPackageDetail("agent", item.id),
+      });
+      declared = detail.dependencies?.integrations ?? [];
+    } catch {
+      // The question is a courtesy; the run gate is the authority. A read that
+      // fails must not stop the deed the caller asked for.
+      return setActive(item, targetSpaceId, next);
+    }
+    const missing = missingIntegrations(
+      declared,
+      (library?.packages.integration ?? []) as LibraryPackageItem[],
+      targetSpaceId,
+      // A system INTEGRATION is not exempt the way a system agent or skill is:
+      // it has a real switch, and a space that has not turned it on does not
+      // run it (`resolveIntegrationActivations`). The verdict is the target
+      // space's alone.
+      () => maySetPackageActive(grantById.get(targetSpaceId), "integration", true),
+    );
+    if (missing.length === 0) return setActive(item, targetSpaceId, next);
+    setClosure({ item, spaceId: targetSpaceId, missing });
+  };
+
   const spaceColumns = useCatalogueSpaceColumns({
     spaces: spaceColumnsInput,
     type: active,
     placementOf: (item) => placementById.get(item.id),
     busy: activate.isPending,
-    onSetActive: (item, targetSpaceId, next) =>
-      activate.mutate(
-        { spaceId: targetSpaceId, packageId: item.id, active: next },
-        {
-          onError: (err: unknown) => toast.error(getErrorMessage(err)),
-        },
-      ),
+    onSetActive: (item, targetSpaceId, next) => void onSetActive(item, targetSpaceId, next),
   });
   const protocolColumn = useCatalogueProtocolColumn((item) => {
     const row = integrationById.get(item.id);
@@ -595,6 +649,33 @@ export function OrgCatalogueModal({
       {/* The two deeds that act on the package itself rather than on one of
           its placements. They are the dialogs the package's own page mounts,
           so the gesture reads the same from either surface. */}
+      {closure && (
+        <ActivationClosureDialog
+          packageName={closure.item.displayName}
+          spaceName={spaceNameOf(closure.spaceId)}
+          missing={closure.missing}
+          isPending={activate.isPending}
+          onClose={() => setClosure(null)}
+          onAgentOnly={() => {
+            setActive(closure.item, closure.spaceId, true);
+            setClosure(null);
+          }}
+          onActivateAll={() => {
+            // The agent AND what its run needs, in the order a reader would do
+            // it by hand. Each is its own call: the API has no cascade, and one
+            // refusal must not take the others down.
+            setActive(closure.item, closure.spaceId, true);
+            for (const entry of closure.missing) {
+              activate.mutate(
+                { spaceId: closure.spaceId, packageId: entry.id, active: true },
+                { onError: (err: unknown) => toast.error(getErrorMessage(err)) },
+              );
+            }
+            setClosure(null);
+          }}
+        />
+      )}
+
       {moveHome && (
         <MoveHomeSpaceDialog
           open

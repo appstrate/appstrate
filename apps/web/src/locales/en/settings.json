@@ -1460,5 +1460,13 @@
   "catalogue.spaceSwitch": "Activate {{package}} in {{space}}",
   "catalogue.revokeFrom": "Withdraw from {{space}}",
   "catalogue.revoked": "Package withdrawn from {{space}}.",
-  "catalogue.homeSpaceHint": "Home space: {{space}}"
+  "catalogue.homeSpaceHint": "Home space: {{space}}",
+  "catalogue.closureTitle": "Activate {{name}} here?",
+  "catalogue.closureBody": "This agent uses integrations {{space}} does not run. Without them its launch is refused.",
+  "catalogue.closureActivateAll": "Activate all here",
+  "catalogue.closureAgentOnly": "Activate the agent only",
+  "catalogue.closureNoRight": "You may not activate it here",
+  "catalogue.closureCredentials": "An integration runs with the space's own credentials: this space will have to connect it.",
+  "packages.shareIntegrationsHint_one": "This agent uses {{list}}: the recipient will have to activate it and connect their own.",
+  "packages.shareIntegrationsHint_other": "This agent uses {{list}}: the recipient will have to activate them and connect their own."
 }

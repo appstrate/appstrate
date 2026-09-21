@@ -1460,5 +1460,13 @@
   "catalogue.spaceSwitch": "Activer {{package}} dans {{space}}",
   "catalogue.revokeFrom": "Retirer de {{space}}",
   "catalogue.revoked": "Package retiré de {{space}}.",
-  "catalogue.homeSpaceHint": "Espace d'origine : {{space}}"
+  "catalogue.homeSpaceHint": "Espace d'origine : {{space}}",
+  "catalogue.closureTitle": "Activer {{name}} ici ?",
+  "catalogue.closureBody": "Cet agent utilise des intégrations que {{space}} n'exécute pas. Sans elles, son lancement sera refusé.",
+  "catalogue.closureActivateAll": "Tout activer ici",
+  "catalogue.closureAgentOnly": "Activer l'agent seulement",
+  "catalogue.closureNoRight": "Vous n'avez pas le droit de l'activer ici",
+  "catalogue.closureCredentials": "Une intégration s'exécute avec les identifiants de l'espace : celui-ci devra s'y connecter.",
+  "packages.shareIntegrationsHint_one": "Cet agent utilise {{list}} : le destinataire devra l'activer chez lui et s'y connecter.",
+  "packages.shareIntegrationsHint_other": "Cet agent utilise {{list}} : le destinataire devra les activer chez lui et s'y connecter."
 }
