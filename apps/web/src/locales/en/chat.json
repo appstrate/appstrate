@@ -60,7 +60,6 @@
   "model.settingsTitle": "Model and generation",
   "model.tabs.models": "Models",
   "model.tabs.configuration": "Configuration",
-  "model.customGeneration": "Custom generation settings",
   "generation.noneSupported": "No generation settings are available for this model.",
   "agentAuthoring.label": "Agent authoring",
   "agentAuthoring.onTitle": "Agent authoring: on",

@@ -311,7 +311,7 @@ describe("runner preset", () => {
     }
   });
 
-  /** An inline manifest naming the skill the runner is not served. */
+  /** A minimal inline manifest: every case here stops at the composing guard. */
   const inlineBody = () =>
     JSON.stringify({
       manifest: {
@@ -321,7 +321,6 @@ describe("runner preset", () => {
         type: "agent",
         description: "Inline run",
         schema_version: "0.1",
-        dependencies: { skills: { [SKILL_ID]: "^1.0.0" } },
       },
       prompt: "Do the thing.",
       input: {},

@@ -329,8 +329,8 @@ export function createRunsRemoteRouter() {
           actor,
         });
       } else {
-        // Composing is a derived capability (`agents:write` on top of the
-        // route's `agents:run`) — see `CoreResources.agents`.
+        // Composing: `agents:write` on top of the route's `agents:run` —
+        // mirror of `canComposeInline` (@appstrate/core/permissions).
         assertPermission(c, "agents", "write");
         // Inline path — the runner ships a manifest+prompt blob. Validate
         // structurally, then create a shadow LoadedPackage. All inline

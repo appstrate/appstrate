@@ -196,11 +196,7 @@ export function ModelSelect({
             "max-w-64 justify-start text-left",
             hasOverrides && "border-primary/40 bg-primary/5",
           )}
-          title={
-            hasOverrides
-              ? `${t("model.settingsTitle")} · ${t("model.customGeneration")}`
-              : t("model.settingsTitle")
-          }
+          title={t("model.settingsTitle")}
         >
           <SlidersHorizontalIcon className="text-muted-foreground size-3.5 shrink-0" />
           {active ? (
@@ -208,12 +204,7 @@ export function ModelSelect({
           ) : (
             <span className="font-medium">{t("model.select")}</span>
           )}
-          {hasOverrides && (
-            <>
-              <span className="bg-primary size-1.5 rounded-full" aria-hidden="true" />
-              <span className="sr-only">{t("model.customGeneration")}</span>
-            </>
-          )}
+          {hasOverrides && <span className="bg-primary size-1.5 rounded-full" aria-hidden="true" />}
           <ChevronDownIcon className="text-muted-foreground size-3.5 shrink-0" />
         </Button>
       </PopoverTrigger>

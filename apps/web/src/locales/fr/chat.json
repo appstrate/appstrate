@@ -60,7 +60,6 @@
   "model.settingsTitle": "Modèle et génération",
   "model.tabs.models": "Modèles",
   "model.tabs.configuration": "Configuration",
-  "model.customGeneration": "Réglages de génération personnalisés",
   "generation.noneSupported": "Aucun réglage de génération disponible pour ce modèle.",
   "agentAuthoring.label": "Création d'agents",
   "agentAuthoring.onTitle": "Création d'agents : activée",

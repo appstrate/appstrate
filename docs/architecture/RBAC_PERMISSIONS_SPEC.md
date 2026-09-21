@@ -675,7 +675,7 @@ A per-org MCP bearer re-enters space-scoped routes in-process and lands on the d
 
 ### 7.4 Module-minted loopbacks (chat module)
 
-The chat module mints its own bearers for the platform calls it makes on the caller's behalf (`packages/module-chat/src/loopback-auth.ts`): the signing secret is generated in memory at module init and never leaves the process, and a token lives one turn. Each carries the caller's already-resolved identity and permission set — no re-derivation, no amplification — and the role preview in force, in the SIGNED claims, because the re-entered request builds its own headers (§6.7).
+The chat module mints its own bearers for the platform calls it makes on the caller's behalf (`packages/module-chat/src/loopback-auth.ts`): the signing secret is generated in memory at module init and never leaves the process, and a token lives one turn. Each carries the caller's already-resolved identity and permission set — no re-derivation, no amplification; the platform-MCP bearer drops `agents:write` when the composer's agent-authoring switch is off — and the role preview in force, in the SIGNED claims, because the re-entered request builds its own headers (§6.7).
 
 The strategy therefore declares `principalKind: "user"`: the loopback IS the caller, by another transport, so personal spaces and per-principal grants answer for the engine's turn exactly as they answer for the `/api/chat` request that minted it. The two capabilities stay separate: the INFERENCE bearer declares `firstPartyLoopback`, which is what the bearer-only proxy surfaces gate on; the platform-MCP bearer never does, so it can authorize the MCP meta-tools and never be replayed against the inference proxy.
 

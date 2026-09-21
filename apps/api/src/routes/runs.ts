@@ -715,7 +715,8 @@ export function createRunsRouter() {
     // each time the middleware is constructed. We read it at route-build
     // time; changes to the env require a reboot.
     rateLimit(getInlineRunLimits().rate_per_min),
-    // Composing is a derived capability — see `CoreResources.agents`.
+    // Composing: mirror of `canComposeInline` (@appstrate/core/permissions),
+    // one guard per grant so a refusal names the one missing.
     requirePermission("agents", "write"),
     requirePermission("agents", "run"),
     idempotency(replayRun),
@@ -849,7 +850,7 @@ export function createRunsRouter() {
   router.post(
     "/runs/inline/validate",
     rateLimit(getInlineRunLimits().rate_per_min),
-    // Same guard as the run surface it validates for.
+    // Same guard as the run surface it validates for (`canComposeInline`).
     requirePermission("agents", "write"),
     requirePermission("agents", "run"),
     async (c) => {

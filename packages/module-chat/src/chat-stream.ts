@@ -287,7 +287,8 @@ export async function handleChatStream(
   // The proxy surfaces are bearer-only (cookies refused — CSRF model):
   // inference loopback calls carry a short-lived token only this process
   // can mint, scoped to llm-proxy:call + models:read. The MCP session keeps
-  // the caller's own credentials (full RBAC fidelity on tool calls).
+  // the caller's own grants (full RBAC fidelity on tool calls, narrowed by
+  // `turnPermissions` when agent authoring is off).
   //
   // The token lives 60 s, but a turn fans out into many inference calls over
   // many steps (with a run long-poll blocking for ~55s between them), so the

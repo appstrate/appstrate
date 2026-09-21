@@ -10,11 +10,10 @@
  * permission set, the persona) is host state, so routing it through a
  * `ChatHost` member would buy nothing but a wider injection surface.
  *
- * A preview started elsewhere needs no handling of its own: `/api/orgs` and
- * `/api/spaces` both carry `X-View-As` through the client middleware, so
- * `usePermissions()` and the space row already answer AS the persona. An
- * owner previewing `runner` sees the runner's verdicts here, which is the
- * whole point of a preview.
+ * An active role preview (`X-View-As`) needs no permission logic here:
+ * `/api/orgs` and `/api/spaces` already answer AS the persona, so an owner
+ * previewing `runner` sees the runner's verdicts. The chip only marks it (eye
+ * icon, closing line).
  */
 
 import { useTranslation } from "react-i18next";

@@ -2,8 +2,9 @@
 
 /**
  * What the chat assistant can do for the caller. It acts through an MCP bearer
- * carrying exactly the caller's effective set, so this is the caller's RBAC
- * translated into the assistant's acts. Not a gate — every act is re-checked
+ * carrying the caller's effective set — minus what the composer's
+ * agent-authoring switch turns off (`turnPermissions`), never more — so this is
+ * the caller's RBAC translated into the assistant's acts. Not a gate — every act is re-checked
  * server-side — but a row must never claim what the route would refuse.
  */
 
