@@ -8,7 +8,6 @@ import {
   Globe,
   KeyRound,
   Laptop,
-  Library,
   LayoutGrid,
   Settings,
   Shield,
@@ -44,13 +43,6 @@ interface SettingsNavigationOptions {
    * read-only page.
    */
   can: (permission: GateablePermission) => boolean;
-  /**
-   * Whether the caller authors packages in ANY space they can enter. The
-   * library spans spaces, so the CURRENT space's permissions are the wrong
-   * question: someone who builds in another space would lose the screen that
-   * installs into it.
-   */
-  canAuthorPackage: boolean;
   features: {
     oidc: boolean;
     billing: boolean;
@@ -60,7 +52,6 @@ interface SettingsNavigationOptions {
 
 export function buildSettingsNavigation({
   can,
-  canAuthorPackage,
   features,
 }: SettingsNavigationOptions): UnifiedSettingsSection[] {
   return [
@@ -91,14 +82,6 @@ export function buildSettingsNavigation({
           icon: LayoutGrid,
           labelKey: "applications.pageTitle",
           show: can("spaces:write"),
-        },
-        {
-          to: "/org-settings/library",
-          icon: Library,
-          labelKey: "orgSettings.tabLibrary",
-          // The library installs packages into spaces: it is for whoever
-          // authors one somewhere.
-          show: canAuthorPackage,
         },
         {
           to: "/org-settings/models",

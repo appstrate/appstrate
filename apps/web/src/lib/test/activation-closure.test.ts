@@ -31,7 +31,7 @@ function integration(
       state: p.state,
       shared_by: null,
     })),
-  } as LibraryPackageItem;
+  };
 }
 
 const always = () => true;

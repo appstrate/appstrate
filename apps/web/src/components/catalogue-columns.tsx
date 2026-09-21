@@ -17,7 +17,7 @@ import type { PackageType } from "@appstrate/core/validation";
 import { maySetPackageActive, type SpaceGrant } from "../lib/package-permissions";
 import type { CataloguePlacement } from "../lib/catalogue-placement";
 import type { DataColumn } from "./data-table";
-import { CatalogueRowMenu, CatalogueStatusBadge } from "./catalogue-row";
+import { CatalogueRowMenu } from "./catalogue-row";
 import type { CardItem } from "../pages/package-list";
 import type { IntegrationProtocol } from "../lib/integration-collection";
 
@@ -86,34 +86,6 @@ export function useCatalogueSelectColumn({
   };
 }
 
-export function useCatalogueActiveColumn(
-  stateOf: (item: CardItem) => CatalogueRowState,
-): DataColumn<CardItem> {
-  const { t } = useTranslation("settings");
-
-  return {
-    id: "activeIn",
-    header: t("catalogue.column.activeIn"),
-    width: "minmax(140px,1fr)",
-    // The other spaces are context, not the deed: they wait for the width.
-    tier: 3,
-    cell: (item) => {
-      const state = stateOf(item);
-      if (state.everywhere) {
-        return <span className="text-muted-foreground text-xs">{t("catalogue.allSpaces")}</span>;
-      }
-      if (state.activeIn.length === 0) {
-        return <span className="text-muted-foreground/50">—</span>;
-      }
-      return (
-        <span className="text-muted-foreground truncate text-xs" title={state.activeIn.join(", ")}>
-          {state.activeIn.join(" · ")}
-        </span>
-      );
-    },
-  };
-}
-
 /**
  * Where the package comes FROM, in two words on one line: who provides it, and
  * which space governs its draft.
@@ -155,23 +127,6 @@ export function useCatalogueOriginColumn(
         </span>
       );
     },
-  };
-}
-
-export function useCatalogueStatusColumn(
-  stateOf: (item: CardItem) => CatalogueRowState,
-): DataColumn<CardItem> {
-  const { t } = useTranslation("settings");
-
-  return {
-    id: "status",
-    header: t("catalogue.column.status"),
-    width: "128px",
-    // Tier two: whether it is on HERE is the question every catalogue row is
-    // read for, and it used to be an absence (no button) rather than a word.
-    // Tier one holds the name and the "…" menu, whose items already say it.
-    tier: 2,
-    cell: (item) => <CatalogueStatusBadge state={stateOf(item)} />,
   };
 }
 

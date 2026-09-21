@@ -30,7 +30,7 @@ function pkg(
       state: p.state,
       shared_by: null,
     })),
-  } as LibraryPackageItem;
+  };
 }
 
 describe("cataloguePlacement", () => {

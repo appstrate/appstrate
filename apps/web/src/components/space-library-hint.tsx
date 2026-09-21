@@ -12,9 +12,10 @@ import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
  *
  * An index answers "what can I run here", so it lists the ACTIVE set and
  * nothing else. Everything else that reached this space — an offer nobody took
- * up, a package deliberately switched off — is in the space library, the one
- * management view (RBAC spec §6.8). Without this line an empty index reads as
- * "nothing was ever placed here", which is the one thing it does not mean.
+ * up, a package deliberately switched off — is in the catalogue, which carries
+ * the whole placement model in one screen. Without this line an empty index
+ * reads as "nothing was ever placed here", which is the one thing it does not
+ * mean.
  *
  * Gated on the TYPE's own `read` in THIS space, which is the predicate the
  * library's contents are built from (`readableSpaceIds`,
@@ -35,7 +36,7 @@ export function SpaceLibraryHint({ type }: { type: PackageType }) {
       t={t}
       i18nKey="library.indexEmptyHint"
       components={{
-        1: <Link to="/space/packages" className="text-primary hover:underline" />,
+        1: <Link to="/catalogue/placed/agent" className="text-primary hover:underline" />,
       }}
     />
   );

@@ -184,7 +184,6 @@ const DYNAMIC_KEY_PREFIXES = [
   "editor.appearanceColorName.", // components/agent-editor/agent-appearance-fields.tsx
   "integration.auth.type.", // components/integration-connect/{inline-connect-button,integration-connection-picker}.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
-  "library.tab.", // pages/library-page.tsx — t(`library.tab.${tab}`)
   "integration.admin.creation.", // pages/integration-detail.tsx — t(`integration.admin.creation.${value}`)
   "integration.admin.usage.",
   "integration.admin.orgDefault.connection.", // pages/integration-detail.tsx — forced / default

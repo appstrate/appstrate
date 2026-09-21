@@ -64,7 +64,7 @@ describe("NotificationContent", () => {
 
     expect(html).toContain(`Alice Martin vous a partagé ${PACKAGE_ID}`);
     // The current space view has the acceptance action, regardless of type.
-    expect(html).toContain('href="/space/packages"');
+    expect(html).toContain('href="/catalogue/placed/agent"');
     // Not a run: no run-scoped link, and nothing that reads as a dead agent.
     expect(html).not.toContain("Agent supprimé");
     expect(html).not.toContain('href="/runs/');
@@ -81,7 +81,7 @@ describe("NotificationContent", () => {
       },
     ]);
 
-    expect(html).toContain('href="/space/packages"');
+    expect(html).toContain('href="/catalogue/placed/agent"');
   });
 
   it("still renders a run notification as the agent and its status", () => {

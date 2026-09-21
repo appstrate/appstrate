@@ -339,9 +339,7 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
               type,
               rows.map((pkg) => ({
                 ...pkg,
-                placements: pkg.placements.filter(
-                  (placement) => placement.space_id === spaceId,
-                ),
+                placements: pkg.placements.filter((placement) => placement.space_id === spaceId),
               })),
             ]),
           ),

@@ -107,7 +107,7 @@ function hintFor(permissions: string[], type: "agent" | "integration" | "skill")
 
 /** The library link the hint wraps, when it renders one at all. */
 function libraryLink(html: string): string | null {
-  return html.match(/<a[^>]*href="\/space\/packages"[^>]*>[^<]*<\/a>/)?.[0] ?? null;
+  return html.match(/<a[^>]*href="\/catalogue\/placed\/agent"[^>]*>[^<]*<\/a>/)?.[0] ?? null;
 }
 
 describe("SpaceLibraryHint", () => {
@@ -120,7 +120,7 @@ describe("SpaceLibraryHint", () => {
     expect(libraryLink(html)).not.toBeNull();
     // The whole sentence, not just the link: the bundle string is what the
     // reader sees, and `Trans` is what assembles it around the anchor.
-    expect(html).toContain("Packages de cet espace");
+    expect(html).toContain("catalogue");
   });
 
   it("points a reader of the type at the library", () => {

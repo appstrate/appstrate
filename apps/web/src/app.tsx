@@ -27,7 +27,7 @@ import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useSpaceResolver } from "./hooks/use-current-space";
-import { RequirePermission, RequireOrgCatalogAdmin } from "./components/require-permission";
+import { RequirePermission } from "./components/require-permission";
 import { useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "./components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
@@ -91,12 +91,7 @@ const IntegrationsPage = lazy(() =>
 const IntegrationDetailPage = lazy(() =>
   import("./pages/integration-detail").then((m) => ({ default: m.IntegrationDetailPage })),
 );
-const OrgSettingsLibraryPage = lazy(() =>
-  import("./pages/library-page").then((m) => ({ default: m.LibraryPage })),
-);
-const SpacePackagesPage = lazy(() =>
-  import("./pages/library-page").then((m) => ({ default: m.SpacePackagesPage })),
-);
+
 const EndUsersPage = lazy(() =>
   import("./pages/end-users-page").then((m) => ({ default: m.EndUsersPage })),
 );
@@ -413,16 +408,10 @@ export function App() {
           </RequirePermission>
         }
       />
-      <Route
-        path="library"
-        element={
-          // Main's guard (#1437): the org library ACTS on every space's
-          // placements, which `spaces:read` does not authorize.
-          <RequireOrgCatalogAdmin>
-            <OrgSettingsLibraryPage />
-          </RequireOrgCatalogAdmin>
-        }
-      />
+      {/* The library was a second reading of the placement model, for admins
+          only. The catalogue carries the whole of it now, graded by what the
+          caller may do, so this address goes there. */}
+      <Route path="library" element={<Navigate to="/catalogue/placed/agent" replace />} />
       <Route
         path="models"
         element={
@@ -1044,15 +1033,12 @@ export function App() {
                 </RequirePermission>
               }
             />
+            {/* One space's inventory was the same model again, narrowed, and
+                reachable from no navigation entry. The catalogue's placed half
+                is that view, with the space named in its own column. */}
             <Route
               path="/space/packages"
-              element={
-                <RequirePermission permission="spaces:read">
-                  <LazyRoute>
-                    <SpacePackagesPage />
-                  </LazyRoute>
-                </RequirePermission>
-              }
+              element={<Navigate to="/catalogue/placed/agent" replace />}
             />
             <Route
               path="/library"

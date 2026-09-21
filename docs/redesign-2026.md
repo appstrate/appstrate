@@ -11,8 +11,9 @@ says where things stand, why the non-obvious calls were made, and what is still
 open — so the work can be picked up cold.
 
 **Picking it up cold, read in this order:** "How the work goes" just below,
-then **"Open", which opens on WHERE THIS STANDS (20 September 2026)** — the
-most recent state, and what is left. After it come the questions for the API
+then **"Open", which opens on WHERE THIS STANDS (20 September 2026) and the
+catalogue section that follows it (21 September)** — the most recent state, and
+what is left. After it come the questions for the API
 and the product, then NEXT, IN ORDER: the numbered blocks that
 are the work, written for someone with no other context. Then "Form pattern",
 which the first of those blocks is entirely about, and "The grammar", which
@@ -1565,11 +1566,74 @@ The lab had no degraded role, which is why nobody saw the panel go blank. It
 has one now — "Analyste", holding `chat:write` from a chat module this
 deployment no longer loads.
 
+### THE CATALOGUE IS THE PLACEMENT MODEL (21 September 2026)
+
+Main's #1437 replaced one question ("which space owns this package") with three
+axes: `packages.home_space_id` is the write authority, `package_shares` the
+placement and read, `space_packages.enabled` the activation. That model is
+adopted whole. What it arrived WITH was two new screens — an org library for
+admins and one space's inventory at `/space/packages` — and both read
+`GET /api/library`, the very endpoint this app's CATALOGUE already read. Three
+screens, one model, two of them reachable from no navigation entry.
+
+So the catalogue absorbed them and they are deleted. It is one screen, graded
+by what the caller may do, which is also how the server answers: the library
+response only ever carries the spaces the caller can enter.
+
+**Its shape**
+
+- **The first axis is possession, not provenance.** "Dans vos espaces" against
+  "Découvrir" — what is already placed in a space you reach, against what you
+  could still place. Provenance (the org's packages, Appstrate's) became a
+  filter, which is what it is: an attribute of a package, not the question a
+  reader opens with. The old `/catalogue/org/...` links still resolve.
+- **A column per space, a switch per cell.** "Actif ici" named no space while
+  the column beside it listed the others: two ways of speaking about one
+  subject, one of them mute. Now each column is a space and each cell says and
+  CHANGES the state there. A caller with one space keeps the table they had,
+  with the space named instead of implied.
+- **Three states, and the third is the one the model added.** Active, switched
+  off, and OFFERED — a placement somebody made and nobody switched on. It is
+  not an inbox item to accept: turning the switch on IS accepting it.
+- **The navigation carries the offers**, because nothing else does: the share
+  route notifies a PERSON and says nothing at all when the target is a team
+  space (`createPackageShareNotification`, gated on `recipientUserId`). The
+  count is placements, not packages — one package offered to three spaces is
+  three decisions.
+- **The row's menu holds what acts on the PACKAGE**: move its home, offer it,
+  withdraw an offer. Activating is deliberately not there — it is the switch in
+  a named column, and a menu item could only ever mean "the space the app
+  happens to be in".
+
+**What an activation leaves undone, said before it is done**
+
+`activatePackage` cascades to nothing, and the run gate asks for more —
+differently of the two families. SKILLS are judged from the agent's HOME space
+(`placementAnchor`) and travel with it: an agent offered elsewhere keeps the
+skills its home placed beside it. INTEGRATIONS are judged where the run starts
+and a missing one refuses the launch, because an integration carries
+credentials and the recipient runs it with theirs.
+
+So switching an agent on asks first, and only when there is something to ask:
+it names the integrations that space does not run and offers to activate them
+with it. The share dialog says the same thing before the offer goes out. The
+rule is `lib/activation-closure`, with the case where silence is right — an
+integration the caller cannot see is not named, since naming it would leak that
+it exists.
+
 **What is left**
 
 1. **The lab has no package creation handler**, so a skill cannot be created
    end to end locally: only the creation screens can be judged. Add the POST
    fixtures, or accept that this path is verified on a real instance.
+2. **Main's 18 library permission tests went with its screen.** They pinned
+   real RBAC rules against a rendered table; the catalogue is a modal, and
+   Radix portals render nothing in this suite (`apps/web/AGENTS.md`). What they
+   protected lives in the pure rules instead — `catalogue-placement`,
+   `activation-closure`, `maySetPackageActive` and its own verdict test — but
+   the composition itself is now only checked by driving the lab. If that
+   proves too thin, the answer is a page rather than a modal, not a portal
+   shim.
 
 **How this was verified**
 

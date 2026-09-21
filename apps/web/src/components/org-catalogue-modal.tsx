@@ -108,7 +108,7 @@ import { Spinner } from "./spinner";
  */
 export type CatalogueScope = "placed" | "discover";
 
-export function catalogueScope(raw: string): CatalogueScope {
+function catalogueScope(raw: string): CatalogueScope {
   return raw === "discover" ? "discover" : "placed";
 }
 
@@ -424,13 +424,13 @@ export function OrgCatalogueModal({
    */
   const onSetActive = async (item: CardItem, targetSpaceId: string, next: boolean) => {
     if (!next || active !== "agent") return setActive(item, targetSpaceId, next);
-    let declared: { id: string }[] = [];
+    let declared: { id: string }[];
     try {
       const detail = await qc.fetchQuery({
         queryKey: packageKeys.detail("agents", orgId ?? "", spaceId ?? "", item.id, null),
         queryFn: () => fetchPackageDetail("agent", item.id),
       });
-      declared = detail.dependencies?.integrations ?? [];
+      declared = detail.dependencies.integrations;
     } catch {
       // The question is a courtesy; the run gate is the authority. A read that
       // fails must not stop the deed the caller asked for.
@@ -438,7 +438,7 @@ export function OrgCatalogueModal({
     }
     const missing = missingIntegrations(
       declared,
-      (library?.packages.integration ?? []) as LibraryPackageItem[],
+      library?.packages.integration ?? [],
       targetSpaceId,
       // A system INTEGRATION is not exempt the way a system agent or skill is:
       // it has a real switch, and a space that has not turned it on does not

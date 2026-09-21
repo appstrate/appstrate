@@ -8,9 +8,9 @@ type Features = Parameters<typeof buildSettingsNavigation>[0]["features"];
 const ALL_FEATURES: Features = { oidc: true, billing: true, webhooks: true };
 const NO_FEATURES: Features = { oidc: false, billing: false, webhooks: false };
 
-function destinations(features: Features, granted: string[], canAuthorPackage = false) {
+function destinations(features: Features, granted: string[]) {
   const can = (permission: string) => granted.includes(permission);
-  return buildSettingsNavigation({ can, canAuthorPackage, features }).flatMap((section) =>
+  return buildSettingsNavigation({ can, features }).flatMap((section) =>
     section.items.filter((item) => item.show !== false).map((item) => item.to),
   );
 }
@@ -45,9 +45,8 @@ describe("unified settings navigation", () => {
     ]);
     expect(member).toEqual(["/org-settings/members", "/org-settings/roles"]);
 
-    // Authoring somewhere is what the library is for — anywhere, not only in
-    // the space the caller happens to stand in.
-    expect(destinations(ALL_FEATURES, [], true)).toContain("/org-settings/library");
+    // The library is gone from this rail: the catalogue carries the placement
+    // model, in the navigation, gated on its own verdict.
     expect(destinations(ALL_FEATURES, ["skills:write"])).not.toContain("/org-settings/library");
 
     // Writing is what the infrastructure screens are for.

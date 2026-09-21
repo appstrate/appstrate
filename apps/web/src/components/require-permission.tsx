@@ -3,11 +3,7 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Lock } from "lucide-react";
-import {
-  usePermissions,
-  useCanManageOrgCatalog,
-  type GateablePermission,
-} from "../hooks/use-permissions";
+import { usePermissions, type GateablePermission } from "../hooks/use-permissions";
 import { EmptyState, LoadingState } from "./page-states";
 
 /**
@@ -44,12 +40,4 @@ export function RequirePermission({
 export function NoAccessState() {
   const { t } = useTranslation("common");
   return <EmptyState message={t("access.denied")} hint={t("access.deniedHint")} icon={Lock} />;
-}
-
-/** The organization library is administrative even when the caller manages a space. */
-export function RequireOrgCatalogAdmin({ children }: { children: ReactNode }) {
-  const { ready } = usePermissions();
-  const allowed = useCanManageOrgCatalog();
-  if (!ready) return <LoadingState />;
-  return allowed ? <>{children}</> : <NoAccessState />;
 }

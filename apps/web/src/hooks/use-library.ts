@@ -47,7 +47,7 @@ export function useLibrary() {
  * round trip restating it. A snapshot another component on the page fetched is
  * still read from the cache.
  */
-export function useSpaceLibrary(options: { enabled?: boolean } = {}) {
+function useSpaceLibrary(options: { enabled?: boolean } = {}) {
   const scope = useOrgOnlyScope();
   const spaceId = useCurrentSpaceId();
   return $api.useQuery(
@@ -63,7 +63,7 @@ export function useSpaceLibrary(options: { enabled?: boolean } = {}) {
 }
 
 /** The placement of `pkg` in `spaceId`, or `undefined` when it sits elsewhere. */
-export function placementIn(
+function placementIn(
   pkg: Pick<LibraryPackageItem, "placements">,
   spaceId: string | null | undefined,
 ): LibraryPlacement | undefined {

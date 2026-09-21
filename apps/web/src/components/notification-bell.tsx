@@ -112,7 +112,7 @@ export function NotificationContent({
             // Source agent gone → fall back to the run-scoped route. Marking
             // it read still flows through `onItemClick`.
             const linkTarget = shared
-              ? "/space/packages"
+              ? "/catalogue/placed/agent"
               : agentId && notification.run_id
                 ? `/agents/${agentId}/runs/${notification.run_id}`
                 : notification.run_id
