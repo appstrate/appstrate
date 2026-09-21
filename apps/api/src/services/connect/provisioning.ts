@@ -20,6 +20,12 @@
  * is content-addressed and immutable once published, and a second copy of that
  * list inside one could only ever disagree with the provisioner it describes.
  *
+ * Honoured for SYSTEM packages only. A provisioning auth has the platform mint
+ * a key and author the block a user pastes as root, so declaring one is a
+ * platform privilege, not something any imported manifest can claim:
+ * {@link readProvisioning} refuses the block on any other package, and every
+ * reader goes through it.
+ *
  * No door lets a client supply its own `private_key`:
  * {@link authWithoutMintedCredentials} takes those names out of the schema the
  * hosted form renders, so nobody is asked to type a value about to be
@@ -44,6 +50,7 @@ import {
   type PublicKeyType,
 } from "../../lib/openssh-key.ts";
 import { isBlockedHost } from "@appstrate/afps-shared/ssrf";
+import { isSystemPackage } from "../system-packages.ts";
 
 /**
  * One thing the user has to do, or check, once the platform minted its half.
@@ -227,9 +234,9 @@ function renderInstallCommand(user: string, publicKey: string, hostKeyPub: strin
  */
 function renderRevokeCommand(user: string, publicKey: string): string {
   return [
-    `# Paste as root (or with sudo) on the target AFTER deleting the connection`,
-    `# in Appstrate. Deleting it destroys the private half here and nothing`,
-    `# else — the platform cannot reach your machine to take its key out.`,
+    `# Paste as root (or with sudo) on the target, before or after deleting the`,
+    `# connection in Appstrate. Deleting it destroys the private half there and`,
+    `# nothing else — the platform cannot reach your machine to take its key out.`,
     `(`,
     `set -eu`,
     `su -s /bin/sh ${user} <<'APPSTRATE_SSH'`,
@@ -370,7 +377,8 @@ function sshHandoffSteps(credentials: Record<string, unknown>): HandoffStep[] {
       value: fingerprint,
       note:
         "The command above prints the server's fingerprint as its last line. " +
-        "If it differs from this one, somebody is in the middle: delete the connection.",
+        "If it differs from this one, the host key you pinned is not this server's: " +
+        "delete the connection and reconnect with the right one.",
     },
     {
       kind: "command",
@@ -379,9 +387,10 @@ function sshHandoffSteps(credentials: Record<string, unknown>): HandoffStep[] {
       label: "Remove this key from the server",
       shell: renderRevokeCommand(user, publicKey),
       note:
-        "Keep this block. Deleting the connection in Appstrate destroys the private half and " +
-        "nothing else — Appstrate cannot reach your server to take its key out of " +
-        "authorized_keys.",
+        "Keep this block, and run it before or after deleting the connection: once it is " +
+        "deleted, Appstrate can no longer show it. Deleting the connection destroys the " +
+        "private half and nothing else — Appstrate cannot reach your server to take its " +
+        "key out of authorized_keys.",
     },
   ];
 }
@@ -421,14 +430,16 @@ const KINDS: Record<
  * renders nothing rather than a half-built command.
  */
 export function handoffStepsFor(
+  packageId: string,
   auth: unknown,
   credentials: Record<string, unknown>,
 ): readonly HandoffStep[] {
   let declaration: ProvisioningDeclaration | null;
   try {
-    declaration = readProvisioning(auth);
+    declaration = readProvisioning(packageId, auth);
   } catch {
-    // A manifest this build cannot read is not a reason to refuse a deletion.
+    // A manifest this build cannot read, or one claiming provisioning it may
+    // not, is not a reason to refuse a deletion.
     return [];
   }
   if (!declaration) return [];
@@ -442,14 +453,23 @@ export interface ProvisioningDeclaration {
 }
 
 /**
- * Read `_meta["dev.appstrate/provisioning"]` off an auth block, or null when the
- * auth provisions nothing. Throws on a declared-but-unknown kind — falling back
- * to "the user types it" would silently drop a minted credential.
+ * Read `_meta["dev.appstrate/provisioning"]` off an auth block of `packageId`,
+ * or null when the auth provisions nothing. The one chokepoint every reader
+ * goes through, so it is where the system-package rule lives.
+ *
+ * Throws, never falls back to "the user types it", on a block declared by a
+ * package that is not a system package and on a kind this build does not know:
+ * either fallback would ask for a credential the manifest expects to be minted.
  */
-export function readProvisioning(auth: unknown): ProvisioningDeclaration | null {
+export function readProvisioning(packageId: string, auth: unknown): ProvisioningDeclaration | null {
   const meta = (auth as { _meta?: Record<string, unknown> } | null)?._meta;
   const block = meta?.["dev.appstrate/provisioning"] as { kind?: unknown } | undefined;
   if (!block) return null;
+  if (!isSystemPackage(packageId)) {
+    throw invalidRequest(
+      `\`${packageId}\` declares credential provisioning, which only system packages may`,
+    );
+  }
   const kind = block.kind;
   if (typeof kind !== "string" || !(kind in KINDS)) {
     throw invalidRequest(`unknown credential provisioning kind: ${String(kind)}`);
@@ -472,8 +492,8 @@ export function readProvisioning(auth: unknown): ProvisioningDeclaration | null 
  * Returns a copy. The manifest it comes from is shared, so a strip written
  * through it would be a strip every later reader sees.
  */
-export function authWithoutMintedCredentials<T>(auth: T): T {
-  const declaration = readProvisioning(auth);
+export function authWithoutMintedCredentials<T>(packageId: string, auth: T): T {
+  const declaration = readProvisioning(packageId, auth);
   if (declaration === null || declaration.provides.length === 0) return auth;
   const block = auth as { credentials?: { schema?: { properties?: unknown; required?: unknown } } };
   const schema = block.credentials?.schema;
@@ -504,11 +524,12 @@ export function authWithoutMintedCredentials<T>(auth: T): T {
  * carries it over rather than minting a second copy nobody can undo.
  */
 export async function provisionCredentials(
+  packageId: string,
   auth: unknown,
   fields: SubmittedFields,
   existing: Record<string, unknown> | null,
 ): Promise<Record<string, string> | null> {
-  const declaration = readProvisioning(auth);
+  const declaration = readProvisioning(packageId, auth);
   if (!declaration) return null;
   return KINDS[declaration.kind]!.mint(fields, existing);
 }

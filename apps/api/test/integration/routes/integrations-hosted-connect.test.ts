@@ -12,7 +12,7 @@
  * OAuth dispatch internals are covered by the existing `/connect/oauth2` tests;
  * here we assert only that mint works for an oauth2 auth.
  */
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import {
@@ -32,6 +32,10 @@ import {
   buildConnectUrl,
   connectClaimsFor,
 } from "../../../src/services/connect/connect-session.ts";
+import {
+  _setSystemPackagesForTesting,
+  type SystemPackageEntry,
+} from "../../../src/services/system-packages.ts";
 
 const app = getTestApp();
 
@@ -515,8 +519,9 @@ describe("hosted connect portal — error completions are addressed (issue #1346
   });
 
   // A completion naming NOTHING is delivered to every waiting surface by
-  // contract (`completionMatches`), and both carriers fan out — so a failing
-  // Gmail link used to drive an open ClickUp card into an error naming Gmail.
+  // contract (`completionMatches`), and both carriers fan out — so an
+  // unaddressed failure on a Gmail link drives an open ClickUp card into an
+  // error naming Gmail.
   it("names the package on the OAuth-begin refusal", async () => {
     const res = await startConnect(await mintSession(ctx, "@myorg/gsuite", "google"));
     expect(res.status).toBe(403);
@@ -640,6 +645,22 @@ async function provisionedManifest(name = "@myorg/ssh"): Promise<IntegrationMani
 }
 
 /**
+ * Provisioning is honoured for system packages only, and `getTestApp()` skips
+ * the boot that fills the system registry — so a describe seeding the SSH
+ * package under `@myorg/ssh` registers that id for its own duration. Handed
+ * back afterwards: the whole suite shares one process and one registry.
+ */
+function registerAsSystemPackage(packageId: string) {
+  let restore: () => void;
+  beforeAll(() => {
+    restore = _setSystemPackagesForTesting(
+      new Map([[packageId, { packageId } as SystemPackageEntry]]),
+    );
+  });
+  afterAll(() => restore());
+}
+
+/**
  * What the hosted form actually asks for: everything except `private_key`,
  * which the platform mints and the render context therefore never offers.
  */
@@ -690,6 +711,7 @@ async function submitConnectForm(
 }
 
 describe("hosted connect portal — credential provisioning", () => {
+  registerAsSystemPackage("@myorg/ssh");
   let ctx: TestContext;
   beforeEach(async () => {
     await truncateAll();
@@ -773,7 +795,7 @@ describe("hosted connect portal — credential provisioning", () => {
    * The account name is the field whose shape the SSH runner depends on: it is
    * concatenated into ssh's destination argument, so an `-o`-shaped value
    * would be read as an option rather than a user. `credentials.schema` is
-   * what bounds it, and the hosted form is now the only door onto this auth.
+   * what bounds it, and the hosted form is the only door onto this auth.
    */
   it.each([
     ["an account name shaped like an ssh option", { user: "-oProxyCommand=x" }],
@@ -839,6 +861,51 @@ describe("hosted connect portal — credential provisioning", () => {
 });
 
 /**
+ * The same manifest seeded as an ordinary org package. Declaring provisioning
+ * has the platform mint a key and author a block pasted as root, so only a
+ * package the platform ships may do it: anywhere else the declaration is
+ * refused on every door, never read as "provisions nothing" — that would ask
+ * the user to type a key the manifest expects to be minted.
+ */
+describe("hosted connect portal — provisioning outside a system package", () => {
+  let ctx: TestContext;
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "myorg" });
+    await seedIntegration(ctx.orgId, await provisionedManifest("@myorg/ssh-fork"));
+  });
+
+  it("refuses the hosted form's render context", async () => {
+    const token = await mintSession(ctx, "@myorg/ssh-fork", "primary");
+    const start = await app.request(
+      `/api/integrations/connect/start?token=${encodeURIComponent(token)}`,
+      { redirect: "manual" },
+    );
+    const res = await app.request("/api/integrations/connect/context", {
+      headers: { Cookie: `appstrate_connect=${readSetCookie(start)}` },
+    });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(await res.json())).toMatch(/only system packages may/);
+  });
+
+  it("refuses the programmatic import, even without a minted name in the body", async () => {
+    const res = await app.request(
+      "/api/integrations/@myorg/ssh-fork/auths/primary/connect/fields",
+      {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ credentials: SSH_FORM_FIELDS }),
+      },
+    );
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(await res.json())).toMatch(/only system packages may/);
+
+    const rows = await db.select().from(integrationConnections);
+    expect(rows).toHaveLength(0);
+  });
+});
+
+/**
  * An org-bound DELEGATE with NO pinned space — the `oauth2-dashboard` shape,
  * as `module-auth-strategy.test.ts` models it. It is the credential the
  * handoff's ORG check answers alone: an API key pins a space as well, so for
@@ -886,6 +953,7 @@ const boundApp = getTestApp({ modules: [orgBoundDelegate] });
  * the clear and a stored copy could drift from the key it claims to remove.
  */
 describe("me/connections/:id/handoff — the teardown half, derived", () => {
+  registerAsSystemPackage("@myorg/ssh");
   let ctx: TestContext;
   beforeEach(async () => {
     await truncateAll();

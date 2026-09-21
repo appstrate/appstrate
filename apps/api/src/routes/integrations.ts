@@ -741,7 +741,9 @@ export function createIntegrationsRouter() {
         }
         // A minted name supplied by the caller is a key the platform did not
         // make and would nonetheless install on the target. Refuse it here.
-        const minted = readProvisioning(auth)?.provides.find((name) => name in body.credentials);
+        const minted = readProvisioning(packageId, auth)?.provides.find(
+          (name) => name in body.credentials,
+        );
         if (minted) {
           throw invalidRequest(
             `\`${minted}\` is minted by the platform, not submitted — create this connection ` +
@@ -1077,7 +1079,7 @@ export function createIntegrationsRouter() {
       // schema it is given, and nobody is asked to type a value about to be
       // generated. Display only — the submit door below validates against the
       // FULL manifest schema and drops those names whatever the body carries.
-      auth: authWithoutMintedCredentials(auth),
+      auth: authWithoutMintedCredentials(claims.package_id, auth),
       // AFPS §7.10 publisher instructions, rendered on the form itself: this
       // is the surface where someone is asked to produce the credential.
       setup_guide: manifest.setup_guide ?? null,
@@ -1108,7 +1110,7 @@ export function createIntegrationsRouter() {
       // What this auth mints, if anything — read once here because it decides
       // two things: whether to open the target's envelope, and whether the
       // response carries a handoff block.
-      const provisioning = readProvisioning(auth);
+      const provisioning = readProvisioning(claims.package_id, auth);
       // On a RECONNECT of such an auth, the bundle the connection already
       // holds. The provisioner reuses the key it finds there, so re-running
       // the form leaves the key already installed on the target valid. Read
@@ -1127,7 +1129,12 @@ export function createIntegrationsRouter() {
       // on the form instead of a connection nobody can use. This is the ONLY
       // door that provisions — `connect/fields` refuses a provisioned name
       // outright.
-      const provisioned = await provisionCredentials(auth, body.credentials, existing);
+      const provisioned = await provisionCredentials(
+        claims.package_id,
+        auth,
+        body.credentials,
+        existing,
+      );
       const credentials = provisioned ? { ...body.credentials, ...provisioned } : body.credentials;
 
       const conn = await resolveStrategy(auth, {
@@ -1156,7 +1163,9 @@ export function createIntegrationsRouter() {
       return c.json({
         ok: true,
         connection: conn,
-        ...(provisioning ? { handoff_steps: handoffStepsFor(auth, credentials) } : {}),
+        ...(provisioning
+          ? { handoff_steps: handoffStepsFor(claims.package_id, auth, credentials) }
+          : {}),
       });
     } catch (err) {
       if (err instanceof ApiError) throw err;

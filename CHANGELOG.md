@@ -40,7 +40,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `GET /api/me/connections/{id}/handoff` hands that one back when the connection
   is deleted months later — neither block is stored, both are derived on demand.
   An auth opts into platform-minted credentials with
-  `_meta["dev.appstrate/provisioning"]` (AFPS §10), and no door lets a caller
+  `_meta["dev.appstrate/provisioning"]` (AFPS §10), honoured for system
+  packages only: any other package declaring it is refused by the hosted connect
+  form (served and submitted) and by `POST …/connect/fields` rather than asking
+  the user for the key, and its handoff carries no block. No door lets a caller
   bring its own key: the hosted form is served a schema with the minted names
   removed and the platform overwrites them on submit whatever the body carried,
   and `POST …/connect/fields` rejects a submission naming one.

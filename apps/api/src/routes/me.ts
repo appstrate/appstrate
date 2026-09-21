@@ -448,7 +448,7 @@ router.get("/connections/:connectionId/handoff", async (c) => {
     );
     const credentials = await getIntegrationConnectionCredentialFields(connectionId);
     if (!credentials) return empty();
-    const removal = handoffStepsFor(auth, credentials).flatMap((step) =>
+    const removal = handoffStepsFor(row.integrationId, auth, credentials).flatMap((step) =>
       step.kind === "command" && step.deferred === true
         ? [
             {

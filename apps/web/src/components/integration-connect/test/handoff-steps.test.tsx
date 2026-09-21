@@ -34,7 +34,7 @@ const STEPS: HandoffStep[] = [
     kind: "value",
     label: "Host fingerprint, pinned",
     value: "SHA256:YJK+IkPvWMR1nIl8CmsNEzIxSKBBIAZkrizRiuynnbw",
-    note: "If it differs, someone is sitting in between.",
+    note: "If it differs, the pinned key is not this server's.",
   },
   {
     id: "demo_revoke",
@@ -61,7 +61,7 @@ describe("HandoffSteps", () => {
   it("renders a value step's value and its note", () => {
     const markup = render(<HandoffSteps steps={[STEPS[1]!]} />);
     expect(markup).toContain("SHA256:YJK+IkPvWMR1nIl8CmsNEzIxSKBBIAZkrizRiuynnbw");
-    expect(markup).toContain("someone is sitting in between");
+    expect(markup).toContain("the pinned key is not this server");
   });
 
   /**
@@ -110,7 +110,7 @@ describe("HandoffSteps — prose keyed on the step id", () => {
     const markup = render(<HandoffSteps steps={[known]} />);
 
     expect(markup).toContain("Empreinte de l'hôte, épinglée");
-    expect(markup).toContain("quelqu'un s'est intercalé");
+    expect(markup).toContain("la clé d'hôte épinglée n'est pas celle de ce serveur");
     expect(markup).not.toContain("Host fingerprint, pinned");
   });
 
@@ -127,6 +127,22 @@ describe("HandoffSteps — prose keyed on the step id", () => {
 
     expect(markup).toContain("Install the client certificate");
     expect(markup).toContain("The chain matters as much as the leaf.");
+  });
+
+  it("renders the revoke note in the shape the teardown confirmation receives", () => {
+    // `/handoff` sends the removal step without `deferred`: it is the whole
+    // list there, so it renders open, note included, not collapsed.
+    const teardown: HandoffStep = {
+      id: "ssh_revoke",
+      kind: "command",
+      label: "Remove this key from the server",
+      shell: "grep -vF 'AAAA' ~agent/.ssh/authorized_keys",
+      note: "Keep this block.",
+    };
+    const markup = render(<HandoffSteps steps={[teardown]} />);
+
+    expect(markup).not.toContain("<details");
+    expect(markup).toContain("lancez-le avant ou après la suppression");
   });
 
   it("renders no note when the server sent none, key or no key", () => {
