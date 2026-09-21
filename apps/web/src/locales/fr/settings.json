@@ -1458,5 +1458,6 @@
   "catalogue.emptyPlaced": "Aucun package dans vos espaces.",
   "catalogue.emptyPlacedHint": "Ce que vous ajoutez depuis Découvrir apparaît ici, actif ou non.",
   "catalogue.emptyDiscover": "Rien de plus à ajouter.",
-  "catalogue.emptyDiscoverHint": "Tout ce que l'organisation et Appstrate proposent est déjà dans vos espaces."
+  "catalogue.emptyDiscoverHint": "Tout ce que l'organisation et Appstrate proposent est déjà dans vos espaces.",
+  "catalogue.spaceSwitch": "Activer {{package}} dans {{space}}"
 }

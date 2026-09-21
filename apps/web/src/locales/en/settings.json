@@ -1458,5 +1458,6 @@
   "catalogue.emptyPlaced": "No package in your spaces.",
   "catalogue.emptyPlacedHint": "What you add from Discover appears here, switched on or not.",
   "catalogue.emptyDiscover": "Nothing left to add.",
-  "catalogue.emptyDiscoverHint": "Everything the organization and Appstrate offer is already in your spaces."
+  "catalogue.emptyDiscoverHint": "Everything the organization and Appstrate offer is already in your spaces.",
+  "catalogue.spaceSwitch": "Activate {{package}} in {{space}}"
 }

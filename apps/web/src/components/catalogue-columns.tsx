@@ -12,6 +12,10 @@
  */
 import { useTranslation } from "react-i18next";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { Switch } from "@appstrate/ui/components/switch";
+import type { PackageType } from "@appstrate/core/validation";
+import { maySetPackageActive, type SpaceGrant } from "../lib/package-permissions";
+import type { CataloguePlacement } from "../lib/catalogue-placement";
 import type { DataColumn } from "./data-table";
 import { CatalogueRowMenu, CatalogueStatusBadge } from "./catalogue-row";
 import type { CardItem } from "../pages/package-list";
@@ -202,4 +206,92 @@ export function useCatalogueProtocolColumn(
       );
     },
   };
+}
+
+/**
+ * One column per space the caller reaches, each cell saying — and changing —
+ * this package's state THERE.
+ *
+ * It replaces the pair of columns that came before it ("Statut", then "Actif
+ * dans"), which between them could not name the space they spoke about: the
+ * first reasoned on the current space and never wrote its name, the second
+ * listed the others. With three states and several spaces, a row needs the
+ * same word in the same place for every space, which is a column each.
+ *
+ * The switch IS the deed, not a report of it: activating a package in a space
+ * it is not placed in shares it there and switches it on in one transaction,
+ * which is the door the API already opens. The verdict is the TARGET space's,
+ * never the one on screen — owning a personal space authorizes activating in
+ * it even where the preset held there grants nothing (RBAC spec §3.6).
+ *
+ * "Offered" is written beside the switch rather than in place of it: it is the
+ * one state that asks the reader for a decision, and hiding the control that
+ * takes it behind a word would make the row a dead end.
+ */
+export function useCatalogueSpaceColumns({
+  spaces,
+  type,
+  placementOf,
+  busy,
+  onSetActive,
+}: {
+  spaces: readonly { id: string; name: string; grant?: SpaceGrant }[];
+  type: PackageType;
+  placementOf: (item: CardItem) => CataloguePlacement | undefined;
+  busy: boolean;
+  onSetActive: (item: CardItem, spaceId: string, next: boolean) => void;
+}): DataColumn<CardItem>[] {
+  const { t } = useTranslation("settings");
+
+  return spaces.map((space, index) => ({
+    id: `space:${space.id}`,
+    header: space.name,
+    // Controls, not content: the row's link is placed elsewhere, and the
+    // switches below are raised over the overlay it stretches across the row.
+    control: true,
+    width: "minmax(132px,1fr)",
+    // The first space holds tier two, beside the name; the others wait for the
+    // width the way any further column does. A caller with ONE space therefore
+    // keeps the table it had, with the space named instead of implied.
+    tier: index === 0 ? 2 : 3,
+    cell: (item) => {
+      const placement = placementOf(item);
+      if (!placement) return <span className="text-muted-foreground/50">—</span>;
+      // A system agent, skill or MCP server is readable in every space without
+      // a row of its own: there is no switch to offer.
+      if (placement.everywhere) {
+        return <span className="text-muted-foreground text-xs">{t("catalogue.everywhere")}</span>;
+      }
+      const state = placement.activeIn.includes(space.id)
+        ? "active"
+        : placement.offeredIn.includes(space.id)
+          ? "offered"
+          : placement.inactiveIn.includes(space.id)
+            ? "inactive"
+            : null;
+      const mayWrite = maySetPackageActive(space.grant, type, state !== "active");
+      return (
+        // `relative z-10`: the row link paints an overlay over every cell, and
+        // anything that answers to the pointer has to sit above it or the row
+        // swallows the click (see `data-table.tsx`).
+        <span className="relative z-10 flex items-center gap-1.5">
+          <Switch
+            checked={state === "active"}
+            disabled={busy || !mayWrite}
+            aria-label={t("catalogue.spaceSwitch", {
+              package: item.displayName,
+              space: space.name,
+            })}
+            title={mayWrite ? undefined : t("library.cannotActivate", { ns: "common" })}
+            onCheckedChange={(next) => onSetActive(item, space.id, next === true)}
+          />
+          {state === "offered" && (
+            <span className="text-muted-foreground text-[0.7rem]">
+              {t("catalogue.offeredHere")}
+            </span>
+          )}
+        </span>
+      );
+    },
+  }));
 }

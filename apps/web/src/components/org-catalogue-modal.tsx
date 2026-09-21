@@ -43,6 +43,7 @@ import { Button } from "@appstrate/ui/components/button";
 import type { PackageType } from "@appstrate/core/validation";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useOrg } from "../hooks/use-org";
+import { useSpaces } from "../hooks/use-spaces";
 import { useAllIntegrations } from "../hooks/use-integrations";
 import { useLibrary, useSetPackageActive, type LibraryPackageItem } from "../hooks/use-library";
 import {
@@ -71,10 +72,9 @@ import { PackageCollection } from "./package-collection";
 import type { FilterSpec } from "./list-toolbar";
 import {
   useCatalogueActionsColumn,
-  useCatalogueActiveColumn,
   useCatalogueProtocolColumn,
   useCatalogueOriginColumn,
-  useCatalogueStatusColumn,
+  useCatalogueSpaceColumns,
   useCatalogueSelectColumn,
   type CatalogueRowState,
 } from "./catalogue-columns";
@@ -164,6 +164,15 @@ export function OrgCatalogueModal({
   const { data: integrations } = useAllIntegrations({ enabled: active === "integration" });
   const integrationById = new Map((integrations ?? []).map((row) => [row.id, row] as const));
   const spaces = library?.spaces ?? [];
+  // The library names the spaces this caller reaches; `/api/spaces` carries the
+  // grant in each, which is the verdict a switch in that column answers to.
+  const { data: reachable } = useSpaces();
+  const grantById = new Map((reachable ?? []).map((space) => [space.id, space] as const));
+  const spaceColumnsInput = spaces.map((space) => ({
+    id: space.id,
+    name: space.name,
+    grant: grantById.get(space.id),
+  }));
 
   /**
    * One row's placement, for every kind but the integrations.
@@ -335,8 +344,19 @@ export function OrgCatalogueModal({
     onToggleAll: () => setSelected(allSelected ? new Set() : new Set(activatable)),
   });
   const originColumn = useCatalogueOriginColumn(orgName);
-  const statusColumn = useCatalogueStatusColumn(stateOf);
-  const activeColumn = useCatalogueActiveColumn(stateOf);
+  const spaceColumns = useCatalogueSpaceColumns({
+    spaces: spaceColumnsInput,
+    type: active,
+    placementOf: (item) => placementById.get(item.id),
+    busy: activate.isPending,
+    onSetActive: (item, targetSpaceId, next) =>
+      activate.mutate(
+        { spaceId: targetSpaceId, packageId: item.id, active: next },
+        {
+          onError: (err: unknown) => toast.error(getErrorMessage(err)),
+        },
+      ),
+  });
   const protocolColumn = useCatalogueProtocolColumn((item) => {
     const row = integrationById.get(item.id);
     return row ? integrationProtocol(row) : undefined;
@@ -503,7 +523,7 @@ export function OrgCatalogueModal({
           trailingColumns={[
             originColumn,
             ...(active === "integration" && execution === "remote" ? [protocolColumn] : []),
-            ...(discovering ? [] : [statusColumn, activeColumn]),
+            ...spaceColumns,
             actionsColumn,
           ]}
           rowAction={(item) => preview.open(item.id)}

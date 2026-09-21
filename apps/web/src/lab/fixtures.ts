@@ -3740,6 +3740,7 @@ export const library: Json200<"/api/library", "get"> = {
     { id: "app_lab_default", name: "Default", isDefault: true },
     { id: APP_ID, name: "Production", isDefault: false },
     { id: "app_lab_sandbox", name: "Bac à sable", isDefault: false },
+    { id: "app_lab_personal", name: "Mon espace", isDefault: false },
   ],
   packages: {
     agent: [
