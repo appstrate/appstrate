@@ -990,7 +990,7 @@ export const TOOLS = [
   {
     name: "ssh_exec",
     description:
-      "Run a command on the remote host, as the connection's Unix account. WRITES — this tool can do anything that account can do; withhold it from an agent that must not change the target. The string is handed to the account's login shell, so shell syntax works and quoting is yours to get right. After `timeout_seconds` (default 120, max 600) the call returns with `timed_out: true` and `exit_code: null`, and the connection is dropped, but the remote process may keep running — wrap long commands in `timeout` on the target. Exit status 255 is reserved by ssh itself: a command exiting 255 is reported as an ssh failure. stdout and stderr over 64 KiB each keep their head and tail around an omission marker.",
+      "Run a command on the remote host, as the connection's Unix account. WRITES — this tool can do anything that account can do; withhold it from an agent that must not change the target. The string is handed to the account's login shell, so shell syntax works and quoting is yours to get right. After `timeout_seconds` (default 120, max 600) the call returns with `timed_out: true` and `exit_code: null`, and the connection is dropped, but the remote process may keep running — wrap long commands in `timeout` on the target. Longer work can be started detached — `nohup cmd > log 2>&1 < /dev/null &`; without the redirections the call waits for it — and followed with ssh_read on the log. The server handles one call at a time: a running ssh_exec holds up every other ssh tool until it returns. Exit status 255 is reserved by ssh itself: a command exiting 255 is reported as an ssh failure. stdout and stderr over 64 KiB each keep their head and tail around an omission marker.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1010,7 +1010,7 @@ export const TOOLS = [
   {
     name: "ssh_read",
     description:
-      "Read a remote path over SFTP. A directory returns its entries, dotfiles included, sorted by name, cut at 256 KiB with a note saying so; `offset`/`limit` are refused on a directory. A UTF-8 text file returns its lines numbered like `cat -n`, from `offset` (1-based) for `limit` lines, at most 256 KiB per call; when more remains, the reply ends with the offset to read next. Binary or non-UTF-8 files and files over 8 MiB are refused — use ssh_exec for those. Relative paths start at the account's home directory; `~` is not expanded. Read-only.",
+      "Read a remote path over SFTP. A directory returns its entries, dotfiles included, sorted by name, cut at 256 KiB with a note saying so; `offset`/`limit` are refused on a directory. A UTF-8 text file returns its lines numbered like `cat -n`, from `offset` (1-based) for `limit` lines, at most 256 KiB per call; when more remains, the reply ends with the offset to read next. Binary or non-UTF-8 files and files over 8 MiB are refused — use ssh_exec for those. Symlinks are followed. Relative paths start at the account's home directory; `~` is not expanded. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1036,7 +1036,7 @@ export const TOOLS = [
   {
     name: "ssh_write_file",
     description:
-      "Write a remote file over SFTP, creating or overwriting it (8 MiB at most; a directory is refused). An existing file keeps its mode; a new file is created 0600 — chmod it with ssh_exec if needed. Relative paths start at the account's home directory; `~` is not expanded. WRITES — withhold it from an agent that must not change the target.",
+      "Write a remote file over SFTP, creating or overwriting it (8 MiB at most; a directory is refused). An existing file keeps its mode; a new file is created 0600 — chmod it with ssh_exec if needed. A symlink is followed: its target is written. Relative paths start at the account's home directory; `~` is not expanded. WRITES — withhold it from an agent that must not change the target.",
     inputSchema: {
       type: "object",
       properties: { path: { type: "string" }, content: { type: "string" } },
@@ -1047,7 +1047,7 @@ export const TOOLS = [
   {
     name: "ssh_edit_file",
     description:
-      "Replace an exact string in a remote UTF-8 text file over SFTP, rewriting it in place so its mode, owner and links are kept. `old_str` must occur exactly once unless `replace_all` is set; copy it from ssh_read output without the line-number prefix, whitespace included. Relative paths start at the account's home directory; `~` is not expanded. WRITES — withhold it from an agent that must not change the target.",
+      "Replace an exact string in a remote UTF-8 text file over SFTP, rewriting it in place so its mode, owner and links are kept; a symlink is followed and its target edited. `old_str` must occur exactly once unless `replace_all` is set; copy it from ssh_read output without the line-number prefix, whitespace included. Relative paths start at the account's home directory; `~` is not expanded. WRITES — withhold it from an agent that must not change the target.",
     inputSchema: {
       type: "object",
       properties: {
