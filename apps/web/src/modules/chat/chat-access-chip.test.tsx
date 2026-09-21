@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The chat header's access chip — its trigger, which is all this harness can
+ * The composer's access chip — its trigger, which is all this harness can
  * see (`renderToStaticMarkup` has no DOM, and Radix portals the popover body).
  *
  * Two properties are worth pinning here, and both are about NOT lying:

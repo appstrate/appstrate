@@ -10,10 +10,6 @@
  * permission set, the persona) is host state, so routing it through a
  * `ChatHost` member would buy nothing but a wider injection surface.
  *
- * Its own control, NOT an entry in the model popover: picking a model is an
- * ACT, a role is a STATE one is subject to. It starts no role preview either —
- * that belongs to role administration (settings → roles, space members).
- *
  * A preview started elsewhere needs no handling of its own: `/api/orgs` and
  * `/api/spaces` both carry `X-View-As` through the client middleware, so
  * `usePermissions()` and the space row already answer AS the persona. An
@@ -105,16 +101,16 @@ export function ChatAccessChip() {
   );
 }
 
+/** Rows the composer's agent-authoring switch turns off: granted, but not used this turn. */
+const AUTHORING_OFF: ReadonlySet<string> = new Set(["createAgents"]);
+const NOTHING_OFF: ReadonlySet<string> = new Set();
+
 /**
  * One list item per capability, the verdict INSIDE the item it judges. The
  * check/cross is decoration (`aria-hidden`); what a screen reader announces is
  * the label followed by its spoken verdict, in DOM order, so the two can never
  * be read against a neighbouring row.
  */
-/** Rows the composer's agent-authoring switch turns off: granted, but not used this turn. */
-const AUTHORING_OFF: ReadonlySet<string> = new Set(["createAgents"]);
-const NOTHING_OFF: ReadonlySet<string> = new Set();
-
 export function ChatCapabilityList({
   capabilities,
   turnedOff,

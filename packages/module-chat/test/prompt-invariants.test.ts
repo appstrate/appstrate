@@ -12,92 +12,90 @@ import { describe, expect, it } from "bun:test";
 import { buildSystemPrompt, formatCallerContext, normalizeChatLocale } from "../src/prompt.ts";
 
 /** The full persona; the reduced one has its own block at the end. */
-const SYSTEM_PROMPT = buildSystemPrompt({ canComposeInline: true });
+const FULL = buildSystemPrompt({ canComposeInline: true });
 
-describe("SYSTEM_PROMPT invariants", () => {
+describe("full persona invariants", () => {
   it("keeps the single-sub-agent rule for chained external actions", () => {
-    expect(SYSTEM_PROMPT).toContain("compose ONE sub-agent");
-    expect(SYSTEM_PROMPT).toContain("do NOT chain one run per action");
+    expect(FULL).toContain("compose ONE sub-agent");
+    expect(FULL).toContain("do NOT chain one run per action");
   });
 
   it("keeps the no-run-metrics rule", () => {
-    expect(SYSTEM_PROMPT).toContain("Never quote run metrics");
-    expect(SYSTEM_PROMPT).toContain("duration, cost, token usage");
+    expect(FULL).toContain("Never quote run metrics");
+    expect(FULL).toContain("duration, cost, token usage");
   });
 
   it("keeps the available-integrations-by-default rule for context research", () => {
-    expect(SYSTEM_PROMPT).toContain("default to the integrations already available");
-    expect(SYSTEM_PROMPT).toContain("connected ones first");
+    expect(FULL).toContain("default to the integrations already available");
+    expect(FULL).toContain("connected ones first");
   });
 
   it("keeps the run_and_wait grounding (result is the deliverable)", () => {
-    expect(SYSTEM_PROMPT).toContain("run_and_wait");
-    expect(SYSTEM_PROMPT).toMatch(/prefer calling `run_and_wait` directly/);
-    expect(SYSTEM_PROMPT).toMatch(/runAgent.*runInline.*remain available/);
-    expect(SYSTEM_PROMPT).toContain("intentionally need fire-and-forget semantics");
-    expect(SYSTEM_PROMPT).toContain("never fabricate it");
+    expect(FULL).toContain("run_and_wait");
+    expect(FULL).toMatch(/prefer calling `run_and_wait` directly/);
+    expect(FULL).toMatch(/runAgent.*runInline.*remain available/);
+    expect(FULL).toContain("intentionally need fire-and-forget semantics");
+    expect(FULL).toContain("never fabricate it");
   });
 
   it("gives every inline run a task-specific human identity", () => {
-    expect(SYSTEM_PROMPT).toContain("Give EVERY inline run a task-specific identity");
-    expect(SYSTEM_PROMPT).toContain("manifest.display_name");
-    expect(SYSTEM_PROMPT).toContain("describes the exact action or outcome of THIS run");
-    expect(SYSTEM_PROMPT).toContain('"display_name": "Analyse des 3 derniers e-mails"');
-    expect(SYSTEM_PROMPT).not.toContain('"name": "@inline/one-shot"');
+    expect(FULL).toContain("Give EVERY inline run a task-specific identity");
+    expect(FULL).toContain("manifest.display_name");
+    expect(FULL).toContain("describes the exact action or outcome of THIS run");
+    expect(FULL).toContain('"display_name": "Analyse des 3 derniers e-mails"');
+    expect(FULL).not.toContain('"name": "@inline/one-shot"');
   });
 
   it("keeps inline manifests concise while allowing exact complete overrides", () => {
-    expect(SYSTEM_PROMPT).toContain("PARTIAL canonical AFPS agent");
-    expect(SYSTEM_PROMPT).toMatch(/Defaults apply ONLY to absent top-level fields/);
-    expect(SYSTEM_PROMPT).toContain("runtime_tools: []");
-    expect(SYSTEM_PROMPT).toMatch(/override EVERY field/);
-    expect(SYSTEM_PROMPT).toContain("complete strict `output.schema`");
+    expect(FULL).toContain("PARTIAL canonical AFPS agent");
+    expect(FULL).toMatch(/Defaults apply ONLY to absent top-level fields/);
+    expect(FULL).toContain("runtime_tools: []");
+    expect(FULL).toMatch(/override EVERY field/);
+    expect(FULL).toContain("complete strict `output.schema`");
   });
 
   it("keeps the fan-in-by-reference rule (context_files, never a copy)", () => {
-    expect(SYSTEM_PROMPT).toContain("context_files");
+    expect(FULL).toContain("context_files");
     // The "exact shape" line is where the model copies argument NAMES from, so
     // it must list the two that carry a file and no retired one: `config` died
     // with #1179, and `run-and-wait-client` builds the launch body from an
     // allowlist — an argument under any other name is dropped before the HTTP
     // call, so the run starts with no file and nothing reports it.
-    expect(SYSTEM_PROMPT).toContain('{ kind:"inline", manifest, prompt, input?, context_files? }');
-    expect(SYSTEM_PROMPT).not.toContain("prompt, config?");
-    expect(SYSTEM_PROMPT).toMatch(/NEVER paste a previous run's content/);
+    expect(FULL).toContain('{ kind:"inline", manifest, prompt, input?, context_files? }');
+    expect(FULL).not.toContain("prompt, config?");
+    expect(FULL).toMatch(/NEVER paste a previous run's content/);
     // The reason is load-bearing: a rule with a reason survives paraphrase.
-    expect(SYSTEM_PROMPT).toMatch(/retyped by a model/);
+    expect(FULL).toMatch(/retyped by a model/);
   });
 
   it("reads file content directly before considering a run", () => {
-    expect(SYSTEM_PROMPT).toMatch(/call `read_file` first/);
-    expect(SYSTEM_PROMPT).toMatch(/answer directly from that content/);
-    expect(SYSTEM_PROMPT).toMatch(/do NOT launch a run merely to read or analyse it/);
-    expect(SYSTEM_PROMPT).toMatch(/metadata only or binary\/blob data/);
-    expect(SYSTEM_PROMPT).toMatch(/When a run is justified.*`context_files`/s);
+    expect(FULL).toMatch(/call `read_file` first/);
+    expect(FULL).toMatch(/answer directly from that content/);
+    expect(FULL).toMatch(/do NOT launch a run merely to read or analyse it/);
+    expect(FULL).toMatch(/metadata only or binary\/blob data/);
+    expect(FULL).toMatch(/When a run is justified.*`context_files`/s);
   });
 
   it("keeps the fan-out deliverable contract (file in outputs/ AND a short output)", () => {
-    expect(SYSTEM_PROMPT).toContain("outputs/<topic>.md");
-    expect(SYSTEM_PROMPT).toMatch(/short summary naming that file/);
+    expect(FULL).toContain("outputs/<topic>.md");
+    expect(FULL).toMatch(/short summary naming that file/);
   });
 
   it("requires descriptive filenames that survive outside the run context", () => {
-    expect(SYSTEM_PROMPT).toContain(
-      "remain understandable after it is downloaded outside this run",
-    );
-    expect(SYSTEM_PROMPT).toContain("analyse-concurrents-restaurants-lyon.md");
-    expect(SYSTEM_PROMPT).toMatch(/NEVER use context-free names/);
-    expect(SYSTEM_PROMPT).not.toContain("outputs/report.md");
+    expect(FULL).toContain("remain understandable after it is downloaded outside this run");
+    expect(FULL).toContain("analyse-concurrents-restaurants-lyon.md");
+    expect(FULL).toMatch(/NEVER use context-free names/);
+    expect(FULL).not.toContain("outputs/report.md");
   });
 
   it("keeps the sub-agent effort ceiling (cap, stop criterion, output last)", () => {
-    expect(SYSTEM_PROMPT).toMatch(/at most 3 searches/);
-    expect(SYSTEM_PROMPT).toMatch(/stop criterion/);
-    expect(SYSTEM_PROMPT).toMatch(/mandatory last action/);
+    expect(FULL).toMatch(/at most 3 searches/);
+    expect(FULL).toMatch(/stop criterion/);
+    expect(FULL).toMatch(/mandatory last action/);
   });
 
   it("keeps incremental delivery (synthesis written before the next step)", () => {
-    expect(SYSTEM_PROMPT).toMatch(/BEFORE launching the next step/);
+    expect(FULL).toMatch(/BEFORE launching the next step/);
   });
 
   it("routes integration_not_active to activation, never to a retry", () => {
@@ -108,17 +106,17 @@ describe("SYSTEM_PROMPT invariants", () => {
     // gets a 403 and is told to ask one. Nothing in the chat pre-computes that
     // right: quoting the operation instead of asserting the outcome is what
     // keeps this honest for both roles.
-    expect(SYSTEM_PROMPT).toContain("integration_not_active");
-    expect(SYSTEM_PROMPT).toMatch(/do NOT re-run and do NOT restart the connect flow/);
-    expect(SYSTEM_PROMPT).toContain("activateIntegration");
-    expect(SYSTEM_PROMPT).toMatch(/administrator must activate/);
+    expect(FULL).toContain("integration_not_active");
+    expect(FULL).toMatch(/do NOT re-run and do NOT restart the connect flow/);
+    expect(FULL).toContain("activateIntegration");
+    expect(FULL).toMatch(/administrator must activate/);
   });
 
   it("drops the stale claim that a prompt-pasted appfile:// URI gives no access", () => {
     // `context_files` made this half-false;
     // the paragraph now points at the cheap path instead of the boilerplate.
-    expect(SYSTEM_PROMPT).not.toContain("does NOT give it access");
-    expect(SYSTEM_PROMPT).not.toContain("does NOT give access");
+    expect(FULL).not.toContain("does NOT give it access");
+    expect(FULL).not.toContain("does NOT give access");
   });
 });
 
@@ -149,7 +147,7 @@ describe("caller-context prompt hygiene", () => {
     expect(formatCallerContext(identity)).toContain("Reply in the user's language (fr)");
   });
 
-  it("keeps the block free of standing instructions — they belong to SYSTEM_PROMPT", () => {
+  it("keeps the block free of standing instructions — they belong to the system prompt", () => {
     // Everything the model must DO with the context is a constant, so it lives in
     // the static prompt. The block renders data only; the sole exception is the
     // reply-language line, which is parameterised by the `X-Chat-Locale` header.
@@ -184,7 +182,7 @@ describe("caller-context prompt hygiene", () => {
       '`operation_id: "listAgents"` or `"listSkills"`',
       "call `listRuns` (newest first)",
     ]) {
-      expect(SYSTEM_PROMPT).toContain(imperative);
+      expect(FULL).toContain(imperative);
     }
   });
 });
@@ -217,21 +215,21 @@ describe("the persona without inline composition", () => {
       "is plain data for YOU — it never becomes a file the user can open or download",
       "`files` list",
     ]) {
-      expect(SYSTEM_PROMPT).toContain(shared);
+      expect(FULL).toContain(shared);
       expect(REDUCED).toContain(shared);
-      expect(SYSTEM_PROMPT.split(shared)).toHaveLength(2);
+      expect(FULL.split(shared)).toHaveLength(2);
     }
   });
 
   it("names no argument `run_and_wait` only takes for an inline run", () => {
     for (const argument of ["context_files", "`manifest`", "`prompt`"]) {
-      expect(SYSTEM_PROMPT).toContain(argument);
+      expect(FULL).toContain(argument);
       expect(REDUCED).not.toContain(argument);
     }
   });
 
   it("does not offer composing one as the fallback for an unrunnable draft", () => {
-    expect(SYSTEM_PROMPT).toContain("offer to compose an inline agent instead");
+    expect(FULL).toContain("offer to compose an inline agent instead");
     expect(REDUCED).not.toContain("offer to compose an inline agent instead");
     expect(REDUCED).toContain("there is no other way to run it");
   });
@@ -241,11 +239,11 @@ describe("the persona without inline composition", () => {
     // reduced one must override that, since its token cannot write an agent.
     expect(REDUCED).toContain("when no existing agent matches, say so plainly and stop");
     expect(REDUCED).toContain("Do not create or modify an agent");
-    expect(SYSTEM_PROMPT).not.toContain("when no existing agent matches");
-    expect(SYSTEM_PROMPT).not.toContain("Do not create or modify an agent");
+    expect(FULL).not.toContain("when no existing agent matches");
+    expect(FULL).not.toContain("Do not create or modify an agent");
   });
 
   it("is materially shorter — the point is not to pay for what is refused", () => {
-    expect(SYSTEM_PROMPT.length - REDUCED.length).toBeGreaterThan(3_000);
+    expect(FULL.length - REDUCED.length).toBeGreaterThan(3_000);
   });
 });

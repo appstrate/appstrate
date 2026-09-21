@@ -147,7 +147,7 @@ export type CorePermission = {
 
 /**
  * Whether a caller may compose an inline agent (see `CoreResources.agents`).
- * Takes a membership test so a `Set`, an array or a UI `can()` all fit.
+ * Takes a membership test so a `Set` or an array both fit.
  */
 export function canComposeInline(has: (permission: CorePermission) => boolean): boolean {
   return has("agents:write") && has("agents:run");

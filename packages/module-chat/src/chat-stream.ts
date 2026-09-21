@@ -315,7 +315,7 @@ export async function handleChatStream(
   // answer (it also ignored an API key's pinned space).
   const modelId = c.req.header("X-Model-Id") ?? body.modelId;
 
-  // Flipping the switch changes the persona and, through the narrowed token, the
+  // Flipping the switch changes the system prompt and, through the narrowed token, the
   // MCP `run_and_wait` descriptor on the same turn: one prompt-cache miss.
   const authoring = body.agent_authoring !== false;
   const permissions = turnPermissions(c.get("permissions"), authoring);

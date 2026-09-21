@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `id`, `label`, `accountId` and `ownedByActor`.
 - **New export `canComposeInline` (`@appstrate/core/permissions`)** — whether
   a caller may compose an inline agent: `agents:write` and `agents:run`. Takes a
-  membership test, so a `Set`, an array or a UI `can()` all fit.
+  membership test, so a `Set` or an array both fit.
 
 ### Changed
 

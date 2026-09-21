@@ -876,9 +876,8 @@ const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
 function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
   // The route is the gate; this only decides what the model is told.
   const inline = canComposeInline((p) => ctx.permissions.has(p));
-  // Descriptor spans that only make sense for `kind:"inline"`. Absent, not
-  // contradicted, for a caller who cannot launch one.
-  const ifInline = (text: string) => (inline ? text : "");
+  // Inline-only descriptor spans are absent, not contradicted, for a caller
+  // who cannot launch one.
   const descriptor: Tool = {
     name: "run_and_wait",
     description:
@@ -891,8 +890,8 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       "`{ id, packageId, status, done:true, result?, error? }` when the run reaches a terminal " +
       "status. Do NOT call `getRun` after this tool just to wait for completion; this tool already " +
       "waits. " +
-      ifInline(
-        "For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
+      (inline
+        ? "For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
           "only a concise task-specific `display_name` plus task dependencies/configuration. The " +
           "platform derives `name` and fills omitted AFPS boilerplate, `runtime_tools` (log, output, " +
           "publish_file), and an open object output schema. Defaults apply only " +
@@ -902,8 +901,8 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
           "A complete deterministic manifest may override every field, including a strict " +
           "`output.schema`; when it does, its explicit `runtime_tools` must include `output`. The chat " +
           "shows only lines emitted through `log`, so instruct the run to log meaningful steps whenever " +
-          "that tool is selected. Never use an id or a generic display name such as `one-shot`. ",
-      ) +
+          "that tool is selected. Never use an id or a generic display name such as `one-shot`. "
+        : "") +
       "File deliverables: every file the run writes under its workspace `outputs/` directory is " +
       "published as a file when the run ends and returned here as a `resource_link`" +
       (inline
@@ -916,12 +915,12 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
           "`publish_file`. "
         : ". ") +
       "Content merely returned in the output payload never becomes a file." +
-      ifInline(
-        " Chaining runs (kind:inline): feed earlier runs' deliverables to a later one by passing " +
+      (inline
+        ? " Chaining runs (kind:inline): feed earlier runs' deliverables to a later one by passing " +
           "their `appfile://` URIs in `context_files` — never by copying their content into " +
           "`prompt`. " +
-          "Prefer an existing agent over an inline manifest when one matches the intent.",
-      ),
+          "Prefer an existing agent over an inline manifest when one matches the intent."
+        : ""),
     annotations: {
       title: "Run and wait",
       readOnlyHint: false,
@@ -953,7 +952,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
           type: "object",
           description:
             "Run input, validated against the agent's input schema" +
-            ifInline(" (either kind — for kind:inline, against `manifest.input.schema`)") +
+            (inline ? " (either kind — for kind:inline, against `manifest.input.schema`)" : "") +
             ". File fields (typed `format: uri` " +
             "with a `contentMediaType`) accept `appfile://` and `upload://` URIs directly — " +
             "pass an attached file's `appfile://` URI verbatim and the file is streamed " +
@@ -966,7 +965,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
           additionalProperties: { type: "string" },
           description:
             "Which connection to use per integration" +
-            ifInline(" (either kind)") +
+            (inline ? " (either kind)" : "") +
             ': `{ "@scope/integration": ' +
             '"<connection_id>" }`, exactly one connection id per integration. This is the retry ' +
             "path for a `412 must_choose_connection` launch error — that error lists the " +
