@@ -21,3 +21,9 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      # init / autobuild / analyze / upload-sarif must run the same version:
+      # init writes a config the later steps refuse if their version differs.
+      codeql:
+        patterns:
+          - "github/codeql-action*"
