@@ -370,15 +370,16 @@ export const mePaths = {
       summary: "What is due on the target when this connection is deleted",
       description:
         "For a connection whose credentials the platform MINTED, the steps the user owns on " +
-        "their own machine AT DELETION — the `deferred` ones, and only those: the block that " +
-        "takes the key back off the target. Deleting the connection destroys the platform's " +
-        "half and nothing else, since the platform has no access to the target. The steps that " +
-        "were due at CREATION (installing the key, comparing the fingerprint) come back from " +
-        "`submitIntegrationConnect`, which the connect portal shows once on the screen right " +
-        "after the form; this endpoint does not re-serve them. DERIVED from the credential " +
-        "bundle on demand, never stored: every step is a pure function of the key it describes. " +
-        "An empty list for an auth that mints nothing, and for an unknown, malformed or " +
-        "not-owned id (same non-disclosure as the DELETE beside it).",
+        "their own machine AT DELETION — the block that takes the key back off the target, and " +
+        "nothing else. Deleting the connection destroys the platform's half only, since the " +
+        "platform has no access to the target. The steps due at CREATION (installing the key, " +
+        "comparing the fingerprint) come back from `submitIntegrationConnect`, which the connect " +
+        "portal shows once on the screen right after the form; this endpoint does not re-serve " +
+        "them. This list IS the deletion-time set, so `deferred` — the flag that separates those " +
+        "steps from the others on the submit response — is stripped from every step here. " +
+        "DERIVED from the credential bundle on demand, never stored: every step is a pure " +
+        "function of the key it describes. An empty list for an auth that mints nothing, and " +
+        "for an unknown, malformed or not-owned id (same non-disclosure as the DELETE beside it).",
       parameters: [
         {
           name: "connectionId",
@@ -389,7 +390,7 @@ export const mePaths = {
       ],
       responses: {
         "200": {
-          description: "Deferred handoff steps, due at deletion (possibly empty)",
+          description: "Handoff steps due at deletion (possibly empty)",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
@@ -401,7 +402,7 @@ export const mePaths = {
                   hasMore: { type: "boolean" },
                   data: {
                     type: "array",
-                    items: { $ref: "#/components/schemas/HandoffStep" },
+                    items: { $ref: "#/components/schemas/HandoffCommandStep" },
                   },
                 },
               },

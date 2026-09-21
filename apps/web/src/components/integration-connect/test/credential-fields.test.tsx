@@ -3,7 +3,9 @@
 /**
  * The one credential-entry surface. Its whole job is turning the auth served by
  * `GET /api/integrations/connect/context` into inputs — every declared field,
- * and only those, with the labels, descriptions and defaults it declares.
+ * and only those, with the labels and descriptions it declares. Values are the
+ * caller's: the form seeds them with `initialCredentialValues` and owns them
+ * from there.
  *
  * It filters NOTHING. A credential the platform mints for itself is already
  * absent from that schema, stripped server-side, because which names a
@@ -69,25 +71,6 @@ describe("CredentialFields — the served schema, verbatim", () => {
     // And nothing it does not declare.
     expect(inputTag(markup, "private_key")).toBeNull();
   });
-
-  /**
-   * The regression this replaces a client-side filter with: the form must not
-   * re-derive what to hide. Were it to read `_meta` again, the two answers
-   * could differ — and the one that matters is the server's.
-   */
-  it("renders a declared field even when the auth provisions its kind", () => {
-    const withMinted = {
-      type: "custom",
-      credentials: {
-        schema: {
-          type: "object",
-          properties: { private_key: { type: "string", title: "Clé privée Appstrate" } },
-        },
-      },
-      _meta: { "dev.appstrate/provisioning": { kind: "ssh_keypair" } },
-    } as unknown as IntegrationManifestAuth;
-    expect(inputTag(html(withMinted), "private_key")).not.toBeNull();
-  });
 });
 
 describe("CredentialFields — manifest-declared presentation", () => {
@@ -104,20 +87,24 @@ describe("CredentialFields — manifest-declared presentation", () => {
     // A field with no description must not leave an empty paragraph behind.
     expect(markup).not.toContain('data-testid="field-description-user"');
   });
+});
 
-  it("prefills a declared default", () => {
-    expect(inputTag(html(SSH_AUTH), "port")).toContain('value="22"');
+describe("CredentialFields — values belong to the caller", () => {
+  it("renders the value it is given", () => {
+    const seeded = html(SSH_AUTH, initialCredentialValues(SSH_AUTH));
+    expect(inputTag(seeded, "port")).toContain('value="22"');
   });
 
-  it("lets a submitted empty value win over the default", () => {
-    // Clearing a prefilled field must stay cleared, or the box cannot be
-    // emptied at all.
-    expect(inputTag(html(SSH_AUTH, { port: "" }), "port")).not.toContain('value="22"');
+  it("lets a cleared field stay cleared", () => {
+    // Clearing a seeded field must stay cleared, or the box cannot be emptied
+    // at all.
+    const cleared = html(SSH_AUTH, { ...initialCredentialValues(SSH_AUTH), port: "" });
+    expect(inputTag(cleared, "port")).not.toContain('value="22"');
   });
 });
 
 describe("initialCredentialValues", () => {
-  it("seeds exactly the defaults that are shown", () => {
+  it("seeds exactly the defaults the auth declares", () => {
     // A default the form displays but does not seed would be a value under the
     // user's eyes that never reaches the server.
     expect(initialCredentialValues(SSH_AUTH)).toEqual({

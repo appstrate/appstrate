@@ -13,6 +13,10 @@ import {
   invalidateIntegrationQueries,
   useInitiateIntegrationConnect,
 } from "../../hooks/use-integrations";
+import {
+  acceptsConnectHeldOpenMessage,
+  connectHeldOpenMatches,
+} from "../../lib/connect-completion";
 
 const CONNECT_POPUP_TIMEOUT_MS = 5 * 60_000;
 const POPUP_POLL_INTERVAL_MS = 500;
@@ -35,7 +39,9 @@ const POPUP_FEATURES = "width=600,height=700";
  * Completion is event-driven: both the OAuth callback page and the hosted form
  * broadcast `appstrate:integration_connection` on success (postMessage +
  * BroadcastChannel). The promise resolves on that signal OR when the popup
- * closes (cancel fallback) and rejects on timeout / kickoff failure.
+ * closes (cancel fallback) and rejects on timeout / kickoff failure. A second
+ * message kind, `appstrate:integration_connect_held_open`, only disarms the
+ * timeout — see `onHeldOpen` below.
  */
 export function useHostedConnectPopup() {
   const { t } = useTranslation("settings");
@@ -97,11 +103,24 @@ export function useHostedConnectPopup() {
             // the popup-close poll below is what settles that case.
             const isSuccess = (data: unknown): boolean =>
               completionMatches(data, target) && data.ok === true;
+            // A connection whose credentials the platform minted ends on an
+            // install block the user runs on ANOTHER machine — a root shell, a
+            // paste, a fingerprint to compare — and that screen withholds its
+            // completion until they say they did it. It outlasts any deadline
+            // worth setting, so the deadline goes rather than the window:
+            // force-closing it would destroy the only copy of the block and
+            // report a timeout on a connection that exists. The close-poll and
+            // the eventual `ok: true` still settle this promise.
+            const onHeldOpen = () => clearTimeout(timer);
             const onMessage = (e: MessageEvent) => {
               // The completion pages (hosted form + OAuth popup HTML) are served
               // from our own origin, so a foreign-origin message is a forgery —
               // it must not stand in for a real connect. Origin first, then the
               // correlation, in one call.
+              if (acceptsConnectHeldOpenMessage(e, window.location.origin, target)) {
+                onHeldOpen();
+                return;
+              }
               if (!acceptsCompletionMessage(e, window.location.origin, target)) return;
               if (isSuccess(e.data)) onHit();
             };
@@ -112,6 +131,10 @@ export function useHostedConnectPopup() {
               // correlation only, which is what `isSuccess` applies.
               bc = new BroadcastChannel(INTEGRATION_CONNECT_CHANNEL);
               bc.onmessage = (e) => {
+                if (connectHeldOpenMatches(e.data, target)) {
+                  onHeldOpen();
+                  return;
+                }
                 if (isSuccess(e.data)) onHit();
               };
             } catch {

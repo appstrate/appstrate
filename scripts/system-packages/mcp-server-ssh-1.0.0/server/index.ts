@@ -148,6 +148,12 @@ export interface SshOptionOverrides {
    * at all), so overriding by appending is not an option.
    */
   logLevel?: "ERROR" | "VERBOSE";
+  /**
+   * `-N`: authenticate and open no session. It is an OPTION, so it belongs
+   * here rather than after the destination, where the `--` below would make
+   * it the remote command instead.
+   */
+  noSession?: boolean;
 }
 
 export function buildSshOptions(
@@ -181,6 +187,7 @@ export function buildSshOptions(
     "-o",
     `LogLevel=${overrides.logLevel ?? "ERROR"}`,
   ];
+  if (overrides.noSession) opts.push("-N");
   if (cfg.proxyUrl) {
     // ssh expands %h/%p itself; the helper reads the proxy URL from env.
     opts.push("-o", `ProxyCommand=bun ${join(SERVER_DIR, "proxy-connect.ts")} %h %p`);
@@ -188,7 +195,15 @@ export function buildSshOptions(
   return opts;
 }
 
-/** `ssh … user@host [command]` — the command is handed to the login shell. */
+/**
+ * `ssh … -- user@host [command]` — the command is handed to the login shell.
+ *
+ * The `--` is load-bearing: OpenSSH parses options with getopt, so a `user` or
+ * `host` beginning with `-` would otherwise be read as one (`-w…` measured as
+ * `Bad tun device`). `ssh [options] -- destination [command]` keeps the
+ * destination a destination whatever it starts with, and the remote command
+ * still follows it.
+ */
 export function buildSshArgs(
   cfg: SshConfig,
   knownHostsPath: string,
@@ -199,13 +214,14 @@ export function buildSshArgs(
     ...buildSshOptions(cfg, knownHostsPath, overrides),
     "-p",
     String(cfg.port),
+    "--",
     `${cfg.user}@${cfg.host}`,
   ];
   if (command !== undefined) args.push(command);
   return args;
 }
 
-/** `sftp -b - … user@host`, batch commands arrive on stdin. */
+/** `sftp -b - … -- user@host`, batch commands arrive on stdin. Same `--` rule. */
 export function buildSftpArgs(cfg: SshConfig, knownHostsPath: string): string[] {
   return [
     ...buildSshOptions(cfg, knownHostsPath),
@@ -213,6 +229,7 @@ export function buildSftpArgs(cfg: SshConfig, knownHostsPath: string): string[] 
     "-",
     "-P",
     String(cfg.port),
+    "--",
     `${cfg.user}@${cfg.host}`,
   ];
 }
@@ -449,7 +466,10 @@ function sshFailure(what: string, res: RunResult): Error {
     hint =
       "\nhint: the pinned host key does not match — the target's key changed or SSH_HOST_KEY is wrong. Never accept a new key silently; reconnect the integration.";
   } else if (/permission denied \(publickey/i.test(tail)) {
-    hint = "\nhint: the target rejected the key — check authorized_keys on the dedicated account.";
+    hint =
+      "\nhint: the target rejected the key — check authorized_keys on the dedicated account. " +
+      "The `restrict` option the install block writes needs OpenSSH 7.2 or newer; an older sshd " +
+      "refuses the whole line as an unknown option, so the key is installed and never authenticates.";
   } else if (/CONNECT refused by proxy/i.test(tail)) {
     hint = "\nhint: the egress proxy refused the target (private address or blocked host).";
   } else if (what === "sftp" && /connection closed/i.test(tail)) {
@@ -476,7 +496,7 @@ export async function probeTool(deps: Deps = {}): Promise<Record<string, unknown
   // ssh prints `Authenticated to <host> … using "publickey"`, and the process
   // is killed once that line lands. Failure still exits 255.
   const res = await run(
-    ["ssh", ...buildSshArgs(cfg, kh, undefined, { logLevel: "VERBOSE" }), "-N"],
+    ["ssh", ...buildSshArgs(cfg, kh, undefined, { logLevel: "VERBOSE", noSession: true })],
     {
       untilStderr: /^Authenticated to .+ using "publickey"/m,
       ceilingMs: 20_000,
@@ -601,7 +621,7 @@ interface JsonRpcResponse {
  * Each `description` is byte-identical to the same tool's entry in the package
  * manifest, and `scripts/test/ssh-mcp.test.ts` diffs the two: the manifest is
  * what the platform shows when granting tools, this is what the agent reads,
- * and the pair has drifted before.
+ * and nothing but that diff holds the pair together.
  *
  * "WRITES" in a description is the signal a read-only grant is built from: an
  * agent that must not change the target is given the tools WITHOUT it. The

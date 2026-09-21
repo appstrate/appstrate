@@ -81,6 +81,7 @@ import {
   createIntegrationOAuthClient,
   deleteIntegrationOAuthClient,
   getIntegrationAuthStatuses,
+  getIntegrationConnectionCredentialFields,
   listIntegrationClients,
   listIntegrationConnections,
   readIntegrationAuth,
@@ -272,11 +273,11 @@ const noSecretWithPublicClient = (b: {
  *   - `"none"` WITH a secret → the caller resolved a credential and then said
  *     it would not be used;
  *   - a secret-based method (or no method at all, which means "the manifest's
- *     method applies") WITHOUT a secret → a request that cannot succeed.
- *     Refused here rather than stored: an empty `client_secret` reads as
- *     "public" to the storage encoder, so an admin who declared
- *     `client_secret_basic` and forgot the secret would get a PUBLIC client
- *     back and a token endpoint answering HTTP 400 later.
+ *     method applies") WITHOUT a secret → the request that cannot succeed.
+ *     This is the one that used to return 201: `client_secret` defaulted to
+ *     `""` and the storage encoder read that emptiness as "public", so an
+ *     admin who declared `client_secret_basic` and forgot the secret got a
+ *     PUBLIC client back and a token endpoint answering HTTP 400 later.
  */
 export const oauthClientCreateSchema = oauthClientSchema
   .refine(noSecretWithPublicClient, {
@@ -812,11 +813,11 @@ export function createIntegrationsRouter() {
       //     what that account already authorized. Empty for a fresh connect
       //     (no row yet), so fresh connects stay at the default scope set.
       //
-      // The kickoff deliberately does NOT walk the space's agents — that would
-      // leak unrelated agents' scopes into a plain "connect" and ask for more
-      // than the integration page's defaults. Scope upgrades are an explicit,
-      // per-agent action on the agent's Connexions tab. Endpoint validation +
-      // client lookup live in OAuth2Strategy.begin.
+      // The kickoff deliberately does NOT walk the space's agents — that
+      // would leak unrelated agents' scopes into a plain "connect" and made the
+      // integration page's connect request more than its defaults. Scope
+      // upgrades are an explicit, per-agent action on the agent's Connexions
+      // tab. Endpoint validation + client lookup live in OAuth2Strategy.begin.
       const granted = body.connection_id
         ? await getCurrentScopesGranted({
             scope,
@@ -1104,6 +1105,21 @@ export function createIntegrationsRouter() {
       if (auth.type === "oauth2") {
         throw invalidRequest("This integration uses OAuth — open the connect link instead");
       }
+      // What this auth mints, if anything — read once here because it decides
+      // two things: whether to open the target's envelope, and whether the
+      // response carries a handoff block.
+      const provisioning = readProvisioning(auth);
+      // On a RECONNECT of such an auth, the bundle the connection already
+      // holds. The provisioner reuses the key it finds there, so re-running
+      // the form leaves the key already installed on the target valid. Read
+      // under BOTH conditions so an auth that mints nothing never pays a
+      // decryption. Safe to decrypt: `connection_id` rides SIGNED claims, and
+      // the mint route asserted the actor owns that connection before minting
+      // them (`assertConnectionBelongsToActor`, `connect/session` above).
+      const existing =
+        provisioning && claims.connection_id
+          ? await getIntegrationConnectionCredentialFields(claims.connection_id)
+          : null;
       // Credentials the platform mints rather than asks for (for SSH, the key
       // pair). Runs BEFORE `complete` so the minted values are persisted in
       // the same envelope as the submitted ones, and so a provisioning failure
@@ -1111,9 +1127,7 @@ export function createIntegrationsRouter() {
       // on the form instead of a connection nobody can use. This is the ONLY
       // door that provisions — `connect/fields` refuses a provisioned name
       // outright.
-      const provisioned = await provisionCredentials(auth, body.credentials, {
-        integrationId: claims.package_id,
-      });
+      const provisioned = await provisionCredentials(auth, body.credentials, existing);
       const credentials = provisioned ? { ...body.credentials, ...provisioned } : body.credentials;
 
       const conn = await resolveStrategy(auth, {
@@ -1142,7 +1156,7 @@ export function createIntegrationsRouter() {
       return c.json({
         ok: true,
         connection: conn,
-        ...(provisioned ? { provisioned: { steps: handoffStepsFor(auth, credentials) } } : {}),
+        ...(provisioning ? { handoff_steps: handoffStepsFor(auth, credentials) } : {}),
       });
     } catch (err) {
       if (err instanceof ApiError) throw err;

@@ -2,8 +2,6 @@
 
 import { Fragment, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { $api } from "../../api/client";
-import { HandoffSteps } from "../../components/integration-connect/handoff-steps";
 import { Link } from "react-router-dom";
 import { Unplug, Pencil, Check, X } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -18,6 +16,7 @@ import { formatDateField } from "../../lib/format-date";
 import { LoadingState, EmptyState } from "../../components/page-states";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { ConnectionStatusBadge } from "../../components/integration-connect/connection-status-badge";
+import { ConnectionTeardownSteps } from "../../components/integration-connect/connection-teardown-steps";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 
 // ─────────────────────────────────────────────
@@ -317,28 +316,6 @@ export function PreferencesConnectionsPage() {
     reused_by_agents: number;
   } | null>(null);
 
-  /**
-   * What deleting this connection leaves behind on a target — the endpoint
-   * returns only the steps due AT deletion, and an empty list when the
-   * credential was not minted. Fetched only while the confirmation is open: it
-   * costs a decryption, so the list must not pay it for every row to serve the
-   * one row being acted on.
-   */
-  const handoff = $api.useQuery(
-    "get",
-    "/api/me/connections/{connectionId}/handoff",
-    { params: { path: { connectionId: confirmState?.connectionId ?? "" } } },
-    { enabled: !!confirmState, select: (e) => e.data },
-  );
-
-  // `deferred` is dropped because this is the moment those steps stop being
-  // "later": `HandoffSteps` collapses a deferred step behind a "keep for
-  // later" summary, which is the wrong affordance inside this confirmation.
-  const teardownSteps = useMemo(
-    () => (handoff.data ?? []).map((step) => ({ ...step, deferred: false })),
-    [handoff.data],
-  );
-
   const totalConnections = useMemo(
     () => (groups ?? []).reduce((s, g) => s + g.total_connections, 0),
     [groups],
@@ -464,11 +441,7 @@ export function PreferencesConnectionsPage() {
           );
         }}
       >
-        {teardownSteps.length > 0 && (
-          <div className="mt-4">
-            <HandoffSteps steps={teardownSteps} />
-          </div>
-        )}
+        {confirmState && <ConnectionTeardownSteps connectionId={confirmState.connectionId} />}
       </ConfirmModal>
     </>
   );

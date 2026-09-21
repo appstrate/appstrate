@@ -233,8 +233,13 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   SpaceMemberRemoval:
     "single-field acknowledgement of DELETE /spaces/{id}/members/{userId}; the page re-reads SpaceMemberObject, which IS registered",
   ResolutionFieldError: "ProblemDetail.errors[] item; never read through a shared-type",
-  HandoffStep:
-    "flattened projection of a discriminated union: the server type (services/connect/provisioning.ts) makes `shell` required on the command arm and `value` on the value arm, which a flat schema cannot express and this check cannot compare; the SPA consumes the generated spec type directly",
+  // Handoff steps. Derived from a credential bundle, not from any table, so
+  // there is no Drizzle shared-type to compare against; the canonical TS shape
+  // is the `HandoffStep` union in apps/api/src/services/connect/provisioning.ts
+  // and the SPA reads the generated spec type.
+  HandoffCommandStep: "handoff command step; derived from a credential bundle, no shared-type",
+  HandoffValueStep: "handoff value step; derived from a credential bundle, no shared-type",
+  HandoffStep: "handoff step union; derived from a credential bundle, no shared-type",
   ModelGenerationSettings:
     "embedded request/response value object; canonical runtime type lives in @appstrate/core",
   ModelGenerationCapabilities:

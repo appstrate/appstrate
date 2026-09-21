@@ -15,13 +15,19 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import {
+  createTestContext,
+  createTestOrg,
+  authHeaders,
+  type TestContext,
+} from "../../helpers/auth.ts";
+import { seedApiKey, seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import type { AppstrateModule, AuthResolution } from "@appstrate/core/module";
 import {
   buildConnectUrl,
   connectClaimsFor,
@@ -644,9 +650,17 @@ const SSH_FORM_FIELDS = {
   host_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5",
 } as const;
 
-/** Mint a session, follow the dispatch, and come back with the page cookie + CSRF nonce. */
-async function openConnectForm(ctx: TestContext, packageId: string, authKey: string) {
-  const token = await mintSession(ctx, packageId, authKey);
+/**
+ * Mint a session, follow the dispatch, and come back with the page cookie +
+ * CSRF nonce. `mint` is the mint body — `{ connection_id }` for a reconnect.
+ */
+async function openConnectForm(
+  ctx: TestContext,
+  packageId: string,
+  authKey: string,
+  mint: Record<string, unknown> = {},
+) {
+  const token = await mintSession(ctx, packageId, authKey, mint);
   const start = await app.request(
     `/api/integrations/connect/start?token=${encodeURIComponent(token)}`,
     { redirect: "manual" },
@@ -665,8 +679,9 @@ async function submitConnectForm(
   packageId: string,
   authKey: string,
   credentials: Record<string, unknown>,
+  mint: Record<string, unknown> = {},
 ) {
-  const { cookie, csrf } = await openConnectForm(ctx, packageId, authKey);
+  const { cookie, csrf } = await openConnectForm(ctx, packageId, authKey, mint);
   return app.request("/api/integrations/connect/submit", {
     method: "POST",
     headers: { Cookie: cookie, "Content-Type": "application/json", "x-connect-csrf": csrf },
@@ -777,12 +792,81 @@ describe("hosted connect portal — credential provisioning", () => {
     // the only difference is that every value is in shape.
     const res = await submit(SSH_FORM_FIELDS);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { provisioned?: { steps: Array<{ kind: string }> } };
+    const body = (await res.json()) as { handoff_steps?: Array<{ kind: string }> };
     // The user never typed a private key — the platform made one, and handed
     // back the install block for its public half.
-    expect(body.provisioned?.steps.map((s) => s.kind)).toEqual(["command", "value", "command"]);
+    expect(body.handoff_steps?.map((s) => s.kind)).toEqual(["command", "value", "command"]);
+  });
+
+  /**
+   * A reconnect re-runs the SAME form on the SAME target — after a repinned
+   * host key, or a connection flagged for reconnection. The key the user
+   * already authorized there must survive it: minting a second pair would
+   * strand the installed line and leave every run failing until someone went
+   * back and pasted the new block. So the provisioner reuses the key the
+   * connection already holds.
+   */
+  it("keeps the installed key across a reconnect of the same connection", async () => {
+    const first = await submit(SSH_FORM_FIELDS);
+    expect(first.status).toBe(200);
+    const created = (await first.json()) as {
+      connection: { id: string };
+      handoff_steps: Array<{ shell?: string }>;
+    };
+
+    const reconnected = await submitConnectForm(ctx, "@myorg/ssh", "primary", SSH_FORM_FIELDS, {
+      connection_id: created.connection.id,
+    });
+    expect(reconnected.status).toBe(200);
+    const renewed = (await reconnected.json()) as {
+      connection: { id: string };
+      handoff_steps: Array<{ shell?: string }>;
+    };
+    expect(renewed.connection.id).toBe(created.connection.id);
+
+    // The public half is the whole point: identical across both responses, so
+    // the line already in `authorized_keys` still opens this connection.
+    const publicKeyOf = (steps: Array<{ shell?: string }>) =>
+      /restrict ssh-ed25519 ([A-Za-z0-9+/=]+)/.exec(String(steps[0]!.shell))![1]!;
+    expect(publicKeyOf(renewed.handoff_steps)).toBe(publicKeyOf(created.handoff_steps));
   });
 });
+
+/**
+ * An org-bound DELEGATE with NO pinned space — the `oauth2-dashboard` shape,
+ * as `module-auth-strategy.test.ts` models it. It is the credential the
+ * handoff's ORG check answers alone: an API key pins a space as well, so for
+ * one of those the space check reaches the same verdict first. The bound org
+ * rides a header so one strategy covers both a foreign and a matching org.
+ */
+let boundUser: { id: string; email: string; name: string } | null = null;
+
+const orgBoundDelegate: AppstrateModule = {
+  manifest: { id: "handoff-org-bound", name: "Handoff Org Bound", version: "1.0.0" },
+  async init() {},
+  authStrategies() {
+    return [
+      {
+        id: "handoff-org-bound-delegate",
+        async authenticate({ headers }) {
+          const orgId = headers.get("x-test-bound-org");
+          if (!orgId || !boundUser) return null;
+          return {
+            user: boundUser,
+            orgId,
+            orgRole: "admin",
+            authMethod: "test-org-bound-delegate",
+            principalKind: "delegate",
+            permissions: [],
+          } satisfies AuthResolution;
+        },
+      },
+    ];
+  },
+};
+
+/** Its own app: a strategy is contributed by a module, and the default app loads none. */
+const boundApp = getTestApp({ modules: [orgBoundDelegate] });
 
 /**
  * What is due AT DELETION has to be available long after the screen that first
@@ -810,7 +894,7 @@ describe("me/connections/:id/handoff — the teardown half, derived", () => {
     expect(res.status).toBe(200);
     return (await res.json()) as {
       connection: { id: string };
-      provisioned: { steps: Array<Record<string, unknown>> };
+      handoff_steps: Array<Record<string, unknown>>;
     };
   };
 
@@ -823,19 +907,21 @@ describe("me/connections/:id/handoff — the teardown half, derived", () => {
   };
 
   it("returns the removal block, and nothing that was due at creation", async () => {
-    const { connection, provisioned } = await connectSsh();
+    const { connection, handoff_steps: steps } = await connectSsh();
 
+    // Exactly the deferred subset of what the submit response carried, minus
+    // the flag that selected it — rebuilt from the keyring alone, so the block
+    // that removes the key cannot disagree with the one that installed it.
+    const removal = steps.find((s) => s.deferred === true)!;
     const { data } = await handoffOf(connection.id);
-    // Exactly the deferred subset of what the submit response carried —
-    // rebuilt from the keyring alone, so the block that removes the key cannot
-    // disagree with the one that installed it.
-    expect(data).toEqual(provisioned.steps.filter((s) => s.deferred === true));
-    expect(data).toHaveLength(1);
-    expect(data.every((s) => s.deferred === true)).toBe(true);
+    expect(data).toEqual([
+      { kind: removal.kind, label: removal.label, shell: removal.shell, note: removal.note },
+    ]);
+    expect(data.every((s) => !("deferred" in s))).toBe(true);
 
     // The base64 of the key this connection actually holds, so the command
     // removes its line and no other — the property a stored copy could lose.
-    const installBlock = String(provisioned.steps[0]!.shell);
+    const installBlock = String(steps[0]!.shell);
     const base64 = /restrict ssh-ed25519 ([A-Za-z0-9+/=]+)/.exec(installBlock)![1]!;
     expect(data[0]!.shell).toContain(`grep -vF '${base64}'`);
   });
@@ -871,5 +957,73 @@ describe("me/connections/:id/handoff — the teardown half, derived", () => {
     });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { data: unknown[] }).data).toEqual([]);
+  });
+
+  /**
+   * This read DECRYPTS, so it is held to the presented credential's binding
+   * exactly as the list and the delete beside it are: a credential issued in
+   * one organization never has the platform open an envelope in another, even
+   * when it authenticates as the connection's own owner.
+   */
+  describe("a bound credential stays inside its binding", () => {
+    /** A second org for the SAME user, so ownership passes and only the binding can refuse. */
+    const secondOrgFor = async (userId: string) =>
+      (await createTestOrg(userId, { slug: `handoff-other-${crypto.randomUUID().slice(0, 8)}` }))
+        .org.id;
+
+    const handoffAs = async (connectionId: string, headers: Record<string, string>) => {
+      const res = await app.request(`/api/me/connections/${connectionId}/handoff`, { headers });
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { data: unknown[] }).data;
+    };
+
+    /**
+     * An API key pins a space as well as an org, so this pair is held by the
+     * SPACE tier — the org tier below is what an org-only credential meets.
+     */
+    it("answers nothing to an API key issued in another org, and the block to one issued here", async () => {
+      const { connection } = await connectSsh();
+      const foreignOrgId = await secondOrgFor(ctx.user.id);
+      const foreignSpace = await seedSpace({ orgId: foreignOrgId, name: "Foreign" });
+      const foreign = await seedApiKey({
+        orgId: foreignOrgId,
+        spaceId: foreignSpace.id,
+        createdBy: ctx.user.id,
+      });
+      const here = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+      });
+
+      expect(await handoffAs(connection.id, { Authorization: `Bearer ${foreign.rawKey}` })).toEqual(
+        [],
+      );
+      expect(
+        await handoffAs(connection.id, { Authorization: `Bearer ${here.rawKey}` }),
+      ).toHaveLength(1);
+    });
+
+    /**
+     * The org tier on its own: this credential pins NO space, so nothing but
+     * the org comparison stands between a foreign organization's token and a
+     * decryption of its creator's key.
+     */
+    it("answers nothing to an org-bound token from another org, and the block to one from here", async () => {
+      const { connection } = await connectSsh();
+      boundUser = { id: ctx.user.id, email: ctx.user.email, name: ctx.user.name };
+      const foreignOrgId = await secondOrgFor(ctx.user.id);
+
+      const boundHandoff = async (orgId: string) => {
+        const res = await boundApp.request(`/api/me/connections/${connection.id}/handoff`, {
+          headers: { "x-test-bound-org": orgId },
+        });
+        expect(res.status).toBe(200);
+        return ((await res.json()) as { data: unknown[] }).data;
+      };
+
+      expect(await boundHandoff(foreignOrgId)).toEqual([]);
+      expect(await boundHandoff(ctx.orgId)).toHaveLength(1);
+    });
   });
 });

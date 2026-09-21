@@ -1051,19 +1051,11 @@ export const integrationsPaths = {
                 properties: {
                   ok: { type: "boolean" },
                   connection: integrationConnectionSchema,
-                  provisioned: {
-                    type: "object",
+                  handoff_steps: {
+                    type: "array",
                     description:
-                      'Present when the auth declares `_meta["dev.appstrate/provisioning"]`: what the user must now do with the material the platform minted. Public halves only — the private key is sealed in the connection\'s envelope and is never returned. Every step is DERIVED from the stored credential bundle, so this is the one surface that renders the install steps; the teardown ones (`deferred`) are re-derived later by `getMyConnectionHandoff`.',
-                    required: ["steps"],
-                    properties: {
-                      steps: {
-                        type: "array",
-                        description:
-                          "Ordered handoff steps. A list rather than named fields so a new provisioning kind ships without a front-end branch.",
-                        items: { $ref: "#/components/schemas/HandoffStep" },
-                      },
-                    },
+                      'Present when the auth declares `_meta["dev.appstrate/provisioning"]`: what the user must now do with the material the platform minted, in order. Public halves only — the private key is sealed in the connection\'s envelope and is never returned. A list rather than named fields so a new provisioning kind ships without a front-end branch. Every step is DERIVED from the stored credential bundle, so this is the one surface that renders the install steps; the `deferred` ones are re-derived later by `getMyConnectionHandoff`.',
+                    items: { $ref: "#/components/schemas/HandoffStep" },
                   },
                 },
               },

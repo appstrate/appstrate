@@ -9,7 +9,7 @@ import { HandoffSteps, type HandoffStep } from "../components/integration-connec
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
 import { IntegrationIcon } from "../components/integration-icon";
 import { client, type paths } from "../api/client";
-import { publishConnectCompletion } from "../lib/connect-completion";
+import { publishConnectCompletion, publishConnectHeldOpen } from "../lib/connect-completion";
 import type { IntegrationManifestAuth } from "../hooks/use-integrations";
 
 /**
@@ -49,7 +49,7 @@ export function HostedConnectPage() {
   const [values, setValues] = useState<Record<string, string>>({});
   // What the user must now do on the target host for the minted credential to
   // work. Nothing here is secret — the private half never leaves the server.
-  const [provisioned, setProvisioned] = useState<{ steps: HandoffStep[] } | null>(null);
+  const [handoffSteps, setHandoffSteps] = useState<HandoffStep[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Technical reason behind a context-load failure (HTTP status or network
   // error). Shown under the generic body so an invalid/expired link, a removed
@@ -79,6 +79,16 @@ export function HostedConnectPage() {
       cancelled = true;
     };
   }, []);
+
+  /**
+   * Tell whatever opened this window to stop counting down. The opener arms a
+   * deadline and force-closes the popup when it expires; the install block
+   * below is read against another machine, so the normal case outlives it and
+   * the block would be destroyed along with the window.
+   */
+  const announceHeldOpen = (packageId: string) => {
+    publishConnectHeldOpen({ packageId }, window.opener as Window | null, window.location.origin);
+  };
 
   /** Tell whatever opened this window that the connection now exists. */
   const announceConnected = () => {
@@ -111,10 +121,11 @@ export function HostedConnectPage() {
       // here: the opener (`useHostedConnectPopup`) closes this window the
       // instant it sees `ok: true`, which would take the block away before it
       // could be read. It is announced on the user's own "I ran it" instead.
-      const minted = data?.provisioned;
-      if (minted) {
-        setProvisioned(minted);
+      const minted = data?.handoff_steps;
+      if (minted && minted.length > 0) {
+        setHandoffSteps(minted);
         setPhase("provisioned");
+        announceHeldOpen(context.package_id);
         return;
       }
 
@@ -157,7 +168,7 @@ export function HostedConnectPage() {
           </div>
         )}
 
-        {phase === "provisioned" && provisioned && (
+        {phase === "provisioned" && handoffSteps && (
           <div className="space-y-5" data-testid="connect-provisioned">
             <div>
               <h1 className="text-lg font-semibold">
@@ -168,7 +179,7 @@ export function HostedConnectPage() {
               </p>
             </div>
 
-            <HandoffSteps steps={provisioned.steps} />
+            <HandoffSteps steps={handoffSteps} />
 
             <Button
               type="button"

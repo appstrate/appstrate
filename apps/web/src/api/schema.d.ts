@@ -1938,7 +1938,7 @@ export interface paths {
         };
         /**
          * What is due on the target when this connection is deleted
-         * @description For a connection whose credentials the platform MINTED, the steps the user owns on their own machine AT DELETION — the `deferred` ones, and only those: the block that takes the key back off the target. Deleting the connection destroys the platform's half and nothing else, since the platform has no access to the target. The steps that were due at CREATION (installing the key, comparing the fingerprint) come back from `submitIntegrationConnect`, which the connect portal shows once on the screen right after the form; this endpoint does not re-serve them. DERIVED from the credential bundle on demand, never stored: every step is a pure function of the key it describes. An empty list for an auth that mints nothing, and for an unknown, malformed or not-owned id (same non-disclosure as the DELETE beside it).
+         * @description For a connection whose credentials the platform MINTED, the steps the user owns on their own machine AT DELETION — the block that takes the key back off the target, and nothing else. Deleting the connection destroys the platform's half only, since the platform has no access to the target. The steps due at CREATION (installing the key, comparing the fingerprint) come back from `submitIntegrationConnect`, which the connect portal shows once on the screen right after the form; this endpoint does not re-serve them. This list IS the deletion-time set, so `deferred` — the flag that separates those steps from the others on the submit response — is stripped from every step here. DERIVED from the credential bundle on demand, never stored: every step is a pure function of the key it describes. An empty list for an auth that mints nothing, and for an unknown, malformed or not-owned id (same non-disclosure as the DELETE beside it).
          */
         get: operations["getMyConnectionHandoff"];
         put?: never;
@@ -5385,17 +5385,29 @@ export interface components {
                 max_size?: number;
             };
         };
-        HandoffStep: {
-            /** @enum {string} */
-            kind: "command" | "value";
+        HandoffCommandStep: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "command";
             label: string;
+            /** @description Shell to run on the target. The platform never runs it. */
+            shell: string;
             note?: string;
-            /** @description `kind: command` — shell to run on the target. Never executed by the platform. */
-            shell?: string;
-            /** @description `kind: command` — due when the connection is deleted, not now. `getMyConnectionHandoff` returns exactly these; the connect submit response carries them alongside the steps due immediately. */
+            /** @description Due when the connection is deleted, not now. Carried by `submitIntegrationConnect`, which hands out both halves; `getMyConnectionHandoff` is the deletion set itself and drops the flag. */
             deferred?: boolean;
-            /** @description `kind: value` — a value to read or compare. */
-            value?: string;
+        };
+        HandoffStep: components["schemas"]["HandoffCommandStep"] | components["schemas"]["HandoffValueStep"];
+        HandoffValueStep: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "value";
+            label: string;
+            value: string;
+            note?: string;
         };
         /** @description Per-integration connection verdict for an agent: which connection the next run uses (admin pin → run/schedule override → member pin → fallback + scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses. */
         IntegrationAgentResolution: {
@@ -11442,11 +11454,8 @@ export interface operations {
                             /** Format: date-time */
                             updatedAt: string;
                         };
-                        /** @description Present when the auth declares `_meta["dev.appstrate/provisioning"]`: what the user must now do with the material the platform minted. Public halves only — the private key is sealed in the connection's envelope and is never returned. Every step is DERIVED from the stored credential bundle, so this is the one surface that renders the install steps; the teardown ones (`deferred`) are re-derived later by `getMyConnectionHandoff`. */
-                        provisioned?: {
-                            /** @description Ordered handoff steps. A list rather than named fields so a new provisioning kind ships without a front-end branch. */
-                            steps: components["schemas"]["HandoffStep"][];
-                        };
+                        /** @description Present when the auth declares `_meta["dev.appstrate/provisioning"]`: what the user must now do with the material the platform minted, in order. Public halves only — the private key is sealed in the connection's envelope and is never returned. A list rather than named fields so a new provisioning kind ships without a front-end branch. Every step is DERIVED from the stored credential bundle, so this is the one surface that renders the install steps; the `deferred` ones are re-derived later by `getMyConnectionHandoff`. */
+                        handoff_steps?: components["schemas"]["HandoffStep"][];
                     };
                 };
             };
@@ -13148,7 +13157,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Deferred handoff steps, due at deletion (possibly empty) */
+            /** @description Handoff steps due at deletion (possibly empty) */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -13160,7 +13169,7 @@ export interface operations {
                         /** @enum {string} */
                         object: "list";
                         hasMore: boolean;
-                        data: components["schemas"]["HandoffStep"][];
+                        data: components["schemas"]["HandoffCommandStep"][];
                     };
                 };
             };

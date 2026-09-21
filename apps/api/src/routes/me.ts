@@ -41,9 +41,9 @@ import type { AppEnv } from "../types/index.ts";
 import { getOrgById, getUserOrganizations } from "../services/organizations.ts";
 import { db } from "@appstrate/db/client";
 import { integrationConnections, spaces } from "@appstrate/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { listMeConnections, type MeConnectionAuthority } from "../services/me-connections.ts";
-import { getActor } from "../lib/actor.ts";
+import { actorFilter, getActor } from "../lib/actor.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
 import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
 import { callerPermissions } from "../lib/permissions.ts";
@@ -393,6 +393,10 @@ router.delete("/connections/:connectionId", async (c) => {
  * installed it. Computed here rather than on the connection LIST because it
  * costs a decryption, which a list must not pay per row.
  *
+ * `deferred` is the FILTER here, not part of the answer: this list IS the
+ * deletion-time set, so the flag that singles it out of a larger one has
+ * nothing left to say and is dropped from every step.
+ *
  * Non-disclosure matches the DELETE beside it: an unknown, malformed or
  * not-owned id answers an empty list rather than a 404, so a caller probing
  * ids learns nothing.
@@ -407,28 +411,33 @@ router.get("/connections/:connectionId/handoff", async (c) => {
 
   // `integration_connections` carries no `org_id` (it is space-scoped), and
   // reading the manifest needs one — so it comes from the space, joined here.
+  //
+  // Ownership rides the WHERE through `actorFilter`, the same single predicate
+  // the list and the delete resolve to: a connection is its owner's whatever
+  // org the caller is currently scoped to. A row this actor does not own never
+  // loads, so nothing below can decrypt it.
   const [row] = await db
     .select({
       spaceId: integrationConnections.spaceId,
       orgId: spaces.orgId,
       integrationId: integrationConnections.integrationId,
       authKey: integrationConnections.authKey,
-      userId: integrationConnections.userId,
-      endUserId: integrationConnections.endUserId,
     })
     .from(integrationConnections)
     .innerJoin(spaces, eq(spaces.id, integrationConnections.spaceId))
-    .where(eq(integrationConnections.id, connectionId))
+    .where(
+      and(eq(integrationConnections.id, connectionId), actorFilter(actor, integrationConnections)),
+    )
     .limit(1);
   if (!row) return empty();
 
-  // Same ownership predicate the delete relies on, applied here because this
-  // read decrypts a credential: a connection is its owner's regardless of the
-  // org the caller is currently scoped to.
-  const owns = actor.type === "end_user" ? row.endUserId === actor.id : row.userId === actor.id;
-  if (!owns) return empty();
-  if (authority.kind === "bound" && authority.spaceId && row.spaceId !== authority.spaceId) {
-    return empty();
+  // A BOUND credential is held to its binding here exactly as it is on the
+  // list and the delete — BOTH tiers. Org first: a leaked API key issued in
+  // one org must not have the platform decrypt its creator's credentials in
+  // another one. Then the pinned space, when it pins one.
+  if (authority.kind === "bound") {
+    if (row.orgId !== authority.orgId) return empty();
+    if (authority.spaceId && row.spaceId !== authority.spaceId) return empty();
   }
 
   try {
@@ -439,11 +448,23 @@ router.get("/connections/:connectionId/handoff", async (c) => {
     );
     const credentials = await getIntegrationConnectionCredentialFields(connectionId);
     if (!credentials) return empty();
-    const steps = handoffStepsFor(auth, credentials);
-    return c.json(listResponse(steps.filter((s) => s.kind === "command" && s.deferred === true)));
+    const removal = handoffStepsFor(auth, credentials).flatMap((step) =>
+      step.kind === "command" && step.deferred === true
+        ? [
+            {
+              kind: step.kind,
+              label: step.label,
+              shell: step.shell,
+              ...(step.note ? { note: step.note } : {}),
+            },
+          ]
+        : [],
+    );
+    return c.json(listResponse(removal));
   } catch (err) {
-    // A manifest that no longer loads must not block a deletion — the user can
-    // still delete, they just get no removal block.
+    // The confirmation modal this feeds asks for a removal block, not for a
+    // guarantee — a manifest this build cannot read, or an envelope it cannot
+    // open, answers no steps rather than a 500 on the way to deleting.
     logger.warn("Could not derive connection handoff steps", {
       err: String(err),
       connectionId,

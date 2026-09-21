@@ -10,109 +10,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Agents can reach a host over SSH.** Two new system packages: the
   `@appstrate/ssh` integration and the `@appstrate/ssh-mcp` local mcp-server it
-  backs (`source.kind: "local"`, the second first-party one after
-  `@appstrate/github-git`). One connection is one key on one Unix account, and
-  **that account is the boundary**: what the agent can do is exactly what the
-  account can do. `ssh_exec` hands its string to that account's login shell —
-  SSH `exec` has no argv at the protocol level, so there is no narrower
-  payload. Grant root only if you mean it; otherwise create a dedicated user
-  and restrict it with what the system already gives you — sudoers, groups, a
-  restricted shell. Appstrate narrows nothing further, and the setup guide says
-  so in as many words, because a posture nobody chose is a posture nobody
-  holds. The private key lives in the keyring and is delivered to the runner as
-  a file (`delivery.files`, `/run/secrets/ssh_key`, `0600`); it never enters
-  the agent container.
-
-  **Read-only is a property of the AGENT, not of the connection.** The platform
-  grants tools per agent (`toolAllowlist`, enforced sidecar-side), so an agent
-  that must not change the target is given `ssh_probe`, `ssh_read_file` and
-  `ssh_list_dir` and not `ssh_exec` or `ssh_write_file` — a tool it does not
-  have rather than a rule it might talk its way past. Per-agent, so one
-  connection serves a reader and a writer at once. The server marks which of
-  its tools write, and a test pins both halves of that split so a new tool
-  cannot join without landing on one side.
-
-  Host keys are pinned from the connection's `host_key` with
-  `StrictHostKeyChecking=yes` against a per-process `known_hosts`; there is no
-  trust-on-first-use, because in an autonomous run nobody is there to accept.
-
-  The server shells out to the `ssh`/`sftp` clients the bun runner image already
-  bakes in, and reaches a proxied target through an OpenSSH `ProxyCommand` that
-  speaks HTTP CONNECT to the sidecar's egress listener. A target on a private
-  address is refused by the SSRF floor on that path — a public VPS works, a LAN
-  box does not, and that is a decision, not a bug (#1228). Per-connection host
-  scoping of the egress listener is #1458.
-
-  Two defects this surfaced were fixed on their own first: an mcp-server
-  declaring `entry_point: "./server.js"` could not be imported at all (#1461),
-  and `delivery.files` landed unreadable in every runner image (#1462).
+  backs. One connection is one key on one Unix account, and **that account is
+  the boundary** — `ssh_exec` hands its string to the account's login shell, so
+  what the agent can do is exactly what the account can do. Grant root only if
+  you mean it; otherwise use a dedicated user, restricted with sudoers or a
+  restricted shell. The private key reaches the runner as a file
+  (`/run/secrets/ssh_key`, `0600`) and never enters the agent container.
+  **Read-only is a property of the agent, not of the connection**: an agent that
+  must not change the target is granted `ssh_probe`, `ssh_read_file` and
+  `ssh_list_dir` and not `ssh_exec` or `ssh_write_file`, so one connection
+  serves a reader and a writer at once. The host key is pinned
+  (`StrictHostKeyChecking=yes`) with no trust-on-first-use — in an autonomous
+  run nobody is there to accept one. A target on a private address is refused by
+  the SSRF floor on the runner's egress path: a public VPS works, a LAN box does
+  not (#1228; per-connection host scoping of that listener is #1458).
 
 - **Connecting an SSH host never asks for a private key.** The platform mints
-  the ed25519 pair itself, straight into the credential envelope: never
-  displayed, never typed, never readable again. A pasted key is almost always
-  the user's PERSONAL key, already installed on ten other machines, so the
-  blast radius of an Appstrate credential would leave Appstrate; a minted pair
-  is used nowhere else.
-
-  The form asks for what only the user can answer — host, port, account, and
-  the target's own host key. The host key is read off the machine
-  (`awk '{print $1" "$2}' /etc/ssh/ssh_host_ed25519_key.pub`) from a session
-  the user already authenticated, because a remote scan is by definition an
-  unauthenticated first contact — precisely what a machine-in-the-middle
-  answers. The platform opens no SSH socket at any point, and its image ships
-  no SSH client.
-
-  After creation the connect page shows the one block to paste on the target. It
-  authorises the public key on the named account with `restrict` — no port
-  forwarding, agent forwarding, X11 or pty — and refuses to touch anything if
-  that account has no login shell, since sshd would then run nothing and the
-  failure would only surface mid-run. It prints the host's own fingerprint, of
-  the key type actually pinned, so it can be compared against the one pasted
-  into the form. The same screen carries the block that REMOVES the key:
-  deleting the connection destroys the private half and nothing else, because
-  the platform cannot reach the target.
-
-  Nothing about either block is stored. Both are derived on demand from the
-  credential bundle the keyring already holds — an `openssh-key-v1` container
-  carries its own public half in the clear, and the fingerprint is a pure
-  function of the pinned host key — so `GET /api/me/connections/{id}/handoff`
-  hands back the removal block due at deletion, months later, from the same
-  function that rendered the install block.
-
-  The mechanism is generic, not SSH-specific: an auth opts in with
-  `_meta["dev.appstrate/provisioning"]` (AFPS §10), naming the KIND and nothing
-  else. WHICH credentials a kind mints is a property of the provisioner, so it
-  is declared once, in the platform code beside it — a manifest is immutable
-  once published, and a copy of that list inside one could only drift from the
-  provisioner it describes. The hosted form is handed a schema with those names
-  already removed, so the browser is told what to ask for rather than working
-  it out. Both doors then refuse a field the platform mints: the hosted form
-  strips those names from the request body, and the programmatic
-  `POST …/connect/fields` import rejects a submission carrying one, so no path
-  lets a caller bring its own key. What the user DOES supply is shape-checked
-  by the auth's `credentials.schema` (`pattern`), validated on both doors
-  alike — against the FULL schema, which still describes the stored shape.
-
-  A target the RUNNER could not reach is refused at the form rather than
-  persisted: the platform's usual egress guard honours
-  `EGRESS_ALLOW_INTERNAL_HOSTS` while the runner's CONNECT floor has no
-  allowlist at all, and creating a connection on the looser of the two would
-  have produced runs that always fail. The form therefore applies the bare
-  floor — the predicate the runner's listener uses — and not that guard. It
-  checks literals only; a NAME resolving to a private address meets the
-  runner's own CONNECT gate at run time, which is the gate that was always
-  going to decide.
+  the ed25519 pair itself into the credential envelope: never displayed, never
+  readable again. Reconnecting the same host, port and account reuses the
+  existing pair, so the key already authorised on the target keeps working; a
+  changed target gets a fresh one. The form asks only what the user can answer —
+  host, port, account, and the target's own host key, read off the machine from
+  a session they already authenticated; the platform opens no SSH socket at any
+  point. After creation the connect page shows the block to paste on the target:
+  it authorises the public key on the named account with `restrict` (no port
+  forwarding, agent forwarding, X11 or pty), performs every file operation as
+  that account, and prints the host's own fingerprint to compare against the one
+  submitted. The same screen carries the block that REMOVES the key, and
+  `GET /api/me/connections/{id}/handoff` hands that one back when the connection
+  is deleted months later — neither block is stored, both are derived on demand.
+  An auth opts into platform-minted credentials with
+  `_meta["dev.appstrate/provisioning"]` (AFPS §10), and no door lets a caller
+  bring its own key: the hosted form is served a schema with the minted names
+  removed and the platform overwrites them on submit whatever the body carried,
+  and `POST …/connect/fields` rejects a submission naming one.
 
 ### Fixed
 
-- **The hosted connect form showed raw field names.** It derived inputs from
-  the credential property NAMES only, so `title`, `description` and `default`
-  declared in a manifest reached nobody — every integration that documented its
-  fields still presented `snake_case` keys with no explanation, and a declared
-  default was neither shown nor submitted. The form now renders all three, and
-  seeds the defaults it displays. It also renders the manifest's AFPS §7.10
-  `setup_guide`, which until now appeared only on the integration detail page —
-  everywhere except the surface actually asking someone for a credential.
+- **The hosted connect form showed raw field names.** It derived inputs from the
+  credential property NAMES only, so `title`, `description` and `default`
+  declared in a manifest reached nobody, and a declared default was neither
+  shown nor submitted. The form now renders all three, seeds the defaults it
+  displays, and renders the manifest's AFPS §7.10 `setup_guide` — until now
+  shown only on the integration detail page.
 
 ### Security
 

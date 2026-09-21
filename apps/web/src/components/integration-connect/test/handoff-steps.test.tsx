@@ -20,21 +20,21 @@ await i18n.changeLanguage("fr");
 const STEPS: HandoffStep[] = [
   {
     kind: "command",
-    label: "À coller sur le serveur cible",
+    label: "Paste this on the target server",
     shell: "set -eu\ninstall -d ~agent/.ssh",
   },
   {
     kind: "value",
-    label: "Empreinte de l'hôte, épinglée",
+    label: "Host fingerprint, pinned",
     value: "SHA256:YJK+IkPvWMR1nIl8CmsNEzIxSKBBIAZkrizRiuynnbw",
-    note: "Si elle diffère, quelqu'un s'est intercalé.",
+    note: "If it differs, someone is sitting in between.",
   },
   {
     kind: "command",
-    label: "Retirer cette clé plus tard",
+    label: "Remove this key later",
     shell: "grep -vF 'AAAA' ~agent/.ssh/authorized_keys",
     deferred: true,
-    note: "Gardez ce bloc.",
+    note: "Keep this block.",
   },
 ];
 
@@ -45,7 +45,7 @@ describe("HandoffSteps", () => {
 
   it("renders a command step's shell verbatim, with a copy affordance", () => {
     const markup = render(<HandoffSteps steps={[STEPS[0]!]} />);
-    expect(markup).toContain("À coller sur le serveur cible");
+    expect(markup).toContain("Paste this on the target server");
     expect(markup).toContain("install -d ~agent/.ssh");
     expect(markup).toContain('data-testid="handoff-copy-0"');
   });
@@ -53,7 +53,7 @@ describe("HandoffSteps", () => {
   it("renders a value step's value and its note", () => {
     const markup = render(<HandoffSteps steps={[STEPS[1]!]} />);
     expect(markup).toContain("SHA256:YJK+IkPvWMR1nIl8CmsNEzIxSKBBIAZkrizRiuynnbw");
-    expect(markup).toContain("Si elle diffère");
+    expect(markup).toContain("someone is sitting in between");
   });
 
   /**
@@ -64,14 +64,14 @@ describe("HandoffSteps", () => {
   it("keeps a deferred step on the page, collapsed rather than dropped", () => {
     const markup = render(<HandoffSteps steps={STEPS} />);
     expect(markup).toContain("<details");
-    expect(markup).toContain("Retirer cette clé plus tard");
+    expect(markup).toContain("Remove this key later");
     expect(markup).toContain("grep -vF");
   });
 
   it("orders the steps to do now before the deferred one", () => {
     const markup = render(<HandoffSteps steps={STEPS} />);
-    const now = markup.indexOf("À coller sur le serveur cible");
-    const fingerprint = markup.indexOf("Empreinte de l'hôte");
+    const now = markup.indexOf("Paste this on the target server");
+    const fingerprint = markup.indexOf("Host fingerprint, pinned");
     const later = markup.indexOf("<details");
     expect(now).toBeGreaterThanOrEqual(0);
     expect(fingerprint).toBeGreaterThan(now);
@@ -80,6 +80,6 @@ describe("HandoffSteps", () => {
 
   it("does not repeat the label inside a collapsed step", () => {
     const markup = render(<HandoffSteps steps={[STEPS[2]!]} />);
-    expect(markup.split("Retirer cette clé plus tard")).toHaveLength(2);
+    expect(markup.split("Remove this key later")).toHaveLength(2);
   });
 });

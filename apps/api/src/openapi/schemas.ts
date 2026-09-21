@@ -1898,32 +1898,57 @@ export const schemas = {
       },
     },
   },
+  // A block to run on the target. `shell` is required: a command step with
+  // nothing to run is a step with no content.
+  HandoffCommandStep: {
+    type: "object",
+    required: ["kind", "label", "shell"],
+    properties: {
+      kind: { type: "string", enum: ["command"] },
+      label: { type: "string" },
+      shell: {
+        type: "string",
+        description: "Shell to run on the target. The platform never runs it.",
+      },
+      note: { type: "string" },
+      deferred: {
+        type: "boolean",
+        description:
+          "Due when the connection is deleted, not now. Carried by `submitIntegrationConnect`, which hands out both halves; `getMyConnectionHandoff` is the deletion set itself and drops the flag.",
+      },
+    },
+  },
+  // A value to read or compare — a fingerprint, an identifier. `value` is
+  // required for the same reason `shell` is on the arm above.
+  HandoffValueStep: {
+    type: "object",
+    required: ["kind", "label", "value"],
+    properties: {
+      kind: { type: "string", enum: ["value"] },
+      label: { type: "string" },
+      value: { type: "string" },
+      note: { type: "string" },
+    },
+  },
   /**
    * One step a user must run or check on their own machine because the
    * platform minted a credential for them. Shared by the two surfaces that
    * hand these out — the connect submit response (every step) and
-   * `GET /api/me/connections/{id}/handoff` (the `deferred` ones) — because
+   * `GET /api/me/connections/{id}/handoff` (the deletion-time ones) — because
    * both derive them from the same bundle through the same renderer, and a
    * second copy of this shape is a second thing the SPA can drift from.
    */
   HandoffStep: {
-    type: "object",
-    required: ["kind", "label"],
-    properties: {
-      kind: { type: "string", enum: ["command", "value"] },
-      label: { type: "string" },
-      note: { type: "string" },
-      shell: {
-        type: "string",
-        description:
-          "`kind: command` — shell to run on the target. Never executed by the platform.",
+    oneOf: [
+      { $ref: "#/components/schemas/HandoffCommandStep" },
+      { $ref: "#/components/schemas/HandoffValueStep" },
+    ],
+    discriminator: {
+      propertyName: "kind",
+      mapping: {
+        command: "#/components/schemas/HandoffCommandStep",
+        value: "#/components/schemas/HandoffValueStep",
       },
-      deferred: {
-        type: "boolean",
-        description:
-          "`kind: command` — due when the connection is deleted, not now. `getMyConnectionHandoff` returns exactly these; the connect submit response carries them alongside the steps due immediately.",
-      },
-      value: { type: "string", description: "`kind: value` — a value to read or compare." },
     },
   },
 

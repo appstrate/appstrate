@@ -43,8 +43,9 @@ export function CredentialFields({ auth, values, onChange }: CredentialFieldsPro
         const labelKey = `integration.connect.fields.${field}.label`;
         const labelText = t(labelKey, { defaultValue: schema?.title ?? field });
         const description = schema?.description;
-        // A declared default is what the user would have to retype otherwise.
-        const value = values[field] ?? schema?.default ?? "";
+        // Controlled by the caller alone: a declared default reaches the input
+        // through `initialCredentialValues`, which is also what submits it.
+        const value = values[field] ?? "";
         return (
           <div key={field} className="space-y-1">
             <Label

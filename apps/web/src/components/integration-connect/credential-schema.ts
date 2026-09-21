@@ -59,10 +59,9 @@ export function deriveFieldNames(auth: IntegrationManifestAuth): string[] {
 }
 
 /**
- * Seed values for a connect form: every field the auth gives a `default`. The
- * form SHOWS a default, so it has to SUBMIT it too — rendering one without
- * seeding state would put a value under the user's eyes that never leaves the
- * browser.
+ * Seed values for a connect form: every field the auth gives a `default`.
+ * Seeding is the only way a default reaches the screen, which is what keeps
+ * what the user sees and what the form submits the same value.
  */
 export function initialCredentialValues(auth: IntegrationManifestAuth): Record<string, string> {
   const schemas = fieldSchemas(auth);

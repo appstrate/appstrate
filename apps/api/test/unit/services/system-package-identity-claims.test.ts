@@ -349,18 +349,10 @@ const CASES: Record<string, Case> = {
   // 200 with `{"ok": false}` on a bad token, so the manifest declares none and
   // identity is read straight off the `oauth.v2.access` token response — the
   // first of the three layers `extractIdentity` is handed.
-  /**
-   * The one mapping whose source is NOT a third-party payload: an SSH identity
-   * is read off the credential bag the platform itself assembled.
-   *
-   * The host, not the account. `@appstrate/ssh` has the user create ONE
-   * dedicated Unix account and reuse it, so the account name is the field that
-   * repeats and the host is the field that varies — the better discriminator
-   * of the two, and `accountId` is only ever a display value (it seeds the
-   * connection's default label and tells candidates apart in the
-   * `must_choose_connection` picker; nothing resolves by it, and there is no
-   * uniqueness constraint on it).
-   */
+  // The one mapping whose source is not a third-party payload: an SSH identity
+  // is read off the credential bag the platform itself assembled. The account
+  // key is the HOST, not the Unix user — one dedicated account is reused, so
+  // the host is the field that tells two connections apart.
   "@appstrate/ssh": {
     authKey: "primary",
     source: {
@@ -507,19 +499,9 @@ describe("system-package identity_claims → accountId", () => {
 
   /**
    * `sub` is the claim `required_identity_claims` most often names, so an empty
-   * one makes that gate reject the connection outright.
-   *
-   * Checked only where the mapping DECLARES it. This used to be unconditional,
-   * on the premise that every mapping in the repo was OAuth-shaped and carried
-   * a subject; `@appstrate/ssh` falsified that — an SSH identity is a Unix
-   * account on a host, there is no IdP and no subject. Making the condition
-   * explicit is the fix: the assertion now states what it actually depends on.
-   *
-   * Deliberately NOT widened to "every declared claim resolves". That is the
-   * stronger rule and probably the right one, but it currently reports six
-   * pre-existing fixtures whose declared `picture` / `email` never populate —
-   * unrelated to this change, and one of them (`@appstrate/jira#email`) may be
-   * a real broken accessor rather than a thin fixture. Worth its own pass.
+   * one makes that gate reject the connection outright. Checked where the
+   * mapping DECLARES it: not every identity has a subject — an SSH identity is
+   * a Unix account on a host, with no IdP behind it.
    */
   it("populates a declared `sub`, not just the account key", async () => {
     const declaring = await loadDeclaring();

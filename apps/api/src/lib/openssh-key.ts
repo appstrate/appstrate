@@ -40,11 +40,12 @@ export interface OpenSshKeyPair {
 }
 
 /**
- * Mint an ed25519 pair. The comment rides inside the container for an operator
- * inspecting the key; it is not key material, and the platform never reads it
- * back (see {@link publicKeyFromOpenSshPrivateKey}).
+ * Mint an ed25519 pair. The container carries the literal comment `appstrate`
+ * for an operator inspecting the key; it is not key material, and the platform
+ * never reads it back (see {@link publicKeyFromOpenSshPrivateKey}), so there is
+ * nothing for a caller to choose.
  */
-export function generateOpenSshEd25519KeyPair(comment: string): OpenSshKeyPair {
+export function generateOpenSshEd25519KeyPair(): OpenSshKeyPair {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
 
   // Both DER encodings are fixed-length for this curve (SPKI 44, PKCS#8 48),
@@ -65,7 +66,7 @@ export function generateOpenSshEd25519KeyPair(comment: string): OpenSshKeyPair {
     sshString(rawPublicKey),
     // Ed25519's private field is seed || public, not the seed alone.
     sshString(Buffer.concat([seed, rawPublicKey])),
-    sshString(comment),
+    sshString("appstrate"),
   ]);
 
   // Pad to the block size with the bytes 1, 2, 3, … — OpenSSH uses 8 for
@@ -133,12 +134,11 @@ function reader(buf: Buffer, at = 0) {
  * an installed authorized_keys line is recoverable from the keyring and nothing
  * has to persist it.
  *
- * What comes back is REBUILT, never echoed. The container's key-type and
- * comment fields are caller-chosen (`POST .../connect/fields` imports a private
- * key without running a provisioner) and this line is interpolated into a script
- * pasted as root. So the blob must be byte-exactly `ssh-ed25519 || <32-byte
- * point>`, the private section must name the same type, and the comment is
- * never read.
+ * What comes back is REBUILT, never echoed. A stored bundle is not trusted at
+ * render time — the container's key-type and comment fields are whatever its
+ * bytes say, and the line built from them is interpolated into a script pasted
+ * as root. So the blob must be byte-exactly `ssh-ed25519 || <32-byte point>`,
+ * the private section must name the same type, and the comment is never read.
  */
 export function publicKeyFromOpenSshPrivateKey(pem: string): string {
   const body = pem
@@ -200,12 +200,26 @@ const PUBLIC_KEY_LINE_RE = /^(ssh-ed25519|ssh-rsa) ([A-Za-z0-9+/]+=*)$/;
  * looser than the pattern accepts lines the programmatic door refuses, and what
  * comes out picks a file path interpolated into a script run as root. Null for
  * anything else; each caller words its own refusal.
+ *
+ * The blob names its own type, and the two halves must agree. A line whose
+ * text says `ssh-rsa` over an ed25519 blob picks the wrong `/etc/ssh` file for
+ * the install block to print, and fingerprints a key the host never offers —
+ * so the one machine-in-the-middle check there is would read as a mismatch on
+ * every correct host. Only the leading type string is required to match: the
+ * platform pins a host key it never parses further.
  */
 export function parsePublicKeyLine(line: string): { type: PublicKeyType; base64: string } | null {
   const match = PUBLIC_KEY_LINE_RE.exec(line);
   if (!match) return null;
   // The alternation IS `PublicKeyType`, so group 1 is one of its two members.
-  return { type: match[1] as PublicKeyType, base64: match[2]! };
+  const type = match[1] as PublicKeyType;
+  const base64 = match[2]!;
+  try {
+    if (reader(Buffer.from(base64, "base64")).string().toString("utf8") !== type) return null;
+  } catch {
+    return null;
+  }
+  return { type, base64 };
 }
 
 /**

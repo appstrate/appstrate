@@ -13,12 +13,12 @@
  * Lives in `scripts/test/`, beside the other tests for `scripts/`, and NOT in
  * `apps/api/test/unit/`: it tests a SYSTEM PACKAGE, not the platform. A system
  * package is deletable by construction — remove its sources and its `.afps`
- * and the platform must be unaffected — but this file resolves those sources
- * at module load, so from the API suite its absence took all 168 unit files
- * down with it. Nor does it belong inside the package directory:
- * `collectZipEntries` (scripts/build-system-packages.ts) walks everything but
- * `node_modules` and dotfiles, so a `*.test.ts` there would ship inside the
- * archive handed to customers.
+ * and the platform must be unaffected — and this file resolves those sources
+ * at module load, so from the API suite it would take every unit file down
+ * with it. Nor does it belong inside the package directory: `collectZipEntries`
+ * (scripts/build-system-packages.ts) walks everything but `node_modules` and
+ * dotfiles, so a `*.test.ts` there would ship inside the archive handed to
+ * customers.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
@@ -266,13 +266,26 @@ describe("buildSshArgs — the connection policy", () => {
     ]) {
       expect(has(args, opt)).toBe(true);
     }
-    expect(args.slice(-3)).toEqual(["-p", "22", "agent@example.com"]);
+    expect(args.slice(-4)).toEqual(["-p", "22", "--", "agent@example.com"]);
   });
 
   it("appends the command string as the last argv entry, and nothing else", () => {
     const args = buildSshArgs(loadConfig(ENV), "/kh", "hostname");
     expect(args.at(-1)).toBe("hostname");
     expect(args.at(-2)).toBe("agent@example.com");
+  });
+
+  // Without the terminator a user or host starting with `-` is read as an
+  // option (`-w…` lands as `Bad tun device`), and only the manifest's pattern
+  // stands between a connect form and that. `--` is the argv-level floor.
+  it("terminates the options with `--` immediately before the destination", () => {
+    expect(buildSshArgs(loadConfig(ENV), "/kh").slice(-2)).toEqual(["--", "agent@example.com"]);
+    expect(buildSshArgs(loadConfig(ENV), "/kh", "hostname").slice(-3)).toEqual([
+      "--",
+      "agent@example.com",
+      "hostname",
+    ]);
+    expect(buildSftpArgs(loadConfig(ENV), "/kh").slice(-2)).toEqual(["--", "agent@example.com"]);
   });
 
   it("adds a ProxyCommand only when a proxy is configured", () => {
@@ -285,7 +298,7 @@ describe("buildSshArgs — the connection policy", () => {
 
   it("sftp uses -P for the port and reads its batch from stdin", () => {
     const args = buildSftpArgs(loadConfig({ ...ENV, SSH_PORT: "2222" }), "/kh");
-    expect(args.slice(-5)).toEqual(["-b", "-", "-P", "2222", "agent@example.com"]);
+    expect(args.slice(-6)).toEqual(["-b", "-", "-P", "2222", "--", "agent@example.com"]);
     expect(has(args, "StrictHostKeyChecking=yes")).toBe(true);
   });
 });
@@ -357,11 +370,11 @@ describe("ssh_exec via injected runner", () => {
 });
 
 /**
- * There is no per-connection read-only flag any more. "Read-only" is a property
- * of the AGENT: the platform grants tools per agent (`toolAllowlist`, enforced
- * sidecar-side), so an agent that must not change the target is simply not
- * given `ssh_exec` or `ssh_write_file`. This server therefore advertises which
- * tools write, and that advertisement is what the grant is made from.
+ * "Read-only" is a property of the AGENT, not of the connection: the platform
+ * grants tools per agent (`toolAllowlist`, enforced sidecar-side), so an agent
+ * that must not change the target is simply not given `ssh_exec` or
+ * `ssh_write_file`. This server therefore advertises which tools write, and
+ * that advertisement is what the grant is made from.
  */
 describe("ssh_write_file", () => {
   it("declares itself a writing tool, so a read-only agent is given the others", () => {
@@ -405,7 +418,10 @@ describe("ssh_probe", () => {
       { run, knownHostsPath: join(scratch, "kh") },
     );
     expect(calls[0]!.argv[0]).toBe("ssh");
-    expect(calls[0]!.argv.at(-1)).toBe("-N");
+    // `-N` is an option: past the `--` it would be sent as the remote command,
+    // which is the one thing the probe must not do.
+    expect(calls[0]!.argv.at(-1)).toBe("agent@example.com");
+    expect(calls[0]!.argv.indexOf("-N")).toBeLessThan(calls[0]!.argv.indexOf("--"));
     // `-N` holds the connection open after auth, so the probe must read
     // success off stderr and give up on a ceiling — never wait for an exit.
     expect(calls[0]!.untilStderr).toBeInstanceOf(RegExp);

@@ -20,10 +20,11 @@
  * is content-addressed and immutable once published, and a second copy of that
  * list inside one could only ever disagree with the provisioner it describes.
  *
- * {@link provisionCredentials} drops those names from the submitted bag, so a
- * client cannot supply its own `private_key`, and
- * {@link authWithoutMintedCredentials} takes them out of the schema the hosted
- * form renders, so nobody is asked to type a value about to be generated.
+ * No door lets a client supply its own `private_key`:
+ * {@link authWithoutMintedCredentials} takes those names out of the schema the
+ * hosted form renders, so nobody is asked to type a value about to be
+ * generated, and the programmatic `POST .../connect/fields` refuses a minted
+ * name outright rather than storing a key the platform did not make.
  *
  * {@link KINDS} is the whole registry, one entry per kind: what it mints, the
  * minting, and what the user is left holding afterwards.
@@ -50,8 +51,9 @@ import { isBlockedHost } from "@appstrate/afps-shared/ssrf";
  * Steps are DATA, not named fields: the SPA renders the list, so a new `kind`
  * ships without a front-end branch. Two shapes, both with a consumer today — a
  * block to run and a value to read; publisher prose is already `setup_guide`
- * (AFPS §7.10). Labels and notes are SERVER text, not i18n keys, because half
- * of a step (the shell block) is generated anyway.
+ * (AFPS §7.10). Labels and notes are SERVER text — English, like every other
+ * string this API emits, and not i18n keys: half of a step (the shell block) is
+ * generated here anyway, so a catalogue could only ever hold the other half.
  */
 export type HandoffStep =
   | {
@@ -107,6 +109,14 @@ function publicKeyBase64(publicKey: string): string {
  * Render the one block the user pastes on the target: it authorises the minted
  * public key on the account they named, and nothing else.
  *
+ * Root touches no path under that account's home: every filesystem operation is
+ * handed to `su`, which performs it AS the account. Opening, creating, chowning
+ * or chmoding follows symlinks, and the home belongs to the very account an
+ * agent gets a shell on — so a swapped `~/.ssh/authorized_keys` would hand root
+ * whatever it points at, on a block the user is invited to replay. Writing
+ * through such a link as the account is that account's own privilege, and
+ * changes nothing it could not already do.
+ *
  * There is deliberately no `command=`: what an agent may do is what the ACCOUNT
  * may do, and narrowing that is the operator's act on their own machine — a
  * dedicated user, sudoers, a restricted shell. The setup guide says so.
@@ -114,9 +124,15 @@ function publicKeyBase64(publicKey: string): string {
  * Everything interpolated is platform-minted or validated: the account against
  * {@link USER_NAME_RE}, the host-key file picked from a fixed table, the public
  * key rebuilt by `publicKeyFromOpenSshPrivateKey` as `ssh-ed25519 <base64>`
- * (never a string read out of the key container, which the programmatic import
- * door lets a caller choose), and the trailing comment a literal of this file's.
- * So nothing here can carry shell syntax across.
+ * (never a string read out of the stored container, which is not trusted at
+ * render time), and the trailing comment a literal of this file's. So nothing
+ * here can carry shell syntax across — including into the `su` payload, a
+ * QUOTED heredoc, which the shell passes on without expanding a character.
+ *
+ * The whole thing runs in a subshell, because it is PASTED — into an
+ * interactive root shell, where a top-level `set -eu` would outlive the block
+ * and an `exit 1` would close the session. The parentheses keep both inside,
+ * and the subshell's status is still the block's.
  *
  * It ends by printing the host fingerprint, from a session the user already
  * authenticated, so comparing it with what they pasted costs one glance.
@@ -124,6 +140,7 @@ function publicKeyBase64(publicKey: string): string {
 function renderInstallCommand(user: string, publicKey: string, hostKeyPub: string): string {
   return [
     `# Paste as root (or with sudo) on the target.`,
+    `(`,
     `set -eu`,
     ``,
     `# sshd runs a command through the account's LOGIN SHELL, so an account set`,
@@ -133,37 +150,44 @@ function renderInstallCommand(user: string, publicKey: string, hostKeyPub: strin
     `[ -n "\${login_shell:-}" ] || login_shell=$(awk -F: -v u=${user} '$1==u{print $7}' /etc/passwd)`,
     `case "\${login_shell:-}" in`,
     `  */nologin|*/false)`,
-    `    echo "appstrate: le compte ${user} a pour shell \${login_shell}." >&2`,
-    `    echo "  SSH passe par le shell de login : aucune commande ne s'exécuterait." >&2`,
-    `    echo "  Donnez-lui /bin/sh, puis rejouez ce bloc." >&2`,
+    `    echo "appstrate: the login shell of ${user} is \${login_shell}." >&2`,
+    `    echo "  SSH runs commands through the login shell: none would execute." >&2`,
+    `    echo "  Give the account /bin/sh, then run this block again." >&2`,
     `    exit 1 ;;`,
     `esac`,
-    ``,
-    `# The account's real primary group — assuming a group named after the user`,
-    `# breaks on every box where it is not.`,
-    `group=$(id -gn ${user})`,
-    `install -d -m 700 -o ${user} -g "$group" ~${user}/.ssh`,
-    `keys=~${user}/.ssh/authorized_keys`,
     ``,
     `# restrict turns off port forwarding, agent forwarding, X11 and pty. What`,
     `# this key may DO is what ${user} may do — restrict that account, not this`,
     `# line, if the agent should be able to do less. Guarded on the key's own`,
     `# base64, so replaying this block appends nothing a second time.`,
+    `su -s /bin/sh ${user} <<'APPSTRATE_SSH'`,
+    `set -eu`,
+    `umask 077`,
+    `mkdir -p ~/.ssh`,
+    `keys=~/.ssh/authorized_keys`,
+    `# A last line with no newline would take the append onto itself: the minted`,
+    `# key unusable, the key already there mangled, and its base64 now in the`,
+    `# file, so the guard below turns every replay into a silent no-op.`,
+    `[ ! -s "$keys" ] || [ -z "$(tail -c1 "$keys")" ] || printf '\\n' >> "$keys"`,
     `grep -qF '${publicKeyBase64(publicKey)}' "$keys" 2>/dev/null ||`,
     `  printf '%s\\n' 'restrict ${publicKey} appstrate' >> "$keys"`,
-    `chown ${user}:"$group" "$keys"`,
-    `chmod 600 "$keys"`,
+    `APPSTRATE_SSH`,
     ``,
+    `# Captured, not piped: a pipeline answers for its LAST command, so a missing`,
+    `# or failing ssh-keygen would print the heading, then nothing, and succeed —`,
+    `# an empty answer to the one question the user is here to ask.`,
     `echo`,
-    `if [ -r ${hostKeyPub} ]; then`,
-    `  echo "empreinte de cet hôte :"`,
-    `  ssh-keygen -lf ${hostKeyPub} | awk '{print "  " $2}'`,
-    `  echo "  ↳ comparez-la avec celle affichée dans Appstrate"`,
+    `fp=$(ssh-keygen -lf ${hostKeyPub} 2>/dev/null | awk '{print $2}') || fp=`,
+    `if [ -n "$fp" ]; then`,
+    `  echo "fingerprint of this host:"`,
+    `  echo "  $fp"`,
+    `  echo "  ↳ compare it with the one Appstrate shows"`,
     `else`,
-    `  echo "ATTENTION: ${hostKeyPub} est illisible — la clé est installée, mais" >&2`,
-    `  echo "  l'empreinte n'a pas pu être imprimée. Comparez-la à la main avec :" >&2`,
+    `  echo "WARNING: no fingerprint could be read from ${hostKeyPub} — the key is" >&2`,
+    `  echo "  installed, but compare the fingerprint by hand with:" >&2`,
     `  echo "    ssh-keygen -lf ${hostKeyPub}" >&2`,
     `fi`,
+    `)`,
   ].join("\n");
 }
 
@@ -171,6 +195,10 @@ function renderInstallCommand(user: string, publicKey: string, hostKeyPub: strin
  * Render the block that takes this key back off the target. Matched on the
  * key's own base64 (`grep -F`, so none of its characters is a pattern), which
  * removes exactly this connection's line and no other.
+ *
+ * Filtered AS the account, and wrapped in a subshell, for the two reasons
+ * {@link renderInstallCommand} is: root opens no path under a home that account
+ * controls, and neither `set -eu` nor a failure outlives a pasted block.
  *
  * Two outcomes are ordinary rather than failures, and each would otherwise
  * destroy the file under `set -e`: no `authorized_keys` at all, and a `grep`
@@ -181,8 +209,11 @@ function renderRevokeCommand(user: string, publicKey: string): string {
     `# Paste as root (or with sudo) on the target AFTER deleting the connection`,
     `# in Appstrate. Deleting it destroys the private half here and nothing`,
     `# else — the platform cannot reach your machine to take its key out.`,
+    `(`,
     `set -eu`,
-    `keys=~${user}/.ssh/authorized_keys`,
+    `su -s /bin/sh ${user} <<'APPSTRATE_SSH'`,
+    `set -eu`,
+    `keys=~/.ssh/authorized_keys`,
     `[ -f "$keys" ] || exit 0`,
     ``,
     `tmp=$(mktemp)`,
@@ -192,20 +223,47 @@ function renderRevokeCommand(user: string, publicKey: string): string {
     `grep -vF '${publicKeyBase64(publicKey)}' "$keys" > "$tmp" || [ "$?" -eq 1 ]`,
     `# Written back THROUGH the file, so its inode, owner and mode survive.`,
     `cat "$tmp" > "$keys"`,
+    `APPSTRATE_SSH`,
+    `)`,
   ].join("\n");
 }
 
 /** Unix account name — interpolated into the script, so kept deliberately narrow. */
 const USER_NAME_RE = /^[a-z_][a-z0-9_-]{0,31}$/;
 
-/** Context a provisioner runs in. */
-export interface ProvisionContext {
-  integrationId: string;
+/**
+ * The pair a reconnect already installed, or null when there is none to keep.
+ *
+ * A pair is reused only on the TARGET it was installed on — same host, port and
+ * account. Reusing it there is what keeps the installed line describable: a
+ * second pair for the same target strands the first public key in that
+ * `authorized_keys`, and the platform cannot reach the host to take it out.
+ *
+ * When the target changes, a fresh pair is minted, and the line on the previous
+ * target stays there — unusable, since its private half is overwritten, and
+ * described by no block the platform can still render. Removing it is the
+ * operator's, on the machine they own. A stored half this build cannot read
+ * describes nothing either, so it is not kept.
+ */
+function reusableSshPrivateKey(
+  existing: Record<string, unknown> | null,
+  target: { host: string; port: string; user: string },
+): string | null {
+  if (!existing) return null;
+  if (Object.entries(target).some(([name, value]) => existing[name] !== value)) return null;
+  const stored = existing.private_key;
+  if (typeof stored !== "string") return null;
+  try {
+    publicKeyFromOpenSshPrivateKey(stored);
+  } catch {
+    return null;
+  }
+  return stored;
 }
 
 async function provisionSshKeyPair(
   fields: SubmittedFields,
-  ctx: ProvisionContext,
+  existing: Record<string, unknown> | null,
 ): Promise<Record<string, string>> {
   const host = requiredString(fields, "host");
   const user = requiredString(fields, "user");
@@ -238,15 +296,13 @@ async function provisionSshKeyPair(
   const hostKey = requiredString(fields, "host_key");
   hostKeyPubFile(hostKey);
 
-  const keyPair = generateOpenSshEd25519KeyPair(`appstrate ${ctx.integrationId}`);
-
   // Credentials only: what the user must DO with them is rendered by
   // `sshHandoffSteps` from this very bundle, months later as well as now.
+  const target = { host, port: String(port), user };
   return {
-    private_key: keyPair.privateKey,
-    host,
-    port: String(port),
-    user,
+    private_key:
+      reusableSshPrivateKey(existing, target) ?? generateOpenSshEd25519KeyPair().privateKey,
+    ...target,
     host_key: hostKey,
   };
 }
@@ -282,26 +338,26 @@ function sshHandoffSteps(credentials: Record<string, unknown>): HandoffStep[] {
   return [
     {
       kind: "command",
-      label: "À coller sur le serveur cible (en root, ou avec sudo)",
+      label: "Paste on the target server (as root, or with sudo)",
       shell: renderInstallCommand(user, publicKey, hostKeyPub),
     },
     {
       kind: "value",
-      label: "Empreinte de l'hôte, épinglée",
+      label: "Host fingerprint, pinned",
       value: fingerprint,
       note:
-        "La commande ci-dessus imprime l'empreinte du serveur en dernière ligne. " +
-        "Si elle diffère de celle-ci, quelqu'un s'est intercalé : supprimez la connexion.",
+        "The command above prints the server's fingerprint as its last line. " +
+        "If it differs from this one, somebody is in the middle: delete the connection.",
     },
     {
       kind: "command",
       deferred: true,
-      label: "Retirer cette clé du serveur",
+      label: "Remove this key from the server",
       shell: renderRevokeCommand(user, publicKey),
       note:
-        "Gardez ce bloc. Supprimer la connexion dans Appstrate détruit la moitié privée et " +
-        "rien d'autre — Appstrate ne peut pas atteindre votre serveur pour retirer sa clé " +
-        "d'authorized_keys.",
+        "Keep this block. Deleting the connection in Appstrate destroys the private half and " +
+        "nothing else — Appstrate cannot reach your server to take its key out of " +
+        "authorized_keys.",
     },
   ];
 }
@@ -318,7 +374,10 @@ const KINDS: Record<
   {
     /** What the kind MINTS — the sole declaration of it, moving with `mint`. */
     provides: readonly string[];
-    mint: (fields: SubmittedFields, ctx: ProvisionContext) => Promise<Record<string, string>>;
+    mint: (
+      fields: SubmittedFields,
+      existing: Record<string, unknown> | null,
+    ) => Promise<Record<string, string>>;
     handoff: (credentials: Record<string, unknown>) => HandoffStep[];
   }
 > = {
@@ -383,7 +442,8 @@ export function readProvisioning(auth: unknown): ProvisioningDeclaration | null 
  * holds those names, so "what the form asks for" and "what a connection is
  * made of" are two different questions and the client should be answering
  * neither. Submitted bags are still validated against the FULL manifest schema,
- * and {@link provisionCredentials} drops these names whatever arrives.
+ * and whatever a body carries for a minted name is overwritten by what
+ * {@link provisionCredentials} returns.
  *
  * Returns a copy. The manifest it comes from is shared, so a strip written
  * through it would be a strip every later reader sees.
@@ -414,17 +474,17 @@ export function authWithoutMintedCredentials<T>(auth: T): T {
 /**
  * Run the provisioner an auth declares. Returns null when it declares none,
  * so the caller keeps the plain "whatever was submitted" path.
+ *
+ * `existing` is the decrypted bundle of the connection being RECONNECTED, or
+ * null when one is being created: a kind that already put something on a target
+ * carries it over rather than minting a second copy nobody can undo.
  */
 export async function provisionCredentials(
   auth: unknown,
   fields: SubmittedFields,
-  ctx: ProvisionContext,
+  existing: Record<string, unknown> | null,
 ): Promise<Record<string, string> | null> {
   const declaration = readProvisioning(auth);
   if (!declaration) return null;
-  const result = await KINDS[declaration.kind]!.mint(fields, ctx);
-  // Defence in depth: whatever the client sent for a provisioned name is
-  // dropped, not merged, so a crafted body cannot smuggle in its own key.
-  for (const name of declaration.provides) delete fields[name];
-  return result;
+  return KINDS[declaration.kind]!.mint(fields, existing);
 }
