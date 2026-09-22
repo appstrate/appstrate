@@ -1467,6 +1467,8 @@
   "catalogue.pendingLine_other": "{{count}} items shared with your spaces are not active yet.",
   "catalogue.pendingShow": "Show",
   "catalogue.onlyHere": "Active space",
+  "catalogue.allSpaces": "All spaces",
+  "catalogue.everywhereHint": "Shipped with Appstrate: readable in every space, with nothing to switch on.",
   "catalogue.pendingElsewhere_one": "{{count}} of them in your other spaces.",
   "catalogue.pendingElsewhere_other": "{{count}} of them in your other spaces.",
   "catalogue.offeredByShort": "by {{name}}",

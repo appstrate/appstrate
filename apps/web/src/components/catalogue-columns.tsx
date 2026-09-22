@@ -102,6 +102,8 @@ export function useCatalogueSelectColumn({
 export function useCatalogueOriginColumn(
   orgName: string,
   homeNameOf?: (item: CardItem) => string | null,
+  /** Readable in every space without being switched on: said once, here. */
+  everywhereOf?: (item: CardItem) => boolean,
 ): DataColumn<CardItem> {
   const { t } = useTranslation("settings");
   return {
@@ -111,11 +113,22 @@ export function useCatalogueOriginColumn(
     tier: 3,
     cell: (item) => {
       const home = item.source === "system" ? null : homeNameOf?.(item);
+      const everywhere = everywhereOf?.(item) ?? false;
       return (
         <span className="flex min-w-0 flex-col">
           <span className="text-muted-foreground truncate text-xs">
             {item.source === "system" ? t("catalogue.sourceSystem") : orgName}
           </span>
+          {everywhere && (
+            // Said once under the provider rather than repeated in every space
+            // column, where "Partout · Partout · Partout" read as a puzzle.
+            <span
+              className="text-muted-foreground/70 truncate text-[0.68rem]"
+              title={t("catalogue.everywhereHint")}
+            >
+              {t("catalogue.everywhere")}
+            </span>
+          )}
           {home && (
             <span
               className="text-muted-foreground/70 truncate text-[0.68rem]"
@@ -269,9 +282,9 @@ export function useCatalogueSpaceColumns({
       if (!placement) return <span className="text-muted-foreground/50">—</span>;
       // A system agent, skill or MCP server is readable in every space without
       // a row of its own: there is no switch to offer.
-      if (placement.everywhere) {
-        return <span className="text-muted-foreground text-xs">{t("catalogue.everywhere")}</span>;
-      }
+      // The origin column says "Partout" once for this row; a switch would be
+      // a control with nothing to change.
+      if (placement.everywhere) return <span className="text-muted-foreground/50">—</span>;
       const state = placement.activeIn.includes(space.id)
         ? "active"
         : placement.offeredIn.includes(space.id)

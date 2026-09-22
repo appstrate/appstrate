@@ -267,6 +267,34 @@ export function CataloguePreview({
 
   return (
     <div>
+      {/* The one line that asks the reader for a decision, at the TOP like
+          every other alert in the product: above the first block rather than
+          beside the table, since its button names the space it acts on. It
+          goes through the catalogue's own activation, which asks about the
+          agent's integrations before writing. */}
+      {offers.map((offer) => (
+        <Alert key={offer.id} variant="info" className="mb-5">
+          <Inbox className="h-4 w-4" />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <AlertTitle className="mb-0">
+                {offer.offeredBy
+                  ? t("catalogue.sheet.offerBy", { name: offer.offeredBy, space: offer.name })
+                  : t("catalogue.sheet.offer", { space: offer.name })}
+              </AlertTitle>
+              <p className="text-muted-foreground mt-0.5 text-xs">
+                {missingText(offer.id) ?? t("catalogue.sheet.offerCredentials")}
+              </p>
+            </div>
+            {offer.mayToggle && (
+              <Button size="sm" disabled={busy} onClick={() => onSetActive(offer.id, true)}>
+                {t("catalogue.sheet.activateIn", { space: offer.name })}
+              </Button>
+            )}
+          </div>
+        </Alert>
+      ))}
+
       {/* The action sits on the TITLE's line, not on the back link's: leaving
           for the package's own page acts on the package, while Back is the
           panel's own navigation. */}
@@ -294,35 +322,6 @@ export function CataloguePreview({
       </div>
 
       {item.description && <p className="mt-4 text-sm">{item.description}</p>}
-
-      {/* The one line that asks the reader for a decision, at the TOP like
-          every other alert in the product: above the first block rather than
-          beside the table, since its button names the space it acts on. It
-          goes through the catalogue's own activation, which asks about the
-          agent's integrations before writing. */}
-      {offers.map((offer) => (
-        <Alert key={offer.id} variant="info" className="mt-4">
-          <Inbox className="h-4 w-4" />
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0">
-              <AlertTitle className="mb-0">
-                {offer.offeredBy
-                  ? t("catalogue.sheet.offerBy", { name: offer.offeredBy, space: offer.name })
-                  : t("catalogue.sheet.offer", { space: offer.name })}
-              </AlertTitle>
-              <p className="text-muted-foreground mt-0.5 text-xs">
-                {missingText(offer.id) ?? t("catalogue.sheet.offerCredentials")}
-              </p>
-            </div>
-            {offer.mayToggle && (
-              <Button size="sm" disabled={busy} onClick={() => onSetActive(offer.id, true)}>
-                {t("catalogue.sheet.activateIn", { space: offer.name })}
-              </Button>
-            )}
-          </div>
-        </Alert>
-      ))}
-
       {/* The package's properties, in blocks each under a heading of its own —
           the same heading "Espaces" carries below. A gap alone had to carry the
           split and read as an accident of spacing instead. A list rather than

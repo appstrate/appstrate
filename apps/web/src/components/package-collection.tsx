@@ -83,6 +83,14 @@ export interface PackageCollectionProps {
   cardRun?: boolean;
   /** Drawn at the right end of the bar, where a list's actions always are. */
   actions?: ReactNode;
+  /**
+   * Filters the CALLER owns, cleared alongside the list's own.
+   *
+   * `list.reset` knows the dimensions it stores; a screen whose filters live in
+   * the URL (the catalogue's space and state) has some it cannot see, and
+   * "Réinitialiser" left those chips standing.
+   */
+  onResetFilters?: () => void;
   /** Above the bar: what this collection is. */
   header?: ReactNode;
   /** `CollectionTabs` for the bar's line, before the search. */
@@ -119,6 +127,7 @@ export function PackageCollection({
   extraFilters = NO_FILTERS,
   cardRun = true,
   actions,
+  onResetFilters,
   header,
   tabs,
   rowAction,
@@ -197,9 +206,13 @@ export function PackageCollection({
   // the bar and the count above and below it never move. This used to be three
   // early returns above the toolbar, which is how an empty list lost its bar
   // and had to re-offer the page's own actions as unlabelled icons.
+  const resetAll = () => {
+    list.reset();
+    onResetFilters?.();
+  };
   const emptyBody = filtering ? (
     <EmptyState message={t("list.noMatch")} icon={SearchX} compact>
-      <Button variant="outline" size="sm" onClick={list.reset}>
+      <Button variant="outline" size="sm" onClick={resetAll}>
         {t("toolbar.clearAll", { ns: "common" })}
       </Button>
     </EmptyState>
@@ -215,7 +228,7 @@ export function PackageCollection({
         placement={placement}
         search={{ value: query, onChange: list.setSearch, placeholder: searchPlaceholder }}
         filters={filters}
-        onReset={list.reset}
+        onReset={resetAll}
         // Only the table view has columns to choose from, and only the set the
         // list owns: a tick and a deed are not columns anyone hides.
         columns={view === "table" ? columnMenu(baseColumns, visibility) : undefined}

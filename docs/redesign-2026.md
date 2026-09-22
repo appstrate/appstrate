@@ -1777,16 +1777,41 @@ Two more things made the default view hard to read, both fixed:
   whatever its rank, and it is the tier-2 column — the one that survives a
   narrow table — so the reader's anchor never moves and never drops. It is also
   the wider column, since it carries the "ici" pill beside the name.
-- **A shortcut where the view switch used to be**: "Espace actif", a two-state
-  button. Pressed, the table is the reader's own space alone. It WRITES the
-  space filter (`?space=`) rather than holding a state of its own, so the chip
-  and the button cannot disagree, and a hand-picked pair of spaces simply
-  leaves it unpressed — which a two-value segmented control could not express.
+- **A switcher where the view switch used to be**: "Espace actif" against
+  "Tous les espaces", in the shape the rail's Espaces / Découvrir already has —
+  one of two states SHOWN rather than a button whose pressed state had to be
+  deduced. It WRITES the space filter (`?space=`) rather than holding a state
+  of its own, so the chip and the switcher cannot disagree; a hand-picked pair
+  of spaces lights neither half, which is the truth. Découvrir drops both the
+  switcher and the space filter: its rows are placed in no space, so narrowing
+  by space there would filter on nothing.
 
-Narrowing must not hide a decision: the line above the table counts shares
+Narrowing must not hide a decision: the alert above the table counts shares
 waiting in EVERY space the caller reaches, adds "Dont N dans vos autres
 espaces" when the table shows fewer, and its "Voir" widens the table back
 before filtering on the offered state.
+
+Three defects that came with those controls, all fixed and each worth knowing:
+
+- **Two `setSearchParams` in one handler lose the first.** Each builds its own
+  `URLSearchParams` from the params it was RENDERED with, so the second
+  overwrites the first: "Voir" widened the table and filtered on offers, and
+  only the filter survived — an empty list, from a button that promised the
+  opposite. The two URL dimensions are written by one function now.
+- **"Réinitialiser" could not see them.** The bar resets the dimensions
+  `list.reset` owns, and the catalogue's space and state live in the URL, so
+  both chips stayed. `PackageCollection` takes an `onResetFilters` the caller
+  owns, called alongside.
+- **An alert belongs above the title**, both on the list and on a package's
+  sheet — the decision is not something a reader should meet after the heading
+  of the thing it concerns.
+
+**"Partout" is said once, not once per column**
+
+A system agent read "Partout · Partout · Partout" across the space columns,
+with no switch anywhere: three repetitions of one fact, in the place where
+every other row offers a control. The fact moved to the origin column, under
+the provider, and the space cells are a quiet dash.
 
 **Découvrir is structurally empty for agents and skills, and that is correct**
 

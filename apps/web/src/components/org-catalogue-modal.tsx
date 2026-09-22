@@ -39,8 +39,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { ArrowLeft, Boxes, Layers, LibraryBig, SquareUser, Wrench } from "lucide-react";
+import { ArrowLeft, Boxes, Inbox, Layers, LibraryBig, Wrench } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { Alert } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import type { PackageType } from "@appstrate/core/validation";
@@ -219,18 +220,7 @@ export function OrgCatalogueModal({
     .filter((id) => knownSpaceIds.includes(id));
   const visibleSpaces =
     chosenSpaces.length > 0 ? spaces.filter((space) => chosenSpaces.includes(space.id)) : spaces;
-  const setChosenSpaces = (next: string[]) =>
-    setSearchParams(
-      (prev) => {
-        const out = new URLSearchParams(prev);
-        if (next.length > 0) out.set("space", next.join(","));
-        else out.delete("space");
-        return out;
-      },
-      // The overlay's background travels in the state; dropping it would
-      // close the catalogue under the reader's hand.
-      { replace: true, state: routerLocation.state },
-    );
+  const setChosenSpaces = (next: string[]) => narrow({ spaces: next });
   const spaceColumnsInput = visibleSpaces.map((space) => ({
     id: space.id,
     name: space.name,
@@ -341,16 +331,41 @@ export function OrgCatalogueModal({
     .filter((value): value is (typeof STATE_VALUES)[number] =>
       (STATE_VALUES as readonly string[]).includes(value),
     );
-  const setStates = (next: string[]) =>
+  const setStates = (next: string[]) => narrow({ states: next });
+  /**
+   * The two URL-backed dimensions, written TOGETHER.
+   *
+   * They used to have a setter each, and two `setSearchParams` in one handler
+   * lost the first: each builds its own `URLSearchParams` from the params it
+   * was rendered with, so the second overwrote the first. "Voir les partages"
+   * widened the table and filtered on offers, and only the filter survived —
+   * an empty list, on a button that promised the opposite.
+   */
+  function narrow({
+    spaces: nextSpaces,
+    states: nextStates,
+  }: {
+    spaces?: string[];
+    states?: string[];
+  }) {
     setSearchParams(
       (prev) => {
         const out = new URLSearchParams(prev);
-        if (next.length > 0) out.set("state", next.join(","));
-        else out.delete("state");
+        if (nextSpaces !== undefined) {
+          if (nextSpaces.length > 0) out.set("space", nextSpaces.join(","));
+          else out.delete("space");
+        }
+        if (nextStates !== undefined) {
+          if (nextStates.length > 0) out.set("state", nextStates.join(","));
+          else out.delete("state");
+        }
         return out;
       },
+      // The overlay's background travels in the state; dropping it would
+      // close the catalogue under the reader's hand.
       { replace: true, state: routerLocation.state },
     );
+  }
   const visibleIds = visibleSpaces.map((space) => space.id);
   /** Narrowed to the reader's own space, which is what the bar's shortcut writes. */
   const onlyHere = chosenSpaces.length === 1 && chosenSpaces[0] === spaceId;
@@ -389,8 +404,10 @@ export function OrgCatalogueModal({
     const placement = placementById.get(item.id);
     return total + (placement?.offeredIn.filter((id) => visibleIds.includes(id)).length ?? 0);
   }, 0);
+  // Découvrir's rows are placed in no space at all, so narrowing by space
+  // there filters on nothing: the control is dropped rather than offered dead.
   const spaceFilter: FilterSpec | null =
-    spaces.length > 1
+    !discovering && spaces.length > 1
       ? {
           id: "space",
           label: t("catalogue.filter.space"),
@@ -492,12 +509,16 @@ export function OrgCatalogueModal({
       }),
     onToggleAll: () => setSelected(allSelected ? new Set() : new Set(activatable)),
   });
-  const originColumn = useCatalogueOriginColumn(orgName, (item) => {
-    const home = placementById.get(item.id)?.homeSpaceId;
-    // `null` when the caller does not reach the home: the server withholds the
-    // id rather than naming a space they cannot enter (RBAC spec §6.9).
-    return home ? spaceNameOf(home) : null;
-  });
+  const originColumn = useCatalogueOriginColumn(
+    orgName,
+    (item) => {
+      const home = placementById.get(item.id)?.homeSpaceId;
+      // `null` when the caller does not reach the home: the server withholds
+      // the id rather than naming a space they cannot enter (RBAC spec §6.9).
+      return home ? spaceNameOf(home) : null;
+    },
+    (item) => placementById.get(item.id)?.everywhere === true,
+  );
   const setActive = (item: CardItem, targetSpaceId: string, next: boolean) =>
     activate.mutate(
       { spaceId: targetSpaceId, packageId: item.id, active: next },
@@ -753,39 +774,42 @@ export function OrgCatalogueModal({
           emptyHint={t(discovering ? "catalogue.emptyDiscoverHint" : "catalogue.emptyPlacedHint")}
           emptyIcon={kind.icon}
           list={list}
+          // The space and the state live in the URL, so the bar's own reset
+          // could not see them: "Réinitialiser" left both chips standing.
+          onResetFilters={() => narrow({ spaces: [], states: [] })}
           view={view}
           header={
             <>
-              <SettingsHeading className="mb-4" title={t(kind.titleKey)} />
-              {/* The offers waiting for an answer, said above the table and
-                  one click from being the only rows in it. Not a second list
-                  of them: they ARE rows of this table, and a copy above it
-                  would be two places to take one decision. */}
+              {/* Above the title, where every alert in the product sits: it is
+                  the one line asking the reader for a decision, and it must not
+                  wait behind the heading of the list it concerns. */}
               {!discovering && pendingAll > 0 && !states.includes("offered") && (
-                <div className="border-border bg-card mb-4 flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm">
-                  <span>
-                    {t("catalogue.pendingLine", { count: pendingAll })}
-                    {pendingAll > pendingHere && (
-                      <span className="text-muted-foreground">
-                        {" "}
-                        {t("catalogue.pendingElsewhere", { count: pendingAll - pendingHere })}
-                      </span>
-                    )}
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      // Showing them means showing them ALL: a narrowed table
-                      // would answer the button with an empty list.
-                      if (pendingAll > pendingHere) setChosenSpaces([]);
-                      setStates(["offered"]);
-                    }}
-                  >
-                    {t("catalogue.pendingShow")}
-                  </Button>
-                </div>
+                <Alert variant="info" className="mb-4">
+                  <Inbox className="h-4 w-4" />
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <span>
+                      {t("catalogue.pendingLine", { count: pendingAll })}
+                      {pendingAll > pendingHere && (
+                        <span className="text-muted-foreground">
+                          {" "}
+                          {t("catalogue.pendingElsewhere", { count: pendingAll - pendingHere })}
+                        </span>
+                      )}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      // Showing them means showing them ALL, in ONE write: a
+                      // table still narrowed to one space would answer this
+                      // button with an empty list.
+                      onClick={() => narrow({ spaces: [], states: ["offered"] })}
+                    >
+                      {t("catalogue.pendingShow")}
+                    </Button>
+                  </div>
+                </Alert>
               )}
+              <SettingsHeading className="mb-4" title={t(kind.titleKey)} />
             </>
           }
           tabs={
@@ -833,24 +857,48 @@ export function OrgCatalogueModal({
           rowAction={(item) => preview.open(item.id)}
           actions={
             <>
-              {/* The space filter's one-click form, in the bar's own corner:
-                  the reader's space alone, or every space. It WRITES the
+              {/* The space filter's two-value form, in the bar's own corner and
+                  in the shape the rail's Espaces / Découvrir already has: one
+                  of two states is SHOWN rather than pressed. It writes the
                   filter rather than holding a state of its own, so the chip
-                  below and this button can never disagree — and a hand-picked
-                  pair of spaces simply leaves it unpressed. */}
-              {spaceId && spaces.length > 1 && spaces.some((space) => space.id === spaceId) && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  aria-pressed={onlyHere}
-                  className="aria-pressed:bg-accent aria-pressed:text-accent-foreground gap-1.5"
-                  onClick={() => setChosenSpaces(onlyHere ? [] : [spaceId])}
-                >
-                  <SquareUser />
-                  {t("catalogue.onlyHere")}
-                </Button>
-              )}
+                  below and this control can never disagree; a hand-picked pair
+                  of spaces lights neither half, which is the truth. Découvrir
+                  has no space columns at all, so it has no use for it. */}
+              {!discovering &&
+                spaceId &&
+                spaces.length > 1 &&
+                spaces.some((space) => space.id === spaceId) && (
+                  <div
+                    role="tablist"
+                    aria-label={t("catalogue.filter.space")}
+                    className="bg-sidebar-accent/40 flex h-8 shrink-0 gap-0.5 rounded-lg p-0.5"
+                  >
+                    {[
+                      { id: "here", label: t("catalogue.onlyHere"), on: onlyHere },
+                      {
+                        id: "all",
+                        label: t("catalogue.allSpaces"),
+                        on: chosenSpaces.length === 0,
+                      },
+                    ].map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={option.on}
+                        className={cn(
+                          "focus-visible:ring-ring flex items-center rounded-md px-2.5 text-xs font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-2",
+                          option.on
+                            ? "bg-card text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                        onClick={() => setChosenSpaces(option.id === "here" ? [spaceId] : [])}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               {view === "table" && picked.length > 0 ? (
                 <Button
                   type="button"

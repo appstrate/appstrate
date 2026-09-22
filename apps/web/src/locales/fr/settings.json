@@ -1467,6 +1467,8 @@
   "catalogue.pendingLine_other": "{{count}} éléments partagés avec vos espaces ne sont pas encore activés.",
   "catalogue.pendingShow": "Voir",
   "catalogue.onlyHere": "Espace actif",
+  "catalogue.allSpaces": "Tous les espaces",
+  "catalogue.everywhereHint": "Fourni avec Appstrate : lisible dans tous les espaces, sans activation.",
   "catalogue.pendingElsewhere_one": "Dont {{count}} dans vos autres espaces.",
   "catalogue.pendingElsewhere_other": "Dont {{count}} dans vos autres espaces.",
   "catalogue.offeredByShort": "par {{name}}",
