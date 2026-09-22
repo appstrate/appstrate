@@ -39,7 +39,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Boxes, Layers, LibraryBig, Wrench } from "lucide-react";
+import { ArrowLeft, Boxes, Layers, LibraryBig, Wrench } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
@@ -95,7 +95,6 @@ import {
 } from "./catalogue-columns";
 import { RailButton } from "./settings/rail-link";
 import { RailGroup, RailHeader } from "./settings/rail-shell";
-import { SettingsHeading } from "./settings/settings-heading";
 import { Spinner } from "./spinner";
 
 /**
@@ -655,6 +654,27 @@ export function OrgCatalogueModal({
       contentScrollArea
       closeLabel={t("btn.close", { ns: "common" })}
       reserveCloseArea
+      // Where the reader is, kept in place while the pane scrolls: the kind
+      // they are browsing, or the package they opened, with the way back.
+      contentHeader={
+        reading ? (
+          <div className="flex min-w-0 items-center gap-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="-ml-2 shrink-0 gap-1.5"
+              onClick={preview.close}
+            >
+              <ArrowLeft />
+              {t("catalogue.back")}
+            </Button>
+            <span className="text-muted-foreground shrink-0">/</span>
+            <span className="truncate text-sm font-medium">{reading.name || reading.id}</span>
+          </div>
+        ) : (
+          <span className="text-sm font-semibold">{t(kind.titleKey)}</span>
+        )
+      }
       onClose={onClose}
     >
       {reading ? (
@@ -681,7 +701,6 @@ export function OrgCatalogueModal({
               next,
             )
           }
-          onBack={preview.close}
         />
       ) : (
         <PackageCollection
@@ -697,7 +716,6 @@ export function OrgCatalogueModal({
           view={view}
           header={
             <>
-              <SettingsHeading className="mb-4" title={t(kind.titleKey)} />
               {/* The offers waiting for an answer, said above the table and
                   one click from being the only rows in it. Not a second list
                   of them: they ARE rows of this table, and a copy above it

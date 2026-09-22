@@ -27,7 +27,6 @@ import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
-  ArrowLeft,
   Boxes,
   Clock,
   ExternalLink,
@@ -42,6 +41,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { cn } from "@appstrate/ui/cn";
 import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
 import { Alert, AlertTitle } from "@appstrate/ui/components/alert";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -162,7 +162,6 @@ export function CataloguePreview({
   protocol,
   busy,
   onSetActive,
-  onBack,
 }: {
   item: LibraryPackageItem;
   type: PackageType;
@@ -180,7 +179,6 @@ export function CataloguePreview({
   busy: boolean;
   /** Goes through the catalogue's own activation, which asks about integrations first. */
   onSetActive: (spaceId: string, next: boolean) => void;
-  onBack: () => void;
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const { currentOrg } = useOrg();
@@ -269,11 +267,6 @@ export function CataloguePreview({
 
   return (
     <div>
-      <Button variant="ghost" size="sm" className="mb-3 -ml-2 gap-1.5" onClick={onBack}>
-        <ArrowLeft />
-        {t("catalogue.back")}
-      </Button>
-
       {/* The action sits on the TITLE's line, not on the back link's: leaving
           for the package's own page acts on the package, while Back is the
           panel's own navigation. */}
@@ -434,7 +427,12 @@ export function CataloguePreview({
           </p>
         )}
         {mode === "single" && rows[0] && (
-          <div className="border-border flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm">
+          <div
+            className={cn(
+              "border-border flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm",
+              rows[0].state === "offered" && "bg-primary/5",
+            )}
+          >
             <div className="min-w-0">
               <p>
                 <span className="font-medium">{rows[0].name}</span>
@@ -461,7 +459,9 @@ export function CataloguePreview({
               </TableHeader>
               <TableBody>
                 {rows.map((row) => (
-                  <TableRow key={row.id}>
+                  // The alert above names a space; this is that space. Same
+                  // tint as the alert, so the eye carries one to the other.
+                  <TableRow key={row.id} className={row.state === "offered" ? "bg-primary/5" : ""}>
                     <TableCell className="font-medium">{row.name}</TableCell>
                     <TableCell className="text-muted-foreground">{stateLabel(row)}</TableCell>
                     {missingAnywhere && (

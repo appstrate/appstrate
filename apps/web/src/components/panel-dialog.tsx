@@ -40,6 +40,16 @@ interface PanelDialogProps {
   mobileAsSurface?: boolean;
   /** Sticky action area owned by the content pane, never by the rail. */
   contentFooter?: ReactNode;
+  /**
+   * A band at the top of the content pane that STAYS while the pane scrolls.
+   *
+   * The dialog's close control floats over that pane, so without an opaque
+   * band the content slides under it and the cross lands on whatever text
+   * happens to be passing. The band is that opaque surface, and since it is
+   * there anyway it carries where the reader is — a back control, a title —
+   * instead of being empty reserved space.
+   */
+  contentHeader?: ReactNode;
   children: ReactNode;
   onClose: () => void;
 }
@@ -53,17 +63,31 @@ export function PanelDialog({
   reserveCloseArea = false,
   mobileAsSurface = false,
   contentFooter,
+  contentHeader,
   children,
   onClose,
 }: PanelDialogProps) {
   const isMobile = useIsMobile();
   const content = (
     <div
-      className={cn("w-full max-w-full min-w-0 p-6", reserveCloseArea && "md:pt-14")}
+      className={cn(
+        "w-full max-w-full min-w-0 p-6",
+        // The band reserves the close control's room itself.
+        reserveCloseArea && !contentHeader && "md:pt-14",
+        contentHeader && "pt-0",
+      )}
       style={{ contain: "inline-size" }}
     >
       {/* `pr-10` clears the dialog's own close button, which is absolutely
           positioned top-right and would otherwise sit on the selector. */}
+      {contentHeader && (
+        // Sticky, opaque, and inset the way the pane is: `-mx-6` cancels the
+        // pane's padding so the band spans its full width, `pr-14` keeps the
+        // close control's corner free.
+        <div className="bg-background sticky top-0 z-20 -mx-6 mb-4 border-b px-6 py-2 pr-14">
+          {contentHeader}
+        </div>
+      )}
       {mobileNav && <div className="mb-4 pr-10 md:hidden">{mobileNav}</div>}
       {children}
     </div>

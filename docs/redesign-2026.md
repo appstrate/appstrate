@@ -1742,6 +1742,24 @@ space's Skills list. That list answers "what can I use here", and an embedded
 skill can be neither opened nor added to another agent there. If reuse is ever
 wanted, the answer is a request to share, not a read-only row.
 
+**The panel keeps a band under the close control (22 September)**
+
+The dialog's close control floats over the content pane, so everything scrolled
+under it and the cross landed on whatever text was passing. `PanelDialog` takes
+a `contentHeader` now: an opaque band, sticky at the top of that pane, with the
+corner kept free for the cross. Since it is there anyway it says where the
+reader is — the kind they are browsing, or "← Retour au catalogue / Radar IA"
+on a package's sheet, which is where the sheet's back control now lives. The
+list's own heading went with it: the band carries the name once.
+
+**The share alert and the row it names share a tint**
+
+An alert saying "partagé avec Bac à sable" sat above a table where nothing
+pointed at Bac à sable. The row in that state carries the alert's tint
+(`bg-primary/5`), so the eye goes from one to the other. It keys off the STATE,
+not off the space the reader stands in: the sheet says nothing about "ici", and
+a reader looking at four spaces gets the same answer wherever they are.
+
 **The vocabulary is sharing, not offering (22 September)**
 
 The screen said "proposé", a word this product invented. It says **partagé**
