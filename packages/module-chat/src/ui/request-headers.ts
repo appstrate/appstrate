@@ -1,16 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The scoping headers every module-chat request carries.
- *
- * A LEAF, imported by both `sessions.ts` and `chat-skills.ts`: the two files
- * had byte-identical copies of this helper, and `sessions.ts` importing
- * `chat-skills.ts` means the shared one cannot live in either.
- */
+/** Scoping headers for every module-chat request. A LEAF: `sessions.ts` imports
+ * `chat-skills.ts`, so the copy they share fits in neither. */
 
 import type { GetHeaders } from "./runtime-context.ts";
 
-/** The host's org/space headers, plus the JSON content type when there is a body. */
 export function requestHeaders(
   getHeaders: GetHeaders | null | undefined,
   json = false,

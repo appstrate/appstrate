@@ -48,6 +48,7 @@ import {
   PLATFORM_DEFAULT_SKILLS,
   byPackageId,
   skillDiscoverySchema,
+  type ChatSkillEntry,
   type SkillHint,
 } from "./skills.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
@@ -93,16 +94,6 @@ export const sessionSkillsSchema = z.object({
  * have one.
  */
 const SKILL_PICKER_LIMIT = 100;
-
-/** One row of `GET /api/chat/skills` — the picker's and the `/` popover's source. */
-interface ChatSkillEntry {
-  package_id: string;
-  display_name: string;
-  description: string;
-  version: string | null;
-  /** `platform` = indexed by every turn whatever the space holds; `space` = catalogue. */
-  source: "platform" | "space";
-}
 
 type SessionRow = typeof chatSessions.$inferSelect;
 type MessageRow = typeof chatMessages.$inferSelect;

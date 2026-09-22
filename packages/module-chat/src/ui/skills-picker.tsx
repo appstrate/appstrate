@@ -50,6 +50,16 @@ const GROUP_KEYS: Record<ChatSkillEntry["source"], string> = {
   space: "skills.group.space",
 };
 
+/**
+ * A package id as a DOM id fragment: `@acme/x` → `-acme-x`. The raw id puts `@`
+ * and `/` in an `id`/`htmlFor` pair — legal in HTML5, but unusable from a CSS
+ * selector without escaping, so anything reaching for one (a test, a style)
+ * breaks on it rather than on the id it meant.
+ */
+function domIdPart(packageId: string): string {
+  return packageId.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+}
+
 export function SkillsPicker({ sessionId }: { sessionId: string }) {
   const { t } = useChatHost();
   const getHeaders = useChatHeaders();
@@ -177,7 +187,7 @@ export function SkillsPicker({ sessionId }: { sessionId: string }) {
                   {t(GROUP_KEYS[group.source])}
                 </div>
                 {group.skills.map((skill) => {
-                  const id = `skills-pin-${skill.package_id}`;
+                  const id = `skills-pin-${domIdPart(skill.package_id)}`;
                   const checked = pinnedSet.has(skill.package_id);
                   return (
                     <div key={skill.package_id} className="flex items-start gap-2 rounded-md p-1">

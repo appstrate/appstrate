@@ -26,7 +26,7 @@ import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions, chatSessionSkills } from "@appstrate/db/schema";
 import { notFound } from "@appstrate/core/api-errors";
 import { uiMessageText } from "./message-text.ts";
-import { parseSkillMentions } from "./skill-mentions.ts";
+import { splitSkillDirectives } from "./skill-mentions.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import { toSkillDiscovery, type ChatSkillSelection, type SkillDiscovery } from "./skills.ts";
 import type { UIMessage } from "ai";
@@ -485,17 +485,16 @@ function titleFromText(text: string): string | null {
   return plain.length > 60 ? `${plain.slice(0, 57)}…` : plain;
 }
 
-/** Each `skill` directive replaced by its label, in source order. */
+/**
+ * Each `skill` directive replaced by its label, in source order — the title
+ * projection of {@link splitSkillDirectives}, not a second walk of the same
+ * text: a title that cut the directives anywhere else than the bubble does
+ * would name a conversation after markup the user never sees.
+ */
 function withoutSkillDirectives(text: string): string {
-  const mentions = parseSkillMentions(text);
-  if (mentions.length === 0) return text;
-  let out = "";
-  let cursor = 0;
-  for (const mention of mentions) {
-    out += text.slice(cursor, mention.index) + mention.label;
-    cursor = mention.index + mention.raw.length;
-  }
-  return out + text.slice(cursor);
+  return splitSkillDirectives(text)
+    .map((segment) => (segment.kind === "text" ? segment.text : segment.label))
+    .join("");
 }
 
 /**

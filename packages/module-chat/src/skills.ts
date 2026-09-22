@@ -1,23 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Which skills a chat turn puts in its index, and in what order.
+ * Which skills a chat turn puts in its index, and in what order. PURE: the
+ * route fetches, this decides, `prompt.ts` renders.
  *
- * Four sources feed one index — the platform defaults below, the session's
- * pins, the space catalogue, and (phase 4) a `/skill` mention — and this
- * resolver is where they become one deterministic list. It is PURE: the route
- * fetches, this decides, `prompt.ts` renders. That split is what makes the
- * ordering testable without a database.
- *
- * Determinism is the load-bearing property, not a nicety. The rendered index
- * lands in the chat's system prompt, which pi-ai emits as ONE block carrying
- * ONE `cache_control` breakpoint: any byte that moves between turns for the
- * same session state invalidates the cached prefix AND the conversation
- * history behind it. So everything here sorts by package id, and nothing reads
- * a clock, a counter or an insertion order.
+ * Determinism is load-bearing: the index sits in the system prompt, which
+ * pi-ai emits as ONE `cache_control` block, so a byte that moves between turns
+ * for the same session state invalidates the cached prefix and the history
+ * behind it. Hence sorting by package id and reading no clock or counter.
  */
 
 import { z } from "zod";
+
+/**
+ * One pinnable skill as `GET /api/chat/skills` projects it: `routes.ts` builds
+ * this shape and the module's OpenAPI documents it under the same name.
+ * `platform` = indexed by every turn whatever the space holds; `space` = the
+ * catalogue.
+ */
+export interface ChatSkillEntry {
+  package_id: string;
+  display_name: string;
+  description: string;
+  version: string | null;
+  source: "platform" | "space";
+}
 
 /**
  * One skill as `GET /api/me/context` projects it — the `skills` catalogue and

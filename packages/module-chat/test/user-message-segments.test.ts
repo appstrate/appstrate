@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { splitSkillDirectives } from "../src/ui/skill-directive.ts";
+import { splitSkillDirectives } from "../src/skill-mentions.ts";
 
 describe("splitSkillDirectives", () => {
   it("returns plain text as a single run", () => {

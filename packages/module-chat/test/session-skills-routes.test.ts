@@ -26,6 +26,7 @@ import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import {
   createTestContext,
   authHeaders,
+  memberContext,
   type TestContext,
 } from "../../../apps/api/test/helpers/auth.ts";
 import { VISIBILITY_META_NAMESPACE } from "../../../apps/api/src/lib/package-helpers.ts";
@@ -294,6 +295,20 @@ describe("GET /api/chat/skills", () => {
     }
     // A listed space skill is listed once, and on the space half.
     expect(skills.filter((s) => s.package_id === LISTED_SKILL)).toHaveLength(1);
+  });
+
+  it("answers 200 with an empty list to a caller who holds `chat:read` but not `skills:read`", async () => {
+    // The `runner` preset IS that caller: the chat module grants it
+    // `chat:read`/`chat:write`, core grants it no `skills:read`. Both halves of
+    // the picker are then refused — `/api/me/context` resolves no skills and
+    // `GET /api/packages/skills` 403s — and the route has to degrade to an
+    // empty affordance. Propagating either refusal would turn a popover the
+    // user cannot use into a 403 or a 500 they cannot dismiss; the refusal that
+    // matters is the one the TURN reports when it tries to load a skill.
+    const runner = await memberContext(ctx, "member", "runner");
+    const res = await app.request("/api/chat/skills", { headers: authHeaders(runner) });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ skills: [] });
   });
 
   it("sorts by package id within each half", async () => {

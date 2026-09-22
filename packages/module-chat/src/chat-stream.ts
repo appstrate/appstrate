@@ -370,25 +370,30 @@ export async function handleChatStream(
   // `platformMcp` optimistically; if the `mcp` module is absent the engine just
   // gets no tools.
   //
-  // The promise settles to a RESULT and never rejects: every early return
-  // between here and the point the block is consumed (invalid generation
-  // settings, a gate rejection) would otherwise leave a rejection with no
-  // handler. The error is rethrown where the block is consumed.
-  // Started WITH phase B, not after it: the mention loader reads
+  // Started BEFORE phase B, not chained behind it: the mention loader reads
   // `GET /api/packages/skills/{scope}/{name}` per id and depends on nothing the
-  // session row produces, so it overlaps the caller-context read instead of
-  // queueing behind it. Like phase B it settles to a result and never rejects
-  // (`loadMentionedSkills` turns every failure into a per-skill reason), so an
-  // early return between here and the join leaves no unhandled rejection.
+  // session row produces, so it does not wait on that round trip and overlaps
+  // the caller-context read. Like phase B it settles to a result and never
+  // rejects (`loadMentionedSkills` turns every failure into a per-skill
+  // reason), so an early return between here and the join leaves no unhandled
+  // rejection.
   const mentionedSkillsPromise: Promise<ReadonlyMap<string, LoadedSkill>> = mentionedSkills.length
     ? loadMentionedSkills(deps, { origin, headers, spaceId }, mentionedSkills)
     : Promise.resolve(new Map());
 
+  // Started HERE, before the chain, so `phaseBMs` covers the whole phase —
+  // including the wait on the session row the block is chained behind. Starting
+  // it inside `.then()` would time the HTTP read alone and report a phase that
+  // is systematically shorter than the one the turn actually paid for.
+  const phaseBStart = Date.now();
   let phaseBMs = 0;
+  // The promise settles to a RESULT and never rejects: every early return
+  // between here and the point the block is consumed (invalid generation
+  // settings, a gate rejection) would otherwise leave a rejection with no
+  // handler. The error is rethrown where the block is consumed.
   const contextBlockPromise: Promise<{ ok: true; block: string } | { ok: false; error: unknown }> =
     sessionSkills
       .then((skills) => {
-        const phaseBStart = Date.now();
         return buildCallerContextBlock(c, {
           origin,
           headers,
@@ -402,7 +407,7 @@ export async function handleChatStream(
           // is given below, so the persona and the block agree by construction.
           skills,
         }).finally(() => {
-          // Wall time of the block itself.
+          // Wall time of the whole phase: the session-row wait plus the block.
           phaseBMs = Date.now() - phaseBStart;
         });
       })
@@ -574,9 +579,10 @@ export async function handleChatStream(
   }
 
   // Everything before generation, for an ADMITTED turn: the two overlapped
-  // phases (their wall times, not a sum — `phaseBMs` runs under `phaseAMs`),
-  // the claim/persist round trips, and the whole span since the request was
-  // parsed. A rejected turn (gate, dead credential, unsupported family,
+  // phases (their wall times, not a sum — they start together and OVERLAP, but
+  // neither contains the other: phase A ends at the model-list join, phase B
+  // whenever its own read settles, which may be after that), the claim/persist
+  // round trips, and the whole span since the request was parsed. A rejected turn (gate, dead credential, unsupported family,
   // saturated capacity) returns above and is not measured here.
   logger.info("chat preamble", {
     credentialMode,

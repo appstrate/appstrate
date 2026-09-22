@@ -9,34 +9,27 @@
  *     :skill[/copilot]{name=@appstrate/copilot}
  *
  * The label is what the chip shows; `name` carries the package id. That raw
- * text is what gets PERSISTED — the user's message is never rewritten, so the
- * transcript keeps an audit trail of what was asked, not of what was resolved.
+ * text is what gets PERSISTED — the message is never rewritten, so the
+ * transcript records what was asked, not what was resolved.
  *
  * The body enters the USER TURN TEXT, never the system prompt: the prompt is
- * one `cache_control` block (`prompt.ts`) and a 32 KiB body landing in it would
- * bust the cached prefix on the turn a skill is mentioned AND on every turn
- * after it. Injecting into the history instead costs the body once, at the
- * position it was mentioned, exactly like Claude Code's own skill loading.
+ * one `cache_control` block (`prompt.ts`) and a 32 KiB body there would bust
+ * the cached prefix on the mention turn and on every turn after it.
  *
- * Which means the projection below runs on EVERY turn, over the whole history.
- * It is pure GIVEN `(messages, loaded)`: no clocks, no counters, no iteration
- * over a Map's insertion order. The LOADER is what may change between turns —
- * bodies are re-read every turn BY DESIGN, so a mention follows the skill's
- * current definition and a revoked skill stops loading — and the cache miss
- * that a rare edit costs is the accepted price of that.
+ * So the projection below runs on EVERY turn, over the whole history, and is
+ * pure GIVEN `(messages, loaded)`. The LOADER is what may change between turns:
+ * bodies are re-read by design, so a mention follows the skill's current
+ * definition and a revoked skill stops loading.
  */
 
 import type { UIMessage } from "ai";
 import { scopedNameRegex } from "@appstrate/core/validation";
 
 /**
- * One skill body, capped. 32 KiB is ~8k tokens — a generous SKILL.md and still
- * an order of magnitude below the context a turn can carry, so a pathological
- * skill cannot eat the conversation it was mentioned in.
- *
- * The cap is applied HERE, at projection time, and not by the loader: it is the
- * model-facing serialization that must be bounded, and this is the one place
- * that serialization is written.
+ * One skill body, capped. 32 KiB is ~8k tokens — a generous SKILL.md, and far
+ * enough below a turn's context that a pathological skill cannot eat the
+ * conversation. Applied here rather than in the loader: what must be bounded is
+ * the model-facing serialization, and this file is where it is written.
  */
 export const MAX_SKILL_BODY_BYTES = 32 * 1024;
 
@@ -61,25 +54,17 @@ export interface LoadedSkillError {
 export type LoadedSkill = LoadedSkillBody | LoadedSkillError;
 
 /**
- * Reason rendered for a mentioned id the loaded map does not mention at all —
- * as opposed to one it explicitly failed on, which carries its own reason.
- * Reachable when the loader was never started (a turn whose mentions were all
- * added by an earlier message is still re-projected here).
+ * Reason for a mentioned id the loaded map does not mention at all — as opposed
+ * to one it explicitly failed on, which carries its own reason.
  */
 const UNKNOWN_REASON = "not resolved for this turn";
 
 /**
- * The directive grammar, strict on BOTH halves.
- *
- * The type is `skill` and nothing else, and the id is the AFPS scoped-name
- * shape — anything that does not match is prose and is left alone, which is why
- * a user can still type `:skill[` in a sentence, or paste a directive of
- * another type, without the server silently eating it.
- *
- * The id pattern here is deliberately LOOSER than {@link scopedNameRegex}
- * (which forbids leading/trailing dashes): the regex finds candidates, the
- * canonical validator decides. Re-typing the anchored canonical source into a
- * global regex is what would let the two drift.
+ * The directive grammar, strict on both halves: type `skill` and nothing else,
+ * id in the AFPS scoped-name shape. Anything else stays prose, so typing
+ * `:skill[` in a sentence is safe. The id pattern is deliberately LOOSER than
+ * {@link scopedNameRegex} — this finds candidates, that validator decides;
+ * re-typing its anchored source here is what would let the two drift.
  */
 const SKILL_DIRECTIVE_RE = /:skill\[([^\]\n]{1,1024})\]\{name=(@[a-z0-9-]+\/[a-z0-9-]+)\}/g;
 
@@ -109,6 +94,31 @@ export function parseSkillMentions(text: string): SkillMention[] {
     if (!scopedNameRegex.test(id)) continue;
     out.push({ id, label: m[1]!, raw: m[0]!, index: m.index });
   }
+  return out;
+}
+
+/** One run of a persisted text: prose, or a directive resolved to its parts. */
+export type SkillTextSegment =
+  { kind: "text"; text: string } | { kind: "skill"; label: string; id: string };
+
+/**
+ * Split a persisted text on its directives; the prose runs are the literal
+ * gaps between them.
+ *
+ * ONE home for that projection, because three consumers must agree on it: the
+ * user bubble renders the segments as chips, the conversation title maps them
+ * to their labels, and both have to cut the text exactly where the server's own
+ * parser finds a directive.
+ */
+export function splitSkillDirectives(text: string): SkillTextSegment[] {
+  const out: SkillTextSegment[] = [];
+  let cursor = 0;
+  for (const mention of parseSkillMentions(text)) {
+    if (mention.index > cursor) out.push({ kind: "text", text: text.slice(cursor, mention.index) });
+    out.push({ kind: "skill", label: mention.label, id: mention.id });
+    cursor = mention.index + mention.raw.length;
+  }
+  if (cursor < text.length) out.push({ kind: "text", text: text.slice(cursor) });
   return out;
 }
 

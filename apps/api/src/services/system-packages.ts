@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { join } from "node:path";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
@@ -15,6 +15,27 @@ import { storageFolderForType } from "./package-items/config.ts";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 
 export type { SystemPackageEntry };
+
+/**
+ * A system package's id is already owned by an ORGANIZATION's own package.
+ *
+ * Its own class because the boot call site swallows a sync failure into a warn
+ * — right, for a transient S3 or pool error, wrong for this one: the collision
+ * cannot heal on the next boot, and the alternative to failing is a system
+ * package that silently never ships. `lib/boot.ts` rethrows this one, and only
+ * this one, which exits the process.
+ */
+export class SystemPackageOwnershipError extends Error {
+  constructor(readonly packageIds: readonly string[]) {
+    super(
+      `System package id(s) already owned by an organization: ${[...packageIds].sort().join(", ")}. ` +
+        "A system package must never overwrite an organization's own package, so the sync refused to " +
+        "write. Rename the organization package (publish it under a different @scope/name id) and " +
+        "restart.",
+    );
+    this.name = "SystemPackageOwnershipError";
+  }
+}
 
 /** What one `syncSystemPackagesToDb` pass actually wrote. */
 interface SystemPackageSyncReport {
@@ -123,6 +144,7 @@ export function _setSystemPackagesForTesting(
  * - UPSERT one `packages` row per packageId at the canonical (highest semver) version
  * - Register every loaded version in `package_versions` (idempotent)
  * - Refuse-overwrite on integrity drift without a version bump (the safety gate)
+ * - THROW when a system id is already owned by an organization (the other gate)
  *
  * Returns what it did. A boot over an unchanged package set must report zero
  * writes — that is the contract the content-addressed skip guards below exist
@@ -142,6 +164,8 @@ export async function syncSystemPackagesToDb(
   let syncedVersions = 0;
   let unchangedPackages = 0;
   let unchangedVersions = 0;
+  /** Ids whose `packages` row belongs to an ORGANIZATION — see the UPSERT below. */
+  const ownershipConflicts: string[] = [];
 
   // One SHA-256 per loaded archive, shared by both passes below (the canonical
   // pass and the version pass hash the same `zipBuffer` for the canonical
@@ -217,7 +241,21 @@ export async function syncSystemPackagesToDb(
       return;
     }
 
-    await db
+    // `setWhere: isNull(orgId)` is the OWNERSHIP GUARD, and it is the whole
+    // reason this write reads its `RETURNING`. `packages.id` is one global
+    // namespace shared by system and org packages, and nothing reserves a scope
+    // — so a system package shipped under an id an organization already
+    // published would, without this predicate, rewrite that org's row to
+    // `source: "system", org_id: null` and overwrite its content, silently, at
+    // boot. A SYSTEM row may be refreshed; an ORG row is never touched.
+    //
+    // An INSERT returns its row, a permitted UPDATE returns the updated row, and
+    // a conflict the predicate refused returns NOTHING — which is the only way
+    // this statement can write zero rows, so an empty result IS the collision.
+    // It is collected and thrown after the pass (`docs/NO_TRANSITIONAL_CODE.md`:
+    // fail loudly, never fall back), not swallowed into a warn — a boot that
+    // reports success while a system package is missing is the failure mode.
+    const written = await db
       .insert(packages)
       .values({
         id,
@@ -229,6 +267,7 @@ export async function syncSystemPackagesToDb(
       })
       .onConflictDoUpdate({
         target: packages.id,
+        setWhere: isNull(packages.orgId),
         set: {
           // `type` must heal in place: a packageId can change type across
           // versions, so a reseed updates it rather than keeping the stale
@@ -240,7 +279,13 @@ export async function syncSystemPackagesToDb(
           orgId: null,
           ...(isNewVersion ? { updatedAt: new Date() } : {}),
         },
-      });
+      })
+      .returning({ id: packages.id });
+
+    if (written.length === 0) {
+      ownershipConflicts.push(id);
+      return;
+    }
 
     if (Object.keys(entry.files).length > 1) {
       await uploadPackageFiles(
@@ -326,6 +371,14 @@ export async function syncSystemPackagesToDb(
       });
     }),
   );
+
+  // Before the version pass, so a collision never registers a `package_versions`
+  // row under an id an organization owns. The message names every colliding id
+  // and the one fix an operator has: rename the ORG package (republish it under
+  // a different `@scope/name`) — the system id is a platform constant and
+  // cannot move. Boot fails; there is deliberately no degraded mode.
+  if (ownershipConflicts.length > 0) throw new SystemPackageOwnershipError(ownershipConflicts);
+
   await mapWithConcurrency(allVersions, SYNC_CONCURRENCY, (entry) =>
     syncVersion(entry).catch((err) => {
       logger.warn("Failed to register system package version", {

@@ -4,17 +4,13 @@
  * Read the SKILL.md bodies a turn's `/skill` mentions ask for.
  *
  * One in-process dispatch of `GET /api/packages/skills/{scope}/{name}` per
- * distinct id — the SAME route the model calls through `invoke_operation`
- * `getSkill`, so a mention is subject to exactly the authorization a load is:
- * `skills:read`, package accessibility, and the platform's single
- * definition-read rule (the author's draft when writable, else the latest
- * published version). Nothing here decides who may read what; the dispatched
- * request carries the caller's own headers and the platform re-runs auth.
+ * distinct id — the SAME route `getSkill` serves, carrying the caller's own
+ * headers, so a mention is subject to exactly the authorization a load is and
+ * nothing here decides who may read what.
  *
- * It NEVER throws. A mention that cannot be read is a line in the transcript
- * telling the model why (`skill-mentions.ts`), not a failed turn: the user
- * asked a question and attached a skill to it, and losing the question because
- * the attachment 404s is the wrong trade.
+ * It NEVER throws: a mention that cannot be read becomes a line in the
+ * transcript (`skill-mentions.ts`), because losing the user's question because
+ * their attachment 404s is the wrong trade.
  */
 
 import { encodePackageIdPath } from "@appstrate/core/naming";
@@ -23,13 +19,10 @@ import { spaceScopedHeaders } from "./prompt.ts";
 import type { LoadedSkill } from "./skill-mentions.ts";
 
 /**
- * How many distinct skills one conversation may direct-load.
- *
- * A context-budget bound, not an anti-abuse one: every loaded body is replayed
- * into the projected history on EVERY later turn, so ten of them at the 32 KiB
- * cap is already 320 KiB of permanent conversation. Past it the mention still
- * renders — as a refusal naming the cap, so the user sees why their eleventh
- * chip did nothing.
+ * How many distinct skills one conversation may direct-load. A context-budget
+ * bound: every body is replayed into the projected history on EVERY later turn,
+ * so ten at the 32 KiB cap is already 320 KiB of permanent conversation. Past
+ * it the mention still renders, as a refusal naming the cap.
  */
 export const MAX_MENTIONED_SKILLS = 10;
 

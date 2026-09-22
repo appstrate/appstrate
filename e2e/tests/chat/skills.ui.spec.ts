@@ -38,6 +38,8 @@ test("pins a skill before the first message, then mentions it with /", async ({
   const manual = popover.getByRole("radio", { name: "Manuelle" });
   await manual.click();
   await expect(manual).toBeChecked();
+  // By accessible name: the checkbox gets it from its `<label htmlFor>`, whose
+  // `id` is a slug of the package id — so this also proves the pairing survives.
   const pin = popover.getByRole("checkbox", { name: `Test Skill ${name}` });
   await pin.click();
   await expect(pin).toBeChecked();
@@ -70,8 +72,7 @@ test("pins a skill before the first message, then mentions it with /", async ({
   await page.screenshot({ path: "test-results/chat-skills-mention.png" });
   await page.keyboard.press("Enter");
   await expect(composer).toHaveValue(new RegExp(`:skill\\[/${name}\\]\\{name=${packageId}\\}`));
-  // Enter with the popover closed is the composer's own send, not the trigger's:
-  // the directive is still there and the popover did not reopen.
+  // The insertion closed the popover: no row survives the selection.
   await expect(page.getByRole("option")).toHaveCount(0);
 });
 

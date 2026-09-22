@@ -1,20 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * When the `/` popover may open.
- *
- * assistant-ui's default detection opens on ANY word-initial `/`, and while a
- * trigger is open the composer plugin swallows Enter even with zero matching
+ * When the `/` popover may open. assistant-ui's default detection opens on ANY
+ * word-initial `/`, and an open trigger swallows Enter even with zero matching
  * items — so `regarde /outputs` + Enter sends nothing and looks like a broken
- * composer. A `matcher` narrows detection instead of the item list: no match,
- * no open trigger, and Enter is the composer's own send again.
+ * composer. A `matcher` narrows DETECTION, not the item list.
  *
- * The detection itself mirrors the library default (`detectTrigger.js`): scan
- * back from the caret, stop at whitespace, accept a `/` that starts a word.
- * The added rule is the last line — the query must be a prefix of something
- * offerable, where the library's own filter (`matchesTriggerItemQuery`) is a
- * substring match. Prefix, because typing is left to right: `/cop` is on its
- * way to `/copilot`, `/outputs` is on its way to nothing.
+ * Detection mirrors the library default (`detectTrigger.js`): scan back from
+ * the caret, stop at whitespace, accept a `/` that starts a word. The added
+ * rule is the same SUBSTRING test the library's own item filter runs
+ * (`matchesTriggerItemQuery`), so an open trigger always has rows behind it.
  */
 
 import type { Unstable_Mention, Unstable_TriggerMatch } from "@assistant-ui/react";
@@ -48,23 +43,14 @@ function labelNamePart(label: string): string {
   return space === -1 ? bare : bare.slice(0, space);
 }
 
-/** Would this item still be reachable by continuing to type `query`? */
+/** Would the popover have this item in it for `query`? */
 function skillMatchesQuery(item: Unstable_Mention, query: string): boolean {
   const q = query.toLowerCase();
   if (q === "") return true;
-  const bare = (item.label.startsWith("/") ? item.label.slice(1) : item.label).toLowerCase();
-  return (
-    labelNamePart(item.label).toLowerCase().startsWith(q) ||
-    bare.startsWith(q) ||
-    item.id.toLowerCase().startsWith(q)
-  );
+  return labelNamePart(item.label).toLowerCase().includes(q) || item.id.toLowerCase().includes(q);
 }
 
-/**
- * The trigger matcher for a given catalogue. A bare `/` (empty query) always
- * opens — it lists everything, and it is also the only state in which an empty
- * or still-loading catalogue can say so.
- */
+/** A bare `/` always opens — it lists everything, loading catalogue included. */
 export function createSkillTriggerMatcher(items: readonly Unstable_Mention[]) {
   return (
     text: string,

@@ -177,7 +177,7 @@ describe("formatCallerContext", () => {
     expect(out.indexOf("@acme/mine")).toBeLessThan(out.indexOf("@appstrate/copilot"));
   });
 
-  it("renders the catalogue under its own heading, minus what is already indexed", () => {
+  it("renders the catalogue under its lead line, minus what is already indexed", () => {
     const out = formatCallerContext(
       {
         user: { name: "Ada" },
@@ -191,11 +191,36 @@ describe("formatCallerContext", () => {
       },
       { skills: { discovery: "auto", pinned: [] } },
     );
-    expect(out).toContain("### Other skills in this space");
+    expect(out).toContain("Other skills in this space (not loaded):");
     expect(out).toContain("- `@acme/pdf` — PDF: Reads PDFs.");
     expect(out).toContain("(list truncated)");
     // The indexed one is NOT repeated in the catalogue.
     expect(out.split("@appstrate/copilot")).toHaveLength(2);
+    // ONE heading for the whole section — the catalogue has a lead, not a
+    // sub-heading, so the empty-index case below cannot render a bare `##
+    // Skills` above a `###` the persona then names.
+    expect(out).not.toContain("###");
+  });
+
+  it("renders ONE `## Skills` heading when only the catalogue has rows", () => {
+    // Nothing indexed (no defaults resolved, no pins) and a non-empty
+    // catalogue: the section still has exactly one heading, with the catalogue
+    // introduced by the lead line the `auto` rule names.
+    const out = formatCallerContext(
+      {
+        user: { name: "Ada" },
+        org: { role: "member" },
+        requested_skills: [],
+        skills: [{ package_id: "@acme/pdf", display_name: "PDF" }],
+      },
+      { skills: { discovery: "auto", pinned: [] } },
+    );
+    expect(out.split("## Skills")).toHaveLength(2);
+    expect(out).not.toContain("###");
+    expect(out.indexOf("## Skills")).toBeLessThan(
+      out.indexOf("Other skills in this space (not loaded):"),
+    );
+    expect(out).toContain("- `@acme/pdf` — PDF");
   });
 
   it("drops the catalogue (and its truncation marker) outside `auto`", () => {
@@ -210,7 +235,7 @@ describe("formatCallerContext", () => {
       { skills: { discovery: "on_demand", pinned: [] } },
     );
     expect(out).toContain("## Skills");
-    expect(out).not.toContain("### Other skills in this space");
+    expect(out).not.toContain("Other skills in this space");
     expect(out).not.toContain("@acme/pdf");
     expect(out).not.toContain("(list truncated)");
   });
@@ -234,7 +259,7 @@ describe("formatCallerContext", () => {
     );
     expect(out).toContain("- `@acme/mine` (pinned) — Mine: Pinned.");
     expect(out).not.toContain("@appstrate/copilot");
-    expect(out).not.toContain("### Other skills in this space");
+    expect(out).not.toContain("Other skills in this space");
     expect(out).not.toContain("@acme/pdf");
   });
 

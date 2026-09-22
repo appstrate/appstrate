@@ -75,6 +75,18 @@ export type ChatEnv = {
 };
 
 /**
+ * Lead line introducing the space catalogue inside the ONE `## Skills` section.
+ *
+ * A lead rather than a second heading, and the section has exactly one heading
+ * whatever it holds: a sub-heading forced the block to render a bare `## Skills`
+ * above it whenever nothing was indexed, and the `auto` rule then named a
+ * heading the model could be shown without any loaded skill above it. One
+ * constant, read by the rule and by the renderer, is what keeps the persona and
+ * the block naming the same string.
+ */
+const SKILL_CATALOGUE_LEAD = "Other skills in this space (not loaded):";
+
+/**
  * Assemble the chat persona from what the turn's token carries
  * (`turnPermissions`): `canAuthorAgents` is `agents:write`, `canComposeInline`
  * adds `agents:run`. Instructions for an act the token lacks are absent rather
@@ -101,11 +113,15 @@ export function buildSystemPrompt(options: {
   const author = (yes: string, no = "") => (options.canAuthorAgents ? yes : no);
   const discovery = options.skillDiscovery;
   const discoveryRule = {
-    auto: "The list under `### Other skills in this space` is a catalogue you have not loaded: read those descriptions the same way and load one when it clearly matches. When that catalogue is marked `(list truncated)`, call `listSkills` to see the rest.",
+    auto: `The list under \`${SKILL_CATALOGUE_LEAD}\` is a catalogue you have not loaded: read those descriptions the same way and load one when it clearly matches. When that catalogue is marked \`(list truncated)\`, call \`listSkills\` to see the rest.`,
     on_demand:
       "No catalogue of other skills is shown to you. Call `listSkills` only when the user asks for a skill you do not see listed.",
+    // The empty case is the NO-SECTION case: with no pins there is nothing to
+    // index, no catalogue and no notice, so `formatCallerContext` renders no
+    // `## Skills` heading at all — a rule naming an empty section would
+    // describe a block the model is never shown.
     manual:
-      "Load only the skills listed under `## Skills`; when that section lists none, load no skill at all. Do not browse for others, and do not call `listSkills` on your own initiative.",
+      "Load only the skills listed under `## Skills`; when no `## Skills` section appears, load no skill at all. Do not browse for others, and do not call `listSkills` on your own initiative.",
   }[discovery];
   return `You are Appstrate's assistant. You help the user operate their Appstrate instance through the available tools.
 
@@ -410,11 +426,14 @@ export function formatCallerContext(
   // loads skills for ITSELF now, so they are no longer "things to attach to an
   // agent you may not write". The author-gated half is the `dependencies.skills`
   // sentence, and it lives in the persona (`buildSystemPrompt`), not here.
+  //
+  // ONE heading too, whatever the section holds: the catalogue goes under
+  // {@link SKILL_CATALOGUE_LEAD} inside it, never under a heading of its own.
   if (hasSkillSection) {
     lines.push("", "## Skills");
     for (const skill of skills.indexed) lines.push(skillLine(skill, skill.origin === "pinned"));
     if (skills.catalogue.length) {
-      lines.push("", "### Other skills in this space");
+      lines.push("", SKILL_CATALOGUE_LEAD);
       for (const skill of skills.catalogue) lines.push(skillLine(skill, false));
       if (skills.catalogueTruncated) lines.push("(list truncated)");
     }

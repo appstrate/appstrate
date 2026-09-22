@@ -56,6 +56,10 @@ export const chatComponentSchemas = {
   // indexes, then the space's own catalogue. `source` says which half a row
   // came from — a `platform` row is indexed whatever the space holds and is
   // therefore not pinnable, a `space` row is.
+  //
+  // This documents the `ChatSkillEntry` interface of `./skills.ts`, which is
+  // what `routes.ts` builds. A JSON Schema cannot be derived from a TS type
+  // here, so the two are kept in step by name and by `verify:openapi`.
   ChatSkillEntry: {
     type: "object",
     required: ["package_id", "display_name", "description", "version", "source"],

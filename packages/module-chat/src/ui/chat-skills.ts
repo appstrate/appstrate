@@ -4,20 +4,13 @@
  * The conversation's skill selection — transport, cache keys, and the pure
  * rules the picker and its hook share.
  *
- * Two server surfaces back it: `GET /api/chat/skills` (what CAN be pinned: the
- * platform defaults plus the space catalogue) and
- * `PUT /api/chat/sessions/:id/skills` (what IS pinned, plus the discovery
- * mode). The read is space-scoped, the write is session-scoped, and neither
- * goes through the shell's typed client — module-chat talks to its own routes
- * the way `sessions.ts` does.
+ * Two server surfaces back it: `GET /api/chat/skills` (what CAN be pinned,
+ * space-scoped) and `PUT /api/chat/sessions/:id/skills` (what IS pinned plus
+ * the discovery mode, session-scoped). Neither goes through the shell's typed
+ * client — module-chat talks to its own routes the way `sessions.ts` does.
  *
- * Everything below the transport is PURE and lives here rather than in the
- * component: normalisation, the pin toggle, the optimistic cache patch and the
- * write coalescer are the parts that can be wrong in a way React cannot show
- * you, so they are the parts that get tests.
- *
- * This file is a LEAF: `sessions.ts` imports it (its history payload carries
- * the selection), never the other way round.
+ * Everything below the transport is PURE: those are the parts that can be
+ * wrong in a way React cannot show you. A LEAF — `sessions.ts` imports it.
  */
 
 import type { UIMessage } from "ai";
@@ -25,23 +18,13 @@ import {
   DEFAULT_SKILL_DISCOVERY,
   MAX_PINNED_SKILLS,
   toSkillDiscovery,
+  type ChatSkillEntry,
   type SkillDiscovery,
 } from "../skills.ts";
 import { requestHeaders } from "./request-headers.ts";
 import type { GetHeaders } from "./runtime-context.ts";
 
-/**
- * One pinnable skill, exactly as `GET /api/chat/skills` projects it. `source`
- * is what the picker groups on: `platform` skills are indexed by default in
- * `auto` and `on_demand`, `space` ones only through the catalogue or a pin.
- */
-export interface ChatSkillEntry {
-  package_id: string;
-  display_name: string;
-  description: string;
-  version: string | null;
-  source: "platform" | "space";
-}
+export type { ChatSkillEntry };
 
 /** The per-session choice: how much to index, and what to always index. */
 export interface SessionSkillSelection {
@@ -49,25 +32,15 @@ export interface SessionSkillSelection {
   pinned: string[];
 }
 
-/**
- * A conversation's stored history plus its skill selection — one GET, one
- * cache entry. The two travel together because they arrive together
- * (`GET /api/chat/sessions/:id`), and splitting them would give the picker a
- * second request whose answer could disagree with the one the thread mounted.
- */
+/** One GET, one cache entry: a split would let the picker read a stale mode. */
 export interface SessionHistory {
   messages: UIMessage[];
   skills: SessionSkillSelection;
 }
 
-/** Prefix every chat-skill-catalogue key starts with — a space-scoped list. */
 const CHAT_SKILLS_QUERY_KEY = ["chat", "skills"] as const;
 
-/**
- * The pinnable-skill catalogue of ONE space. Space-scoped for the same reason
- * `sessionsQueryKey` is: the route reads `X-Space-Id`, so a key without it
- * would serve another space's catalogue from cache.
- */
+/** Space-scoped: the route reads `X-Space-Id`, so a bare key crosses spaces. */
 export function chatSkillsQueryKey(spaceId: string | null): readonly unknown[] {
   return [...CHAT_SKILLS_QUERY_KEY, spaceId];
 }
@@ -80,18 +53,12 @@ export function defaultSkillSelection(): SessionSkillSelection {
   return { discovery: DEFAULT_SKILL_DISCOVERY, pinned: [] };
 }
 
-/**
- * A discovery mode off the wire or out of an optimistic patch. The SERVER's own
- * narrowing function, re-exported under the name the UI uses: an unknown mode
- * must degrade to the default here exactly as it does in the resolver, and two
- * implementations of "exactly as" drift.
- */
+/** The SERVER's own narrowing: two "degrades to the default" would drift. */
 export const normalizeDiscovery = toSkillDiscovery;
 
 /**
- * The pin set as the UI and the wire both want it: strings only, deduped,
- * sorted, capped. Sorted because the list is rendered and diffed, and an
- * insertion-ordered set would make two equal selections look different.
+ * Strings only, deduped, sorted, capped — sorted because the list is diffed,
+ * and insertion order makes two equal selections look different.
  */
 export function normalizePinned(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -99,10 +66,7 @@ export function normalizePinned(value: unknown): string[] {
   return [...new Set(ids)].sort().slice(0, MAX_PINNED_SKILLS);
 }
 
-/**
- * Pin/unpin one id. Returns the PREVIOUS set unchanged when the cap would be
- * exceeded, so the caller can detect the refusal by identity.
- */
+/** Pin/unpin. Returns `pinned` ITSELF at the cap, so refusal is detectable. */
 export function togglePinned(pinned: readonly string[], packageId: string): string[] {
   const set = new Set(pinned);
   if (set.has(packageId)) set.delete(packageId);
@@ -112,11 +76,8 @@ export function togglePinned(pinned: readonly string[], packageId: string): stri
 }
 
 /**
- * The optimistic cache patch: the session entry with a new selection, keeping
- * the messages. `prev` is `undefined` for a conversation whose first message
- * has not been sent yet (no row, so no GET) — pinning before the first turn is
- * supported server-side, so it must be supported here: we seed an empty
- * history rather than dropping the write.
+ * The optimistic cache patch. `prev` is `undefined` before the first message
+ * (no row, so no GET); pinning then is supported server-side, so seed.
  */
 export function withSkillSelection(
   prev: SessionHistory | undefined,
@@ -135,11 +96,8 @@ export interface SkillGroup {
 }
 
 /**
- * Group by source, platform first. The server already sorts within each group
- * (by package id), so this partitions and never re-sorts — a second ordering
- * rule here could only disagree with the one the prompt's index uses. A source
- * this build does not know falls in with `space`: an unrenderable row is worse
- * than a mis-grouped one, since the pin still works from either group.
+ * Partitions, never re-sorts — the server sorts within each group. An unknown
+ * source joins `space`: a mis-grouped row beats an unrenderable one.
  */
 export function groupSkillsBySource(skills: readonly ChatSkillEntry[]): SkillGroup[] {
   const groups: SkillGroup[] = [
@@ -150,13 +108,9 @@ export function groupSkillsBySource(skills: readonly ChatSkillEntry[]): SkillGro
 }
 
 /**
- * Serialises writes to ONE session's selection: at most one PUT in flight, and
- * the newest selection wins.
- *
- * Toggling three checkboxes in a second must not race three PUTs whose
- * completion order decides the stored set — the last one the user asked for is
- * the one that must land. Queue depth is 1 on purpose: an intermediate state
- * nobody looked at is not worth a round trip.
+ * One PUT in flight per session, newest wins — three checkbox clicks must not
+ * race three PUTs whose completion order decides the stored set. Queue depth
+ * 1: an intermediate nobody looked at is not worth a round trip.
  */
 export interface SkillsWriter {
   write(selection: SessionSkillSelection): void;
@@ -205,11 +159,7 @@ export async function fetchChatSkills(
   return ((await res.json()) as { skills?: ChatSkillEntry[] }).skills ?? [];
 }
 
-/**
- * Replace the conversation's mode + pin set. Works on an id with no row yet —
- * the route creates the session exactly like the first turn does — so the
- * picker is usable before the first message.
- */
+/** Works on an id with no row yet — the route creates it as turn one would. */
 export async function putSessionSkills(
   getHeaders: GetHeaders | null | undefined,
   sessionId: string,

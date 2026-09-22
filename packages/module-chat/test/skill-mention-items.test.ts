@@ -144,11 +144,19 @@ describe("createSkillTriggerMatcher", () => {
     expect(at("regarde /web")?.query).toBe("web");
   });
 
+  it("opens on a substring, like the item filter the popover then runs", () => {
+    // `/search` would list `/web-search`: a matcher stricter than
+    // `matchesTriggerItemQuery` hides rows the library was ready to show.
+    expect(at("/search")?.query).toBe("search");
+    expect(at("/SEARCH")?.query).toBe("SEARCH");
+    expect(at("/pilot")?.query).toBe("pilot");
+  });
+
   it("opens on a package id typed in full", () => {
     expect(at("/@appstrate")?.query).toBe("@appstrate");
   });
 
-  it("stays closed on a word that no skill can grow into", () => {
+  it("stays closed on a word no skill contains", () => {
     expect(at("regarde /outputs")).toBeNull();
     expect(at("/zzz")).toBeNull();
   });

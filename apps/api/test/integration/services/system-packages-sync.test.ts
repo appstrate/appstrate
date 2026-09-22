@@ -37,11 +37,14 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import {
   syncSystemPackagesToDb,
+  SystemPackageOwnershipError,
   type SystemPackageEntry,
 } from "../../../src/services/system-packages.ts";
 import { zipArtifact } from "@appstrate/core/zip";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
+import { createTestContext } from "../../helpers/auth.ts";
+import { seedPackage } from "../../helpers/seed.ts";
 
 function enc(s: string): Uint8Array {
   return new TextEncoder().encode(s);
@@ -283,6 +286,70 @@ describe("syncSystemPackagesToDb", () => {
       .limit(1);
     expect(row).toBeDefined();
     expect(row!.source).toBe("system");
+  });
+
+  // ─── Ownership safety gate ─────────────────────────────
+
+  it("REFUSES to convert an ORG-owned package into a system one, and fails the boot", async () => {
+    // `packages.id` is ONE namespace and nothing reserves a scope, so a system
+    // package shipped under an id an organization already published would
+    // otherwise rewrite that row to `source: "system", org_id: null` and
+    // overwrite its content — silently, at boot, in production. The UPSERT's
+    // `setWhere: isNull(org_id)` refuses the write and the sync throws.
+    const ctx = await createTestContext({ orgSlug: "sysclash" });
+    const COLLIDING = "@appstrate/copilot";
+    await seedPackage({
+      id: COLLIDING,
+      orgId: ctx.orgId,
+      type: "skill",
+      source: "local",
+      draftManifest: {
+        name: COLLIDING,
+        version: "9.9.9",
+        type: "skill",
+        schema_version: "0.1",
+        display_name: "The org's own copilot",
+      },
+      draftContent: "ORG-AUTHORED BODY",
+    });
+
+    const entry = makeFixtureEntry({ id: COLLIDING, version: "1.0.0" });
+    const { canonical, versions } = buildRegistry([entry]);
+
+    // Fails loudly, and names both the id and the fix.
+    let thrown: unknown;
+    try {
+      await syncSystemPackagesToDb(canonical, versions);
+    } catch (err) {
+      thrown = err;
+    }
+    // Its own class, because `bootBackground` swallows every OTHER failure of
+    // this sync into a warn and must rethrow this one (the process exits).
+    expect(thrown).toBeInstanceOf(SystemPackageOwnershipError);
+    expect((thrown as Error).message).toContain(COLLIDING);
+    expect((thrown as Error).message).toMatch(/[Rr]ename/);
+
+    // The org's row is EXACTLY as it was: still theirs, still their content.
+    const [row] = await db
+      .select({
+        orgId: packages.orgId,
+        source: packages.source,
+        draftContent: packages.draftContent,
+      })
+      .from(packages)
+      .where(eq(packages.id, COLLIDING))
+      .limit(1);
+    expect(row!.orgId).toBe(ctx.orgId);
+    expect(row!.source).toBe("local");
+    expect(row!.draftContent).toBe("ORG-AUTHORED BODY");
+
+    // …and the version pass never ran for it: no system version was registered
+    // under an id the organization owns.
+    const versionRows = await db
+      .select({ version: packageVersions.version })
+      .from(packageVersions)
+      .where(eq(packageVersions.packageId, COLLIDING));
+    expect(versionRows).toEqual([]);
   });
 
   // ─── Integrity drift safety gate ───────────────────────

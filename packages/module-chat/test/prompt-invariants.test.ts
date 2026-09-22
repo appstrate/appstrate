@@ -14,8 +14,9 @@ import { DEFAULT_SKILL_DISCOVERY } from "../src/skills.ts";
 
 /**
  * The ONE activation door's operationId (`POST /api/spaces/{spaceId}/packages`,
- * `apps/api/src/openapi/paths/spaces.ts`). Pinned here rather than imported:
- * `verify:module-isolation` forbids a module reaching into the API workspace.
+ * `apps/api/src/openapi/paths/spaces.ts`). Pinned here rather than imported so
+ * this suite stays a pure string test: importing the API's spec tree would pull
+ * the platform router into a file that otherwise needs no app and no database.
  */
 const ACTIVATION_OPERATION_ID = "activatePackage";
 
@@ -131,9 +132,9 @@ describe("full persona invariants", () => {
     // The persona used to name `activateIntegration`, which has never existed:
     // a model following it burned a turn on `search_operations` and guessed.
     // The real door is `activatePackage`, `POST /api/spaces/{spaceId}/packages`
-    // (apps/api/src/openapi/paths/spaces.ts). A module test cannot import the
-    // API workspace (`verify:module-isolation`), so the id is pinned as a
-    // constant here and the negative below catches the name that never was.
+    // (apps/api/src/openapi/paths/spaces.ts). Pinned as a constant here rather
+    // than imported (see its declaration), and the negative below catches the
+    // name that never was.
     expect(FULL).not.toContain("activateIntegration");
   });
 
@@ -187,17 +188,30 @@ describe("full persona invariants", () => {
     });
     // `auto` IS the default mode, so it reads like the persona built with it.
     expect(auto).toBe(FULL);
-    expect(auto).toContain("### Other skills in this space` is a catalogue");
+    expect(auto).toContain("`Other skills in this space (not loaded):` is a catalogue");
     expect(onDemand).toContain("No catalogue of other skills is shown to you");
     expect(onDemand).not.toContain("is a catalogue you have not loaded");
     expect(manual).toContain("Load only the skills listed under `## Skills`");
-    // The empty case is NAMED: `manual` with no pins renders a `## Skills`
-    // section with nothing under it, and a rule that only says "load only what
-    // is listed" leaves the model to guess what an empty list licenses.
-    expect(manual).toContain("when that section lists none, load no skill at all");
+    // The empty case is NAMED, and named as the block renders it: `manual` with
+    // no pins indexes nothing, catalogues nothing and notices nothing, so
+    // `formatCallerContext` emits NO `## Skills` section at all. A rule about
+    // "a section that lists none" would describe a heading the model never sees.
+    expect(manual).toContain("when no `## Skills` section appears, load no skill at all");
     expect(manual).not.toContain("No catalogue of other skills is shown");
     // A mode that shows no catalogue must not send the model browsing.
     expect(manual).not.toContain("call `listSkills` to see the rest");
+    // …and the BLOCK agrees with that rule: `manual` with no pins renders no
+    // `## Skills` section, catalogue rows in the payload or not.
+    expect(
+      formatCallerContext(
+        {
+          user: { name: "Ada" },
+          org: { role: "member" },
+          skills: [{ package_id: "@acme/pdf", display_name: "PDF" }],
+        },
+        { skills: { discovery: "manual", pinned: [] } },
+      ),
+    ).not.toContain("## Skills");
   });
 
   it("carries no trace of the retired attach-to-an-agent skills heading", () => {

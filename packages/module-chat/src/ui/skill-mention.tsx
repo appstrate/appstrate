@@ -17,7 +17,8 @@ import {
 } from "@assistant-ui/react";
 import { BookOpenIcon } from "lucide-react";
 import { useChatHost } from "./runtime-context.ts";
-import { skillMentionItems, splitSkillDirectives } from "./skill-directive.ts";
+import { splitSkillDirectives } from "../skill-mentions.ts";
+import { skillMentionItems } from "./skill-directive.ts";
 import { createSkillTriggerMatcher } from "./skill-trigger.ts";
 import { useChatSkillsCatalog } from "./use-chat-skills.ts";
 
@@ -44,7 +45,6 @@ export function SkillMentionPopover() {
     items,
     includeModelContextTools: false,
   });
-  const label = t("skills.mention.label");
 
   return (
     <ComposerPrimitive.Unstable_TriggerPopover
@@ -52,14 +52,15 @@ export function SkillMentionPopover() {
       matcher={matcher}
       adapter={adapter}
       isLoading={loading}
-      aria-label={label}
+      aria-label={t("skills.mention.label")}
       className="bg-popover text-popover-foreground absolute bottom-full left-0 z-50 mb-2 max-h-64 w-[min(22rem,calc(100vw-2.5rem))] overflow-y-auto rounded-lg border p-1 text-sm shadow-md"
     >
       {/* `directive` is `{ formatter: unstable_defaultDirectiveFormatter }` —
           spread rather than reconstructed so the adapter and the insertion
           behaviour can never drift apart. */}
       <ComposerPrimitive.Unstable_TriggerPopover.Directive {...directive} />
-      <ComposerPrimitive.Unstable_TriggerPopoverItems aria-label={label}>
+      {/* Unnamed on purpose: this `role="group"` is inside the named listbox. */}
+      <ComposerPrimitive.Unstable_TriggerPopoverItems>
         {(matched) =>
           matched.length === 0 ? (
             <p className="text-muted-foreground px-2 py-3 text-center text-xs">

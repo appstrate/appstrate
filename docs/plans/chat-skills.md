@@ -165,6 +165,11 @@ System skills (`scripts/system-packages/skill-<name>-1.0.0/`, built into
   lines, French like the existing content, no personal instance references.
 - Conformance: `bun test packages/runner-pi/test/skill-frontmatter-parity.test.ts`
   and whatever gate `#1252` added must pass on the new archives.
+- PRE-DEPLOY CHECK (these are the first system packages under generic ids, and
+  nothing reserves a scope): run
+  `SELECT id, org_id FROM packages WHERE id IN ('@appstrate/copilot', '@appstrate/web-search', '@appstrate/connector-choice');`
+  on prod first. Any row with a non-null `org_id` must be renamed before the
+  deploy — the boot sync refuses to overwrite it and fails the boot naming the id.
 
 ## Phase 3 — pins, discovery mode, picker
 

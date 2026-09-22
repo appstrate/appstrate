@@ -75,19 +75,6 @@ describe("toSkillDiscovery", () => {
   });
 });
 
-/**
- * `GET /api/me/context?skills=` caps the parameter, and the chat is its biggest
- * caller: every turn asks for the platform defaults PLUS the session's pins in
- * one request. If the cap ever fell below that sum, a user pinning to the
- * ceiling would get a 400 the chat swallows — degrading silently to an
- * identity-only prompt with no skills at all.
- *
- * Asserted against the source rather than an import: `routes/me.ts` builds a
- * router and pulls half the API with it, which this unit suite deliberately
- * does not load.
- */
-describe("the caller-context skill cap", () => {});
-
 describe("resolveChatSkills", () => {
   it("indexes defaults and pins, sorted by package id whatever order they arrive in", () => {
     const out = resolve({
