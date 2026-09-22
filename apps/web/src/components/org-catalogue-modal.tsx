@@ -36,6 +36,7 @@
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useLocation, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Boxes, Layers, LibraryBig, Wrench } from "lucide-react";
@@ -179,7 +180,39 @@ export function OrgCatalogueModal({
   // grant in each, which is the verdict a switch in that column answers to.
   const { data: reachable } = useSpaces();
   const grantById = new Map((reachable ?? []).map((space) => [space.id, space] as const));
-  const spaceColumnsInput = spaces.map((space) => ({
+  /**
+   * The spaces the reader narrowed to, from the URL.
+   *
+   * In the URL rather than in the bar's local state for two reasons: a link can
+   * open the catalogue already narrowed (a package page's "Parcourir le
+   * catalogue" opens on the space you were in), and moving from Agents to
+   * Skills keeps it, because switching kinds keeps the query.
+   *
+   * Narrowing shows the space in a chip, so the context is written on the
+   * screen and removed in one click — the difference between this and the
+   * implicit "ici" the catalogue used to have.
+   */
+  const routerLocation = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const knownSpaceIds = spaces.map((space) => space.id);
+  const chosenSpaces = (searchParams.get("space") ?? "")
+    .split(",")
+    .filter((id) => knownSpaceIds.includes(id));
+  const visibleSpaces =
+    chosenSpaces.length > 0 ? spaces.filter((space) => chosenSpaces.includes(space.id)) : spaces;
+  const setChosenSpaces = (next: string[]) =>
+    setSearchParams(
+      (prev) => {
+        const out = new URLSearchParams(prev);
+        if (next.length > 0) out.set("space", next.join(","));
+        else out.delete("space");
+        return out;
+      },
+      // The overlay's background travels in the state; dropping it would
+      // close the catalogue under the reader's hand.
+      { replace: true, state: routerLocation.state },
+    );
+  const spaceColumnsInput = visibleSpaces.map((space) => ({
     id: space.id,
     name: space.name,
     grant: grantById.get(space.id),
@@ -284,15 +317,40 @@ export function OrgCatalogueModal({
   // and offered to nobody's answer yet. "Where does it run" was the closest
   // this screen could say before, and it could not tell those two apart.
   const states = list.values("state", ["active", "inactive", "offered"] as const);
+  const visibleIds = visibleSpaces.map((space) => space.id);
+  /** Its states across the spaces on screen: the columns are the question. */
+  const statesIn = (placement: CataloguePlacement): PlacementState[] => {
+    // A system package is readable everywhere without a row: it is active in
+    // every sense the reader cares about.
+    if (placement.everywhere) return ["active"];
+    const out: PlacementState[] = [];
+    if (placement.activeIn.some((id) => visibleIds.includes(id))) out.push("active");
+    if (placement.inactiveIn.some((id) => visibleIds.includes(id))) out.push("inactive");
+    if (placement.offeredIn.some((id) => visibleIds.includes(id))) out.push("offered");
+    return out;
+  };
   const rows = all.filter((item) => {
-    if (states.length === 0) return true;
     const placement = placementById.get(item.id);
     if (!placement) return false;
-    // A system package is readable everywhere without a row: it is active here
-    // in every sense the reader cares about.
-    const here: PlacementState | null = placement.everywhere ? "active" : placement.here;
-    return here !== null && states.includes(here);
+    // Narrowed to some spaces, the placed half shows what is placed IN them —
+    // "what is in this space" is the question a narrowed view asks. Découvrir
+    // is untouched: its rows are placed nowhere, by definition.
+    if (!discovering && chosenSpaces.length > 0 && statesIn(placement).length === 0) return false;
+    if (states.length === 0) return true;
+    return statesIn(placement).some((state) => states.includes(state));
   });
+  // Offered only when there is a choice to make: with one space, the only
+  // column is already that space.
+  const spaceFilter: FilterSpec | null =
+    spaces.length > 1
+      ? {
+          id: "space",
+          label: t("catalogue.filter.space"),
+          values: chosenSpaces,
+          options: spaces.map((space) => ({ value: space.id, label: space.name })),
+          onChange: setChosenSpaces,
+        }
+      : null;
   const stateFilter: FilterSpec = {
     id: "state",
     label: t("catalogue.filter.state"),
@@ -617,7 +675,11 @@ export function OrgCatalogueModal({
           // filter here has, rather than the collection's built-in one.
           activityFilter={false}
           originFilter={false}
-          extraFilters={discovering ? [originFilter] : [stateFilter, originFilter]}
+          extraFilters={[
+            ...(spaceFilter ? [spaceFilter] : []),
+            ...(discovering ? [] : [stateFilter]),
+            originFilter,
+          ]}
           // A package this space has not activated cannot be run from here.
           cardRun={false}
           // A tick is a table affordance; in cards, each card carries its own

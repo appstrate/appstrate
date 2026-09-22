@@ -81,7 +81,8 @@ describe("NotificationContent", () => {
       },
     ]);
 
-    expect(html).toContain('href="/catalogue/placed/agent"');
+    // A shared SKILL opens the catalogue on its own kind, where the offer is.
+    expect(html).toContain('href="/catalogue/placed/skill"');
   });
 
   it("still renders a run notification as the agent and its status", () => {

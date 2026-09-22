@@ -2,6 +2,8 @@
 
 import { type ReactNode, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { catalogueHref } from "../lib/catalogue-link";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useTranslation } from "react-i18next";
 import { Layers, LibraryBig, Plus, type LucideIcon, Upload } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
@@ -110,6 +112,8 @@ export function PackageList() {
   const [importOpen, setImportOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+
+  const currentSpaceId = useCurrentSpaceId();
   const creation = useCreationHandoff("agent", can("agents:write"));
   const canActivate = can(PACKAGE_PERMISSIONS.agent.activate);
 
@@ -142,7 +146,7 @@ export function PackageList() {
             <PageActionsMenu>
               {canActivate && (
                 <DropdownMenuItem asChild data-page-action="catalogue">
-                  <Link to="/catalogue/placed/agent" state={openAsModal(location)}>
+                  <Link to={catalogueHref("agent", currentSpaceId)} state={openAsModal(location)}>
                     <LibraryBig />
                     {t("catalogue.browse", { ns: "settings" })}
                   </Link>

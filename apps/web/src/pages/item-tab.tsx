@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { catalogueHref } from "../lib/catalogue-link";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useTranslation } from "react-i18next";
 import { LibraryBig, Plug, Plus, Upload, Wrench } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
@@ -46,6 +48,7 @@ export function ItemTab({
   manualCreation?: "editor" | "import";
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
+  const currentSpaceId = useCurrentSpaceId();
   // What works in THIS space; the rest of the org is one action away.
   const { data: rawItems, isLoading } = usePackageList(type);
   const { can } = usePermissions();
@@ -87,7 +90,7 @@ export function ItemTab({
                 <DropdownMenuItem asChild data-page-action="catalogue">
                   <Link
                     // A local MCP server is installed through its integration.
-                    to={`/catalogue/placed/${type === "mcp-server" ? "integration" : type}`}
+                    to={catalogueHref(type, currentSpaceId)}
                     state={openAsModal(location)}
                   >
                     <LibraryBig />

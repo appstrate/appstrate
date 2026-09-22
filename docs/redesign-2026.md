@@ -1600,6 +1600,14 @@ response only ever carries the spaces the caller can enter.
   space (`createPackageShareNotification`, gated on `recipientUserId`). The
   count is placements, not packages — one package offered to three spaces is
   three decisions.
+- **A space filter narrows both axes at once**: the columns to the chosen
+  spaces, and — in the placed half — the rows to what is placed in them. It is
+  in the URL (`?space=`), so a link opens the catalogue already narrowed and
+  moving from Agents to Skills keeps it. "Parcourir le catalogue" from a
+  space's own page opens narrowed to that space; the navigation's entry opens
+  the whole map; the bell opens on the space an offer was made to. The context
+  the catalogue once IMPLIED ("ici") is now a chip, written on the screen and
+  removed in one click. The State filter reads the spaces on screen.
 - **The row's menu holds what acts on the PACKAGE**: move its home, offer it,
   withdraw an offer. Activating is deliberately not there — it is the switch in
   a named column, and a menu item could only ever mean "the space the app

@@ -35,7 +35,10 @@ export function CataloguePage() {
       scope={scope ?? "placed"}
       type={type ?? ""}
       onSelect={(nextScope: CatalogueScope, nextType: PackageType) =>
-        navigate(`/catalogue/${nextScope}/${nextType}`, { replace: true, state: location.state })
+        navigate(`/catalogue/${nextScope}/${nextType}${location.search}`, {
+          replace: true,
+          state: location.state,
+        })
       }
       onClose={close}
     />

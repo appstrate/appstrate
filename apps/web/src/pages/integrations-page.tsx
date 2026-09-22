@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useMemo } from "react";
+import { catalogueHref } from "../lib/catalogue-link";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Boxes, LibraryBig, Plus, SearchX } from "lucide-react";
@@ -74,6 +76,7 @@ function IntegrationCard({ integration }: { integration: IntegrationSummaryWire 
 
 export function IntegrationsPage() {
   const { t } = useTranslation(["settings", "common"]);
+  const currentSpaceId = useCurrentSpaceId();
   const { can } = usePermissions();
   const { data, isLoading, error } = useAllIntegrations();
   const location = useLocation();
@@ -146,7 +149,10 @@ export function IntegrationsPage() {
           <PageActionsMenu>
             {can("integrations:install") && (
               <DropdownMenuItem asChild data-page-action="catalogue">
-                <Link to="/catalogue/placed/integration" state={openAsModal(location)}>
+                <Link
+                  to={catalogueHref("integration", currentSpaceId)}
+                  state={openAsModal(location)}
+                >
                   <LibraryBig />
                   {t("catalogue.browse")}
                 </Link>

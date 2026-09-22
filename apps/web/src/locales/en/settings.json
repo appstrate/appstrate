@@ -1465,5 +1465,6 @@
   "catalogue.closureNoRight": "You may not activate it here",
   "catalogue.closureCredentials": "An integration runs with the space's own credentials: this space will have to connect it.",
   "packages.shareIntegrationsHint_one": "This agent uses {{list}}: the recipient will have to activate it and connect their own.",
-  "packages.shareIntegrationsHint_other": "This agent uses {{list}}: the recipient will have to activate them and connect their own."
+  "packages.shareIntegrationsHint_other": "This agent uses {{list}}: the recipient will have to activate them and connect their own.",
+  "catalogue.filter.space": "Space"
 }

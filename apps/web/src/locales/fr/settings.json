@@ -1465,5 +1465,6 @@
   "catalogue.closureNoRight": "Vous n'avez pas le droit de l'activer ici",
   "catalogue.closureCredentials": "Une intégration s'exécute avec les identifiants de l'espace : celui-ci devra s'y connecter.",
   "packages.shareIntegrationsHint_one": "Cet agent utilise {{list}} : le destinataire devra l'activer chez lui et s'y connecter.",
-  "packages.shareIntegrationsHint_other": "Cet agent utilise {{list}} : le destinataire devra les activer chez lui et s'y connecter."
+  "packages.shareIntegrationsHint_other": "Cet agent utilise {{list}} : le destinataire devra les activer chez lui et s'y connecter.",
+  "catalogue.filter.space": "Espace"
 }
