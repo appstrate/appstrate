@@ -18,6 +18,7 @@ import { PERMISSION_REQUIREMENT_MARKER } from "@appstrate/core/permissions";
 import {
   deriveRouteRequirements,
   isGranted,
+  markFallback,
   type RouteRequirement,
   type RouteRequirementLookup,
 } from "../../src/lib/route-requirements.ts";
@@ -35,6 +36,9 @@ import { errorHandler } from "../../src/middleware/error-handler.ts";
 import type { AppEnv } from "../../src/types/index.ts";
 
 const ok = () => new Response("ok");
+
+/** A catch-all fallback, fresh each call: the marker is stamped on the function itself. */
+const fallback = () => markFallback(() => new Response("fallback"));
 
 /** A space re-scope, mounted the way `routes/spaces.ts` mounts one. */
 const rescope = () => markSpaceRescope(async (_c: Context<AppEnv>, next: Next) => next());
@@ -297,19 +301,68 @@ describe("lookup — prefix mounts", () => {
     expect(table("GET", "/api/never-mounted")).toBeUndefined();
   });
 
-  it("never serves anything from the root catch-all", () => {
-    // `index.ts` mounts the SPA fallback as `app.get("/*")`, after the `ALL
-    // /api/*` 404. Reading it as a route would answer every GET template ever
-    // spelled, publishing a ghost operation as real and unguarded.
+  it("never serves anything from the root catch-alls", () => {
+    // `index.ts` mounts the `ALL /api/*` 404 and the SPA `GET /*` shell as
+    // marked fallbacks. Reading either as a route would answer every template
+    // ever spelled, publishing a ghost operation as real and unguarded.
     const table = rootTableOf((app) => {
       app.on(["POST", "GET"], "/api/auth/*", ok);
-      app.all("/api/*", ok);
-      app.get("/*", ok);
+      app.all("/api/*", fallback());
+      app.get("/*", fallback());
     });
     expect(table("GET", "/api/ghost")).toBeUndefined();
     expect(table("POST", "/api/ghost")).toBeUndefined();
+    expect(table("GET", "/ghost")).toBeUndefined();
     // The control: a real prefix mount beneath the same catch-all still serves.
     expect(served(table, "POST", "/api/auth/sign-in/email").requirements).toEqual([]);
+  });
+});
+
+describe("lookup — a terminal handler serves, middleware never does", () => {
+  // Hono's route table spells `use("/x", mw)` and `all("/x", handler)` the same
+  // (`ALL /x`); only the handler tells them apart. Each case was checked
+  // against Hono itself: 404 exactly where the table answers `undefined`.
+  it("serves no other method from an exact-path `use`", () => {
+    const table = rootTableOf((app) => {
+      app.use("/api/things/:id", requirePermission("agents", "read"));
+      app.get("/api/things/:id", ok);
+    });
+    expect(served(table, "GET", "/api/things/{id}").requirements).toEqual(["agents:read"]);
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+      expect(table(method, "/api/things/{id}")).toBeUndefined();
+    }
+  });
+
+  it("serves the whole subtree of an `all` prefix mount with a terminal handler", () => {
+    // A proxy: one mount answers every method beneath it, bare prefix included.
+    const table = rootTableOf((app) => app.all("/api/proxy/*", ok));
+    for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE"]) {
+      expect(served(table, method, "/api/proxy/{path}").requirements).toEqual([]);
+    }
+    expect(served(table, "GET", "/api/proxy").requirements).toEqual([]);
+  });
+
+  it("serves from an unmarked catch-all — the marker, not the path, excludes a fallback", () => {
+    const unmarked = rootTableOf((app) => app.all("/api/*", ok));
+    expect(served(unmarked, "POST", "/api/ghost").requirements).toEqual([]);
+    const marked = rootTableOf((app) => app.get("/api/*", fallback()));
+    expect(marked("GET", "/api/ghost")).toBeUndefined();
+  });
+
+  it("classifies through the wrapper `app.route()` adds for a sub-app's `onError`", () => {
+    const app = mounted((sub) => {
+      sub.use("/things/:id", requirePermission("agents", "read"));
+      sub.get("/things/:id", ok);
+      sub.all("/proxy/*", ok);
+    });
+    const table = deriveRouteRequirements(app.routes);
+    expect(served(table, "GET", "/api/things/{id}").requirements).toEqual(["agents:read"]);
+    expect(table("PUT", "/api/things/{id}")).toBeUndefined();
+    expect(served(table, "DELETE", "/api/proxy/{path}").requirements).toEqual([]);
+    // Fixture check: every handler copied here is a `(c, next)` wrapper, so
+    // an arity read on the wrapper would take the proxy for middleware.
+    const proxy = app.routes.find((route) => route.path === "/api/proxy/*")!;
+    expect(proxy.handler.length).toBe(2);
   });
 });
 

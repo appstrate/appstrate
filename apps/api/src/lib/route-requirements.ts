@@ -3,16 +3,16 @@
 /**
  * What a route requires, read off the handler markers of Hono's route table
  * and matched segment by segment as Hono matches, since several operations
- * have no route of their own. A prefix mount (`*`) with a concrete method
- * SERVES its subtree, bare prefix included; a wildcard `ALL` mount only
- * DECORATES (adds its guard, serves nothing) while an exact-path `ALL` serves
- * every method. Guards mounted after a space re-scope (`markSpaceRescope`) are
+ * have no route of their own. An operation is SERVED when a terminal handler
+ * matches it, whatever its method or path shape; middleware only adds its
+ * guard. Guards mounted after a space re-scope (`markSpaceRescope`) are
  * enforced in the space the PATH names, so they are reported apart and never filter.
  */
 
 import { PERMISSION_REQUIREMENT_MARKER } from "@appstrate/core/permissions";
+import { findTargetHandler, isMiddleware } from "hono/utils/handler";
 import { getPattern, splitPath, splitRoutingPath } from "hono/utils/url";
-import { readHandlerMarker } from "../middleware/handler-marker.ts";
+import { hasHandlerMarker, markHandler, readHandlerMarker } from "../middleware/handler-marker.ts";
 import { isRowAuthority, isSpaceRescope } from "../middleware/require-permission.ts";
 
 export interface RouteRequirement {
@@ -52,9 +52,27 @@ interface TableEntry {
   /** Without the trailing `*` of a prefix mount. */
   readonly tokens: readonly Token[];
   readonly prefix: boolean;
+  readonly serves: boolean;
   readonly requirement: string | null;
   readonly rowDecides: boolean;
   readonly rescope: boolean;
+}
+
+const FALLBACK = Symbol.for("appstrate.fallback");
+
+/** Mark a catch-all terminal handler (unknown-path 404, SPA shell): it answers
+ *  whatever it matches, yet serves no documented operation. */
+export function markFallback<T extends object>(handler: T): T {
+  return markHandler(handler, FALLBACK);
+}
+
+/** Hono's own test (`hono/utils/handler`, an internal module): a handler that
+ *  declares `next` is middleware. Read on the target, since `app.route()`
+ *  wraps a sub-app's handlers in a `(c, next)` shim when it has an `onError`. */
+function servesOperation(handler: unknown): boolean {
+  if (typeof handler !== "function") return false;
+  const target = findTargetHandler(handler as (...args: never[]) => unknown);
+  return !isMiddleware(target) && !hasHandlerMarker(handler, FALLBACK);
 }
 
 function tokenize(path: string): Token[] {
@@ -76,9 +94,6 @@ export function deriveRouteRequirements(
   const entries: TableEntry[] = [];
   for (const route of routes) {
     const method = route.method.toUpperCase();
-    // Skip the SPA fallback, which would serve every GET template. `ALL /*`
-    // stays: it only decorates, and dropping it would lose an app-wide guard.
-    if (route.path === "/*" && method !== "ALL") continue;
     const tokens = tokenize(route.path);
     const prefix = tokens.at(-1)?.kind === "wildcard";
     const required = readHandlerMarker(route.handler, PERMISSION_REQUIREMENT_MARKER);
@@ -86,6 +101,7 @@ export function deriveRouteRequirements(
       method,
       tokens: prefix ? tokens.slice(0, -1) : tokens,
       prefix,
+      serves: servesOperation(route.handler),
       requirement: typeof required === "string" && required.length > 0 ? required : null,
       rowDecides: isRowAuthority(route.handler),
       rescope: isSpaceRescope(route.handler),
@@ -109,7 +125,7 @@ function lookup(
   for (const entry of entries) {
     if (entry.method !== "ALL" && entry.method !== method) continue;
     if (!matches(entry, template)) continue;
-    if (!entry.prefix || entry.method !== "ALL") served = true;
+    if (entry.serves) served = true;
     if (entry.rescope) rescoped = true;
     if (entry.rowDecides) conditional = true;
     if (entry.requirement !== null) {

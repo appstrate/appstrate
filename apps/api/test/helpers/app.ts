@@ -20,7 +20,7 @@
  * zero-footprint invariant (no modules → no module routes, no module
  * space-scoped prefixes). The explicit path never touches the singleton cache.
  */
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { requestId } from "../../src/middleware/request-id.ts";
 import { clientIp } from "../../src/middleware/client-ip.ts";
@@ -45,6 +45,7 @@ import { setModulePermissionsProvider } from "@appstrate/core/permissions";
 import { setPrincipalPermissionsProviders } from "@appstrate/core/principal-permissions";
 import { initAppConfig } from "../../src/lib/app-config.ts";
 import { notFound } from "../../src/lib/errors.ts";
+import { markFallback } from "../../src/lib/route-requirements.ts";
 import { buildOpenApiSpec } from "../../src/openapi/index.ts";
 import { createOpenApiSpecRouter } from "../../src/routes/openapi-spec.ts";
 import { swaggerUI } from "@hono/swagger-ui";
@@ -321,10 +322,13 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/internal", createInternalRouter());
 
   // Mirrors production: unknown /api/* → 404 problem+json (no SPA fallback in tests).
-  app.all("/api/*", (c) => {
-    const pathname = new URL(c.req.url).pathname;
-    throw notFound(`API endpoint not found: ${c.req.method} ${pathname}`);
-  });
+  app.all(
+    "/api/*",
+    markFallback((c: Context<AppEnv>) => {
+      const pathname = new URL(c.req.url).pathname;
+      throw notFound(`API endpoint not found: ${c.req.method} ${pathname}`);
+    }),
+  );
 
   if (!explicit) cachedApp = app;
   return app;
