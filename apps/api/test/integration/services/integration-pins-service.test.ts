@@ -22,6 +22,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
+import { eq } from "drizzle-orm";
 import { integrationConnections } from "@appstrate/db/schema";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
 import {
@@ -31,9 +32,8 @@ import {
   loadConnectionOwnership,
   listIntegrationPins,
   upsertIntegrationPin,
+  updateConnectionMetadata,
 } from "../../../src/services/integration-pins-service.ts";
-import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
-import { describeRequiresPostgres } from "../../helpers/tier.ts";
 
 const INTEGRATION = "@official/gmail";
 const OTHER_INTEGRATION = "@official/clickup";
@@ -320,7 +320,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       await seedSpacePackage(scope.spaceId, AGENT, { enabled: true });
     });
 
-    it("pins N connections as N rows folded into one summary", async () => {
+    it("pins N connections as one row, in the caller's order", async () => {
       const ids = await seedSharedConnections(3);
       const pin = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
@@ -334,7 +334,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       expect(listed[0]!.connection_ids).toEqual(ids);
     });
 
-    it("a second write REPLACES the set — a dropped connection leaves no row", async () => {
+    it("a second write REPLACES the set rather than merging into it", async () => {
       const ids = await seedSharedConnections(3);
       await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
@@ -350,44 +350,6 @@ describe("integration-pins-service — DB access/ownership", () => {
       expect(listed).toHaveLength(1);
       expect(listed[0]!.connection_ids).toEqual([ids[2]!]);
       expect(listed[0]!.connection_ids).not.toContain(ids[0]!);
-    });
-
-    it("refuses more than the cap, and accepts exactly the cap", async () => {
-      const ids = await seedSharedConnections(MAX_CONNECTIONS_PER_INTEGRATION + 1);
-      // The cap is on the SET, so the excess is one id over, not one label over.
-      await expect(
-        upsertIntegrationPin(scope, INTEGRATION, {
-          agentPackageId: AGENT,
-          connectionIds: ids,
-          createdBy: ctx.user.id,
-        }),
-      ).rejects.toThrow(new RegExp(`between 1 and ${MAX_CONNECTIONS_PER_INTEGRATION}`));
-
-      const capped = ids.slice(0, MAX_CONNECTIONS_PER_INTEGRATION);
-      const pin = await upsertIntegrationPin(scope, INTEGRATION, {
-        agentPackageId: AGENT,
-        connectionIds: capped,
-        createdBy: ctx.user.id,
-      });
-      expect(pin.connection_ids).toHaveLength(MAX_CONNECTIONS_PER_INTEGRATION);
-    });
-
-    it("refuses an empty set and a repeated id", async () => {
-      const ids = await seedSharedConnections(1);
-      await expect(
-        upsertIntegrationPin(scope, INTEGRATION, {
-          agentPackageId: AGENT,
-          connectionIds: [],
-          createdBy: ctx.user.id,
-        }),
-      ).rejects.toThrow(/between 1 and/);
-      await expect(
-        upsertIntegrationPin(scope, INTEGRATION, {
-          agentPackageId: AGENT,
-          connectionIds: [ids[0]!, ids[0]!],
-          createdBy: ctx.user.id,
-        }),
-      ).rejects.toThrow(/must not repeat/);
     });
 
     it("refuses a set whose members share a label, with the resolver's wording", async () => {
@@ -427,24 +389,48 @@ describe("integration-pins-service — DB access/ownership", () => {
         connectionIds: [a, bOther],
         createdBy: ctx.user.id,
       });
-      expect(pin.connection_ids).toEqual([a, bOther].sort());
+      expect(pin.connection_ids).toEqual([a, bOther]);
     });
 
-    it("echoes ids lowercased and sorted, matching what the read returns", async () => {
-      // `z.uuid()` accepts an upper-case id; Postgres stores and returns the
-      // lower-case form. An unfolded echo would disagree with the very next
-      // read on both case and order.
+    it("echoes what the next read returns, in the caller's order", async () => {
       const ids = await seedSharedConnections(2);
-      const shouted = [...ids].reverse().map((id) => id.toUpperCase());
+      const reversed = [...ids].reverse();
       const pin = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
-        connectionIds: shouted,
+        connectionIds: reversed.map((id) => id.toUpperCase()),
         createdBy: ctx.user.id,
       });
-      expect(pin.connection_ids).toEqual(ids);
+      expect(pin.connection_ids).toEqual(reversed);
       expect((await listIntegrationPins(scope, INTEGRATION))[0]!.connection_ids).toEqual(
         pin.connection_ids,
       );
+    });
+
+    it("deleting a pinned connection leaves its id in the set — the pin never shrinks", async () => {
+      const ids = await seedSharedConnections(2);
+      await upsertIntegrationPin(scope, INTEGRATION, {
+        agentPackageId: AGENT,
+        connectionIds: ids,
+        createdBy: ctx.user.id,
+      });
+      await db.delete(integrationConnections).where(eq(integrationConnections.id, ids[1]!));
+      expect((await listIntegrationPins(scope, INTEGRATION))[0]!.connection_ids).toEqual(ids);
+    });
+
+    it("refuses to unshare ANY member of a pinned set (409 connection_pinned)", async () => {
+      const ids = await seedSharedConnections(2);
+      await upsertIntegrationPin(scope, INTEGRATION, {
+        agentPackageId: AGENT,
+        connectionIds: ids,
+        createdBy: ctx.user.id,
+      });
+      await expect(updateConnectionMetadata(ids[1]!, { sharedWithOrg: false })).rejects.toThrow(
+        /pinned/,
+      );
+      // Control: a shared connection outside the set unshares freely.
+      const [outside] = await seedSharedConnections(1);
+      const row = await updateConnectionMetadata(outside!, { sharedWithOrg: false });
+      expect(row.sharedWithOrg).toBe(false);
     });
 
     it("refuses the whole set when ONE member is not shared", async () => {
@@ -462,94 +448,6 @@ describe("integration-pins-service — DB access/ownership", () => {
         }),
       ).rejects.toThrow(/sharedWithOrg/i);
       expect(await listIntegrationPins(scope, INTEGRATION)).toEqual([]);
-    });
-  });
-
-  /**
-   * The advisory lock in `upsertPin`, driven by hand.
-   *
-   * The sequential tests above cannot see the RACE, and the race is what the
-   * lock is for: delete-then-insert is not atomic under READ COMMITTED, so a
-   * second writer whose delete cannot see the first's uncommitted rows leaves
-   * the UNION of both sets behind — a pin neither caller asked for, past the
-   * cap for a large enough pair, and one the resolver then binds silently.
-   *
-   * Reproducing it needs TWO transactions open at once, i.e. two connections,
-   * i.e. a real PostgreSQL: PGlite is a single-process embedded engine, so
-   * under `TEST_TIER=0` there is no interleaving to observe and this block
-   * skips with that as its reason (`test/helpers/tier.ts`).
-   */
-  describeRequiresPostgres("two writers racing on one pin (needs a real PostgreSQL)", () => {
-    const RACE_AGENT = "@pinsorg/race-agent";
-
-    beforeEach(async () => {
-      await seedPackage({
-        id: RACE_AGENT,
-        orgId: ctx.orgId,
-        type: "agent",
-        homeSpaceId: scope.spaceId,
-        draftManifest: {
-          type: "agent",
-          schema_version: "0.1",
-          name: RACE_AGENT,
-          version: "1.0.0",
-          display_name: "Race agent",
-          prompt: "x",
-          dependencies: { integrations: { [INTEGRATION]: "^1.0.0" } },
-        },
-      });
-      await seedSpacePackage(scope.spaceId, RACE_AGENT, { enabled: true });
-    });
-
-    it("makes the second writer wait — the table holds one set, never the union", async () => {
-      const ids: string[] = [];
-      for (let i = 0; i < 4; i += 1) {
-        ids.push(
-          await seedConnection({
-            spaceId: scope.spaceId,
-            userId: memberId,
-            sharedWithOrg: true,
-            label: `race-${i}`,
-          }),
-        );
-      }
-      ids.sort();
-      const first = [ids[0]!, ids[1]!];
-      const second = [ids[2]!, ids[3]!];
-
-      let commitFirst!: () => void;
-      const gate = new Promise<void>((resolve) => {
-        commitFirst = resolve;
-      });
-
-      // T1 — held open between its insert and its commit through the service's
-      // own seam, so T2 necessarily starts against uncommitted rows.
-      const writingFirst = upsertIntegrationPin(
-        scope,
-        INTEGRATION,
-        { agentPackageId: RACE_AGENT, connectionIds: first, createdBy: ctx.user.id },
-        { onBeforeCommit: () => gate },
-      );
-      await Bun.sleep(150);
-
-      // T2 — blocks on T1's advisory lock. Without it, its DELETE sees no row
-      // (T1 has not committed) and its INSERT lands beside T1's four.
-      const writingSecond = upsertIntegrationPin(scope, INTEGRATION, {
-        agentPackageId: RACE_AGENT,
-        connectionIds: second,
-        createdBy: ctx.user.id,
-      });
-      await Bun.sleep(150);
-
-      commitFirst();
-      await Promise.all([writingFirst, writingSecond]);
-
-      const listed = (await listIntegrationPins(scope, INTEGRATION)).filter(
-        (p) => p.packageId === RACE_AGENT,
-      );
-      expect(listed).toHaveLength(1);
-      // The last committed set, whole — never `[...first, ...second]`.
-      expect(listed[0]!.connection_ids).toEqual(second);
     });
   });
 

@@ -2,6 +2,7 @@
 
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { connectionSetRefusals } from "./integrations.ts";
 
 /**
  * User-scoped identity routes (`/api/me/*`).
@@ -266,8 +267,8 @@ export const mePaths = {
       summary: "Pin connections for the caller's runs of an agent",
       description:
         "Persists the caller's preference for an integration on this agent. " +
-        "Sits at cascade layer 5 — wins over the fallback ambiguity but loses to admin " +
-        "pins / run / schedule overrides. Replaces the previous R5 localStorage pick. " +
+        "Sits at cascade layer 5 — wins over a soft org default and the fallback, loses " +
+        "to an admin pin, an enforced org default and run / schedule overrides. " +
         "The body carries the WHOLE set and this write replaces it; `DELETE` clears it. " +
         "Idempotent — repeated calls rewrite the same set.",
       parameters: [
@@ -306,8 +307,7 @@ export const mePaths = {
           },
         },
         "400": {
-          description:
-            "Validation failed (connection wrong integration/auth, or not accessible to caller).",
+          description: `Refused: ${connectionSetRefusals}; or a connection of another integration or space, or one neither owned by the caller nor shared.`,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -319,8 +319,8 @@ export const mePaths = {
       tags: ["Profile"],
       summary: "Clear the caller's pin on a (agent, integration)",
       description:
-        "Removes the caller's member pin so the resolver falls back to layer 5 " +
-        "(accessible connections). Idempotent — 204 even when no row exists.",
+        "Removes the caller's member pin so the resolver falls back to layers 6-7 " +
+        "(soft org default, then accessible connections). Idempotent — 204 even when no row exists.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

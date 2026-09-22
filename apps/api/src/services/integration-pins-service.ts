@@ -5,20 +5,16 @@
  * `block_user_connections` toggle + connection metadata edits
  * (label, sharedWithOrg). Consumed by the routes in `routes/integrations.ts`.
  *
- * Pin model (flat): one SET per (space, agent, integration, scope), one row
- * per bound connection.
+ * Pin model (flat): one row per (space, agent, integration, scope), carrying
+ * the bound set in `connection_ids`.
  * Scope = admin (`user_id IS NULL`) OR member (`user_id = caller.id`).
- * The pin row carries a `connection_id`; the connection's own `auth_key`
- * is denormalised on the PinSummary for display but never part of the
- * uniqueness key — OAuth and api_key connections are interchangeable at
- * runtime.
  *
  * All governance operations — the route layer enforces
  * `requirePermission("integrations", "configure")`; this layer assumes the
  * caller already holds it.
  */
 
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, arrayContains, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   spacePackages,
@@ -44,8 +40,6 @@ import {
   missingScopesForConnection,
   manifestAuthKeySet,
   labelsSharedBy,
-  normalizeConnectionIds,
-  MAX_CONNECTIONS_PER_INTEGRATION,
   type ConnectionResolutionSource,
 } from "@appstrate/core/integration";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
@@ -142,24 +136,6 @@ export async function setBlockUserConnections(
 
 // ─────────────────────────── Pin CRUD ─────────────────────────────────────────
 
-/**
- * Cap + {@link normalizeConnectionIds} + sort, at every set WRITE. Sorting is
- * what gives a set ONE representation: its rows share a write timestamp, so
- * nothing but the id can order a read of them.
- */
-export function canonicalConnectionSet(ids: string[], field: string): string[] {
-  if (ids.length === 0 || ids.length > MAX_CONNECTIONS_PER_INTEGRATION) {
-    throw invalidRequest(
-      `\`${field}\` must hold between 1 and ${MAX_CONNECTIONS_PER_INTEGRATION} connection ids`,
-    );
-  }
-  const normalized = normalizeConnectionIds(ids);
-  if (normalized === null) {
-    throw invalidRequest(`\`${field}\` must not repeat a connection id`);
-  }
-  return normalized.sort();
-}
-
 /** Refuse a colliding set here; the resolver re-checks for a LATER rename. */
 export function assertDistinctConnectionLabels(
   integrationId: string,
@@ -171,31 +147,14 @@ export function assertDistinctConnectionLabels(
   }
 }
 
-interface PinJoinRow {
-  pin: PinRow;
-  conn: ConnectionRow | null;
-}
-
-/** Fold one pin's N rows into one summary; `createdAt` = the current set's write. */
-function toPinSummaries(rows: PinJoinRow[]): PinSummary[] {
-  const byPin = new Map<string, PinJoinRow[]>();
-  for (const row of rows) {
-    const key = `${row.pin.packageId}|${row.pin.integrationId}`;
-    const bucket = byPin.get(key);
-    if (bucket) bucket.push(row);
-    else byPin.set(key, [row]);
-  }
-  return [...byPin.values()].map((group) => {
-    const first = group[0]!;
-    return {
-      packageId: first.pin.packageId,
-      integration_package_id: first.pin.integrationId,
-      auth_key: first.conn?.authKey ?? "",
-      connection_ids: group.map((r) => r.pin.connectionId),
-      createdAt: first.pin.createdAt.toISOString(),
-      updatedAt: first.pin.updatedAt.toISOString(),
-    };
-  });
+function toPinSummary(pin: PinRow): PinSummary {
+  return {
+    packageId: pin.packageId,
+    integration_package_id: pin.integrationId,
+    connection_ids: pin.connectionIds,
+    createdAt: pin.createdAt.toISOString(),
+    updatedAt: pin.updatedAt.toISOString(),
+  };
 }
 
 /**
@@ -209,9 +168,8 @@ export async function listIntegrationPins(
   integrationId: string,
 ): Promise<PinSummary[]> {
   const rows = await db
-    .select({ pin: integrationPins, conn: integrationConnections })
+    .select()
     .from(integrationPins)
-    .leftJoin(integrationConnections, eq(integrationConnections.id, integrationPins.connectionId))
     .where(
       and(
         eq(integrationPins.spaceId, scope.spaceId),
@@ -219,8 +177,8 @@ export async function listIntegrationPins(
         isNull(integrationPins.userId),
       ),
     )
-    .orderBy(integrationPins.connectionId);
-  return toPinSummaries(rows);
+    .orderBy(integrationPins.packageId);
+  return rows.map(toPinSummary);
 }
 
 /**
@@ -282,8 +240,6 @@ export async function upsertIntegrationPin(
   scope: SpaceScope,
   integrationId: string,
   input: SetPinInput,
-  /** TEST seam (`revokePackageShare`'s shape): runs in-transaction, pre-commit. */
-  opts?: { onBeforeCommit?: () => Promise<void> },
 ): Promise<PinSummary> {
   return upsertPin({
     scope,
@@ -293,13 +249,12 @@ export async function upsertIntegrationPin(
     userIdValue: null,
     validateOpts: { requireShared: true },
     createdBy: input.createdBy,
-    ...(opts?.onBeforeCommit ? { onBeforeCommit: opts.onBeforeCommit } : {}),
   });
 }
 
 /**
- * Delete-then-insert rather than a per-row upsert: a connection the caller
- * dropped must disappear with the write that adds the new ones.
+ * Raw SQL because the conflict target is the unique index's `coalesce`
+ * expression, which drizzle's `onConflictDoUpdate` cannot name.
  */
 async function upsertPin(args: {
   scope: SpaceScope;
@@ -309,58 +264,42 @@ async function upsertPin(args: {
   userIdValue: string | null;
   validateOpts: { requireShared?: boolean; allowOwnedBy?: string };
   createdBy: string | null;
-  onBeforeCommit?: () => Promise<void>;
 }): Promise<PinSummary> {
-  const { scope, agentPackageId, integrationId, userIdValue, createdBy } = args;
-  const connectionIds = canonicalConnectionSet(args.connectionIds, "connection_ids");
+  const { scope, agentPackageId, integrationId, connectionIds, userIdValue, createdBy } = args;
   const conns = await Promise.all(
     connectionIds.map((id) => validatePinTarget(scope, integrationId, id, args.validateOpts)),
   );
   assertDistinctConnectionLabels(integrationId, conns);
   await assertAgentActiveHere(scope, agentPackageId);
 
-  const now = new Date();
-  const userPredicate =
-    userIdValue === null ? isNull(integrationPins.userId) : eq(integrationPins.userId, userIdValue);
-  const lockKey = `ip_set:${scope.spaceId}:${agentPackageId}:${integrationId}:${userIdValue ?? ""}`;
-
-  await db.transaction(async (tx) => {
-    // Not atomic under READ COMMITTED: without this, two concurrent PUTs both
-    // delete what they can see, both insert, and the UNION survives.
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
-    await tx
-      .delete(integrationPins)
-      .where(
-        and(
-          eq(integrationPins.spaceId, scope.spaceId),
-          eq(integrationPins.packageId, agentPackageId),
-          eq(integrationPins.integrationId, integrationId),
-          userPredicate,
-        ),
-      );
-    await tx.insert(integrationPins).values(
-      connectionIds.map((connectionId) => ({
-        spaceId: scope.spaceId,
-        packageId: agentPackageId,
-        integrationId,
-        userId: userIdValue,
-        connectionId,
-        createdBy,
-        createdAt: now,
-        updatedAt: now,
-      })),
+  const ids = sql`ARRAY[${sql.join(
+    connectionIds.map((id) => sql`${id}`),
+    sql`, `,
+  )}]::uuid[]`;
+  await db.execute(sql`
+    INSERT INTO ${integrationPins}
+      (space_id, package_id, integration_package_id, user_id, connection_ids, created_by)
+    VALUES (${scope.spaceId}, ${agentPackageId}, ${integrationId}, ${userIdValue}, ${ids}, ${createdBy})
+    ON CONFLICT (space_id, package_id, integration_package_id, (coalesce(user_id, '')))
+    DO UPDATE SET
+      connection_ids = EXCLUDED.connection_ids,
+      created_by = EXCLUDED.created_by,
+      updated_at = now()
+  `);
+  const [pin] = await db
+    .select()
+    .from(integrationPins)
+    .where(
+      and(
+        eq(integrationPins.spaceId, scope.spaceId),
+        eq(integrationPins.packageId, agentPackageId),
+        eq(integrationPins.integrationId, integrationId),
+        userIdValue === null
+          ? isNull(integrationPins.userId)
+          : eq(integrationPins.userId, userIdValue),
+      ),
     );
-    if (args.onBeforeCommit) await args.onBeforeCommit();
-  });
-
-  return {
-    packageId: agentPackageId,
-    integration_package_id: integrationId,
-    auth_key: conns[0]!.authKey,
-    connection_ids: connectionIds,
-    createdAt: now.toISOString(),
-    updatedAt: now.toISOString(),
-  };
+  return toPinSummary(pin!);
 }
 
 export async function deleteIntegrationPin(
@@ -442,10 +381,10 @@ interface UpsertMemberPinInput {
 }
 
 /**
- * Replace the member-scope pin set (`integration_pins` rows with `user_id`).
+ * Replace the member-scope pin set (`integration_pins` row with `user_id`).
  *
  * Member writes their own preference for this (agent, integration) —
- * the persisted rows the resolver sees on every run (layer 5 of the
+ * the persisted row the resolver sees on every run (layer 5 of the
  * cascade).
  */
 export async function upsertMemberPin(
@@ -498,10 +437,10 @@ export async function listMemberPinsForAgent(
   agentPackageId: string,
   userId: string,
 ): Promise<MemberPinSummary[]> {
-  const rows = await db
+  return db
     .select({
-      integrationId: integrationPins.integrationId,
-      connectionId: integrationPins.connectionId,
+      integration_package_id: integrationPins.integrationId,
+      connection_ids: integrationPins.connectionIds,
     })
     .from(integrationPins)
     .where(
@@ -511,18 +450,7 @@ export async function listMemberPinsForAgent(
         eq(integrationPins.userId, userId),
       ),
     )
-    .orderBy(integrationPins.connectionId);
-
-  const byIntegration = new Map<string, string[]>();
-  for (const row of rows) {
-    const ids = byIntegration.get(row.integrationId);
-    if (ids) ids.push(row.connectionId);
-    else byIntegration.set(row.integrationId, [row.connectionId]);
-  }
-  return [...byIntegration].map(([integration_package_id, connection_ids]) => ({
-    integration_package_id,
-    connection_ids,
-  }));
+    .orderBy(integrationPins.integrationId);
 }
 
 // ─────────────────────────── Connection metadata edits ────────────────────────
@@ -552,12 +480,12 @@ export async function updateConnectionMetadata(
       db
         .select({ packageId: integrationPins.packageId })
         .from(integrationPins)
-        .where(eq(integrationPins.connectionId, connectionId))
+        .where(arrayContains(integrationPins.connectionIds, [connectionId]))
         .limit(1),
       db
         .select({ id: integrationOrgDefaults.id })
         .from(integrationOrgDefaults)
-        .where(eq(integrationOrgDefaults.connectionId, connectionId))
+        .where(arrayContains(integrationOrgDefaults.connectionIds, [connectionId]))
         .limit(1),
     ]);
     if (pins.length > 0) {
@@ -682,11 +610,10 @@ function pickStatusForSource(source: ConnectionResolutionSource): IntegrationPic
  * connection the next run would use for this (agent, integration, actor),
  * plus the candidate list and pin/blocked state the dropdown renders.
  *
- * The "which connection" decision delegates to {@link resolveConnectionsForRun}
- * — the exact cascade (admin pin → run/schedule override → member pin →
- * fallback) + scope check the runtime uses — so the UI never re-implements
- * it. Per-candidate `missingScopes` are an additional display annotation
- * (the resolver only scope-checks the one resolved connection).
+ * The "which connections" decision delegates to {@link resolveConnectionsForRun}
+ * — the exact cascade + scope check the runtime uses — so the UI never
+ * re-implements it. Per-candidate `missingScopes` are an additional display
+ * annotation (the resolver only scope-checks the bound connections).
  *
  * `agentManifest` and `resolution` are REQUIRED and caller-supplied, which is
  * load-bearing rather than stylistic. This function used to load the package
@@ -788,7 +715,7 @@ async function resolveAgentIntegrationPick(args: {
   } else if (err) {
     switch (err.code) {
       case "insufficient_scopes":
-        resolvedConnectionIds = err.connectionId ? [err.connectionId] : [];
+        resolvedConnectionIds = err.boundConnectionIds ?? [];
         resolvedMissingScopes = err.missingScopes ?? [];
         status = err.source ? pickStatusForSource(err.source) : "auto";
         break;
@@ -796,6 +723,7 @@ async function resolveAgentIntegrationPick(args: {
         status = "must_choose";
         break;
       case "duplicate_connection_label":
+        resolvedConnectionIds = err.boundConnectionIds ?? [];
         status = "duplicate_label";
         break;
       case "needs_reconnection":

@@ -59,9 +59,7 @@ export interface IntegrationConnection {
   /**
    * Display name, set at creation: the extracted identity (email/login) when
    * available, else "Connexion N". Stable for the connection's lifetime and
-   * user-editable. The UI renders it verbatim. NOT NULL and always present:
-   * a run binding several connections of one integration addresses each by
-   * its label.
+   * user-editable. The UI renders it verbatim.
    */
   label: string;
   /** Opt-in: makes this connection selectable by other members of the same space. */
@@ -171,7 +169,6 @@ export interface AccessibleIntegrationConnection {
   id: string;
   auth_key: string;
   account_id: string;
-  /** User-given name. NOT NULL: a bound connection is addressed by it. */
   label: string;
   owner_user_id: string | null;
   owner_end_user_id: string | null;
@@ -185,39 +182,26 @@ export interface AccessibleIntegrationConnection {
 
 /**
  * An admin pin (`integration_pins`, `user_id IS NULL`) governing which
- * connections an agent uses for an integration — one row per bound
- * connection, folded into one summary. Wire shape for the
+ * connections an agent uses for an integration. Wire shape for the
  * `/api/integrations/:packageId/pins` surface.
  */
 export interface IntegrationPin {
   packageId: string;
   integration_package_id: string;
-  /** Denormalised from the set's first connection — display hint only. */
-  auth_key: string;
-  /** The whole pinned set, 1..MAX_CONNECTIONS_PER_INTEGRATION. A write replaces it. */
   connection_ids: string[];
-  /**
-   * When the CURRENT set was written, not when this (agent, integration) was
-   * first pinned: a write replaces the rows, so none survives an edit.
-   */
   createdAt: string;
   updatedAt: string;
 }
 
 /**
- * Org-wide default connection SET for an integration (all consuming agents).
+ * Org-wide default connection set for an integration (all consuming agents).
  * `enforce: true` locks members; `false` is a soft default they can
- * override with their own pin. The N rows share one `enforce` by
- * construction — a write replaces the whole set. See the resolver cascade.
+ * override with their own pin. See the resolver cascade.
  */
 export interface IntegrationOrgDefault {
   integration_package_id: string;
-  /** The whole default set, 1..MAX_CONNECTIONS_PER_INTEGRATION. A write replaces it. */
   connection_ids: string[];
-  /** Denormalised from the set's first connection — display hint only. */
-  auth_key: string;
   enforce: boolean;
-  /** When the CURRENT set was written — a write replaces the rows. */
   createdAt: string;
   updatedAt: string;
 }
@@ -269,13 +253,9 @@ export type IntegrationPickStatus =
 
 export interface IntegrationAgentResolution {
   status: IntegrationPickStatus;
-  /** Connections the next run would bind; empty for none/must_choose/stale. */
+  /** The set the next run binds (the whole failing set on under-scoped / duplicate_label). */
   resolved_connection_ids: string[];
-  /**
-   * Missing scopes on the one connection an `insufficient_scopes` verdict
-   * names; empty otherwise. Not per bound connection — the resolver stops at
-   * the first member that fails its health check.
-   */
+  /** Missing scopes on the one connection an under-scoped verdict names; else empty. */
   resolved_missing_scopes: string[];
   /** Admin pin connection set (status admin_locked), else empty. */
   admin_pinned_connection_ids: string[];

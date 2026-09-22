@@ -1265,7 +1265,7 @@ export const schemas = {
       },
       connection_overrides: {
         type: ["object", "null"],
-        description: `Per-integration connection picks for this run (flat-connections mechanism #2). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 1..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration; each chosen connection carries its own authKey. Loses to admin pins (#1).`,
+        description: `Per-integration connection picks for this run (cascade layer 3). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 1..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration; each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats the schedule override, member pins, a soft org default and the fallback.`,
         additionalProperties: {
           type: "array",
           items: { type: "string" },
@@ -1380,7 +1380,7 @@ export const schemas = {
       version_override: { type: ["string", "null"] },
       connection_overrides: {
         type: ["object", "null"],
-        description: `Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 1..${MAX_CONNECTIONS_PER_INTEGRATION} per integration. Replayed on every fire; loses to admin pins (#1), beats actor-fallback (#4).`,
+        description: `Per-integration connection picks frozen on the schedule row (cascade layer 4). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 1..${MAX_CONNECTIONS_PER_INTEGRATION} per integration. Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback.`,
         additionalProperties: {
           type: "array",
           items: { type: "string" },
@@ -1807,7 +1807,7 @@ export const schemas = {
   IntegrationAgentResolution: {
     type: "object",
     description:
-      "Per-integration connection verdict for an agent: which connection the next run uses (admin pin → run/schedule override → member pin → fallback + scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses.",
+      "Per-integration connection verdict for an agent: which connections the next run binds (admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback, each layer a set and the fallback binding at most one; then a scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses.",
     required: [
       "status",
       "resolved_connection_ids",
@@ -1837,6 +1837,8 @@ export const schemas = {
         type: "array",
         items: { type: "string" },
         maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+        description:
+          "The set the next run binds. On `duplicate_label` and on an `insufficient_scopes` verdict, the whole set the winning layer tried to bind.",
       },
       resolved_missing_scopes: {
         type: "array",
@@ -1992,31 +1994,18 @@ export const schemas = {
 
   IntegrationPin: {
     type: "object",
-    required: [
-      "packageId",
-      "integration_package_id",
-      "auth_key",
-      "connection_ids",
-      "createdAt",
-      "updatedAt",
-    ],
+    required: ["packageId", "integration_package_id", "connection_ids", "createdAt", "updatedAt"],
     properties: {
       packageId: { type: "string" },
       integration_package_id: { type: "string" },
-      auth_key: { type: "string" },
       connection_ids: {
         type: "array",
         items: { type: "string", format: "uuid" },
         minItems: 1,
         maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
-        description: "The whole pinned set. A write replaces it; there is no add/remove call.",
+        description: "The whole pinned set, in the order it was written. A write replaces it.",
       },
-      createdAt: {
-        type: "string",
-        format: "date-time",
-        description:
-          "When the CURRENT set was written — not when this (agent, integration) was first pinned: a write replaces the rows, so none survives an edit to carry an older date.",
-      },
+      createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },
   },

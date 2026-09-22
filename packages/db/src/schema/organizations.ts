@@ -436,8 +436,7 @@ export const modelProviderPairings = pgTable(
     // and the first statement to address it by name — the
     // `DROP CONSTRAINT "<declared name>"` drizzle-kit emits when an FK's
     // `onDelete` or target changes — would have errored 42704 and aborted the
-    // whole pending batch. Same reasoning in full on
-    // `integration_org_defaults.connectionId`, the other one of the two.
+    // whole pending batch.
     foreignKey({
       columns: [table.credentialId],
       foreignColumns: [modelProviderCredentials.id],

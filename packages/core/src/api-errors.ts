@@ -51,18 +51,14 @@ export interface ResolutionFieldError extends ValidationFieldError {
   /**
    * `must_choose_connection` — the connections the caller may pick from, each
    * carrying the fields that tell them apart (`label`, `account_id`,
-   * `owned_by_actor`). Send the chosen `id`s back as that integration's ARRAY
-   * in the request's `connection_overrides` map. Ids alone would force a second
-   * round-trip through the connection list before the caller could choose.
-   *
-   * `duplicate_connection_label` carries the same list, for the opposite
-   * reason: those are the connections already BOUND to the integration that
-   * collide on a label. Nothing the caller sends here fixes it — the labels
-   * themselves have to change.
+   * `owned_by_actor`). Pick some and send their `id`s back in the request's
+   * `connection_overrides` map. Ids alone would force a second round-trip
+   * through the connection list before the caller could choose.
+   * `duplicate_connection_label` — the bound connections sharing a label.
    */
   candidate_connections?: {
     id: string;
-    label: string | null;
+    label: string;
     account_id: string;
     owned_by_actor: boolean;
   }[];

@@ -106,10 +106,9 @@ import {
   CLIENT_SECRET_REQUIRED_MESSAGE,
   PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
 } from "../services/integration-manifest-helpers.ts";
-import {
-  partitionScopesByAuthCatalog,
-  MAX_CONNECTIONS_PER_INTEGRATION,
-} from "@appstrate/core/integration";
+import { partitionScopesByAuthCatalog } from "@appstrate/core/integration";
+import { connectionIdSetSchema } from "../lib/connection-set.ts";
+import { CONNECTION_LABEL_MAX, connectionLabelProblem } from "../lib/connection-label.ts";
 import {
   deleteIntegrationPin,
   listAgentsConsumingIntegration,
@@ -210,22 +209,28 @@ export const updateSettingsSchema = z
 
 export const setPinSchema = z
   .object({
-    connection_ids: z.array(z.uuid()).min(1).max(MAX_CONNECTIONS_PER_INTEGRATION),
+    connection_ids: connectionIdSetSchema,
   })
   .strict();
 
 export const setOrgDefaultSchema = z
   .object({
-    connection_ids: z.array(z.uuid()).min(1).max(MAX_CONNECTIONS_PER_INTEGRATION),
+    connection_ids: connectionIdSetSchema,
     enforce: z.boolean().default(false),
   })
   .strict();
 
 export const updateConnectionSchema = z
   .object({
-    // A rename, never a clear — the column is NOT NULL and the sidecar keys
-    // its `connection` tool parameter on this value.
-    label: z.string().min(1).max(80).optional(),
+    label: z
+      .string()
+      .min(1)
+      .max(CONNECTION_LABEL_MAX)
+      .superRefine((label, ctx) => {
+        const problem = connectionLabelProblem(label);
+        if (problem) ctx.addIssue({ code: "custom", message: `label ${problem}` });
+      })
+      .optional(),
     shared_with_org: z.boolean().optional(),
   })
   .strict()
@@ -1258,11 +1263,10 @@ export function createIntegrationsRouter() {
     },
   );
 
-  // ─── Org default connections (cross-agent governance) ────────────────────
-  // One default connection SET per (space, integration) — the resolver
+  // ─── Org default connection (cross-agent governance) ─────────────────────
+  // One default connection set per (space, integration) — the resolver
   // baseline for every consuming agent (enforce → org-wide lock; soft →
-  // overridable by member pins). PUT replaces the set, DELETE clears it.
-  // Admin-only.
+  // overridable by member pins). Admin-only.
 
   router.get(
     "/:packageId{@[^/]+/[^/]+}/default",

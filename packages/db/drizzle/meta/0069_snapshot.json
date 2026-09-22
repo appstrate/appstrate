@@ -1,5 +1,5 @@
 {
-  "id": "a75644d3-e387-4236-a468-59d2768491e5",
+  "id": "197824cc-79fc-46a0-a8b1-e4659f5a0013",
   "prevId": "287f825a-4f22-49a8-81e9-ca81535f1c9e",
   "version": "7",
   "dialect": "postgresql",
@@ -5229,6 +5229,10 @@
         "integration_connections_auth_key_valid": {
           "name": "integration_connections_auth_key_valid",
           "value": "\"auth_key\" ~ '^[a-z][a-z0-9_]*$'"
+        },
+        "integration_connections_label_not_empty": {
+          "name": "integration_connections_label_not_empty",
+          "value": "label <> ''"
         }
       },
       "isRLSEnabled": false
@@ -5485,9 +5489,9 @@
           "primaryKey": false,
           "notNull": false
         },
-        "connection_id": {
-          "name": "connection_id",
-          "type": "uuid",
+        "connection_ids": {
+          "name": "connection_ids",
+          "type": "uuid[]",
           "primaryKey": false,
           "notNull": true
         },
@@ -5539,12 +5543,6 @@
               "asc": true,
               "isExpression": true,
               "nulls": "last"
-            },
-            {
-              "expression": "connection_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
             }
           ],
           "isUnique": true,
@@ -5552,11 +5550,11 @@
           "method": "btree",
           "with": {}
         },
-        "idx_integration_pins_connection": {
-          "name": "idx_integration_pins_connection",
+        "idx_integration_pins_connection_ids": {
+          "name": "idx_integration_pins_connection_ids",
           "columns": [
             {
-              "expression": "connection_id",
+              "expression": "connection_ids",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -5564,7 +5562,7 @@
           ],
           "isUnique": false,
           "concurrently": false,
-          "method": "btree",
+          "method": "gin",
           "with": {}
         },
         "idx_integration_pins_user": {
@@ -5621,15 +5619,6 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "integration_pins_connection_id_integration_connections_id_fk": {
-          "name": "integration_pins_connection_id_integration_connections_id_fk",
-          "tableFrom": "integration_pins",
-          "tableTo": "integration_connections",
-          "columnsFrom": ["connection_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
         "integration_pins_created_by_user_id_fk": {
           "name": "integration_pins_created_by_user_id_fk",
           "tableFrom": "integration_pins",
@@ -5643,7 +5632,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "integration_pins_connection_ids_cardinality": {
+          "name": "integration_pins_connection_ids_cardinality",
+          "value": "cardinality(connection_ids) BETWEEN 1 AND 10"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.integration_org_defaults": {
@@ -5669,9 +5663,9 @@
           "primaryKey": false,
           "notNull": true
         },
-        "connection_id": {
-          "name": "connection_id",
-          "type": "uuid",
+        "connection_ids": {
+          "name": "connection_ids",
+          "type": "uuid[]",
           "primaryKey": false,
           "notNull": true
         },
@@ -5718,12 +5712,6 @@
               "isExpression": false,
               "asc": true,
               "nulls": "last"
-            },
-            {
-              "expression": "connection_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
             }
           ],
           "isUnique": true,
@@ -5731,11 +5719,11 @@
           "method": "btree",
           "with": {}
         },
-        "idx_integration_org_defaults_connection": {
-          "name": "idx_integration_org_defaults_connection",
+        "idx_integration_org_defaults_connection_ids": {
+          "name": "idx_integration_org_defaults_connection_ids",
           "columns": [
             {
-              "expression": "connection_id",
+              "expression": "connection_ids",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -5743,7 +5731,7 @@
           ],
           "isUnique": false,
           "concurrently": false,
-          "method": "btree",
+          "method": "gin",
           "with": {}
         }
       },
@@ -5774,21 +5762,17 @@
           "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
-        },
-        "integration_org_defaults_connection_id_fk": {
-          "name": "integration_org_defaults_connection_id_fk",
-          "tableFrom": "integration_org_defaults",
-          "tableTo": "integration_connections",
-          "columnsFrom": ["connection_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "integration_org_defaults_connection_ids_cardinality": {
+          "name": "integration_org_defaults_connection_ids_cardinality",
+          "value": "cardinality(connection_ids) BETWEEN 1 AND 10"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.uploads": {

@@ -1133,34 +1133,12 @@ export function validateAgentIntegrationScopes(
 // resolver output, not the AFPS manifest, so they stay idiomatic TS.
 // ────────────────────────────────────────────────────────────────────
 
-/**
- * Hard cap on the connections one declared integration may bind in a single
- * run. Enforced at every WRITE (pins, org defaults, run and schedule
- * overrides) rather than in the resolver: the cascade only ever echoes a set
- * a write already validated, and the fallback produces at most one.
- */
+/** Cap on the connections one declared integration binds in a run, enforced at every write. */
 export const MAX_CONNECTIONS_PER_INTEGRATION = 10;
 
 /**
- * Fold a bound connection set onto one representation: ids lowercased,
- * caller's order kept. `null` when an id repeats — the same connection twice
- * is a set whose labels cannot be distinct.
- *
- * The fold is load-bearing, not cosmetic: Zod's `z.uuid()` accepts `A1B2…`,
- * Postgres stores and returns `a1b2…`, and the resolver looks a pick up in a
- * Map keyed on what the database returned.
- */
-export function normalizeConnectionIds(ids: readonly string[]): string[] | null {
-  const folded = ids.map((id) => id.toLowerCase());
-  return new Set(folded).size === folded.length ? folded : null;
-}
-
-/**
- * Rows whose `label` is shared verbatim with another row of the set. The
- * agent addresses each bound connection BY its label, so a shared one makes
- * the set unaddressable — this is the single definition of that collision,
- * used by the resolver (412 `duplicate_connection_label`) and by every UI
- * that composes a set, so the two can never disagree.
+ * Rows whose `label` is shared verbatim with another row of the set — the one
+ * definition of a collision, for the resolver and every UI composing a set.
  */
 export function labelsSharedBy<T extends { label: string }>(rows: readonly T[]): T[] {
   const counts = new Map<string, number>();
@@ -1171,9 +1149,7 @@ export function labelsSharedBy<T extends { label: string }>(rows: readonly T[]):
 /**
  * Per-integration connection picks. Used on `runs.connection_overrides`
  * (caller's run-time choice) and `package_schedules.connection_overrides`
- * (frozen at schedule create). Shape:
- * `{ "@scope/integration": ["<connection_id>", ...] }`, 1..
- * {@link MAX_CONNECTIONS_PER_INTEGRATION} entries per key.
+ * (frozen at schedule create). Shape: `{ "@scope/integration": ["<connection_id>", ...] }`.
  */
 export type ConnectionOverrides = Record<string, string[]>;
 
@@ -1203,10 +1179,7 @@ export interface ResolvedConnection {
 
 /**
  * Snapshot of the resolver output for one run. Persisted on
- * `runs.resolved_connections`. Shape:
- * `{ "@scope/integration": ResolvedConnection[] }` — one entry per bound
- * connection, 1..{@link MAX_CONNECTIONS_PER_INTEGRATION} per declared
- * integration.
+ * `runs.resolved_connections`. Shape: `{ "@scope/integration": ResolvedConnection[] }`.
  */
 export type ResolvedConnectionMap = Record<string, ResolvedConnection[]>;
 
@@ -1222,8 +1195,7 @@ export type ConnectionResolutionErrorCode =
   | "auth_key_mismatch";
 
 /**
- * One connection carried by a connection-set error (`must_choose_connection`,
- * `duplicate_connection_label`).
+ * One connection carried by `must_choose_connection` or `duplicate_connection_label`.
  *
  * Carries what it takes to TELL the candidates apart, not just to name them.
  * An id alone is opaque: a model reading the 412 has to fetch the connection
@@ -1231,14 +1203,12 @@ export type ConnectionResolutionErrorCode =
  * and a human reading a log learns nothing at all. The resolver already holds
  * the rows, so denormalizing the three distinguishing fields costs no query.
  *
- * Both fields are always set — `label` because `integration_connections.label`
- * is NOT NULL and a candidate is read from a live row, `accountId` because it
- * is the connect flow's own discriminator — so the pair always identifies the
- * account.
+ * `label` is user-given; `accountId` is the connect flow's own discriminator
+ * and is always set, so the pair always identifies the account.
  */
 export interface ConnectionCandidate {
   id: string;
-  /** User-given name, minted at creation and never empty. */
+  /** User-given name, minted at creation. */
   label: string;
   /** The auth's account discriminator (`sub` claim, email, host…). */
   accountId: string;
@@ -1250,12 +1220,7 @@ export interface ConnectionCandidate {
 export interface ConnectionResolutionError {
   integrationId: string;
   code: ConnectionResolutionErrorCode;
-  /**
-   * On `must_choose_connection`, the connections the caller may pick from.
-   * On `duplicate_connection_label`, the bound connections that collide on a
-   * label — the label is the agent's handle for a connection, so a set whose
-   * labels are not distinct is unaddressable and the caller must rename.
-   */
+  /** Pickable on `must_choose_connection`; colliding on `duplicate_connection_label`. */
   candidateConnections?: ConnectionCandidate[];
   /**
    * The connection the error is bound to:
@@ -1297,6 +1262,8 @@ export interface ConnectionResolutionError {
    * against re-fetched pin ids.
    */
   source?: ConnectionResolutionSource;
+  /** Every connection the layer that won bound, in its order — set when that set failed to bind. */
+  boundConnectionIds?: string[];
   /**
    * True when the resolved connection belongs to the current actor. Carried on
    * the two connection-bound connect-flow codes — `insufficient_scopes` and

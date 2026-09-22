@@ -50,24 +50,12 @@ const agentPackageIdParam = {
   schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$" },
 } as const;
 
-// The org default is keyed by (space, integration) ONLY — one SET per
-// integration, NOT one per (integration, auth_key). PUT replaces that set
-// wholesale in one transaction, so the N connections of a default share a
-// single `enforce` by construction. `auth_key` below is a DERIVED read-only
-// projection of the FIRST connection's own auth (joined from
-// `integration_connections` at read time) — it does NOT partition the default.
-// Picking connections of a different auth type replaces the set; it does not
-// create a second, per-auth one.
+// The org default is keyed by (space, integration) ONLY — one set per
+// integration, NOT one per (integration, auth_key): a set may mix auths, and
+// PUT replaces it wholesale.
 const integrationOrgDefaultSchema = {
   type: "object",
-  required: [
-    "integration_package_id",
-    "connection_ids",
-    "auth_key",
-    "enforce",
-    "createdAt",
-    "updatedAt",
-  ],
+  required: ["integration_package_id", "connection_ids", "enforce", "createdAt", "updatedAt"],
   properties: {
     integration_package_id: { type: "string" },
     connection_ids: {
@@ -76,21 +64,14 @@ const integrationOrgDefaultSchema = {
       minItems: 1,
       maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
     },
-    auth_key: {
-      type: "string",
-      description:
-        "Auth type of the default's FIRST connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default set per (space, integration) regardless of auth_key; a set may mix auths, and the per-connection auth is read from the connection list.",
-    },
     enforce: { type: "boolean" },
-    createdAt: {
-      type: "string",
-      format: "date-time",
-      description:
-        "When the CURRENT set was written — a write replaces the rows, so none survives an edit to carry an older date.",
-    },
+    createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" },
   },
 } as const;
+
+/** The refusals every connection-set write shares, beyond the per-connection checks. */
+export const connectionSetRefusals = `an empty set, more than ${MAX_CONNECTIONS_PER_INTEGRATION} ids, a repeated id (compared case-insensitively), or connections whose labels are not distinct (the agent addresses each bound connection by its label)`;
 
 const integrationSummarySchema = {
   type: "object",
@@ -1126,7 +1107,7 @@ export const integrationsPaths = {
                   minLength: 1,
                   maxLength: 80,
                   description:
-                    "A rename. The label cannot be cleared: it is NOT NULL, and a run binding several connections of one integration addresses each by its label.",
+                    "A rename; the label cannot be cleared. It reaches the agent's model verbatim, so a whitespace-only label, or one holding a control character (line breaks and tabs included), a zero-width/invisible character or a bidirectional-override character is refused with 400.",
                 },
                 shared_with_org: { type: "boolean" },
               },
@@ -1289,7 +1270,7 @@ export const integrationsPaths = {
     put: {
       operationId: "upsertIntegrationPin",
       tags: ["Integrations"],
-      summary: "Pin an admin-shared connection to an agent for all members (admin)",
+      summary: "Pin a set of admin-shared connections to an agent for all members (admin)",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1310,7 +1291,7 @@ export const integrationsPaths = {
                   minItems: 1,
                   maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
                   description:
-                    "The WHOLE pinned set — this write replaces it. 1..10 connections of this integration, each `shared_with_org`.",
+                    "The WHOLE pinned set, in the order the run binds it — this write replaces it. Each connection must belong to this integration and be `shared_with_org`.",
                 },
               },
               additionalProperties: false,
@@ -1326,7 +1307,10 @@ export const integrationsPaths = {
             "application/json": { schema: { $ref: "#/components/schemas/IntegrationPin" } },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: `Refused: ${connectionSetRefusals}; or a connection that is not shared, belongs to another integration or another space.`,
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
@@ -1356,7 +1340,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Get the org-wide default connection for this integration",
       description:
-        "The cross-agent governance baseline: one default connection per (space, " +
+        "The cross-agent governance baseline: one default connection set per (space, " +
         "integration) used by every consuming agent. `enforce: true` locks every member; " +
         "`enforce: false` is overridable by a member pin. Returns 204 when unset.",
       parameters: [
@@ -1387,10 +1371,9 @@ export const integrationsPaths = {
       summary: "Set the org-wide default connection for this integration (admin)",
       description:
         "Replace the (space, integration) default connection SET. Keyed per-integration, " +
-        "NOT per-auth: the body carries the WHOLE set and this write replaces it in one " +
-        "transaction, so the N rows share a single `enforce`. Selecting connections " +
-        "of a different auth type replaces the current default rather than adding a " +
-        "second one. The response `auth_key` reflects the first connection's auth (derived).",
+        "NOT per-auth: the body carries the WHOLE set and this write replaces it, " +
+        "`enforce` included. Selecting connections of a different auth type replaces " +
+        "the current default rather than adding a second one.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1426,7 +1409,10 @@ export const integrationsPaths = {
           headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: integrationOrgDefaultSchema } },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: `Refused: ${connectionSetRefusals}; or a connection that is not shared, belongs to another integration or another space.`,
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },

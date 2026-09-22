@@ -117,7 +117,8 @@ function conn(input: Partial<ConnectionRow> & { authKey?: string }): ConnectionR
 }
 
 let pinSeq = 0;
-function pin(connectionId: string, opts?: { userId?: string | null }): PinRow {
+/** One pin row — the whole bound set of its (agent, integration, scope). */
+function pin(connectionIds: string | string[], opts?: { userId?: string | null }): PinRow {
   pinSeq += 1;
   return {
     id: `pin_${pinSeq}`,
@@ -125,7 +126,7 @@ function pin(connectionId: string, opts?: { userId?: string | null }): PinRow {
     packageId: AGENT_ID,
     integrationId: INTEG,
     userId: opts?.userId ?? null,
-    connectionId,
+    connectionIds: typeof connectionIds === "string" ? [connectionIds] : connectionIds,
     createdBy: null,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -133,8 +134,8 @@ function pin(connectionId: string, opts?: { userId?: string | null }): PinRow {
 }
 
 /** Sugar — member pin scoped to the test's default user. */
-function memberPin(connectionId: string): PinRow {
-  return pin(connectionId, { userId: USER_ID });
+function memberPin(connectionIds: string | string[]): PinRow {
+  return pin(connectionIds, { userId: USER_ID });
 }
 
 function req(
@@ -181,6 +182,7 @@ describe("resolveConnections — admin pin (cascade layer 1)", () => {
     expect(result.resolved[INTEG]).toBeUndefined();
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]!.code).toBe("pinned_connection_unavailable");
+    expect(result.errors[0]!.message).toContain("may have been deleted");
   });
 
   it("pin wins over run override", () => {
@@ -223,7 +225,7 @@ describe("resolveConnections — admin pin (cascade layer 1)", () => {
   });
 });
 
-describe("resolveConnections — run override (cascade layer 2)", () => {
+describe("resolveConnections — run override (cascade layer 3)", () => {
   it("uses run override when no pin", () => {
     const c = conn({});
     const result = resolveConnections({
@@ -266,7 +268,7 @@ describe("resolveConnections — run override (cascade layer 2)", () => {
   });
 });
 
-describe("resolveConnections — schedule override (cascade layer 3)", () => {
+describe("resolveConnections — schedule override (cascade layer 4)", () => {
   it("uses schedule override when no pin or run override", () => {
     const c = conn({});
     const result = resolveConnections({
@@ -279,7 +281,7 @@ describe("resolveConnections — schedule override (cascade layer 3)", () => {
   });
 });
 
-describe("resolveConnections — member pin (cascade layer 4)", () => {
+describe("resolveConnections — member pin (cascade layer 5)", () => {
   it("uses member pin when no admin pin / no overrides and actor matches", () => {
     const c = conn({});
     const result = resolveConnections({
@@ -372,7 +374,7 @@ describe("resolveConnections — member pin (cascade layer 4)", () => {
   });
 });
 
-describe("resolveConnections — fallback (cascade layer 5)", () => {
+describe("resolveConnections — fallback (cascade layer 7)", () => {
   it("auto-picks the single accessible connection", () => {
     const c = conn({});
     const result = resolveConnections({
@@ -1352,7 +1354,7 @@ describe("resolveConnections — connection sets", () => {
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [web, dbx],
-      pins: [pin(web.id), pin(dbx.id)],
+      pins: [pin([web.id, dbx.id])],
     });
     expect(result.errors).toEqual([]);
     expect(result.resolved[INTEG]).toEqual([
@@ -1394,7 +1396,7 @@ describe("resolveConnections — connection sets", () => {
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [pinnedA, pinnedB, overridden],
-      pins: [pin(pinnedA.id), pin(pinnedB.id)],
+      pins: [pin([pinnedA.id, pinnedB.id])],
       runOverrides: { [INTEG]: [overridden.id] },
     });
     expect(result.resolved[INTEG]!.map((r) => r.connectionId)).toEqual([pinnedA.id, pinnedB.id]);
@@ -1420,11 +1422,39 @@ describe("resolveConnections — connection sets", () => {
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [live],
-      pins: [pin(live.id), pin("conn_ghost")],
+      pins: [pin([live.id, "conn_ghost"])],
     });
     expect(result.resolved[INTEG]).toBeUndefined();
     expect(result.errors[0]!.code).toBe("pinned_connection_unavailable");
     expect(result.errors[0]!.message).toContain("conn_ghost");
+    expect(result.errors[0]!.message).toContain("may have been deleted");
+  });
+
+  it("a gone member of a MEMBER pin fails loud too — the survivor is not bound alone", () => {
+    const live = conn({ label: "web-1" });
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [live],
+      pins: [memberPin([live.id, "conn_ghost"])],
+      actorUserId: USER_ID,
+    });
+    expect(result.resolved[INTEG]).toBeUndefined();
+    expect(result.errors[0]!.code).toBe("pinned_connection_unavailable");
+    expect(result.errors[0]!.message).toContain("conn_ghost");
+  });
+
+  it("an ENFORCE default with a gone member fails loud, naming it", () => {
+    const live = conn({ label: "web-1", sharedWithOrg: true });
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [live],
+      pins: [],
+      orgDefaults: { [INTEG]: { connectionIds: [live.id, "conn_ghost"], enforce: true } },
+    });
+    expect(result.resolved[INTEG]).toBeUndefined();
+    expect(result.errors[0]!.code).toBe("pinned_connection_unavailable");
+    expect(result.errors[0]!.message).toContain("conn_ghost");
+    expect(result.errors[0]!.message).toContain("may have been deleted");
   });
 
   it("a dead member fails the whole set with needs_reconnection naming it", () => {
@@ -1433,11 +1463,30 @@ describe("resolveConnections — connection sets", () => {
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [live, dead],
-      pins: [pin(live.id), pin(dead.id)],
+      pins: [pin([live.id, dead.id])],
     });
     expect(result.resolved[INTEG]).toBeUndefined();
     expect(result.errors[0]!.code).toBe("needs_reconnection");
     expect(result.errors[0]!.connectionId).toBe(dead.id);
+    expect(result.errors[0]!.boundConnectionIds).toEqual([live.id, dead.id]);
+  });
+
+  it("an under-scoped member reports the WHOLE bound set, not just itself", () => {
+    const scoped = {
+      ...oauth2Manifest(),
+      tools_policy: { t1: { required_scopes: { oauth: ["repo"] } } },
+    } as unknown as IntegrationManifest;
+    const ok = conn({ label: "web-1", scopesGranted: ["repo"] });
+    const short = conn({ label: "web-2", scopesGranted: [] });
+    const result = resolveConnections({
+      requirements: [req(scoped, ["t1"])],
+      accessibleConnections: [ok, short],
+      pins: [pin([ok.id, short.id])],
+    });
+    const err = result.errors[0]!;
+    expect(err.code).toBe("insufficient_scopes");
+    expect(err.connectionId).toBe(short.id);
+    expect(err.boundConnectionIds).toEqual([ok.id, short.id]);
   });
 
   it("control — the healthy sibling alone still resolves", () => {
@@ -1473,6 +1522,7 @@ describe("resolveConnections — duplicate_connection_label", () => {
     const err = result.errors[0]!;
     expect(err.code).toBe("duplicate_connection_label");
     expect(err.candidateConnections?.map((c) => c.id)).toEqual([a.id, b.id]);
+    expect(err.boundConnectionIds).toEqual([a.id, b.id]);
     expect(translateResolutionError(err)).toMatchObject({
       field: `integrations.${INTEG}`,
       code: "duplicate_connection_label",

@@ -456,7 +456,7 @@ export interface MeConnectionEntry {
   /** Stable connection id (uuid). */
   connection_id: string;
   kind: MeConnectionKind;
-  /** Display label set by the user. NOT NULL — always present. */
+  /** Display label set by the user. */
   label: string;
   scopes_granted: string[];
   connected_at: string;

@@ -62,7 +62,7 @@ import {
   readIntegrationAuth,
 } from "../services/integration-connections.ts";
 import { handoffStepsFor } from "../services/connect/provisioning.ts";
-import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { connectionIdSetSchema } from "../lib/connection-set.ts";
 import { logger } from "../lib/logger.ts";
 import { listRunnableAgents, listActiveSkills } from "../services/space-packages.ts";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
@@ -203,12 +203,8 @@ router.get("/connections", async (c) => {
  *
  * The persisted replacement for the R5 localStorage pick: when an agent
  * has >1 candidate connection on a required integration and the member picks
- * one or more, the choice is stored here and read by the resolver on every
+ * some, the choice is stored here and read by the resolver on every
  * subsequent run (cascade layer 5).
- *
- * `PUT` carries the WHOLE set and replaces it; `DELETE` clears it. There is
- * no add/remove endpoint — a partial write is a different pin from the one
- * the member asked for.
  *
  * Member-only (no end-user surface — end-users are addressed via API key
  * impersonation and the calling member controls the choice via run
@@ -223,7 +219,7 @@ export const upsertMemberPinSchema = z
   .object({
     agent_package_id: z.string().min(1),
     integration_package_id: z.string().min(1),
-    connection_ids: z.array(z.uuid()).min(1).max(MAX_CONNECTIONS_PER_INTEGRATION),
+    connection_ids: connectionIdSetSchema,
   })
   .strict();
 
@@ -266,7 +262,7 @@ router.put("/integration-pins", requireSpaceContext(), async (c) => {
     action: "integration.member_pin.upserted",
     resourceType: "integration_pin",
     resourceId: `${input.agent_package_id}|${input.integration_package_id}`,
-    after: { connectionIds: input.connection_ids },
+    after: { connectionIds: result.connection_ids },
   });
   return c.json(result);
 });

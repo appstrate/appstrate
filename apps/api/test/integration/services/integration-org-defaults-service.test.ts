@@ -15,6 +15,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
+import { eq } from "drizzle-orm";
 import { integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
@@ -24,8 +25,6 @@ import {
   deleteOrgDefault,
 } from "../../../src/services/integration-org-defaults-service.ts";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
-import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
-import { describeRequiresPostgres } from "../../helpers/tier.ts";
 
 const INTEGRATION_ID = "@official/gmail";
 
@@ -98,14 +97,12 @@ describe("integration-org-defaults-service", () => {
     });
     expect(created.connection_ids).toEqual([connId]);
     expect(created.enforce).toBe(true);
-    expect(created.auth_key).toBe("primary");
 
     // get
     const fetched = await getOrgDefault(scope, INTEGRATION_ID);
     expect(fetched).not.toBeNull();
     expect(fetched!.connection_ids).toEqual([connId]);
     expect(fetched!.enforce).toBe(true);
-    expect(fetched!.auth_key).toBe("primary");
 
     // listOrgDefaultsForResolver shape
     const resolverMap = await listOrgDefaultsForResolver(ctx.defaultSpaceId);
@@ -143,14 +140,14 @@ describe("integration-org-defaults-service", () => {
     expect(fetched!.enforce).toBe(true);
   });
 
-  it("a default is a SET: N connections, one shared `enforce`, replaced wholesale", async () => {
+  it("a default is a SET: N connections in the caller's order, replaced wholesale", async () => {
     const a = await seedSharedConnection(ctx.defaultSpaceId, "a");
     const b = await seedSharedConnection(ctx.defaultSpaceId, "b");
     const c = await seedSharedConnection(ctx.defaultSpaceId, "c");
-    const expected = [a, b, c].sort();
+    const expected = [c, a, b];
 
     const created = await upsertOrgDefault(scope, INTEGRATION_ID, {
-      connectionIds: [a, b, c],
+      connectionIds: expected,
       enforce: true,
       createdBy: ctx.user.id,
     });
@@ -159,7 +156,7 @@ describe("integration-org-defaults-service", () => {
       [INTEGRATION_ID]: { connectionIds: expected, enforce: true },
     });
 
-    // Replacement, not a merge: the two dropped members leave no row behind.
+    // Replacement, not a merge.
     await upsertOrgDefault(scope, INTEGRATION_ID, {
       connectionIds: [c],
       enforce: false,
@@ -168,37 +165,6 @@ describe("integration-org-defaults-service", () => {
     const fetched = await getOrgDefault(scope, INTEGRATION_ID);
     expect(fetched!.connection_ids).toEqual([c]);
     expect(fetched!.enforce).toBe(false);
-  });
-
-  it("refuses more than the cap and refuses a repeated id, changing nothing", async () => {
-    const ids: string[] = [];
-    for (let i = 0; i <= MAX_CONNECTIONS_PER_INTEGRATION; i += 1) {
-      ids.push(await seedSharedConnection(ctx.defaultSpaceId, `c${i}`));
-    }
-    await expect(
-      upsertOrgDefault(scope, INTEGRATION_ID, {
-        connectionIds: ids,
-        enforce: false,
-        createdBy: ctx.user.id,
-      }),
-    ).rejects.toThrow(new RegExp(`between 1 and ${MAX_CONNECTIONS_PER_INTEGRATION}`));
-    await expect(
-      upsertOrgDefault(scope, INTEGRATION_ID, {
-        connectionIds: [ids[0]!, ids[0]!],
-        enforce: false,
-        createdBy: ctx.user.id,
-      }),
-    ).rejects.toThrow(/must not repeat/);
-    expect(await getOrgDefault(scope, INTEGRATION_ID)).toBeNull();
-
-    // Control: exactly the cap is accepted.
-    const capped = ids.slice(0, MAX_CONNECTIONS_PER_INTEGRATION);
-    const ok = await upsertOrgDefault(scope, INTEGRATION_ID, {
-      connectionIds: capped,
-      enforce: false,
-      createdBy: ctx.user.id,
-    });
-    expect(ok.connection_ids).toHaveLength(MAX_CONNECTIONS_PER_INTEGRATION);
   });
 
   it("refuses a set whose members share a label, with the resolver's wording", async () => {
@@ -220,52 +186,20 @@ describe("integration-org-defaults-service", () => {
       enforce: true,
       createdBy: ctx.user.id,
     });
-    expect(ok.connection_ids).toEqual([a, bOther].sort());
+    expect(ok.connection_ids).toEqual([a, bOther]);
   });
 
-  /**
-   * The advisory lock in `upsertOrgDefault`, driven by hand — same reasoning
-   * as the pin one (`integration-pins-service.test.ts`), plus one failure of
-   * its own: the union would carry BOTH writers' `enforce` values across rows
-   * the resolver reads as a single governance decision.
-   */
-  describeRequiresPostgres("two writers racing on one default (needs a real PostgreSQL)", () => {
-    it("makes the second writer wait — one set, one enforce, never the union", async () => {
-      const ids: string[] = [];
-      for (let i = 0; i < 4; i += 1) {
-        ids.push(await seedSharedConnection(ctx.defaultSpaceId, `race-${i}`));
-      }
-      ids.sort();
-      const first = [ids[0]!, ids[1]!];
-      const second = [ids[2]!, ids[3]!];
-
-      let commitFirst!: () => void;
-      const gate = new Promise<void>((resolve) => {
-        commitFirst = resolve;
-      });
-
-      const writingFirst = upsertOrgDefault(
-        scope,
-        INTEGRATION_ID,
-        { connectionIds: first, enforce: true, createdBy: ctx.user.id },
-        { onBeforeCommit: () => gate },
-      );
-      await Bun.sleep(150);
-      const writingSecond = upsertOrgDefault(scope, INTEGRATION_ID, {
-        connectionIds: second,
-        enforce: false,
-        createdBy: ctx.user.id,
-      });
-      await Bun.sleep(150);
-      commitFirst();
-      await Promise.all([writingFirst, writingSecond]);
-
-      const fetched = await getOrgDefault(scope, INTEGRATION_ID);
-      expect(fetched!.connection_ids).toEqual(second);
-      expect(fetched!.enforce).toBe(false);
-      expect(await listOrgDefaultsForResolver(ctx.defaultSpaceId)).toEqual({
-        [INTEGRATION_ID]: { connectionIds: second, enforce: false },
-      });
+  it("deleting a member leaves its id in the set — an enforced default never shrinks", async () => {
+    const a = await seedSharedConnection(ctx.defaultSpaceId, "staging");
+    const b = await seedSharedConnection(ctx.defaultSpaceId, "prod");
+    await upsertOrgDefault(scope, INTEGRATION_ID, {
+      connectionIds: [a, b],
+      enforce: true,
+      createdBy: ctx.user.id,
+    });
+    await db.delete(integrationConnections).where(eq(integrationConnections.id, a));
+    expect(await listOrgDefaultsForResolver(ctx.defaultSpaceId)).toEqual({
+      [INTEGRATION_ID]: { connectionIds: [a, b], enforce: true },
     });
   });
 

@@ -39,37 +39,17 @@
 
 import { z } from "zod";
 import { collectOverridableDependencyIds } from "@appstrate/core/dependencies";
-import {
-  MAX_CONNECTIONS_PER_INTEGRATION,
-  normalizeConnectionIds,
-} from "@appstrate/core/integration";
 import { ApiError } from "./errors.ts";
+import { connectionSetSchema } from "./connection-set.ts";
 import { isValidDependencyOverride } from "../services/input-parser.ts";
 
 /**
  * Per-integration connection picks:
  * `{ "@scope/integration": ["<connection_id>", ...] }`.
  *
- * Three bounds, all load-bearing on every surface, and all costing the most on
- * schedules — a schedule replays its frozen map on every tick, so a shape the
- * write accepts and the resolver ignores answers 200 once and fires wrong for
- * ever after:
- *
- *  - `.min(1)` on the ID: an empty-string id resolves to no row at
- *    `resolveOne` (`integration-connection-resolver.ts`), so the pick would be
- *    refused per fire instead of per write.
- *  - `.min(1)` on the ARRAY: an empty set is indistinguishable from "this
- *    layer has no opinion" (`nonEmpty`, same file), so the launch would fall
- *    through to the actor-fallback in silence.
- *  - `.max(MAX_CONNECTIONS_PER_INTEGRATION)`: the cap is a write-time rule
- *    everywhere (pins, org defaults, overrides) — the resolver only echoes a
- *    set a write already validated.
- *  - `normalizeConnectionIds` (core): lowercases every id and refuses a
- *    repeat. The fold is what makes an uppercase id resolve at all — the
- *    resolver keys its lookup on what Postgres returned — and a repeat is a
- *    set whose labels cannot be distinct, so it would 412
- *    `duplicate_connection_label` at every fire. Same helper as the pin and
- *    org-default writes.
+ * `.min(1)` on the id is load-bearing on every surface, and it costs the most
+ * on schedules: an empty-string id resolves to no row, so a schedule's frozen
+ * map would answer 200 once and be refused at every fire after it.
  *
  * It is also owned here rather than delegated to `parseRequestInput`:
  * `POST /api/runs/inline/validate` never calls the parser, so the guard would
@@ -78,21 +58,7 @@ import { isValidDependencyOverride } from "../services/input-parser.ts";
  */
 export const connectionOverridesSchema = z.record(
   z.string(),
-  z
-    .array(z.string().min(1))
-    .min(1)
-    .max(MAX_CONNECTIONS_PER_INTEGRATION)
-    .transform((ids, ctx) => {
-      const normalized = normalizeConnectionIds(ids);
-      if (normalized === null) {
-        ctx.addIssue({
-          code: "custom",
-          message: "`connection_overrides` must not repeat a connection id",
-        });
-        return z.NEVER;
-      }
-      return normalized;
-    }),
+  connectionSetSchema(z.string().min(1)),
 );
 
 /**
