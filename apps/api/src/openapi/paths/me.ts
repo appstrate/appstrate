@@ -489,7 +489,6 @@ export const mePaths = {
                 required: [
                   "user",
                   "org",
-                  "space",
                   "connections",
                   "recent_runs",
                   "agents",
@@ -525,17 +524,6 @@ export const mePaths = {
                         description: "Human-readable organization name.",
                       },
                       slug: { type: ["string", "null"], description: "Organization slug." },
-                    },
-                  },
-                  space: {
-                    type: "object",
-                    description:
-                      "The space this context resolved in (`X-Space-Id`, the API key's space, " +
-                      "or the org default). Its `id` is the `spaceId` path parameter of " +
-                      "space-scoped operations such as `POST /api/spaces/{spaceId}/packages`.",
-                    required: ["id"],
-                    properties: {
-                      id: { type: "string", description: 'Space id, e.g. "spc_abc123".' },
                     },
                   },
                   recent_runs: {
@@ -689,7 +677,6 @@ export const mePaths = {
               example: {
                 user: { id: "user_abc", name: "Ada Lovelace", email: "ada@acme.com" },
                 org: { id: "org_abc123", role: "member", name: "Acme", slug: "acme" },
-                space: { id: "spc_abc123" },
                 connections: [
                   { integration_id: "@appstrate/gmail", name: "Gmail", source: "own" },
                   { integration_id: "@appstrate/clickup", name: "ClickUp", source: "shared" },

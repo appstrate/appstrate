@@ -13285,9 +13285,6 @@ export interface operations {
                      *         "name": "Acme",
                      *         "slug": "acme"
                      *       },
-                     *       "space": {
-                     *         "id": "spc_abc123"
-                     *       },
                      *       "connections": [
                      *         {
                      *           "integration_id": "@appstrate/gmail",
@@ -13365,11 +13362,6 @@ export interface operations {
                             name?: string | null;
                             /** @description Organization slug. */
                             slug?: string | null;
-                        };
-                        /** @description The space this context resolved in (`X-Space-Id`, the API key's space, or the org default). Its `id` is the `spaceId` path parameter of space-scoped operations such as `POST /api/spaces/{spaceId}/packages`. */
-                        space: {
-                            /** @description Space id, e.g. "spc_abc123". */
-                            id: string;
                         };
                         /** @description The caller's own most recent runs (actor-scoped), newest first — lets an agent reference a recent or failed run without a discovery round-trip. */
                         recent_runs: {

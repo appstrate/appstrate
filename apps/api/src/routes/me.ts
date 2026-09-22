@@ -562,8 +562,6 @@ router.get("/context", requireSpaceContext(), async (c) => {
       name: (c.get("orgName") as string | undefined) ?? null,
       slug: (c.get("orgSlug") as string | undefined) ?? null,
     },
-    // A model needs the id to address `spaceId`-path operations (activation door).
-    space: { id: scope.spaceId },
     connections,
     recent_runs: recentRuns,
     agents: runnable.agents,

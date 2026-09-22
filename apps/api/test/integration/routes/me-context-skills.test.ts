@@ -22,7 +22,6 @@ const UNLISTED = "@ctxskill/unlisted";
 const UNKNOWN = "@ctxskill/nope";
 
 interface ContextBody {
-  space: { id: string };
   skills: { package_id: string }[];
   requested_skills: { package_id: string; version: string | null; source: string }[];
   unresolved_skills: string[];
@@ -91,12 +90,6 @@ describe("GET /api/me/context?skills=", () => {
     const body = (await res.json()) as ContextBody;
     expect(body.requested_skills).toEqual([]);
     expect(body.unresolved_skills).toEqual([]);
-  });
-
-  it("names the space the context was resolved in", async () => {
-    const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
-    const body = (await res.json()) as ContextBody;
-    expect(body.space).toEqual({ id: ctx.defaultSpaceId });
   });
 
   it("answers nothing about the requested skills without `skills:read`", async () => {
