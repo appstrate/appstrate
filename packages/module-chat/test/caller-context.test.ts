@@ -170,6 +170,7 @@ describe("formatCallerContext", () => {
             display_name: "Agent Copilot",
             description: "Builds an agent with the user.",
             version: "1.0.0",
+            source: "system",
           },
           { package_id: "@acme/mine", display_name: "Mine", description: "Pinned.", version: null },
         ],
@@ -190,9 +191,11 @@ describe("formatCallerContext", () => {
       {
         user: { name: "Ada" },
         org: { role: "member" },
-        requested_skills: [{ package_id: "@appstrate/copilot", display_name: "Agent Copilot" }],
+        requested_skills: [
+          { package_id: "@appstrate/copilot", display_name: "Agent Copilot", source: "system" },
+        ],
         skills: [
-          { package_id: "@appstrate/copilot", display_name: "Agent Copilot" },
+          { package_id: "@appstrate/copilot", display_name: "Agent Copilot", source: "system" },
           { package_id: "@acme/pdf", display_name: "PDF", description: "Reads PDFs." },
         ],
         skills_truncated: true,
@@ -232,7 +235,9 @@ describe("formatCallerContext", () => {
       {
         user: { name: "Ada" },
         org: { role: "member" },
-        requested_skills: [{ package_id: "@appstrate/copilot", display_name: "Agent Copilot" }],
+        requested_skills: [
+          { package_id: "@appstrate/copilot", display_name: "Agent Copilot", source: "system" },
+        ],
         skills: [{ package_id: "@acme/pdf", display_name: "PDF" }],
         skills_truncated: true,
       },
@@ -250,7 +255,7 @@ describe("formatCallerContext", () => {
         user: { name: "Ada" },
         org: { role: "member" },
         requested_skills: [
-          { package_id: "@appstrate/copilot", display_name: "Agent Copilot" },
+          { package_id: "@appstrate/copilot", display_name: "Agent Copilot", source: "system" },
           { package_id: "@acme/mine", display_name: "Mine", description: "Pinned." },
         ],
         skills: [{ package_id: "@acme/pdf", display_name: "PDF" }],
@@ -588,8 +593,18 @@ describe("formatCallerContext", () => {
       user: { name: "Ada" },
       org: { role: "member" },
       requested_skills: [
-        { package_id: "@appstrate/web-search", display_name: "Web Search", version: "1.0.0" },
-        { package_id: "@appstrate/copilot", display_name: "Copilot", version: "1.0.0" },
+        {
+          package_id: "@appstrate/web-search",
+          display_name: "Web Search",
+          version: "1.0.0",
+          source: "system",
+        },
+        {
+          package_id: "@appstrate/copilot",
+          display_name: "Copilot",
+          version: "1.0.0",
+          source: "system",
+        },
         { package_id: "@acme/mine", display_name: "Mine" },
       ],
       skills: [{ package_id: "@acme/pdf", display_name: "PDF" }],
@@ -701,7 +716,7 @@ describe("buildCallerContextBlock", () => {
       Response.json({
         user: { name: "Ada" },
         skills: [{ package_id: "@acme/pdf" }],
-        requested_skills: [{ package_id: "@appstrate/copilot" }],
+        requested_skills: [{ package_id: "@appstrate/copilot", source: "system" }],
         unresolved_skills: ["@acme/mine", ...PLATFORM_DEFAULT_SKILLS],
       }),
     );

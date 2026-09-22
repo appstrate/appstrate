@@ -9,11 +9,12 @@ import {
   type SkillHint,
 } from "../src/skills.ts";
 
-const hint = (id: string): SkillHint => ({
+const hint = (id: string, source = "system"): SkillHint => ({
   package_id: id,
   display_name: id,
   description: "A skill.",
   version: "1.0.0",
+  source,
 });
 
 function resolve(
@@ -61,6 +62,25 @@ describe("resolveChatSkills", () => {
       ["@a/alpha", true, false],
       ["@a/both", true, true],
       ["@a/mine", false, true],
+    ]);
+  });
+
+  it("treats a default id an organization owns as that organization's skill", () => {
+    const out = resolve({
+      defaults: ["@a/alpha", "@a/owned"],
+      requested: [hint("@a/alpha"), hint("@a/owned", "local")],
+      catalogue: [hint("@a/owned", "local")],
+    });
+    expect(out.indexed.map((s) => [s.package_id, s.platform])).toEqual([["@a/alpha", true]]);
+    expect(out.catalogue.map((s) => s.package_id)).toEqual(["@a/owned"]);
+
+    const pinnedOwned = resolve({
+      defaults: ["@a/owned"],
+      selection: { pinned: ["@a/owned"] },
+      requested: [hint("@a/owned", "local")],
+    });
+    expect(pinnedOwned.indexed.map((s) => [s.package_id, s.platform, s.pinned])).toEqual([
+      ["@a/owned", false, true],
     ]);
   });
 

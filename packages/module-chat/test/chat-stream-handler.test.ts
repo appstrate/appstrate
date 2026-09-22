@@ -478,6 +478,7 @@ describe("handleChatStream", () => {
           display_name: id,
           description: "fixture",
           version: null,
+          source: id.startsWith("@appstrate/") ? "system" : "local",
         })),
         unresolved_skills: [],
       });

@@ -8,6 +8,7 @@ export interface SkillHint {
   display_name?: string | null;
   description?: string | null;
   version?: string | null;
+  source?: string;
 }
 
 /** Unlisted system packages every turn indexes, whatever the space holds. */
@@ -64,11 +65,11 @@ export function resolveChatSkills(input: ResolveChatSkillsInput): ResolvedChatSk
   const byId = new Map<string, IndexedSkill>();
   for (const hint of input.requested) {
     if (!wanted.has(hint.package_id) || byId.has(hint.package_id)) continue;
-    byId.set(hint.package_id, {
-      ...hint,
-      platform: defaults.has(hint.package_id),
-      pinned: pinned.has(hint.package_id),
-    });
+    // A default id an organization owns (the boot sync skipped the system
+    // package) is that organization's skill, not a platform one.
+    const platform = defaults.has(hint.package_id) && hint.source === "system";
+    if (!platform && !pinned.has(hint.package_id)) continue;
+    byId.set(hint.package_id, { ...hint, platform, pinned: pinned.has(hint.package_id) });
   }
 
   // An unresolved pin is the user's own act, so the model is told; an

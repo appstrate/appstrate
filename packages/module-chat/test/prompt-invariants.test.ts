@@ -154,7 +154,7 @@ describe("full persona invariants", () => {
     const block = formatCallerContext(
       {
         user: { name: "Ada" },
-        requested_skills: [{ package_id: "@appstrate/copilot" }],
+        requested_skills: [{ package_id: "@appstrate/copilot", source: "system" }],
         skills: [{ package_id: "@acme/pdf" }],
       },
       OPTS,
