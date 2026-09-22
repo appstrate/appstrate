@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New exports `RunLevel`, `reaches`, `agentCapabilities`
+  (`@appstrate/core/permissions`)** — the one derivation of how far a caller
+  gets with runs (`none` → `read` → `run` → `compose`) and whether it may author
+  agents, from its permission set plus whether it can dispatch at all;
+  `reaches` compares two levels on that ordered scale.
 - **New export `ConnectionCandidate` (`@appstrate/core/integration`)** — one
   connection the caller may pick from on `must_choose_connection`, carrying
   `id`, `label`, `accountId` and `ownedByActor`.
@@ -32,6 +37,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New export `canComposeInline` (`@appstrate/core/permissions`)** — whether
   a caller may compose an inline agent: `agents:write` and `agents:run`. Takes a
   membership test, so a `Set` or an array both fit.
+- **New exports `canReadRuns` and `canRunAgents`
+  (`@appstrate/core/permissions`)** — beside `canComposeInline`, same membership
+  test: `canReadRuns` is the `runs:read` / `runs:read-all` disjunction,
+  `canRunAgents` is `agents:run` plus that read. See
+  `docs/architecture/RBAC_PERMISSIONS_SPEC.md` §13.11.
+- **New export `RUNS_READ_PERMISSIONS` (`@appstrate/core/permissions`)** — the
+  `["runs:read", "runs:read-all"]` tuple `canReadRuns` is defined from.
+- **New export `PERMISSION_REQUIREMENT_MARKER`
+  (`@appstrate/core/permissions`)** — the symbol under which every guard
+  `makePermissionGuard` builds now also carries the requirement it checks (one
+  `resource:action`, or several joined with `|`), beside the unchanged boolean
+  `appstrate.permissionGuard` marker; a guard carrying the boolean alone is
+  row-aware. See `apps/api/src/middleware/handler-marker.ts`.
 - **`AppstrateTurnMetadata` gains optional `modelId` and `modelLabel`
   (`@appstrate/core/chat-turn-metadata`)** — the model a chat turn ran on,
   stamped when the engine closes the turn. Additive: a turn the engine did not

@@ -12,31 +12,44 @@
  * org guard requires to match the resolved org.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
+import * as jose from "jose";
 import { and, eq } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
-import { auditEvents } from "@appstrate/db/schema";
+import { auditEvents, endUsers, oidcEndUserProfiles } from "@appstrate/db/schema";
+import { prefixedId } from "@appstrate/db/ids";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { truncateAll, db } from "../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../test/helpers/redis.ts";
-import { createTestContext, orgOnlyHeaders } from "../../../../../test/helpers/auth.ts";
-import { seedApiKey, seedPackage } from "../../../../../test/helpers/seed.ts";
+import {
+  addOrgMember,
+  createTestContext,
+  createTestUser,
+  memberContext,
+  orgOnlyHeaders,
+} from "../../../../../test/helpers/auth.ts";
+import {
+  seedApiKey,
+  seedPackage,
+  seedSpace,
+  seedSpaceMember,
+  seedSpaceRole,
+} from "../../../../../test/helpers/seed.ts";
 import {
   MCP_ACCEPT,
   mcpPath,
   mcpRpc,
   type JsonRpcEnvelope,
 } from "../../../../../test/helpers/mcp.ts";
-import { setPlatformApp } from "../../../../lib/platform-app.ts";
+import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
+import { overrideJwks } from "../../../oidc/services/enduser-token.ts";
 import { drainAudits, pendingAuditCount } from "../../../../services/audit.ts";
 import { getCatalog, resetCatalog } from "../../catalog.ts";
 import { createMcpRouter } from "../../router.ts";
 import mcpModule from "../../index.ts";
 
 const app = getTestApp();
-// Wire in-process dispatch to the test app (production sets this in
-// registerModuleRoutes; the test harness mounts modules inline).
-setPlatformApp(app);
+await registerTestPlatformApp();
 
 const rpc = mcpRpc(app);
 
@@ -173,8 +186,6 @@ describe("mcp discovery + auth gate", () => {
     // A session caller is used because it takes the same `resolveMcpSpaceRow` →
     // `applySpacePermissions` path a per-org bearer does; only the credential
     // that resolved the org role differs.
-    const { createTestUser, addOrgMember } = await import("../../../../../test/helpers/auth.ts");
-    const { seedSpaceMember } = await import("../../../../../test/helpers/seed.ts");
     const owner = await createTestContext();
     const guest = await createTestUser();
     await addOrgMember(owner.orgId, guest.id, "guest");
@@ -251,7 +262,17 @@ describe("mcp tool round-trip", () => {
   });
 
   it("lists the available tools with annotations after initialize", async () => {
-    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    // Every tool this list names has a grant of its own now: `run_and_wait`
+    // needs launch + run-read, `list_files` needs `GET /api/files`. Scoping the
+    // key to `mcp:*` alone would drop both and this would assert on the
+    // declaration gate instead of on the advertised surface.
+    const headers = await apiKeyHeaders([
+      "mcp:read",
+      "mcp:invoke",
+      "agents:run",
+      "runs:read",
+      "files:read",
+    ]);
     await rpc(headers, {
       jsonrpc: "2.0",
       id: 1,
@@ -291,6 +312,42 @@ describe("mcp tool round-trip", () => {
     expect((search.annotations as Record<string, unknown>).readOnlyHint).toBe(true);
   });
 
+  it("narrows the advertised surface to the caller's space role", async () => {
+    // The per-org endpoint resolves the org's default space and reads the
+    // caller's role there (RBAC spec §7.3), and the two presets differ exactly
+    // where this matters: `viewer` holds neither `agents:run` nor the mcp
+    // module's `invoke` contribution, `builder` holds both. Same user shape,
+    // same request — only the space row's preset differs.
+    const owner = await createTestContext();
+
+    const listFor = async (presetRole: "viewer" | "builder"): Promise<string[]> => {
+      const member = await createTestUser();
+      await addOrgMember(owner.orgId, member.id, "member");
+      await seedSpaceMember({ spaceId: owner.defaultSpaceId, userId: member.id, presetRole });
+      const headers = { Cookie: member.cookie, "X-Org-Id": owner.orgId };
+      const { envelope } = await rpc(headers, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {},
+      });
+      return (envelope.result?.tools as Array<{ name: string }>).map((t) => t.name);
+    };
+
+    const viewer = await listFor("viewer");
+    expect(viewer).not.toContain("run_and_wait");
+    expect(viewer).not.toContain("invoke_operation");
+    // A viewer DOES hold `files:read` and `mcp:read`: this is a narrowing of
+    // the surface, not an empty list — without that control the case above
+    // would also pass if the whole list were gone.
+    expect(viewer).toContain("list_files");
+    expect(viewer).toContain("search_operations");
+
+    const builder = await listFor("builder");
+    expect(builder).toContain("run_and_wait");
+    expect(builder).toContain("invoke_operation");
+  });
+
   it("searches then invokes a real operation in-process", async () => {
     const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
     const search = await rpc(headers, {
@@ -299,7 +356,7 @@ describe("mcp tool round-trip", () => {
       method: "tools/call",
       params: { name: "search_operations", arguments: { query: "agent", limit: 3 } },
     });
-    expect((toolPayload(search.envelope).data.count as number) > 0).toBe(true);
+    expect((toolPayload(search.envelope).data.total as number) > 0).toBe(true);
 
     // Pick a real GET operation with no path params and invoke it. The
     // underlying route runs through the full pipeline, so the result carries
@@ -317,16 +374,23 @@ describe("mcp tool round-trip", () => {
     expect(typeof payload.data.status).toBe("number");
   });
 
-  it("denies invoke_operation when the caller lacks mcp:invoke", async () => {
+  it("does not declare invoke_operation when the caller lacks mcp:invoke", async () => {
     const headers = await apiKeyHeaders(["mcp:read"]);
+    const listed = await rpc(headers, { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
+    const names = (listed.envelope.result?.tools as Array<{ name: string }>).map((t) => t.name);
+    expect(names).not.toContain("invoke_operation");
+
+    // And calling it anyway is refused by the SDK before any handler runs:
+    // tools are registered per session, so a tool that is not declared is
+    // simply not there.
     const op = [...getCatalog().operations.values()][0]!;
     const { envelope } = await rpc(headers, {
       jsonrpc: "2.0",
-      id: 1,
+      id: 2,
       method: "tools/call",
       params: { name: "invoke_operation", arguments: { operation_id: op.operationId } },
     });
-    expect(toolPayload(envelope).isError).toBe(true);
+    expect(envelope.error?.message).toContain("Unknown tool: invoke_operation");
   });
 
   it("cannot escalate past the caller's REST permissions (defence in depth)", async () => {
@@ -469,6 +533,99 @@ describe("mcp tool round-trip", () => {
     expect(indexSection).not.toContain(" — ");
     expect(indexSection).not.toMatch(/^- \w/m);
   });
+
+  it("reports and enforces `listSpaceMembers` in the space its PATH names", async () => {
+    // The endpoint pins ONE space (here the org default, A) but the operation
+    // acts on the space in its path. `requireSpaceFromParam` re-applies the
+    // caller's permissions there, so the requirement the tool reports is the
+    // TARGET space's — and A's set neither grants nor withholds it.
+    const owner = await createTestContext();
+    const caller = await memberContext(owner, "member", "operator");
+    const runs = await seedSpace({ orgId: owner.orgId, name: "Runs", visibility: "closed" });
+    await seedSpaceMember({ spaceId: runs.id, userId: caller.user.id, presetRole: "admin" });
+    const foreign = await seedSpace({ orgId: owner.orgId, name: "Foreign", visibility: "closed" });
+    const headers = { Cookie: caller.cookie, "X-Org-Id": owner.orgId };
+
+    const call = async (id: number, name: string, args: Record<string, unknown>) => {
+      const { envelope } = await rpc(headers, {
+        jsonrpc: "2.0",
+        id,
+        method: "tools/call",
+        params: { name, arguments: args },
+      });
+      return toolPayload(envelope);
+    };
+
+    const described = await call(1, "describe_operation", { operation_id: "listSpaceMembers" });
+    expect(described.data.conditional).toBe(true);
+    // The two halves are reported apart: nothing is asked in the caller's own
+    // space, `space-members:read` is asked in the one the path names.
+    expect(described.data.target_space_permissions).toContain("space-members:read");
+    expect(described.data.required_permissions).toEqual([]);
+    // `operator` in A holds no `space-members:read` anywhere in A, and the
+    // operation is still offered: the caller-space set is not what decides it.
+    expect(described.data.granted).toBe(true);
+
+    const inRuns = await call(2, "invoke_operation", {
+      operation_id: "listSpaceMembers",
+      path_params: { id: runs.id },
+    });
+    expect(inRuns.data.status).toBe(200);
+
+    // The same call one space over, where this caller has no row at all: the
+    // TARGET space refuses, and the refusal is not a permission the caller
+    // could acquire in A — so the result carries no permission advice.
+    const inForeign = await call(3, "invoke_operation", {
+      operation_id: "listSpaceMembers",
+      path_params: { id: foreign.id },
+    });
+    expect([403, 404]).toContain(inForeign.data.status as number);
+    expect(inForeign.isError).toBe(true);
+    expect(inForeign.data.required_permissions).toBeUndefined();
+    expect(inForeign.data.hint).toBeUndefined();
+
+    // A conditional operation is a listed one: searching must offer it rather
+    // than bury it under `denied`, which is where a caller-space reading of the
+    // requirement would have put it.
+    const searched = await call(4, "search_operations", { query: "members", limit: 100 });
+    const listed = (searched.data.operations as Array<{ operation_id: string }>).map(
+      (entry) => entry.operation_id,
+    );
+    const denied = (searched.data.denied as Array<{ operation_id: string }>).map(
+      (entry) => entry.operation_id,
+    );
+    expect(listed).toContain("listSpaceMembers");
+    expect(denied).not.toContain("listSpaceMembers");
+  });
+
+  it("advertises the tools a CUSTOM space role's own permission list allows", async () => {
+    // A bundle is not a preset: the surface has to follow the strings the row
+    // carries, not the nearest preset to them.
+    const owner = await createTestContext();
+    const member = await createTestUser();
+    await addOrgMember(owner.orgId, member.id, "member");
+    const role = await seedSpaceRole({
+      orgId: owner.orgId,
+      permissions: ["mcp:read", "mcp:invoke", "agents:run", "runs:read-all"],
+    });
+    await seedSpaceMember({
+      spaceId: owner.defaultSpaceId,
+      userId: member.id,
+      presetRole: null,
+      customRoleId: role.id,
+    });
+
+    const { envelope } = await rpc(
+      { Cookie: member.cookie, "X-Org-Id": owner.orgId },
+      { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
+    );
+    const names = (envelope.result?.tools as Array<{ name: string }>).map((tool) => tool.name);
+    expect(names).toContain("run_and_wait");
+    expect(names).toContain("invoke_operation");
+    // The control: the bundle names no `files:read`, so the file tool is gone
+    // while the two above stay — a narrowing, not an empty list.
+    expect(names).not.toContain("list_files");
+  });
 });
 
 describe("mcp audit + rate limiting", () => {
@@ -513,7 +670,11 @@ describe("mcp audit + rate limiting", () => {
     expect((rows[0]!.after as Record<string, unknown>).outcome).toBe("invoked");
   });
 
-  it("records an mcp.operation.denied audit row when the caller lacks mcp:invoke", async () => {
+  it("audits nothing when the caller lacks mcp:invoke — the tool is never declared", async () => {
+    // RBAC spec §4.3 audits a denial once, at the guard that fires it. With
+    // `invoke_operation` absent from what this caller is shown, no tool ran and
+    // there is nothing for the MCP layer to record; a row here would mean the
+    // declaration gate is gone and the handler refuses inside the tool.
     const headers = await apiKeyHeaders(["mcp:read"]);
     const op = [...getCatalog().operations.values()][0]!;
     await rpc(headers, {
@@ -526,9 +687,8 @@ describe("mcp audit + rate limiting", () => {
     const rows = await db
       .select()
       .from(auditEvents)
-      .where(eq(auditEvents.action, "mcp.operation.denied"));
-    expect(rows.length).toBe(1);
-    expect((rows[0]!.after as Record<string, unknown>).outcome).toBe("denied");
+      .where(eq(auditEvents.resourceType, "mcp_operation"));
+    expect(rows.length).toBe(0);
   });
 
   it("returns the MCP response before the audit insert settles — the insert is tracked, not awaited", async () => {
@@ -641,5 +801,96 @@ describe("mcp audit + rate limiting", () => {
       /remaining=(\d+)/.exec(second.headers.get("RateLimit") ?? "")?.[1],
     );
     expect(secondRemaining).toBe(118);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The OIDC end-user principal, through the real transport. An end-user is not
+// an organization member: its grants come from the token's scopes, filtered by
+// the module's end-user allowlist, and its actor type closes surfaces no scope
+// can open.
+// ---------------------------------------------------------------------------
+const END_USER_KID = "mcp-enduser-key";
+let endUserSigningKey: jose.CryptoKey;
+
+/** Seed an end-user in a fresh org and mint an access token carrying `scope`. */
+async function endUserHeaders(scope: string): Promise<Record<string, string>> {
+  const ctx = await createTestContext();
+  const authUser = await createTestUser();
+  const endUserId = prefixedId("eu");
+  await db
+    .insert(endUsers)
+    .values({ id: endUserId, spaceId: ctx.defaultSpaceId, orgId: ctx.orgId, name: "Embedded" });
+  await db
+    .insert(oidcEndUserProfiles)
+    .values({ endUserId, authUserId: authUser.id, emailVerified: true, status: "active" });
+  const token = await new jose.SignJWT({
+    sub: authUser.id,
+    actor_type: "end_user",
+    end_user_id: endUserId,
+    space_id: ctx.defaultSpaceId,
+    scope,
+  })
+    .setProtectedHeader({ alg: "ES256", kid: END_USER_KID })
+    // The verifier matches Better Auth's own issuer/audience shape.
+    .setIssuer(`${process.env.APP_URL!}/api/auth`)
+    // RFC 8707: the per-org MCP resource URI must be in `aud` or the endpoint
+    // refuses the token, whatever its scopes say.
+    .setAudience([process.env.APP_URL!, `${process.env.APP_URL!}/api/mcp/o/${ctx.orgId}`])
+    .setIssuedAt()
+    .setExpirationTime("2m")
+    .sign(endUserSigningKey);
+  return {
+    Authorization: `Bearer ${token}`,
+    "X-Org-Id": ctx.orgId,
+    "X-Space-Id": ctx.defaultSpaceId,
+  };
+}
+
+describe("mcp tools/list for an OIDC end-user", () => {
+  beforeAll(async () => {
+    const { publicKey, privateKey } = await jose.generateKeyPair("ES256", { extractable: true });
+    endUserSigningKey = privateKey;
+    const jwk = await jose.exportJWK(publicKey);
+    // Serve this key as the JWKS: the Better Auth singleton the preload built
+    // signs with a different key set, so self-minted tokens verify only here.
+    overrideJwks(async () => ({ keys: [{ ...jwk, kid: END_USER_KID, alg: "ES256", use: "sig" }] }));
+  });
+
+  afterAll(() => overrideJwks(null));
+
+  beforeEach(async () => {
+    await truncateAll();
+    resetCatalog();
+  });
+
+  const toolNames = async (headers: Record<string, string>): Promise<string[]> => {
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/list",
+      params: {},
+    });
+    return (envelope.result?.tools as Array<{ name: string }>).map((tool) => tool.name);
+  };
+
+  it("offers the run and invoke tools its scopes carry, never the package import", async () => {
+    const names = await toolNames(
+      await endUserHeaders("openid mcp:read mcp:invoke agents:run runs:read"),
+    );
+    expect(names).toContain("run_and_wait");
+    expect(names).toContain("invoke_operation");
+    // Importing a package is closed to an end-user on both counts: no package
+    // write permission is in the end-user scope allowlist, and the tool refuses
+    // any actor that is not an organization user.
+    expect(names).not.toContain("import_package_file");
+  });
+
+  it("drops run_and_wait when the same token cannot read back what it would launch", async () => {
+    const names = await toolNames(await endUserHeaders("openid mcp:read mcp:invoke agents:run"));
+    expect(names).not.toContain("run_and_wait");
+    // The control: only the run pair went, so this is the `runs:read` half and
+    // not a token that stopped resolving.
+    expect(names).toContain("invoke_operation");
   });
 });

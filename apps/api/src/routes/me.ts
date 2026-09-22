@@ -67,7 +67,7 @@ import { logger } from "../lib/logger.ts";
 import { listRunnableAgents, listActiveSkills } from "../services/space-packages.ts";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { listRecentForActor } from "../services/state/runs.ts";
-import { canReadRuns } from "../lib/run-visibility.ts";
+import { canReadRuns } from "@appstrate/core/permissions";
 import { getEndUser } from "../services/end-users.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { unauthorized, invalidRequest } from "../lib/errors.ts";
@@ -493,7 +493,7 @@ router.get("/context", requireSpaceContext(), async (c) => {
   // whose ceiling excludes `runs:read` is refused by `GET /api/runs`, so it
   // must not read the same rows through this payload either. The route itself
   // stays open — a role without runs still needs its identity and org.
-  const mayReadRuns = canReadRuns(permissions);
+  const mayReadRuns = canReadRuns((p) => permissions.has(p));
   const mayReadIntegrations = permissions.has("integrations:read");
   // Resolved once for both hint listings: `home_writable` is what tells the
   // model whether a draft-only package is THIS caller's to run, and computing

@@ -41,7 +41,7 @@ import { registerStopController, unregisterStopController } from "./stop-registr
 import { setActiveStream, clearActiveStream } from "./resumable.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 import type { UsageRejection } from "@appstrate/core/module";
-import { canComposeInline } from "@appstrate/core/permissions";
+import { turnCapabilities } from "./capabilities.ts";
 import { classifyClientTurnError, clientTurnErrorMarker } from "./turn-error.ts";
 import {
   ModelGenerationError,
@@ -319,8 +319,7 @@ export async function handleChatStream(
   // Flipping the switch changes the system prompt and, through the narrowed token, the
   // MCP `run_and_wait` descriptor on the same turn: one prompt-cache miss.
   const permissions = turnPermissions(c.get("permissions"), body.agent_authoring !== false);
-  const canAuthorAgents = permissions.includes("agents:write");
-  const composeInline = canComposeInline((p) => permissions.includes(p));
+  const capabilities = turnCapabilities((permission) => permissions.includes(permission));
   const phaseAStart = Date.now();
 
   // ── Preamble phase B (overlapped with A) ─────────────────────────────────
@@ -356,7 +355,8 @@ export async function handleChatStream(
       deps,
       // UI language forwarded by the client; validated/defaulted in the builder.
       locale: c.req.header("X-Chat-Locale"),
-      canAuthorAgents,
+      capabilities,
+      permissions,
     })
       .finally(() => {
         // Wall time of the block itself.
@@ -464,10 +464,7 @@ export async function handleChatStream(
   // (`pi-chat/engine.ts`). Re-applying it to this prompt matched nothing — and
   // could only misfire, since the context block below carries org-authored agent
   // names and would be truncated at any that happened to spell the heading.
-  let system = buildSystemPrompt({
-    canComposeInline: composeInline,
-    canAuthorAgents,
-  });
+  let system = buildSystemPrompt(capabilities);
   if (contextBlock) system += `\n\n${contextBlock}`;
 
   // Which credential the turn spends. One engine drives them both.

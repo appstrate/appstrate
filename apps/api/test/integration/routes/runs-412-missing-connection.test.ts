@@ -61,6 +61,7 @@ import {
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
 import { readConnectToken } from "../../../src/services/connect/connect-session.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
+import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
 import type {
   AppstrateModule,
   ModuleInitContext,
@@ -1333,8 +1334,9 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
         getTestApp();
       });
 
-      afterAll(() => {
-        resetModules();
+      afterAll(async () => {
+        // Back to the registry the preload populated, not to an empty one.
+        await restoreDiscoveredModules();
         getTestApp();
       });
 

@@ -27,6 +27,7 @@ import {
   enterSpaceContext,
 } from "@appstrate/core/permissions";
 import { pinnedSpaceScopeGuard } from "../../middleware/guards.ts";
+import { markSpaceRescope, rowAuthority } from "../../middleware/require-permission.ts";
 import { conflict, notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
 import { spaceAssignmentSchema } from "../../lib/space-role-assignment.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
@@ -487,10 +488,14 @@ export function createOidcRouter() {
 
   // ── Admin: CRUD ─────────────────────────────────────────────────────────────
 
+  // `rowAuthority()` on create and update: `isFirstParty` skips consent, so the
+  // handler asks for owner/admin on top of the mounted write permission
+  // (`requireAdminForFirstParty`) — an authority the route table cannot show.
   router.post(
     "/api/oauth/clients",
     rateLimit(10),
     requireModulePermission("oauth-clients", "write"),
+    rowAuthority(),
     idempotency(),
     async (c) => {
       const orgId = c.get("orgId");
@@ -591,6 +596,7 @@ export function createOidcRouter() {
     "/api/oauth/clients/:clientId",
     rateLimit(10),
     requireModulePermission("oauth-clients", "write"),
+    rowAuthority(),
     async (c) => {
       const orgId = c.get("orgId");
       const clientId = c.req.param("clientId")!;
@@ -682,11 +688,14 @@ export function createOidcRouter() {
    * `pinnedSpaceScopeGuard` runs first: an API key's membership is resolved
    * from its CREATOR, so without it a key bound to space A whose creator
    * administers space B would reach B through the path param.
+   *
+   * Marked: the guards behind it are asked in the path's space, which the
+   * route-table reader cannot see from the mounts alone.
    */
-  const enterParamSpace = async (c: Context<AppEnv>, next: Next) => {
+  const enterParamSpace = markSpaceRescope(async (c: Context<AppEnv>, next: Next) => {
     await enterSpaceContext(c, c.req.param("id")!);
     return next();
-  };
+  });
 
   router.use("/api/spaces/:id/smtp-config/*", pinnedSpaceScopeGuard, enterParamSpace);
   router.use("/api/spaces/:id/social-providers/*", pinnedSpaceScopeGuard, enterParamSpace);

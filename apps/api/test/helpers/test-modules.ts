@@ -12,6 +12,8 @@
  * Consumers only use getDiscoveredModules().
  */
 import type { AppstrateModule } from "@appstrate/core/module";
+import { loadModulesFromInstances, resetModules } from "../../src/lib/modules/module-loader.ts";
+import { buildModuleInitContext } from "../../src/lib/modules/registry.ts";
 
 const discovered: AppstrateModule[] = [];
 
@@ -22,4 +24,18 @@ export function registerTestModule(mod: AppstrateModule): void {
 
 export function getDiscoveredModules(): readonly AppstrateModule[] {
   return discovered;
+}
+
+/**
+ * Put the module-loader registry back the way the preload left it.
+ *
+ * A file that swaps in a fake module owns the registry for its duration, but
+ * the state it must return to is the preload's — not an empty map. Anything
+ * derived from `_modules` (the MCP catalog's module-contributed OpenAPI paths,
+ * the RBAC snapshot) reads a registry emptied by a sibling file as a smaller
+ * platform, and answers for one.
+ */
+export async function restoreDiscoveredModules(): Promise<void> {
+  resetModules();
+  await loadModulesFromInstances([...discovered], buildModuleInitContext());
 }

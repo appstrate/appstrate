@@ -10,9 +10,29 @@
 
 import { describe, expect, it } from "bun:test";
 import { buildSystemPrompt, formatCallerContext, normalizeChatLocale } from "../src/prompt.ts";
+import { turnCapabilities } from "../src/capabilities.ts";
 
-/** The full persona; the reduced one has its own block at the end. */
-const FULL = buildSystemPrompt({ canComposeInline: true, canAuthorAgents: true });
+/** The turn's capabilities, from a permission set a role can actually hold. */
+function caps(permissions: readonly string[]) {
+  return turnCapabilities((permission) => permissions.includes(permission));
+}
+
+/** Build a persona from a permission set, so every one below is reachable. */
+function promptFor(permissions: readonly string[]): string {
+  return buildSystemPrompt(caps(permissions));
+}
+
+/** The transport floor plus the dispatching tool — nothing acts without both. */
+const MCP = ["mcp:read", "mcp:invoke"];
+/** A builder as the platform grants it. */
+const BUILDER = [...MCP, "agents:read", "agents:run", "agents:write", "runs:read"];
+
+/** The full persona; the reduced ones have their own blocks at the end. */
+const FULL = promptFor(BUILDER);
+/** Builder minus `agents:write`: runs existing agents, composes and authors nothing. */
+const REDUCED = promptFor(BUILDER.filter((permission) => permission !== "agents:write"));
+/** May author an agent, may not launch one. */
+const NO_RUNS_AUTHOR = promptFor([...MCP, "agents:write"]);
 
 describe("full persona invariants", () => {
   it("keeps the single-sub-agent rule for chained external actions", () => {
@@ -100,16 +120,19 @@ describe("full persona invariants", () => {
 
   it("routes integration_not_active to activation, never to a retry", () => {
     // Retrying the run or re-running the connect flow can never clear a 412:
-    // connecting is personal, activating is space-wide. Activation IS
-    // reachable (`activateIntegration` is in the platform's operation surface),
-    // and RBAC decides who may call it — an admin fixes it in one step, a member
-    // gets a 403 and is told to ask one. Nothing in the chat pre-computes that
-    // right: quoting the operation instead of asserting the outcome is what
-    // keeps this honest for both roles.
+    // connecting is personal, activating is per space. The persona names the
+    // real catalog operation with its path and body, because the model is told
+    // never to guess an operationId. `activatePackage` is decided in the space
+    // its path names, so its 403 carries the route's own error, never the
+    // caller-space `required_permissions` enrichment; claiming it would be false.
     expect(FULL).toContain("integration_not_active");
     expect(FULL).toMatch(/do NOT re-run and do NOT restart the connect flow/);
-    expect(FULL).toContain("activateIntegration");
-    expect(FULL).toMatch(/administrator must activate/);
+    expect(FULL).toContain("`activatePackage`");
+    expect(FULL).toContain("`POST /api/spaces/{spaceId}/packages`");
+    expect(FULL).toContain('{ "packageId": "<that integration id>" }');
+    expect(FULL).not.toContain("activateIntegration");
+    expect(FULL).toMatch(/report the refusal with its error and stop/);
+    expect(FULL).not.toMatch(/the 403 names the permission it required/);
   });
 
   it("drops the stale claim that a prompt-pasted appfile:// URI gives no access", () => {
@@ -139,27 +162,48 @@ describe("caller-context prompt hygiene", () => {
   const identity = { user: { name: "Ada" }, org: { role: "member" } };
 
   it("renders the forwarded locale in the reply-language line", () => {
-    const out = formatCallerContext(identity, { locale: "en-US" });
+    const out = formatCallerContext(identity, {
+      locale: "en-US",
+      capabilities: caps(BUILDER),
+      rolePreview: false,
+      spaceRole: "builder",
+      permissions: ["agents:read", "mcp:invoke"],
+    });
     expect(out).toContain("Reply in the user's language (en)");
   });
 
   it("defaults the reply language to fr without a locale", () => {
-    expect(formatCallerContext(identity)).toContain("Reply in the user's language (fr)");
+    expect(
+      formatCallerContext(identity, {
+        capabilities: caps(BUILDER),
+        rolePreview: false,
+        spaceRole: "builder",
+        permissions: ["agents:read", "mcp:invoke"],
+      }),
+    ).toContain("Reply in the user's language (fr)");
   });
 
   it("keeps the block free of standing instructions — they belong to the system prompt", () => {
     // Everything the model must DO with the context lives in the persona
     // (`buildSystemPrompt`). The block renders data only; the sole exception is the
     // reply-language line, which is parameterised by the `X-Chat-Locale` header.
-    const out = formatCallerContext({
-      user: { name: "Ada" },
-      org: { role: "member" },
-      connections: [{ integration_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
-      agents: [{ package_id: "@appstrate/triage", takes_input: false }],
-      agents_truncated: true,
-      skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
-      skills_truncated: true,
-    });
+    const out = formatCallerContext(
+      {
+        user: { name: "Ada" },
+        org: { role: "member" },
+        connections: [{ integration_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
+        agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+        agents_truncated: true,
+        skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
+        skills_truncated: true,
+      },
+      {
+        capabilities: caps(BUILDER),
+        rolePreview: false,
+        spaceRole: "builder",
+        permissions: ["agents:read", "mcp:invoke"],
+      },
+    );
     // Gone from the block…
     for (const imperative of [
       "Use the `@scope/name` id verbatim",
@@ -190,9 +234,6 @@ describe("caller-context prompt hygiene", () => {
 describe("the persona without inline composition", () => {
   // What a turn without `agents:write` ∧ `agents:run` is told. The platform
   // refuses the launch either way; this block is about not teaching it.
-  const REDUCED = buildSystemPrompt({ canComposeInline: false, canAuthorAgents: false });
-  /** `agents:write` without `agents:run`: may author agents, not compose one inline. */
-  const AUTHOR_ONLY = buildSystemPrompt({ canComposeInline: false, canAuthorAgents: true });
 
   it("teaches no way to compose one", () => {
     expect(REDUCED).not.toContain('kind:"inline"');
@@ -207,7 +248,7 @@ describe("the persona without inline composition", () => {
     expect(REDUCED).toContain("default to the integrations already available");
     expect(REDUCED).toContain("call `read_file` first");
     expect(REDUCED).toContain('{ kind:"agent", scope, name, version?, input? }');
-    expect(REDUCED).toContain("Respect the user's role");
+    expect(REDUCED).toContain("The context lists the permissions this turn holds");
   });
 
   it("states the published-agent and `output` contracts once, in both personas", () => {
@@ -247,14 +288,12 @@ describe("the persona without inline composition", () => {
     const skills = "Skills are not run on their own";
     expect(FULL).toContain(skills);
     expect(REDUCED).not.toContain(skills);
-    // A caller who may write but not run: no inline, yet nothing forbids authoring.
-    expect(AUTHOR_ONLY).toContain(skills);
-    expect(AUTHOR_ONLY).not.toContain("Do not create or modify an agent");
-    expect(AUTHOR_ONLY).not.toContain('kind:"inline"');
-    // Configuring or activating stays open (`agents:configure`); "manage" would not.
-    expect(FULL).toContain("manage agents");
-    expect(REDUCED).not.toContain("manage agents");
-    expect(REDUCED).toContain("configure or activate agents");
+    // A caller who may write but not launch: no inline, yet nothing forbids
+    // authoring — the reduced persona's "do not create one" line is a RUN-branch
+    // sentence, so it cannot reach a turn that holds `agents:write`.
+    expect(NO_RUNS_AUTHOR).toContain(skills);
+    expect(NO_RUNS_AUTHOR).not.toContain("Do not create or modify an agent");
+    expect(NO_RUNS_AUTHOR).not.toContain('kind:"inline"');
     // Manifest fields mean nothing to a turn that may not author an agent.
     expect(FULL).toContain("`dependencies.integrations`");
     expect(REDUCED).not.toContain("dependencies.");
@@ -262,5 +301,178 @@ describe("the persona without inline composition", () => {
 
   it("is materially shorter — the point is not to pay for what is refused", () => {
     expect(FULL.length - REDUCED.length).toBeGreaterThan(3_000);
+  });
+
+  it("still teaches running an existing agent — the tool IS declared to it", () => {
+    expect(REDUCED).toContain("run_and_wait");
+    expect(REDUCED).toContain('kind:"agent"');
+    expect(REDUCED).not.toContain('kind:"inline"');
+  });
+});
+
+describe("the persona without agent runs", () => {
+  // `run_and_wait` is declared on `mcp:invoke` ∧ launch ∧ run-read; a turn
+  // missing any of the three is never shown the tool, so the persona must not
+  // teach it. Absent, not contradicted: nothing says "you cannot run agents".
+  const NO_RUNS = promptFor(MCP);
+  /** `mcp:invoke` ∧ run-read without `agents:run`: may inspect runs, not launch. */
+  const READER = promptFor([...MCP, "runs:read"]);
+  /** The control this block is measured against: the same grants plus the launch. */
+  const RUNNER = REDUCED;
+
+  it("names no way to launch a run", () => {
+    for (const taught of [
+      "run_and_wait",
+      "runAgent",
+      "runInline",
+      'kind:"agent"',
+      'kind:"inline"',
+      "listRuns",
+      "outputs/",
+      "integration_not_active",
+      "run an agent",
+    ]) {
+      expect(NO_RUNS).not.toContain(taught);
+      expect(NO_RUNS_AUTHOR).not.toContain(taught);
+    }
+  });
+
+  it("closes on the permission list, not on a vague deference to the role", () => {
+    // The context block now carries the turn's set in the `required_permissions`
+    // vocabulary, so the closing rule can be joined against it.
+    for (const persona of [NO_RUNS, FULL]) {
+      expect(persona).toContain("The context lists the permissions this turn holds");
+      expect(persona).toContain("say which permission is missing instead of attempting it");
+      expect(persona).not.toContain("Respect the user's role");
+    }
+  });
+
+  it("enumerates no permission-gated act — the turn's permission list is the authority", () => {
+    // The permission list is the one authority always in context: the operation
+    // index is stripped for the engines whose models choke on it
+    // (`applyOperationIndexPolicy`), so a sentence pointing at the index points
+    // at nothing there. A persona that names acts attributes them to a caller
+    // whose set may not carry them: an operator asked "what can you do?"
+    // answered from the prompt instead of from its tools.
+    for (const enumerated of ["manage agents", "configure or activate", "schedule"]) {
+      expect(NO_RUNS).not.toContain(enumerated);
+      expect(FULL).not.toContain(enumerated);
+    }
+    for (const persona of [NO_RUNS, FULL]) {
+      expect(persona).toContain(
+        "If the request is a pure Appstrate operation, call that operation directly with `invoke_operation`",
+      );
+      expect(persona).toContain("the permissions listed in your context decide what you may call");
+      expect(persona).not.toContain("the operation index in your instructions is the authority");
+    }
+  });
+
+  it("contradicts nothing — no refusal is asserted in the model's place", () => {
+    for (const contradiction of ["cannot run", "not allowed to run", "you may not run"]) {
+      expect(NO_RUNS).not.toContain(contradiction);
+    }
+  });
+
+  it("keeps every rule that is not about running", () => {
+    expect(NO_RUNS).toContain("You are Appstrate's assistant");
+    expect(NO_RUNS).toContain("call `read_file` first");
+    expect(NO_RUNS).toContain("Never invent an operationId or argument shape");
+    expect(NO_RUNS).toContain("The context lists the permissions this turn holds");
+  });
+
+  it("keeps skill authoring, which needs no run", () => {
+    expect(NO_RUNS_AUTHOR).toContain("Skills are not run on their own");
+    expect(NO_RUNS_AUTHOR).toContain("in `dependencies.integrations` and in `dependencies.skills`");
+    expect(NO_RUNS).not.toContain("Skills are not run on their own");
+    // Neither list is rendered, so the bullet about truncated lists is gone too.
+    expect(NO_RUNS).not.toContain("(list truncated)");
+    expect(NO_RUNS_AUTHOR).toContain("(list truncated)");
+  });
+
+  it("names the full-list operation only for a list the context renders", () => {
+    // Skills are listed on authoring, agents on running: each operation is
+    // named under the gate that shows its list, never under the other one.
+    expect(NO_RUNS_AUTHOR).toContain('`operation_id: "listSkills"`');
+    expect(NO_RUNS_AUTHOR).not.toContain("listAgents");
+    expect(REDUCED).toContain('`operation_id: "listAgents"`');
+    expect(REDUCED).not.toContain("listSkills");
+  });
+
+  it("lists no agent as runnable in the caller-context block", () => {
+    const raw = {
+      user: { name: "Ada" },
+      org: { role: "member" },
+      agents: [{ package_id: "@acme/triage", takes_input: false }],
+    };
+    expect(
+      formatCallerContext(raw, {
+        capabilities: caps(BUILDER),
+        rolePreview: false,
+        spaceRole: "builder",
+        permissions: ["agents:read", "mcp:invoke"],
+      }),
+    ).toContain("## Existing agents you can run");
+    const off = formatCallerContext(raw, {
+      capabilities: caps([...MCP, "agents:write"]),
+      rolePreview: false,
+      spaceRole: "builder",
+      permissions: ["agents:read", "mcp:invoke"],
+    });
+    expect(off).not.toContain("## Existing agents you can run");
+    expect(off).not.toContain("@acme/triage");
+    // The identity half survives — date and role grounding do not depend on runs.
+    expect(off).toContain("You are assisting Ada");
+  });
+
+  it("keeps the run-reading rules for a turn that may inspect runs but not launch", () => {
+    // Reading runs is its own grant (`mcp:invoke` ∧ run-read): the history
+    // bullet and the metrics rule presuppose it, not the launch.
+    expect(READER).toContain("listRuns");
+    expect(READER).toContain("Never quote run metrics");
+    expect(READER).not.toContain("run_and_wait");
+    // Re-running is the launch half — gone with it.
+    expect(READER).not.toContain("or wants to re-run something");
+    expect(RUNNER).toContain("or wants to re-run something");
+    // And a turn that may not read runs at all is told neither.
+    expect(NO_RUNS).not.toContain("Never quote run metrics");
+  });
+
+  it("is materially shorter than the persona that may run", () => {
+    expect(RUNNER.length - NO_RUNS.length).toBeGreaterThan(4_000);
+  });
+});
+
+describe("the persona of a turn that can look but not act", () => {
+  // `mcp:read` without `mcp:invoke` is reachable through a custom role: the turn
+  // reaches the MCP endpoint and is declared the discovery tools, never the
+  // dispatching one. Teaching it `invoke_operation` promises a refusal — and the
+  // refusal is the platform's to give, so the persona is silent rather than
+  // contradicting itself.
+  const DISCOVERY = promptFor(["mcp:read", "chat:write"]);
+
+  it("names no dispatching tool", () => {
+    expect(DISCOVERY).not.toContain("invoke_operation");
+    expect(DISCOVERY).not.toContain("invoke it");
+    expect(DISCOVERY).not.toContain("run_and_wait");
+    // Control: the persona that CAN dispatch names it.
+    expect(FULL).toContain("invoke_operation");
+  });
+
+  it("still teaches discovery and direct file reading", () => {
+    expect(DISCOVERY).toContain("search_operations");
+    expect(DISCOVERY).toContain("describe_operation");
+    expect(DISCOVERY).toContain("you can look things up, you cannot act");
+    expect(DISCOVERY).toContain("call `read_file` first");
+    expect(DISCOVERY).toContain("Never invent an operationId or argument shape");
+    // Control: the discovery tools are named to the full persona too, so their
+    // presence here is not an artifact of a branch only this turn renders.
+    expect(FULL).toContain("search_operations");
+    expect(FULL).toContain("describe_operation");
+  });
+
+  it("still carries the permission list, without promising an attempt", () => {
+    expect(DISCOVERY).toContain("The context lists the permissions this turn holds");
+    expect(DISCOVERY).not.toContain("instead of attempting it");
+    expect(FULL).toContain("instead of attempting it");
   });
 });

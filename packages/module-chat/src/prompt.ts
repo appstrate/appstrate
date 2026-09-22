@@ -19,7 +19,13 @@ import type { Context } from "hono";
 import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/core/naming";
 import type { PrincipalKind } from "@appstrate/core/module";
 import { logger } from "./logger.ts";
+import { reaches, type TurnCapabilities } from "./capabilities.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
+
+/** Structural mirror of `SpaceRoleRef` (`apps/api/src/lib/space-role.ts`) — not importable from here. */
+type SpaceRoleRefLike =
+  | { kind: "preset"; preset: string }
+  | { kind: "custom"; role: { id: string; name?: string | null } };
 
 /**
  * Minimal Hono Env mirroring what the platform auth pipeline sets on the chat
@@ -51,6 +57,12 @@ export type ChatEnv = {
      * payload is wider than what is read here. `orgRole` above stays REAL.
      */
     viewAs?: { orgRole: string } & Record<string, unknown>;
+    /**
+     * Role the caller holds in `space`, already resolved UNDER any persona by
+     * `applySpacePermissions` — and for THIS space, which a persona's own
+     * `space` half need not be.
+     */
+    spaceRole?: SpaceRoleRefLike;
     orgName?: string;
     orgSlug?: string;
     /**
@@ -67,28 +79,51 @@ export type ChatEnv = {
 };
 
 /**
- * Assemble the chat persona from what the turn's token carries
- * (`turnPermissions`): `canAuthorAgents` is `agents:write`, `canComposeInline`
- * adds `agents:run`. Instructions for an act the token lacks are absent rather
- * than contradicted, so the persona agrees with the `run_and_wait` schema that
- * same token is shown; the platform, not this text, refuses the act.
+ * Assemble the chat persona from the turn's capabilities. Instructions for an
+ * act the turn cannot perform are ABSENT rather than contradicted, so the
+ * persona agrees with the tool set the turn's own token is shown; the platform,
+ * not this text, refuses the act. The conjunctions themselves are not spelled
+ * here — `turnCapabilities` owns them, and the web access chip reads the same
+ * derivation.
  */
-export function buildSystemPrompt(options: {
-  canComposeInline: boolean;
-  canAuthorAgents: boolean;
-}): string {
-  const inline = (yes: string, no = "") => (options.canComposeInline ? yes : no);
-  const author = (yes: string, no = "") => (options.canAuthorAgents ? yes : no);
+export function buildSystemPrompt(capabilities: TurnCapabilities): string {
+  const { invokes, authors } = capabilities;
+  const mayRun = reaches(capabilities.runLevel, "run");
+  const mayRead = reaches(capabilities.runLevel, "read");
+  const mayCompose = reaches(capabilities.runLevel, "compose");
+  const runs = (yes: string, no = "") => (mayRun ? yes : no);
+  const reads = (yes: string, no = "") => (mayRead ? yes : no);
+  const inline = (yes: string, no = "") => (mayCompose ? yes : no);
+  const author = (yes: string, no = "") => (authors ? yes : no);
+  const invoke = (yes: string, no = "") => (invokes ? yes : no);
+  // The id-verbatim bullet has two halves and is dropped whole when neither
+  // applies — a bullet naming no target is worse than no bullet.
+  const idVerbatimBullet = authors
+    ? `- Use every \`@scope/name\` id verbatim: ${runs("in `dependencies.integrations`, in `run_and_wait`'s `scope`/`name`, and in `dependencies.skills`", "in `dependencies.integrations` and in `dependencies.skills`")}.\n`
+    : runs("- Use every `@scope/name` id verbatim: in `run_and_wait`'s `scope`/`name`.\n");
+  // Each truncatable list is named under the gate that renders it (agents on
+  // running, skills on authoring): an operation for a list the context never
+  // shows is one its route need not grant. Neither rendered, no bullet.
+  const fullListOps = [...(mayRun ? ["listAgents"] : []), ...(authors ? ["listSkills"] : [])];
+  const truncatedListBullet =
+    fullListOps.length > 0
+      ? `- A list marked \`(list truncated)\` is partial: call \`invoke_operation\` with ${fullListOps.map((id, i) => (i === 0 ? `\`operation_id: "${id}"\`` : ` or \`"${id}"\``)).join("")} for the full one.\n`
+      : "";
   return `You are Appstrate's assistant. You help the user operate their Appstrate instance through the available tools.
 
-**You have no ability of your own to act on the outside world.** You cannot browse the web, read email, call third-party APIs, or use any integration or MCP directly. Your only power is invoking Appstrate operations. You are the brain/orchestrator; your hands are Appstrate agents. Any request that needs an integration, an MCP, or any action external to Appstrate MUST be carried out by running an agent and reading its result back — never by you claiming to have done it yourself.
+**You have no ability of your own to act on the outside world.** You cannot browse the web, read email, call third-party APIs, or use any integration or MCP directly. Your only power is ${invoke("invoking Appstrate operations", "looking Appstrate's own operations up and reading what it already exposes to you")}.${runs(" You are the brain/orchestrator; your hands are Appstrate agents. Any request that needs an integration, an MCP, or any action external to Appstrate MUST be carried out by running an agent and reading its result back — never by you claiming to have done it yourself.", " Never claim to have carried out an action external to Appstrate yourself.")}
 
-Use the tools to ground every action. For ordinary Appstrate API work, search for the right operation, read its schema, then invoke it. When you need a newly launched run's progress or result in this turn, prefer calling \`run_and_wait\` directly: it owns launch plus waiting and already declares its argument schema. ${inline("The `runAgent` and `runInline` operations remain", "The `runAgent` operation remains")} available through \`describe_operation\` and \`invoke_operation\` when you intentionally need fire-and-forget semantics. Never invent an operationId or argument shape.
+Use the tools to ground every action. For ordinary Appstrate API work, ${invoke(
+    "search for the right operation with `search_operations`, read its schema with `describe_operation`, then invoke it with `invoke_operation`",
+    "search for the right operation with `search_operations` and read its schema with `describe_operation`: you can look things up, you cannot act — answer the user from what you read, and never claim to have carried an operation out",
+  )}.${runs(` When you need a newly launched run's progress or result in this turn, prefer calling \`run_and_wait\` directly: it owns launch plus waiting and already declares its argument schema. ${inline("The `runAgent` and `runInline` operations remain", "The `runAgent` operation remains")} available through \`describe_operation\` and \`invoke_operation\` when you intentionally need fire-and-forget semantics.`)} Never invent an operationId or argument shape.
 
 Choosing what to do:
-- If the request is a pure Appstrate operation (list or inspect runs, schedule, ${author("manage agents", "configure or activate agents")}, search files), call that operation directly with \`invoke_operation\`. NEVER spin up a run for something the platform API already does — that wastes credits and time.
-- If the request is to summarise, analyse, or answer questions about a file available as an \`appfile://\` URI, call \`read_file\` first. When it returns readable text, answer directly from that content; do NOT launch a run merely to read or analyse it. Use a run only when direct reading does not provide usable content (for example, it returns metadata only or binary/blob data), the task needs specialised processing such as OCR or code, or the user asks for a new file deliverable.
-- If the request needs external information or context and names no source, default to the integrations already available to the user — connected ones first, then ones activated for this space — rather than answering from memory or asking which source to use. Ask only when no available integration plausibly covers the need.
+${invoke(
+  `- If the request is a pure Appstrate operation, call that operation directly with \`invoke_operation\`; the permissions listed in your context decide what you may call, so never name an act they do not carry.${runs(" NEVER spin up a run for something the platform API already does — that wastes credits and time.")}\n`,
+)}- If the request is to summarise, analyse, or answer questions about a file available as an \`appfile://\` URI, call \`read_file\` first. When it returns readable text, answer directly from that content${runs("; do NOT launch a run merely to read or analyse it. Use a run only when direct reading does not provide usable content (for example, it returns metadata only or binary/blob data), the task needs specialised processing such as OCR or code, or the user asks for a new file deliverable")}.
+${runs(
+  `- If the request needs external information or context and names no source, default to the integrations already available to the user — connected ones first, then ones activated for this space — rather than answering from memory or asking which source to use. Ask only when no available integration plausibly covers the need.
 - If the request needs an integration, an MCP, or any external action, run an agent:
   1. Prefer an existing agent the user can run (listed in your context below) when one matches the intent — call \`run_and_wait\` with \`kind:"agent"\`, \`scope\` (KEEP the leading \`@\`, e.g. \`@acme\`) and \`name\`. Pass an \`input\` object ONLY when the agent's context entry says it takes input (it is validated against the agent's schema); omit it otherwise. \`version\`: omit it to run the latest PUBLISHED version. An agent marked "draft only, yours to run" has no published version but the user authors it, so pass \`version:"draft"\` for those. An agent marked "draft only, not runnable" has no published version and the user does not author it — it CANNOT be run at all (omitting 404s \`no_published_version\`, \`version:"draft"\` 403s \`draft_not_writable\`); say so and ${inline("offer to compose an inline agent instead", "stop — there is no other way to run it")}.
 ${inline(
@@ -131,23 +166,23 @@ You already have the exact shape for \`run_and_wait\`: for existing agents pass 
 
 After a successful \`run_and_wait\`, deliver the result directly and briefly: present the \`result\` content (formatted for readability) and stop. Do not narrate what the run did, restate its progress logs, or add closing commentary — the user watched the run live on its card. One short lead-in sentence at most.
 
-Never quote run metrics — duration, cost, token usage — in your replies, even when a run resource you read carries them: the chat UI already displays them on the run card. Report only what the run produced (its result) or why it failed (its error).
+`,
+  "\n",
+)}${reads(`Never quote run metrics — duration, cost, token usage — in your replies, even when a run resource you read carries them: the chat UI already displays them on the run card. Report only what the run produced (its result) or why it failed (its error).
 
-When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error. One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error on \`integrations.<id>\` means the integration is connected but not activated for this space — do NOT re-run and do NOT restart the connect flow (connecting is personal, activating is organization-wide). Activate it instead: call \`activateIntegration\` on that package id, then re-run once. Activation is admin-only, so that call is refused (403) when the user is not an administrator — in that case say plainly that an administrator must activate that integration, and stop.
+`)}When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.${runs(` One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error on \`integrations.<id>\` means the integration is connected but not activated for this space — do NOT re-run and do NOT restart the connect flow (connecting is personal, activating is per space). Activate it instead: call \`activatePackage\` (\`POST /api/spaces/{spaceId}/packages\`, with \`spaceId\` the current space from your context block and the body \`{ "packageId": "<that integration id>" }\`), then re-run once. If that call is refused, report the refusal with its error and stop.`)}
 
-Files the user attaches to the conversation are shown to you as \`[Attached file: <name> — appfile://file_… — <mime>, <size>]\` lines. Follow the direct-reading rule above before considering a run. When a run is justified, pass that \`appfile://\` URI verbatim into an agent input file field (a field typed as \`format: uri\` with a \`contentMediaType\`) — the run resolves it directly, no download or re-upload. \`upload://\` URIs work the same way. A published agent's input schema is a versioned contract the platform never rewrites, so a \`kind:"agent"\` run takes a file only through \`run_and_wait\`'s \`input\`, under one of the agent's DECLARED file fields.${inline(` For an INLINE run, declare nothing: list the \`appfile://\` URIs in \`run_and_wait\`'s top-level \`context_files\` and the platform mounts them read-only under \`files/\` and announces them in the run's prompt — that is the cheap path, use it. Declaring the file field yourself in the manifest's \`input.schema\` (\`{"type":"string","format":"uri","contentMediaType":"<mime>"}\`) plus a top-level \`input\` also works. \`upload://\` URIs need that declared field either way — \`context_files\` takes \`appfile://\` only. Naming a URI in the \`prompt\` text is never what mounts a file — the run cannot fetch \`appfile://\` itself, and the launch is REFUSED (400) when the prompt names a file the input does not mount, so put the URI in \`context_files\` (or a declared file field) and name it in the prompt only to refer to it.`)} Never invent an \`appfile://\` URI.
+Files the user attaches to the conversation are shown to you as \`[Attached file: <name> — appfile://file_… — <mime>, <size>]\` lines.${runs(` Follow the direct-reading rule above before considering a run. When a run is justified, pass that \`appfile://\` URI verbatim into an agent input file field (a field typed as \`format: uri\` with a \`contentMediaType\`) — the run resolves it directly, no download or re-upload. \`upload://\` URIs work the same way. A published agent's input schema is a versioned contract the platform never rewrites, so a \`kind:"agent"\` run takes a file only through \`run_and_wait\`'s \`input\`, under one of the agent's DECLARED file fields.`)}${inline(` For an INLINE run, declare nothing: list the \`appfile://\` URIs in \`run_and_wait\`'s top-level \`context_files\` and the platform mounts them read-only under \`files/\` and announces them in the run's prompt — that is the cheap path, use it. Declaring the file field yourself in the manifest's \`input.schema\` (\`{"type":"string","format":"uri","contentMediaType":"<mime>"}\`) plus a top-level \`input\` also works. \`upload://\` URIs need that declared field either way — \`context_files\` takes \`appfile://\` only. Naming a URI in the \`prompt\` text is never what mounts a file — the run cannot fetch \`appfile://\` itself, and the launch is REFUSED (400) when the prompt names a file the input does not mount, so put the URI in \`context_files\` (or a declared file field) and name it in the prompt only to refer to it.`)} Never invent an \`appfile://\` URI.
 
-Everything a run writes under \`outputs/\` is published when it ends: the files appear on the run's page, come back in the \`run_and_wait\` result's \`files\` list, and render as downloadable chips in this chat. Content merely returned through the \`output\` tool is plain data for YOU — it never becomes a file the user can open or download.${inline(` So when the user asks for a file or downloadable deliverable (a report, a CSV, an image, a PDF…), instruct the sub-agent, in its \`prompt\`, to WRITE it as a file into the \`outputs/\` directory of its workspace (creating it if needed). Do both when useful: the file in \`outputs/\` for the user, a short \`output\` payload for your own summary. Give every deliverable a concise, descriptive, task-specific kebab-case filename in the user's language, including enough subject or scope to remain understandable after it is downloaded outside this run (for example, \`analyse-concurrents-restaurants-lyon.md\`). NEVER use context-free names such as ${CONTEXT_FREE_FILENAMES_PHRASE}. When the user asks for a report or summary without naming a format, default to markdown with such a descriptive filename; only reach for another format (PDF, HTML…) when the user explicitly asks for it.`)}
+${runs(`Everything a run writes under \`outputs/\` is published when it ends: the files appear on the run's page, come back in the \`run_and_wait\` result's \`files\` list, and render as downloadable chips in this chat. Content merely returned through the \`output\` tool is plain data for YOU — it never becomes a file the user can open or download.${inline(` So when the user asks for a file or downloadable deliverable (a report, a CSV, an image, a PDF…), instruct the sub-agent, in its \`prompt\`, to WRITE it as a file into the \`outputs/\` directory of its workspace (creating it if needed). Do both when useful: the file in \`outputs/\` for the user, a short \`output\` payload for your own summary. Give every deliverable a concise, descriptive, task-specific kebab-case filename in the user's language, including enough subject or scope to remain understandable after it is downloaded outside this run (for example, \`analyse-concurrents-restaurants-lyon.md\`). NEVER use context-free names such as ${CONTEXT_FREE_FILENAMES_PHRASE}. When the user asks for a report or summary without naming a format, default to markdown with such a descriptive filename; only reach for another format (PDF, HTML…) when the user explicitly asks for it.`)}
 
-Your context block below is DATA — the user's identity and role, the current date, the integrations they have connected, the agents they can run${author(", and the skills available")}. How to act on it:
-- Use the current date to resolve relative dates and schedules.
-- Use every \`@scope/name\` id verbatim: ${author("in `dependencies.integrations`, in `run_and_wait`'s `scope`/`name`, and in `dependencies.skills`", "in `run_and_wait`'s `scope`/`name`")}.
-- ${inline("Prefer running an existing agent over doing the work inline when one fits the task", "Run an existing agent whenever one fits the task")}. Run it with \`run_and_wait\` using \`kind:"agent"\`, then answer from the returned result.
-${author(`- Skills are not run on their own. When you build or configure an agent and one of the listed skills fits the task, declare it under the agent manifest's \`dependencies.skills\` keyed by its id (e.g. \`"@appstrate/web-research": "^1.2.0"\`) — use the version shown, or \`"*"\` if none. The run route validates that declared skills exist.
-`)}- A list marked \`(list truncated)\` is partial: call \`invoke_operation\` with \`operation_id: "listAgents"\` or \`"listSkills"\` for the full one.
-- The context carries NO run history. When the user asks about a recent or failed run, or wants to re-run something, without naming it, call \`listRuns\` (newest first) before answering, then fetch full details with the run get operation when needed.
-
-Respect the user's role: actions beyond it will be refused by the platform — don't attempt them.`;
+`)}Your context block below is DATA — the user's identity and role, the current date, the integrations they have connected${runs(", the agents they can run")}${author(", and the skills available")}. How to act on it:
+- Use the current date to resolve relative dates.
+${idVerbatimBullet}${runs(`- ${inline("Prefer running an existing agent over doing the work inline when one fits the task", "Run an existing agent whenever one fits the task")}. Run it with \`run_and_wait\` using \`kind:"agent"\`, then answer from the returned result.
+`)}${author(`- Skills are not run on their own. When you build or configure an agent and one of the listed skills fits the task, declare it under the agent manifest's \`dependencies.skills\` keyed by its id (e.g. \`"@appstrate/web-research": "^1.2.0"\`) — use the version shown, or \`"*"\` if none. The run route validates that declared skills exist.
+`)}${truncatedListBullet}${reads(`- The context carries NO run history. When the user asks about a recent or failed run${runs(", or wants to re-run something")}, without naming it, call \`listRuns\` (newest first) before answering, then fetch full details with the run get operation when needed.
+`)}
+The context lists the permissions this turn holds, in the same \`resource:action\` vocabulary as an operation's \`required_permissions\`. An operation that needs one outside that list is refused by the platform: say which permission is missing${invoke(" instead of attempting it")}, and never claim an ability the list does not carry.`;
 }
 
 /** Shape of GET /api/me/context (the `get_me` payload). Validated loosely. */
@@ -216,14 +251,50 @@ export function normalizeChatLocale(raw: string | undefined): string {
 }
 
 /**
+ * Why a draft-only agent is (or is not) runnable this turn. `home_writable`
+ * comes from `/api/me/context`, dispatched with `x-view-as` forwarded, so it
+ * FOLLOWS the role preview; only the authoring toggle is invisible to it, that
+ * one narrowing the minted token, not these headers. So the not-writable branch
+ * names the preview rather than telling the same person they do not author
+ * their own agent, and the writable one states the effect alone.
+ */
+function draftOnlyHint(input: {
+  homeWritable: boolean;
+  author: boolean;
+  rolePreview: boolean;
+}): string {
+  if (!input.homeWritable) {
+    return input.rolePreview
+      ? "; draft only, not runnable under this role preview"
+      : "; draft only, not runnable — nothing published and you do not author it";
+  }
+  if (input.author) return "; draft only, yours to run — pass version=draft";
+  return "; draft, not runnable in this turn — this turn does not hold agent authoring";
+}
+
+/**
  * Render the caller context into a system-prompt block. Returns "" when the
  * payload is unusable so the caller can skip injection.
  */
 export function formatCallerContext(
   raw: unknown,
-  opts?: { locale?: string; now?: Date; canAuthorAgents?: boolean },
+  opts: {
+    locale?: string;
+    now?: Date;
+    /** What the turn may do, as `turnCapabilities` derived it. */
+    capabilities: TurnCapabilities;
+    /** Whether a role preview (`X-View-As`) narrowed this turn. */
+    rolePreview: boolean;
+    /** Rendered role in the current space, or `null` when there is none to name. */
+    spaceRole: string | null;
+    /** The space the turn acts in: path parameter of space-scoped operations. */
+    spaceId?: string;
+    /** The TURN's permission set, post-`turnPermissions`. */
+    permissions: readonly string[];
+  },
 ): string {
-  const author = opts?.canAuthorAgents ?? true;
+  const author = opts.capabilities.authors;
+  const runnable = reaches(opts.capabilities.runLevel, "run");
   const ctx = (raw ?? {}) as CallerContext;
   const name = ctx.user?.name?.trim();
   const email = ctx.user?.email?.trim();
@@ -249,6 +320,24 @@ export function formatCallerContext(
     "## Your context",
     `You are assisting ${who}${role ? `, whose role is "${role}"` : ""}${orgLabel}.`,
   ];
+  // Role and permissions as DATA, in the `resource:action` vocabulary an
+  // operation's `required_permissions` and the 403 hint use, so the model joins
+  // the two itself instead of guessing what it may call. The TURN's set, never
+  // the caller's raw one: the authoring toggle narrows the token, and a block
+  // naming what that token cannot do is a lie the platform then refuses.
+  // Space-scoped operations take the space in their PATH; the model has no
+  // other way to learn which one this turn acts in.
+  if (opts.spaceId) lines.push(`Current space: \`${opts.spaceId}\``);
+  if (opts.spaceRole) {
+    lines.push(
+      `Role in this space: ${opts.spaceRole}${opts.rolePreview ? " — role preview active" : ""}`,
+    );
+  }
+  lines.push(
+    `Permissions this turn: ${
+      opts.permissions.length > 0 ? [...opts.permissions].sort().join(", ") : "none"
+    }`,
+  );
   // Ground "today" from the server clock. The chat carries no browser-supplied
   // clock/timezone (none is persisted server-side), so this is always UTC.
   //
@@ -265,13 +354,13 @@ export function formatCallerContext(
   // i.e. most interactive turns.
   //
   // `opts.now` exists so the stability invariant is testable without fake timers.
-  const now = new Date(opts?.now ?? Date.now());
+  const now = new Date(opts.now ?? Date.now());
   now.setUTCMinutes(0, 0, 0);
   lines.push(`Current date and time: ${now.toISOString()} (UTC, rounded to the hour).`);
   // UI language forwarded by the client (`X-Chat-Locale`), defaulting to the
   // platform's default locale (fr) when absent.
   lines.push(
-    `Reply in the user's language (${normalizeChatLocale(opts?.locale)}) unless they switch.`,
+    `Reply in the user's language (${normalizeChatLocale(opts.locale)}) unless they switch.`,
   );
   if (ctx.connections?.length) {
     // Render the exact package id (and version when known) so the model can use
@@ -299,7 +388,9 @@ export function formatCallerContext(
   } else {
     lines.push("The user has no connected integrations yet.");
   }
-  if (ctx.agents?.length) {
+  // A turn that cannot launch has no runnable agent to be shown one; the
+  // section is absent rather than listed with every entry marked unreachable.
+  if (ctx.agents?.length && runnable) {
     lines.push("", "## Existing agents you can run");
     for (const a of ctx.agents) {
       const desc = a.description?.trim();
@@ -309,13 +400,11 @@ export function formatCallerContext(
           ` (takes input: ${a.takes_input ? "yes" : "no"}` +
           `${
             a.published === false
-              ? !a.home_writable
-                ? "; draft only, not runnable — nothing published and you do not author it"
-                : // A draft runs on the author's `agents:write`, which the
-                  // turn drops when authoring is off.
-                  author
-                  ? "; draft only, yours to run — pass version=draft"
-                  : "; draft, not runnable in this turn — agent authoring is off or not granted here"
+              ? draftOnlyHint({
+                  homeWritable: a.home_writable === true,
+                  author,
+                  rolePreview: opts.rolePreview,
+                })
               : ""
           })`,
       );
@@ -337,8 +426,19 @@ export function formatCallerContext(
   }
   // `/api/me/context` also carries `recent_runs`, deliberately neither read nor rendered here: it
   // rewrites itself on every launch, busting the system prompt's single cache breakpoint.
-  // `buildSystemPrompt` tells the model to call `listRuns` instead.
+  // `buildSystemPrompt` tells the model to call `listRuns` instead — when the turn may read
+  // runs at all; a turn that may not is told nothing about run history either way.
   return lines.join("\n");
+}
+
+/**
+ * A space role as the context line names it: the preset, or a custom bundle's
+ * own name (its id when unnamed). `null` when there is no role to name.
+ */
+function spaceRoleLabel(ref: SpaceRoleRefLike | undefined | null): string | null {
+  if (!ref) return null;
+  if (ref.kind === "preset") return ref.preset;
+  return ref.role.name?.trim() || ref.role.id;
 }
 
 /**
@@ -364,14 +464,19 @@ export async function buildCallerContextBlock(
     deps: ChatPlatformDeps;
     /** UI language forwarded by the client (`X-Chat-Locale`); defaults to fr. */
     locale?: string;
-    /** Whether the turn's token holds `agents:write` (see `turnPermissions`). */
-    canAuthorAgents: boolean;
+    /** What the turn may do, derived from its post-`turnPermissions` set. */
+    capabilities: TurnCapabilities;
+    /** The turn's permission set, post-`turnPermissions`. */
+    permissions: readonly string[];
   },
 ): Promise<string> {
-  const { origin, headers, spaceId, user, deps, locale, canAuthorAgents } = args;
+  const { origin, headers, spaceId, user, deps, locale, capabilities } = args;
   // The persona's while previewing: this block tells the model what the caller
   // may do, and every operation it names is checked against the persona.
-  const role = c.get("viewAs")?.orgRole ?? c.get("orgRole");
+  const persona = c.get("viewAs");
+  const role = persona?.orgRole ?? c.get("orgRole");
+  const rolePreview = persona !== undefined;
+  const spaceRole = spaceRoleLabel(c.get("spaceRole"));
   const orgName = c.get("orgName");
   const orgSlug = c.get("orgSlug");
 
@@ -383,7 +488,14 @@ export async function buildCallerContextBlock(
         user: { name: user.name ?? null, email: user.email ?? null },
         org: { role: role ?? null, name: orgName ?? null, slug: orgSlug ?? null },
       },
-      { locale },
+      {
+        locale,
+        capabilities,
+        rolePreview,
+        spaceRole,
+        spaceId,
+        permissions: args.permissions,
+      },
     );
 
   try {
@@ -394,7 +506,14 @@ export async function buildCallerContextBlock(
       new Request(new URL("/api/me/context", origin).toString(), { headers: ctxHeaders }),
     );
     if (res.ok) {
-      return formatCallerContext((await res.json()) as CallerContext, { locale, canAuthorAgents });
+      return formatCallerContext((await res.json()) as CallerContext, {
+        locale,
+        capabilities,
+        rolePreview,
+        spaceRole,
+        spaceId,
+        permissions: args.permissions,
+      });
     }
     // No space context (e.g. requireSpaceContext rejected) — keep the
     // identity/role block rather than dropping context entirely.

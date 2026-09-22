@@ -29,7 +29,7 @@ import { Hono, type Context } from "hono";
 import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
+import { requirePermission, rowAuthority } from "../middleware/require-permission.ts";
 import { getActor, actorFromIds } from "../lib/actor.ts";
 import { getSpaceScope } from "../lib/scope.ts";
 import { callerPermissions } from "../lib/permissions.ts";
@@ -116,19 +116,27 @@ export function createFilesRouter() {
 
   // GET /api/files/:id — metadata DTO. Token-minting route (the single GET
   // mints the signed `preview_url`), so it is rate-limited like the others.
-  router.get("/files/:id", rateLimit(120), requirePermission("files", "read"), async (c) => {
-    const scope = getSpaceScope(c);
-    const actor = getActor(c);
-    const resolved = await getFileForActor(
-      scope,
-      actor,
-      c.req.param("id")!,
-      callerPermissions(c),
-      fileLifecycleCeiling(c),
-    );
-    if (!resolved) throw notFound("File not found");
-    return c.json(toFileDto(resolved.row, actor, resolved.capabilities, { mintPreview: true }));
-  });
+  // `rowAuthority()` on every by-id route: layer 1 is mounted, layer 2 — the
+  // per-file container ACL — is decided on the row this handler loads.
+  router.get(
+    "/files/:id",
+    rateLimit(120),
+    requirePermission("files", "read"),
+    rowAuthority(),
+    async (c) => {
+      const scope = getSpaceScope(c);
+      const actor = getActor(c);
+      const resolved = await getFileForActor(
+        scope,
+        actor,
+        c.req.param("id")!,
+        callerPermissions(c),
+        fileLifecycleCeiling(c),
+      );
+      if (!resolved) throw notFound("File not found");
+      return c.json(toFileDto(resolved.row, actor, resolved.capabilities, { mintPreview: true }));
+    },
+  );
 
   // GET /api/files/:id/content — download the bytes. Gated by the derived
   // `downloadable` flag (a user upload is served only to its creator). 307 to a
@@ -138,6 +146,7 @@ export function createFilesRouter() {
     "/files/:id/content",
     rateLimit(120),
     requirePermission("files", "read"),
+    rowAuthority(),
     async (c) => {
       const scope = getSpaceScope(c);
       const actor = getActor(c);
@@ -197,7 +206,7 @@ export function createFilesRouter() {
 
   // DELETE /api/files/:id — allowed for a caller with the `files:delete`
   // permission (owner/admin) OR the file's own creator.
-  router.delete("/files/:id", rateLimit(60), async (c) => {
+  router.delete("/files/:id", rateLimit(60), rowAuthority(), async (c) => {
     const scope = getSpaceScope(c);
     const actor = getActor(c);
     const resolved = await getFileForActor(
@@ -232,7 +241,7 @@ export function createFilesRouter() {
   // authorization as delete (the `files:delete` permission OR the file's
   // own creator). Idempotent — pinning an already-permanent file is a no-op
   // that returns 200 with the (unchanged) file. Returns the updated DTO.
-  router.post("/files/:id/keep", rateLimit(60), async (c) => {
+  router.post("/files/:id/keep", rateLimit(60), rowAuthority(), async (c) => {
     const scope = getSpaceScope(c);
     const actor = getActor(c);
     const resolved = await getFileForActor(

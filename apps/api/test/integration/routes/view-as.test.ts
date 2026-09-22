@@ -41,7 +41,7 @@ import {
 } from "../../helpers/seed.ts";
 import { collectSSEEvents, pgNotify } from "../../helpers/sse.ts";
 import { initRealtime } from "../../../src/services/realtime.ts";
-import { setPlatformApp } from "../../../src/lib/platform-app.ts";
+import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
 import { resetCatalog } from "../../../src/modules/mcp/catalog.ts";
 import { collectModulePermissions } from "../../../src/lib/modules/module-loader.ts";
 import { getDiscoveredModules } from "../../helpers/test-modules.ts";
@@ -53,7 +53,7 @@ import { getDiscoveredModules } from "../../helpers/test-modules.ts";
 import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 
 const app = getTestApp();
-setPlatformApp(app);
+await registerTestPlatformApp();
 
 /**
  * Resources the probe module in the "intersection with the real caller" block
@@ -923,6 +923,65 @@ describe("view as role", () => {
     // creates the space.
     const real = await invoke();
     expect(real.isError).toBe(false);
+  });
+
+  it("narrows the advertised MCP tool surface to the previewed role", async () => {
+    resetCatalog();
+    // A preview must get the answers the real role would, declarations
+    // included: `viewer` holds no `agents:run`, so `run_and_wait` is not among
+    // the tools it is shown; `operator` — same session, same endpoint — is.
+    const toolNames = async (view?: string): Promise<string[]> => {
+      const envelope = await expectJson<{ result?: { tools?: Array<{ name: string }> } }>(
+        await request(`/api/mcp/o/${owner.orgId}`, {
+          view,
+          space: owner.defaultSpaceId,
+          headers: { Accept: "application/json, text/event-stream" },
+          body: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
+        }),
+      );
+      return (envelope.result?.tools ?? []).map((tool) => tool.name);
+    };
+
+    expect(await toolNames(persona("member", "preset:viewer"))).not.toContain("run_and_wait");
+    expect(await toolNames(persona("member", "preset:operator"))).toContain("run_and_wait");
+    // The control: the same session with no persona is preset `admin` and
+    // keeps the tool, so the line above is the header narrowing the surface
+    // rather than the surface being empty.
+    expect(await toolNames()).toContain("run_and_wait");
+  });
+
+  it("resolves the persona in the space the REQUEST names, not the one the persona names", async () => {
+    resetCatalog();
+    // Two spaces, one persona. `X-Space-Id` is what the MCP endpoint enters, so
+    // a persona whose space half points elsewhere previews nothing here — and
+    // the advertised surface must say so exactly as the REST route does.
+    const here = await space("Here", "closed");
+    const elsewhere = await space("Elsewhere", "closed");
+
+    const tools = (view: string) =>
+      request(`/api/mcp/o/${owner.orgId}`, {
+        view,
+        space: here.id,
+        headers: { Accept: "application/json, text/event-stream" },
+        body: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
+      });
+    const agents = (view: string) => request("/api/agents", { view, space: here.id });
+
+    // The persona names THIS space: the role is previewed, and both surfaces
+    // answer as that role.
+    const named = persona("member", "preset:operator", here.id);
+    const listed = await expectJson<{ result?: { tools?: Array<{ name: string }> } }>(
+      await tools(named),
+    );
+    expect((listed.result?.tools ?? []).map((tool) => tool.name)).toContain("run_and_wait");
+    expect((await agents(named)).status).toBe(200);
+
+    // The same role named in the OTHER space: a closed space admits this
+    // persona through no row, so both refuse. The persona's own space half is
+    // not what the endpoint reads.
+    const other = persona("member", "preset:operator", elsewhere.id);
+    expect((await tools(other)).status).toBe(403);
+    expect((await agents(other)).status).toBe(403);
   });
 
   // ─── 7. The marker is present exactly when the persona validated ──

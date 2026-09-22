@@ -27,7 +27,7 @@ import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import type { AgentManifest } from "../types/index.ts";
 import { requireActiveAgent, requireAgent } from "../middleware/guards.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
+import { requirePermission, rowAuthority } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { parseScopedName } from "@appstrate/core/naming";
@@ -363,9 +363,12 @@ export function createAgentsRouter() {
   // still refuses it); closing the gap means giving this DTO the activation
   // verdict too — a wire change to the Connexions tab. The kickoff remains the
   // authority; this is what the badge renders.
+  // `rowAuthority()`: reporting on `?version=draft` is the author's view, gated
+  // in the handler by the package's home space (`assertDraftSelectorAllowed`).
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/connection-readiness`,
     requirePermission("integrations", "read"),
+    rowAuthority(),
     requireAgent(),
     async (c) => {
       const agent = c.get("package");
@@ -676,10 +679,15 @@ export function createAgentsRouter() {
   // distinction the CLI's run-by-id flow needs to prompt for an activation
   // rather than suggest a typo — and it lives there, once, so the three doors
   // answer this agent the same way.
+  // `rowAuthority()`: past `agents:read` the handler refuses on the package
+  // itself — the org's copy restriction (`assertPackageCopyAllowed`), draft
+  // ownership (`assertDraftSelectorAllowed`) and a per-type read scope for
+  // every dependency the assembled bundle carries.
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/bundle`,
     rateLimit(30),
     requirePermission("agents", "read"),
+    rowAuthority(),
     requireAgent(),
     requireActiveAgent(),
     async (c) => {
