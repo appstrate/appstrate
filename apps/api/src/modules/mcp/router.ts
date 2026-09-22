@@ -164,11 +164,7 @@ export function buildServerInstructions(
   surface: McpSurface,
   contextInjected = false,
 ): string {
-  // The conditionals read the `surface` `buildMcpTools` declares its tools
-  // from, so no tool is taught that is not there — and a missing act is taught
-  // by ABSENCE: nothing here says "you cannot invoke" or "you cannot run
-  // agents". A caller who cannot launch a run is not told that configuring one
-  // leads to running it.
+  // A missing act is taught by ABSENCE (see `McpSurface`).
   const { invokes, runs, composes: inline, authors, importsPackages } = surface;
   // A sentence naming an operation renders only for a caller its route grants,
   // unless the gate it sits under already implies that grant.
@@ -195,8 +191,7 @@ export function buildServerInstructions(
   // Every inline-run span below follows `run_and_wait`'s own descriptor: a
   // caller who cannot compose is not told about a kind the route refuses.
   const runOps = inline ? "`runAgent`/`runInline`" : "`runAgent`";
-  // Discovery-only (`mcp:read` alone): the index and describe_operation are the
-  // whole surface, so the sentences that hand an operationId onwards stop there.
+  // Discovery-only (`mcp:read` alone): the operationId goes no further than describe.
   const verbs = invokes ? "discover and call" : "discover and inspect";
   const pickOperation = invokes
     ? "then call describe_operation for its input schema and invoke_operation to run it"
@@ -212,10 +207,8 @@ export function buildServerInstructions(
   const packageFiles = inline
     ? "MCP package authoring — call `get_runtime_capabilities` first, have one inline run create the manifest + executable files, package them from the package root with the available shell tools (for example `python3 -m zipfile -c package.afps manifest.json <entry-point> ...`), then publish that archive with `publish_file` and pass the returned `appfile://` URI to `validate_package_file`."
     : "MCP package files — to check an existing archive, pass its `appfile://` URI to `validate_package_file`.";
-  // Both fragments below hand the model an act it cannot perform without
-  // `invoke_operation`: the `query` envelope is that tool's argument shape, and
-  // `GET /api/integrations` is an operation to call. The preference ORDER they
-  // sit beside names no tool, so it is written for every caller.
+  // Both need `invoke_operation`; the integration preference order they sit
+  // beside names no tool, so every caller gets it.
   const heavyListBullet = invokes
     ? `- Heavy list responses — list operations paginate with \`query: { limit, offset }\`, and some${listsIntegrations ? " (e.g. `listIntegrations`)" : ""} also take a \`fields\` selector (comma-separated projection; describe_operation shows it when available). On heavy lists request only the fields you need${listsIntegrations ? ' — e.g. `fields: "id,active,block_user_connections"` on `listIntegrations` —' : ""} and read a single row's detail operation when you need its full \`manifest\`.
 `
@@ -223,11 +216,8 @@ export function buildServerInstructions(
   const integrationListing = listsIntegrations
     ? ` \`GET /api/integrations\` lists every integration with an \`active\` flag (activated for this space) and \`block_user_connections\`; use it to tell tiers 2 and 3 apart. Do not silently activate or connect an integration the caller did not ask for — surface that it would be needed and let them decide.`
     : "";
-  // Everything below is about getting a run off the ground, so it is absent
-  // together for a caller who cannot launch one: the two run sentences of the
-  // opening paragraph, the asynchronous-run pair, and the readiness/connect
-  // guidance. Of the integration-preference bullet only its first sentence —
-  // the preference order itself, which names no tool — stands on its own.
+  // Everything about launching a run — intro sentences, run bullets, readiness
+  // and connect guidance — is absent together for a caller who cannot launch.
   const runIntro = runs
     ? ` When you need a newly launched run's progress or result, prefer the run_and_wait tool directly; it already owns launch plus waiting and declares its own schema. For intentionally fire-and-forget runs, use ${runOps} through describe_operation and invoke_operation.`
     : "";
@@ -236,13 +226,9 @@ export function buildServerInstructions(
 - Shortcut — \`run_and_wait\` launches a run, exposes the created run to chat for live progress, then waits internally and returns \`{ id, packageId, status, done:true, result?, error? }\` once the run is terminal. Prefer it for launch-and-wait flows; use the fully discoverable ${runOps} when you deliberately want to launch without waiting. Do not call \`getRun\` after \`run_and_wait\` merely to wait again.${inlineShortcut}
 `
     : "";
-  // The item's own \`auth_key\` is always there to forward; the listing that
-  // can stand in for a missing one is offered only to a caller it grants.
   const authKeySource = listsIntegrations
     ? "<the error's auth_key, or a key from manifest.auths of the integration row from GET /api/integrations when the error carries none>"
     : "<the error's auth_key>";
-  // Without the connect grant an item with no \`connect_url\` is reported as
-  // it stands: the flow that would mint one is absent, not refused.
   const connectFlow = connects
     ? ` When it does NOT, you MUST start the connect flow yourself (do not just describe it): CALL \`invoke_operation\` with \`operation_id: "initiateIntegrationConnect"\`, \`path_params: { packageId: "<id>", authKey: "${authKeySource}" }\` and \`body: { scopes: <the error's required_scopes, verbatim>, connection_id: <the error's connection_id, when it carries one — the existing connection is then reconnected/upgraded in place instead of duplicated> }\`. Forwarding \`required_scopes\` is what makes the consent cover the scopes the run needs instead of re-granting the same insufficient set. This op is auth-type-agnostic — it works for every auth (oauth2, api_key, basic, mtls, custom), so you never inspect the auth type yourself — and its result is what carries the \`connect_url\`; without that call there is none, so never promise a connect link you did not just obtain this turn.`
     : "";

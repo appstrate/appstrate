@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The catalog's join from an operationId onto the permission its route
- * enforces: every documented operation resolves one, every mutating one is
- * readable (a permission, a row-authoritative marker, or an allowlist entry
- * that still stands for something), and an app leaving an operation unserved is
- * refused registration rather than publishing it as public. The surfaces with
- * no route table (core predicates, the chat capabilities, the web chip) are
- * pinned to the operations they stand for. Reads the catalog only — no DB.
+ * The catalog's join from each operation onto the guards of its route, and the
+ * hand-written predicates (core, chat capabilities, web chip) pinned to the
+ * operations they stand for. Reads the catalog only — no DB.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -35,12 +31,10 @@ import type { AppEnv } from "../../../../src/types/index.ts";
 
 await registerTestPlatformApp();
 
-/** The route-table key the catalog joins on, for a failure message. */
 function key(op: CatalogOperation): string {
   return `${op.method} ${op.pathTemplate}`;
 }
 
-/** The catalog operation `operationId`, or a failure naming it. */
 function op(operationId: string): CatalogOperation {
   const found = getCatalog().operations.get(operationId);
   if (!found) throw new Error(`operation \`${operationId}\` is absent from the catalog`);
@@ -49,19 +43,16 @@ function op(operationId: string): CatalogOperation {
 
 describe("getCatalog — the route join", () => {
   it("resolves a requirement for every operation, with no exception", () => {
-    // Building the catalog at all is the assertion: one unjoined operation and
-    // the call throws, naming it. The control is that it joined a real surface
-    // rather than an empty one.
+    // Registration already threw on any unjoined operation; this is the
+    // control that it joined a real surface, not an empty one.
     expect(getCatalog().operations.size).toBeGreaterThan(100);
   });
 
   it("refuses to register an app when a documented operation has no mounted route", () => {
-    // The refusal is the whole point of the join: an operation the route table
-    // cannot find would otherwise be published as needing nothing.
+    // Otherwise an unserved operation would be published as needing nothing.
     const bare = new Hono<AppEnv>();
     bare.get("/api/health", (c) => c.json({ ok: true }));
     expect(() => registerPlatformApp(bare)).toThrow(/no mounted route serves/);
-    // Naming the unserved operations is what makes the failure actionable.
     expect(() => registerPlatformApp(bare)).toThrow("createSpace (POST /api/spaces)");
     // A refused registration leaves the previous one answering.
     expect(getCatalog().operations.size).toBeGreaterThan(100);
@@ -82,8 +73,6 @@ describe("getCatalog — the route join", () => {
 
 describe("the lookup the catalog joins on", () => {
   it("answers undefined for a template no route serves", () => {
-    // What makes the join above a failure rather than a silent grant: the
-    // lookup reports "nothing serves this", and registration refuses the app.
     const requirementFor = deriveRouteRequirements(getTestApp().routes);
     expect(requirementFor("POST", "/api/nothing-mounts-this/{id}")).toBeUndefined();
   });
@@ -99,23 +88,17 @@ describe("the lookup the catalog joins on", () => {
 });
 
 /**
- * The permission the MCP surface shows for an operation must be the permission
- * its route enforces — for a read as much as a write: an unguarded GET is
- * advertised to every caller. An operation therefore names a permission, says
- * the handler decides (`rowAuthority()`), or appears in the allowlist below with
- * the authority that stands in for a mounted guard. Both directions are gates:
- * an operation that fits none of the three fails, and so does an allowlist
- * entry whose reason expired — nothing else would ever delete it.
- */
-
-/**
- * `/api/` operations that mount no permission guard, each with the authority
- * that stands in for one. `*` covers the subtree, anything else
- * matches exactly. An entry whose reason stops being true is deleted.
+ * `/api/` operations with no permission guard and no `rowAuthority()` marker —
+ * an unguarded route, GET included, is advertised to every caller — each with
+ * the authority that stands in for a guard. A trailing `*` is a prefix match,
+ * anything else exact. An entry that stops matching fails the suite.
  */
 const NO_MOUNTED_GUARD: ReadonlyArray<{ path: string; why: string }> = [
-  // ── The request's own token is the authority — no principal to check.
-  { path: "/api/auth/*", why: "runs before a principal exists; the token IS the credential" },
+  // ── The request's own credential is the authority — no RBAC grant to check.
+  {
+    path: "/api/auth/*",
+    why: "each call authenticates by what it carries (password, grant, bootstrap or refresh token); cookie-session calls (get-session, CLI sessions) act on the caller's own sessions only",
+  },
   {
     path: "/api/integrations/connect/*",
     why: "hosted connect portal — the signed start token, then the page cookie and its CSRF nonce",
@@ -137,16 +120,14 @@ const NO_MOUNTED_GUARD: ReadonlyArray<{ path: string; why: string }> = [
   { path: "/api/runs/{runId}/workspace", why: "runner input — HMAC `verifyRunSignature`" },
   { path: "/api/oauth/logout", why: "ends the session its own cookie names" },
   { path: "/api/uploads/_content", why: "HMAC upload sink — skips the auth pipeline outright" },
-  // Present only when `@appstrate/module-ee` is loaded — the preload discovers
-  // `packages/module-*` on Postgres tiers, never on tier 0 — so a run without
-  // EE never judges this entry at all.
+  // Only with `@appstrate/module-ee` loaded (Postgres tiers): see PRESENT_ONLY_WITH_EE.
   { path: "/api/billing/webhooks", why: "Stripe receiver, verified by `stripe-signature`" },
 
   // ── Self-scoped: the caller's own rows, with no RBAC resource to name.
   { path: "/api/me/*", why: "filtered by the caller's own identity, never by a grant" },
+  // Two exact entries: `/api/profiles/batch` carries `members:read`.
   { path: "/api/profile", why: "the person's own account (`isUserPrincipal`)" },
   { path: "/api/profile/password", why: "the person's own account (`isUserPrincipal`)" },
-  // Two exact entries: `/api/profiles/batch` carries `members:read`.
   { path: "/api/notifications*", why: "filtered by the caller's actor; another's is a 404" },
   { path: "/api/uploads", why: "mints an upload token into the caller's own space, nothing else" },
   { path: "/api/welcome/setup", why: "onboarding, on the person's own credential only" },
@@ -171,18 +152,13 @@ const NO_MOUNTED_GUARD: ReadonlyArray<{ path: string; why: string }> = [
 /** Entries a deployment without `@appstrate/module-ee` cannot match. */
 const PRESENT_ONLY_WITH_EE: ReadonlySet<string> = new Set(["/api/billing/webhooks"]);
 
-/** True when `pathTemplate` is covered by `list`. */
 function covers(list: ReadonlyArray<{ path: string }>, pathTemplate: string): boolean {
   return list.some(({ path }) =>
     path.endsWith("*") ? pathTemplate.startsWith(path.slice(0, -1)) : pathTemplate === path,
   );
 }
 
-/**
- * `/api/` operations whose route names no permission — in the caller's space or
- * in the one its path re-scopes to — and does not say the handler decides.
- * Exactly what an allowlist entry has to stand for.
- */
+/** `/api/` operations naming no permission in either space and not row-decided. */
 function unguardedOperations(): CatalogOperation[] {
   return [...getCatalog().operations.values()].filter(
     (operation) =>
@@ -213,9 +189,7 @@ describe("every /api/ operation has a readable requirement", () => {
   });
 
   it("carries no allowlist entry that has stopped standing for anything", () => {
-    // The other direction: a route that gained a guard (or a `rowAuthority()`
-    // marker) leaves its entry matching nothing, and an entry matching nothing
-    // is a permanent excuse for whatever is mounted there next.
+    // An entry matching nothing is a standing excuse for whatever mounts there next.
     const unguarded = unguardedOperations();
     const stale = NO_MOUNTED_GUARD.filter(
       (entry) =>
@@ -228,12 +202,8 @@ describe("every /api/ operation has a readable requirement", () => {
 
 describe("requirement anchors", () => {
   it("reads every row-authoritative route as conditional", () => {
-    // Each of these refuses from a row its handler loads — a file's ACL, the
-    // package's home space, the webhook's own space, the placement, the
-    // registry agent's placement and activation, the caller's org role on the
-    // organization library — behind no guard that could
-    // state the string. Read as unconditional they would show in the MCP
-    // surface as granted to anyone who reached the transport.
+    // Each refuses from a row its handler loads (file ACL, home space, placement,
+    // org role…); read as unconditional it would be granted to every caller.
     const unconditional = [
       "deleteFile",
       "keepFile",
@@ -251,8 +221,7 @@ describe("requirement anchors", () => {
     ].filter((operationId) => !op(operationId).requirement.conditional);
     expect(unconditional).toEqual([]);
 
-    // The control: a route whose guard IS the whole answer stays unconditional,
-    // so the assertion above is the markers and not a flag stuck on.
+    // The control: a guard-only route stays unconditional — no flag stuck on.
     expect(op("createSpace").requirement).toMatchObject({
       requirements: ["spaces:write"],
       conditional: false,
@@ -260,17 +229,14 @@ describe("requirement anchors", () => {
   });
 
   it("reads `listSpaceMembers` as a requirement of the space the PATH names", () => {
-    // `requireSpaceFromParam` re-applies the caller's permissions in that space
-    // before the guard runs, so `space-members:read` is asked THERE. Reported
-    // as a caller-space requirement it would hide the operation from everyone
-    // whose current space is not the one they are asking about — which is the
-    // normal case for an org-wide client.
+    // `requireSpaceFromParam` re-scopes before the guard, so it is asked THERE;
+    // as a caller-space requirement it would hide the operation from an org-wide
+    // client calling from any other space.
     const requirement = op("listSpaceMembers").requirement;
     expect(requirement.requirements).toEqual([]);
     expect(requirement.targetSpaceRequirements).toContain("space-members:read");
 
-    // The control: the same guard mounted WITHOUT a re-scope in front of it is
-    // a caller-space requirement, so the split above is the marker's doing.
+    // The control: without a re-scope in front, a guard stays caller-space.
     expect(op("listApiKeys").requirement).toMatchObject({
       requirements: ["api-keys:read"],
       targetSpaceRequirements: [],
@@ -278,8 +244,7 @@ describe("requirement anchors", () => {
   });
 
   it("reads the OIDC per-space auth configuration as a requirement of the path's space", () => {
-    // The OIDC router enters the space `:id` names before `space-settings:write`
-    // runs, so an admin of that space is granted it whatever space they call from.
+    // The OIDC router enters the `:id` space before `space-settings:write` runs.
     const misread = [
       "getSpaceSocialProvider",
       "getSpaceSmtpConfig",
@@ -299,7 +264,6 @@ describe("requirement anchors", () => {
 const PATH_SPACE = /^\/api\/spaces\/\{(id|spaceId)\}\//;
 
 describe("a route addressing a space by path enforces space permissions there", () => {
-  /** Catalog operations whose path names the space they act in. */
   function pathSpaceOperations(): CatalogOperation[] {
     return [...getCatalog().operations.values()].filter((operation) =>
       PATH_SPACE.test(operation.pathTemplate),
@@ -307,10 +271,7 @@ describe("a route addressing a space by path enforces space permissions there", 
   }
 
   it("reports no space-level permission as a caller-space requirement", () => {
-    // A space-level guard on such a route is only meaningful in the path's
-    // space; read as the caller's it hides the operation from an admin of the
-    // target while advertising it to one of the caller's space. Its presence
-    // here means the middleware entering that space is not `markSpaceRescope`d.
+    // A hit means the middleware entering the path's space is not `markSpaceRescope`d.
     const spaceLevel = knownSpaceLevelPermissions();
     const offenders = pathSpaceOperations().flatMap((operation) =>
       operation.requirement.requirements
@@ -326,11 +287,8 @@ describe("a route addressing a space by path enforces space permissions there", 
   });
 });
 
-/**
- * Surfaces with no route table decide from hand-written predicates; each must
- * answer exactly what the guard of the operation it stands for answers, over
- * every role a member can hold and the edge sets the presets never produce.
- */
+/** Each predicate must answer what its operation's guards answer, over every
+ *  role a member can hold plus edge sets the presets never produce. */
 describe("hand-written predicates agree with the guards they stand for", () => {
   /** Org role ∪ space preset: the effective sets a session actually carries. */
   const roleSets = ORG_ROLES.flatMap((role) =>

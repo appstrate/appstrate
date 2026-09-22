@@ -17,8 +17,7 @@
 
 import { findTargetHandler } from "hono/utils/handler";
 
-/** Stamp `marker` on `handler` and return it, for a factory to `return` directly.
- *  A `value` other than `true` is read with {@link readHandlerMarker}. */
+/** Stamp `marker` on `handler` and return it, for a factory to `return` directly. */
 export function markHandler<T extends object>(
   handler: T,
   marker: symbol,
@@ -44,11 +43,7 @@ export function hasHandlerMarker(handler: unknown, marker: symbol): boolean {
   return readHandlerMarker(handler, marker) === true;
 }
 
-/**
- * The value stamped under `marker`, or `undefined` when absent — e.g. the
- * requirement string a permission guard tests. Read through the same
- * unwrapping as {@link hasHandlerMarker}.
- */
+/** The value stamped under `marker` (e.g. a guard's requirement string), or `undefined`. */
 export function readHandlerMarker(handler: unknown, marker: symbol): unknown {
   if (typeof handler !== "function") return undefined;
   const target = findTargetHandler(handler as (...args: never[]) => unknown);

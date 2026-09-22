@@ -3,15 +3,10 @@
 /**
  * The fully-wired root Hono app and the documented operations it serves.
  *
- * In-process self-dispatch: a module issues an authenticated request back
- * through the full platform middleware chain via `app.fetch(request)` — no
- * socket, no second auth implementation — so callers reuse the exact
- * authorization surface of the REST API.
- *
- * Registration joins every OpenAPI operation onto what the guards mounted on
- * its route require (`lib/route-requirements.ts`) and refuses an operation no
- * route serves, so a spec/route mismatch fails the boot rather than the first
- * request that reads the join. Generic infra — not tied to any single module.
+ * In-process self-dispatch sends a request back through the full platform
+ * middleware chain via `app.fetch(request)` — no socket, no second auth
+ * implementation — so callers reuse the exact authorization surface of the
+ * REST API.
  */
 
 import type { Hono } from "hono";
@@ -33,14 +28,11 @@ interface PlatformOperation {
   /** Upper-case HTTP method. */
   readonly method: string;
   readonly pathTemplate: string;
-  /** The raw OpenAPI operation node. */
   readonly node: Record<string, unknown>;
-  /** What the guards mounted on the serving route ask of the caller. */
   readonly requirement: RouteRequirement;
 }
 
-/** One registration's view. A fresh object per registration, so anything
- *  derived from it can be cached on its identity. */
+/** Fresh per registration, so a derivation can be cached on its identity. */
 export interface PlatformOperations {
   readonly spec: OpenApiSpec;
   readonly operations: readonly PlatformOperation[];
@@ -49,9 +41,9 @@ export interface PlatformOperations {
 let registered: { app: Hono<AppEnv>; operations: PlatformOperations } | null = null;
 
 /**
- * Register the root app once every route is mounted — the join reads the
- * route table, and the spec reads the loaded modules. Throws, leaving any
- * previous registration in place, when a documented operation has no route.
+ * Call once every module is loaded and every route mounted: joins each OpenAPI
+ * operation onto its route's guards. Throws — keeping any previous registration
+ * — when a documented operation has no route, so the mismatch fails the boot.
  */
 export function registerPlatformApp(app: Hono<AppEnv>): void {
   const spec = buildOpenApiSpec(
@@ -94,8 +86,7 @@ export function registerPlatformApp(app: Hono<AppEnv>): void {
   registered = { app, operations: Object.freeze({ spec, operations: Object.freeze(operations) }) };
 }
 
-/** Throws before `registerPlatformApp()` — a programming error, since every
- *  reader runs at request time; `use` names what the caller wanted. */
+/** Throws before `registerPlatformApp()` — a programming error. */
 function getRegistered(use: string): { app: Hono<AppEnv>; operations: PlatformOperations } {
   if (!registered) {
     throw new Error(`Platform app not registered — registerPlatformApp() must run before ${use}`);
@@ -112,7 +103,6 @@ export function dispatchInProcess(request: Request): Promise<Response> {
   return Promise.resolve(getRegistered("in-process dispatch").app.fetch(request));
 }
 
-/** Every documented operation of the registered app, with its requirement. */
 export function getPlatformOperations(): PlatformOperations {
   return getRegistered("reading the platform operations").operations;
 }

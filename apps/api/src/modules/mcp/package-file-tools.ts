@@ -31,9 +31,8 @@ interface PackageFileToolContext {
    */
   authorizeBundle: NonNullable<Parameters<typeof preflightBundleImport>[2]>;
   /**
-   * Required. Decides whether a re-imported root homed in ANOTHER space is
-   * placed here WITH its offer, exactly as `POST /api/packages/import-bundle`
-   * decides it: no authority, no placement, and `root_active: false`.
+   * Whether a root re-imported from ANOTHER home space is placed here with its
+   * offer, as `POST /api/packages/import-bundle` decides; `false` → `root_active: false`.
    */
   mayShareRoot: (packageId: string) => Promise<boolean>;
 }
@@ -287,8 +286,7 @@ function buildRuntimeCapabilitiesTool(): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
-/** `imports` (`McpSurface.importsPackages`) is the import tool's only gate:
- *  its handler calls the service directly, no route re-checks it. */
+/** `imports` is `McpSurface.importsPackages` — the import tool's only gate. */
 export function buildPackageFileTools(
   ctx: PackageFileToolContext,
   imports: boolean,

@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Operation catalog — the single source of MCP tool material, derived from the
- * operations the platform app registered (`lib/platform-app.ts`): the live
- * OpenAPI spec (which also backs `GET /api/openapi.json`) joined onto what the
- * guards mounted on each route ask of the caller. The index and the tool
- * surface thus derive from the table that enforces them — never a second list.
+ * Operation catalog — the MCP tool material: the operations `registerPlatformApp`
+ * joined onto their routes' guards, so the index and tools read the enforcing table.
  */
 
 import { getPlatformOperations, type PlatformOperations } from "../../lib/platform-app.ts";
@@ -33,7 +30,6 @@ export interface CatalogOperation {
   pathParams: string[];
   /** Names of OpenAPI `in: header` parameters this operation declares. */
   headerParams: string[];
-  /** What the guards mounted on this operation's route ask of the caller. */
   requirement: RouteRequirement;
   /** Raw OpenAPI operation node (for `describe_operation`). */
   operation: OperationNode;
@@ -59,10 +55,10 @@ function extractPathParams(pathTemplate: string): string[] {
 }
 
 /**
- * Names of `in: header` parameters declared by an operation, so
- * invoke_operation can route a model-supplied value to a real request header —
- * the Credential Proxy family keys off `X-Integration-Id`. Auth-context
- * headers are never sourced from here.
+ * Names of `in: header` parameters declared by an operation. Lets
+ * invoke_operation route a value the model supplied (in any bag) to a real
+ * request header — required by e.g. the Credential Proxy family, which keys
+ * off `X-Integration-Id`. Auth-context headers are never sourced from here.
  */
 function extractHeaderParams(node: OperationNode): string[] {
   const params = node.parameters;
@@ -78,10 +74,9 @@ function extractHeaderParams(node: OperationNode): string[] {
 }
 
 /**
- * Paths kept out of the catalog: the MCP transport and its RFC 9728 discovery
- * well-known, which as "tools" would expose the JSON-RPC envelope and invite
- * recursive self-invocation, plus the catalog's own source and human viewer,
- * which `describe_operation` already serves piecewise.
+ * Kept out of the catalog: the MCP transport and its RFC 9728 well-known (no
+ * recursive self-invocation), and the spec document and its viewer, which
+ * `describe_operation` already serves piecewise.
  */
 function isExcludedPath(pathTemplate: string): boolean {
   return (
@@ -141,15 +136,9 @@ export function operationIdGranted(operationId: string, permissions: ReadonlySet
 }
 
 /**
- * A compact index of the operations this caller may invoke, grouped by tag —
- * one comma-separated line of operationIds per tag, so a client picks an id
- * straight from it instead of searching. Method/path are omitted;
- * describe_operation and search_operations' `best_match` carry them.
- *
- * Filtered PER OPERATION ({@link operationGranted}): context reduction, never
- * a security boundary — invoke_operation dispatches through the real route,
- * which re-enforces RBAC on every call, and a row-conditional operation stays
- * listed because only the loaded row can refuse it.
+ * The operations this caller may invoke, one line of operationIds per tag. The
+ * filter is context reduction, not a security boundary: the dispatched route
+ * re-enforces RBAC on every call.
  */
 export function buildOperationIndex(permissions: ReadonlySet<string>): string {
   const { operations } = getCatalog();
@@ -157,8 +146,7 @@ export function buildOperationIndex(permissions: ReadonlySet<string>): string {
   for (const op of operations.values()) {
     if (!operationGranted(op, permissions)) continue;
     const tag = op.tags[0] ?? "Other";
-    // operationId ONLY: the per-op summary costs several KB across the surface
-    // and describe_operation stays the source of truth for what each one does.
+    // operationId only: summaries would cost several KB on every uncached turn.
     (byTag.get(tag) ?? byTag.set(tag, []).get(tag)!).push(op.operationId);
   }
 
@@ -172,8 +160,7 @@ export function buildOperationIndex(permissions: ReadonlySet<string>): string {
 
 const SCHEMA_REF_PREFIX = "#/components/schemas/";
 
-/** Every component schema reachable from a node via `$ref`, as `{ name: schema }`
- *  — `describe_operation` inlines them so the model needs no second lookup. */
+/** Every component schema reachable from `root` via `$ref`, for describe_operation to inline. */
 export function collectReferencedSchemas(
   root: unknown,
   componentSchemas: Record<string, unknown>,

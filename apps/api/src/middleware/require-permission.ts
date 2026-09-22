@@ -30,9 +30,8 @@ import { forbidden } from "../lib/errors.ts";
 import type { Resource, Action } from "../lib/permissions.ts";
 import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
 
-/** Stamped by every route-level permission guard, core's `makePermissionGuard`
- *  included. Read by the agent-lookup ordering conformance test, which proves a
- *  guard is mounted before any agent lookup. */
+/** Stamped by every route-level permission guard (core's `makePermissionGuard`
+ *  stamps it too). Read by the agent-lookup ordering conformance test. */
 export const PERMISSION_GUARD = Symbol.for("appstrate.permissionGuard");
 
 /** True when `handler` rejects unauthorized callers before the chain continues.
@@ -49,26 +48,22 @@ export function markSpaceRescope<T extends object>(handler: T): T {
   return markHandler(handler, SPACE_RESCOPE);
 }
 
-/** True when `handler` re-scopes `permissions` onto the space its path names. */
 export function isSpaceRescope(handler: unknown): boolean {
   return hasHandlerMarker(handler, SPACE_RESCOPE);
 }
 
 const ROW_AUTHORITY = Symbol.for("appstrate.rowAuthority");
 
-/** Mark a middleware whose verdict comes from the row it loads, so no static
- *  permission describes the routes it guards. */
+/** Mark a middleware whose verdict comes from the row it loads, not a static permission. */
 export function markRowAuthority<T extends object>(handler: T): T {
   return markHandler(handler, ROW_AUTHORITY);
 }
 
-/** A passthrough declaring that the handler after it decides authority on the
- *  row it loads. */
+/** A passthrough declaring that the handler after it decides on the row it loads. */
 export function rowAuthority(): MiddlewareHandler<AppEnv> {
   return markRowAuthority(async (_c: Context<AppEnv>, next: Next) => next());
 }
 
-/** True when `handler` declares the row, not a permission, as the authority. */
 export function isRowAuthority(handler: unknown): boolean {
   return hasHandlerMarker(handler, ROW_AUTHORITY);
 }
@@ -105,12 +100,8 @@ export function assertPermission<R extends Resource>(
  * what the caller would have needed, not an arbitrary pick from the list.
  * Handlers that resolve the disjunction only once the row is loaded invoke it
  * with a no-op `next`, the same way route-level guards are reused inline.
- *
- * The joined form is also stamped as the guard's requirement, so a route-table
- * reader sees the same string the audit records (`lib/route-requirements.ts`
- * splits it back). An empty list is refused at construction: the guard would
- * deny everyone while stamping `""`, which that reader takes for no
- * requirement, i.e. a grant.
+ * The joined form is also the requirement stamped for `lib/route-requirements.ts`.
+ * An empty list throws: it would deny everyone yet stamp `""`, read as a grant.
  */
 export function requireAnyPermission(permissions: readonly string[]) {
   if (permissions.length === 0) {

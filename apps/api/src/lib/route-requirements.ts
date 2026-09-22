@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What a route requires, read off Hono's route table — the same mounts that
- * decide it (`middleware/handler-marker.ts`). Matching follows Hono's, segment
- * by segment, since several operations have no route of their own: a prefix
- * mount (`*`) with a concrete method SERVES its subtree, bare prefix included;
- * a wildcard `ALL` mount only DECORATES, contributing its guard without making
- * anything exist, while an exact-path one serves every method; a root `/*`
- * entry with a concrete method is the SPA fallback and is discarded outright,
- * since reading it would answer every GET template ever spelled. A guard
- * mounted after a space re-scope (`markSpaceRescope`) is enforced in the space
- * the PATH names, so it is reported separately and never filters.
+ * What a route requires, read off the handler markers of Hono's route table
+ * and matched segment by segment as Hono matches, since several operations
+ * have no route of their own. A prefix mount (`*`) with a concrete method
+ * SERVES its subtree, bare prefix included; a wildcard `ALL` mount only
+ * DECORATES (adds its guard, serves nothing) while an exact-path `ALL` serves
+ * every method. Guards mounted after a space re-scope (`markSpaceRescope`) are
+ * enforced in the space the PATH names, so they are reported apart and never filter.
  */
 
 import { PERMISSION_REQUIREMENT_MARKER } from "@appstrate/core/permissions";
@@ -40,7 +37,6 @@ export type RouteRequirementLookup = (
   pathTemplate: string,
 ) => RouteRequirement | undefined;
 
-/** One segment of a mounted path, in Hono's own grammar. */
 type Token =
   | { readonly kind: "literal"; readonly value: string }
   | { readonly kind: "param"; readonly accepts: RegExp | null }
@@ -55,11 +51,9 @@ interface TableEntry {
   readonly method: string;
   /** Without the trailing `*` of a prefix mount. */
   readonly tokens: readonly Token[];
-  /** Ended in `*`: covers the subtree, bare prefix included. */
   readonly prefix: boolean;
   readonly requirement: string | null;
   readonly rowDecides: boolean;
-  /** Everything matched after this entry is enforced in the space the path names. */
   readonly rescope: boolean;
 }
 
@@ -82,8 +76,8 @@ export function deriveRouteRequirements(
   const entries: TableEntry[] = [];
   for (const route of routes) {
     const method = route.method.toUpperCase();
-    // The SPA fallback only. An `ALL /*` mount decorates without serving, so
-    // dropping it would silently discard a guard covering the whole app.
+    // Skip the SPA fallback, which would serve every GET template. `ALL /*`
+    // stays: it only decorates, and dropping it would lose an app-wide guard.
     if (route.path === "/*" && method !== "ALL") continue;
     const tokens = tokenize(route.path);
     const prefix = tokens.at(-1)?.kind === "wildcard";
@@ -156,8 +150,7 @@ function tokenCovers(token: Token, segment: TemplateSegment): boolean {
 }
 
 /** Every requirement holds, a `|` entry on any alternative. Target-space and
- *  row-conditional requirements are granted here — only the space or the row
- *  the call names could still refuse. */
+ *  row-conditional routes count as granted: only that space or row can refuse. */
 export function isGranted(
   requirement: RouteRequirement,
   permissions: ReadonlySet<string>,
