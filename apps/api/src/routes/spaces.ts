@@ -44,7 +44,7 @@ import {
 import {
   callerOrgRole,
   callerPersonalOwnerId,
-  callerSpaceMember,
+  callerSpaceAccess,
   effectiveInSpace,
   personaFor,
   personaMemberships,
@@ -244,7 +244,6 @@ function requireSpaceFromParam(param: "id" | "spaceId") {
     const space = await validateSpaceInOrg(spaceId, c.get("orgId"));
     if (!space) throw notFound(`Space '${spaceId}' not found in this organization`);
     await applySpacePermissions(c, space);
-    c.set("space", space);
     return next();
   };
 }
@@ -454,15 +453,12 @@ export function createSpacesRouter() {
     try {
       const space = await getSpace(orgId, spaceId);
       const orgRole = callerOrgRole(c);
-      // One PK lookup, not the whole membership set: a single-space read has
-      // exactly one row to find.
-      const role = resolveSpaceRole(
-        orgRole,
-        space,
-        await callerSpaceMember(c, orgId, space.id),
-        callerPersonalOwnerId(c),
-      );
-      if (!isSpaceVisibleTo(orgRole, space, role)) {
+      // Judged on the snapshot (RBAC spec §4.4), not on the full row read for
+      // the response: one PK lookup joined to the caller's one row.
+      const access = await callerSpaceAccess(c, space);
+      if (!access) throw notFound(`Space '${spaceId}' not found in this organization`);
+      const role = resolveSpaceRole(orgRole, access.space, access.member, callerPersonalOwnerId(c));
+      if (!isSpaceVisibleTo(orgRole, access.space, role)) {
         throw notFound(`Space '${spaceId}' not found in this organization`);
       }
       return c.json(spaceWireForCaller(c, space, role));
@@ -506,7 +502,12 @@ export function createSpacesRouter() {
 
       try {
         const { default_role, ...rest } = data;
-        const space = await updateSpace(orgId, spaceId, { ...rest, defaultRole: default_role });
+        const space = await updateSpace(
+          orgId,
+          spaceId,
+          { ...rest, defaultRole: default_role },
+          current,
+        );
         await recordAuditFromContext(c, {
           action: "space.updated",
           resourceType: "space",

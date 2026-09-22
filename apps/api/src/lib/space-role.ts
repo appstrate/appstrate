@@ -9,7 +9,7 @@
  * @see docs/architecture/RBAC_PERMISSIONS_SPEC.md §4
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { spaceMembers, spaceRoles, spaces } from "@appstrate/db/schema";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
@@ -46,6 +46,15 @@ export interface SpaceMemberRow {
  * the principal is not one: an API key (pinned to a space, and its creator's
  * private drafts are not its business) or an end-user. Every caller passes it
  * explicitly — a default would silently hand a key its creator's personal space.
+ *
+ * `space` and `memberRow` MUST come from ONE statement (RBAC spec §4.4). Read
+ * apart, they can pair a space row from before an admin's change with a
+ * membership row from after the next one, and that pair can grant what no
+ * committed state ever did: `open`+`admin` default read before the space was
+ * closed, no row read after the viewer row was deleted → `admin`. `orgRole` is
+ * pinned once per request at admission, like every other org-level grant the
+ * request carries; only a caller with no admission reads it in that same
+ * statement (the scheduler, via `loadSpaceAccess`).
  */
 export function resolveSpaceRole(
   orgRole: OrgRole,
@@ -99,6 +108,30 @@ export function spacePermissions(ref: SpaceRoleRef | null): Set<Permission> {
 }
 
 /**
+ * The columns every explicit-membership read projects, custom role joined in.
+ * Readers that also need the SPACE join them onto `spaces` with
+ * {@link membershipOn} and {@link customRoleOn} rather than reading the two
+ * tables in two statements (RBAC spec §4.4).
+ */
+export const MEMBERSHIP_COLUMNS = {
+  presetRole: spaceMembers.presetRole,
+  customRoleId: spaceMembers.customRoleId,
+  customKey: spaceRoles.key,
+  customName: spaceRoles.name,
+  customPermissions: spaceRoles.permissions,
+} as const;
+
+/** `spaces LEFT JOIN space_members ON` this — `null` joins nothing (a principal with no rows). */
+export function membershipOn(userId: string | null) {
+  return and(
+    eq(spaceMembers.spaceId, spaces.id),
+    userId === null ? sql`false` : eq(spaceMembers.userId, userId),
+  );
+}
+
+export const customRoleOn = eq(spaceRoles.id, spaceMembers.customRoleId);
+
+/**
  * One indexed lookup on the composite PK, custom role joined in the same query.
  *
  * `executor` takes an open transaction handle so a caller that must read the
@@ -110,15 +143,9 @@ export async function loadSpaceMember(
   executor: Pick<typeof db, "select"> = db,
 ): Promise<SpaceMemberRow | null> {
   const [row] = await executor
-    .select({
-      presetRole: spaceMembers.presetRole,
-      customRoleId: spaceMembers.customRoleId,
-      customKey: spaceRoles.key,
-      customName: spaceRoles.name,
-      customPermissions: spaceRoles.permissions,
-    })
+    .select(MEMBERSHIP_COLUMNS)
     .from(spaceMembers)
-    .leftJoin(spaceRoles, eq(spaceRoles.id, spaceMembers.customRoleId))
+    .leftJoin(spaceRoles, customRoleOn)
     .where(and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, userId)))
     .limit(1);
 
@@ -148,28 +175,12 @@ export function toRef(row: MembershipColumns): SpaceRoleRef {
   };
 }
 
-/** One query for a whole listing — `GET /api/spaces` must not look up per space. */
-export async function loadSpaceMemberships(
-  orgId: string,
-  userId: string,
-): Promise<Map<string, SpaceMemberRow>> {
-  const rows = await db
-    .select({
-      spaceId: spaceMembers.spaceId,
-      presetRole: spaceMembers.presetRole,
-      customRoleId: spaceMembers.customRoleId,
-      customKey: spaceRoles.key,
-      customName: spaceRoles.name,
-      customPermissions: spaceRoles.permissions,
-    })
-    .from(spaceMembers)
-    .innerJoin(spaces, eq(spaces.id, spaceMembers.spaceId))
-    .leftJoin(spaceRoles, eq(spaceRoles.id, spaceMembers.customRoleId))
-    .where(and(eq(spaces.orgId, orgId), eq(spaceMembers.userId, userId)));
-
-  const out = new Map<string, SpaceMemberRow>();
-  for (const row of rows) out.set(row.spaceId, { ref: toRef(row) });
-  return out;
+/**
+ * The explicit row a `LEFT JOIN` found, or `null`: the `num_nonnulls` CHECK
+ * makes exactly one of the two role columns non-null on a real row.
+ */
+export function memberFromJoin(row: MembershipColumns): SpaceMemberRow | null {
+  return row.presetRole !== null || row.customRoleId !== null ? { ref: toRef(row) } : null;
 }
 
 export function toSpaceRoleWire(

@@ -21273,7 +21273,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description The space is a personal space and the body changes more than its name (`personal_space_immutable`). */
+            /** @description The space is a personal space and the body changes more than its name (`personal_space_immutable`), or its `visibility` or `default_role` changed between the moment this request was authorized and the write (`space_access_changed`) — reload and retry. */
             409: {
                 headers: {
                     [name: string]: unknown;

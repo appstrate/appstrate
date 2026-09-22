@@ -9,8 +9,16 @@
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { spaces } from "@appstrate/db/schema";
+import { organizationMembers, spaceMembers, spaceRoles, spaces } from "@appstrate/db/schema";
+import type { OrgRole } from "@appstrate/core/permissions";
 import { assertSpaceId } from "./ids.ts";
+import {
+  customRoleOn,
+  MEMBERSHIP_COLUMNS,
+  memberFromJoin,
+  membershipOn,
+  type SpaceMemberRow,
+} from "./space-role.ts";
 
 /** Space row exposed as `c.get("space")`. Keep the field set tight so services can destructure it. */
 export interface SpaceContextRow {
@@ -65,4 +73,42 @@ export async function defaultSpaceForOrg(orgId: string): Promise<SpaceContextRow
     .where(and(eq(spaces.orgId, orgId), eq(spaces.isDefault, true)))
     .limit(1);
   return space ?? null;
+}
+
+/** What `resolveSpaceRole` needs about one principal in one space, read as one snapshot. */
+export interface SpaceAccessSnapshot {
+  space: SpaceContextRow;
+  member: SpaceMemberRow | null;
+  /** `null` when `userId` is not a member of the organization. */
+  orgRole: OrgRole | null;
+}
+
+/**
+ * The space row, `userId`'s explicit row in it and their org role, in ONE
+ * statement — the only way `resolveSpaceRole` may be fed (RBAC spec §4.4).
+ * `null` when the space is not in `orgId`. Shape-guards the id like
+ * {@link validateSpaceInOrg}.
+ */
+export async function loadSpaceAccess(
+  spaceId: string,
+  orgId: string,
+  userId: string,
+): Promise<SpaceAccessSnapshot | null> {
+  assertSpaceId(spaceId);
+  const [row] = await db
+    .select({
+      space: SPACE_CONTEXT_COLUMNS,
+      ...MEMBERSHIP_COLUMNS,
+      orgRole: organizationMembers.role,
+    })
+    .from(spaces)
+    .leftJoin(spaceMembers, membershipOn(userId))
+    .leftJoin(spaceRoles, customRoleOn)
+    .leftJoin(
+      organizationMembers,
+      and(eq(organizationMembers.orgId, spaces.orgId), eq(organizationMembers.userId, userId)),
+    )
+    .where(and(eq(spaces.id, spaceId), eq(spaces.orgId, orgId)))
+    .limit(1);
+  return row ? { space: row.space, member: memberFromJoin(row), orgRole: row.orgRole } : null;
 }

@@ -259,7 +259,7 @@ export const spacesPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "The space is a personal space and the body changes more than its name (`personal_space_immutable`).",
+            "The space is a personal space and the body changes more than its name (`personal_space_immutable`), or its `visibility` or `default_role` changed between the moment this request was authorized and the write (`space_access_changed`) — reload and retry.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
