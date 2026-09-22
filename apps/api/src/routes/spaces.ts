@@ -370,7 +370,8 @@ function toSweepWire(
 export function createSpacesRouter() {
   const router = new Hono<AppEnv>();
 
-  router.use("/:id", pinnedSpaceScopeGuard);
+  // `/:spaceId/*` also matches the bare `/:spaceId`. An exact twin would run the
+  // guard twice and, as an `ALL` exact mount, serve every method at `/:id`.
   router.use("/:spaceId/*", pinnedSpaceScopeGuard);
 
   router.get(
@@ -617,8 +618,8 @@ export function createSpacesRouter() {
   // ─── Space members (RBAC spec §6.4) ────────────────────────────────
 
   // Every member route resolves the PATH space first, so `space-members:*`
-  // (preset `admin`) is read from the caller's set in THAT space.
-  router.use("/:id/members", requireSpaceFromParam("id"));
+  // (preset `admin`) is read from the caller's set in THAT space. Hono runs a
+  // `/x/*` middleware on bare `/x` too, so one mount covers the collection.
   router.use("/:id/members/*", requireSpaceFromParam("id"));
 
   router.get(
@@ -760,10 +761,9 @@ export function createSpacesRouter() {
   // `X-Space-Id`, so they resolve their own space — `run-config` gates on
   // `agents:read`, a space-level string that org context alone never carries.
   router.use("/:spaceId/packages/*", requireSpaceFromParam("spaceId"));
-  router.use("/:spaceId/packages", requireSpaceFromParam("spaceId"));
 
   // GET /api/spaces/:spaceId/packages — list this space's placements.
-  // The `router.use` guards above only prove the space belongs to the org;
+  // The `router.use` guard above only proves the space belongs to the org;
   // `spaces:read` is the read twin of the `spaces:write` the mutating routes
   // carry, and matches this route being package-type agnostic.
   router.get("/:spaceId/packages", requirePermission("spaces", "read"), async (c) => {
