@@ -124,6 +124,7 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
       endUserId: null,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { access_token: "tok" } }),
       scopesGranted: ["read"],
+      label: "Readiness pin",
     });
   });
 

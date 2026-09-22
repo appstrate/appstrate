@@ -1767,10 +1767,15 @@
                   },
                   "connection_overrides": {
                     "type": "object",
-                    "description": "Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ \"@scope/integration\": \"<connection_id>\" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.",
+                    "description": "Per-integration connection picks for THIS run (flat-connections mechanism #2). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same picks. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and empty ids are refused at the write (`lib/launch-schemas.ts`): either would be skipped in silence by the connection resolver. Returns 412 `missing_integration_connection` if an id is not accessible to the actor, or `duplicate_connection_label` when the bound set shares a label.",
                     "additionalProperties": {
-                      "type": "string",
-                      "minLength": 1
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "minItems": 1,
+                      "maxItems": 10
                     }
                   },
                   "dependency_overrides": {
@@ -2158,7 +2163,7 @@
         "operationId": "runInline",
         "tags": ["Runs"],
         "summary": "Execute an inline agent (no persisted package)",
-        "description": "Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. The body is closed: an unknown field is a `400`, never a silently dropped value — `dependency_overrides` in particular is NOT honoured on this surface and is refused rather than ignored. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.",
+        "description": "Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. The body is closed: an unknown field is a `400`, never a silently dropped value — `dependency_overrides` in particular is NOT honoured on this surface and is refused rather than ignored. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors. **Permission:** `agents:write` and `agents:run` — composing a manifest is authoring, launching it is running. A caller holding `agents:run` without `agents:write` — the `operator` and `runner` presets, an API key scoped to `agents:run` — is refused.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -2208,10 +2213,15 @@
                   },
                   "connection_overrides": {
                     "type": "object",
-                    "description": "Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ \"@scope/integration\": \"<connection_id>\" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.",
+                    "description": "Per-integration connection picks for THIS run (flat-connections mechanism #2). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same picks. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and empty ids are refused at the write (`lib/launch-schemas.ts`): either would be skipped in silence by the connection resolver. Returns 412 `missing_integration_connection` if an id is not accessible to the actor, or `duplicate_connection_label` when the bound set shares a label.",
                     "additionalProperties": {
-                      "type": "string",
-                      "minLength": 1
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "minItems": 1,
+                      "maxItems": 10
                     }
                   },
                   "modelId": {
@@ -2430,7 +2440,7 @@
         "operationId": "validateInlineRun",
         "tags": ["Runs"],
         "summary": "Validate an inline manifest without firing a run",
-        "description": "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, input against the manifest schema, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json for validation failures (with the accumulated validation errors). Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.",
+        "description": "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, input against the manifest schema, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json for validation failures (with the accumulated validation errors). Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors. **Permission:** `agents:write` and `agents:run` — composing a manifest is authoring, launching it is running. A caller holding `agents:run` without `agents:write` — the `operator` and `runner` presets, an API key scoped to `agents:run` — is refused.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -2473,10 +2483,15 @@
                   "connection_overrides": {
                     "type": "object",
                     "additionalProperties": {
-                      "type": "string",
-                      "minLength": 1
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "minItems": 1,
+                      "maxItems": 10
                     },
-                    "description": "Same field as `POST /api/runs/inline` — applied to the integration readiness check so a pick that clears `must_choose_connection` here clears it on the real launch too. Never persisted; no run is created. Values must be non-empty, same rule and same reason as on the launch surfaces."
+                    "description": "Same field as `POST /api/runs/inline` — applied to the integration readiness check so a pick that clears `must_choose_connection` here clears it on the real launch too. Never persisted; no run is created. Same array shape and same bounds as on the launch surfaces."
                   },
                   "modelId": {
                     "type": ["string", "null"]
@@ -3106,7 +3121,7 @@
         "operationId": "createRemoteRun",
         "tags": ["Runs"],
         "summary": "Create a remote-backed run (caller executes the agent)",
-        "description": "Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.",
+        "description": "Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply.\n\n**Permission:** `agents:run`; an `inline` source (a manifest the body carries) also requires `agents:write`. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -4549,10 +4564,15 @@
                   },
                   "connection_overrides": {
                     "type": "object",
-                    "description": "Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Shape: `{ \"@scope/integration\": \"<connection_id>\" }`. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire. Values must be non-empty: an empty id is falsy at the connection resolver, so it would skip the pin in silence on every fire instead of failing here.",
+                    "description": "Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }`, 1..10 per integration, always an ARRAY. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire. Empty arrays and empty ids are refused here: either would be skipped in silence by the connection resolver on every fire instead of failing at this write.",
                     "additionalProperties": {
-                      "type": "string",
-                      "minLength": 1
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "minItems": 1,
+                      "maxItems": 10
                     }
                   },
                   "dependency_overrides": {
@@ -4815,10 +4835,15 @@
                   },
                   "connection_overrides": {
                     "type": ["object", "null"],
-                    "description": "Per-integration connection picks frozen on the schedule. Pass `null` to clear. Values must be non-empty — same rule as on create.",
+                    "description": "Per-integration connection picks frozen on the schedule, one array of 1..10 connection ids per integration. Pass `null` to clear. Same array shape and same bounds as on create.",
                     "additionalProperties": {
-                      "type": "string",
-                      "minLength": 1
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "minItems": 1,
+                      "maxItems": 10
                     }
                   },
                   "dependency_overrides": {
@@ -6935,8 +6960,10 @@
                 "type": "object",
                 "properties": {
                   "label": {
-                    "type": ["string", "null"],
-                    "maxLength": 80
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80,
+                    "description": "A rename. The label cannot be cleared: it is NOT NULL, and a run binding several connections of one integration addresses each by its label."
                   },
                   "shared_with_org": {
                     "type": "boolean"
@@ -7529,11 +7556,17 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["connection_id"],
+                "required": ["connection_ids"],
                 "properties": {
-                  "connection_id": {
-                    "type": "string",
-                    "format": "uuid"
+                  "connection_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "minItems": 1,
+                    "maxItems": 10,
+                    "description": "The WHOLE pinned set — this write replaces it. 1..10 connections of this integration, each `shared_with_org`."
                   }
                 },
                 "additionalProperties": false
@@ -7662,7 +7695,7 @@
                   "type": "object",
                   "required": [
                     "integration_package_id",
-                    "connection_id",
+                    "connection_ids",
                     "auth_key",
                     "enforce",
                     "createdAt",
@@ -7672,13 +7705,18 @@
                     "integration_package_id": {
                       "type": "string"
                     },
-                    "connection_id": {
-                      "type": "string",
-                      "format": "uuid"
+                    "connection_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "minItems": 1,
+                      "maxItems": 10
                     },
                     "auth_key": {
                       "type": "string",
-                      "description": "Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (space, integration) regardless of auth_key; this field just tells you which auth the current default connection uses."
+                      "description": "Auth type of the default's FIRST connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default set per (space, integration) regardless of auth_key; a set may mix auths, and the per-connection auth is read from the connection list."
                     },
                     "enforce": {
                       "type": "boolean"
@@ -7716,7 +7754,7 @@
         "operationId": "upsertIntegrationOrgDefault",
         "tags": ["Integrations"],
         "summary": "Set the org-wide default connection for this integration (admin)",
-        "description": "Upsert the single (space, integration) default. Keyed per-integration, NOT per-auth: this overwrites the one existing default wholesale (atomic onConflictDoUpdate on [spaceId, integrationId]). Selecting a connection of a different auth type replaces the current default rather than adding a second one. The response `auth_key` reflects the chosen connection's auth (derived).",
+        "description": "Replace the (space, integration) default connection SET. Keyed per-integration, NOT per-auth: the body carries the WHOLE set and this write replaces it in one transaction, so the N rows share a single `enforce`. Selecting connections of a different auth type replaces the current default rather than adding a second one. The response `auth_key` reflects the first connection's auth (derived).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -7741,11 +7779,17 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["connection_id"],
+                "required": ["connection_ids"],
                 "properties": {
-                  "connection_id": {
-                    "type": "string",
-                    "format": "uuid"
+                  "connection_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "minItems": 1,
+                    "maxItems": 10,
+                    "description": "The WHOLE default set — this write replaces it."
                   },
                   "enforce": {
                     "type": "boolean",
@@ -7774,7 +7818,7 @@
                   "type": "object",
                   "required": [
                     "integration_package_id",
-                    "connection_id",
+                    "connection_ids",
                     "auth_key",
                     "enforce",
                     "createdAt",
@@ -7784,13 +7828,18 @@
                     "integration_package_id": {
                       "type": "string"
                     },
-                    "connection_id": {
-                      "type": "string",
-                      "format": "uuid"
+                    "connection_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "minItems": 1,
+                      "maxItems": 10
                     },
                     "auth_key": {
                       "type": "string",
-                      "description": "Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (space, integration) regardless of auth_key; this field just tells you which auth the current default connection uses."
+                      "description": "Auth type of the default's FIRST connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default set per (space, integration) regardless of auth_key; a set may mix auths, and the per-connection auth is read from the connection list."
                     },
                     "enforce": {
                       "type": "boolean"
@@ -12007,7 +12056,7 @@
         "operationId": "listMyIntegrationPins",
         "tags": ["Profile"],
         "summary": "List the caller's member-scope integration pins for an agent",
-        "description": "Returns the caller's own (integration, authKey) → connectionId pins for the given agent. Used by the agent-page picker to render the collapsed default row. Member-only; end-user callers receive an empty list. Requires `X-Space-Id`.",
+        "description": "Returns the caller's own integration → connection-set pins for the given agent. Used by the agent-page picker to render the collapsed default row. Member-only; end-user callers receive an empty list. Requires `X-Space-Id`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -12042,14 +12091,19 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["integration_package_id", "connection_id"],
+                        "required": ["integration_package_id", "connection_ids"],
                         "properties": {
                           "integration_package_id": {
                             "type": "string"
                           },
-                          "connection_id": {
-                            "type": "string",
-                            "format": "uuid"
+                          "connection_ids": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "minItems": 1,
+                            "maxItems": 10
                           }
                         }
                       }
@@ -12076,8 +12130,8 @@
       "put": {
         "operationId": "upsertMyIntegrationPin",
         "tags": ["Profile"],
-        "summary": "Pin a connection for the caller's runs of an agent",
-        "description": "Persists the caller's preference for a (integration, authKey) on this agent. Sits at cascade layer 4 — wins over the fallback ambiguity but loses to admin pins / run / schedule overrides. Replaces the previous R5 localStorage pick. Idempotent — repeated calls update the row in place.",
+        "summary": "Pin connections for the caller's runs of an agent",
+        "description": "Persists the caller's preference for an integration on this agent. Sits at cascade layer 5 — wins over the fallback ambiguity but loses to admin pins / run / schedule overrides. Replaces the previous R5 localStorage pick. The body carries the WHOLE set and this write replaces it; `DELETE` clears it. Idempotent — repeated calls rewrite the same set.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -12092,7 +12146,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["agent_package_id", "integration_package_id", "connection_id"],
+                "required": ["agent_package_id", "integration_package_id", "connection_ids"],
                 "properties": {
                   "agent_package_id": {
                     "type": "string",
@@ -12102,9 +12156,14 @@
                     "type": "string",
                     "minLength": 1
                   },
-                  "connection_id": {
-                    "type": "string",
-                    "format": "uuid"
+                  "connection_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "minItems": 1,
+                    "maxItems": 10
                   }
                 },
                 "additionalProperties": false
@@ -13131,7 +13190,7 @@
         "operationId": "getIntegrationCredentials",
         "tags": ["Internal"],
         "summary": "Fetch live credentials + HTTP delivery plans for an active integration",
-        "description": "Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is ACTIVE in the run's space. A `200` with an EMPTY `auths` array means one thing only: the integration declares no auth. Every state where a credential was expected but could not be produced fails instead — `404` when the actor has no connection (or the connection this run pinned at kickoff was deleted/unshared since), `409` when the pinned manifest version no longer declares the connection's auth, `410` when the credential is dead. The sidecar reads an empty payload as *no `delivery.http` auths, skip the MITM listener*, so answering `200` for a broken state boots the run with zero credentials and every upstream call leaves uncredentialed. One caller is authorised differently: an ephemeral CONNECT run (`run_at: \"link\"` orchestrated `connect.tool` login) has no run row and no agent to walk, so it is authorised against the launcher-published grant naming the single integration it is connecting, and always receives the EMPTY payload — it exists to MINT the credential, its login secret arrives out of band, and the session it captures is installed in-process.",
+        "description": "Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls for ONE of the connections this run bound to the integration (named by the required `connection_id`) — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations`, that the integration is ACTIVE in the run's space, AND that the run's kickoff snapshot bound this connection. A `200` with an EMPTY `auths` array means one thing only: the integration declares no auth. Every state where a credential was expected but could not be produced fails instead — `400` when the selector is missing or names a connection outside the run's bound set, `404` when the named connection is no longer reachable by the actor (deleted/unshared since kickoff), `409` when the pinned manifest version no longer declares the connection's auth, `410` when the credential is dead. The sidecar reads an empty payload as *no `delivery.http` auths, skip the MITM listener*, so answering `200` for a broken state boots the run with zero credentials and every upstream call leaves uncredentialed. One caller is authorised differently: an ephemeral CONNECT run (`run_at: \"link\"` orchestrated `connect.tool` login) has no run row and no agent to walk, so it is authorised against the launcher-published grant naming the single integration it is connecting, and always receives the EMPTY payload — it exists to MINT the credential, its login secret arrives out of band, and the session it captures is installed in-process.",
         "security": [
           {
             "bearerExecToken": []
@@ -13143,6 +13202,16 @@
           },
           {
             "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "name": "connection_id",
+            "in": "query",
+            "required": true,
+            "description": "Which of the connections this run bound to the integration the credentials are for. REQUIRED: a run may bind up to 10 connections per integration and each has its own credential surface, so there is no \"the connection of this integration\" to fall back to. Must be a member of `runs.resolved_connections[<integration id>]` — an id the run did not bind is a `400 connection_not_in_run`, because the run token authorises the connections the run's cascade bound and no others. The one caller exempt from it is the ephemeral CONNECT run, which has no run row, no cascade and no bound set — it is authorised by its launcher-published grant and always receives the empty payload.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -13152,6 +13221,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/IntegrationCredentialsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the caller is speaking the retired single-connection protocol and the platform will not pick a connection on its behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             }
@@ -13206,7 +13285,7 @@
         "operationId": "refreshIntegrationCredentials",
         "tags": ["Internal"],
         "summary": "Force-refresh OAuth2 credentials for an active integration",
-        "description": "Sidecar-only. Same response shape as the GET endpoint; forces a refresh of every OAuth2 auth on this integration regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. Non-OAuth2 auths are returned unchanged. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.",
+        "description": "Sidecar-only. Same response shape and same required `connection_id` selector as the GET endpoint; forces a refresh of every OAuth2 auth on the named connection regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. Non-OAuth2 auths are returned unchanged. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.",
         "security": [
           {
             "bearerExecToken": []
@@ -13218,6 +13297,16 @@
           },
           {
             "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "name": "connection_id",
+            "in": "query",
+            "required": true,
+            "description": "Which of the connections this run bound to the integration the credentials are for. REQUIRED: a run may bind up to 10 connections per integration and each has its own credential surface, so there is no \"the connection of this integration\" to fall back to. Must be a member of `runs.resolved_connections[<integration id>]` — an id the run did not bind is a `400 connection_not_in_run`, because the run token authorises the connections the run's cascade bound and no others. The one caller exempt from it is the ephemeral CONNECT run, which has no run row, no cascade and no bound set — it is authorised by its launcher-published grant and always receives the empty payload.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -13227,6 +13316,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/IntegrationCredentialsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the caller is speaking the retired single-connection protocol and the platform will not pick a connection on its behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             }
@@ -23530,8 +23629,8 @@
                   "type": "string"
                 },
                 "label": {
-                  "type": ["string", "null"],
-                  "description": "User-given name; `null` when the connection was never labelled."
+                  "type": "string",
+                  "description": "User-given name. Always present — the column is NOT NULL, because a run binding several connections addresses each by its label."
                 },
                 "account_id": {
                   "type": "string",
@@ -23543,7 +23642,7 @@
                 }
               }
             },
-            "description": "Populated on `must_choose_connection`. The connections the caller may pick from, each carrying the fields that tell them apart; pass one `id` back via the request body's `connection_overrides` map to retry the run."
+            "description": "Populated on `must_choose_connection` — the connections the caller may pick from, each carrying the fields that tell them apart; pass their `id`s back as the request body's `connection_overrides` array for that integration to retry the run. Populated on `duplicate_connection_label` too, where it names the bound connections that share a label: the remedy is renaming one of them (`PATCH /api/integrations/{packageId}/connections/{connectionId}`), not re-picking."
           },
           "connection_id": {
             "type": "string",
@@ -24938,9 +25037,14 @@
           },
           "connection_overrides": {
             "type": ["object", "null"],
-            "description": "Per-integration connection picks for this run (flat-connections mechanism #2). Flat map: `{ \"@scope/integration\": \"<connection_id>\" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (#1).",
+            "description": "Per-integration connection picks for this run (flat-connections mechanism #2). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 1..10 connections per integration; each chosen connection carries its own authKey. Loses to admin pins (#1).",
             "additionalProperties": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 10
             }
           },
           "dependency_overrides": {
@@ -24952,7 +25056,7 @@
           },
           "connections_used": {
             "type": ["array", "null"],
-            "description": "Connections resolved for this run, projected from the internal snapshot for display. Null when the agent declares no integrations.",
+            "description": "Connections resolved for this run, projected from the internal snapshot for display — one entry per BOUND connection, so an integration bound to several contributes several entries sharing an `integration_id`. Null when the agent declares no integrations.",
             "items": {
               "type": "object",
               "required": ["integration_id", "label", "account_id", "source"],
@@ -25100,9 +25204,14 @@
           },
           "connection_overrides": {
             "type": ["object", "null"],
-            "description": "Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Flat map: `{ \"@scope/integration\": \"<connection_id>\" }`. Replayed on every fire; loses to admin pins (#1), beats actor-fallback (#4).",
+            "description": "Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }`, 1..10 per integration. Replayed on every fire; loses to admin pins (#1), beats actor-fallback (#4).",
             "additionalProperties": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 10
             }
           },
           "dependency_overrides": {
@@ -25748,12 +25857,12 @@
         "description": "Per-integration connection verdict for an agent: which connection the next run uses (admin pin → run/schedule override → member pin → fallback + scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses.",
         "required": [
           "status",
-          "resolved_connection_id",
+          "resolved_connection_ids",
           "resolved_missing_scopes",
           "resolved_owned_by_actor",
-          "admin_pinned_connection_id",
-          "member_pinned_connection_id",
-          "org_default_connection_id",
+          "admin_pinned_connection_ids",
+          "member_pinned_connection_ids",
+          "org_default_connection_ids",
           "org_default_enforced",
           "can_add_connection",
           "candidates"
@@ -25766,13 +25875,18 @@
               "pinned",
               "auto",
               "must_choose",
+              "duplicate_label",
               "none",
               "stale",
               "needs_reconnection"
             ]
           },
-          "resolved_connection_id": {
-            "type": ["string", "null"]
+          "resolved_connection_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10
           },
           "resolved_missing_scopes": {
             "type": "array",
@@ -25783,14 +25897,26 @@
           "resolved_owned_by_actor": {
             "type": "boolean"
           },
-          "admin_pinned_connection_id": {
-            "type": ["string", "null"]
+          "admin_pinned_connection_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10
           },
-          "member_pinned_connection_id": {
-            "type": ["string", "null"]
+          "member_pinned_connection_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10
           },
-          "org_default_connection_id": {
-            "type": ["string", "null"]
+          "org_default_connection_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10
           },
           "org_default_enforced": {
             "type": "boolean"
@@ -25976,7 +26102,7 @@
           "packageId",
           "integration_package_id",
           "auth_key",
-          "connection_id",
+          "connection_ids",
           "createdAt",
           "updatedAt"
         ],
@@ -25990,9 +26116,14 @@
           "auth_key": {
             "type": "string"
           },
-          "connection_id": {
-            "type": "string",
-            "format": "uuid"
+          "connection_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "minItems": 1,
+            "maxItems": 10
           },
           "createdAt": {
             "type": "string",

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 
 export const schedulesPaths = {
   "/api/schedules": {
@@ -126,8 +127,13 @@ export const schedulesPaths = {
                 connection_overrides: {
                   type: "object",
                   description:
-                    'Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Shape: `{ "@scope/integration": "<connection_id>" }`. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire. Values must be non-empty: an empty id is falsy at the connection resolver, so it would skip the pin in silence on every fire instead of failing here.',
-                  additionalProperties: { type: "string", minLength: 1 },
+                    'Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..10 per integration, always an ARRAY. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire. Empty arrays and empty ids are refused here: either would be skipped in silence by the connection resolver on every fire instead of failing at this write.',
+                  additionalProperties: {
+                    type: "array",
+                    items: { type: "string", minLength: 1 },
+                    minItems: 1,
+                    maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+                  },
                 },
                 dependency_overrides: {
                   type: "object",
@@ -320,8 +326,13 @@ export const schedulesPaths = {
                 connection_overrides: {
                   type: ["object", "null"],
                   description:
-                    "Per-integration connection picks frozen on the schedule. Pass `null` to clear. Values must be non-empty — same rule as on create.",
-                  additionalProperties: { type: "string", minLength: 1 },
+                    "Per-integration connection picks frozen on the schedule, one array of 1..10 connection ids per integration. Pass `null` to clear. Same array shape and same bounds as on create.",
+                  additionalProperties: {
+                    type: "array",
+                    items: { type: "string", minLength: 1 },
+                    minItems: 1,
+                    maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+                  },
                 },
                 dependency_overrides: {
                   type: ["object", "null"],

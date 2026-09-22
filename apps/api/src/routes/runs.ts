@@ -137,8 +137,9 @@ const inlineRunBodySchema = z
      * gate, which runs BEFORE `parseRequestInput` and would otherwise never see
      * it.
      *
-     * `.min(1)` and the reason it is owned at the schema rather than in
-     * `parseRequestInput` live with the rule itself, in `lib/launch-schemas.ts`.
+     * The bounds (non-empty id, non-empty set, cap) and the reason they are
+     * owned at the schema rather than in `parseRequestInput` live with the
+     * rule itself, in `lib/launch-schemas.ts`.
      */
     connection_overrides: connectionOverridesSchema.optional(),
     /**

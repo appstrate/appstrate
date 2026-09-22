@@ -54,6 +54,7 @@ import { enqueueStorageDeletion } from "../storage-deletion.ts";
 import { runWorkspaceDeletionJobs } from "../run-workspace-storage.ts";
 import { normalizeScope } from "@appstrate/core/naming";
 import type { LlmUsageLedgerRow, ModelCost } from "@appstrate/core/module";
+import type { ConnectionOverrides, ResolvedConnectionMap } from "@appstrate/core/integration";
 import type { SpaceScope, OrgScope } from "../../lib/scope.ts";
 import {
   modelGenerationSettingsSchema,
@@ -322,22 +323,25 @@ function runRowToWireDto(row: RunProjection): RunWireDto {
 
 /**
  * Project the internal `runs.resolved_connections` snapshot into the
- * display-safe `connections_used` wire shape. Drops the raw `connectionId`
- * (internal state) and keeps the denormalized label/account so the panel
- * renders even after the connection is renamed or deleted. Empty/absent → null.
+ * display-safe `connections_used` wire shape — one entry per BOUND
+ * connection, so an integration bound to N connections contributes N rows
+ * sharing an `integration_id`. Drops the raw `connectionId` (internal state)
+ * and keeps the denormalized label/account so the panel renders even after
+ * the connection is renamed or deleted. Empty/absent → null.
  */
 function projectConnectionsUsed(
   resolved: typeof runs.$inferSelect.resolvedConnections,
 ): RunConnectionUsed[] | null {
   if (!resolved || typeof resolved !== "object") return null;
-  const entries = Object.entries(resolved);
-  if (entries.length === 0) return null;
-  return entries.map(([integrationId, v]) => ({
-    integration_id: integrationId,
-    label: v.label ?? null,
-    account_id: v.accountId ?? null,
-    source: v.source,
-  }));
+  const used = Object.entries(resolved).flatMap(([integrationId, bound]) =>
+    (bound ?? []).map((v) => ({
+      integration_id: integrationId,
+      label: v.label ?? null,
+      account_id: v.accountId ?? null,
+      source: v.source,
+    })),
+  );
+  return used.length > 0 ? used : null;
 }
 
 function mapEnrichedRun(r: EnrichedRunRow, canReadAgentInput: boolean): EnrichedRun {
@@ -598,23 +602,20 @@ interface CreateRunParams {
    */
   runnerKind?: string | null;
   /**
-   * Caller's per-(integration, authKey) connection override map. Persisted
+   * Caller's per-integration connection override map. Persisted
    * verbatim on `runs.connection_overrides` for audit + "re-run with same
    * picks" replay. Feeds the resolver's mechanism #2 at kickoff; surface
    * pinned admin choices and fallback if absent. Null when the run used
    * defaults verbatim.
    */
-  connectionOverrides?: Record<string, string> | null;
+  connectionOverrides?: ConnectionOverrides | null;
   /**
    * Snapshot of the resolver output at kickoff: per integration, which
-   * connection id was actually picked and which mechanism produced the
+   * connections were actually bound and which mechanism produced the
    * pick. Persisted on `runs.resolved_connections` so the credentials
    * resolver (sidecar MITM refresh) can honour the pick long after kickoff.
    */
-  resolvedConnections?: Record<
-    string,
-    { connectionId: string; source: string; label?: string | null; accountId?: string | null }
-  > | null;
+  resolvedConnections?: ResolvedConnectionMap | null;
   /**
    * Snapshot of each declared integration's resolved manifest version at
    * kickoff (#686). Persisted on `runs.resolved_integration_versions` so the

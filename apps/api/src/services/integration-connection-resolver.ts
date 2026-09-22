@@ -2,7 +2,10 @@
 
 /**
  * Integration connection resolver — single source of truth for "which
- * connection does this run use for each (integration, authKey)?".
+ * connections does this run use for each integration?".
+ *
+ * Every layer yields a SET (1..MAX_CONNECTIONS_PER_INTEGRATION); the first
+ * non-empty one wins and every member of it must pass `checkHealth`.
  *
  * Flat resolution cascade (highest precedence first):
  *
@@ -18,6 +21,10 @@
  *   7. fallback: actor's accessible connections
  *      = own + (shared_with_org AND space match)
  *      → 1 match → auto, 0 → not_connected, N → must_choose
+ *
+ * Only the fallback can BIND without an explicit pick, and it binds at most
+ * one: N accessible connections is a `must_choose_connection`, never an
+ * auto-bound set.
  *
  * The exported `resolveConnections()` is pure — no DB access — so it can
  * be unit-tested with mock arrays. The `resolveConnectionsForRun()`
@@ -61,7 +68,10 @@ import type { Actor } from "../lib/actor.ts";
 import { actorOrSharedFilter } from "../lib/actor.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "./integration-service.ts";
-import { listOrgDefaultsForResolver } from "./integration-org-defaults-service.ts";
+import {
+  listOrgDefaultsForResolver,
+  type OrgDefaultPick,
+} from "./integration-org-defaults-service.ts";
 import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
 
 // ─────────────────────────────────── Types ────────────────────────────────────
@@ -142,13 +152,14 @@ interface ResolveConnectionsInput {
   /** Schedule's frozen override map (package_schedules row). */
   scheduleOverrides?: ConnectionOverrides | null;
   /**
-   * Org-wide default connection per integration (space-scoped, all
+   * Org-wide default connection SET per integration (space-scoped, all
    * agents). `enforce: true` locks every actor (layer 2, just below the
    * per-agent admin pin); `enforce: false` is a soft default (layer 6,
-   * just above the fallback — a member pin still wins). Absent in OSS
-   * until an admin sets one; the resolver then behaves exactly as before.
+   * just above the fallback — a member pin still wins). The N rows of one
+   * default share a single `enforce` by construction: a write replaces the
+   * whole set. Absent in OSS until an admin sets one.
    */
-  orgDefaults?: Record<string, { connectionId: string; enforce: boolean }> | null;
+  orgDefaults?: Record<string, OrgDefaultPick> | null;
   /**
    * Actor's `user.id` — used to match member pins (`pins.userId === actorUserId`)
    * in the cascade's layer 4. Null for end-users (they don't have member
@@ -175,8 +186,8 @@ interface ResolveConnectionsInput {
 // ─────────────────────────── Pure resolver (unit-tested) ──────────────────────
 
 /**
- * Walks the cascade per integration. One connection per integration,
- * regardless of authKey — the chosen connection carries its own authKey,
+ * Walks the cascade per integration and binds a SET of connections,
+ * regardless of authKey — each chosen connection carries its own authKey,
  * which drives credential injection downstream.
  *
  * Cascade per integration:
@@ -283,11 +294,11 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       manifest: req.manifest,
       agentTools: req.agentTools,
       agentScopes: req.agentScopes,
-      adminPinId: adminPins.get(req.integrationId) ?? null,
+      adminPinIds: nonEmpty(adminPins.get(req.integrationId)),
       orgDefault: input.orgDefaults?.[req.integrationId] ?? null,
-      runOverrideId: input.runOverrides?.[req.integrationId] ?? null,
-      scheduleOverrideId: input.scheduleOverrides?.[req.integrationId] ?? null,
-      memberPinId: memberPins.get(req.integrationId) ?? null,
+      runOverrideIds: nonEmpty(input.runOverrides?.[req.integrationId]),
+      scheduleOverrideIds: nonEmpty(input.scheduleOverrides?.[req.integrationId]),
+      memberPinIds: nonEmpty(memberPins.get(req.integrationId)),
       accessibleConnections: filteredConnections,
       connectionIndex: filteredIndex,
       actorUserId: input.actorUserId ?? null,
@@ -307,16 +318,26 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
 
 // ─────────────────────────── Per-integration core ─────────────────────────────
 
+/**
+ * A cascade layer's pick, normalised. An empty array is indistinguishable
+ * from "this layer has no opinion" — and it must be, because a layer that
+ * silently contributed zero connections would skip to the next one leaving
+ * no trace. Every write path caps the set at 1..MAX_CONNECTIONS_PER_INTEGRATION.
+ */
+function nonEmpty(ids: readonly string[] | null | undefined): readonly string[] | null {
+  return ids && ids.length > 0 ? ids : null;
+}
+
 interface ResolveOneArgs {
   integrationId: string;
   manifest: IntegrationManifest;
   agentTools: readonly string[] | "*";
   agentScopes: readonly string[];
-  adminPinId: string | null;
-  orgDefault: { connectionId: string; enforce: boolean } | null;
-  runOverrideId: string | null;
-  scheduleOverrideId: string | null;
-  memberPinId: string | null;
+  adminPinIds: readonly string[] | null;
+  orgDefault: OrgDefaultPick | null;
+  runOverrideIds: readonly string[] | null;
+  scheduleOverrideIds: readonly string[] | null;
+  memberPinIds: readonly string[] | null;
   accessibleConnections: ConnectionRow[];
   connectionIndex: Map<string, ConnectionRow>;
   actorUserId: string | null;
@@ -331,91 +352,149 @@ interface ResolveOneArgs {
 }
 
 type ResolveOneResult =
-  | { kind: "resolved"; value: ResolvedConnection }
+  | { kind: "resolved"; value: ResolvedConnection[] }
   | { kind: "error"; error: ConnectionResolutionError };
 
 /**
- * Look up a connection by id in the index, treating a row that belongs to a
- * DIFFERENT integration as not-found. Pins/overrides (cascade layers 1-6)
- * carry a caller-supplied connection id; without this guard a run/schedule
- * override (or pin) pointing at an accessible connection of another
- * integration would be accepted and its credentials injected under the wrong
- * integration's auth — an intra-tenant confused-deputy. Layer 7 (fallback)
- * already filters by integrationId, so it does not need this.
+ * Look up a SET of connection ids in the index, treating a row that belongs
+ * to a DIFFERENT integration as not-found. Pins/overrides (cascade layers
+ * 1-6) carry caller-supplied connection ids; without this guard a
+ * run/schedule override (or pin) pointing at an accessible connection of
+ * another integration would be accepted and its credentials injected under
+ * the wrong integration's auth — an intra-tenant confused-deputy. Layer 7
+ * (fallback) already filters by integrationId, so it does not need this.
+ *
+ * Reports the FIRST id that could not be resolved, so the caller raises the
+ * same code a single unavailable id raised before, naming the offender.
  */
-function ownedConn(args: ResolveOneArgs, id: string): ConnectionRow | undefined {
-  const conn = args.connectionIndex.get(id);
-  return conn && conn.integrationId === args.integrationId ? conn : undefined;
+function ownedConns(
+  args: ResolveOneArgs,
+  ids: readonly string[],
+): { rows: ConnectionRow[] } | { missingId: string } {
+  const rows: ConnectionRow[] = [];
+  for (const id of ids) {
+    const conn = args.connectionIndex.get(id);
+    if (!conn || conn.integrationId !== args.integrationId) return { missingId: id };
+    rows.push(conn);
+  }
+  return { rows };
+}
+
+/**
+ * Health-check every member of the winning set, then enforce distinct
+ * labels across it.
+ *
+ * The label is the agent's handle for a connection — the sidecar injects a
+ * `connection` enum of labels on every tool of a namespace holding more than
+ * one — so a set whose labels collide is unaddressable at run time. The check
+ * is a no-op for a single connection, which is why the degenerate case stays
+ * byte-identical to the single-connection model.
+ */
+function bindSet(
+  args: ResolveOneArgs,
+  rows: ConnectionRow[],
+  source: ResolvedConnection["source"],
+): ResolveOneResult {
+  const value: ResolvedConnection[] = [];
+  for (const conn of rows) {
+    const health = checkHealth(args, conn, source);
+    if (health.kind === "error") return health;
+    value.push(health.value);
+  }
+
+  const colliding = rowsSharingALabel(rows);
+  if (colliding.length > 0) {
+    return errorOf(args, {
+      code: "duplicate_connection_label",
+      message: `Connections bound to ${args.integrationId} must have distinct labels — rename one of: ${colliding
+        .map((c) => c.label)
+        .join(", ")}.`,
+      candidateConnections: colliding.map((c) => candidateOf(args, c)),
+    });
+  }
+
+  return { kind: "resolved", value };
+}
+
+/** Every row whose label is shared, VERBATIM, with another row of the set. */
+function rowsSharingALabel(rows: ConnectionRow[]): ConnectionRow[] {
+  const byLabel = new Map<string, ConnectionRow[]>();
+  for (const conn of rows) {
+    const bucket = byLabel.get(conn.label);
+    if (bucket) bucket.push(conn);
+    else byLabel.set(conn.label, [conn]);
+  }
+  return [...byLabel.values()].filter((group) => group.length > 1).flat();
 }
 
 function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   // 1. Admin pin (highest precedence — locks the choice for every actor).
-  if (args.adminPinId) {
-    const conn = ownedConn(args, args.adminPinId);
-    if (!conn) {
+  if (args.adminPinIds) {
+    const owned = ownedConns(args, args.adminPinIds);
+    if ("missingId" in owned) {
       return errorOf(args, {
         code: "pinned_connection_unavailable",
-        message: `Pinned connection for ${args.integrationId} is not accessible — it may have been deleted or unshared.`,
+        message: `Pinned connection '${owned.missingId}' for ${args.integrationId} is not accessible — it may have been deleted or unshared.`,
       });
     }
-    return checkHealth(args, conn, "admin_pin");
+    return bindSet(args, owned.rows, "admin_pin");
   }
 
   // 2. Org default ENFORCE — org-wide force, locks every actor on every
   // agent. Beaten only by the per-agent admin pin above.
   if (args.orgDefault?.enforce) {
-    const conn = ownedConn(args, args.orgDefault.connectionId);
-    if (!conn) {
+    const owned = ownedConns(args, args.orgDefault.connectionIds);
+    if ("missingId" in owned) {
       return errorOf(args, {
         code: "pinned_connection_unavailable",
-        message: `Org default connection for ${args.integrationId} is not accessible — it may have been deleted or unshared.`,
+        message: `Org default connection '${owned.missingId}' for ${args.integrationId} is not accessible — it may have been deleted or unshared.`,
       });
     }
-    return checkHealth(args, conn, "org_default_enforced");
+    return bindSet(args, owned.rows, "org_default_enforced");
   }
 
   // 3. Run override.
-  if (args.runOverrideId) {
-    const conn = ownedConn(args, args.runOverrideId);
-    if (!conn) {
+  if (args.runOverrideIds) {
+    const owned = ownedConns(args, args.runOverrideIds);
+    if ("missingId" in owned) {
       return errorOf(args, {
         code: "override_connection_unavailable",
-        message: `Run-override connection for ${args.integrationId} is not accessible.`,
+        message: `Run-override connection '${owned.missingId}' for ${args.integrationId} is not accessible.`,
       });
     }
-    return checkHealth(args, conn, "run_override");
+    return bindSet(args, owned.rows, "run_override");
   }
 
   // 4. Schedule override.
-  if (args.scheduleOverrideId) {
-    const conn = ownedConn(args, args.scheduleOverrideId);
-    if (!conn) {
+  if (args.scheduleOverrideIds) {
+    const owned = ownedConns(args, args.scheduleOverrideIds);
+    if ("missingId" in owned) {
       return errorOf(args, {
         code: "override_connection_unavailable",
-        message: `Schedule-override connection for ${args.integrationId} is not accessible.`,
+        message: `Schedule-override connection '${owned.missingId}' for ${args.integrationId} is not accessible.`,
       });
     }
-    return checkHealth(args, conn, "schedule_override");
+    return bindSet(args, owned.rows, "schedule_override");
   }
 
   // 5. Member pin — actor's persisted preference for this agent.
-  if (args.memberPinId) {
-    const conn = ownedConn(args, args.memberPinId);
-    if (!conn) {
+  if (args.memberPinIds) {
+    const owned = ownedConns(args, args.memberPinIds);
+    if ("missingId" in owned) {
       return errorOf(args, {
         code: "pinned_connection_unavailable",
-        message: `Your pinned connection for ${args.integrationId} is no longer accessible — it may have been deleted or unshared.`,
+        message: `Your pinned connection '${owned.missingId}' for ${args.integrationId} is no longer accessible — it may have been deleted or unshared.`,
       });
     }
-    return checkHealth(args, conn, "member_pin");
+    return bindSet(args, owned.rows, "member_pin");
   }
 
   // 6. Org default SOFT — org-wide baseline, just above the fallback. A
-  // missing connection (deleted/unshared) silently falls through to the
+  // missing member (deleted/unshared) silently falls through to the
   // fallback rather than erroring, since the default is non-binding.
   if (args.orgDefault) {
-    const conn = ownedConn(args, args.orgDefault.connectionId);
-    if (conn) return checkHealth(args, conn, "org_default");
+    const owned = ownedConns(args, args.orgDefault.connectionIds);
+    if (!("missingId" in owned)) return bindSet(args, owned.rows, "org_default");
   }
 
   // 7. Fallback — actor's accessible connections on this integration,
@@ -447,7 +526,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   const healthy = candidates.filter((c) => !c.needsReconnection);
 
   if (healthy.length === 1) {
-    return checkHealth(args, healthy[0]!, "fallback_auto");
+    return bindSet(args, [healthy[0]!], "fallback_auto");
   }
 
   if (healthy.length > 1) {
@@ -470,8 +549,8 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   // No healthy candidate — every accessible connection on this integration is
   // flagged needsReconnection. Surface needs_reconnection (with one id for the
   // reconnect CTA to UPDATE in place) rather than must_choose, which would only
-  // offer dead options. checkHealth on the first emits the canonical shape.
-  return checkHealth(args, candidates[0]!, "fallback_auto");
+  // offer dead options. The health check on the first emits the canonical shape.
+  return bindSet(args, [candidates[0]!], "fallback_auto");
 }
 
 /**
@@ -563,11 +642,15 @@ function candidateOf(args: ResolveOneArgs, conn: ConnectionRow): ConnectionCandi
   };
 }
 
+type CheckHealthResult =
+  | { kind: "resolved"; value: ResolvedConnection }
+  | { kind: "error"; error: ConnectionResolutionError };
+
 function checkHealth(
   args: ResolveOneArgs,
   conn: ConnectionRow,
   source: ResolvedConnection["source"],
-): ResolveOneResult {
+): CheckHealthResult {
   const ownedByActor = isOwnedByActor(args, conn);
 
   if (conn.needsReconnection) {
@@ -631,7 +714,7 @@ function checkHealth(
 function errorOf(
   args: { integrationId: string },
   partial: Omit<ConnectionResolutionError, "integrationId">,
-): ResolveOneResult {
+): { kind: "error"; error: ConnectionResolutionError } {
   return {
     kind: "error",
     error: {
@@ -644,21 +727,27 @@ function errorOf(
 /**
  * Partition pins into admin (`userId IS NULL`) and member (matching the
  * actor) buckets. Member pins for OTHER users are silently ignored —
- * each actor sees only their own pin. Keyed by integrationId only — one
- * pin per (agent, integration, scope).
+ * each actor sees only their own pins. Keyed by integrationId, valued by the
+ * SET of connection ids: one row per bound connection, N rows per
+ * (agent, integration, scope).
  */
 function indexPins(
   pins: PinRow[],
   actorUserId: string | null,
-): { adminPins: Map<string, string>; memberPins: Map<string, string> } {
-  const adminPins = new Map<string, string>();
-  const memberPins = new Map<string, string>();
+): { adminPins: Map<string, string[]>; memberPins: Map<string, string[]> } {
+  const adminPins = new Map<string, string[]>();
+  const memberPins = new Map<string, string[]>();
   for (const p of pins) {
-    if (p.userId === null) {
-      adminPins.set(p.integrationId, p.connectionId);
-    } else if (actorUserId !== null && p.userId === actorUserId) {
-      memberPins.set(p.integrationId, p.connectionId);
-    }
+    const bucket =
+      p.userId === null
+        ? adminPins
+        : actorUserId !== null && p.userId === actorUserId
+          ? memberPins
+          : null;
+    if (!bucket) continue;
+    const ids = bucket.get(p.integrationId);
+    if (ids) ids.push(p.connectionId);
+    else bucket.set(p.integrationId, [p.connectionId]);
   }
   return { adminPins, memberPins };
 }
@@ -823,7 +912,8 @@ export function translateResolutionError(e: ConnectionResolutionError): Resoluti
     // Smuggle the candidates on must_choose_connection so a caller with no
     // picker of its own names its choice straight from the error, without a
     // second round-trip through the connection list to learn which uuid is
-    // which.
+    // which. Same field on duplicate_connection_label, where it names the
+    // rows to rename rather than the rows to pick from.
     ...(e.candidateConnections && e.candidateConnections.length > 0
       ? {
           candidate_connections: e.candidateConnections.map((c) => ({
@@ -894,6 +984,7 @@ const TITLE_BY_CODE: Record<ConnectionResolutionError["code"], string> = {
   pinned_connection_unavailable: "Pinned Connection Unavailable",
   override_connection_unavailable: "Override Connection Unavailable",
   must_choose_connection: "Multiple Connections Available — Pick One",
+  duplicate_connection_label: "Duplicate Connection Label",
   insufficient_scopes: "Insufficient Permissions",
   auth_key_mismatch: "Connection Auth Method Mismatch",
 };

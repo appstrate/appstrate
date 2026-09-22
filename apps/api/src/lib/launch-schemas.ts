@@ -39,26 +39,38 @@
 
 import { z } from "zod";
 import { collectOverridableDependencyIds } from "@appstrate/core/dependencies";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { ApiError } from "./errors.ts";
 import { isValidDependencyOverride } from "../services/input-parser.ts";
 
 /**
- * Per-integration connection picks: `{ "@scope/integration": "<connection_id>" }`.
+ * Per-integration connection picks:
+ * `{ "@scope/integration": ["<connection_id>", ...] }`.
  *
- * `.min(1)` on the VALUE is load-bearing on every surface, and it costs the
- * most on schedules. An empty-string id is FALSY at the resolver's `resolveOne`
- * (`integration-connection-resolver.ts`, layer 4), so the pin is skipped
- * without a trace and the launch falls through to the actor-fallback or dies
- * with a 412 `must_choose_connection`. A schedule replays its frozen map on
- * every tick, so without this the write answers 200 once and every subsequent
- * fire is silently wrong.
+ * Three bounds, all load-bearing on every surface, and all costing the most on
+ * schedules — a schedule replays its frozen map on every tick, so a shape the
+ * write accepts and the resolver ignores answers 200 once and fires wrong for
+ * ever after:
+ *
+ *  - `.min(1)` on the ID: an empty-string id resolves to no row at
+ *    `resolveOne` (`integration-connection-resolver.ts`), so the pick would be
+ *    refused per fire instead of per write.
+ *  - `.min(1)` on the ARRAY: an empty set is indistinguishable from "this
+ *    layer has no opinion" (`nonEmpty`, same file), so the launch would fall
+ *    through to the actor-fallback in silence.
+ *  - `.max(MAX_CONNECTIONS_PER_INTEGRATION)`: the cap is a write-time rule
+ *    everywhere (pins, org defaults, overrides) — the resolver only echoes a
+ *    set a write already validated.
  *
  * It is also owned here rather than delegated to `parseRequestInput`:
  * `POST /api/runs/inline/validate` never calls the parser, so the guard would
  * have no owner there and the validator would disagree with the launch on the
  * same body.
  */
-export const connectionOverridesSchema = z.record(z.string(), z.string().min(1));
+export const connectionOverridesSchema = z.record(
+  z.string(),
+  z.array(z.string().min(1)).min(1).max(MAX_CONNECTIONS_PER_INTEGRATION),
+);
 
 /**
  * Per-dependency version overrides: `{ "@scope/dep": "draft" | "<spec>" }`.

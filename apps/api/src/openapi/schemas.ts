@@ -4,6 +4,7 @@ import { orgRoleEnum } from "@appstrate/db/schema";
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
 import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 
 const ORG_ROLES = [...orgRoleEnum.enumValues];
 
@@ -145,8 +146,9 @@ export const schemas = {
           properties: {
             id: { type: "string" },
             label: {
-              type: ["string", "null"],
-              description: "User-given name; `null` when the connection was never labelled.",
+              type: "string",
+              description:
+                "User-given name. Always present — the column is NOT NULL, because a run binding several connections addresses each by its label.",
             },
             account_id: {
               type: "string",
@@ -160,7 +162,7 @@ export const schemas = {
           },
         },
         description:
-          "Populated on `must_choose_connection`. The connections the caller may pick from, each carrying the fields that tell them apart; pass one `id` back via the request body's `connection_overrides` map to retry the run.",
+          "Populated on `must_choose_connection` — the connections the caller may pick from, each carrying the fields that tell them apart; pass their `id`s back as the request body's `connection_overrides` array for that integration to retry the run. Populated on `duplicate_connection_label` too, where it names the bound connections that share a label: the remedy is renaming one of them (`PATCH /api/integrations/{packageId}/connections/{connectionId}`), not re-picking.",
       },
       connection_id: {
         type: "string",
@@ -1264,8 +1266,13 @@ export const schemas = {
       connection_overrides: {
         type: ["object", "null"],
         description:
-          'Per-integration connection picks for this run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (#1).',
-        additionalProperties: { type: "string" },
+          'Per-integration connection picks for this run (flat-connections mechanism #2). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration; each chosen connection carries its own authKey. Loses to admin pins (#1).',
+        additionalProperties: {
+          type: "array",
+          items: { type: "string" },
+          minItems: 1,
+          maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+        },
       },
       dependency_overrides: {
         type: ["object", "null"],
@@ -1276,12 +1283,15 @@ export const schemas = {
       connections_used: {
         type: ["array", "null"],
         description:
-          "Connections resolved for this run, projected from the internal snapshot for display. Null when the agent declares no integrations.",
+          "Connections resolved for this run, projected from the internal snapshot for display — one entry per BOUND connection, so an integration bound to several contributes several entries sharing an `integration_id`. Null when the agent declares no integrations.",
         items: {
           type: "object",
           required: ["integration_id", "label", "account_id", "source"],
           properties: {
             integration_id: { type: "string" },
+            // Nullable although the column is NOT NULL: this is a kickoff-time
+            // audit copy, and snapshots taken before the denormalisation carry
+            // none.
             label: { type: ["string", "null"] },
             account_id: { type: ["string", "null"] },
             source: { type: "string" },
@@ -1372,8 +1382,13 @@ export const schemas = {
       connection_overrides: {
         type: ["object", "null"],
         description:
-          'Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Flat map: `{ "@scope/integration": "<connection_id>" }`. Replayed on every fire; loses to admin pins (#1), beats actor-fallback (#4).',
-        additionalProperties: { type: "string" },
+          'Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..10 per integration. Replayed on every fire; loses to admin pins (#1), beats actor-fallback (#4).',
+        additionalProperties: {
+          type: "array",
+          items: { type: "string" },
+          minItems: 1,
+          maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+        },
       },
       dependency_overrides: {
         type: ["object", "null"],
@@ -1797,12 +1812,12 @@ export const schemas = {
       "Per-integration connection verdict for an agent: which connection the next run uses (admin pin → run/schedule override → member pin → fallback + scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses.",
     required: [
       "status",
-      "resolved_connection_id",
+      "resolved_connection_ids",
       "resolved_missing_scopes",
       "resolved_owned_by_actor",
-      "admin_pinned_connection_id",
-      "member_pinned_connection_id",
-      "org_default_connection_id",
+      "admin_pinned_connection_ids",
+      "member_pinned_connection_ids",
+      "org_default_connection_ids",
       "org_default_enforced",
       "can_add_connection",
       "candidates",
@@ -1815,17 +1830,34 @@ export const schemas = {
           "pinned",
           "auto",
           "must_choose",
+          "duplicate_label",
           "none",
           "stale",
           "needs_reconnection",
         ],
       },
-      resolved_connection_id: { type: ["string", "null"] },
+      resolved_connection_ids: {
+        type: "array",
+        items: { type: "string" },
+        maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+      },
       resolved_missing_scopes: { type: "array", items: { type: "string" } },
       resolved_owned_by_actor: { type: "boolean" },
-      admin_pinned_connection_id: { type: ["string", "null"] },
-      member_pinned_connection_id: { type: ["string", "null"] },
-      org_default_connection_id: { type: ["string", "null"] },
+      admin_pinned_connection_ids: {
+        type: "array",
+        items: { type: "string" },
+        maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+      },
+      member_pinned_connection_ids: {
+        type: "array",
+        items: { type: "string" },
+        maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+      },
+      org_default_connection_ids: {
+        type: "array",
+        items: { type: "string" },
+        maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+      },
       org_default_enforced: { type: "boolean" },
       can_add_connection: { type: "boolean" },
       candidates: {
@@ -1959,7 +1991,7 @@ export const schemas = {
       "packageId",
       "integration_package_id",
       "auth_key",
-      "connection_id",
+      "connection_ids",
       "createdAt",
       "updatedAt",
     ],
@@ -1967,7 +1999,12 @@ export const schemas = {
       packageId: { type: "string" },
       integration_package_id: { type: "string" },
       auth_key: { type: "string" },
-      connection_id: { type: "string", format: "uuid" },
+      connection_ids: {
+        type: "array",
+        items: { type: "string", format: "uuid" },
+        minItems: 1,
+        maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+      },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },

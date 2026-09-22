@@ -149,8 +149,10 @@ export interface RunWireDto {
 
 /**
  * One integration connection resolved for a run, projected from the internal
- * `runs.resolved_connections` snapshot for display. The raw `connectionId` is
- * deliberately omitted — only display-safe fields cross the wire.
+ * `runs.resolved_connections` snapshot for display — one entry per BOUND
+ * connection, so an integration bound to several contributes several entries
+ * sharing an `integration_id`. The raw `connectionId` is deliberately omitted
+ * — only display-safe fields cross the wire.
  */
 export interface RunConnectionUsed {
   /** Integration package id (`@scope/integration`). */
@@ -338,7 +340,7 @@ export interface ScheduleWireDto {
   model_id_override: string | null;
   proxy_id_override: string | null;
   version_override: string | null;
-  connection_overrides: Record<string, string> | null;
+  connection_overrides: Record<string, string[]> | null;
   dependency_overrides: Record<string, string> | null;
   last_run_at: string | null;
   next_run_at: string | null;

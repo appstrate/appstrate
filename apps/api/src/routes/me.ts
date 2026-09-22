@@ -62,6 +62,7 @@ import {
   readIntegrationAuth,
 } from "../services/integration-connections.ts";
 import { handoffStepsFor } from "../services/connect/provisioning.ts";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { logger } from "../lib/logger.ts";
 import { listRunnableAgents, listActiveSkills } from "../services/space-packages.ts";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
@@ -201,14 +202,18 @@ router.get("/connections", async (c) => {
  * `/api/me/integration-pins` — member-self pin CRUD.
  *
  * The persisted replacement for the R5 localStorage pick: when an agent
- * has >1 candidate connection on a required (integration, authKey) and
- * the member picks one, the choice is stored here and read by the
- * resolver on every subsequent run (cascade layer 4).
+ * has >1 candidate connection on a required integration and the member picks
+ * one or more, the choice is stored here and read by the resolver on every
+ * subsequent run (cascade layer 5).
+ *
+ * `PUT` carries the WHOLE set and replaces it; `DELETE` clears it. There is
+ * no add/remove endpoint — a partial write is a different pin from the one
+ * the member asked for.
  *
  * Member-only (no end-user surface — end-users are addressed via API key
  * impersonation and the calling member controls the choice via run
  * overrides). All routes require `X-Space-Id`; the pin is scoped
- * to (member, space, agent, integration, authKey).
+ * to (member, space, agent, integration).
  *
  * Admin pins live under `/api/integrations/:packageId/pins/...` and use
  * a different validation rule (the connection must be `sharedWithOrg`);
@@ -218,7 +223,7 @@ export const upsertMemberPinSchema = z
   .object({
     agent_package_id: z.string().min(1),
     integration_package_id: z.string().min(1),
-    connection_id: z.uuid(),
+    connection_ids: z.array(z.uuid()).min(1).max(MAX_CONNECTIONS_PER_INTEGRATION),
   })
   .strict();
 
@@ -254,14 +259,14 @@ router.put("/integration-pins", requireSpaceContext(), async (c) => {
   const result = await upsertMemberPin(scope, {
     agentPackageId: input.agent_package_id,
     integrationId: input.integration_package_id,
-    connectionId: input.connection_id,
+    connectionIds: input.connection_ids,
     userId: user.id,
   });
   await recordAuditFromContext(c, {
     action: "integration.member_pin.upserted",
     resourceType: "integration_pin",
     resourceId: `${input.agent_package_id}|${input.integration_package_id}`,
-    after: { connectionId: input.connection_id },
+    after: { connectionIds: input.connection_ids },
   });
   return c.json(result);
 });

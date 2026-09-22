@@ -1204,13 +1204,15 @@ export type ConnectionResolutionErrorCode =
  * and a human reading a log learns nothing at all. The resolver already holds
  * the rows, so denormalizing the three distinguishing fields costs no query.
  *
- * `label` is user-given and may be null; `accountId` is the connect flow's own
- * discriminator and is always set, so the pair always identifies the account.
+ * Both fields are always set — `label` because `integration_connections.label`
+ * is NOT NULL and a candidate is read from a live row, `accountId` because it
+ * is the connect flow's own discriminator — so the pair always identifies the
+ * account.
  */
 export interface ConnectionCandidate {
   id: string;
-  /** User-given name, `null` when the connection was never labelled. */
-  label: string | null;
+  /** User-given name, minted at creation and never empty. */
+  label: string;
   /** The auth's account discriminator (`sub` claim, email, host…). */
   accountId: string;
   /** True when the row is the calling actor's own, false when inherited via org sharing. */

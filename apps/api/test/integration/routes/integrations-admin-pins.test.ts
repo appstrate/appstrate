@@ -46,6 +46,7 @@ import {
   localIntegrationManifest,
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 
 const app = getTestApp();
 
@@ -103,6 +104,7 @@ describe("/api/integrations/:packageId admin surface", () => {
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
         scopesGranted: [],
         sharedWithOrg: true,
+        label: `Partagée ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -121,6 +123,7 @@ describe("/api/integrations/:packageId admin surface", () => {
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
         scopesGranted: [],
         sharedWithOrg: false,
+        label: `Perso ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -156,12 +159,12 @@ describe("/api/integrations/:packageId admin surface", () => {
 
   interface AgentResolutionDTO {
     status: string;
-    resolved_connection_id: string | null;
+    resolved_connection_ids: string[];
     resolved_missing_scopes: string[];
     resolved_owned_by_actor: boolean;
-    admin_pinned_connection_id: string | null;
-    member_pinned_connection_id: string | null;
-    org_default_connection_id: string | null;
+    admin_pinned_connection_ids: string[];
+    member_pinned_connection_ids: string[];
+    org_default_connection_ids: string[];
     org_default_enforced: boolean;
     can_add_connection: boolean;
     candidates: Array<{ id: string; is_own: boolean; missing_scopes: string[] }>;
@@ -192,12 +195,12 @@ describe("/api/integrations/:packageId admin surface", () => {
 
       // Wire-shape contract — all fields present, snake_case.
       expect(body).toHaveProperty("status");
-      expect(body).toHaveProperty("resolved_connection_id");
+      expect(body).toHaveProperty("resolved_connection_ids");
       expect(body).toHaveProperty("resolved_missing_scopes");
       expect(body).toHaveProperty("resolved_owned_by_actor");
-      expect(body).toHaveProperty("admin_pinned_connection_id");
-      expect(body).toHaveProperty("member_pinned_connection_id");
-      expect(body).toHaveProperty("org_default_connection_id");
+      expect(body).toHaveProperty("admin_pinned_connection_ids");
+      expect(body).toHaveProperty("member_pinned_connection_ids");
+      expect(body).toHaveProperty("org_default_connection_ids");
       expect(body).toHaveProperty("org_default_enforced");
       expect(body).toHaveProperty("can_add_connection");
       expect(Array.isArray(body.candidates)).toBe(true);
@@ -205,7 +208,7 @@ describe("/api/integrations/:packageId admin surface", () => {
       // With one private connection on the actor and no pin/default:
       // resolver picks it auto → status="auto", resolved=owned connection.
       expect(body.status).toBe("auto");
-      expect(body.resolved_connection_id).toBe(connId);
+      expect(body.resolved_connection_ids).toEqual([connId]);
       expect(body.resolved_owned_by_actor).toBe(true);
     });
 
@@ -251,7 +254,7 @@ describe("/api/integrations/:packageId admin surface", () => {
 
       const before = await getResolution(INERT_AGENT, INTEGRATION);
       expect(before.status).toBe("must_choose");
-      expect(before.resolved_connection_id).toBeNull();
+      expect(before.resolved_connection_ids).toEqual([]);
 
       // Member pins connection B via the same endpoint the picker calls.
       const pinRes = await app.request("/api/me/integration-pins", {
@@ -260,7 +263,7 @@ describe("/api/integrations/:packageId admin surface", () => {
         body: JSON.stringify({
           agent_package_id: INERT_AGENT,
           integration_package_id: INTEGRATION,
-          connection_id: connB,
+          connection_ids: [connB],
         }),
       });
       expect(pinRes.status).toBe(200);
@@ -268,8 +271,8 @@ describe("/api/integrations/:packageId admin surface", () => {
       const after = await getResolution(INERT_AGENT, INTEGRATION);
       // The pin must now drive the verdict — not must_choose.
       expect(after.status).toBe("pinned");
-      expect(after.resolved_connection_id).toBe(connB);
-      expect(after.member_pinned_connection_id).toBe(connB);
+      expect(after.resolved_connection_ids).toEqual([connB]);
+      expect(after.member_pinned_connection_ids).toEqual([connB]);
       expect(connA).not.toBe(connB);
     });
   });
@@ -283,13 +286,70 @@ describe("/api/integrations/:packageId admin surface", () => {
       const res = await app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ connection_id: connId }),
+        body: JSON.stringify({ connection_ids: [connId] }),
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { connection_id: string };
+      const body = (await res.json()) as { connection_ids: string[] };
       // Wire shape uses snake_case (IntegrationPin DTO).
-      expect(body.connection_id).toBe(connId);
+      expect(body.connection_ids).toEqual([connId]);
+    });
+
+    it("ALLOW: admin pins a SET of connections, and the readiness reports all of them", async () => {
+      const connA = await seedSharedConnection();
+      const connB = await seedSharedConnection();
+
+      const res = await app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ connection_ids: [connA, connB] }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { connection_ids: string[] };
+      expect([...body.connection_ids].sort()).toEqual([connA, connB].sort());
+
+      const resolution = await getResolution(AGENT, INTEGRATION);
+      expect([...resolution.admin_pinned_connection_ids].sort()).toEqual([connA, connB].sort());
+    });
+
+    it("ALLOW: a second PUT REPLACES the set rather than merging into it", async () => {
+      const connA = await seedSharedConnection();
+      const connB = await seedSharedConnection();
+      const put = (ids: string[]) =>
+        app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
+          method: "PUT",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({ connection_ids: ids }),
+        });
+
+      await put([connA, connB]);
+      const res = await put([connA]);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { connection_ids: string[] };
+      expect(body.connection_ids).toEqual([connA]);
+
+      const resolution = await getResolution(AGENT, INTEGRATION);
+      expect(resolution.admin_pinned_connection_ids).toEqual([connA]);
+    });
+
+    it("DENY: 400 on an empty set, a repeated id, and a set over the cap", async () => {
+      const connId = await seedSharedConnection();
+      const put = (ids: string[]) =>
+        app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
+          method: "PUT",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({ connection_ids: ids }),
+        });
+
+      expect((await put([])).status).toBe(400);
+      expect((await put([connId, connId])).status).toBe(400);
+      const over = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION + 1 }, () =>
+        crypto.randomUUID(),
+      );
+      expect((await put(over)).status).toBe(400);
+      // Control: the singleton the other cases degenerate from still lands.
+      expect((await put([connId])).status).toBe(200);
     });
 
     it("DENY: 400 when body uses camelCase keys (snake_case wire contract)", async () => {
@@ -298,7 +358,7 @@ describe("/api/integrations/:packageId admin surface", () => {
       const res = await app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ connectionId: connId }),
+        body: JSON.stringify({ connectionIds: [connId] }),
       });
 
       expect(res.status).toBe(400);
@@ -323,7 +383,7 @@ describe("/api/integrations/:packageId admin surface", () => {
           "X-Space-Id": ctx.defaultSpaceId,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ connection_id: connId }),
+        body: JSON.stringify({ connection_ids: [connId] }),
       });
 
       // A member's space preset (`operator`) does not hold
@@ -335,7 +395,7 @@ describe("/api/integrations/:packageId admin surface", () => {
       const res = await app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ connection_id: "00000000-0000-0000-0000-000000000000" }),
+        body: JSON.stringify({ connection_ids: ["00000000-0000-0000-0000-000000000000"] }),
       });
       expect(res.status).toBe(401);
     });
@@ -350,7 +410,7 @@ describe("/api/integrations/:packageId admin surface", () => {
       await app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ connection_id: connId }),
+        body: JSON.stringify({ connection_ids: [connId] }),
       });
 
       const res = await app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
@@ -410,7 +470,7 @@ describe("/api/integrations/:packageId admin surface", () => {
         await app.request(`/api/integrations/${INTEGRATION}/pins/${id}`, {
           method: "PUT",
           headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-          body: JSON.stringify({ connection_id: connId }),
+          body: JSON.stringify({ connection_ids: [connId] }),
         });
       }
 
@@ -420,7 +480,7 @@ describe("/api/integrations/:packageId admin surface", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        data: Array<{ packageId: string; connection_id: string }>;
+        data: Array<{ packageId: string; connection_ids: string[] }>;
       };
       expect(body.data).toHaveLength(2);
       const agentIds = new Set(body.data.map((p) => p.packageId));

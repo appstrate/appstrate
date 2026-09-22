@@ -106,7 +106,10 @@ import {
   CLIENT_SECRET_REQUIRED_MESSAGE,
   PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
 } from "../services/integration-manifest-helpers.ts";
-import { partitionScopesByAuthCatalog } from "@appstrate/core/integration";
+import {
+  partitionScopesByAuthCatalog,
+  MAX_CONNECTIONS_PER_INTEGRATION,
+} from "@appstrate/core/integration";
 import {
   deleteIntegrationPin,
   listAgentsConsumingIntegration,
@@ -207,20 +210,22 @@ export const updateSettingsSchema = z
 
 export const setPinSchema = z
   .object({
-    connection_id: z.uuid(),
+    connection_ids: z.array(z.uuid()).min(1).max(MAX_CONNECTIONS_PER_INTEGRATION),
   })
   .strict();
 
 export const setOrgDefaultSchema = z
   .object({
-    connection_id: z.uuid(),
+    connection_ids: z.array(z.uuid()).min(1).max(MAX_CONNECTIONS_PER_INTEGRATION),
     enforce: z.boolean().default(false),
   })
   .strict();
 
 export const updateConnectionSchema = z
   .object({
-    label: z.string().max(80).nullable().optional(),
+    // A rename, never a clear — the column is NOT NULL and the sidecar keys
+    // its `connection` tool parameter on this value.
+    label: z.string().min(1).max(80).optional(),
     shared_with_org: z.boolean().optional(),
   })
   .strict()
@@ -1220,14 +1225,14 @@ export function createIntegrationsRouter() {
       const userId = c.get("user")?.id ?? null;
       const pin = await upsertIntegrationPin(scope, packageId, {
         agentPackageId,
-        connectionId: body.connection_id,
+        connectionIds: body.connection_ids,
         createdBy: userId,
       });
       await recordAuditFromContext(c, {
         action: "integration.pin.upserted",
         resourceType: "integration_pin",
         resourceId: `${packageId}#${agentPackageId}`,
-        after: { connectionId: pin.connection_id },
+        after: { connectionIds: pin.connection_ids },
       });
       return c.json(pin);
     },
@@ -1253,10 +1258,11 @@ export function createIntegrationsRouter() {
     },
   );
 
-  // ─── Org default connection (cross-agent governance) ─────────────────────
-  // One default connection per (space, integration) — the resolver
+  // ─── Org default connections (cross-agent governance) ────────────────────
+  // One default connection SET per (space, integration) — the resolver
   // baseline for every consuming agent (enforce → org-wide lock; soft →
-  // overridable by member pins). Admin-only.
+  // overridable by member pins). PUT replaces the set, DELETE clears it.
+  // Admin-only.
 
   router.get(
     "/:packageId{@[^/]+/[^/]+}/default",
@@ -1281,7 +1287,7 @@ export function createIntegrationsRouter() {
       const body = await readJsonBody(c, setOrgDefaultSchema);
       const userId = c.get("user")?.id ?? null;
       const def = await upsertOrgDefault(scope, packageId, {
-        connectionId: body.connection_id,
+        connectionIds: body.connection_ids,
         enforce: body.enforce,
         createdBy: userId,
       });
@@ -1289,7 +1295,7 @@ export function createIntegrationsRouter() {
         action: "integration.org_default.upserted",
         resourceType: "integration_org_default",
         resourceId: packageId,
-        after: { connectionId: def.connection_id, enforce: def.enforce },
+        after: { connectionIds: def.connection_ids, enforce: def.enforce },
       });
       return c.json(def);
     },

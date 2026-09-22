@@ -366,17 +366,18 @@ describe("Schedules API", () => {
     });
   });
 
-  describe("connection_overrides shape (flat per-integration map)", () => {
+  describe("connection_overrides shape (per-integration connection SETS)", () => {
     // Regression guard for the schedule half of the connection-renewal flow.
-    // The wire shape is a FLAT `Record<integrationId, connectionId>` matching
-    // the run route — `routes/schedules.ts` validates it with
-    // `z.record(z.string(), z.string())`. The frontend previously sent the
-    // nested `Record<int, Record<authKey, conn>>` shape, which 400'd. These
-    // tests pin both directions so a revert to the nested schema fails CI.
-    // Connection ids need not resolve to real rows: the route validates the
-    // shape only and freezes the map; resolution happens at fire time.
+    // The wire shape is `Record<integrationId, connectionId[]>` matching the
+    // run route — `connectionOverridesSchema` in `lib/launch-schemas.ts`. Two
+    // shapes 400 here and both used to be sent by something: the nested
+    // `Record<int, Record<authKey, conn>>` an old frontend sent, and the bare
+    // string a pre-multi-connection caller sends. These tests pin all of them
+    // so a revert fails CI. Connection ids need not resolve to real rows: the
+    // route validates the shape only and freezes the map; resolution happens
+    // at fire time.
 
-    it("accepts a flat connection_overrides map on create and round-trips it", async () => {
+    it("accepts a connection_overrides map of sets on create and round-trips it", async () => {
       const fid = agentId("co-create");
       await seedAgent({
         id: fid,
@@ -386,7 +387,7 @@ describe("Schedules API", () => {
       });
       await publish(fid);
 
-      const overrides = { "@runorg/svc": "conn_abc123" };
+      const overrides = { "@runorg/svc": ["conn_abc123", "conn_def456"] };
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -424,7 +425,51 @@ describe("Schedules API", () => {
       expect(res.status).toBe(400);
     });
 
-    it("updates connection_overrides via PUT and round-trips the flat map", async () => {
+    it("rejects a BARE connection id (the retired single-connection shape) with 400", async () => {
+      const fid = agentId("co-bare");
+      await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      await publish(fid);
+
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cron_expression: "0 9 * * 1-5",
+          connection_overrides: { "@runorg/svc": "conn_abc123" },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects an EMPTY set with 400 — it would be skipped in silence at every fire", async () => {
+      const fid = agentId("co-empty");
+      await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      await publish(fid);
+
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cron_expression: "0 9 * * 1-5",
+          connection_overrides: { "@runorg/svc": [] },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("updates connection_overrides via PUT and round-trips the map of sets", async () => {
       const fid = agentId("co-update");
       const agent = await seedAgent({
         id: fid,
@@ -442,7 +487,7 @@ describe("Schedules API", () => {
         name: "co-sched",
       });
 
-      const overrides = { "@runorg/svc": "conn_xyz789" };
+      const overrides = { "@runorg/svc": ["conn_xyz789"] };
       const res = await app.request(`/api/schedules/${schedule.id}`, {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -698,7 +743,7 @@ describe("Schedules API", () => {
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         cronExpression: "0 * * * *",
-        connectionOverrides: { "@acme/slack": "conn_keep" },
+        connectionOverrides: { "@acme/slack": ["conn_keep"] },
       });
 
       const res = await app.request(`/api/schedules/${schedule.id}`, {
@@ -711,7 +756,7 @@ describe("Schedules API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.userId).toBe(ctx.user.id);
-      expect(body.connection_overrides).toEqual({ "@acme/slack": "conn_keep" });
+      expect(body.connection_overrides).toEqual({ "@acme/slack": ["conn_keep"] });
     });
 
     it("rejects both user_id and end_user_id together", async () => {
@@ -748,7 +793,7 @@ describe("Schedules API", () => {
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         cronExpression: "0 * * * *",
-        connectionOverrides: { "@acme/slack": "conn_old" },
+        connectionOverrides: { "@acme/slack": ["conn_old"] },
       });
 
       const res = await app.request(`/api/schedules/${schedule.id}`, {

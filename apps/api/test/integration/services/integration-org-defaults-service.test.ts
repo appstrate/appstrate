@@ -24,6 +24,7 @@ import {
   deleteOrgDefault,
 } from "../../../src/services/integration-org-defaults-service.ts";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 
 const INTEGRATION_ID = "@official/gmail";
 
@@ -64,7 +65,10 @@ describe("integration-org-defaults-service", () => {
   });
 
   /** Seed a sharedWithOrg connection (the only valid org-default target). */
-  async function seedSharedConnection(spaceId = ctx.defaultSpaceId): Promise<string> {
+  async function seedSharedConnection(
+    spaceId = ctx.defaultSpaceId,
+    label: string | null = null,
+  ): Promise<string> {
     const [row] = await db
       .insert(integrationConnections)
       .values({
@@ -76,6 +80,7 @@ describe("integration-org-defaults-service", () => {
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
         scopesGranted: [],
         sharedWithOrg: true,
+        label: label ?? `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -86,24 +91,24 @@ describe("integration-org-defaults-service", () => {
 
     // upsert
     const created = await upsertOrgDefault(scope, INTEGRATION_ID, {
-      connectionId: connId,
+      connectionIds: [connId],
       enforce: true,
       createdBy: ctx.user.id,
     });
-    expect(created.connection_id).toBe(connId);
+    expect(created.connection_ids).toEqual([connId]);
     expect(created.enforce).toBe(true);
     expect(created.auth_key).toBe("primary");
 
     // get
     const fetched = await getOrgDefault(scope, INTEGRATION_ID);
     expect(fetched).not.toBeNull();
-    expect(fetched!.connection_id).toBe(connId);
+    expect(fetched!.connection_ids).toEqual([connId]);
     expect(fetched!.enforce).toBe(true);
     expect(fetched!.auth_key).toBe("primary");
 
     // listOrgDefaultsForResolver shape
     const resolverMap = await listOrgDefaultsForResolver(ctx.defaultSpaceId);
-    expect(resolverMap[INTEGRATION_ID]).toEqual({ connectionId: connId, enforce: true });
+    expect(resolverMap[INTEGRATION_ID]).toEqual({ connectionIds: [connId], enforce: true });
 
     // delete
     const del = await deleteOrgDefault(scope, INTEGRATION_ID);
@@ -120,21 +125,79 @@ describe("integration-org-defaults-service", () => {
     const connB = await seedSharedConnection();
 
     await upsertOrgDefault(scope, INTEGRATION_ID, {
-      connectionId: connA,
+      connectionIds: [connA],
       enforce: false,
       createdBy: ctx.user.id,
     });
     const replaced = await upsertOrgDefault(scope, INTEGRATION_ID, {
-      connectionId: connB,
+      connectionIds: [connB],
       enforce: true,
       createdBy: ctx.user.id,
     });
-    expect(replaced.connection_id).toBe(connB);
+    expect(replaced.connection_ids).toEqual([connB]);
     expect(replaced.enforce).toBe(true);
 
     const fetched = await getOrgDefault(scope, INTEGRATION_ID);
-    expect(fetched!.connection_id).toBe(connB);
+    expect(fetched!.connection_ids).toEqual([connB]);
     expect(fetched!.enforce).toBe(true);
+  });
+
+  it("a default is a SET: N connections, one shared `enforce`, replaced wholesale", async () => {
+    const a = await seedSharedConnection(ctx.defaultSpaceId, "a");
+    const b = await seedSharedConnection(ctx.defaultSpaceId, "b");
+    const c = await seedSharedConnection(ctx.defaultSpaceId, "c");
+    const expected = [a, b, c].sort();
+
+    const created = await upsertOrgDefault(scope, INTEGRATION_ID, {
+      connectionIds: [a, b, c],
+      enforce: true,
+      createdBy: ctx.user.id,
+    });
+    expect(created.connection_ids).toEqual(expected);
+    expect(await listOrgDefaultsForResolver(ctx.defaultSpaceId)).toEqual({
+      [INTEGRATION_ID]: { connectionIds: expected, enforce: true },
+    });
+
+    // Replacement, not a merge: the two dropped members leave no row behind.
+    await upsertOrgDefault(scope, INTEGRATION_ID, {
+      connectionIds: [c],
+      enforce: false,
+      createdBy: ctx.user.id,
+    });
+    const fetched = await getOrgDefault(scope, INTEGRATION_ID);
+    expect(fetched!.connection_ids).toEqual([c]);
+    expect(fetched!.enforce).toBe(false);
+  });
+
+  it("refuses more than the cap and refuses a repeated id, changing nothing", async () => {
+    const ids: string[] = [];
+    for (let i = 0; i <= MAX_CONNECTIONS_PER_INTEGRATION; i += 1) {
+      ids.push(await seedSharedConnection(ctx.defaultSpaceId, `c${i}`));
+    }
+    await expect(
+      upsertOrgDefault(scope, INTEGRATION_ID, {
+        connectionIds: ids,
+        enforce: false,
+        createdBy: ctx.user.id,
+      }),
+    ).rejects.toThrow(new RegExp(`between 1 and ${MAX_CONNECTIONS_PER_INTEGRATION}`));
+    await expect(
+      upsertOrgDefault(scope, INTEGRATION_ID, {
+        connectionIds: [ids[0]!, ids[0]!],
+        enforce: false,
+        createdBy: ctx.user.id,
+      }),
+    ).rejects.toThrow(/must not repeat/);
+    expect(await getOrgDefault(scope, INTEGRATION_ID)).toBeNull();
+
+    // Control: exactly the cap is accepted.
+    const capped = ids.slice(0, MAX_CONNECTIONS_PER_INTEGRATION);
+    const ok = await upsertOrgDefault(scope, INTEGRATION_ID, {
+      connectionIds: capped,
+      enforce: false,
+      createdBy: ctx.user.id,
+    });
+    expect(ok.connection_ids).toHaveLength(MAX_CONNECTIONS_PER_INTEGRATION);
   });
 
   it("getOrgDefault returns null when no default is set", async () => {
@@ -145,7 +208,7 @@ describe("integration-org-defaults-service", () => {
   it("org isolation: one org cannot read another org's default", async () => {
     const connId = await seedSharedConnection();
     await upsertOrgDefault(scope, INTEGRATION_ID, {
-      connectionId: connId,
+      connectionIds: [connId],
       enforce: true,
       createdBy: ctx.user.id,
     });

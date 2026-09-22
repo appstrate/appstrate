@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 
 /**
  * User-scoped identity routes (`/api/me/*`).
@@ -200,7 +201,7 @@ export const mePaths = {
       tags: ["Profile"],
       summary: "List the caller's member-scope integration pins for an agent",
       description:
-        "Returns the caller's own (integration, authKey) → connectionId pins for the " +
+        "Returns the caller's own integration → connection-set pins for the " +
         "given agent. Used by the agent-page picker to render the collapsed default " +
         "row. Member-only; end-user callers receive an empty list. Requires " +
         "`X-Space-Id`.",
@@ -232,14 +233,19 @@ export const mePaths = {
                   data: {
                     type: "array",
                     // `listMemberPinsForAgent` projects to exactly these two
-                    // fields (NOT the 6-field IntegrationPin the PUT route's
-                    // `toPinSummary` emits) — keep the list item minimal.
+                    // fields (NOT the 6-field IntegrationPin the PUT route
+                    // emits) — keep the list item minimal.
                     items: {
                       type: "object",
-                      required: ["integration_package_id", "connection_id"],
+                      required: ["integration_package_id", "connection_ids"],
                       properties: {
                         integration_package_id: { type: "string" },
-                        connection_id: { type: "string", format: "uuid" },
+                        connection_ids: {
+                          type: "array",
+                          items: { type: "string", format: "uuid" },
+                          minItems: 1,
+                          maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+                        },
                       },
                     },
                   },
@@ -257,12 +263,13 @@ export const mePaths = {
     put: {
       operationId: "upsertMyIntegrationPin",
       tags: ["Profile"],
-      summary: "Pin a connection for the caller's runs of an agent",
+      summary: "Pin connections for the caller's runs of an agent",
       description:
-        "Persists the caller's preference for a (integration, authKey) on this agent. " +
-        "Sits at cascade layer 4 — wins over the fallback ambiguity but loses to admin " +
+        "Persists the caller's preference for an integration on this agent. " +
+        "Sits at cascade layer 5 — wins over the fallback ambiguity but loses to admin " +
         "pins / run / schedule overrides. Replaces the previous R5 localStorage pick. " +
-        "Idempotent — repeated calls update the row in place.",
+        "The body carries the WHOLE set and this write replaces it; `DELETE` clears it. " +
+        "Idempotent — repeated calls rewrite the same set.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -273,11 +280,16 @@ export const mePaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["agent_package_id", "integration_package_id", "connection_id"],
+              required: ["agent_package_id", "integration_package_id", "connection_ids"],
               properties: {
                 agent_package_id: { type: "string", minLength: 1 },
                 integration_package_id: { type: "string", minLength: 1 },
-                connection_id: { type: "string", format: "uuid" },
+                connection_ids: {
+                  type: "array",
+                  items: { type: "string", format: "uuid" },
+                  minItems: 1,
+                  maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+                },
               },
               additionalProperties: false,
             },

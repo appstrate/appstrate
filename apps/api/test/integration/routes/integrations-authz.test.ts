@@ -488,6 +488,7 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
         credentialsEncrypted: "x",
         scopesGranted: ["openid", "email"],
         sharedWithOrg: opts.shared ?? false,
+        label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -614,6 +615,7 @@ describe("integrations:configure is never grantable to an API key", () => {
         credentialsEncrypted: "x",
         scopesGranted: ["openid", "email"],
         sharedWithOrg: true,
+        label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -637,7 +639,7 @@ describe("integrations:configure is never grantable to an API key", () => {
     const res = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ connection_id: connId }),
+      body: JSON.stringify({ connection_ids: [connId] }),
     });
     expect(res.status).toBe(403);
   });
@@ -650,11 +652,11 @@ describe("integrations:configure is never grantable to an API key", () => {
     const res = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ connection_id: connId }),
+      body: JSON.stringify({ connection_ids: [connId] }),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { connection_id: string };
-    expect(body.connection_id).toBe(connId);
+    const body = (await res.json()) as { connection_ids: string[] };
+    expect(body.connection_ids).toEqual([connId]);
   });
 
   it("validateScopes refuses integrations:configure at mint time, for an owner", async () => {
@@ -800,7 +802,7 @@ describe("integrations:configure is never grantable to an API key", () => {
     const res = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ connection_id: connId }),
+      body: JSON.stringify({ connection_ids: [connId] }),
     });
     expect(res.status).toBe(403);
   });
@@ -841,6 +843,7 @@ describe("connect/oauth2 reconnect scope-union (incremental consent)", () => {
         credentialsEncrypted: "x",
         scopesGranted: ["openid", "email", "https://www.googleapis.com/auth/gmail.readonly"],
         sharedWithOrg: false,
+        label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
     const connId = row!.id;

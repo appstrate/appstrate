@@ -29,8 +29,10 @@ import {
   listAccessibleConnections,
   listAgentsConsumingIntegration,
   loadConnectionOwnership,
+  listIntegrationPins,
   upsertIntegrationPin,
 } from "../../../src/services/integration-pins-service.ts";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 
 const INTEGRATION = "@official/gmail";
 const OTHER_INTEGRATION = "@official/clickup";
@@ -57,7 +59,7 @@ async function seedConnection(opts: {
       credentialsEncrypted: "x",
       scopesGranted: ["openid", "email"],
       sharedWithOrg: opts.sharedWithOrg ?? false,
-      label: opts.label ?? null,
+      label: opts.label ?? `Connexion ${crypto.randomUUID().slice(0, 8)}`,
     })
     .returning({ id: integrationConnections.id });
   return row!.id;
@@ -264,7 +266,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       await expect(
         upsertIntegrationPin(scope, INTEGRATION, {
           agentPackageId: "@pinsorg/pin-off",
-          connectionId,
+          connectionIds: [connectionId],
           createdBy: ctx.user.id,
         }),
       ).rejects.toThrow(/not active in this space/i);
@@ -273,10 +275,135 @@ describe("integration-pins-service — DB access/ownership", () => {
       await seedSpacePackage(scope.spaceId, "@pinsorg/pin-off", { enabled: true });
       const pin = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: "@pinsorg/pin-off",
-        connectionId,
+        connectionIds: [connectionId],
         createdBy: ctx.user.id,
       });
-      expect(pin.connection_id).toBe(connectionId);
+      expect(pin.connection_ids).toEqual([connectionId]);
+    });
+  });
+
+  describe("pin sets", () => {
+    const AGENT = "@pinsorg/set-agent";
+
+    async function seedSharedConnections(n: number): Promise<string[]> {
+      const ids: string[] = [];
+      for (let i = 0; i < n; i += 1) {
+        ids.push(
+          await seedConnection({
+            spaceId: scope.spaceId,
+            userId: memberId,
+            sharedWithOrg: true,
+            label: `conn-${i}`,
+          }),
+        );
+      }
+      return ids.sort();
+    }
+
+    beforeEach(async () => {
+      await seedPackage({
+        id: AGENT,
+        orgId: ctx.orgId,
+        type: "agent",
+        homeSpaceId: scope.spaceId,
+        draftManifest: {
+          type: "agent",
+          schema_version: "0.1",
+          name: AGENT,
+          version: "1.0.0",
+          display_name: "Set agent",
+          prompt: "x",
+          dependencies: { integrations: { [INTEGRATION]: "^1.0.0" } },
+        },
+      });
+      await seedSpacePackage(scope.spaceId, AGENT, { enabled: true });
+    });
+
+    it("pins N connections as N rows folded into one summary", async () => {
+      const ids = await seedSharedConnections(3);
+      const pin = await upsertIntegrationPin(scope, INTEGRATION, {
+        agentPackageId: AGENT,
+        connectionIds: ids,
+        createdBy: ctx.user.id,
+      });
+      expect(pin.connection_ids).toEqual(ids);
+
+      const listed = await listIntegrationPins(scope, INTEGRATION);
+      expect(listed).toHaveLength(1);
+      expect(listed[0]!.connection_ids).toEqual(ids);
+    });
+
+    it("a second write REPLACES the set — a dropped connection leaves no row", async () => {
+      const ids = await seedSharedConnections(3);
+      await upsertIntegrationPin(scope, INTEGRATION, {
+        agentPackageId: AGENT,
+        connectionIds: ids,
+        createdBy: ctx.user.id,
+      });
+      await upsertIntegrationPin(scope, INTEGRATION, {
+        agentPackageId: AGENT,
+        connectionIds: [ids[2]!],
+        createdBy: ctx.user.id,
+      });
+      const listed = await listIntegrationPins(scope, INTEGRATION);
+      expect(listed).toHaveLength(1);
+      expect(listed[0]!.connection_ids).toEqual([ids[2]!]);
+      expect(listed[0]!.connection_ids).not.toContain(ids[0]!);
+    });
+
+    it("refuses more than the cap, and accepts exactly the cap", async () => {
+      const ids = await seedSharedConnections(MAX_CONNECTIONS_PER_INTEGRATION + 1);
+      // The cap is on the SET, so the excess is one id over, not one label over.
+      await expect(
+        upsertIntegrationPin(scope, INTEGRATION, {
+          agentPackageId: AGENT,
+          connectionIds: ids,
+          createdBy: ctx.user.id,
+        }),
+      ).rejects.toThrow(new RegExp(`between 1 and ${MAX_CONNECTIONS_PER_INTEGRATION}`));
+
+      const capped = ids.slice(0, MAX_CONNECTIONS_PER_INTEGRATION);
+      const pin = await upsertIntegrationPin(scope, INTEGRATION, {
+        agentPackageId: AGENT,
+        connectionIds: capped,
+        createdBy: ctx.user.id,
+      });
+      expect(pin.connection_ids).toHaveLength(MAX_CONNECTIONS_PER_INTEGRATION);
+    });
+
+    it("refuses an empty set and a repeated id", async () => {
+      const ids = await seedSharedConnections(1);
+      await expect(
+        upsertIntegrationPin(scope, INTEGRATION, {
+          agentPackageId: AGENT,
+          connectionIds: [],
+          createdBy: ctx.user.id,
+        }),
+      ).rejects.toThrow(/between 1 and/);
+      await expect(
+        upsertIntegrationPin(scope, INTEGRATION, {
+          agentPackageId: AGENT,
+          connectionIds: [ids[0]!, ids[0]!],
+          createdBy: ctx.user.id,
+        }),
+      ).rejects.toThrow(/must not repeat/);
+    });
+
+    it("refuses the whole set when ONE member is not shared", async () => {
+      const [shared] = await seedSharedConnections(1);
+      const personal = await seedConnection({
+        spaceId: scope.spaceId,
+        userId: memberId,
+        sharedWithOrg: false,
+      });
+      await expect(
+        upsertIntegrationPin(scope, INTEGRATION, {
+          agentPackageId: AGENT,
+          connectionIds: [shared!, personal],
+          createdBy: ctx.user.id,
+        }),
+      ).rejects.toThrow(/sharedWithOrg/i);
+      expect(await listIntegrationPins(scope, INTEGRATION)).toEqual([]);
     });
   });
 

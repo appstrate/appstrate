@@ -1641,12 +1641,20 @@ describe("Runs API", () => {
         userId: ctx.user.id,
         status: "success",
         resolvedConnections: {
-          "@acme/gmail": {
-            connectionId: "11111111-1111-1111-1111-111111111111",
-            source: "member_pin",
-            label: "Gmail Boulot",
-            accountId: "dt@tractr.net",
-          },
+          "@acme/gmail": [
+            {
+              connectionId: "11111111-1111-1111-1111-111111111111",
+              source: "member_pin",
+              label: "Gmail Boulot",
+              accountId: "dt@tractr.net",
+            },
+            {
+              connectionId: "22222222-2222-2222-2222-222222222222",
+              source: "member_pin",
+              label: "Gmail Perso",
+              accountId: "dt@perso.net",
+            },
+          ],
         },
       });
 
@@ -1654,6 +1662,8 @@ describe("Runs API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
+      // One entry per BOUND connection — a single integration bound twice
+      // contributes two entries sharing an `integration_id`.
       expect(body.connections_used).toEqual([
         {
           integration_id: "@acme/gmail",
@@ -1661,10 +1671,19 @@ describe("Runs API", () => {
           account_id: "dt@tractr.net",
           source: "member_pin",
         },
+        {
+          integration_id: "@acme/gmail",
+          label: "Gmail Perso",
+          account_id: "dt@perso.net",
+          source: "member_pin",
+        },
       ]);
-      // The raw connection id is internal state and must not cross the wire.
+      // The raw connection ids are internal state and must not cross the wire.
       expect(JSON.stringify(body.connections_used)).not.toContain(
         "11111111-1111-1111-1111-111111111111",
+      );
+      expect(JSON.stringify(body.connections_used)).not.toContain(
+        "22222222-2222-2222-2222-222222222222",
       );
     });
 

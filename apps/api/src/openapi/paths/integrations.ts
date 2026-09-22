@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 
 /**
  * OpenAPI paths for the AFPS integration marketplace.
@@ -49,20 +50,19 @@ const agentPackageIdParam = {
   schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$" },
 } as const;
 
-// The org default is keyed by (space, integration) ONLY — a single row
-// per integration, NOT one per (integration, auth_key). The unique index in
-// `integrationOrgDefaults` and the `onConflictDoUpdate` in
-// `integration-org-defaults-service.ts:upsertOrgDefault` both target
-// [spaceId, integrationId], so PUT overwrites the one existing default
-// wholesale. `auth_key` below is a DERIVED read-only projection of the chosen
-// connection's own auth (joined from `integration_connections` at read time) —
-// it does NOT partition the default. Picking a connection of a different auth
-// type replaces the single default; it does not create a second, per-auth one.
+// The org default is keyed by (space, integration) ONLY — one SET per
+// integration, NOT one per (integration, auth_key). PUT replaces that set
+// wholesale in one transaction, so the N connections of a default share a
+// single `enforce` by construction. `auth_key` below is a DERIVED read-only
+// projection of the FIRST connection's own auth (joined from
+// `integration_connections` at read time) — it does NOT partition the default.
+// Picking connections of a different auth type replaces the set; it does not
+// create a second, per-auth one.
 const integrationOrgDefaultSchema = {
   type: "object",
   required: [
     "integration_package_id",
-    "connection_id",
+    "connection_ids",
     "auth_key",
     "enforce",
     "createdAt",
@@ -70,11 +70,16 @@ const integrationOrgDefaultSchema = {
   ],
   properties: {
     integration_package_id: { type: "string" },
-    connection_id: { type: "string", format: "uuid" },
+    connection_ids: {
+      type: "array",
+      items: { type: "string", format: "uuid" },
+      minItems: 1,
+      maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+    },
     auth_key: {
       type: "string",
       description:
-        "Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (space, integration) regardless of auth_key; this field just tells you which auth the current default connection uses.",
+        "Auth type of the default's FIRST connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default set per (space, integration) regardless of auth_key; a set may mix auths, and the per-connection auth is read from the connection list.",
     },
     enforce: { type: "boolean" },
     createdAt: { type: "string", format: "date-time" },
@@ -1106,7 +1111,13 @@ export const integrationsPaths = {
             schema: {
               type: "object",
               properties: {
-                label: { type: ["string", "null"], maxLength: 80 },
+                label: {
+                  type: "string",
+                  minLength: 1,
+                  maxLength: 80,
+                  description:
+                    "A rename. The label cannot be cleared: it is NOT NULL, and a run binding several connections of one integration addresses each by its label.",
+                },
                 shared_with_org: { type: "boolean" },
               },
               additionalProperties: false,
@@ -1281,8 +1292,17 @@ export const integrationsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["connection_id"],
-              properties: { connection_id: { type: "string", format: "uuid" } },
+              required: ["connection_ids"],
+              properties: {
+                connection_ids: {
+                  type: "array",
+                  items: { type: "string", format: "uuid" },
+                  minItems: 1,
+                  maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+                  description:
+                    "The WHOLE pinned set — this write replaces it. 1..10 connections of this integration, each `shared_with_org`.",
+                },
+              },
               additionalProperties: false,
             },
           },
@@ -1356,11 +1376,11 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Set the org-wide default connection for this integration (admin)",
       description:
-        "Upsert the single (space, integration) default. Keyed per-integration, " +
-        "NOT per-auth: this overwrites the one existing default wholesale (atomic " +
-        "onConflictDoUpdate on [spaceId, integrationId]). Selecting a connection " +
+        "Replace the (space, integration) default connection SET. Keyed per-integration, " +
+        "NOT per-auth: the body carries the WHOLE set and this write replaces it in one " +
+        "transaction, so the N rows share a single `enforce`. Selecting connections " +
         "of a different auth type replaces the current default rather than adding a " +
-        "second one. The response `auth_key` reflects the chosen connection's auth (derived).",
+        "second one. The response `auth_key` reflects the first connection's auth (derived).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1374,9 +1394,15 @@ export const integrationsPaths = {
               type: "object",
               // `enforce` carries a server-side default (`false`), so it is
               // optional on the wire — the `default` beside it said as much.
-              required: ["connection_id"],
+              required: ["connection_ids"],
               properties: {
-                connection_id: { type: "string", format: "uuid" },
+                connection_ids: {
+                  type: "array",
+                  items: { type: "string", format: "uuid" },
+                  minItems: 1,
+                  maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+                  description: "The WHOLE default set — this write replaces it.",
+                },
                 enforce: { type: "boolean", default: false },
               },
               additionalProperties: false,

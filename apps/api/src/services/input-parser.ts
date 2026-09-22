@@ -66,6 +66,7 @@ import { prefixedId } from "@appstrate/db/ids";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { isValidRange } from "@appstrate/core/semver";
+import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { extensionForMime } from "@appstrate/core/naming";
 import { isValidDistTag, isProtectedTag } from "@appstrate/core/dist-tags";
 import { streamRunFile, writeRunFilesManifest, deleteRunFiles } from "./run-workspace-storage.ts";
@@ -86,10 +87,11 @@ export interface ParsedInput {
    * Per-integration connection picks for THIS run (#199).
    * Wire field `connectionOverrides` on the request body; flows into the
    * resolver's mechanism #2 and is persisted on `runs.connection_overrides`.
-   * Flat shape: `{ "<integrationId>": "<connectionId>" }` — one connection
-   * per integration; the chosen connection carries its own authKey.
+   * Shape: `{ "<integrationId>": ["<connectionId>", ...] }` — 1..N
+   * connections per integration; each chosen connection carries its own
+   * authKey.
    */
-  connectionOverrides?: Record<string, string>;
+  connectionOverrides?: ConnectionOverrides;
   /**
    * Per-run dependency version overrides (#666). Wire field
    * `dependency_overrides`; flows into `buildAgentPackage` and is persisted
@@ -147,7 +149,7 @@ interface RunRequestBody {
   generation?: ModelGenerationSettings | undefined;
   /** Nullable on the inline surface only (`null` == "no override"). */
   proxyId?: string | null | undefined;
-  connection_overrides?: Record<string, string> | undefined;
+  connection_overrides?: ConnectionOverrides | undefined;
   dependency_overrides?: Record<string, string> | undefined;
 }
 

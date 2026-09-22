@@ -25,6 +25,7 @@ import { agentExecutionBlock } from "../lib/package-access.ts";
 import { resolveAndValidateScheduleInput } from "./input-resolution.ts";
 import { withoutLockedFields } from "@appstrate/core/input-resolution";
 import { getErrorMessage } from "@appstrate/core/errors";
+import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { getPackage, packageExists } from "./package-catalog.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
@@ -54,12 +55,12 @@ interface ScheduleJobData {
   proxyIdOverride?: string;
   versionOverride?: string;
   /**
-   * Frozen per-(integration, authKey) connection picks (#199 mechanism #3).
+   * Frozen per-integration connection picks (#199 mechanism #3).
    * Loaded from `package_schedules.connection_overrides`, propagated into
    * `runs.connection_overrides` at fire time so the snapshot stays in sync
    * with the scheduler's intent. Loses to admin pins.
    */
-  connectionOverrides?: Record<string, string>;
+  connectionOverrides?: ConnectionOverrides;
   /**
    * Frozen per-dependency version overrides (#666/#686). Loaded from
    * `package_schedules.dependency_overrides`, forwarded into
@@ -95,7 +96,7 @@ function toSchedule(row: typeof schedules.$inferSelect): ScheduleWireDto {
     model_id_override: row.modelIdOverride,
     proxy_id_override: row.proxyIdOverride,
     version_override: row.versionOverride,
-    connection_overrides: (row.connectionOverrides as Record<string, string> | null) ?? null,
+    connection_overrides: (row.connectionOverrides as ConnectionOverrides | null) ?? null,
     dependency_overrides: (row.dependencyOverrides as Record<string, string> | null) ?? null,
     last_run_at: row.lastRunAt ? row.lastRunAt.toISOString() : null,
     next_run_at: row.nextRunAt ? row.nextRunAt.toISOString() : null,
@@ -141,7 +142,7 @@ async function upsertScheduleJob(row: typeof schedules.$inferSelect): Promise<vo
     generationConfigOverride: row.generationConfigOverride ?? undefined,
     proxyIdOverride: row.proxyIdOverride ?? undefined,
     versionOverride: row.versionOverride ?? undefined,
-    connectionOverrides: (row.connectionOverrides as Record<string, string> | null) ?? undefined,
+    connectionOverrides: (row.connectionOverrides as ConnectionOverrides | null) ?? undefined,
     dependencyOverrides: (row.dependencyOverrides as Record<string, string> | null) ?? undefined,
   };
 
@@ -443,7 +444,7 @@ export async function triggerScheduledRun(
     generationConfigOverride?: ModelGenerationSettings;
     proxyIdOverride?: string;
     versionOverride?: string;
-    connectionOverrides?: Record<string, string>;
+    connectionOverrides?: ConnectionOverrides;
     dependencyOverrides?: Record<string, string>;
   } = {},
 ) {
@@ -968,7 +969,7 @@ export async function createSchedule(
     generationConfigOverride?: ModelGenerationSettings | null;
     proxyIdOverride?: string | null;
     versionOverride?: string | null;
-    connectionOverrides?: Record<string, string> | null;
+    connectionOverrides?: ConnectionOverrides | null;
     dependencyOverrides?: Record<string, string> | null;
   },
 ): Promise<EnrichedSchedule> {
@@ -1030,7 +1031,7 @@ export async function updateSchedule(
     generationConfigOverride?: ModelGenerationSettings | null;
     proxyIdOverride?: string | null;
     versionOverride?: string | null;
-    connectionOverrides?: Record<string, string> | null;
+    connectionOverrides?: ConnectionOverrides | null;
     dependencyOverrides?: Record<string, string> | null;
     // #738: re-point the schedule's execution identity. When set, overwrites
     // both `userId` and `endUserId` (one non-null, mirroring create). Never
