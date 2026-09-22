@@ -11,7 +11,7 @@
 import { describe, expect, it } from "bun:test";
 import { formatCallerContext, buildCallerContextBlock } from "../src/prompt.ts";
 import { turnCapabilities } from "../src/capabilities.ts";
-import { DEFAULT_SKILL_SELECTION, PLATFORM_DEFAULT_SKILLS } from "../src/skills.ts";
+import { DEFAULT_SKILL_SELECTION } from "../src/skills.ts";
 import type { ChatPlatformDeps } from "../src/platform-services.ts";
 
 /** Minimal Hono-context stub exposing the `c.get(key)` reads the builder makes. */
@@ -297,57 +297,51 @@ describe("formatCallerContext", () => {
     }
   });
 
-  it("indexes the platform defaults and tags each line (platform) or (pinned)", () => {
+  it("indexes the pins, tagged (pinned) and sorted by package id", () => {
     const out = formatCallerContext(
       {
         user: { name: "Ada" },
         org: { role: "member" },
         requested_skills: [
           {
-            package_id: "@appstrate/copilot",
-            display_name: "Agent Copilot",
-            description: "Builds an agent with the user.",
+            package_id: "@acme/zeta",
+            display_name: "Zeta",
+            description: "Last.",
             version: "1.0.0",
-            source: "system",
           },
           { package_id: "@acme/mine", display_name: "Mine", description: "Pinned.", version: null },
         ],
       },
-      { ...BASE_OPTS, skills: { catalogue: true, pinned: ["@acme/mine"] } },
+      { ...BASE_OPTS, skills: { catalogue: true, pinned: ["@acme/mine", "@acme/zeta"] } },
     );
     expect(out).toContain("## Skills");
     expect(out).toContain("- `@acme/mine` (pinned) — Mine: Pinned.");
-    expect(out).toContain(
-      "- `@appstrate/copilot` (v1.0.0) (platform) — Agent Copilot: Builds an agent",
-    );
-    // Sorted by id, so the pin comes first here — not by "pins first".
-    expect(out.indexOf("@acme/mine")).toBeLessThan(out.indexOf("@appstrate/copilot"));
+    expect(out).toContain("- `@acme/zeta` (v1.0.0) (pinned) — Zeta: Last.");
+    expect(out.indexOf("@acme/mine")).toBeLessThan(out.indexOf("@acme/zeta"));
   });
 
-  it("renders the catalogue under its lead line, minus what is already indexed", () => {
+  it("renders the catalogue under its lead line, minus what is already pinned", () => {
     const out = formatCallerContext(
       {
         user: { name: "Ada" },
         org: { role: "member" },
-        requested_skills: [
-          { package_id: "@appstrate/copilot", display_name: "Agent Copilot", source: "system" },
-        ],
+        requested_skills: [{ package_id: "@acme/mine", display_name: "Mine" }],
         skills: [
-          { package_id: "@appstrate/copilot", display_name: "Agent Copilot", source: "system" },
+          { package_id: "@acme/mine", display_name: "Mine" },
           { package_id: "@acme/pdf", display_name: "PDF", description: "Reads PDFs." },
         ],
         skills_truncated: true,
       },
-      { ...BASE_OPTS, skills: { catalogue: true, pinned: [] } },
+      { ...BASE_OPTS, skills: { catalogue: true, pinned: ["@acme/mine"] } },
     );
     expect(out).toContain("Other skills in this space (not loaded):");
     expect(out).toContain("- `@acme/pdf` — PDF: Reads PDFs.");
     expect(out).toContain("(list truncated)");
-    // The indexed one is NOT repeated in the catalogue.
-    expect(out.split("@appstrate/copilot")).toHaveLength(2);
+    // The pinned one is NOT repeated in the catalogue.
+    expect(out.split("@acme/mine")).toHaveLength(2);
     expect(out).not.toContain("###");
-    // A catalogue line is neither a default nor a pin.
-    expect(out).not.toContain("`@acme/pdf` (platform)");
+    // A catalogue line is not a pin.
+    expect(out).not.toContain("`@acme/pdf` (pinned)");
   });
 
   it("renders ONE `## Skills` heading when only the catalogue has rows", () => {
@@ -368,57 +362,36 @@ describe("formatCallerContext", () => {
     expect(out).toContain("- `@acme/pdf` — PDF");
   });
 
-  it("drops the catalogue (and its truncation marker) when the catalogue is off", () => {
+  it("drops the catalogue (and its truncation marker) when the catalogue is off, keeping the pins", () => {
     const out = formatCallerContext(
       {
         user: { name: "Ada" },
         org: { role: "member" },
         requested_skills: [
-          { package_id: "@appstrate/copilot", display_name: "Agent Copilot", source: "system" },
+          { package_id: "@acme/mine", display_name: "Mine", description: "Pinned." },
         ],
         skills: [{ package_id: "@acme/pdf", display_name: "PDF" }],
         skills_truncated: true,
       },
-      { ...BASE_OPTS, skills: { catalogue: false, pinned: [] } },
+      { ...BASE_OPTS, skills: { catalogue: false, pinned: ["@acme/mine"] } },
     );
-    expect(out).toContain("## Skills");
+    expect(out).toContain("- `@acme/mine` (pinned) — Mine: Pinned.");
     expect(out).not.toContain("Other skills in this space");
     expect(out).not.toContain("@acme/pdf");
     expect(out).not.toContain("(list truncated)");
   });
 
-  it("still indexes the defaults and the pins when the catalogue is off", () => {
-    const out = formatCallerContext(
-      {
-        user: { name: "Ada" },
-        org: { role: "member" },
-        requested_skills: [
-          { package_id: "@appstrate/copilot", display_name: "Agent Copilot", source: "system" },
-          { package_id: "@acme/mine", display_name: "Mine", description: "Pinned." },
-        ],
-        skills: [{ package_id: "@acme/pdf", display_name: "PDF" }],
-      },
-      { ...BASE_OPTS, skills: { catalogue: false, pinned: ["@acme/mine"] } },
-    );
-    expect(out).toContain("- `@acme/mine` (pinned) — Mine: Pinned.");
-    expect(out).toContain("- `@appstrate/copilot` (platform) — Agent Copilot");
-    expect(out).not.toContain("@acme/pdf");
-  });
-
-  it("says a pinned skill could not be resolved, and nothing about a missing default", () => {
+  it("says a pinned skill could not be resolved", () => {
     const out = formatCallerContext(
       {
         user: { name: "Ada" },
         org: { role: "member" },
         requested_skills: [],
-        unresolved_skills: ["@acme/gone", "@appstrate/copilot"],
+        unresolved_skills: ["@acme/gone"],
       },
       { ...BASE_OPTS, skills: { catalogue: true, pinned: ["@acme/gone"] } },
     );
     expect(out).toContain("`@acme/gone` is pinned to this conversation but is not available here");
-    // A platform default missing from the deployment is an operator's problem,
-    // logged at warn — never a line the model has to reason about.
-    expect(out).not.toContain("@appstrate/copilot");
   });
 
   it("omits the heading entirely when nothing resolves and nothing is catalogued", () => {
@@ -706,18 +679,8 @@ describe("formatCallerContext", () => {
       user: { name: "Ada" },
       org: { role: "member" },
       requested_skills: [
-        {
-          package_id: "@appstrate/web-search",
-          display_name: "Web Search",
-          version: "1.0.0",
-          source: "system",
-        },
-        {
-          package_id: "@appstrate/copilot",
-          display_name: "Copilot",
-          version: "1.0.0",
-          source: "system",
-        },
+        { package_id: "@acme/zeta", display_name: "Zeta", version: "1.0.0" },
+        { package_id: "@acme/beta", display_name: "Beta", version: "1.0.0" },
         { package_id: "@acme/mine", display_name: "Mine" },
       ],
       skills: [{ package_id: "@acme/pdf", display_name: "PDF" }],
@@ -725,7 +688,7 @@ describe("formatCallerContext", () => {
     };
     const opts = {
       ...BASE_OPTS,
-      skills: { catalogue: true, pinned: ["@acme/mine", "@acme/gone"] },
+      skills: { catalogue: true, pinned: ["@acme/beta", "@acme/gone", "@acme/mine", "@acme/zeta"] },
     };
     const at = new Date("2026-06-25T09:05:00.000Z");
     expect(formatCallerContext(ctx, { ...opts, now: at })).toBe(
@@ -738,9 +701,9 @@ describe("formatCallerContext", () => {
       .filter((line) => line.startsWith("- `@"))
       .map((line) => line.slice(3, line.indexOf("`", 3)));
     expect(ids).toEqual([
+      "@acme/beta",
       "@acme/mine",
-      "@appstrate/copilot",
-      "@appstrate/web-search",
+      "@acme/zeta",
       // …then the catalogue block.
       "@acme/pdf",
     ]);
@@ -811,26 +774,28 @@ describe("buildCallerContextBlock", () => {
     expect(req.headers.get("cookie")).toBe("session=abc");
   });
 
-  it("asks the platform to resolve the platform defaults plus the session's pins", async () => {
+  it("asks the platform to resolve the session's pins, and nothing without `skills:read`", async () => {
     const { deps, lastRequest } = fakeDeps(() => Response.json({ user: { name: "Ada" } }));
-    await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
+    const args = {
       origin: "http://127.0.0.1:3000",
       headers: {},
       spaceId: "spc_1",
       user,
       deps,
-      capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
-      // A pin that is ALSO a default must not be asked for twice, and the
-      // order must not depend on how the session stored it.
-      skills: { catalogue: true, pinned: ["@acme/mine", "@appstrate/copilot"] },
+      skills: { catalogue: true, pinned: ["@acme/a", "@acme/b"] },
+    };
+    await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
+      ...args,
+      capabilities: caps(BUILDER),
     });
-    const asked = new URL(lastRequest()!.url).searchParams.get("skills");
-    expect(asked).toBe(
-      ["@acme/mine", ...PLATFORM_DEFAULT_SKILLS].sort().join(","), // sorted, deduped
-    );
+    expect(new URL(lastRequest()!.url).searchParams.get("skills")).toBe("@acme/a,@acme/b");
+    await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
+      ...args,
+      capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
+    });
+    expect(new URL(lastRequest()!.url).searchParams.has("skills")).toBe(false);
   });
-
   it("drops the runnable-agents section for a turn that cannot launch", async () => {
     const payload = {
       user: { name: "Ada", email: "ada@acme.com" },

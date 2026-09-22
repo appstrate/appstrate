@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
-import { UNLISTED_MARKER } from "../visibility.ts";
 
 /**
  * User-scoped identity routes (`/api/me/*`).
@@ -472,7 +471,7 @@ export const mePaths = {
           required: false,
           description:
             "Comma-separated `@scope/name` skill ids to resolve by exact id into " +
-            "`requested_skills`, unlisted ones included. At most 30 distinct ids; a malformed " +
+            "`requested_skills`, past the `skills` cap. At most 30 distinct ids; a malformed " +
             "id or more than 30 is a 400, an unknown or unreadable id lands in `unresolved_skills`.",
           schema: { type: "string" },
           example: "@appstrate/copilot,@appstrate/web-search",
@@ -584,8 +583,7 @@ export const mePaths = {
                       "Agents the caller can run in the current space (capped). Only " +
                       "present when the caller holds the `agents:run` permission; empty otherwise. " +
                       "When `agents_truncated` is true, the full list is reachable via the " +
-                      "`listAgents` operation. " +
-                      `Unlisted packages (${UNLISTED_MARKER}) are neither listed nor counted.`,
+                      "`listAgents` operation.",
                     items: {
                       type: "object",
                       required: [
@@ -644,8 +642,7 @@ export const mePaths = {
                       "(capped). A catalogue read, not a runnable hint: only present when the " +
                       "caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent " +
                       "manifest's `dependencies.skills`. When `skills_truncated` is true, the " +
-                      "full list is reachable via the `listSkills` operation. " +
-                      `Unlisted packages (${UNLISTED_MARKER}) are neither listed nor counted.`,
+                      "full list is reachable via the `listSkills` operation.",
                     items: skillHintSchema,
                   },
                   skills_truncated: {
@@ -661,7 +658,7 @@ export const mePaths = {
                     type: "array",
                     description:
                       "Skills named by the `skills` query parameter that resolved in this space " +
-                      "(unlisted included), sorted by `package_id`. Empty without the parameter " +
+                      "(past the `skills` cap), sorted by `package_id`. Empty without the parameter " +
                       "or without `skills:read`.",
                     items: skillHintSchema,
                   },

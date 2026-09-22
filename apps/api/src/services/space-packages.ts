@@ -24,7 +24,7 @@ import { db } from "@appstrate/db/client";
 import { spacePackages, packages, packageShares, packageDistTags } from "@appstrate/db/schema";
 import { notFound, parseBody } from "../lib/errors.ts";
 import { inputSettingsSchema } from "../lib/jsonb-schemas.ts";
-import { orgOrSystemFilter, listedFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
+import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import type { PackageType } from "@appstrate/core/validation";
@@ -596,8 +596,6 @@ export async function getSpacePackage(scope: SpaceScope, packageId: string) {
  * {@link isPackageActiveHere}, with the library's projection and with the index
  * listings, so what an index page shows, what the caller-context hints tell the
  * model it may invoke, and what the run gate lets through are one set.
- * Listings add `listedFilter` on top (drop rows, never add), so no page offers
- * what the run gate would refuse.
  */
 function activePackagesFilter(scope: SpaceScope, type: PackageType) {
   return and(
@@ -659,7 +657,7 @@ export async function listActivePackages(scope: SpaceScope, type: PackageType) {
     .from(packages)
     .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
     .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
-    .where(and(activePackagesFilter(scope, type), listedFilter()))
+    .where(activePackagesFilter(scope, type))
     .orderBy(...packageListingOrder());
 }
 
@@ -796,7 +794,7 @@ async function listActivePackageHints<T extends PackageHint>(
     .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
     .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
     .leftJoin(packageDistTags, latestDistTagJoin())
-    .where(and(activePackagesFilter(scope, type), listedFilter()))
+    .where(activePackagesFilter(scope, type))
     .orderBy(...packageListingOrder())
     .limit(limit);
 
@@ -880,7 +878,7 @@ export async function listActiveSkills(
   return { skills: items, truncated, total };
 }
 
-/** Exact-id resolution, unlisted included (visibility ≠ authorization), sorted for a stable prompt. */
+/** Exact-id resolution of skill hints, past the listing's cap, sorted for a stable prompt. */
 export async function resolveSkillsByIds(
   scope: SpaceScope,
   ids: readonly string[],

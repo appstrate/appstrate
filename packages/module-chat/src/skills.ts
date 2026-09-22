@@ -8,36 +8,21 @@ export interface SkillHint {
   display_name?: string | null;
   description?: string | null;
   version?: string | null;
-  source?: string;
 }
-
-/** Unlisted system packages every turn indexes, whatever the space holds. */
-export const PLATFORM_DEFAULT_SKILLS: readonly string[] = [
-  "@appstrate/connector-choice",
-  "@appstrate/copilot",
-  "@appstrate/web-search",
-];
 
 /** Every pin is rendered on every turn, so this is a context-budget bound. */
 export const MAX_PINNED_SKILLS = 20;
 
 export interface ChatSkillSelection {
-  /** Whether the turn also lists the space's catalogue (defaults and pins always are). */
+  /** Whether the turn also lists the space's catalogue (pins always are). */
   catalogue: boolean;
   pinned: readonly string[];
 }
 
 export const DEFAULT_SKILL_SELECTION: ChatSkillSelection = { catalogue: true, pinned: [] };
 
-/** `platform`: a default, which guides the chat and is never an agent dependency. */
-export interface IndexedSkill extends SkillHint {
-  platform: boolean;
-  pinned: boolean;
-}
-
 export interface ResolveChatSkillsInput {
   selection: ChatSkillSelection;
-  defaults: readonly string[];
   /** `/api/me/context` fields: `requested_skills`, `unresolved_skills`, `skills`. */
   requested: readonly SkillHint[];
   unresolved: readonly string[];
@@ -46,7 +31,7 @@ export interface ResolveChatSkillsInput {
 }
 
 interface ResolvedChatSkills {
-  indexed: IndexedSkill[];
+  pinned: SkillHint[];
   catalogue: SkillHint[];
   catalogueTruncated: boolean;
   notices: string[];
@@ -58,24 +43,16 @@ function byPackageId(a: { package_id: string }, b: { package_id: string }): numb
 
 export function resolveChatSkills(input: ResolveChatSkillsInput): ResolvedChatSkills {
   const { selection } = input;
-  const defaults = new Set(input.defaults);
-  const pinned = new Set(selection.pinned);
-  const wanted = new Set([...defaults, ...pinned]);
+  const wanted = new Set(selection.pinned);
 
-  const byId = new Map<string, IndexedSkill>();
+  const byId = new Map<string, SkillHint>();
   for (const hint of input.requested) {
-    if (!wanted.has(hint.package_id) || byId.has(hint.package_id)) continue;
-    // A default id an organization owns (the boot sync skipped the system
-    // package) is that organization's skill, not a platform one.
-    const platform = defaults.has(hint.package_id) && hint.source === "system";
-    if (!platform && !pinned.has(hint.package_id)) continue;
-    byId.set(hint.package_id, { ...hint, platform, pinned: pinned.has(hint.package_id) });
+    if (wanted.has(hint.package_id)) byId.set(hint.package_id, hint);
   }
 
-  // An unresolved pin is the user's own act, so the model is told; an
-  // unresolved default is a deployment fault, warned about by the caller.
+  // A pin is the user's own act, so the model is told when it no longer resolves.
   const unresolved = new Set(input.unresolved);
-  const notices = [...pinned]
+  const notices = [...wanted]
     .filter((id) => unresolved.has(id))
     .sort()
     .map(
@@ -84,7 +61,7 @@ export function resolveChatSkills(input: ResolveChatSkillsInput): ResolvedChatSk
     );
 
   return {
-    indexed: [...byId.values()].sort(byPackageId),
+    pinned: [...byId.values()].sort(byPackageId),
     catalogue: selection.catalogue
       ? input.catalogue.filter((hint) => !byId.has(hint.package_id))
       : [],

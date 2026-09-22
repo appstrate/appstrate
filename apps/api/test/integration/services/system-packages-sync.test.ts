@@ -33,20 +33,15 @@
  *     canonical on `packages`.
  */
 
-import { describe, it, expect, beforeEach, spyOn } from "bun:test";
+import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import {
   syncSystemPackagesToDb,
-  isSystemPackage,
-  _setSystemPackagesForTesting,
   type SystemPackageEntry,
 } from "../../../src/services/system-packages.ts";
-import { logger } from "../../../src/lib/logger.ts";
 import { zipArtifact } from "@appstrate/core/zip";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
-import { createTestContext } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
 
 function enc(s: string): Uint8Array {
   return new TextEncoder().encode(s);
@@ -214,7 +209,6 @@ describe("syncSystemPackagesToDb", () => {
       syncedVersions: 2,
       unchangedPackages: 0,
       unchangedVersions: 0,
-      ownershipConflicts: [],
     });
 
     // Same registry, same bytes — the second pass must write nothing at all.
@@ -224,7 +218,6 @@ describe("syncSystemPackagesToDb", () => {
       syncedVersions: 0,
       unchangedPackages: 2,
       unchangedVersions: 2,
-      ownershipConflicts: [],
     });
 
     // ...and the persisted state is intact, not merely untouched-because-broken.
@@ -281,7 +274,6 @@ describe("syncSystemPackagesToDb", () => {
       syncedVersions: 1,
       unchangedPackages: 0,
       unchangedVersions: 0,
-      ownershipConflicts: [],
     });
 
     const [row] = await db
@@ -291,106 +283,6 @@ describe("syncSystemPackagesToDb", () => {
       .limit(1);
     expect(row).toBeDefined();
     expect(row!.source).toBe("system");
-  });
-
-  // ─── Ownership safety gate ─────────────────────────────
-
-  it("skips an ORG-owned id (logged at error level) without failing the boot, and still syncs the rest", async () => {
-    // `packages.id` is one namespace: without the guard, this row would become system.
-    const ctx = await createTestContext({ orgSlug: "sysclash" });
-    const COLLIDING = "@appstrate/copilot";
-    await seedPackage({
-      id: COLLIDING,
-      orgId: ctx.orgId,
-      type: "skill",
-      source: "local",
-      draftManifest: {
-        name: COLLIDING,
-        version: "9.9.9",
-        type: "skill",
-        schema_version: "0.1",
-        display_name: "The org's own copilot",
-      },
-      draftContent: "ORG-AUTHORED BODY",
-    });
-
-    const entry = makeFixtureEntry({ id: COLLIDING, version: "1.0.0" });
-    // Control: a non-colliding system package in the SAME pass must still be
-    // written — the gate skips one id, not the whole sync.
-    const control = makeFixtureEntry({ id: "@sys-test/bystander", version: "1.0.0" });
-    const { canonical, versions } = buildRegistry([entry, control]);
-
-    // Install the same set as the live registry the platform reads, restored after.
-    const restoreRegistry = _setSystemPackagesForTesting(canonical);
-    const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
-    // Resolves: a tenant's package must never crash-loop every org's boot.
-    let report: Awaited<ReturnType<typeof syncSystemPackagesToDb>>;
-    let errorCalls: unknown[][];
-    let collidingIsSystem: boolean;
-    let bystanderIsSystem: boolean;
-    try {
-      report = await syncSystemPackagesToDb(canonical, versions);
-      collidingIsSystem = isSystemPackage(COLLIDING);
-      bystanderIsSystem = isSystemPackage("@sys-test/bystander");
-    } finally {
-      errorCalls = [...errorSpy.mock.calls];
-      errorSpy.mockRestore();
-      restoreRegistry();
-    }
-
-    // The org keeps full control of its package: the id left the live
-    // registry, the bystander did not.
-    expect(collidingIsSystem).toBe(false);
-    expect(bystanderIsSystem).toBe(true);
-    expect(report).toEqual({
-      syncedPackages: 1,
-      syncedVersions: 1,
-      unchangedPackages: 0,
-      unchangedVersions: 0,
-      ownershipConflicts: [COLLIDING],
-    });
-
-    // Logged at error level, naming the id, the owning org and the fix.
-    const conflictLogs = errorCalls.filter(
-      ([, fields]) => (fields as { packageId?: string } | undefined)?.packageId === COLLIDING,
-    );
-    expect(conflictLogs).toHaveLength(1);
-    expect(conflictLogs[0]![0]).toMatch(/[Rr]ename/);
-    expect(conflictLogs[0]![1]).toEqual({ packageId: COLLIDING, orgId: ctx.orgId });
-
-    // The control was written as a system package with its version.
-    const [bystander] = await db
-      .select({ orgId: packages.orgId, source: packages.source })
-      .from(packages)
-      .where(eq(packages.id, "@sys-test/bystander"))
-      .limit(1);
-    expect(bystander).toEqual({ orgId: null, source: "system" });
-    const bystanderVersions = await db
-      .select({ version: packageVersions.version })
-      .from(packageVersions)
-      .where(eq(packageVersions.packageId, "@sys-test/bystander"));
-    expect(bystanderVersions).toEqual([{ version: "1.0.0" }]);
-
-    // The org's row is EXACTLY as it was: still theirs, still their content.
-    const [row] = await db
-      .select({
-        orgId: packages.orgId,
-        source: packages.source,
-        draftContent: packages.draftContent,
-      })
-      .from(packages)
-      .where(eq(packages.id, COLLIDING))
-      .limit(1);
-    expect(row!.orgId).toBe(ctx.orgId);
-    expect(row!.source).toBe("local");
-    expect(row!.draftContent).toBe("ORG-AUTHORED BODY");
-
-    // No system version registered under the org-owned id.
-    const versionRows = await db
-      .select({ version: packageVersions.version })
-      .from(packageVersions)
-      .where(eq(packageVersions.packageId, COLLIDING));
-    expect(versionRows).toEqual([]);
   });
 
   // ─── Integrity drift safety gate ───────────────────────

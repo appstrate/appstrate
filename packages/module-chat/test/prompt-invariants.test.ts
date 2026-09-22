@@ -159,16 +159,12 @@ describe("full persona invariants", () => {
     const block = formatCallerContext(
       {
         user: { name: "Ada" },
-        requested_skills: [{ package_id: "@appstrate/copilot", source: "system" }],
+        skills: [{ package_id: "@acme/mine" }],
       },
       CONTEXT_OPTS,
     );
     expect(block).toContain("## Skills");
     expect(FULL).toContain("`## Skills`");
-  });
-
-  it("never lets a platform default become an agent dependency", () => {
-    expect(FULL).toContain("Never declare a skill marked `(platform)`");
   });
 
   it("teaches the loading rules whatever the turn may author", () => {

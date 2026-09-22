@@ -1,24 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// `GET /api/me/context?skills=`: exact-id resolution ignores visibility, the catalogue
-// does not. Fixtures pair a listed, an unlisted and an unknown id so a read returning
-// everything or nothing cannot pass.
+// `GET /api/me/context?skills=`: exact-id resolution of the skills a chat pins.
+// Fixtures pair two skills and an unknown id so a read returning everything or
+// nothing cannot pass.
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
-import { VISIBILITY_META_NAMESPACE } from "../../../src/lib/package-helpers.ts";
-import {
-  MAX_PINNED_SKILLS,
-  PLATFORM_DEFAULT_SKILLS,
-} from "../../../../../packages/module-chat/src/skills.ts";
+import { MAX_PINNED_SKILLS } from "../../../../../packages/module-chat/src/skills.ts";
 
 const app = getTestApp();
 
-const LISTED = "@ctxskill/listed";
-const UNLISTED = "@ctxskill/unlisted";
+const FIRST = "@ctxskill/first";
+const SECOND = "@ctxskill/second";
 const UNKNOWN = "@ctxskill/nope";
 
 interface ContextBody {
@@ -27,7 +23,7 @@ interface ContextBody {
   unresolved_skills: string[];
 }
 
-async function createSkill(ctx: TestContext, id: string, unlisted: boolean) {
+async function createSkill(ctx: TestContext, id: string) {
   const res = await app.request("/api/packages/skills", {
     method: "POST",
     headers: authHeaders(ctx, { "Content-Type": "application/json" }),
@@ -39,7 +35,6 @@ async function createSkill(ctx: TestContext, id: string, unlisted: boolean) {
         schema_version: "0.1",
         display_name: `Skill ${id}`,
         description: "A resolution fixture.",
-        ...(unlisted ? { _meta: { [VISIBILITY_META_NAMESPACE]: { level: "unlisted" } } } : {}),
       },
       // Frontmatter `name` is the unscoped half of the id (skill-frontmatter gate).
       content: `---\nname: "${id.split("/")[1]}"\ndescription: "A resolution fixture."\n---\n\nBody.`,
@@ -54,35 +49,30 @@ describe("GET /api/me/context?skills=", () => {
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext();
-    await createSkill(ctx, LISTED, false);
-    await createSkill(ctx, UNLISTED, true);
+    await createSkill(ctx, FIRST);
+    await createSkill(ctx, SECOND);
   });
 
-  it("resolves both the listed and the unlisted skill by exact id, and reports the unknown one", async () => {
-    const query = encodeURIComponent([UNKNOWN, LISTED, UNLISTED].join(","));
+  it("resolves both skills by exact id, and reports the unknown one", async () => {
+    const query = encodeURIComponent([UNKNOWN, FIRST, SECOND].join(","));
     const res = await app.request(`/api/me/context?skills=${query}`, {
       headers: authHeaders(ctx),
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as ContextBody;
 
-    expect(body.requested_skills.map((s) => s.package_id)).toEqual([LISTED, UNLISTED]);
+    expect(body.requested_skills.map((s) => s.package_id)).toEqual([FIRST, SECOND]);
     expect(body.requested_skills[0]?.version).toBe("1.0.0");
     expect(body.unresolved_skills).toEqual([UNKNOWN]);
-
-    // The catalogue half still hides the unlisted row.
-    const catalogue = body.skills.map((s) => s.package_id);
-    expect(catalogue).toContain(LISTED);
-    expect(catalogue).not.toContain(UNLISTED);
   });
 
   it("sorts resolved skills by package id whatever order they were asked in", async () => {
     const res = await app.request(
-      `/api/me/context?skills=${encodeURIComponent([UNLISTED, LISTED].join(","))}`,
+      `/api/me/context?skills=${encodeURIComponent([SECOND, FIRST].join(","))}`,
       { headers: authHeaders(ctx) },
     );
     const body = (await res.json()) as ContextBody;
-    expect(body.requested_skills.map((s) => s.package_id)).toEqual([LISTED, UNLISTED]);
+    expect(body.requested_skills.map((s) => s.package_id)).toEqual([FIRST, SECOND]);
   });
 
   it("returns both fields empty when the parameter is absent", async () => {
@@ -101,7 +91,7 @@ describe("GET /api/me/context?skills=", () => {
       scopes: ["agents:run"],
     });
     const res = await app.request(
-      `/api/me/context?skills=${encodeURIComponent([LISTED, UNLISTED].join(","))}`,
+      `/api/me/context?skills=${encodeURIComponent([FIRST, SECOND].join(","))}`,
       { headers: { Authorization: `Bearer ${apiKey.rawKey}` } },
     );
     expect(res.status).toBe(200);
@@ -111,12 +101,8 @@ describe("GET /api/me/context?skills=", () => {
     expect(body.skills).toEqual([]);
   });
 
-  it("accepts the largest request the chat can build: every default plus a full pin set", async () => {
-    // The chat asks for `defaults ∪ pins` in one parameter; the cap must admit it.
-    const ids = [
-      ...PLATFORM_DEFAULT_SKILLS,
-      ...Array.from({ length: MAX_PINNED_SKILLS }, (_, i) => `@ctxskill/pin-${i}`),
-    ];
+  it("accepts the largest request the chat can build: a full pin set", async () => {
+    const ids = Array.from({ length: MAX_PINNED_SKILLS }, (_, i) => `@ctxskill/pin-${i}`);
     const res = await app.request(`/api/me/context?skills=${encodeURIComponent(ids.join(","))}`, {
       headers: authHeaders(ctx),
     });
@@ -127,7 +113,7 @@ describe("GET /api/me/context?skills=", () => {
 
   it("rejects the whole parameter when an id is not @scope/name", async () => {
     const res = await app.request(
-      `/api/me/context?skills=${encodeURIComponent(`${LISTED},not-a-package-id`)}`,
+      `/api/me/context?skills=${encodeURIComponent(`${FIRST},not-a-package-id`)}`,
       { headers: authHeaders(ctx) },
     );
     expect(res.status).toBe(400);

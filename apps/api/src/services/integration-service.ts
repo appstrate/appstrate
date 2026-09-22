@@ -17,7 +17,7 @@ import { mcpServerManifestSchema, type McpServerManifest } from "@appstrate/core
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { getSystemPackages } from "./system-packages.ts";
 import type { IntegrationSummary } from "@appstrate/shared-types";
-import { orgOrSystemFilter, listedFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
+import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
 import { isManifestTextFallback } from "../lib/manifest-utils.ts";
@@ -791,7 +791,6 @@ export async function listIntegrations(scope: SpaceScope): Promise<IntegrationSu
       and(
         orgOrSystemFilter(scope.orgId),
         notEphemeralFilter(),
-        listedFilter(),
         placementReadFilter(scope.spaceId),
         eq(packages.type, "integration"),
       ),

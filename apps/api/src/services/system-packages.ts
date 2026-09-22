@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { join } from "node:path";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
@@ -26,8 +26,6 @@ interface SystemPackageSyncReport {
   unchangedPackages: number;
   /** Versions already registered from byte-identical archives. */
   unchangedVersions: number;
-  /** System ids skipped because an organization already owns the row (sorted). */
-  ownershipConflicts: string[];
 }
 
 /** System packages dir: AFPS packages live alongside the API source. */
@@ -97,12 +95,6 @@ export function isSystemPackage(id: string): boolean {
   return systemPackages.has(id);
 }
 
-/** Drop org-owned ids: left in, the org's package reads as system and its rename is refused. */
-function dropFromSystemRegistry(ids: ReadonlySet<string>): void {
-  systemPackages = new Map([...systemPackages].filter(([id]) => !ids.has(id)));
-  systemPackageVersions = systemPackageVersions.filter((entry) => !ids.has(entry.packageId));
-}
-
 /**
  * Test-only: install a registry and return the undo. `getTestApp()` skips
  * `boot()`, so the registry is empty under test and every boot-registry branch
@@ -131,8 +123,6 @@ export function _setSystemPackagesForTesting(
  * - UPSERT one `packages` row per packageId at the canonical (highest semver) version
  * - Register every loaded version in `package_versions` (idempotent)
  * - Refuse-overwrite on integrity drift without a version bump (the safety gate)
- * - Skip (and log at error level) a system id already owned by an organization
- *   (the other gate) — one tenant's package must never stop every org's boot
  *
  * Returns what it did. A boot over an unchanged package set must report zero
  * writes — that is the contract the content-addressed skip guards below exist
@@ -145,20 +135,13 @@ export async function syncSystemPackagesToDb(
   const canonicalPackages = canonical ?? getSystemPackages();
   const allVersions = versions ?? getAllSystemPackageVersions();
   if (canonicalPackages.size === 0) {
-    return {
-      syncedPackages: 0,
-      syncedVersions: 0,
-      unchangedPackages: 0,
-      unchangedVersions: 0,
-      ownershipConflicts: [],
-    };
+    return { syncedPackages: 0, syncedVersions: 0, unchangedPackages: 0, unchangedVersions: 0 };
   }
 
   let syncedPackages = 0;
   let syncedVersions = 0;
   let unchangedPackages = 0;
   let unchangedVersions = 0;
-  const ownershipConflicts = new Set<string>();
 
   // One SHA-256 per loaded archive, shared by both passes below (the canonical
   // pass and the version pass hash the same `zipBuffer` for the canonical
@@ -210,8 +193,7 @@ export async function syncSystemPackagesToDb(
     // `draftManifest` / `draftContent` / `files` were all derived from the
     // exact same bytes already persisted — there is nothing to write, and
     // nothing to re-upload. The row's identity columns are compared too so a
-    // drifted `type` / `source` still heals in place (an org-owned row falls
-    // through to the UPSERT, which refuses it). Without this,
+    // drifted `type` / `source` / `orgId` still heals in place. Without this,
     // every boot re-ran 66 UPSERTs (plus an S3 re-upload) to write back
     // byte-identical values.
     //
@@ -235,9 +217,7 @@ export async function syncSystemPackagesToDb(
       return;
     }
 
-    // `setWhere: isNull(orgId)`: never overwrite an organization's row; zero
-    // rows written = collision, logged and skipped (no upload, no version).
-    const written = await db
+    await db
       .insert(packages)
       .values({
         id,
@@ -249,7 +229,6 @@ export async function syncSystemPackagesToDb(
       })
       .onConflictDoUpdate({
         target: packages.id,
-        setWhere: isNull(packages.orgId),
         set: {
           // `type` must heal in place: a packageId can change type across
           // versions, so a reseed updates it rather than keeping the stale
@@ -261,24 +240,7 @@ export async function syncSystemPackagesToDb(
           orgId: null,
           ...(isNewVersion ? { updatedAt: new Date() } : {}),
         },
-      })
-      .returning({ id: packages.id });
-
-    if (written.length === 0) {
-      ownershipConflicts.add(id);
-      const [owner] = await db
-        .select({ orgId: packages.orgId })
-        .from(packages)
-        .where(eq(packages.id, id))
-        .limit(1);
-      logger.error(
-        "System package id is already owned by an organization — skipped, the " +
-          "system package is NOT installed. Rename the organization package " +
-          "(publish it under a different @scope/name id) and restart.",
-        { packageId: id, orgId: owner?.orgId ?? null },
-      );
-      return;
-    }
+      });
 
     if (Object.keys(entry.files).length > 1) {
       await uploadPackageFiles(
@@ -364,12 +326,7 @@ export async function syncSystemPackagesToDb(
       });
     }),
   );
-
-  // No version under an org-owned id: here it is simply not a system package.
-  if (ownershipConflicts.size > 0) dropFromSystemRegistry(ownershipConflicts);
-  const versionsToSync = allVersions.filter((entry) => !ownershipConflicts.has(entry.packageId));
-
-  await mapWithConcurrency(versionsToSync, SYNC_CONCURRENCY, (entry) =>
+  await mapWithConcurrency(allVersions, SYNC_CONCURRENCY, (entry) =>
     syncVersion(entry).catch((err) => {
       logger.warn("Failed to register system package version", {
         packageId: entry.packageId,
@@ -379,20 +336,12 @@ export async function syncSystemPackagesToDb(
     }),
   );
 
-  const conflicts = [...ownershipConflicts].sort();
   logger.info("System packages synced", {
     packages: syncedPackages,
     versions: syncedVersions,
     unchangedPackages,
     unchangedVersions,
-    ownershipConflicts: conflicts,
   });
 
-  return {
-    syncedPackages,
-    syncedVersions,
-    unchangedPackages,
-    unchangedVersions,
-    ownershipConflicts: conflicts,
-  };
+  return { syncedPackages, syncedVersions, unchangedPackages, unchangedVersions };
 }

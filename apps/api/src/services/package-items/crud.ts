@@ -13,7 +13,6 @@ import { asRecord } from "@appstrate/core/safe-json";
 import {
   orgOrSystemFilter,
   getPackageDisplayName,
-  listedFilter,
   notEphemeralFilter,
 } from "../../lib/package-helpers.ts";
 import { parseDraftManifest } from "../../lib/manifest-utils.ts";
@@ -294,7 +293,6 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, spaceI
         orgOrSystemFilter(orgId),
         eq(packages.type, cfg.type),
         notEphemeralFilter(),
-        listedFilter(),
         activeHereSql(spaceId),
       ),
     )

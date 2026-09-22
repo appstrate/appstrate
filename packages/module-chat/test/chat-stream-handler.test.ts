@@ -477,7 +477,6 @@ describe("handleChatStream", () => {
           display_name: id,
           description: "fixture",
           version: null,
-          source: id.startsWith("@appstrate/") ? "system" : "local",
         })),
         unresolved_skills: [],
       });
@@ -491,7 +490,7 @@ describe("handleChatStream", () => {
     expect(res.status).toBe(200);
     await collectUiChunks(res);
 
-    // The pin was asked for by exact id, alongside the platform defaults.
+    // The pin was asked for by exact id.
     expect(requested[0]).toContain(PIN);
 
     const system = calls[0]!.system;

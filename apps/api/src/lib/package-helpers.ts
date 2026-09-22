@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, or, isNull, ne, sql } from "drizzle-orm";
+import { eq, or, isNull, ne } from "drizzle-orm";
 import { packages } from "@appstrate/db/schema";
 import { asRecord } from "@appstrate/core/safe-json";
 
@@ -18,14 +18,6 @@ export function orgOrSystemFilter(orgId: string) {
  */
 export function notEphemeralFilter() {
   return ne(packages.ephemeral, true);
-}
-
-/** AFPS §10.1 vendor namespace of the visibility extension (`{ "level": "unlisted" }`). */
-export const VISIBILITY_META_NAMESPACE = "dev.appstrate/visibility";
-
-/** Drops unlisted packages from catalogue listings, in SQL so LIMIT and totals stay honest. */
-export function listedFilter() {
-  return sql`${packages.draftManifest} -> '_meta' -> ${VISIBILITY_META_NAMESPACE} ->> 'level' IS DISTINCT FROM 'unlisted'`;
 }
 
 /** Extract display_name from a package's draftManifest JSONB, falling back to the package ID. */

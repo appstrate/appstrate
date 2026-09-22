@@ -21,12 +21,7 @@ import type { PrincipalKind } from "@appstrate/core/module";
 import { logger } from "./logger.ts";
 import { reaches, type TurnCapabilities } from "./capabilities.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
-import {
-  PLATFORM_DEFAULT_SKILLS,
-  resolveChatSkills,
-  type ChatSkillSelection,
-  type SkillHint,
-} from "./skills.ts";
+import { resolveChatSkills, type ChatSkillSelection, type SkillHint } from "./skills.ts";
 
 /** Structural mirror of `SpaceRoleRef` (`apps/api/src/lib/space-role.ts`) — not importable from here. */
 type SpaceRoleRefLike =
@@ -192,7 +187,7 @@ ${runs(`Everything a run writes under \`outputs/\` is published when it ends: th
 ${idVerbatimBullet}${runs(`- ${inline("Prefer running an existing agent over doing the work inline when one fits the task", "Run an existing agent whenever one fits the task")}. Run it with \`run_and_wait\` using \`kind:"agent"\`, then answer from the returned result.
 `)}${skills(`- The skills listed under \`${SKILLS_HEADING}\` are guides for YOU — procedures you follow yourself, not packages you run. When one clearly matches the request, LOAD IT BEFORE acting: call \`invoke_operation\` with \`operation_id: "getSkill"\` and the path params \`scope\` (KEEP the leading \`@\`, e.g. \`@appstrate\`) and \`name\`, then follow the \`content\` it returns. Load ONE at a time, and none when none clearly matches. Never call \`getSkill\` for a skill whose content already appears in this conversation. A skill marked \`(pinned)\` is one the user chose for this conversation: prefer it. Never call \`listSkills\` to browse: only when the user asks for a skill you do not see listed, or the list is marked \`(list truncated)\`.
 `)}${skills(
-    author(`- Skills are not run on their own. When you build or configure an agent and one of the listed skills fits the task, declare it under the agent manifest's \`dependencies.skills\` keyed by its id (e.g. \`"@appstrate/web-research": "^1.2.0"\`) — use the version shown, or \`"*"\` if none. Never declare a skill marked \`(platform)\`: those guide you, not agents. The run route validates that declared skills exist.
+    author(`- Skills are not run on their own. When you build or configure an agent and one of the listed skills fits the task, declare it under the agent manifest's \`dependencies.skills\` keyed by its id (e.g. \`"@appstrate/web-research": "^1.2.0"\`) — use the version shown, or \`"*"\` if none. The run route validates that declared skills exist.
 `),
   )}${truncatedListBullet}${reads(`- The context carries NO run history. When the user asks about a recent or failed run${runs(", or wants to re-run something")}, without naming it, call \`listRuns\` (newest first) before answering, then fetch full details with the run get operation when needed.
 `)}
@@ -232,7 +227,7 @@ interface CallerContext {
   agents_truncated?: boolean | null;
   skills?: SkillHint[] | null;
   skills_truncated?: boolean | null;
-  /** `?skills=` resolved by exact id — unlisted included, uncapped. */
+  /** The pins, resolved by exact id past the `skills` cap. */
   requested_skills?: SkillHint[] | null;
   unresolved_skills?: string[] | null;
 }
@@ -261,14 +256,13 @@ export function normalizeChatLocale(raw: string | undefined): string {
 }
 
 /** `` - `@scope/name` (v1.2.0) (pinned) — Label: desc ``, minus the parts that say nothing. */
-function skillLine(skill: SkillHint, tags: { platform?: boolean; pinned?: boolean } = {}): string {
+function skillLine(skill: SkillHint, pinned = false): string {
   const description = skill.description?.trim();
   const label = skill.display_name?.trim() || skill.package_id;
   const head =
     `- \`${skill.package_id}\`` +
     (skill.version ? ` (v${skill.version})` : "") +
-    (tags.platform ? " (platform)" : "") +
-    (tags.pinned ? " (pinned)" : "");
+    (pinned ? " (pinned)" : "");
   if (label === skill.package_id) return description ? `${head} — ${description}` : head;
   return `${head} — ${label}${description ? `: ${description}` : ""}`;
 }
@@ -325,7 +319,6 @@ export function formatCallerContext(
   // cannot launch.
   const skills = resolveChatSkills({
     selection: opts.skills,
-    defaults: PLATFORM_DEFAULT_SKILLS,
     requested: ctx.requested_skills ?? [],
     unresolved: ctx.unresolved_skills ?? [],
     catalogue: ctx.skills ?? [],
@@ -333,7 +326,7 @@ export function formatCallerContext(
   });
   const hasSkillSection =
     opts.capabilities.readsSkills &&
-    (skills.indexed.length > 0 || skills.catalogue.length > 0 || skills.notices.length > 0);
+    (skills.pinned.length > 0 || skills.catalogue.length > 0 || skills.notices.length > 0);
   const name = ctx.user?.name?.trim();
   const email = ctx.user?.email?.trim();
   const role = ctx.org?.role?.trim();
@@ -452,7 +445,7 @@ export function formatCallerContext(
   // Rendered whatever the authoring grant: the chat loads skills for itself.
   if (hasSkillSection) {
     lines.push("", SKILLS_HEADING);
-    for (const skill of skills.indexed) lines.push(skillLine(skill, skill));
+    for (const skill of skills.pinned) lines.push(skillLine(skill, true));
     if (skills.catalogue.length) {
       lines.push("", SKILL_CATALOGUE_LEAD);
       for (const skill of skills.catalogue) lines.push(skillLine(skill));
@@ -536,11 +529,9 @@ export async function buildCallerContextBlock(
       },
     );
 
-  // Sorted and deduped: the same session state must yield the same cached block.
+  // Pins are stored sorted and deduped: the same session asks the same question.
   const url = new URL("/api/me/context", origin);
-  const requested = capabilities.readsSkills
-    ? [...new Set([...PLATFORM_DEFAULT_SKILLS, ...skills.pinned])].sort()
-    : [];
+  const requested = capabilities.readsSkills ? skills.pinned : [];
   if (requested.length > 0) url.searchParams.set("skills", requested.join(","));
   try {
     const ctxHeaders = new Headers();
