@@ -45,6 +45,10 @@ you the matching command).
   dispatched operation still enforces its own permission, so an MCP call can
   never exceed what the key could do over REST.
 
+Grant the key the permissions the work needs on top of those two: what the
+server declares follows the key's scopes (see "The tool surface"), so a key
+holding `mcp:*` alone is shown discovery and nothing else.
+
 This is the recommended onboarding until you have HTTPS + the OAuth flow set up.
 
 ---
@@ -136,29 +140,48 @@ What happens under the hood:
 
 ## The tool surface
 
-The server exposes six tools rather than one per REST operation (which would blow
-past any client's tool budget). Three of them are the progressive-disclosure
-triple over the whole API; the other three are shortcuts for the things clients
-otherwise get wrong.
+The server exposes a handful of tools rather than one per REST operation (which
+would blow past any client's tool budget): the progressive-disclosure triple
+over the whole API, plus shortcuts for the things clients otherwise get wrong.
+`mcp:read` is the transport gate — every row asking for it alone is shown to
+anyone who can connect. The rows asking for more are **shown only when those
+grants hold**.
 
-| Tool                 | Permission   | What it does                                                                                                                                |
-| -------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_me`             | `mcp:read`   | Caller identity, org role, and already-connected integrations. **Call this first** — it grounds everything below.                           |
-| `search_operations`  | `mcp:read`   | Find operations by keyword/tag → operationIds. A keyword search also returns `best_match` with its full input schema.                       |
-| `describe_operation` | `mcp:read`   | Full input schema for one operation (only needed when `best_match` didn't cover it).                                                        |
-| `invoke_operation`   | `mcp:invoke` | Execute one operation (validated + authorized exactly as the equivalent REST call).                                                         |
-| `run_and_wait`       | `mcp:invoke` | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and returns when it reaches a terminal status. |
-| `list_files`         | `mcp:read`   | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                  |
+| Tool                       | Permission                                                   | What it does                                                                                                                                                                |
+| -------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_me`                   | `mcp:read`                                                   | Caller identity, org role, and already-connected integrations. **Call this first** — it grounds everything below. Dropped for a client that injects its own caller context. |
+| `search_operations`        | `mcp:read`                                                   | Find operations by keyword/tag → operationIds. A keyword search also returns `best_match` with its full input schema.                                                       |
+| `describe_operation`       | `mcp:read`                                                   | Full input schema for one operation (only needed when `best_match` didn't cover it).                                                                                        |
+| `read_file`                | `mcp:read`                                                   | Read one `appfile://` URI; the file's own ACL decides on the row.                                                                                                           |
+| `validate_package_file`    | `mcp:read`                                                   | Check an `.afps`/ZIP archive before importing it.                                                                                                                           |
+| `get_runtime_capabilities` | `mcp:read`                                                   | The MCP-server runtimes and manifest templates package authoring works from.                                                                                                |
+| `invoke_operation`         | `mcp:invoke`                                                 | Execute one operation (validated + authorized exactly as the equivalent REST call).                                                                                         |
+| `run_and_wait`             | `mcp:invoke` + `agents:run` + `runs:read` or `runs:read-all` | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and returns when it reaches a terminal status.                                 |
+| `list_files`               | `files:read`                                                 | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                                                  |
+| `import_package_file`      | `mcp:invoke` + a package write permission (org users only)   | Import a validated archive as a package.                                                                                                                                    |
 
-`run_and_wait` declares the inline kind and its arguments (`manifest`, `prompt`,
-`context_files`) only to a caller holding both `agents:write` and `agents:run`; anyone else is
-offered `kind:"agent"` alone.
+`run_and_wait` needs both halves because it launches AND polls the run back
+under your own credentials: `agents:run` without a run-read permission would
+bill a run you could never read. It declares the inline kind and its arguments
+(`manifest`, `prompt`, `context_files`) only to a caller who also holds
+`agents:write`; anyone else is offered `kind:"agent"` alone.
+
+The whole surface follows your permissions, derived from the guards the routes
+actually mount: the tool list, the operation index in the server instructions,
+`search_operations` (matches you cannot invoke come back under `denied` with
+their `required_permissions`, never mixed into `operations`) and
+`describe_operation` (`granted`, `required_permissions`, `conditional`). What
+your role makes impossible is **not shown** rather than shown and refused — but
+an operation only the loaded row can refuse (a file ACL, a draft's home space)
+stays listed and is marked `conditional`. Enforcement itself never moves:
+`invoke_operation` always dispatches, and on a `403` the result carries the
+permissions the route required plus a hint to report it rather than retry.
 
 This server advertises `tools: { listChanged: false }`, so a client that listed
-its tools before an upgrade is never told the set moved, and a name that is no
-longer registered answers `-32602 Unknown tool`. **Re-list your tools after
-upgrading the platform** — that is the supported recovery, and it is one round
-trip.
+its tools before an upgrade — or before its role changed — is never told the set
+moved, and a name that is no longer registered answers `-32602 Unknown tool`.
+**Re-list your tools after upgrading the platform or changing your
+permissions** — that is the supported recovery, and it is one round trip.
 
 Prefer `run_and_wait` when you need a newly launched run's progress or terminal
 result. `runAgent` (and `runInline`, for a caller holding `agents:write` and

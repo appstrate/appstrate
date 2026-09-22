@@ -16,14 +16,32 @@ import {
   resetCatalog,
   buildOperationIndex,
   getOperationIndexCacheStats,
+  operationGranted,
   type CatalogOperation,
 } from "../../catalog.ts";
 import { buildMcpTools, type Dispatch } from "../../tools.ts";
 import { internalDispatchHeader } from "../../../../lib/internal-dispatch.ts";
 import { validateManifest } from "@appstrate/core/validation";
+import { getTestApp } from "../../../../../test/helpers/app.ts";
+import { setPlatformApp } from "../../../../lib/platform-app.ts";
+
+// The tools now read the mounted route table (what each operation's guard
+// requires) to decide what this caller is shown. Register the SHARED test app,
+// as `catalog-requirements.test.ts` does: `setPlatformApp` is module-level
+// state in a one-process runner, so a stand-in here would answer for every
+// later file too.
+setPlatformApp(getTestApp());
 
 // The handlers ignore `extra`; supply a typed placeholder.
 const noExtra = {} as unknown as AppstrateRequestExtra;
+
+/**
+ * Everything the full tool surface takes: the transport gate, invoke, launch
+ * AND read-back (`run_and_wait`), and the `GET /api/files` operation
+ * (`list_files`). A test that is not about the declaration gate uses this so it
+ * asserts on the tool it means to, not on whether it was declared.
+ */
+const FULL_SURFACE = ["mcp:read", "mcp:invoke", "agents:run", "runs:read", "files:read"];
 
 function parseResult(result: CallToolResult): Record<string, unknown> {
   const first = result.content[0];
@@ -35,14 +53,17 @@ function makeTools(
   permissions: string[],
   contextInjected = false,
   actor: Actor = { type: "user", id: "user_1" },
+  /** What the platform answers the dispatched request with. */
+  respond: () => Response = () =>
+    new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
 ) {
   const calls: Request[] = [];
   const dispatch: Dispatch = async (req) => {
     calls.push(req);
-    return new Response(JSON.stringify({ ok: true }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    });
+    return respond();
   };
   const tools = buildMcpTools({
     origin: "https://test.local",
@@ -79,6 +100,61 @@ describe("mcp catalog", () => {
       expect(op.pathTemplate.startsWith("/api/mcp")).toBe(false);
       expect(op.pathTemplate.startsWith("/.well-known/oauth-protected-resource")).toBe(false);
     }
+  });
+});
+
+/**
+ * What the caller is SHOWN, per permission set. An act its grants make
+ * structurally impossible is absent — not declared and then refused — so every
+ * case here goes red the moment its gate is dropped from `buildMcpTools`.
+ */
+describe("buildMcpTools declarations", () => {
+  beforeEach(() => resetCatalog());
+
+  const names = (permissions: string[]): string[] => [...makeTools(permissions).byName.keys()];
+
+  it("shows a read-only caller neither invoke, run nor files", () => {
+    const declared = names(["mcp:read"]);
+    expect(declared).not.toContain("invoke_operation");
+    expect(declared).not.toContain("run_and_wait");
+    expect(declared).not.toContain("list_files");
+    // The control: discovery is behind the transport's own gate, so it stays.
+    expect(declared).toContain("search_operations");
+    expect(declared).toContain("describe_operation");
+  });
+
+  it("declares invoke_operation on `mcp:invoke` alone", () => {
+    expect(names(["mcp:read"])).not.toContain("invoke_operation");
+    expect(names(["mcp:read", "mcp:invoke"])).toContain("invoke_operation");
+  });
+
+  it("withholds run_and_wait until the caller can launch AND read the run back", () => {
+    // Both halves, on the same builder: `agents:run` without a run-read
+    // permission would bill a provisioned run whose poll takes a 403.
+    expect(names(["mcp:read", "mcp:invoke"])).not.toContain("run_and_wait");
+    expect(names(["mcp:read", "mcp:invoke", "agents:run"])).not.toContain("run_and_wait");
+    expect(names(["mcp:read", "agents:run", "runs:read-all"])).not.toContain("run_and_wait");
+    expect(names(["mcp:read", "mcp:invoke", "agents:run", "runs:read-all"])).toContain(
+      "run_and_wait",
+    );
+  });
+
+  it('offers `kind:"inline"` only once the caller may also author', () => {
+    const kinds = (permissions: string[]): string[] | undefined =>
+      (
+        makeTools(permissions).byName.get("run_and_wait")!.descriptor.inputSchema
+          .properties as Record<string, { enum?: string[] }>
+      ).kind!.enum;
+    const runner = ["mcp:read", "mcp:invoke", "agents:run", "runs:read-all"];
+    expect(kinds(runner)).toEqual(["agent"]);
+    expect(kinds([...runner, "agents:write"])).toEqual(["agent", "inline"]);
+  });
+
+  it("declares list_files exactly when `GET /api/files` grants", () => {
+    // The tool dispatches to `listFiles`, whose route is guarded by
+    // `files:read`; without it the tool could only ever return a 403.
+    expect(names(["mcp:read"])).not.toContain("list_files");
+    expect(names(["mcp:read", "files:read"])).toContain("list_files");
   });
 });
 
@@ -138,6 +214,70 @@ describe("search_operations", () => {
     expect(body.best_match).toBeUndefined();
   });
 
+  // A search is a question the model asked on purpose, so a match its role
+  // cannot invoke is answered honestly rather than hidden — "no such operation"
+  // would be a lie to a user asking "can you run this agent?".
+  describe("denied matches", () => {
+    /** A viewer-ish set: reads agents, launches nothing, authors nothing. */
+    const VIEWER = ["mcp:read", "agents:read"];
+
+    async function searchAgents(): Promise<{
+      operations: Array<Record<string, unknown>>;
+      denied: Array<{ operation_id: string; required_permissions: string[] }>;
+      body: Record<string, unknown>;
+    }> {
+      const { byName } = makeTools(VIEWER);
+      const res = await byName
+        .get("search_operations")!
+        .handler({ query: "agent", limit: 100 }, noExtra);
+      const body = parseResult(res);
+      return {
+        operations: body.operations as Array<Record<string, unknown>>,
+        denied: body.denied as Array<{ operation_id: string; required_permissions: string[] }>,
+        body,
+      };
+    }
+
+    it("answers a denied match under `denied`, never under `operations`", async () => {
+      const { operations, denied } = await searchAgents();
+      const shown = operations.map((op) => op.operation_id);
+      const refused = new Map(
+        denied.map((row) => [row.operation_id, row.required_permissions] as const),
+      );
+
+      // `POST /api/agents/{scope}/{name}/run` is guarded by `agents:run`, which
+      // this set does not hold; `GET /api/agents` is `agents:read|agents:run`,
+      // which it does.
+      expect(shown).toContain("listAgents");
+      expect(shown).not.toContain("runAgent");
+      expect([...refused.keys()]).toContain("runAgent");
+      expect(refused.get("runAgent")).toEqual(["agents:run"]);
+      // `POST /api/packages/agents` is `agents:write` — same treatment.
+      expect(shown).not.toContain("createAgent");
+      expect(refused.get("createAgent")).toEqual(["agents:write"]);
+    });
+
+    it("counts only granted matches and never points best_match at a denied one", async () => {
+      const { operations, denied, body } = await searchAgents();
+      // `limit: 100` is the tool's maximum: the granted half fitting under it
+      // is what makes `count === total` a statement about filtering rather
+      // than about truncation.
+      expect(operations.length).toBeLessThan(100);
+      expect(body.count).toBe(operations.length);
+      expect(body.total).toBe(operations.length);
+      // The denied half is real, so `count` counting both would be caught here.
+      expect(denied.length).toBeGreaterThan(0);
+      // `denied` is capped at `limit`; `denied_total` is not, so the model can
+      // tell "three you may not call" from "eighty".
+      expect(body.denied_total as number).toBeGreaterThanOrEqual(denied.length);
+      if (denied.length < 100) expect(body.denied_total).toBe(denied.length);
+      const best = body.best_match as Record<string, unknown>;
+      expect(best.operation_id).toBe(operations[0]!.operation_id);
+      expect(best.granted).toBe(true);
+      expect(denied.map((row) => row.operation_id)).not.toContain(best.operation_id);
+    });
+  });
+
   it("best_match is identical to what describe_operation returns for that id", async () => {
     const { byName } = makeTools(["mcp:read"]);
     const searchRes = await byName.get("search_operations")!.handler({ query: "agent" }, noExtra);
@@ -177,6 +317,41 @@ describe("describe_operation", () => {
       expect(body).toHaveProperty("referenced_schemas");
     },
   );
+
+  // What the route's own guards ask for, and whether this caller holds it —
+  // both read off the mounted guards, never a hand-kept list beside them.
+  describe("permission fields", () => {
+    /** Launch and read back, author nothing: the `runner` shape. */
+    const RUNNER = ["mcp:read", "mcp:invoke", "agents:run", "runs:read"];
+
+    async function describeOp(
+      permissions: string[],
+      operationId: string,
+    ): Promise<Record<string, unknown>> {
+      const { byName } = makeTools(permissions);
+      return parseResult(
+        await byName.get("describe_operation")!.handler({ operation_id: operationId }, noExtra),
+      );
+    }
+
+    it("names both guards of a denied operation, in mount order", async () => {
+      // `POST /api/runs/inline` mounts `requirePermission("agents","write")`
+      // then `requirePermission("agents","run")` — a runner holds the second
+      // only, so the operation stays describable and reports itself denied.
+      const body = await describeOp(RUNNER, "runInline");
+      expect(body.required_permissions).toEqual(["agents:write", "agents:run"]);
+      expect(body.conditional).toBe(false);
+      expect(body.granted).toBe(false);
+    });
+
+    it("reports a granted operation as granted for the same caller", async () => {
+      // Same permission set, the other verdict: `GET /api/agents` is
+      // `agents:read|agents:run` and a runner holds the alternative.
+      const body = await describeOp(RUNNER, "listAgents");
+      expect(body.required_permissions).toEqual(["agents:read|agents:run"]);
+      expect(body.granted).toBe(true);
+    });
+  });
 
   it("throws InvalidParams (-32602) on an unknown operationId — protocol error, not tool error", async () => {
     const { byName } = makeTools(["mcp:read"]);
@@ -355,14 +530,85 @@ describe("invoke_operation", () => {
     expect(sent.get("x-org-id")).toBe("org_1");
   });
 
-  it("denies invocation without mcp:invoke", async () => {
-    const op = firstOp(() => true);
-    const { byName, calls } = makeTools(["mcp:read"]);
+  it("is not declared at all without mcp:invoke", () => {
+    // Was "denies invocation without mcp:invoke": the refusal moved earlier —
+    // the tool is never shown, so there is no handler to refuse with. What a
+    // client that calls it anyway gets is pinned by
+    // `test/integration/mcp.test.ts`.
+    expect(makeTools(["mcp:read"]).byName.has("invoke_operation")).toBe(false);
+  });
+
+  it("names the permission the route refused with, and tells the model not to retry", async () => {
+    // `listAgents` (GET /api/agents) is guarded by `agents:read|agents:run`,
+    // which an mcp-only caller does not hold — the shape of a real 403.
+    const { byName, calls } = makeTools(
+      ["mcp:read", "mcp:invoke"],
+      false,
+      { type: "user", id: "user_1" },
+      () =>
+        new Response(JSON.stringify({ title: "Forbidden" }), {
+          status: 403,
+          headers: { "content-type": "application/json" },
+        }),
+    );
     const res = await byName
       .get("invoke_operation")!
-      .handler({ operation_id: op.operationId }, noExtra);
+      .handler({ operation_id: "listAgents" }, noExtra);
+    // Decision #1: the dispatch always happens — the route is the one
+    // enforcement point. What the 403 adds is the reason, not a second gate.
+    expect(calls.length).toBe(1);
     expect(res.isError).toBe(true);
-    expect(calls.length).toBe(0);
+    const body = parseResult(res);
+    expect(body.status).toBe(403);
+    expect(body.required_permissions).toEqual(["agents:read|agents:run"]);
+    expect(body.hint).toContain("do not retry");
+  });
+
+  it("adds no permission hint to a non-403 failure", async () => {
+    // The enrichment is keyed on 403 alone; a 500 must not be reported to the
+    // model as a role problem it should stop retrying.
+    const { byName } = makeTools(
+      ["mcp:read", "mcp:invoke"],
+      false,
+      { type: "user", id: "user_1" },
+      () => new Response("{}", { status: 500, headers: { "content-type": "application/json" } }),
+    );
+    const body = parseResult(
+      await byName.get("invoke_operation")!.handler({ operation_id: "listAgents" }, noExtra),
+    );
+    expect(body.status).toBe(500);
+    expect("hint" in body).toBe(false);
+    expect("required_permissions" in body).toBe(false);
+  });
+
+  it("adds no permission hint to a 403 on an operation the caller IS granted", async () => {
+    // `createAgentVersion` mounts `requirePackageInOrg()` alone — no stamped
+    // requirement, so the catalog grants it and only the loaded row can
+    // refuse. Telling this caller "your role does not hold this permission"
+    // would be false and would send it to report a role problem it does not
+    // have; the refusal is about THAT package.
+    const { byName } = makeTools(
+      ["mcp:read", "mcp:invoke"],
+      false,
+      { type: "user", id: "user_1" },
+      () =>
+        new Response(JSON.stringify({ title: "Forbidden" }), {
+          status: 403,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    const body = parseResult(
+      await byName.get("invoke_operation")!.handler(
+        {
+          operation_id: "createAgentVersion",
+          path_params: { scope: "@acme", name: "writer" },
+        },
+        noExtra,
+      ),
+    );
+    expect(body.status).toBe(403);
+    expect("hint" in body).toBe(false);
+    expect("required_permissions" in body).toBe(false);
   });
 
   it("errors when required path params are missing", async () => {
@@ -437,19 +683,57 @@ describe("invoke_operation", () => {
 describe("buildOperationIndex", () => {
   beforeEach(() => resetCatalog());
 
-  it("lists every catalog operationId, grouped under tag headers", () => {
-    const index = buildOperationIndex();
+  /**
+   * The ids a rendered index actually lists. Substring matching would lie
+   * here: `createAgent` is a substring of `createAgentVersion`, a DIFFERENT
+   * operation with a different guard.
+   */
+  function indexIds(index: string): string[] {
+    const ids: string[] = [];
+    for (const line of index.split("\n")) {
+      if (line === "" || line.startsWith("## ")) continue;
+      ids.push(...line.split(", "));
+    }
+    return ids;
+  }
+
+  it("lists every operation this caller's guards grant, grouped under tag headers", () => {
+    const permissions = new Set(["mcp:read", "agents:read"]);
+    const index = buildOperationIndex(permissions);
     const { operations } = getCatalog();
     // A tag section header is present.
     expect(index).toMatch(/^## /m);
-    // Every operationId appears in a tag's comma-separated id line.
+    const listed = indexIds(index);
     for (const op of operations.values()) {
-      expect(index).toContain(op.operationId);
+      expect(listed.includes(op.operationId)).toBe(operationGranted(op, permissions));
     }
   });
 
+  it("indexes the agent reads `agents:read` opens and none of the acts it does not", () => {
+    const listed = indexIds(buildOperationIndex(new Set(["mcp:read", "agents:read"])));
+    // Granted: `GET /api/agents` (`agents:read|agents:run`) and
+    // `GET /api/packages/agents` (`agents:read`).
+    expect(listed).toContain("listAgents");
+    expect(listed).toContain("listAgentPackages");
+    // Denied: `POST /api/packages/agents` (`agents:write`) and
+    // `POST /api/agents/{scope}/{name}/run` (`agents:run`).
+    expect(listed).not.toContain("createAgent");
+    expect(listed).not.toContain("runAgent");
+  });
+
+  it("keeps only what no guard gates when the caller holds nothing", () => {
+    const listed = indexIds(buildOperationIndex(new Set<string>()));
+    // `/api/me/*` mounts no permission guard — self-scoped, filtered by
+    // ownership — so the index is narrowed, never emptied.
+    expect(listed).toContain("getMyContext");
+    expect(listed).toContain("listMyOrgs");
+    // Everything an agent guard gates is gone with it.
+    expect(listed).not.toContain("listAgents");
+    expect(listed).not.toContain("runAgent");
+  });
+
   it("carries no structured method+path columns (those come from describe / best_match)", () => {
-    const index = buildOperationIndex();
+    const index = buildOperationIndex(new Set(["mcp:read", "agents:read"]));
     const { operations } = getCatalog();
     const knownIds = new Set([...operations.values()].map((op) => op.operationId));
     // Each tag section is `## Tag` followed by ONE comma-separated line of
@@ -467,8 +751,8 @@ describe("buildOperationIndex", () => {
   });
 
   it("is memoized — same string instance across calls", () => {
-    const a = buildOperationIndex();
-    const b = buildOperationIndex();
+    const a = buildOperationIndex(new Set(["mcp:read"]));
+    const b = buildOperationIndex(new Set(["mcp:read"]));
     expect(b).toBe(a);
   });
 
@@ -488,10 +772,14 @@ describe("buildOperationIndex", () => {
     });
 
     it("keeps distinct permission sets apart — they yield different indexes", () => {
-      const narrow = buildOperationIndex(new Set(["mcp:read"]));
-      const wide = buildOperationIndex(new Set(["mcp:read", "agents:read"]));
-      expect(narrow).not.toContain("## Agents");
-      expect(wide).toContain("## Agents");
+      const narrow = indexIds(buildOperationIndex(new Set(["mcp:read"])));
+      const wide = indexIds(buildOperationIndex(new Set(["mcp:read", "agents:read"])));
+      // Per operation, not per tag: a section survives on its row-conditional
+      // members (`updateAgent` and friends are `requirePackageInOrg()`, which
+      // only the loaded row can refuse), so the difference has to be read on a
+      // concrete id — `GET /api/packages/agents` is `agents:read`.
+      expect(narrow).not.toContain("listAgentPackages");
+      expect(wide).toContain("listAgentPackages");
       expect(getOperationIndexCacheStats()).toEqual({ entries: 2, builds: 2 });
     });
 
@@ -533,7 +821,9 @@ describe("buildMcpTools contextInjected", () => {
     const tools = buildMcpTools({
       origin: "https://test.local",
       authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
-      permissions: new Set(["mcp:read"]),
+      // The full surface, so this asserts on get_me's absence and nothing
+      // else — every other tool here has a grant of its own.
+      permissions: new Set(FULL_SURFACE),
       dispatch,
       contextInjected: true,
       actor: { type: "user", id: "user_1" },

@@ -925,6 +925,31 @@ describe("view as role", () => {
     expect(real.isError).toBe(false);
   });
 
+  it("narrows the advertised MCP tool surface to the previewed role", async () => {
+    resetCatalog();
+    // A preview must get the answers the real role would, declarations
+    // included: `viewer` holds no `agents:run`, so `run_and_wait` is not among
+    // the tools it is shown; `operator` — same session, same endpoint — is.
+    const toolNames = async (view?: string): Promise<string[]> => {
+      const envelope = await expectJson<{ result?: { tools?: Array<{ name: string }> } }>(
+        await request(`/api/mcp/o/${owner.orgId}`, {
+          view,
+          space: owner.defaultSpaceId,
+          headers: { Accept: "application/json, text/event-stream" },
+          body: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
+        }),
+      );
+      return (envelope.result?.tools ?? []).map((tool) => tool.name);
+    };
+
+    expect(await toolNames(persona("member", "preset:viewer"))).not.toContain("run_and_wait");
+    expect(await toolNames(persona("member", "preset:operator"))).toContain("run_and_wait");
+    // The control: the same session with no persona is preset `admin` and
+    // keeps the tool, so the line above is the header narrowing the surface
+    // rather than the surface being empty.
+    expect(await toolNames()).toContain("run_and_wait");
+  });
+
   // ─── 7. The marker is present exactly when the persona validated ──
 
   it("stamps X-View-As-Active on validated requests only", async () => {

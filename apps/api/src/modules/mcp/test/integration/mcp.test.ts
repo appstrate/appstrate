@@ -251,7 +251,17 @@ describe("mcp tool round-trip", () => {
   });
 
   it("lists the available tools with annotations after initialize", async () => {
-    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    // Every tool this list names has a grant of its own now: `run_and_wait`
+    // needs launch + run-read, `list_files` needs `GET /api/files`. Scoping the
+    // key to `mcp:*` alone would drop both and this would assert on the
+    // declaration gate instead of on the advertised surface.
+    const headers = await apiKeyHeaders([
+      "mcp:read",
+      "mcp:invoke",
+      "agents:run",
+      "runs:read",
+      "files:read",
+    ]);
     await rpc(headers, {
       jsonrpc: "2.0",
       id: 1,
@@ -291,6 +301,44 @@ describe("mcp tool round-trip", () => {
     expect((search.annotations as Record<string, unknown>).readOnlyHint).toBe(true);
   });
 
+  it("narrows the advertised surface to the caller's space role", async () => {
+    // The per-org endpoint resolves the org's default space and reads the
+    // caller's role there (RBAC spec §7.3), and the two presets differ exactly
+    // where this matters: `viewer` holds neither `agents:run` nor the mcp
+    // module's `invoke` contribution, `builder` holds both. Same user shape,
+    // same request — only the space row's preset differs.
+    const { createTestUser, addOrgMember } = await import("../../../../../test/helpers/auth.ts");
+    const { seedSpaceMember } = await import("../../../../../test/helpers/seed.ts");
+    const owner = await createTestContext();
+
+    const listFor = async (presetRole: "viewer" | "builder"): Promise<string[]> => {
+      const member = await createTestUser();
+      await addOrgMember(owner.orgId, member.id, "member");
+      await seedSpaceMember({ spaceId: owner.defaultSpaceId, userId: member.id, presetRole });
+      const headers = { Cookie: member.cookie, "X-Org-Id": owner.orgId };
+      const { envelope } = await rpc(headers, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {},
+      });
+      return (envelope.result?.tools as Array<{ name: string }>).map((t) => t.name);
+    };
+
+    const viewer = await listFor("viewer");
+    expect(viewer).not.toContain("run_and_wait");
+    expect(viewer).not.toContain("invoke_operation");
+    // A viewer DOES hold `files:read` and `mcp:read`: this is a narrowing of
+    // the surface, not an empty list — without that control the case above
+    // would also pass if the whole list were gone.
+    expect(viewer).toContain("list_files");
+    expect(viewer).toContain("search_operations");
+
+    const builder = await listFor("builder");
+    expect(builder).toContain("run_and_wait");
+    expect(builder).toContain("invoke_operation");
+  });
+
   it("searches then invokes a real operation in-process", async () => {
     const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
     const search = await rpc(headers, {
@@ -317,16 +365,23 @@ describe("mcp tool round-trip", () => {
     expect(typeof payload.data.status).toBe("number");
   });
 
-  it("denies invoke_operation when the caller lacks mcp:invoke", async () => {
+  it("does not declare invoke_operation when the caller lacks mcp:invoke", async () => {
     const headers = await apiKeyHeaders(["mcp:read"]);
+    const listed = await rpc(headers, { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
+    const names = (listed.envelope.result?.tools as Array<{ name: string }>).map((t) => t.name);
+    expect(names).not.toContain("invoke_operation");
+
+    // And calling it anyway is refused by the SDK before any handler runs:
+    // tools are registered per session, so a tool that was not declared is
+    // simply not there.
     const op = [...getCatalog().operations.values()][0]!;
     const { envelope } = await rpc(headers, {
       jsonrpc: "2.0",
-      id: 1,
+      id: 2,
       method: "tools/call",
       params: { name: "invoke_operation", arguments: { operation_id: op.operationId } },
     });
-    expect(toolPayload(envelope).isError).toBe(true);
+    expect(envelope.error?.message).toContain("Unknown tool: invoke_operation");
   });
 
   it("cannot escalate past the caller's REST permissions (defence in depth)", async () => {
@@ -513,7 +568,11 @@ describe("mcp audit + rate limiting", () => {
     expect((rows[0]!.after as Record<string, unknown>).outcome).toBe("invoked");
   });
 
-  it("records an mcp.operation.denied audit row when the caller lacks mcp:invoke", async () => {
+  it("audits nothing when the caller lacks mcp:invoke — the tool is never declared", async () => {
+    // RBAC spec §4.3 audits a denial once, at the guard that fires it. With
+    // `invoke_operation` absent from what this caller is shown, no tool ran and
+    // there is nothing for the MCP layer to record; a row here would mean the
+    // declaration gate was dropped and the handler refused instead.
     const headers = await apiKeyHeaders(["mcp:read"]);
     const op = [...getCatalog().operations.values()][0]!;
     await rpc(headers, {
@@ -526,9 +585,8 @@ describe("mcp audit + rate limiting", () => {
     const rows = await db
       .select()
       .from(auditEvents)
-      .where(eq(auditEvents.action, "mcp.operation.denied"));
-    expect(rows.length).toBe(1);
-    expect((rows[0]!.after as Record<string, unknown>).outcome).toBe("denied");
+      .where(eq(auditEvents.resourceType, "mcp_operation"));
+    expect(rows.length).toBe(0);
   });
 
   it("returns the MCP response before the audit insert settles — the insert is tracked, not awaited", async () => {

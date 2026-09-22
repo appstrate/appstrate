@@ -15,8 +15,19 @@
 
 import { describe, it, expect } from "bun:test";
 import { buildServerInstructions } from "../../router.ts";
+import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
+import { getTestApp } from "../../../../../test/helpers/app.ts";
+import { setPlatformApp } from "../../../../lib/platform-app.ts";
 
-const permissions = new Set(["mcp:read"]);
+// The appended operation index is filtered per operation against the mounted
+// guards, so building the instructions now reads the route table.
+setPlatformApp(getTestApp());
+
+/**
+ * Launch and read back: the connect bullet is run-readiness guidance, so it is
+ * only written for a caller who can get a run off the ground (`canRunAgents`).
+ */
+const permissions = new Set(["mcp:read", "mcp:invoke", "agents:run", "runs:read"]);
 
 /** The connect bullet only — asserting on the whole prompt would match the index. */
 function connectBullet(contextInjected: boolean): string {
@@ -76,6 +87,44 @@ describe("MCP server instructions — connect bullet", () => {
       expect(bullet).toMatch(/do NOT poll, loop, wait/);
       expect(bullet).toMatch(/authKey: "<the error's auth_key/);
     }
+  });
+});
+
+describe("MCP server instructions — run guidance", () => {
+  // Rule 1: an act the caller's set makes structurally impossible is ABSENT,
+  // not contradicted. `run_and_wait` is declared on `canRunAgents`, so every
+  // paragraph that teaches running goes with it — dropping that gate makes
+  // each of these three markers reappear for the caller below.
+  const RUNNER = new Set(["mcp:read", "mcp:invoke", "agents:run", "runs:read"]);
+  const NO_RUN = new Set(["mcp:read", "mcp:invoke"]);
+
+  /** Prose only — the appended operation index would match on its own. */
+  function prose(caller: ReadonlySet<string>): string {
+    const instructions = buildServerInstructions(caller, true);
+    return instructions.slice(0, instructions.indexOf(OPERATION_INDEX_HEADING));
+  }
+
+  it("teaches run_and_wait, async runs and connect-before-run only to a caller who can run", () => {
+    const withRuns = prose(RUNNER);
+    const without = prose(NO_RUN);
+    for (const marker of [
+      "run_and_wait",
+      "Runs are asynchronous",
+      "Shortcut —",
+      "Connecting or reconnecting an integration before a run",
+      "must_choose_connection",
+    ]) {
+      expect(withRuns).toContain(marker);
+      expect(without).not.toContain(marker);
+    }
+  });
+
+  it("keeps the integration-preference bullet for both — it stands on its own", () => {
+    // The negative control for the case above: the run prose disappearing is a
+    // targeted removal, not the whole "Beyond the per-operation schemas"
+    // section going missing.
+    expect(prose(RUNNER)).toContain("- Integration preference");
+    expect(prose(NO_RUN)).toContain("- Integration preference");
   });
 });
 

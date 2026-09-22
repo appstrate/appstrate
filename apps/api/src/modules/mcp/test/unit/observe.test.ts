@@ -12,6 +12,12 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { getCatalog, resetCatalog, type CatalogOperation } from "../../catalog.ts";
 import { buildMcpTools, type Dispatch, type McpToolEvent } from "../../tools.ts";
+import { getTestApp } from "../../../../../test/helpers/app.ts";
+import { setPlatformApp } from "../../../../lib/platform-app.ts";
+
+// `buildMcpTools` decides what this caller is shown from the guards mounted on
+// the routes, so it reads the route table.
+setPlatformApp(getTestApp());
 
 const noExtra = {} as unknown as AppstrateRequestExtra;
 
@@ -55,12 +61,19 @@ describe("observe — search_operations", () => {
     expect(e.resultCount).toBeLessThanOrEqual(3);
     expect(typeof e.durationMs).toBe("number");
     expect(e.durationMs).toBeGreaterThanOrEqual(0);
+    // How often a caller's role is what stood between it and a match — the
+    // signal that says "this role is mis-scoped", not "the search is bad".
+    // An `mcp:read`-only caller is denied `runAgent`, `createAgent` and more.
+    expect(e.deniedCount).toBeGreaterThan(0);
   });
 
   it("reports a zero result count for a no-match query (search hit-rate signal)", async () => {
     const { byName, events } = makeTools(["mcp:read"]);
     await byName.get("search_operations")!.handler({ query: "zzznotarealthing_xyzzy" }, noExtra);
     expect(events[0]!.resultCount).toBe(0);
+    // Nothing matched, so nothing was denied either — the two counters move
+    // independently.
+    expect(events[0]!.deniedCount).toBe(0);
   });
 });
 
@@ -112,13 +125,13 @@ describe("observe — invoke_operation", () => {
     expect(events[0]!.status).toBe(503);
   });
 
-  it("emits outcome=denied (no dispatch) when the caller lacks mcp:invoke", async () => {
-    const op = firstOp(() => true);
+  it("emits nothing for a caller without mcp:invoke — the tool is not declared", () => {
+    // The tool is absent from what such a caller is shown, so the in-handler
+    // refusal that used to emit an outcome of its own was unreachable and is
+    // gone with it. The route's own guard is what audits a real refusal.
     const { byName, events } = makeTools(["mcp:read"]);
-    await byName.get("invoke_operation")!.handler({ operation_id: op.operationId }, noExtra);
-    expect(events.length).toBe(1);
-    expect(events[0]!.outcome).toBe("denied");
-    expect(events[0]!.status).toBeUndefined();
+    expect(byName.has("invoke_operation")).toBe(false);
+    expect(events.length).toBe(0);
   });
 
   it("emits outcome=rejected for an unknown operationId (before the protocol error throws)", async () => {

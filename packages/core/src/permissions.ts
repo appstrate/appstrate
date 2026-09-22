@@ -169,9 +169,11 @@ export function canReadRuns(has: (permission: CorePermission) => boolean): boole
 
 /**
  * Whether a caller may launch an agent AND read the run back. Launching a run
- * the caller could never read does not count: `run_and_wait` refuses without
- * run-read before it launches, and the chat access chip's "run your agents" row
- * answers this same question.
+ * the caller could never read does not count — it would provision a container
+ * and bill the spend for a status nobody can poll. The MCP server declares its
+ * `run_and_wait` tool on this predicate (plus `mcp:invoke`) rather than
+ * refusing inside it, and the chat access chip's "run your agents" row asks the
+ * same question.
  */
 export function canRunAgents(has: (permission: CorePermission) => boolean): boolean {
   return has("agents:run") && canReadRuns(has);

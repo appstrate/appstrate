@@ -43,9 +43,13 @@ export const mcpPaths = {
       summary: "Per-organization MCP Streamable HTTP endpoint",
       description:
         "Model Context Protocol server (Streamable HTTP, stateless) for a single organization. " +
-        "Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). Exposes four " +
-        "tools — `search_operations`, `describe_operation`, `invoke_operation`, and " +
-        "`run_and_wait` — that let an MCP client discover and call platform API operations, " +
+        "Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it " +
+        "declares follow the caller's permissions: the discovery pair " +
+        "(`search_operations`, `describe_operation`) is always present, while the acting tools — " +
+        "`invoke_operation` (`mcp:invoke`), `run_and_wait` (`mcp:invoke` plus `agents:run` and a " +
+        "run-read permission), `list_files` (`files:read`) and the file/package helpers — are " +
+        "declared only to a caller whose grants make them usable, so `tools/list` differs by " +
+        "role. Together they let an MCP client discover and call platform API operations, " +
         "plus launch and wait for agent runs, with the caller's own credentials and confined to " +
         "the organization in the path. Each organization has its own endpoint: a " +
         "token obtained for this endpoint is audience-bound (RFC 8707) to the per-org resource " +

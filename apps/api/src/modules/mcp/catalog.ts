@@ -12,12 +12,17 @@
  *
  * Built lazily on first use (long after boot, so all modules have
  * contributed their paths) and cached for the process lifetime.
+ *
+ * What an operation requires of its caller is read off the guards mounted on
+ * its route ({@link operationRequirement}), so the index and the tool surface
+ * derive from the same table that enforces them — never a second list.
  */
 
 import { buildOpenApiSpec } from "../../openapi/index.ts";
 import { getPlatformRoutes } from "../../lib/platform-app.ts";
 import {
   deriveRouteRequirements,
+  isGranted,
   routeRequirementKey,
   type RouteRequirement,
   type RouteTable,
@@ -67,7 +72,6 @@ interface OperationCatalog {
 }
 
 let cached: OperationCatalog | null = null;
-let cachedIndex: string | null = null;
 
 /**
  * Permission-scoped operation indexes, memoised per permission SET. The MCP
@@ -110,7 +114,6 @@ export function getOperationIndexCacheStats(): { entries: number; builds: number
 }
 
 function resetDerivedCaches(): void {
-  cachedIndex = null;
   indexByPermissions.clear();
   scopedIndexBuilds = 0;
   routeTable = null;
@@ -237,10 +240,14 @@ export function operationRequirement(op: CatalogOperation): RouteRequirement {
   return requirement;
 }
 
+/** Whether `permissions` clears every guard mounted on this operation's route. */
+export function operationGranted(op: CatalogOperation, permissions: ReadonlySet<string>): boolean {
+  return isGranted(operationRequirement(op), permissions);
+}
+
 /**
- * A compact, generated index of every operation, grouped by tag — one
- * comma-separated line of operationIds per tag (the per-op summary is dropped
- * to keep the index small, see below):
+ * A compact, generated index of the operations this caller may invoke, grouped
+ * by tag — one comma-separated line of operationIds per tag:
  *
  *   ## Agents
  *   listAgents, runAgent
@@ -250,55 +257,26 @@ export function operationRequirement(op: CatalogOperation): RouteRequirement {
  * pick an operationId directly, skipping a search_operations round-trip. It is
  * fully derived from the live catalog and memoized, so it grows with the API
  * surface without any hand maintenance.
+ *
+ * Filtered PER OPERATION against the guards mounted on its route
+ * ({@link operationGranted}), so a tag whose operations are all denied has no
+ * section at all. That is context reduction and honesty — never a security
+ * boundary: invoke_operation dispatches through the real route, which
+ * re-enforces RBAC on every call, and a row-conditional operation stays listed
+ * because only the loaded row can refuse it.
  */
-/**
- * OpenAPI tag → RBAC resource, for permission-scoped index filtering. Coarse
- * by design: the index is grouped by tag and does not yet join
- * {@link operationRequirement}, so we drop a whole tag section when the
- * caller's role has no permission on the mapped resource. Tags with no clear single resource
- * (auth, health, profile, uploads, library, packages, proxies-as-call, …) are
- * intentionally absent and always shown — this is a context-reduction heuristic,
- * NOT a security boundary (invoke_operation re-enforces RBAC per call).
- */
-const TAG_TO_RESOURCE: Record<string, string> = {
-  Agents: "agents",
-  Runs: "runs",
-  Schedules: "schedules",
-  Integrations: "integrations",
-  Spaces: "spaces",
-  "Space Packages": "spaces",
-  "End Users": "end-users",
-  "API Keys": "api-keys",
-  Models: "models",
-  "Model Provider Credentials": "model-provider-credentials",
-  Organizations: "org",
-};
+export function buildOperationIndex(permissions: ReadonlySet<string>): string {
+  const key = permissionsKey(permissions);
+  const hit = indexByPermissions.get(key);
+  if (hit !== undefined) return hit;
 
-/** Whether a tag's section is shown to a caller holding `permissions`. */
-function tagVisible(tag: string, permissions: ReadonlySet<string>): boolean {
-  const resource = TAG_TO_RESOURCE[tag];
-  if (!resource) return true; // unmapped tag → always shown (conservative)
-  const prefix = `${resource}:`;
-  for (const p of permissions) if (p.startsWith(prefix)) return true;
-  return false;
-}
-
-export function buildOperationIndex(permissions?: ReadonlySet<string>): string {
-  // Both shapes are memoised: the unfiltered index in `cachedIndex`, a
-  // permission-scoped one per permission set in `indexByPermissions`.
-  if (!permissions && cachedIndex !== null) return cachedIndex;
-  const key = permissions ? permissionsKey(permissions) : null;
-  if (key !== null) {
-    const hit = indexByPermissions.get(key);
-    if (hit !== undefined) return hit;
-  }
-
-  // `getCatalog()` may rebuild (and thereby clear the index maps) — call it
+  // `getCatalog()` may rebuild (and thereby clear the index map) — call it
   // BEFORE the memo write below so the entry is stored against the catalog it
   // was derived from.
   const { operations } = getCatalog();
   const byTag = new Map<string, string[]>();
   for (const op of operations.values()) {
+    if (!operationGranted(op, permissions)) continue;
     const tag = op.tags[0] ?? "Other";
     // operationId ONLY — the per-op summary is dropped from the index to keep it
     // compact (it's several KB across ~230 ops, re-sent every uncached turn).
@@ -307,26 +285,19 @@ export function buildOperationIndex(permissions?: ReadonlySet<string>): string {
     (byTag.get(tag) ?? byTag.set(tag, []).get(tag)!).push(op.operationId);
   }
 
-  const sections = [...byTag.keys()]
-    .sort()
-    .filter((tag) => !permissions || tagVisible(tag, permissions))
-    .map((tag) => {
-      // One compact, comma-separated line of operationIds per tag.
-      const ids = byTag.get(tag)!.sort();
-      return `## ${tag}\n${ids.join(", ")}`;
-    });
+  const sections = [...byTag.keys()].sort().map((tag) => {
+    // One compact, comma-separated line of operationIds per tag.
+    const ids = byTag.get(tag)!.sort();
+    return `## ${tag}\n${ids.join(", ")}`;
+  });
 
   const result = sections.join("\n\n");
-  if (key === null) {
-    cachedIndex = result;
-  } else {
-    scopedIndexBuilds += 1;
-    if (indexByPermissions.size >= MAX_SCOPED_INDEXES) {
-      const oldest = indexByPermissions.keys().next().value;
-      if (oldest !== undefined) indexByPermissions.delete(oldest);
-    }
-    indexByPermissions.set(key, result);
+  scopedIndexBuilds += 1;
+  if (indexByPermissions.size >= MAX_SCOPED_INDEXES) {
+    const oldest = indexByPermissions.keys().next().value;
+    if (oldest !== undefined) indexByPermissions.delete(oldest);
   }
+  indexByPermissions.set(key, result);
   return result;
 }
 

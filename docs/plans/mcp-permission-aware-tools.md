@@ -77,35 +77,48 @@ does. `isGranted` is `every(requirement => requirement.split("|").some(has))`.
 
 ### The catalog joins on it
 
-`CatalogOperation` gains `requirement: RouteRequirement`. `getCatalog()` reads
-the route table from `lib/platform-app.ts` (a `getPlatformRoutes()` beside
-`dispatchInProcess`, throwing before `setPlatformApp` like dispatch does — no
-fallback to "unfiltered"). An operation with no guard on its route (health,
-`/api/me/*`, uploads) has `requirements: []`, granted to everyone who reached
-the transport.
+`CatalogOperation` gains **no field**. `operationRequirement(op)` is a function
+with a memo of its own, deriving the table on its first call rather than at
+`getCatalog()` time: the app registers itself with `setPlatformApp` BEFORE the
+module routers mount, so a boot-time derivation would freeze a partial table.
+It reads the route table from `lib/platform-app.ts` (a `getPlatformRoutes()`
+beside `dispatchInProcess`, throwing before `setPlatformApp` like dispatch
+does — no fallback to "unfiltered"), and the lookup follows Hono's matching
+(prefix mounts included) rather than an exact `(method, path)` key, since
+several operations have no route of their own. An operation with no guard on
+its route (health, `/api/me/*`, uploads) has `requirements: []`, granted to
+everyone who reached the transport. `/api/openapi.json` and `/api/docs` left
+the catalog: the spec's own source and its human viewer are not operations a
+caller acts with.
 
-`buildOperationIndex(permissions)` filters **per operation**; a tag whose
+`buildOperationIndex(permissions)` takes the permission set as a **required**
+argument and filters **per operation** (`operationGranted`); a tag whose
 operations are all denied has no section. `TAG_TO_RESOURCE` and `tagVisible`
-are deleted in the same commit. Memoisation per permission set stays.
+are deleted in the same commit, and with them the unfiltered index and its
+cache. Memoisation per permission set stays.
 
-### Meta-tools declare what they dispatch to
+### Meta-tools declare what the caller may reach
 
-`AppstrateToolDefinition` gains `dispatchesTo?: string[]` (operationIds).
-`buildMcpTools` declares a tool only when every operation it dispatches to is
-granted:
+`buildMcpTools` builds one table of what this caller is SHOWN, each row a
+predicate over the same grants:
 
-| Tool                                                   | Dispatches to                                  | Declared when                                                           |
-| ------------------------------------------------------ | ---------------------------------------------- | ----------------------------------------------------------------------- |
-| `search_operations`, `describe_operation`, `read_file` | —                                              | always (read-only, transport gate `mcp:read`)                           |
-| `get_me`                                               | `getMeContext`                                 | not `contextInjected` (unchanged)                                       |
-| `invoke_operation`                                     | any                                            | `mcp:invoke`                                                            |
-| `run_and_wait`                                         | `runAgent` (+ `runInline` for the inline half) | `mcp:invoke` ∧ `canReadRuns` ∧ `runAgent` granted; inline half as today |
-| `list_files`                                           | `listFiles`                                    | `listFiles` granted (`files:read`)                                      |
-| `validate_package_file`, `import_package_file`         | as today                                       | unchanged (`canImportPackageFiles` already conditional)                 |
+| Tool                                                   | Declared when                                                       |
+| ------------------------------------------------------ | ------------------------------------------------------------------- |
+| `search_operations`, `describe_operation`, `read_file` | always (read-only, transport gate `mcp:read`; `read_file` is a row) |
+| `get_me`                                               | not `contextInjected` (unchanged)                                   |
+| `invoke_operation`                                     | `mcp:invoke`                                                        |
+| `run_and_wait`                                         | `mcp:invoke` ∧ `canRunAgents`; the inline half as today             |
+| `list_files`                                           | the `GET /api/files` operation granted (`files:read`)               |
+| `validate_package_file`, `import_package_file`         | unchanged (`canImportPackageFiles` already conditional)             |
 
-The in-handler checks (`mcp:invoke`, `canReadRuns`) stay: defence in depth for
-a client that calls a tool it was not shown (the SDK answers "Unknown tool"
-anyway, since tools are registered per session).
+The in-handler checks (`mcp:invoke` in `invoke_operation`, `mcp:invoke` and
+`canReadRuns` in `run_and_wait`) are **deleted**, not kept as defence in depth:
+tools are registered per session, so a tool that was not declared is one the
+SDK refuses with "Unknown tool" before any handler runs, and each of those
+branches was unreachable by construction. Their telemetry goes with them — the
+`"denied"` member of `McpInvokeOutcome` and the `mcp.operation.denied` audit
+action are removed. A refusal is the route guard's own audit, once (RBAC spec
+§4.3), which is the rule this plan started from.
 
 ### Search, describe, invoke
 
@@ -127,9 +140,12 @@ anyway, since tools are registered per session).
 ```ts
 export function canReadRuns(has): boolean; // moved from apps/api/lib/run-visibility.ts; read-all implies read
 export function canRunAgents(has): boolean; // has("agents:run") && canReadRuns(has)
-export function canInvokeOperations(has): boolean; // has("mcp:invoke")
 export function canComposeInline(has): boolean; // unchanged
 ```
+
+No `canInvokeOperations`: `mcp:invoke` is a single `has()` with no rule to
+share, and a predicate wrapping one membership test only hides where the gate
+is.
 
 `apps/api/lib/run-visibility.ts` re-exports nothing: its callers import core.
 `apps/web/src/modules/chat/chat-access.ts` builds every row on these; the
@@ -158,7 +174,7 @@ Three pull requests, each green on its own, no behaviour change in the first.
   `canInvokeOperations` added; version `11.1.0`, tag `core@11.1.0` before PR B
   merges.
 - api: `lib/route-requirements.ts`; `getPlatformRoutes()`; catalog
-  `requirement` field (populated, unused).
+  `operationRequirement()` (derived, unread by the tools yet).
 - Conformance test (`test/integration/middleware/route-requirements.test.ts`):
   every non-`GET` operation in the catalog under `/api/` has ≥ 1 requirement
   or is conditional, with an explicit allowlist (auth, `/api/me/*`, welcome,
