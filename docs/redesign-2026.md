@@ -1768,6 +1768,36 @@ column head of that space, and its row on a sheet, carry a small "ici" pill.
 Not the implicit "ici" the catalogue used to have, which claimed a context
 without naming it: this names the space and changes nothing else.
 
+**The reader's own space leads the table, and has a one-click shortcut**
+
+Two more things made the default view hard to read, both fixed:
+
+- **The columns opened on the organization's default space**, because that is
+  the order the server answers in. The space the app is STANDING in leads now,
+  whatever its rank, and it is the tier-2 column — the one that survives a
+  narrow table — so the reader's anchor never moves and never drops. It is also
+  the wider column, since it carries the "ici" pill beside the name.
+- **A shortcut where the view switch used to be**: "Espace actif", a two-state
+  button. Pressed, the table is the reader's own space alone. It WRITES the
+  space filter (`?space=`) rather than holding a state of its own, so the chip
+  and the button cannot disagree, and a hand-picked pair of spaces simply
+  leaves it unpressed — which a two-value segmented control could not express.
+
+Narrowing must not hide a decision: the line above the table counts shares
+waiting in EVERY space the caller reaches, adds "Dont N dans vos autres
+espaces" when the table shows fewer, and its "Voir" widens the table back
+before filtering on the offered state.
+
+**Découvrir is structurally empty for agents and skills, and that is correct**
+
+A catalogue-wide finding, written down because it looks like a bug: for a
+reader who reaches the space a package is homed in, that package is PLACED —
+the matrix's off switch in another space's column is the same affordance the
+per-space "candidate" was. So Découvrir only ever holds what is in none of your
+spaces: system packages switched on nowhere, which in practice means
+integrations, since a system agent or skill is readable everywhere and says so.
+The empty state already says exactly that.
+
 **The share alert and the row it names share a tint**
 
 An alert saying "partagé avec Bac à sable" sat above a table where nothing
@@ -1794,6 +1824,15 @@ the package's own page that answer is as old as the page; putting it on a
 catalogue sheet a member reads would have named agents homed in spaces they
 cannot enter. The sheet narrows it to the dependents their own library carries,
 and says nothing when none of them are visible.
+
+**The lab's library, and what each row is there to show**
+
+The fixtures carried one "inactive" placement and no system agent or skill, so
+three states could only be judged on a real instance. Added: a system agent and
+a system skill (readable everywhere, no switch), an agent placed and switched
+OFF in two spaces, a skill shared with a PERSONAL space by somebody else, a
+package whose home is withheld (`home_space_id: null`, so the origin column
+names the provider and no space), and a deliberately long name for truncation.
 
 **What is left**
 

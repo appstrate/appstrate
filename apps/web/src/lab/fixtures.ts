@@ -3878,6 +3878,68 @@ export const library: Json200<"/api/library", "get"> = {
           { space_id: APP_ID, via: "home" as const, state: "active" as const, shared_by: null },
         ],
       },
+      {
+        // Shipped with the instance: readable in every space without being
+        // switched on anywhere, which is what "Partout" means and why no
+        // switch is drawn for it.
+        id: "@appstrate/assistant-reunion",
+        name: "Assistant de réunion",
+        description: "Prépare l'ordre du jour et résume la réunion.",
+        source: "system",
+        home_space_id: null,
+        home_writable: false,
+        home_deletable: false,
+        home_shareable: false,
+        placements: ["app_lab_default", APP_ID, "app_lab_sandbox"].map((space_id) => ({
+          space_id,
+          via: "system" as const,
+          state: "none" as const,
+          shared_by: null,
+        })),
+      },
+      {
+        // Placed in Production and switched OFF: the third state, which one
+        // fixture alone used to carry.
+        id: "@tractr/relance-factures",
+        name: "Relance des factures impayées",
+        description: "Relance les factures en retard et journalise les envois.",
+        source: "local",
+        home_space_id: APP_ID,
+        home_writable: true,
+        home_deletable: true,
+        home_shareable: true,
+        placements: [
+          { space_id: APP_ID, via: "home" as const, state: "inactive" as const, shared_by: null },
+          {
+            space_id: "app_lab_default",
+            via: "shared" as const,
+            state: "inactive" as const,
+            shared_by: { user_id: "usr_lab_julie", name: "Julie Ferrand" },
+          },
+        ],
+      },
+      {
+        // Homed in a space this reader cannot enter: the server withholds the
+        // id (`home_space_id: null`) and the origin column names the provider
+        // without naming a space. Its long name is the truncation case.
+        id: "@tractr/rapprochement-bancaire-multi-devises",
+        name: "Rapprochement bancaire multi-devises et consolidation trimestrielle",
+        description:
+          "Rapproche les relevés de plusieurs banques, convertit les devises et consolide le trimestre.",
+        source: "local",
+        home_space_id: null,
+        home_writable: false,
+        home_deletable: false,
+        home_shareable: false,
+        placements: [
+          {
+            space_id: APP_ID,
+            via: "shared" as const,
+            state: "active" as const,
+            shared_by: { user_id: "usr_lab_julie", name: "Julie Ferrand" },
+          },
+        ],
+      },
     ].map((pkg) => ({ ...pkg, type: "agent" as const })),
     skill: [
       {
@@ -3941,6 +4003,44 @@ export const library: Json200<"/api/library", "get"> = {
         home_shareable: true,
         placements: [
           { space_id: APP_ID, via: "home" as const, state: "active" as const, shared_by: null },
+        ],
+      },
+      {
+        // A system skill, like the system agent above: readable everywhere.
+        id: "@appstrate/redaction-claire",
+        name: "redaction-claire",
+        description: "Règles de rédaction claire pour les sorties d'agents.",
+        source: "system",
+        home_space_id: null,
+        home_writable: false,
+        home_deletable: false,
+        home_shareable: false,
+        placements: ["app_lab_default", APP_ID, "app_lab_sandbox"].map((space_id) => ({
+          space_id,
+          via: "system" as const,
+          state: "none" as const,
+          shared_by: null,
+        })),
+      },
+      {
+        // Shared with a PERSONAL space and taken up by nobody: a share to a
+        // person, which the wire never names as a space target.
+        id: "@tractr/notes-client",
+        name: "notes-client",
+        description: "Structure les notes de suivi client.",
+        source: "local",
+        home_space_id: APP_ID,
+        home_writable: true,
+        home_deletable: true,
+        home_shareable: true,
+        placements: [
+          { space_id: APP_ID, via: "home" as const, state: "active" as const, shared_by: null },
+          {
+            space_id: "app_lab_personal",
+            via: "shared" as const,
+            state: "none" as const,
+            shared_by: { user_id: "usr_lab_julie", name: "Julie Ferrand" },
+          },
         ],
       },
     ].map((pkg) => ({ ...pkg, type: "skill" as const })),

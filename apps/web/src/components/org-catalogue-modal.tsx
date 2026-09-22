@@ -39,7 +39,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { ArrowLeft, Boxes, Layers, LibraryBig, Wrench } from "lucide-react";
+import { ArrowLeft, Boxes, Layers, LibraryBig, SquareUser, Wrench } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
@@ -181,7 +181,20 @@ export function OrgCatalogueModal({
   // pays for the request.
   const { data: integrations } = useAllIntegrations({ enabled: active === "integration" });
   const integrationById = new Map((integrations ?? []).map((row) => [row.id, row] as const));
-  const spaces = library?.spaces ?? [];
+  const librarySpaces = library?.spaces ?? [];
+  /**
+   * The space the app is standing in leads, always.
+   *
+   * The server orders spaces with the organization's default first, so a
+   * reader working in Production opened on Default: the first column they read
+   * was not theirs. Theirs is the anchor — it is where a launch, a run and a
+   * connection land — so it heads the table, it is the column that survives a
+   * narrow width (tier 2, in `useCatalogueSpaceColumns`), and no filter moves
+   * it.
+   */
+  const spaces = [...librarySpaces].sort(
+    (a, b) => Number(b.id === spaceId) - Number(a.id === spaceId),
+  );
   // The library names the spaces this caller reaches; `/api/spaces` carries the
   // grant in each, which is the verdict a switch in that column answers to.
   const { data: reachable } = useSpaces();
@@ -339,6 +352,8 @@ export function OrgCatalogueModal({
       { replace: true, state: routerLocation.state },
     );
   const visibleIds = visibleSpaces.map((space) => space.id);
+  /** Narrowed to the reader's own space, which is what the bar's shortcut writes. */
+  const onlyHere = chosenSpaces.length === 1 && chosenSpaces[0] === spaceId;
   /** Its states across the spaces on screen: the columns are the question. */
   const statesIn = (placement: CataloguePlacement): PlacementState[] => {
     // A system package is readable everywhere without a row: it is active in
@@ -360,8 +375,16 @@ export function OrgCatalogueModal({
     if (discovering || states.length === 0) return true;
     return statesIn(placement).some((state) => states.includes(state));
   });
-  // Offered only when there is a choice to make: with one space, the only
-  // column is already that space.
+  /**
+   * Shares waiting for a decision, counted on EVERY space this caller reaches
+   * rather than on the columns on screen: narrowing the table must not make an
+   * offer disappear from the count while the navigation's badge still carries
+   * it. What narrowing hides is said in its own words below.
+   */
+  const pendingAll = ofKind.reduce((total, item) => {
+    const placement = placementById.get(item.id);
+    return total + (placement?.offeredIn.length ?? 0);
+  }, 0);
   const pendingHere = ofKind.reduce((total, item) => {
     const placement = placementById.get(item.id);
     return total + (placement?.offeredIn.filter((id) => visibleIds.includes(id)).length ?? 0);
@@ -738,10 +761,27 @@ export function OrgCatalogueModal({
                   one click from being the only rows in it. Not a second list
                   of them: they ARE rows of this table, and a copy above it
                   would be two places to take one decision. */}
-              {!discovering && pendingHere > 0 && !states.includes("offered") && (
+              {!discovering && pendingAll > 0 && !states.includes("offered") && (
                 <div className="border-border bg-card mb-4 flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm">
-                  <span>{t("catalogue.pendingLine", { count: pendingHere })}</span>
-                  <Button size="sm" variant="outline" onClick={() => setStates(["offered"])}>
+                  <span>
+                    {t("catalogue.pendingLine", { count: pendingAll })}
+                    {pendingAll > pendingHere && (
+                      <span className="text-muted-foreground">
+                        {" "}
+                        {t("catalogue.pendingElsewhere", { count: pendingAll - pendingHere })}
+                      </span>
+                    )}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      // Showing them means showing them ALL: a narrowed table
+                      // would answer the button with an empty list.
+                      if (pendingAll > pendingHere) setChosenSpaces([]);
+                      setStates(["offered"]);
+                    }}
+                  >
                     {t("catalogue.pendingShow")}
                   </Button>
                 </div>
@@ -792,17 +832,37 @@ export function OrgCatalogueModal({
           ]}
           rowAction={(item) => preview.open(item.id)}
           actions={
-            view === "table" && picked.length > 0 ? (
-              <Button
-                type="button"
-                size="sm"
-                disabled={activate.isPending || !spaceId}
-                onClick={() => picked.forEach(activateOne)}
-              >
-                {activate.isPending && <Spinner />}
-                {t("catalogue.activateSelection", { count: picked.length })}
-              </Button>
-            ) : undefined
+            <>
+              {/* The space filter's one-click form, in the bar's own corner:
+                  the reader's space alone, or every space. It WRITES the
+                  filter rather than holding a state of its own, so the chip
+                  below and this button can never disagree — and a hand-picked
+                  pair of spaces simply leaves it unpressed. */}
+              {spaceId && spaces.length > 1 && spaces.some((space) => space.id === spaceId) && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-pressed={onlyHere}
+                  className="aria-pressed:bg-accent aria-pressed:text-accent-foreground gap-1.5"
+                  onClick={() => setChosenSpaces(onlyHere ? [] : [spaceId])}
+                >
+                  <SquareUser />
+                  {t("catalogue.onlyHere")}
+                </Button>
+              )}
+              {view === "table" && picked.length > 0 ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={activate.isPending || !spaceId}
+                  onClick={() => picked.forEach(activateOne)}
+                >
+                  {activate.isPending && <Spinner />}
+                  {t("catalogue.activateSelection", { count: picked.length })}
+                </Button>
+              ) : null}
+            </>
           }
         />
       )}

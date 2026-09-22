@@ -257,7 +257,9 @@ export function useCatalogueSpaceColumns({
     // Controls, not content: the row's link is placed elsewhere, and the
     // switches below are raised over the overlay it stretches across the row.
     control: true,
-    width: "minmax(104px,1fr)",
+    // The pinned first column carries the space name AND the "ici" pill, so it
+    // asks for more room than the ones that carry a name alone.
+    width: index === 0 ? "minmax(140px,1fr)" : "minmax(104px,1fr)",
     // The first space holds tier two, beside the name; the others wait for the
     // width the way any further column does. A caller with ONE space therefore
     // keeps the table it had, with the space named instead of implied.
