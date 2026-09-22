@@ -245,6 +245,7 @@ describe("resolveLiveIntegrationCredentials", () => {
       agentPackageId: "@creds/agent",
       actor: { type: "user" as const, id: ctx.user.id },
       connectionId,
+      connectionSource: "member_pin",
     };
   }
 
@@ -693,6 +694,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     // Naming the id is the whole point: with N bound connections, "no
     // connection for this integration" does not say which one to re-connect.
     expect((err as Error).message).toContain(removed);
+    expect((err as Error).message).toContain("source 'member_pin'");
 
     // CONTROL — the sibling is untouched. A dead member must not black-hole
     // the credentials of the connections that are still live.

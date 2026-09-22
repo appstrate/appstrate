@@ -112,11 +112,8 @@ export async function buildRunContext(params: {
    */
   traceparent?: string;
   /**
-   * Snapshot of the connection resolver output (#199 cascade). When set, the
-   * spawn loader uses it to pin which connection rows are decrypted per
-   * integration — admin pins / run overrides survive the kickoff handoff into
-   * the live runtime. One entry per integration holds the whole bound SET, and
-   * the spawn loader emits one spec per member.
+   * Snapshot of the connection resolver output (#199 cascade): the bound SET
+   * per integration, one spawn spec per member.
    */
   resolvedConnections?: ResolvedConnectionMap | null;
   /**
@@ -340,9 +337,8 @@ export async function buildRunContext(params: {
 /**
  * Run-log `event` name for a declared-but-not-spawned integration. Stable
  * (an operator/API consumer can filter on it) and singular — one row per
- * drop, so `data.integrationId` is never a list. An integration bound to
- * several connections can lose a subset of them: those rows share an
- * `integrationId` and are told apart by `connectionLabel`.
+ * drop, so `data.integrationId` is never a list; drops of one bound set
+ * share it and differ by `connectionLabel`.
  */
 export const INTEGRATION_DROPPED_EVENT = "integration_dropped";
 

@@ -19,6 +19,7 @@ import { encryptCredentialEnvelope } from "@appstrate/connect";
 
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
+import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
@@ -140,6 +141,7 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
+      resolvedConnections: await bindAllConnections(INTEG),
     });
     expect(specs.length).toBe(1);
     const spec = specs[0]!;
@@ -181,6 +183,7 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
+      resolvedConnections: await bindAllConnections(INTEG),
     });
     expect(specs.length).toBe(1);
     const mounts = specs[0]!.fileMounts!;
@@ -205,6 +208,7 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
+      resolvedConnections: await bindAllConnections(INTEG),
     });
     expect(specs.length).toBe(1);
     const mounts = specs[0]!.fileMounts!;
@@ -244,6 +248,7 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
+      resolvedConnections: await bindAllConnections(INTEG),
     });
     expect(specs.length).toBe(1);
     expect(specs[0]!.fileMounts).toBeUndefined();

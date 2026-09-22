@@ -126,7 +126,7 @@ export const schedulesPaths = {
                 },
                 connection_overrides: {
                   type: "object",
-                  description: `Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 1..${MAX_CONNECTIONS_PER_INTEGRATION} per integration, always an ARRAY. Loses to admin pins (#1), beats actor-fallback (#4). Stored on \`package_schedules.connection_overrides\` and replayed on every fire. Empty arrays and empty ids are refused here: either would be skipped in silence by the connection resolver on every fire instead of failing at this write.`,
+                  description: `Per-integration connection sets frozen on the schedule row (the schedule-override layer). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 1..${MAX_CONNECTIONS_PER_INTEGRATION} per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (at most one connection). Stored on \`package_schedules.connection_overrides\` and replayed on every fire. Empty arrays and empty ids are refused here: either would be skipped in silence by the connection resolver on every fire instead of failing at this write. Label distinctness is NOT checked at this write: a set whose connections share a label fails every fire with \`duplicate_connection_label\` until one is renamed.`,
                   additionalProperties: {
                     type: "array",
                     items: { type: "string", minLength: 1 },
@@ -324,7 +324,7 @@ export const schedulesPaths = {
                 },
                 connection_overrides: {
                   type: ["object", "null"],
-                  description: `Per-integration connection picks frozen on the schedule, one array of 1..${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per integration. Pass \`null\` to clear. Same array shape and same bounds as on create.`,
+                  description: `Per-integration connection sets frozen on the schedule, one array of 1..${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per integration. Pass \`null\` to clear. Same array shape, same bounds and same cascade layer as on create; label distinctness is likewise checked at each fire, not here.`,
                   additionalProperties: {
                     type: "array",
                     items: { type: "string", minLength: 1 },

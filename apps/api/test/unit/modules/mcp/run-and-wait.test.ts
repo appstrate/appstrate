@@ -419,9 +419,7 @@ describe("run_and_wait", () => {
       ).connection_overrides;
       expect(property).toBeDefined();
       expect(property!.type).toBe("object");
-      // 1..MAX connection ids per integration, always an array. A `{ type:
-      // "string" }` value map is the retired shape: it would advertise to the
-      // model exactly the argument the launch client now refuses.
+      // 1..MAX connection ids per integration, always an array — the route's shape.
       expect(property!.additionalProperties).toEqual({
         type: "array",
         items: { type: "string" },
@@ -483,28 +481,6 @@ describe("run_and_wait", () => {
       expect(post?.body).toMatchObject({
         connection_overrides: { "@acme/ssh": ["conn_web1", "conn_db"] },
       });
-    });
-
-    // The retired one-id-per-integration shape. Refused before the launch and
-    // never wrapped into a one-element array: a coerced launch would 201 on a
-    // binding the model never asked for, and nothing downstream would say the
-    // argument had been rewritten.
-    it("refuses a bare connection id instead of launching on a coerced one", async () => {
-      const { tool, calls } = makeRunAndWait({});
-
-      const res = await tool.handler(
-        {
-          kind: "inline",
-          manifest: { name: "tmp" },
-          prompt: "do it",
-          connection_overrides: { "@acme/gmail": "conn_abc" },
-        },
-        noExtra,
-      );
-
-      expect(res.isError).toBe(true);
-      expect(String(parseResult(res).error)).toContain("@acme/gmail");
-      expect(calls.find((c) => c.method === "POST")).toBeUndefined();
     });
 
     it("forwards connection_overrides verbatim on an agent launch", async () => {

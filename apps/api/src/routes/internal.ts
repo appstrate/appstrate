@@ -90,8 +90,7 @@ async function verifyRunToken(c: Context): Promise<{
     versionRef: string | null;
     /**
      * Snapshot of the connection resolver output frozen at run kickoff
-     * (#199) — the SET bound per integration, which is what authorises a
-     * `connection_id` on the credentials routes.
+     * (#199): the set bound per integration, which authorises a `connection_id`.
      */
     resolvedConnections: Record<string, { connectionId: string; source: string }[]> | null;
     /**
@@ -502,17 +501,16 @@ export function createInternalRouter() {
   const connectionIdQuerySchema = z.uuid();
 
   /**
-   * Two 400s, both deliberate: absent/malformed, because picking a connection
-   * for the caller is how a run silently used the wrong account; and not in
-   * `runs.resolved_connections[packageId]`, because a run token authorises the
-   * connections ITS cascade bound, not every one the actor owns.
+   * The `connection_id` member of `runs.resolved_connections[packageId]`, else
+   * 400: the platform never picks a connection for the caller, and a run token
+   * authorises only the connections its cascade bound.
    */
-  function requireBoundConnectionId(
+  function requireBoundConnection(
     c: Context,
     packageId: string,
     run: { resolvedConnections: Record<string, { connectionId: string; source: string }[]> | null },
     runId: string,
-  ): string {
+  ): { connectionId: string; source: string } {
     const parsed = connectionIdQuerySchema.safeParse(c.req.query("connection_id"));
     if (!parsed.success) {
       throw invalidRequest(
@@ -521,13 +519,15 @@ export function createInternalRouter() {
         "connection_id",
       );
     }
+    const connectionId = parsed.data.toLowerCase();
     const bound = run.resolvedConnections?.[packageId] ?? [];
-    if (!bound.some((entry) => entry.connectionId === parsed.data)) {
+    const entry = bound.find((member) => member.connectionId === connectionId);
+    if (!entry) {
       logger.warn("Integration credentials request rejected — connection not bound by this run", {
         runId,
         packageId,
         connectionId: parsed.data,
-        boundConnectionIds: bound.map((entry) => entry.connectionId),
+        boundConnectionIds: bound.map((member) => member.connectionId),
       });
       throw new ApiError({
         status: 400,
@@ -539,7 +539,7 @@ export function createInternalRouter() {
         param: "connection_id",
       });
     }
-    return parsed.data;
+    return entry;
   }
 
   /**
@@ -564,16 +564,13 @@ export function createInternalRouter() {
 
   // GET /internal/integration-credentials/:scope/:name?connection_id=<uuid>
   // Sidecar-only. Returns the LIVE credential payload + per-auth HTTP
-  // delivery plans for ONE connection the run bound to an integration it
-  // depends on. `connection_id` is REQUIRED and must be in
-  // `runs.resolved_connections[packageId]` (400 otherwise). OAuth tokens are
-  // refreshed proactively within the lead window; POST .../refresh forces one.
+  // delivery plans for ONE connection the run bound to an integration it depends on.
+  // OAuth tokens are refreshed proactively if within the lead window;
+  // POST .../refresh forces a refresh regardless.
   //
-  // A 2xx on the RUN path always carries a usable credential surface — the only
-  // EMPTY payload this endpoint serves belongs to the connect-run branch above.
-  // Every state where a credential was expected but could not be produced fails
-  // loud — 400 (no `connection_id`, or one this run did not bind), 404 (the
-  // named connection is no longer reachable by the actor), 409
+  // A 2xx on the run path always carries a usable credential surface. Every state where
+  // a credential was expected but could not be produced fails loud — 400 (see
+  // `requireBoundConnection`), 404 (the bound connection is gone), 409
   // `integration_auth_undeclared` (the pinned manifest version no longer
   // declares the connection's auth), 410 (dead credential, connection flagged).
   // The sidecar treats an empty payload as "no `delivery.http` auths, skip the
@@ -595,7 +592,7 @@ export function createInternalRouter() {
     }
     const { runId, run } = await verifyRunToken(c);
     await assertAgentDeclaresIntegration(packageId, run, runId);
-    const connectionId = requireBoundConnectionId(c, packageId, run, runId);
+    const bound = requireBoundConnection(c, packageId, run, runId);
     const actor: Actor | null = actorFromIds(run.userId, run.endUserId);
     let result;
     try {
@@ -605,8 +602,8 @@ export function createInternalRouter() {
         spaceId: run.spaceId,
         agentPackageId: run.packageId,
         actor,
-        connectionId,
-        resolvedConnections: run.resolvedConnections,
+        connectionId: bound.connectionId,
+        connectionSource: bound.source,
         resolvedIntegrationVersions: run.resolvedIntegrationVersions,
       });
     } catch (err) {
@@ -616,7 +613,7 @@ export function createInternalRouter() {
     logger.info("Integration credentials delivered", {
       runId,
       packageId,
-      connectionId,
+      connectionId: bound.connectionId,
       authCount: result.auths.length,
       deliveryPlanCount: Object.keys(result.deliveryPlans).length,
     });
@@ -625,9 +622,8 @@ export function createInternalRouter() {
 
   // POST /internal/integration-credentials/:scope/:name/refresh?connection_id=<uuid>
   // Sidecar-only. Called by the sidecar (api_call adapter + MITM listener) when
-  // an upstream 401 is seen. Force-refreshes THAT connection's credential (same
-  // `connection_id` guard as the GET) and returns the fresh payload (200). When
-  // the credential cannot be recovered —
+  // an upstream 401 is seen. Force-refreshes that connection's credential and
+  // returns the fresh payload (200). When the credential cannot be recovered —
   // a revoked OAuth refresh token, an unrefreshable OAuth auth, OR any
   // non-OAuth auth (api_key/basic), since there is nothing to refresh after a
   // 401 — `resolveLiveIntegrationCredentials` flags the connection
@@ -655,7 +651,7 @@ export function createInternalRouter() {
     }
     const { runId, run } = await verifyRunToken(c);
     await assertAgentDeclaresIntegration(packageId, run, runId);
-    const connectionId = requireBoundConnectionId(c, packageId, run, runId);
+    const bound = requireBoundConnection(c, packageId, run, runId);
     const actor: Actor | null = actorFromIds(run.userId, run.endUserId);
     let result;
     try {
@@ -667,8 +663,8 @@ export function createInternalRouter() {
           spaceId: run.spaceId,
           agentPackageId: run.packageId,
           actor,
-          connectionId,
-          resolvedConnections: run.resolvedConnections,
+          connectionId: bound.connectionId,
+          connectionSource: bound.source,
           resolvedIntegrationVersions: run.resolvedIntegrationVersions,
         },
         { forceRefresh: true },
@@ -683,7 +679,7 @@ export function createInternalRouter() {
     logger.info("Integration credentials refreshed", {
       runId,
       packageId,
-      connectionId,
+      connectionId: bound.connectionId,
       authCount: result.auths.length,
     });
     return c.json(serializeIntegrationCredentialsWire(result));

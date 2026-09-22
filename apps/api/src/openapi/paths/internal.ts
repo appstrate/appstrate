@@ -39,7 +39,7 @@ const connectionIdParam = {
 /** The two ways the `connection_id` selector is refused. Shared by both operations. */
 const connectionSelector400 = {
   description:
-    "The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the caller is speaking the retired single-connection protocol and the platform will not pick a connection on its behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only.",
+    "The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only.",
   content: {
     "application/problem+json": {
       schema: { $ref: "#/components/schemas/ProblemDetail" },

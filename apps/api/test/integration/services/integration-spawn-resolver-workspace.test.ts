@@ -23,6 +23,7 @@ import { encryptCredentialEnvelope } from "@appstrate/connect";
 
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
+import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
@@ -128,6 +129,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
+      resolvedConnections: await bindAllConnections(INTEG),
     });
     expect(specs.length).toBe(1);
     expect(specs[0]!.workspaceMount).toEqual({ mount: "/workspace", access: "rw" });
@@ -150,6 +152,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
+      resolvedConnections: await bindAllConnections(INTEG),
     });
     expect(specs.length).toBe(1);
     expect(specs[0]!.workspaceMount).toBeUndefined();
@@ -172,6 +175,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
+      resolvedConnections: await bindAllConnections(INTEG),
     });
     expect(specs[0]!.workspaceMount).toEqual({ mount: "/scratch", access: "ro" });
   });
@@ -212,6 +216,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
+      resolvedConnections: await bindAllConnections(INTEG),
     });
     expect(specs.length).toBe(1);
     expect(specs[0]!.workspaceMount).toBeUndefined();
@@ -234,6 +239,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
+      resolvedConnections: await bindAllConnections(INTEG),
     });
     expect(specs[0]!.workspaceMount).toEqual({ mount: "/workspace", access: "rw" });
   });

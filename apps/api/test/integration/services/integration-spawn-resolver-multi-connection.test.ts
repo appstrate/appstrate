@@ -23,9 +23,11 @@ import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
+import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
+  apiIntegrationManifest,
   localIntegrationManifest,
   mcpServerManifest,
   envDelivery,
@@ -94,20 +96,24 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
   }
 
   /** One SSH connection = one host, as `@appstrate/ssh` models it. */
-  async function seedConnection(opts: { label: string; host: string }): Promise<string> {
+  async function seedConnection(opts: {
+    label: string;
+    host: string;
+    accountId?: string;
+  }): Promise<string> {
     const [row] = await db
       .insert(integrationConnections)
       .values({
         integrationId: INTEG,
         authKey: "key",
-        accountId: opts.host,
+        accountId: opts.accountId ?? opts.host,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({
           outputs: { host: opts.host, private_key: `key-for-${opts.host}` },
         }),
-        identityClaims: { account_id: opts.host },
+        identityClaims: {},
         label: opts.label,
         scopesGranted: [],
         needsReconnection: false,
@@ -115,22 +121,6 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
-  }
-
-  /**
-   * The kickoff snapshot the cascade writes for a bound set. Its `label` /
-   * `accountId` are the run's AUDIT copy — deliberately stale here, because the
-   * spawn spec must name each connection from its live row, not from this.
-   */
-  function snapshot(ids: string[]): ResolvedConnectionMap {
-    return {
-      [INTEG]: ids.map((connectionId, i) => ({
-        connectionId,
-        source: "member_pin" as const,
-        label: `snapshot-label-${i}`,
-        accountId: `snapshot-account-${i}`,
-      })),
-    };
   }
 
   async function resolve(resolvedConnections: ResolvedConnectionMap) {
@@ -153,7 +143,7 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
     const web = await seedConnection({ label: "web-1", host: "web-1.example.com" });
     const dbHost = await seedConnection({ label: "db", host: "db.example.com" });
 
-    const { specs, dropped } = await resolve(snapshot([web, dbHost]));
+    const { specs, dropped } = await resolve(await bindAllConnections(INTEG));
 
     expect(dropped).toEqual([]);
     expect(specs).toHaveLength(2);
@@ -164,9 +154,7 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
     expect(specs.map((s) => s.namespace)).toEqual([INTEG, INTEG]);
     expect(specs.map((s) => s.toolAllowlist)).toEqual([["ssh_exec"], ["ssh_exec"]]);
 
-    // What actually differs: the credential material and the handle. Both come
-    // from the LIVE rows — the snapshot's audit copies say `snapshot-*`, so an
-    // implementation that read them would fail here.
+    // What actually differs: the credential material and the handle.
     expect(specs.map((s) => s.connection!.label).sort()).toEqual(["db", "web-1"]);
     expect(specs.map((s) => s.connection!.id).sort()).toEqual([web, dbHost].sort());
     expect(specs.map((s) => s.connection!.accountId).sort()).toEqual([
@@ -184,7 +172,7 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
   it("CONTROL: one bound connection still yields exactly one spec, `connection` added", async () => {
     const web = await seedConnection({ label: "web-1", host: "web-1.example.com" });
 
-    const { specs, dropped } = await resolve(snapshot([web]));
+    const { specs, dropped } = await resolve(await bindAllConnections(INTEG));
 
     expect(dropped).toEqual([]);
     expect(specs).toHaveLength(1);
@@ -203,21 +191,158 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
     });
   });
 
-  it("drops only the member that lost its row, naming its label", async () => {
-    // Plan §8 row 7, spawn half: the surviving sibling still spawns, and the
-    // marker says WHICH connection the run lost — `integrationId` alone cannot.
-    const web = await seedConnection({ label: "web-1", host: "web-1.example.com" });
+  // The kickoff cascade checked the set's labels are distinct on the SNAPSHOT;
+  // a rename afterwards must not reach the sidecar unchecked.
+  it("names each connection by its snapshot label, not a rename made since kickoff", async () => {
+    await seedConnection({ label: "web-1", host: "web-1.example.com" });
+    const dbHost = await seedConnection({ label: "db", host: "db.example.com" });
+    const bound = await bindAllConnections(INTEG);
+    await db
+      .update(integrationConnections)
+      .set({ label: "web-1" })
+      .where(eq(integrationConnections.id, dbHost));
+
+    const { specs } = await resolve(bound);
+
+    expect(specs.map((s) => s.connection!.label).sort()).toEqual(["db", "web-1"]);
+  });
+
+  // `account_id` is ONE value wherever it is shown: the column the cascade
+  // snapshots and the 412 candidates carry. Its identity-less placeholder is no
+  // account, so it reaches the sidecar as null.
+  it("carries the account_id column, with the identity-less placeholder as null", async () => {
+    const mail = await seedConnection({
+      label: "ops",
+      host: "ops.example.com",
+      accountId: "ops@example.com",
+    });
+    const anon = await seedConnection({
+      label: "anon",
+      host: "anon.example.com",
+      accountId: "default",
+    });
+
+    const { specs } = await resolve(await bindAllConnections(INTEG));
+
+    const byId = new Map(specs.map((s) => [s.connection!.id, s.connection!.accountId]));
+    expect(byId.get(mail)).toBe("ops@example.com");
+    expect(byId.get(anon)).toBeNull();
+  });
+
+  // Plan §8 row 7, spawn half: a set that lost a member is not spawned at all.
+  // With one survivor the sidecar would inject no `connection` selector, and
+  // every call meant for the lost host would silently run on the other one.
+  it("drops the WHOLE set when one member lost its row, naming every member", async () => {
+    await seedConnection({ label: "web-1", host: "web-1.example.com" });
     const gone = await seedConnection({ label: "db", host: "db.example.com" });
+    const bound = await bindAllConnections(INTEG);
     await db.delete(integrationConnections).where(eq(integrationConnections.id, gone));
 
-    const { specs, dropped } = await resolve(snapshot([web, gone]));
+    const { specs, dropped } = await resolve(bound);
 
-    expect(specs).toHaveLength(1);
-    expect(specs[0]!.connection!.label).toBe("web-1");
-    // The row is gone, so the drop is named from the snapshot's audit copy —
-    // the only record of the connection the run bound that still exists.
-    expect(dropped).toEqual([
-      { integrationId: INTEG, reason: "no_delivery", connectionLabel: "snapshot-label-1" },
-    ]);
+    expect(specs).toEqual([]);
+    expect(dropped).toHaveLength(2);
+    expect(dropped).toContainEqual({
+      integrationId: INTEG,
+      reason: "no_delivery",
+      connectionLabel: "db",
+    });
+    expect(dropped).toContainEqual(
+      expect.objectContaining({
+        integrationId: INTEG,
+        reason: "bound_set_incomplete",
+        connectionLabel: "web-1",
+      }),
+    );
+  });
+});
+
+/**
+ * Each api_call tool belongs to ONE auth. A connection made on `backup` must
+ * not be handed `api_call__primary`: that tool would go out uncredentialed, and
+ * its 401 would flag the `backup` connection for reconnection.
+ */
+describe("resolveIntegrationSpawns — api_call per connection auth", () => {
+  const API = "@orga/twoauth";
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "orga" });
+    const manifest = apiIntegrationManifest({
+      name: API,
+      auths: {
+        primary: {
+          type: "api_key",
+          authorizedUris: ["https://a.example.com/**"],
+          credentialFields: ["api_key"],
+        },
+        backup: {
+          type: "api_key",
+          authorizedUris: ["https://b.example.com/**"],
+          credentialFields: ["api_key"],
+        },
+      },
+    });
+    (manifest as unknown as { _meta: unknown })._meta = {
+      "dev.appstrate/api": { auths: { primary: {}, backup: {} } },
+    };
+    await seedPackage({
+      id: API,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: manifest,
+    });
+    await seedPlacedPackage(ctx.defaultSpaceId, API);
+  });
+
+  async function seedOn(authKey: string, label: string): Promise<string> {
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: API,
+        authKey,
+        accountId: label,
+        label,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        endUserId: null,
+        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: `k-${label}` } }),
+        identityClaims: {},
+        scopesGranted: [],
+        needsReconnection: false,
+        expiresAt: null,
+      })
+      .returning({ id: integrationConnections.id });
+    return row!.id;
+  }
+
+  it("gives each spec only the api_call of its connection's auth", async () => {
+    const onPrimary = await seedOn("primary", "main");
+    const onBackup = await seedOn("backup", "spare");
+
+    const { specs, dropped } = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: {
+        schema_version: "0.2",
+        type: "agent",
+        name: "@orga/agent",
+        version: "0.1.0",
+        display_name: "Agent",
+        dependencies: { integrations: { [API]: "^1.0.0" } },
+        integrations_configuration: { [API]: { tools: "*" } },
+      },
+      resolvedConnections: await bindAllConnections(API),
+    });
+
+    expect(dropped).toEqual([]);
+    const authsOf = new Map(
+      specs.map((s) => [s.connection!.id, (s.apiCalls ?? []).map((c) => c.authKey)]),
+    );
+    expect(authsOf.get(onPrimary)).toEqual(["primary"]);
+    expect(authsOf.get(onBackup)).toEqual(["backup"]);
   });
 });

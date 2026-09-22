@@ -26,6 +26,7 @@ import { resolveAndValidateScheduleInput } from "./input-resolution.ts";
 import { withoutLockedFields } from "@appstrate/core/input-resolution";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
+import { connectionOverridesSchema } from "../lib/launch-schemas.ts";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { getPackage, packageExists } from "./package-catalog.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
@@ -55,7 +56,7 @@ interface ScheduleJobData {
   proxyIdOverride?: string;
   versionOverride?: string;
   /**
-   * Frozen per-integration connection picks (#199 mechanism #3).
+   * Frozen per-integration connection sets (the schedule-override layer).
    * Loaded from `package_schedules.connection_overrides`, propagated into
    * `runs.connection_overrides` at fire time so the snapshot stays in sync
    * with the scheduler's intent. Loses to admin pins.
@@ -351,28 +352,14 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-/** Initialize the schedule worker and sync existing schedules from DB. */
+/** Sync enabled schedules into the queue, THEN start the worker: no fire reads stale job data. */
 export async function initScheduleWorker(): Promise<void> {
   const queue = await getQueue();
-
-  queue.process(
-    async (job) => {
-      await handleScheduleJob(job);
-    },
-    // Trigger work is IO-bound (run-pipeline preflight + DB writes), so
-    // concurrent processing is safe — each job targets a distinct schedule
-    // fire and the run pipeline handles concurrent runs per agent. The
-    // limiter is a global abuse backstop, not a serialization mechanism:
-    // the previous `concurrency: 1, max: 5/min` made every schedule on the
-    // instance share a 5-runs-per-minute serial ceiling.
-    { concurrency: 10, limiter: { max: 30, duration: 60_000 } },
-  );
 
   // Feed the observability queue-depth gauge. Stored unconditionally — the
   // gauge only pulls it when telemetry is enabled, otherwise it's never read.
   setQueueDepthSource(() => queue.count());
 
-  // Sync all enabled schedules from DB to queue
   const rows = await db.select().from(schedules).where(eq(schedules.enabled, true));
 
   let synced = 0;
@@ -401,6 +388,19 @@ export async function initScheduleWorker(): Promise<void> {
       });
     }
   }
+
+  queue.process(
+    async (job) => {
+      await handleScheduleJob(job);
+    },
+    // Trigger work is IO-bound (run-pipeline preflight + DB writes), so
+    // concurrent processing is safe — each job targets a distinct schedule
+    // fire and the run pipeline handles concurrent runs per agent. The
+    // limiter is a global abuse backstop, not a serialization mechanism:
+    // the previous `concurrency: 1, max: 5/min` made every schedule on the
+    // instance share a 5-runs-per-minute serial ceiling.
+    { concurrency: 10, limiter: { max: 30, duration: 60_000 } },
+  );
 
   if (synced > 0 || failed > 0) {
     logger.info("Schedule worker initialized", {
@@ -508,6 +508,23 @@ export async function triggerScheduledRun(
       return;
     }
 
+    // Job data can predate its row; a payload the write path refuses is never read.
+    const connectionOverrides = connectionOverridesSchema
+      .optional()
+      .safeParse(overrides.connectionOverrides);
+    if (!connectionOverrides.success) {
+      logger.warn("Schedule job carries malformed connection_overrides, skipping run", {
+        scheduleId,
+        packageId,
+      });
+      await failSchedule(
+        "Schedule fire refused: its frozen `connection_overrides` is not a map of connection-id " +
+          'arrays (`{"@scope/integration": ["<connection_id>", ...]}`). Save the schedule\'s ' +
+          "connection picks again to repair it.",
+      );
+      return;
+    }
+
     const draftAgent = await getPackage(packageId, orgId);
     if (!draftAgent) {
       logger.warn("Package not found, skipping schedule", { packageId, scheduleId });
@@ -596,7 +613,7 @@ export async function triggerScheduledRun(
         // them so readiness honours the same disambiguation the run
         // pipeline will use a few lines down (matches the "single source
         // of truth" intent of overrides).
-        scheduleConnectionOverrides: overrides.connectionOverrides ?? null,
+        scheduleConnectionOverrides: connectionOverrides.data ?? null,
         // `package_schedules.dependency_overrides` — the same value forwarded
         // into `prepareAndExecuteRun` below. Without it a schedule pinned to a
         // working copy would have its readiness judged against the published
@@ -691,7 +708,7 @@ export async function triggerScheduledRun(
         overrideVersionLabel,
         scheduleId,
         spaceId,
-        scheduleConnectionOverrides: overrides.connectionOverrides ?? null,
+        scheduleConnectionOverrides: connectionOverrides.data ?? null,
         dependencyOverrides: overrides.dependencyOverrides ?? null,
       });
     } catch (err) {

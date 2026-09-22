@@ -323,11 +323,9 @@ function runRowToWireDto(row: RunProjection): RunWireDto {
 
 /**
  * Project the internal `runs.resolved_connections` snapshot into the
- * display-safe `connections_used` wire shape — one entry per BOUND
- * connection, so an integration bound to N connections contributes N rows
- * sharing an `integration_id`. Drops the raw `connectionId` (internal state)
- * and keeps the denormalized label/account so the panel renders even after
- * the connection is renamed or deleted. Empty/absent → null.
+ * display-safe `connections_used` wire shape. Drops the raw `connectionId`
+ * (internal state) and keeps the denormalized label/account so the panel
+ * renders even after the connection is renamed or deleted. Empty/absent → null.
  */
 function projectConnectionsUsed(
   resolved: typeof runs.$inferSelect.resolvedConnections,
@@ -602,18 +600,16 @@ interface CreateRunParams {
    */
   runnerKind?: string | null;
   /**
-   * Caller's per-integration connection override map. Persisted
-   * verbatim on `runs.connection_overrides` for audit + "re-run with same
-   * picks" replay. Feeds the resolver's mechanism #2 at kickoff; surface
-   * pinned admin choices and fallback if absent. Null when the run used
+   * Caller's per-integration connection override sets. Persisted verbatim on
+   * `runs.connection_overrides` for audit + "re-run with same picks" replay;
+   * the run-override layer of the cascade at kickoff. Null when the run used
    * defaults verbatim.
    */
   connectionOverrides?: ConnectionOverrides | null;
   /**
-   * Snapshot of the resolver output at kickoff: per integration, which
-   * connections were actually bound and which mechanism produced the
-   * pick. Persisted on `runs.resolved_connections` so the credentials
-   * resolver (sidecar MITM refresh) can honour the pick long after kickoff.
+   * Snapshot of the resolver output at kickoff: per integration, the bound
+   * connections and the cascade layer each came from. Persisted on
+   * `runs.resolved_connections` for the spawn and credentials resolvers.
    */
   resolvedConnections?: ResolvedConnectionMap | null;
   /**

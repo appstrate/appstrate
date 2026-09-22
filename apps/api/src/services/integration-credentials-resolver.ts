@@ -5,8 +5,7 @@
  * `MitmCredentialSource`. Backs both `GET /internal/integration-credentials/
  * {scope}/{name}` (read-current) and `POST .../refresh` (force-refresh-then-read).
  *
- * The caller names WHICH bound connection it wants (`connection_id`): a run can
- * bind several to one integration, each with its own credential surface. For it:
+ * For the ONE bound connection the caller names (`connection_id`):
  *
  *   1. Find the connection row for the run's actor.
  *   2. If the auth is OAuth2 AND (forced OR within the lead window),
@@ -43,7 +42,7 @@ import {
 } from "./integration-token-refresh.ts";
 import {
   assertIntegrationActive,
-  selectAccessibleConnection,
+  loadAccessibleConnectionById,
   markIntegrationConnectionNeedsReconnection,
 } from "./integration-connections.ts";
 import { computeRequiredScopes } from "./integration-scope-resolver.ts";
@@ -51,12 +50,6 @@ import {
   readIntegrationManifestForRun,
   type ResolvedIntegrationVersion,
 } from "./integration-service.ts";
-
-/** One member of a run's bound connection set, as `runs.resolved_connections` stores it. */
-interface SnapshotConnection {
-  connectionId: string;
-  source: string;
-}
 
 /** Mutable builder for the wire payload (returned widened to the readonly wire type). */
 interface MutableCredentialsWire {
@@ -71,16 +64,13 @@ interface ResolveLiveCredentialsOptions {
 }
 
 /**
- * NEVER returns an empty payload: the sidecar reads one as "no `delivery.http`
- * auths, skip the MITM listener" and boots anyway, so every unproducible
- * credential throws instead. (The connect-run branch in `routes/internal.ts`
- * answers its own empty payload without reaching here.)
+ * NEVER returns an empty payload — the sidecar would read it as "skip the MITM
+ * listener" and boot uncredentialed — so every unproducible credential throws.
  *
  * Throws ApiError on:
  *   - 404: integration not declared by the agent, not active, or the named
- *     connection is no longer reachable by the actor (deleted or unshared
- *     since kickoff). Nothing exists to flag, so this is deliberately NOT the
- *     410 below.
+ *     connection is no longer reachable by the actor. Nothing exists to flag,
+ *     so this is deliberately NOT the 410 below.
  *   - 409 `integration_auth_undeclared`: the connection's `auth_key` is not
  *     declared by the manifest VERSION this run is pinned to (auth renamed or
  *     removed since the connection was made). The credential is intact and may
@@ -103,14 +93,9 @@ export async function resolveLiveIntegrationCredentials(
     spaceId: string;
     agentPackageId: string;
     actor: Actor | null;
-    /**
-     * WHICH bound connection this request is for. Required — a spec is one
-     * connection, so the caller always knows. The route checked it against
-     * `runs.resolved_connections`; this checks the row is still reachable.
-     */
+    /** A member of the run's bound set (the route checked it), and its cascade layer. */
     connectionId: string;
-    /** Read ONLY to name the cascade source of {@link connectionId} in errors. */
-    resolvedConnections?: Record<string, readonly SnapshotConnection[]> | null;
+    connectionSource: string;
     /**
      * Snapshot from `runs.resolved_integration_versions` (#686). When present,
      * `[integrationId]` pins the manifest VERSION this resolver reads — so the
@@ -141,29 +126,22 @@ export async function resolveLiveIntegrationCredentials(
     expiresAtEpochMs: {},
   };
 
-  const snapshotEntry =
-    context.resolvedConnections?.[integrationId]?.find(
-      (c) => c.connectionId === context.connectionId,
-    ) ?? null;
-  const connection = await selectAccessibleConnection(
-    integrationId,
-    Object.keys(auths),
-    context.connectionId,
-    { spaceId: context.spaceId, actor: context.actor },
-  );
+  const connection = await loadAccessibleConnectionById(context.connectionId, integrationId, null, {
+    spaceId: context.spaceId,
+    actor: context.actor,
+  });
   if (!connection) {
     // STATE A — 404 and not 410: no row is left to flag `needsReconnection` on.
-    // Only THIS connection is lost; the run's other runners keep theirs.
     logger.warn("Integration credentials unavailable — no accessible connection", {
       runId: context.runId,
       integrationId,
       connectionId: context.connectionId,
       declaredAuthKeys: Object.keys(auths),
-      ...(snapshotEntry ? { pinnedSource: snapshotEntry.source } : {}),
+      pinnedSource: context.connectionSource,
     });
     throw notFound(
       `Integration '${integrationId}': the connection bound to this run ` +
-        `(${context.connectionId}${snapshotEntry ? `, source '${snapshotEntry.source}'` : ""}) ` +
+        `(${context.connectionId}, source '${context.connectionSource}') ` +
         `is no longer reachable — it was deleted, unshared, or moved to another space after ` +
         `the run started. Re-connect '${integrationId}' and relaunch the run.`,
     );

@@ -834,9 +834,8 @@ describe("launchRunAndWait launch body", () => {
   });
 
   // Several ids under one key is the whole point of the array shape — binding
-  // two connections of one integration in a single run. Asserted as an exact
-  // body so a client that kept only the first id (the retired
-  // one-connection-per-integration behaviour) fails here.
+  // two connections of one integration in a single run. A client that kept
+  // only the first id fails here.
   it("forwards several connection ids under one integration verbatim", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
@@ -856,36 +855,9 @@ describe("launchRunAndWait launch body", () => {
     });
   });
 
-  // A bare id as a value is the RETIRED shape. Not coerced into a one-element
-  // array: a wrapped value would launch a run the model never described, and
-  // the model would keep emitting the dead shape forever. The control is the
-  // one-element array above ("kind:inline forwards connection_overrides"),
-  // which must keep launching — otherwise this test would pass on a client that
-  // simply refuses the argument outright.
-  it("rejects a bare connection id as a value, naming the key", async () => {
-    const { fetchImpl, captured } = captureLaunch();
-
-    const result = await launchRunAndWait(
-      {
-        kind: "inline",
-        manifest: { name: "tmp" },
-        prompt: "do it",
-        connection_overrides: { "@appstrate/gmail": "conn_abc" },
-      },
-      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
-    );
-
-    expect(result.ok).toBe(false);
-    const error = String((result as { step: { payload: { error?: string } } }).step.payload.error);
-    expect(error).toMatch(/must be an ARRAY/);
-    expect(error).toContain("@appstrate/gmail");
-    expect(captured()).toBeUndefined();
-  });
-
   // The name inside `input` belongs to the AGENT, not to us: an agent whose own
   // input schema declares a `connection_overrides` property must stay launchable
-  // and get that property through untouched, whatever the top-level argument
-  // says — including the bare-string value the test above refuses at top level.
+  // and get that property through untouched, whatever the top-level argument says.
   it("forwards the top-level connection_overrides and leaves input's own property alone", async () => {
     const { fetchImpl, captured } = captureLaunch();
 

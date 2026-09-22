@@ -329,9 +329,9 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
   //
   // There is no "the connection of this integration" any more, so the caller
   // names one and the run's kickoff snapshot is what authorises it. Both
-  // refusals are 400: a request that cannot say which connection it means is
-  // speaking the retired protocol, and one naming a connection this run never
-  // bound is asking for a credential its run token does not cover.
+  // refusals are 400: a request that cannot say which connection it means gets
+  // no guess, and one naming a connection this run never bound is asking for a
+  // credential its run token does not cover.
 
   it("DENY: 400 when `connection_id` is absent", async () => {
     await seedIntegration(INTEGRATION, true);
@@ -389,6 +389,19 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     });
 
     expect(res.status).toBe(400);
+  });
+
+  // `z.uuid()` accepts `A1B2…` while the snapshot holds what Postgres returned.
+  it("ALLOW: an uppercase `connection_id` names the same bound connection", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnectionRow(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+
+    const res = await app.request(credentialsUrl(INTEGRATION, connectionId.toUpperCase()), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
   });
 
   it("serves EACH bound connection of one integration its own credentials", async () => {

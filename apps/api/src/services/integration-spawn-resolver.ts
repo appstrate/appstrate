@@ -11,9 +11,8 @@
  *   2. Loads the integration's bundle bytes — system packages from the
  *      in-memory registry (loaded at boot), local packages from object
  *      storage via `downloadVersionZip`.
- *   3. Emits ONE spec per connection the run bound to that integration
- *      (`runs.resolved_connections[id]`, 1..N), decrypting each connection's
- *      credentials and (oauth2) refreshing past the lead window.
+ *   3. Emits ONE spec per connection the run bound (`runs.resolved_connections`),
+ *      decrypting each and (oauth2) refreshing past the lead window.
  *   4. Materialises the `delivery.env` mapping into a flat env dict
  *      (one entry per env var, value taken from the credential field
  *      named in `from`).
@@ -39,7 +38,6 @@ import type {
   ResolvedConnection,
   ResolvedConnectionMap,
 } from "@appstrate/core/integration";
-// ResolvedConnectionMap is consumed via input prop (`resolvedConnections`) below.
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import {
   effectiveMcpServerType,
@@ -54,7 +52,11 @@ import { BundleError } from "@appstrate/afps-runtime/bundle";
 import { checkEgressUrl } from "../lib/egress-host-guard.ts";
 import { logger } from "../lib/logger.ts";
 import type { Actor } from "../lib/actor.ts";
-import { isIntegrationActive, selectAccessibleConnection } from "./integration-connections.ts";
+import {
+  displayAccountId,
+  isIntegrationActive,
+  loadAccessibleConnectionById,
+} from "./integration-connections.ts";
 import {
   fetchIntegrationManifest,
   resolveMcpServerForSpawn,
@@ -91,11 +93,8 @@ interface ResolveIntegrationsInput {
    */
   agentManifest: Record<string, unknown>;
   /**
-   * Snapshot of the cascade frozen at run kickoff
-   * (`runs.resolved_connections`). `snapshot[integrationId]` is the SET the
-   * cascade bound; one spec is emitted per member. An integration with NO entry
-   * falls back to the live actor lookup, which yields at most one connection —
-   * the no-snapshot path, not a "pick the first of the set" rule.
+   * The cascade's kickoff snapshot (`runs.resolved_connections`): the SET bound
+   * per integration. Never re-picked here — a missing entry fails the integration.
    */
   resolvedConnections?: ResolvedConnectionMap | null;
   /**
@@ -122,6 +121,7 @@ export type IntegrationDropReason =
   | "mcp_server_unresolved"
   | "mcp_server_not_runnable"
   | "no_delivery"
+  | "bound_set_incomplete"
   | "resolve_error";
 
 /** One declared integration the run will start WITHOUT, plus why. */
@@ -134,11 +134,7 @@ export interface DroppedIntegration {
    * Omitted when `reason` already says everything.
    */
   readonly detail?: string;
-  /**
-   * Which bound connection the drop is about — a run can lose a subset of an
-   * integration's set, and `integrationId` alone cannot say which. Omitted when
-   * the drop preceded any binding (package missing, not active, …).
-   */
+  /** Which bound connection the drop is about; absent when the drop preceded binding. */
   readonly connectionLabel?: string;
 }
 
@@ -153,25 +149,22 @@ interface ResolveIntegrationSpawnsResult {
   readonly dropped: DroppedIntegration[];
 }
 
-/** A drop before the caller attributes it to its integration. */
 type IntegrationDrop = Omit<DroppedIntegration, "integrationId">;
 
-/** Per-integration outcome: N connections can spawn some and lose others. */
 interface ResolveOneResult {
   readonly specs: readonly IntegrationSpawnSpec[];
   readonly drops: readonly IntegrationDrop[];
 }
 
-/** Terse whole-integration drop, so each pre-connection drop site stays one line. */
 function drop(reason: IntegrationDropReason, detail?: string): ResolveOneResult {
   return { specs: [], drops: [{ reason, ...(detail !== undefined ? { detail } : {}) }] };
 }
 
 /**
- * Return one `IntegrationSpawnSpec` per CONNECTION bound to an integration
- * that's (a) declared on the agent, (b) active in the space, AND (c)
- * connected by the actor, ALONGSIDE one {@link DroppedIntegration} per
- * integration — or per connection — that failed any of those checks.
+ * Return one `IntegrationSpawnSpec` per connection bound to an integration that's (a) declared
+ * on the agent, (b) active in the space, AND (c) connected by
+ * the actor, ALONGSIDE one {@link DroppedIntegration} per integration that
+ * failed any of those checks.
  *
  * Dropping is a deliberate degradation — the product supports running an
  * agent whose integrations are only partly connected (the pre-flight picker
@@ -209,7 +202,7 @@ export async function resolveIntegrationSpawns(
           spaceId,
           actor,
           entry.tools,
-          resolvedConnections?.[entry.id] ?? [],
+          resolvedConnections?.[entry.id],
           entry.auth_key,
           input.manifestCache,
         );
@@ -238,8 +231,7 @@ export async function resolveIntegrationSpawns(
 
   const specs: IntegrationSpawnSpec[] = [];
   const dropped: DroppedIntegration[] = [];
-  // Declaration order is preserved on both lists (map-then-partition), and
-  // within one integration the order of its bound connections is too.
+  // Declaration order is preserved on both lists (map-then-partition).
   outcomes.forEach((outcome, i) => {
     const integrationId = entries[i]!.id;
     specs.push(...outcome.specs);
@@ -249,24 +241,9 @@ export async function resolveIntegrationSpawns(
 }
 
 /**
- * Resolve ONE declared integration into a spec per bound connection.
- *
- * Every spec of an integration is identical but for its credential material:
- * same `namespace` (the package id — McpHost slugs/caps it), same tool surface.
- * The sidecar routes `(tool name, connection label) → client` instead of
- * suffixing tool names, which is what lets N runners share one namespace.
- *
- * What the spec literal below encodes, stated once instead of per field:
- *   - `manifest.server`: absent when serverless; `{ url, transport }` and NO
- *     `type` when remote, because the spawn-mode discriminant is
- *     `spec.sourceKind`, not the AFPS `mcpServerTypeEnum`.
- *   - `toolAllowlist`: the EFFECTIVE selection; `undefined` is the AFPS §4.4
- *     wildcard McpHost reads as "all tools allowed", never `[]`.
- *   - `hiddenTools`: a sidecar filter running AFTER the allowlist, which is the
- *     only thing keeping the connect-login primitive off the LLM's surface
- *     under that wildcard.
- *   - `httpDeliveryAuths` / `needsEgress`: dropped for remote HTTP — it injects
- *     the token itself and has no runner to route (#543).
+ * Resolve ONE declared integration into a spec per bound connection; the specs
+ * differ only in credentials and `connection`. `toolAllowlist: undefined` is the
+ * §4.4 wildcard; remote HTTP injects its own token (no `httpDeliveryAuths`, #543).
  */
 async function resolveOne(
   integrationId: string,
@@ -274,7 +251,7 @@ async function resolveOne(
   spaceId: string,
   actor: Actor,
   agentToolSelection: readonly string[] | "*" | undefined,
-  boundConnections: readonly ResolvedConnection[],
+  boundConnections: readonly ResolvedConnection[] | undefined,
   requiredAuthKey: string | undefined,
   manifestCache?: IntegrationManifestCache,
 ): Promise<ResolveOneResult> {
@@ -350,10 +327,11 @@ async function resolveOne(
   // `api_call` and its `api_upload` companion are granted as a pair: the upload
   // orchestration dispatches every chunk through the sibling api_call tool, so
   // selecting one without the other would either expose a broken upload tool or
-  // silently drop a selected capability. Picking either name grants both.
+  // silently drop a selected capability. Picking either name grants both. Each
+  // api_call belongs to ONE auth: a spec keeps only its connection's (below).
   const wildcardSelection = isToolsWildcard(effectiveSelection);
   const selectedTools = wildcardSelection ? null : new Set(effectiveSelection ?? []);
-  const apiCalls: ApiCallSpec[] = getApiCallConfigs(manifest)
+  const selectedApiCalls: ApiCallSpec[] = getApiCallConfigs(manifest)
     .filter(
       (cfg) =>
         wildcardSelection ||
@@ -370,7 +348,7 @@ async function resolveOne(
         ...(cfg.uploadProtocols.length > 0 ? { uploadProtocols: cfg.uploadProtocols } : {}),
       } satisfies ApiCallSpec;
     });
-  const exposeApiCall = apiCalls.length > 0;
+  const apiCallAuthKeys = new Set(selectedApiCalls.map((cfg) => cfg.authKey));
 
   // ── Resolve the sidecar server spec from the AFPS `source`
   // discriminant (replaces the 1.x inline `manifest.server`). ──
@@ -535,49 +513,50 @@ async function resolveOne(
   // wires only the api_call tool(s), if any).
   const specSourceKind: "local" | "remote" | "none" = sourceKind ?? "none";
 
-  // Local sources only (nothing else has a runner to mount into), and resolved
-  // ONCE: it reads the mcp-server manifest, not the connection, and a malformed
-  // `_meta` must throw for the whole integration rather than N times inside the
-  // loop below.
+  // Once for the whole set: a malformed mcp-server `_meta` fails the integration.
   const workspaceMount =
     referencedMcpServer && specSourceKind === "local"
       ? resolveWorkspaceMount(integrationId, referencedMcpServer)
       : {};
 
-  // `[null]` is the NO-SNAPSHOT path (see `resolvedConnections` above): a live
-  // auto-pick yielding at most one connection. A snapshot entry always carries
-  // the full bound set.
-  const picks: readonly (ResolvedConnection | null)[] =
-    boundConnections.length > 0 ? boundConnections : [null];
+  if (!boundConnections?.length) {
+    // No verdict ⇔ the cascade judged it inert: no tool to expose, nothing to spawn.
+    if (!wildcardSelection && selectedTools!.size === 0) return { specs: [], drops: [] };
+    throw new Error(
+      `integration '${integrationId}' exposes tools but the run's connection snapshot binds no connection to it`,
+    );
+  }
+  const picks = boundConnections.map((pick) => {
+    if (!pick.label) {
+      throw new Error(
+        `integration '${integrationId}': bound connection ${pick.connectionId} carries no label in the run's snapshot`,
+      );
+    }
+    return { pick, label: pick.label };
+  });
 
   const outcomes = await Promise.all(
-    picks.map(async (pick): Promise<IntegrationSpawnSpec | IntegrationDrop> => {
+    picks.map(async ({ pick, label }): Promise<IntegrationSpawnSpec | IntegrationDrop> => {
       const deliveries = await resolveDeliveries(
         integrationId,
         spaceId,
         actor,
         manifest,
-        pick,
-        exposeApiCall,
+        pick.connectionId,
+        apiCallAuthKeys,
         referencedMcpServer,
         requiredAuthKey,
       );
-      if (!deliveries) {
-        // resolveDeliveries logged the fine-grained reason; the run-visible
-        // marker collapses them to one actionable bucket ("no usable
-        // credential") and names WHICH connection lost it.
-        return { reason: "no_delivery", ...(pick?.label ? { connectionLabel: pick.label } : {}) };
-      }
+      // resolveDeliveries logged why; the marker says only "no usable credential".
+      if (!deliveries) return { reason: "no_delivery", connectionLabel: label };
+      const apiCalls = selectedApiCalls.filter((cfg) => cfg.authKey === deliveries.authKey);
 
-      // Per connection, not per integration: the login primitive is declared by
-      // the AUTH the connection was made against, and two connections on one
-      // integration may sit on different auths.
+      // Per connection: the login primitive belongs to the connection's AUTH.
       const loginToolName = deliveries.connectLogin?.toolName;
       let toolAllowlist: readonly string[] | undefined;
       if (wildcardSelection) {
         toolAllowlist = undefined;
       } else {
-        // The wildcard is handled above, so what remains is a concrete list.
         const baseAllowlist = (effectiveSelection ?? []) as readonly string[];
         toolAllowlist =
           loginToolName === undefined
@@ -593,7 +572,11 @@ async function resolveOne(
       return {
         integrationId,
         namespace: integrationId,
-        connection: deliveries.connection,
+        connection: {
+          id: pick.connectionId,
+          label,
+          accountId: displayAccountId(pick.accountId),
+        },
         sourceKind: specSourceKind,
         manifest: {
           name: manifest.name,
@@ -628,11 +611,21 @@ async function resolveOne(
     }),
   );
 
+  // A partial set is never spawned: a lone survivor gets no `connection`
+  // selector, so calls meant for a lost member would silently run on it.
+  const setIncomplete = outcomes.some((outcome) => "reason" in outcome) && outcomes.length > 1;
   const specs: IntegrationSpawnSpec[] = [];
   const drops: IntegrationDrop[] = [];
   for (const outcome of outcomes) {
     if ("reason" in outcome) drops.push(outcome);
-    else specs.push(outcome);
+    else if (!setIncomplete) specs.push(outcome);
+    else {
+      drops.push({
+        reason: "bound_set_incomplete",
+        connectionLabel: outcome.connection!.label,
+        detail: `another connection bound to '${integrationId}' could not be delivered`,
+      });
+    }
   }
   return { specs, drops };
 }
@@ -666,12 +659,8 @@ function resolveWorkspaceMount(
 }
 
 interface ResolvedDeliveries {
-  /**
-   * What tells N otherwise identical specs apart. Always set — a delivery plan
-   * is rendered FROM a connection; the SPEC field is optional only because the
-   * connect-run builder emits one before any connection row exists.
-   */
-  connection: NonNullable<IntegrationSpawnSpec["connection"]>;
+  /** The auth the connection was made on — selects which api_call tools its spec carries. */
+  authKey: string;
   spawnEnv: Record<string, string>;
   httpDeliveryAuths?: NonNullable<IntegrationSpawnSpec["httpDeliveryAuths"]>;
   /**
@@ -700,60 +689,37 @@ interface ResolvedDeliveries {
 }
 
 /**
- * Resolve the delivery plan (env + http) for ONE of the connections bound to
- * this integration. Returns `null` when the connection can't be loaded or its
- * auth declares no usable delivery mapping — the caller turns that into a
- * per-connection drop, so a dead member never black-holes its siblings.
- *
- * The connection carries its own `authKey`, which selects the
- * `manifest.auths[X]` declaration delivery is extracted from — two connections
- * on one integration may sit on different auths.
- *
- * `resolvedConnection` is one member of the cascade's frozen set; `null` is the
- * no-snapshot path (a live auto-pick, at most one connection).
+ * Resolve the delivery plan (env + http) for ONE bound connection, against the
+ * `manifest.auths[X]` of the auth it was made on. `null` when the row is no
+ * longer reachable or its auth yields no usable delivery.
  */
 async function resolveDeliveries(
   integrationId: string,
   spaceId: string,
   actor: Actor,
   manifest: IntegrationManifest,
-  resolvedConnection: ResolvedConnection | null,
-  hasApiCall: boolean,
+  connectionId: string,
+  apiCallAuthKeys: ReadonlySet<string>,
   referencedMcpServer: McpServerManifest | null,
   requiredAuthKey: string | undefined,
 ): Promise<ResolvedDeliveries | null> {
   const auths = (manifest.auths ?? {}) as Record<string, AfpsManifestAuth>;
 
-  // Load this member of the bound set. When the agent dep
-  // pins an `auth_key` (AFPS §4.1), narrow the live-credentials
-  // auto-pick to that single auth — the resolver snapshot already
-  // honoured the pin, this is the parity guarantee for the no-snapshot
-  // path (e.g. legacy callers that don't run the cascade upstream).
-  const row = await selectAccessibleConnection(
+  const row = await loadAccessibleConnectionById(
+    connectionId,
     integrationId,
-    Object.keys(auths),
-    resolvedConnection?.connectionId ?? null,
-    { spaceId, actor, ...(requiredAuthKey ? { requiredAuthKey } : {}) },
+    requiredAuthKey ?? null,
+    { spaceId, actor },
   );
 
   if (!row) {
-    logger.info("no resolved connection for integration; skipping delivery entries", {
+    logger.info("bound connection no longer reachable; skipping delivery entries", {
       integrationId,
       actorType: actor.type,
-      connectionId: resolvedConnection?.connectionId ?? null,
-      hadSnapshot: resolvedConnection !== null,
+      connectionId,
     });
     return null;
   }
-
-  // Read from the LIVE row, not the snapshot's copy: that copy is the run's
-  // audit trail (it survives a rename), while the tool surface the sidecar
-  // builds must name the connection as it is NOW.
-  const connection: ResolvedDeliveries["connection"] = {
-    id: row.id,
-    label: row.label,
-    accountId: row.accountId,
-  };
 
   const auth = auths[row.authKey];
   if (!auth) {
@@ -837,7 +803,7 @@ async function resolveDeliveries(
       },
     };
     return {
-      connection,
+      authKey: row.authKey,
       spawnEnv: {},
       httpDeliveryAuths,
       connectLogin: {
@@ -1057,12 +1023,11 @@ async function resolveDeliveries(
   const declaresEgress = (auth.authorized_uris?.length ?? 0) > 0 || auth.allow_all_uris === true;
   const needsEgress = isLocalSource && resolvedAtLeastOne && auth.type !== "mtls" && declaresEgress;
 
-  // apiCall integrations stay viable on a resolved connection alone — a
-  // `custom` auth resolves no delivery plan but the credential fields are
-  // still served (for {{var}} substitution) via the live endpoint.
-  if (!resolvedAtLeastOne && !hasApiCall) return null;
+  // An auth with a selected api_call stays viable on the row alone: `custom`
+  // resolves no plan but its fields are served via the live endpoint.
+  if (!resolvedAtLeastOne && !apiCallAuthKeys.has(row.authKey)) return null;
   return {
-    connection,
+    authKey: row.authKey,
     spawnEnv,
     ...(Object.keys(httpDeliveryAuths).length > 0 ? { httpDeliveryAuths } : {}),
     ...(Object.keys(fileMounts).length > 0 ? { fileMounts } : {}),

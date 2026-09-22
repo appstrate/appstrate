@@ -21,7 +21,6 @@
  */
 
 import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
-import { asRecord } from "@appstrate/core/safe-json";
 import { db } from "@appstrate/db/client";
 import {
   spacePackages,
@@ -61,6 +60,7 @@ import {
   orgOrSystemFilter,
 } from "../lib/package-helpers.ts";
 import { integrationCallbackUrl } from "../lib/integration-callback-url.ts";
+import { toMintedLabel } from "../lib/connection-label.ts";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
 import type { Actor } from "@appstrate/connect";
 import {
@@ -145,20 +145,6 @@ async function loadManifestOrThrow(
  */
 interface ActorConnectionRow {
   id: string;
-  /**
-   * The agent-facing handle. A run binding several connections to one
-   * integration spawns one runner per connection and the sidecar routes
-   * `(tool name, label) → client`, so the LIVE label — not the kickoff
-   * snapshot's audit copy — is what the spawn spec must carry.
-   */
-  label: string;
-  /**
-   * `identity_claims.account_id` — the upstream account this connection speaks
-   * for (`$.host` for SSH, the `sub`/email claim elsewhere). Rendered into the
-   * `connection` parameter's description so the LLM can tell two labels apart.
-   * `null` when the auth declared no identity claims.
-   */
-  accountId: string | null;
   credentialsEncrypted: string;
   expiresAt: Date | null;
   scopesGranted: string[];
@@ -175,26 +161,17 @@ interface ActorConnectionRow {
  * Spawn-side connection row — carries the `authKey` so the spawn
  * resolver can pick the right `manifest.auths[authKey].delivery`
  * declaration without iterating every declared auth on the integration.
- *
- * Used after the connection resolver has chosen one connection per
- * integration (flat model — no per-authKey iteration at runtime).
  */
 export interface ResolvedConnectionRow extends ActorConnectionRow {
   authKey: string;
 }
 
-/**
- * AFPS §7.4 — the upstream account a connection speaks for, read from the
- * claims the auth's `identity_claims` mapping extracted at connect time. An
- * auth that declares no mapping has none, which is `null`, not a placeholder:
- * the value is shown to the agent to tell two connections apart, and a shared
- * default string would tell it nothing.
- */
-function accountIdFromClaims(identityClaims: unknown): string | null {
-  const claims = asRecord(identityClaims);
-  return typeof claims.account_id === "string" && claims.account_id.length > 0
-    ? claims.account_id
-    : null;
+/** `account_id` of an identity-less connection ({@link extractIdentity} found no claim). */
+const PLACEHOLDER_ACCOUNT_ID = "default";
+
+/** The `account_id` column as an account, or `null` for the placeholder. */
+export function displayAccountId(accountId: string | null | undefined): string | null {
+  return accountId && accountId !== PLACEHOLDER_ACCOUNT_ID ? accountId : null;
 }
 
 /**
@@ -236,8 +213,6 @@ async function loadActorConnection(
   const rows = await db
     .select({
       id: integrationConnections.id,
-      label: integrationConnections.label,
-      identityClaims: integrationConnections.identityClaims,
       credentialsEncrypted: integrationConnections.credentialsEncrypted,
       expiresAt: integrationConnections.expiresAt,
       scopesGranted: integrationConnections.scopesGranted,
@@ -263,7 +238,14 @@ async function loadActorConnection(
   // When a connectionId override is set, the WHERE clause already narrowed
   // to that row — skip the own-vs-shared tiebreaker.
   if (context.connectionId) {
-    return toActorConnectionRow(rows[0]!);
+    const picked = rows[0]!;
+    return {
+      id: picked.id,
+      credentialsEncrypted: picked.credentialsEncrypted,
+      expiresAt: picked.expiresAt,
+      scopesGranted: picked.scopesGranted,
+      clientRef: picked.clientRef,
+    };
   }
 
   // Prefer the actor's own row (any) over shared rows. The OR predicate
@@ -273,36 +255,21 @@ async function loadActorConnection(
     context.actor.type === "user"
       ? r.userId === context.actor.id
       : r.endUserId === context.actor.id;
-  return toActorConnectionRow(rows.find(ownsRow) ?? rows[0]!);
-}
-
-/** Narrow a selected row to the shape credential/spawn resolvers consume. */
-function toActorConnectionRow(row: {
-  id: string;
-  label: string;
-  identityClaims: unknown;
-  credentialsEncrypted: string;
-  expiresAt: Date | null;
-  scopesGranted: string[];
-  clientRef: string | null;
-}): ActorConnectionRow {
+  const picked = rows.find(ownsRow) ?? rows[0]!;
   return {
-    id: row.id,
-    label: row.label,
-    accountId: accountIdFromClaims(row.identityClaims),
-    credentialsEncrypted: row.credentialsEncrypted,
-    expiresAt: row.expiresAt,
-    scopesGranted: row.scopesGranted,
-    clientRef: row.clientRef,
+    id: picked.id,
+    credentialsEncrypted: picked.credentialsEncrypted,
+    expiresAt: picked.expiresAt,
+    scopesGranted: picked.scopesGranted,
+    clientRef: picked.clientRef,
   };
 }
 
 /**
  * Load a specific connection row by its id, scoped to the space
  * and protected by the actor's access predicate (own OR shared). Used
- * by the spawn resolver to decrypt the connection chosen by the cascade
- * (admin pin / overrides / member pin / auto fallback) and return its
- * authKey for downstream delivery selection.
+ * by the spawn and live-credentials resolvers to load a connection the
+ * run's cascade bound, and return its authKey for delivery selection.
  *
  * SECURITY — `integrationId` is a REQUIRED filter: a connection id is
  * caller-supplied on some paths (`X-Connection-Id` on the credential
@@ -314,7 +281,7 @@ function toActorConnectionRow(row: {
  * caller has pinned a specific auth (AFPS §4.1 `auth_key`); pass `null`
  * when the connection's own authKey is authoritative.
  */
-async function loadAccessibleConnectionById(
+export async function loadAccessibleConnectionById(
   connectionId: string,
   integrationId: string,
   expectedAuthKey: string | null,
@@ -324,8 +291,6 @@ async function loadAccessibleConnectionById(
   const [row] = await db
     .select({
       id: integrationConnections.id,
-      label: integrationConnections.label,
-      identityClaims: integrationConnections.identityClaims,
       integrationId: integrationConnections.integrationId,
       authKey: integrationConnections.authKey,
       credentialsEncrypted: integrationConnections.credentialsEncrypted,
@@ -359,12 +324,13 @@ async function loadAccessibleConnectionById(
         (expectedAuthKey !== null ? ` auth '${expectedAuthKey}'` : ""),
     );
   }
-  return { ...toActorConnectionRow(row), authKey: row.authKey };
+  const { integrationId: _integrationId, ...resolved } = row;
+  return resolved;
 }
 
 /**
- * Fallback connection pick used when no resolver snapshot is available
- * (the live credentials path). Walks the declared
+ * Fallback connection pick for a credential-proxy call that names no
+ * connection. Walks the declared
  * auth keys and returns the first accessible connection found — same
  * auto-pick semantics as the runtime resolver's single-candidate fallback.
  * Multi-candidate ambiguity is resolved by iteration order (declared-auth
@@ -392,11 +358,9 @@ async function pickAnyAccessibleConnection(
 }
 
 /**
- * Single source of truth for "which connection does this integration use":
- * load the resolver-pinned row when a snapshot is present, otherwise fall
- * back to the auto-pick. Shared by the spawn resolver (boot) and the live
- * credentials resolver (runtime) so the two paths can never diverge on
- * connection selection.
+ * The credential proxy's connection selection: the named row when the caller
+ * sent one, otherwise the auto-pick. Run paths never auto-pick — they load
+ * the connections their cascade bound via {@link loadAccessibleConnectionById}.
  *
  * Both branches are bound to `packageId`: the by-id branch filters on
  * `integrationId` (and `requiredAuthKey` when set) so a pinned/overridden
@@ -1929,7 +1893,7 @@ export function extractIdentity(
     (typeof source.email === "string" && source.email) ||
     (typeof source.account_email === "string" && source.account_email) ||
     (typeof source.sub === "string" && source.sub) ||
-    "default";
+    PLACEHOLDER_ACCOUNT_ID;
   return { accountId, identityClaims: claims };
 }
 
@@ -2189,34 +2153,20 @@ export async function persistCredentialBundle(
     const insertAuthKey = input.authKey;
     const insertAccountId = input.accountId;
     // No mono-auth-per-actor gate: an actor may hold N connections across any
-    // mix of declared auths (OAuth + PAT + custom). The runtime picks exactly
-    // one per run via the resolver cascade; the member picker disambiguates
-    // when >1 candidate is accessible.
+    // mix of declared auths (OAuth + PAT + custom).
     //
-    // Display name, resolved once at creation and stable thereafter (refresh /
-    // update paths never touch `label`). The extracted identity (`accountId`,
-    // which `extractTokenIdentity` maps to the upstream email/login) when one
-    // was produced, else "Connexion N" — N is the actor's existing connection
-    // count for this (space, integration) + 1, computed as a subquery in the
-    // INSERT so it's one statement. This is the single source of truth for the
-    // UI: no render-time fallback, the label is always set. User-editable after.
-    const identityLabel =
-      input.accountId && input.accountId !== "default" ? input.accountId : undefined;
-    const ownerFilter = userId ? sql`user_id = ${userId}` : sql`end_user_id = ${endUserId}`;
+    // Display name, set once here: the identity or `labelHint`, else "Connexion
+    // N", N one past the highest minted for this (space, integration) across
+    // EVERY owner — a pin or org default binds several owners' connections into
+    // one set, whose labels must be distinct (same rule as the 0069 backfill).
+    // The advisory lock stops concurrent inserts reading the same MAX.
+    const namedLabel = [displayAccountId(input.accountId), input.labelHint]
+      .map((raw) => (raw ? toMintedLabel(raw) : ""))
+      .find((label) => label.length > 0);
     const labelValue: string | SQL =
-      identityLabel ??
-      input.labelHint ??
-      sql<string>`'Connexion ' || ((SELECT COUNT(*) FROM integration_connections WHERE space_id = ${target.scope.spaceId} AND integration_package_id = ${insertPackageId} AND ${ownerFilter}) + 1)`;
-    // Serialize the COUNT(*)-derived "Connexion N" numbering per
-    // (space, integration, owner) with a transaction-scoped advisory lock: two
-    // concurrent first-time connects for the same actor would otherwise both
-    // read the same COUNT (READ COMMITTED — neither sees the other's
-    // uncommitted row) and mint duplicate "Connexion 2" labels. Under the lock
-    // the second insert waits for the first to commit, so its subquery counts
-    // the freshly-inserted row and numbers monotonically. Identity/labelHint
-    // labels don't need it but the lock is cheap and keeps one code path.
-    const ownerKey = userId ?? endUserId ?? "";
-    const labelLockKey = `ic_label:${target.scope.spaceId}:${insertPackageId}:${ownerKey}`;
+      namedLabel ??
+      sql<string>`'Connexion ' || (COALESCE((SELECT MAX(substring(label from '^Connexion ([0-9]+)$')::numeric) FROM integration_connections WHERE space_id = ${target.scope.spaceId} AND integration_package_id = ${insertPackageId} AND label ~ '^Connexion [0-9]+$'), 0) + 1)`;
+    const labelLockKey = `ic_label:${target.scope.spaceId}:${insertPackageId}`;
     const row = await db.transaction(async (tx) => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${labelLockKey})::bigint)`);
       const inserted = await tx
@@ -2297,7 +2247,7 @@ export async function persistCredentialBundle(
     // transaction and take a row lock (`FOR UPDATE`) on the SELECT so the row
     // is pinned for the duration.
     const row = await db.transaction(async (tx) => {
-      if (input.accountId !== undefined && input.accountId !== "default") {
+      if (input.accountId !== undefined && input.accountId !== PLACEHOLDER_ACCOUNT_ID) {
         const [existing] = await tx
           .select({ accountId: integrationConnections.accountId })
           .from(integrationConnections)
@@ -2306,7 +2256,7 @@ export async function persistCredentialBundle(
           .for("update");
         if (
           existing &&
-          existing.accountId !== "default" &&
+          existing.accountId !== PLACEHOLDER_ACCOUNT_ID &&
           existing.accountId !== input.accountId
         ) {
           throw conflict(

@@ -229,9 +229,8 @@ describe("mcp run_and_wait — connection_overrides", () => {
     expect(resolved!.map((c) => c.connectionId).sort()).toEqual([first, second].sort());
   }, 60_000);
 
-  // A bare connection id is the retired single-connection shape. Refused before
-  // the launch rather than wrapped: a coerced launch would 201 on a binding the
-  // model never asked for, and nothing downstream would report the rewrite.
+  // A bare connection id is not a set. The route's 400 names the field, and
+  // nothing wraps it into a one-element set the model never asked for.
   it("refuses a bare connection id without launching", async () => {
     await seedConnectionTestIntegration(ctx, INTEGRATION);
     await seedDefaultOrgModel(ctx);
@@ -245,7 +244,8 @@ describe("mcp run_and_wait — connection_overrides", () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(String(result.data.error)).toContain(INTEGRATION);
+    expect(result.data.status).toBe(400);
+    expect(JSON.stringify(result.data.body)).toContain(INTEGRATION);
     expect(await db.select().from(runs)).toHaveLength(0);
   });
 });
