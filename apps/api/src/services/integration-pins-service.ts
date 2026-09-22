@@ -43,6 +43,7 @@ import type {
 import {
   missingScopesForConnection,
   manifestAuthKeySet,
+  labelsSharedBy,
   MAX_CONNECTIONS_PER_INTEGRATION,
   type ConnectionResolutionSource,
 } from "@appstrate/core/integration";
@@ -67,7 +68,6 @@ import {
   resolveConnectionsForRun,
   translateResolutionError,
   isUserConnectionCreationBlocked,
-  rowsSharingALabel,
   duplicateLabelMessage,
 } from "./integration-connection-resolver.ts";
 import type { ConnectionResolutionResult } from "@appstrate/core/integration";
@@ -180,7 +180,7 @@ export function assertDistinctConnectionLabels(
   integrationId: string,
   rows: readonly ConnectionRow[],
 ): void {
-  const colliding = rowsSharingALabel(rows);
+  const colliding = labelsSharedBy(rows);
   if (colliding.length > 0) {
     throw invalidRequest(duplicateLabelMessage(integrationId, colliding));
   }

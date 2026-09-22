@@ -55,6 +55,7 @@ import {
   requiredScopesForAgent,
   manifestAuthKeySet,
   manifestHasRequiredAuth,
+  labelsSharedBy,
   type IntegrationManifest,
   type ConnectionCandidate,
   type ConnectionOverrides,
@@ -403,7 +404,7 @@ function bindSet(
     value.push(health.value);
   }
 
-  const colliding = rowsSharingALabel(rows);
+  const colliding = labelsSharedBy(rows);
   if (colliding.length > 0) {
     return errorOf(args, {
       code: "duplicate_connection_label",
@@ -416,24 +417,10 @@ function bindSet(
 }
 
 /**
- * Every row whose label is shared, VERBATIM, with another row of the set.
- *
- * Exported because the WRITES (pins, org defaults) refuse a colliding set too
- * — one rule, one definition. Neither check subsumes the other: the write
- * stops the collision being created, and the resolver re-checks because a
- * connection can be renamed after the set was pinned.
+ * The one wording for a colliding set, shared by the resolver and the writes.
+ * The rule itself is `labelsSharedBy` in `@appstrate/core/integration`, so the
+ * API and the web picker cannot disagree about what collides.
  */
-export function rowsSharingALabel(rows: readonly ConnectionRow[]): ConnectionRow[] {
-  const byLabel = new Map<string, ConnectionRow[]>();
-  for (const conn of rows) {
-    const bucket = byLabel.get(conn.label);
-    if (bucket) bucket.push(conn);
-    else byLabel.set(conn.label, [conn]);
-  }
-  return [...byLabel.values()].filter((group) => group.length > 1).flat();
-}
-
-/** The one wording for a colliding set, shared by the resolver and the writes. */
 export function duplicateLabelMessage(
   integrationId: string,
   colliding: readonly ConnectionRow[],

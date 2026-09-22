@@ -1142,6 +1142,19 @@ export function validateAgentIntegrationScopes(
 export const MAX_CONNECTIONS_PER_INTEGRATION = 10;
 
 /**
+ * Rows whose `label` is shared verbatim with another row of the set. The
+ * agent addresses each bound connection BY its label, so a shared one makes
+ * the set unaddressable — this is the single definition of that collision,
+ * used by the resolver (412 `duplicate_connection_label`) and by every UI
+ * that composes a set, so the two can never disagree.
+ */
+export function labelsSharedBy<T extends { label: string }>(rows: readonly T[]): T[] {
+  const counts = new Map<string, number>();
+  for (const row of rows) counts.set(row.label, (counts.get(row.label) ?? 0) + 1);
+  return rows.filter((row) => (counts.get(row.label) ?? 0) > 1);
+}
+
+/**
  * Per-integration connection picks. Used on `runs.connection_overrides`
  * (caller's run-time choice) and `package_schedules.connection_overrides`
  * (frozen at schedule create). Shape:

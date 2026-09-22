@@ -4762,7 +4762,7 @@ export interface paths {
         };
         /**
          * Fetch live credentials + HTTP delivery plans for an active integration
-         * @description Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls for ONE of the connections this run bound to the integration (named by the required `connection_id`) — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations`, that the integration is ACTIVE in the run's space, AND that the run's kickoff snapshot bound this connection. A `200` with an EMPTY `auths` array means one thing only: the integration declares no auth. Every state where a credential was expected but could not be produced fails instead — `400` when the selector is missing or names a connection outside the run's bound set, `404` when the named connection is no longer reachable by the actor (deleted/unshared since kickoff), `409` when the pinned manifest version no longer declares the connection's auth, `410` when the credential is dead. The sidecar reads an empty payload as *no `delivery.http` auths, skip the MITM listener*, so answering `200` for a broken state boots the run with zero credentials and every upstream call leaves uncredentialed. One caller is authorised differently: an ephemeral CONNECT run (`run_at: "link"` orchestrated `connect.tool` login) has no run row and no agent to walk, so it is authorised against the launcher-published grant naming the single integration it is connecting, and always receives the EMPTY payload — it exists to MINT the credential, its login secret arrives out of band, and the session it captures is installed in-process.
+         * @description Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls for ONE of the connections this run bound to the integration (named by the required `connection_id`) — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations`, that the integration is ACTIVE in the run's space, AND that the run's kickoff snapshot bound this connection. On the RUN path a `200` always carries a usable credential surface — the only EMPTY payload this endpoint serves is the connect-run one described below. Every state where a credential was expected but could not be produced fails instead — `400` when the selector is missing or names a connection outside the run's bound set, `404` when the named connection is no longer reachable by the actor (deleted/unshared since kickoff), `409` when the pinned manifest version no longer declares the connection's auth, `410` when the credential is dead. The sidecar reads an empty payload as *no `delivery.http` auths, skip the MITM listener*, so answering `200` for a broken state boots the run with zero credentials and every upstream call leaves uncredentialed. One caller is authorised differently: an ephemeral CONNECT run (`run_at: "link"` orchestrated `connect.tool` login) has no run row and no agent to walk, so it is authorised against the launcher-published grant naming the single integration it is connecting, and always receives the EMPTY payload — it exists to MINT the credential, its login secret arrives out of band, and the session it captures is installed in-process.
          */
         get: operations["getIntegrationCredentials"];
         put?: never;
@@ -5475,8 +5475,12 @@ export interface components {
             packageId: string;
             integration_package_id: string;
             auth_key: string;
+            /** @description The whole pinned set. A write replaces it; there is no add/remove call. */
             connection_ids: string[];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the CURRENT set was written — not when this (agent, integration) was first pinned: a write replaces the rows, so none survives an edit to carry an older date.
+             */
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
@@ -11447,7 +11451,7 @@ export interface operations {
                             /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
                             owner_name?: string | null;
                             /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
-                            label?: string;
+                            label: string;
                             shared_with_org?: boolean;
                             /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                             client_ref: string | null;
@@ -11562,7 +11566,7 @@ export interface operations {
                                 /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
                                 owner_name?: string | null;
                                 /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
-                                label?: string;
+                                label: string;
                                 shared_with_org?: boolean;
                                 /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                                 client_ref: string | null;
@@ -11723,7 +11727,7 @@ export interface operations {
                         /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
                         owner_name?: string | null;
                         /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
-                        label?: string;
+                        label: string;
                         shared_with_org?: boolean;
                         /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                         client_ref: string | null;
@@ -12062,7 +12066,7 @@ export interface operations {
                             /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
                             owner_name?: string | null;
                             /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
-                            label?: string;
+                            label: string;
                             shared_with_org?: boolean;
                             /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                             client_ref: string | null;
@@ -12132,7 +12136,7 @@ export interface operations {
                         /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
                         owner_name?: string | null;
                         /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
-                        label?: string;
+                        label: string;
                         shared_with_org?: boolean;
                         /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                         client_ref: string | null;
@@ -12229,7 +12233,10 @@ export interface operations {
                         /** @description Auth type of the default's FIRST connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default set per (space, integration) regardless of auth_key; a set may mix auths, and the per-connection auth is read from the connection list. */
                         auth_key: string;
                         enforce: boolean;
-                        /** Format: date-time */
+                        /**
+                         * Format: date-time
+                         * @description When the CURRENT set was written — a write replaces the rows, so none survives an edit to carry an older date.
+                         */
                         createdAt: string;
                         /** Format: date-time */
                         updatedAt: string;
@@ -12288,7 +12295,10 @@ export interface operations {
                         /** @description Auth type of the default's FIRST connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default set per (space, integration) regardless of auth_key; a set may mix auths, and the per-connection auth is read from the connection list. */
                         auth_key: string;
                         enforce: boolean;
-                        /** Format: date-time */
+                        /**
+                         * Format: date-time
+                         * @description When the CURRENT set was written — a write replaces the rows, so none survives an edit to carry an older date.
+                         */
                         createdAt: string;
                         /** Format: date-time */
                         updatedAt: string;
@@ -12606,7 +12616,7 @@ export interface operations {
                                 /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
                                 owner_name?: string | null;
                                 /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
-                                label?: string;
+                                label: string;
                                 shared_with_org?: boolean;
                                 /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                                 client_ref: string | null;

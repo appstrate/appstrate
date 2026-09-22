@@ -127,6 +127,7 @@ const integrationConnectionSchema = {
     "expiresAt",
     "owner_type",
     "owner_id",
+    "label",
     "client_ref",
     "createdAt",
     "updatedAt",

@@ -22,20 +22,8 @@ import { InfoCard } from "./run-info-card";
 import { EmptyState } from "./page-states";
 import { RunTrigger } from "./run-trigger";
 import { inlineRunDisplayName } from "../lib/run-title";
+import { groupByIntegration } from "../lib/run-connections";
 import type { EnrichedRun } from "@appstrate/shared-types";
-
-type ConnectionUsed = NonNullable<EnrichedRun["connections_used"]>[number];
-
-/** Preserves first-seen integration order; each group keeps the snapshot order. */
-function groupByIntegration(used: ConnectionUsed[]): [string, ConnectionUsed[]][] {
-  const groups = new Map<string, ConnectionUsed[]>();
-  for (const c of used) {
-    const bucket = groups.get(c.integration_id);
-    if (bucket) bucket.push(c);
-    else groups.set(c.integration_id, [c]);
-  }
-  return [...groups.entries()];
-}
 
 interface RunConfigurationTabProps {
   run: EnrichedRun;

@@ -59,9 +59,11 @@ export interface IntegrationConnection {
   /**
    * Display name, set at creation: the extracted identity (email/login) when
    * available, else "Connexion N". Stable for the connection's lifetime and
-   * user-editable. The UI renders it verbatim.
+   * user-editable. The UI renders it verbatim. NOT NULL and always present:
+   * a run binding several connections of one integration addresses each by
+   * its label.
    */
-  label?: string | null;
+  label: string;
   /** Opt-in: makes this connection selectable by other members of the same space. */
   shared_with_org?: boolean;
   /**

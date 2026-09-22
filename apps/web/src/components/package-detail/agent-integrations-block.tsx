@@ -242,7 +242,7 @@ function buildReuseInfo(
   // always set at creation. A run may bind several — name them all.
   const account = connections.map(connectionDisplayLabel).join(" · ");
   if (agentCount <= 1) {
-    return t("detail.integrationReuseSingle", { account });
+    return t("detail.integrationReuseSingle", { account, count: connections.length });
   }
   return t("detail.integrationReuseShared", { account, count: agentCount });
 }

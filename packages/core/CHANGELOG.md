@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run (10). Enforced at every WRITE (pins, org defaults, run and schedule
   overrides), never in the resolver: the cascade only echoes a set a write
   already validated, and the fallback produces at most one.
+- **New export `labelsSharedBy` (`@appstrate/core/integration`)** — given the
+  rows of a connection set, the ones whose `label` another row of the set
+  carries verbatim. The single definition of the collision rule: the API
+  resolver raises `duplicate_connection_label` on it, the pin and org-default
+  writes refuse on it, and the web pickers flag on it, so the three can never
+  disagree about what a duplicate is.
 - **New export `canComposeInline` (`@appstrate/core/permissions`)** — whether
   a caller may compose an inline agent: `agents:write` and `agents:run`. Takes a
   membership test, so a `Set` or an array both fit.

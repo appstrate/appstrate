@@ -18,6 +18,7 @@ import { getModelIcon } from "./icons";
 import { useIntegrationDetail } from "../hooks/use-integrations";
 import { connectableAuthKeysForAgent } from "@appstrate/core/integration";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
+import { EMPTY_CONNECTION_SET } from "./integration-connect/connection-set";
 import { ModelGenerationFields } from "./model-generation-fields";
 import {
   reconcileModelGenerationSettings,
@@ -32,9 +33,6 @@ const INHERIT = "__inherit__";
 // with "None" selected is no longer silently routed through the org-default
 // proxy.
 const NONE = "none";
-// Stable empty set — a `[]` literal per render would re-fork the picker's
-// controlled value on every parent render.
-const EMPTY_OVERRIDE: string[] = [];
 
 export interface RunOverridesValue {
   /** Per-run model id override. */
@@ -316,7 +314,7 @@ function ScheduleConnectionOverridesSection({
             agentPackageId={agentPackageId}
             integration={integ}
             version={version}
-            value={value[integ.id] ?? EMPTY_OVERRIDE}
+            value={value[integ.id] ?? EMPTY_CONNECTION_SET}
             onChange={(connIds) => {
               const next = { ...value };
               if (connIds.length > 0) next[integ.id] = connIds;

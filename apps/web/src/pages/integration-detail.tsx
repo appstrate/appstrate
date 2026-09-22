@@ -63,7 +63,7 @@ import { Badge } from "@appstrate/ui/components/badge";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
-import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { MAX_CONNECTIONS_PER_INTEGRATION, labelsSharedBy } from "@appstrate/core/integration";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
 import {
   Table,
@@ -86,6 +86,7 @@ import { VersionHistory } from "../components/version-history";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { ConnectionTeardownSteps } from "../components/integration-connect/connection-teardown-steps";
+import { toggleCapped } from "../components/integration-connect/connection-set";
 import { Modal } from "../components/modal";
 import { SourceBadge } from "../components/source-badge";
 import { DefaultCell } from "../components/default-cell";
@@ -862,24 +863,24 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
   const [connectionIds, setConnectionIds] = useState<string[]>([]);
   const [enforce, setEnforce] = useState(false);
 
-  // Seed the form from the persisted default set once loaded. The joined ids
-  // key the seed so a server-side change re-seeds, a fresh array would not.
-  const seededFor = orgDefault?.connection_ids.join(",") ?? null;
+  // The set the form may hold: a default that names a connection since
+  // un-shared must not be silently resent, so the seed drops it and the admin
+  // sees exactly what the next save would write.
+  const seedIds = (orgDefault?.connection_ids ?? []).filter((id) =>
+    shared.some((c) => c.id === id),
+  );
+  // Order carries no meaning in a set — sort so a server reordering does not
+  // read as a change and wipe the admin's in-progress edit.
+  const seededFor = orgDefault ? [...seedIds].sort().join(",") : null;
   const [seeded, setSeeded] = useState<string | null>(null);
   if (seededFor !== seeded) {
     setSeeded(seededFor);
-    setConnectionIds(orgDefault?.connection_ids ?? []);
+    setConnectionIds(seedIds);
     setEnforce(orgDefault?.enforce ?? false);
   }
 
-  const toggleConnection = (id: string) =>
-    setConnectionIds((prev) =>
-      prev.includes(id)
-        ? prev.filter((x) => x !== id)
-        : prev.length < MAX_CONNECTIONS_PER_INTEGRATION
-          ? [...prev, id]
-          : prev,
-    );
+  const selected = shared.filter((c) => connectionIds.includes(c.id));
+  const colliding = labelsSharedBy(selected);
 
   return (
     <div
@@ -908,39 +909,59 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
                 whole set. */}
             <div className="flex flex-col gap-1" data-testid="org-default-connections">
               {shared.map((c) => (
-                <label key={c.id} className="flex items-center gap-2 text-xs">
+                <div key={c.id} className="flex items-center gap-2 text-xs">
                   <Checkbox
+                    id={`org-default-connection-${c.id}`}
                     checked={connectionIds.includes(c.id)}
                     disabled={
                       !connectionIds.includes(c.id) &&
                       connectionIds.length >= MAX_CONNECTIONS_PER_INTEGRATION
                     }
-                    onCheckedChange={() => toggleConnection(c.id)}
+                    onCheckedChange={() =>
+                      setConnectionIds((prev) =>
+                        toggleCapped(prev, c.id, MAX_CONNECTIONS_PER_INTEGRATION),
+                      )
+                    }
+                    // Radix renders a <button>: wrapping it in a <label> gives
+                    // it no accessible name, htmlFor + aria-label do.
+                    aria-label={connectionDisplay(c.id)}
                     data-testid={`org-default-connection-${c.id}`}
                   />
-                  {connectionDisplay(c.id)}
-                </label>
+                  <label htmlFor={`org-default-connection-${c.id}`}>
+                    {connectionDisplay(c.id)}
+                  </label>
+                </div>
               ))}
             </div>
+            {colliding.length > 0 && (
+              <p className="mt-1 text-[0.7rem] text-amber-600 dark:text-amber-400">
+                {t("integration.admin.duplicateLabel", {
+                  labels: [...new Set(colliding.map((c) => c.label))].join(", "),
+                })}
+              </p>
+            )}
           </div>
-          <label className="flex items-center gap-2 pb-1 text-xs">
+          <div className="flex items-center gap-2 pb-1 text-xs">
             <Checkbox
+              id="org-default-enforce"
               checked={enforce}
               onCheckedChange={(v) => setEnforce(v === true)}
+              aria-label={t("integration.admin.orgDefault.enforce")}
               data-testid="org-default-enforce"
             />
-            {t("integration.admin.orgDefault.enforce")}
-          </label>
+            <label htmlFor="org-default-enforce">{t("integration.admin.orgDefault.enforce")}</label>
+          </div>
           <Button
             size="sm"
             onClick={() =>
               connectionIds.length > 0 &&
+              colliding.length === 0 &&
               upsert.mutate({
                 params: { path: { packageId } },
                 body: { connection_ids: connectionIds, enforce },
               })
             }
-            disabled={connectionIds.length === 0 || upsert.isPending}
+            disabled={connectionIds.length === 0 || colliding.length > 0 || upsert.isPending}
             data-testid="org-default-save"
           >
             {t("integration.admin.orgDefault.save")}
@@ -991,8 +1012,11 @@ function PinManagementSection({ packageId }: { packageId: string }) {
     return connectionOptionLabel(c);
   };
 
+  const selectedConnections = pinnableConnections.filter((c) => newConnectionIds.includes(c.id));
+  const colliding = labelsSharedBy(selectedConnections);
+
   const onSubmitNewPin = () => {
-    if (!newAgent || newConnectionIds.length === 0) return;
+    if (!newAgent || newConnectionIds.length === 0 || colliding.length > 0) return;
     upsertPin.mutate(
       {
         params: { path: { packageId, agentPackageId: newAgent } },
@@ -1122,8 +1146,9 @@ function PinManagementSection({ packageId }: { packageId: string }) {
             </Label>
             <div className="flex flex-col gap-1" data-testid="pin-add-connections">
               {pinnableConnections.map((c) => (
-                <label key={c.id} className="flex items-center gap-2 text-xs">
+                <div key={c.id} className="flex items-center gap-2 text-xs">
                   <Checkbox
+                    id={`pin-add-connection-${c.id}`}
                     checked={newConnectionIds.includes(c.id)}
                     disabled={
                       !newConnectionIds.includes(c.id) &&
@@ -1131,24 +1156,35 @@ function PinManagementSection({ packageId }: { packageId: string }) {
                     }
                     onCheckedChange={() =>
                       setNewConnectionIds((prev) =>
-                        prev.includes(c.id)
-                          ? prev.filter((x) => x !== c.id)
-                          : prev.length < MAX_CONNECTIONS_PER_INTEGRATION
-                            ? [...prev, c.id]
-                            : prev,
+                        toggleCapped(prev, c.id, MAX_CONNECTIONS_PER_INTEGRATION),
                       )
                     }
+                    // Radix renders a <button>: wrapping it in a <label> gives
+                    // it no accessible name, htmlFor + aria-label do.
+                    aria-label={connectionDisplay(c.id)}
                     data-testid={`pin-add-connection-${c.id}`}
                   />
-                  {connectionDisplay(c.id)}
-                </label>
+                  <label htmlFor={`pin-add-connection-${c.id}`}>{connectionDisplay(c.id)}</label>
+                </div>
               ))}
             </div>
+            {colliding.length > 0 && (
+              <p className="mt-1 text-[0.7rem] text-amber-600 dark:text-amber-400">
+                {t("integration.admin.duplicateLabel", {
+                  labels: [...new Set(colliding.map((c) => c.label))].join(", "),
+                })}
+              </p>
+            )}
           </div>
           <Button
             size="sm"
             onClick={onSubmitNewPin}
-            disabled={!newAgent || newConnectionIds.length === 0 || upsertPin.isPending}
+            disabled={
+              !newAgent ||
+              newConnectionIds.length === 0 ||
+              colliding.length > 0 ||
+              upsertPin.isPending
+            }
             data-testid="pin-add-submit"
           >
             {t("integration.admin.pinManagement.add")}

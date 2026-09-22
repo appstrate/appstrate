@@ -5,19 +5,18 @@
  *
  * `label` is the single source of truth: it's set at creation to the extracted
  * identity (email/login from `extractTokenIdentity`) or, for identity-less
- * credentials (api_key/basic/custom/PAT), to "Connexion N". The UI renders it
- * verbatim. The `?? accountId` tail only guards the optional `label` type — it
- * is always populated in practice.
+ * credentials (api_key/basic/custom/PAT), to "Connexion N", and the column is
+ * NOT NULL — a run binding several connections of one integration addresses
+ * each by its label.
  */
 
 interface ConnectionLabelFields {
-  account_id: string;
-  label?: string | null;
+  label: string;
 }
 
 /** The connection's display name. */
 export function connectionDisplayLabel(c: ConnectionLabelFields): string {
-  return c.label ?? c.account_id;
+  return c.label;
 }
 
 interface ConnectionOwnerFields {

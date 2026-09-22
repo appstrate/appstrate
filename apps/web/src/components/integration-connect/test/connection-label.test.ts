@@ -15,15 +15,14 @@ import { describe, it, expect } from "bun:test";
 import { connectionDisplayLabel, isConnectionOwnedBy } from "../connection-label";
 
 describe("connectionDisplayLabel", () => {
-  it("renders the label verbatim when set", () => {
-    expect(connectionDisplayLabel({ account_id: "acct-1", label: "work@acme.com" })).toBe(
-      "work@acme.com",
-    );
+  it("renders the label verbatim", () => {
+    expect(connectionDisplayLabel({ label: "work@acme.com" })).toBe("work@acme.com");
   });
 
-  it("falls back to the account id when the label is absent or null", () => {
-    expect(connectionDisplayLabel({ account_id: "acct-1" })).toBe("acct-1");
-    expect(connectionDisplayLabel({ account_id: "acct-1", label: null })).toBe("acct-1");
+  it("does not substitute anything for a label that looks like an account id", () => {
+    // The column is NOT NULL; there is no account-id fallback left to hide a
+    // missing name behind, which is what makes label collisions detectable.
+    expect(connectionDisplayLabel({ label: "acct-1" })).toBe("acct-1");
   });
 });
 

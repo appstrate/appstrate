@@ -425,6 +425,7 @@
   "integration.admin.orgDefault.noPinnableConnections": "No shared connection available. Ask a user to enable sharing on their connection, or create one yourself.",
   "integration.admin.orgDefault.updated": "Default connections updated",
   "integration.admin.orgDefault.deleted": "Default connections removed",
+  "integration.admin.duplicateLabel": "Several selected connections share the same name ({{labels}}): the agent addresses them by name, rename one before saving.",
   "integration.admin.exceptions.title": "Per-agent exceptions (admin)",
   "integration.admin.exceptions.help": "Override the default for specific agents. An exception wins over the default for that agent.",
   "integration.admin.pinManagement.colAgent": "Agent",

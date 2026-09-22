@@ -60,7 +60,13 @@ describe("resolutionBlocksRun", () => {
   });
 
   it("blocks on every unresolved status", () => {
-    for (const status of ["none", "must_choose", "needs_reconnection", "stale"] as const) {
+    for (const status of [
+      "none",
+      "must_choose",
+      "duplicate_label",
+      "needs_reconnection",
+      "stale",
+    ] as const) {
       expect(resolutionBlocksRun(resolution({ status, resolved_connection_ids: [] }))).toBe(true);
     }
   });

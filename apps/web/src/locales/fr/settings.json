@@ -425,6 +425,7 @@
   "integration.admin.orgDefault.noPinnableConnections": "Aucune connexion partagée disponible. Demandez à un utilisateur d'activer le partage sur sa connexion, ou créez-en une vous-même.",
   "integration.admin.orgDefault.updated": "Connexions par défaut mises à jour",
   "integration.admin.orgDefault.deleted": "Connexions par défaut retirées",
+  "integration.admin.duplicateLabel": "Plusieurs connexions sélectionnées portent le même nom ({{labels}}) : l'agent les désigne par leur nom, renommez-en une avant d'enregistrer.",
   "integration.admin.exceptions.title": "Exceptions par agent (admin)",
   "integration.admin.exceptions.help": "Remplacez le défaut pour des agents spécifiques. Une exception prime sur le défaut pour cet agent.",
   "integration.admin.pinManagement.colAgent": "Agent",

@@ -4,12 +4,13 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, XCircle, Puzzle, Check, Loader2 } from "lucide-react";
 import { Input } from "@appstrate/ui/components/input";
-import type { AgentIntegrationEntry } from "@appstrate/shared-types";
+import type { AgentIntegrationEntry, IntegrationCandidate } from "@appstrate/shared-types";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 import { resolutionBlocksRun } from "./integration-connect/integration-run-readiness";
+import { EMPTY_CONNECTION_SET } from "./integration-connect/connection-set";
 import {
   useIntegrationDetail,
   useIntegrationAgentResolution,
@@ -99,10 +100,6 @@ export interface MissingIntegrationFieldError {
  * let the two diverge.
  */
 type ConnectionOverridesMap = Record<string, string[]>;
-
-// Stable empty pick — a `[]` literal per render would re-fork the picker's
-// controlled value on every parent render.
-const EMPTY_PICK: string[] = [];
 
 /**
  * Codes that no connection pick can fix — surfaced as a plain message, no
@@ -221,7 +218,7 @@ export function MissingConnectionsModal({
             err={err}
             agentPackageId={agentPackageId}
             integrationEntries={integrationEntries}
-            pick={picks[parseField(err.field)] ?? EMPTY_PICK}
+            pick={picks[parseField(err.field)] ?? EMPTY_CONNECTION_SET}
             onPick={setPick}
           />
         ))}
@@ -303,7 +300,11 @@ function MissingRow({
         )}
       </div>
       {err.code === "duplicate_connection_label" && err.candidate_connections && (
-        <DuplicateLabelFix packageId={packageId} connections={err.candidate_connections} />
+        <DuplicateLabelFix
+          packageId={packageId}
+          connections={err.candidate_connections}
+          {...(resolution ? { candidates: resolution.candidates } : {})}
+        />
       )}
       {canRenderPicker && (
         <div className="border-border/60 mt-1 border-t pt-2">
@@ -329,20 +330,32 @@ function MissingRow({
 /**
  * Remedy for `duplicate_connection_label`: the run bound several connections
  * whose labels collide, and the agent addresses each one BY its label, so no
- * re-pick fixes it — one of them has to be renamed. Lists the colliding rows
+ * re-pick fixes it — one of them has to be renamed. Lists the colliding rows,
  * with an inline rename field (the same `PATCH .../connections/{id}` the
- * integration page uses).
+ * integration page uses) on the ones the actor owns; renaming someone else's
+ * shared connection is refused server-side, so a foreign row asks its owner
+ * instead of offering a control that would 403.
  */
 function DuplicateLabelFix({
   packageId,
   connections,
+  candidates,
 }: {
   packageId: string;
-  connections: { id: string; label: string; account_id: string }[];
+  connections: { id: string; label: string; account_id: string; owned_by_actor: boolean }[];
+  /** Resolution candidates — the only surface carrying each owner's name. */
+  candidates?: IntegrationCandidate[];
 }) {
   const { t } = useTranslation(["agents"]);
   const rename = useUpdateIntegrationConnection();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  // Labels this modal has already written. Without them the field would snap
+  // back to the stale 412 payload and let the same PATCH be sent again.
+  const [renamed, setRenamed] = useState<Record<string, string>>({});
+
+  const ownerOf = (id: string): string =>
+    candidates?.find((c) => c.id === id)?.owner_name ??
+    t("detail.integrationMemberPicker.ownerUnknown");
 
   return (
     <div
@@ -352,33 +365,60 @@ function DuplicateLabelFix({
       <span className="text-amber-700 dark:text-amber-300">
         {t("missingConnections.duplicateLabel.hint")}
       </span>
-      {connections.map((c) => (
-        <div key={c.id} className="flex items-center gap-2">
-          <span className="text-muted-foreground min-w-0 flex-1 truncate">{c.account_id}</span>
-          <Input
-            className="h-7 max-w-[10rem] text-xs"
-            value={drafts[c.id] ?? c.label}
-            onChange={(e) => setDrafts((prev) => ({ ...prev, [c.id]: e.target.value }))}
-            aria-label={t("missingConnections.duplicateLabel.rename")}
-            data-testid={`duplicate-label-input-${c.id}`}
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs"
-            disabled={rename.isPending || (drafts[c.id] ?? c.label) === c.label}
-            onClick={() =>
-              rename.mutate({
-                params: { path: { packageId, connectionId: c.id } },
-                body: { label: drafts[c.id] ?? c.label },
-              })
-            }
-            data-testid={`duplicate-label-save-${c.id}`}
-          >
-            {t("missingConnections.duplicateLabel.rename")}
-          </Button>
-        </div>
-      ))}
+      {connections.map((c) => {
+        const current = renamed[c.id] ?? c.label;
+        const draft = drafts[c.id] ?? current;
+        return (
+          <div key={c.id} className="flex items-center gap-2">
+            <span className="text-muted-foreground min-w-0 flex-1 truncate">{c.account_id}</span>
+            {c.owned_by_actor ? (
+              <>
+                <Input
+                  className="h-7 max-w-[10rem] text-xs"
+                  value={draft}
+                  onChange={(e) => setDrafts((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                  aria-label={t("missingConnections.duplicateLabel.rename")}
+                  data-testid={`duplicate-label-input-${c.id}`}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  disabled={rename.isPending || draft.trim() === "" || draft === current}
+                  onClick={() =>
+                    rename.mutate(
+                      {
+                        params: { path: { packageId, connectionId: c.id } },
+                        body: { label: draft },
+                      },
+                      {
+                        onSuccess: () => {
+                          setRenamed((prev) => ({ ...prev, [c.id]: draft }));
+                          setDrafts((prev) => {
+                            const { [c.id]: _done, ...rest } = prev;
+                            void _done;
+                            return rest;
+                          });
+                        },
+                      },
+                    )
+                  }
+                  data-testid={`duplicate-label-save-${c.id}`}
+                >
+                  {t("missingConnections.duplicateLabel.rename")}
+                </Button>
+              </>
+            ) : (
+              <span data-testid={`duplicate-label-foreign-${c.id}`}>
+                {t("missingConnections.duplicateLabel.askOwner", {
+                  label: current,
+                  owner: ownerOf(c.id),
+                })}
+              </span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

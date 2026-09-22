@@ -439,7 +439,9 @@ export function useUpsertIntegrationPin() {
     },
     onSuccess: () => {
       toast.success(t("integration.admin.pin.upserted"));
-      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}/pins"] });
+      // An admin pin sits at the TOP of the resolver cascade — every agent's
+      // readiness verdict changes with it, not just the pins list.
+      void invalidateIntegrationQueries(qc);
     },
   });
 }
@@ -457,7 +459,7 @@ export function useDeleteIntegrationPin() {
     },
     onSuccess: () => {
       toast.success(t("integration.admin.pin.deleted"));
-      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}/pins"] });
+      void invalidateIntegrationQueries(qc);
     },
   });
 }
@@ -540,10 +542,10 @@ export function useUpdateIntegrationConnection() {
     },
     onSuccess: () => {
       toast.success(t("integration.connection.updated"));
-      void qc.invalidateQueries({
-        queryKey: ["get", "/api/integrations/{packageId}/connections"],
-      });
-      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}"] });
+      // A rename moves the label the agent addresses a bound connection by,
+      // so it can clear (or create) a `duplicate_connection_label` verdict —
+      // refresh the whole integration subtree, readiness included.
+      void invalidateIntegrationQueries(qc);
     },
   });
 }
