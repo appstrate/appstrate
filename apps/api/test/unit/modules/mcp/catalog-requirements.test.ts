@@ -119,7 +119,42 @@ describe("the arity convention the lookup relies on", () => {
     );
     expect(terminalsBeforeTheEnd(app.routes)).toEqual(["GET /x"]);
   });
+
+  // A standalone `use` has no handler after it for the check above to see: a
+  // rest-args one reads as a terminal catch-all and hides every guard beneath.
+  it("serves from no catch-all but the ones pinned here", () => {
+    expect(terminalCatchAlls(getTestApp().routes)).toEqual(
+      TERMINAL_CATCH_ALLS.map(({ route }) => route).sort(),
+    );
+  });
+
+  it("flags a standalone rest-args `use` as a catch-all, and not a `(c, next)` one", () => {
+    const app = new Hono<AppEnv>();
+    app.use("/x/*", async (...args: [Context<AppEnv>, Next]) => {
+      await args[1]();
+    });
+    app.use("/y/*", async (_c, next) => next());
+    expect(terminalCatchAlls(app.routes)).toEqual(["ALL /x/*"]);
+  });
 });
+
+/** Terminal entries answering every method or a whole subtree. */
+function terminalCatchAlls(routes: readonly RouteEntry[]): string[] {
+  const found = routes
+    .filter(
+      (route) =>
+        servesOperation(route.handler) && (route.method === "ALL" || route.path.endsWith("*")),
+    )
+    .map((route) => `${route.method} ${route.path}`);
+  return [...new Set(found)].sort();
+}
+
+const TERMINAL_CATCH_ALLS: ReadonlyArray<{ route: string; why: string }> = [
+  { route: "GET /api/auth/*", why: "Better Auth's handler answers its whole family" },
+  { route: "POST /api/auth/*", why: "Better Auth's handler answers its whole family" },
+  { route: "ALL /api/mcp/o/:org", why: "405 `Allow: POST` for every verb the POST route leaves" },
+  { route: "ALL /api/credential-proxy/proxy", why: "forwards the caller's method upstream" },
+];
 
 /**
  * `/api/` operations with no permission guard and no `rowAuthority()` marker —

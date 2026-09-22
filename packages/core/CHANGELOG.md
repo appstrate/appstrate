@@ -17,10 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `true` on the mounted function
   (`Object.defineProperty(mw, Symbol.for("appstrate.rowAuthority"), { value: true })`);
   being a registry symbol, a module stamps it without importing the platform.
-- **Every operation a module's `openApiPaths()` documents must be served by a
-  terminal route handler, or the platform refuses to boot.** Middleware alone
-  does not serve, nor does a sub-app attached with `mount()`: forward to it from
-  a route handler, `router.all("/x/*", (c) => handler(c.req.raw))`.
+- **BREAKING: every operation a module's `openApiPaths()` documents must be
+  served by a terminal route handler, or the platform refuses to boot.** A
+  documented operation no route served used to fail only in the MCP tool
+  catalog; it now stops the boot, so an out-of-tree module that documents an
+  operation it does not serve crash-loops on upgrade. Middleware alone does not
+  serve, nor does a sub-app attached with `mount()`. Before upgrading, forward
+  each such operation from a route handler,
+  `router.all("/x/*", (c) => handler(c.req.raw))`, or remove it from
+  `openApiPaths()`.
 
 ## [11.1.0] — 2026-09-22
 
@@ -47,8 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New export `PERMISSION_REQUIREMENT_MARKER`
   (`@appstrate/core/permissions`)** — the symbol under which every guard
   `makePermissionGuard` builds now also carries the requirement it checks (one
-  `resource:action`; the platform's `requireAnyPermission` stamps its
-  disjunction as `a|b`), beside the unchanged boolean
+  `resource:action`, or several joined with `|`), beside the unchanged boolean
   `appstrate.permissionGuard` marker; a guard carrying the boolean alone is
   row-aware. See `apps/api/src/middleware/handler-marker.ts`.
 - **`AppstrateTurnMetadata` gains optional `modelId` and `modelLabel`

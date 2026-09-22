@@ -4,7 +4,7 @@
  * What a route requires, read off the handler markers of Hono's route table
  * and matched segment by segment as Hono matches, since several operations
  * have no route of their own. An operation is SERVED by the first terminal
- * handler that matches it, whatever its method or path shape; middleware
+ * handler that matches all of it, whatever its method or path shape; middleware
  * matching before it only adds its guard. Guards mounted after a space
  * re-scope (`markSpaceRescope`) are enforced in the space the PATH names, so
  * they are reported apart and never filter.
@@ -45,6 +45,9 @@ type Token =
 
 /** One segment of an OpenAPI template; `null` is a `{param}`, i.e. any value. */
 type TemplateSegment = string | null;
+
+/** `partial`: the entry runs for some values of a `{param}` and not others. */
+type Match = "none" | "partial" | "full";
 
 const WILDCARD: Token = Object.freeze({ kind: "wildcard" });
 
@@ -128,7 +131,8 @@ function lookup(
   // Mount order, so a guard is attributed to the space in force where it sits.
   for (const entry of entries) {
     if (entry.method !== "ALL" && entry.method !== method) continue;
-    if (!matches(entry, template)) continue;
+    const match = matches(entry, template);
+    if (match === "none") continue;
     if (entry.rescope) rescoped = true;
     if (entry.rowDecides) conditional = true;
     if (entry.requirement !== null) {
@@ -137,9 +141,10 @@ function lookup(
       if (!into.includes(entry.requirement)) into.push(entry.requirement);
     }
     // Hono answers with the first terminal handler; nothing after it runs.
+    // A partial one leaves the other values to later entries, guards included.
     if (entry.serves) {
       served = true;
-      break;
+      if (match === "full") break;
     }
   }
   if (!served) return undefined;
@@ -153,23 +158,32 @@ function lookup(
 }
 
 /** Hono's match, lifted from a URL to a template: a `{param}` also stands for
- *  values a mount literal does not name, so only a mount param covers it. */
-function matches(entry: TableEntry, template: readonly TemplateSegment[]): boolean {
+ *  values a mount literal does not name, so a literal never covers it, and a
+ *  constrained mount param covers only the values its pattern accepts. */
+function matches(entry: TableEntry, template: readonly TemplateSegment[]): Match {
   const { tokens } = entry;
   if (entry.prefix ? template.length < tokens.length : template.length !== tokens.length) {
-    return false;
+    return "none";
   }
-  return template.every((segment, i) => i >= tokens.length || tokenCovers(tokens[i]!, segment));
+  let match: Match = "full";
+  for (const [i, segment] of template.slice(0, tokens.length).entries()) {
+    const covered = tokenCovers(tokens[i]!, segment);
+    if (covered === "none") return "none";
+    if (covered === "partial") match = "partial";
+  }
+  return match;
 }
 
-function tokenCovers(token: Token, segment: TemplateSegment): boolean {
+function tokenCovers(token: Token, segment: TemplateSegment): Match {
   switch (token.kind) {
     case "wildcard":
-      return true;
+      return "full";
     case "literal":
-      return segment === token.value;
+      return segment === token.value ? "full" : "none";
     case "param":
-      return segment === null || token.accepts === null || token.accepts.test(segment);
+      if (token.accepts === null) return "full";
+      if (segment === null) return "partial";
+      return token.accepts.test(segment) ? "full" : "none";
   }
 }
 

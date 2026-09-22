@@ -362,6 +362,22 @@ describe("lookup — a terminal handler serves, middleware never does", () => {
     expect((await app.request("/api/things/1")).status).toBe(200);
   });
 
+  it("walks past a constrained route that serves only some values of a `{param}`", async () => {
+    // `{name}` also names `abc`, which the regex refuses: Hono answers it from
+    // the guarded route below, so the walk must reach that guard.
+    const app = new Hono<AppEnv>();
+    app.onError(errorHandler);
+    app.get("/api/things/:id{[0-9]+}", ok);
+    app.get("/api/things/:name", requirePermission("agents", "write"), ok);
+    const table = deriveRouteRequirements(app.routes);
+    expect(served(table, "GET", "/api/things/{name}").requirements).toEqual(["agents:write"]);
+    // A literal the constraint accepts is served in full before the guard.
+    expect(served(table, "GET", "/api/things/42").requirements).toEqual([]);
+    // The control: Hono agrees on both.
+    expect((await app.request("/api/things/abc")).status).toBe(403);
+    expect((await app.request("/api/things/42")).status).toBe(200);
+  });
+
   it("does not serve a sub-app attached with `mount()` — its handler declares `next`", async () => {
     const external = (request: Request) => new Response(new URL(request.url).pathname);
     const app = new Hono<AppEnv>();
