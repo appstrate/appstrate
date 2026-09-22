@@ -32,7 +32,7 @@ import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { enterSpaceContext, requireModulePermission } from "@appstrate/core/permissions";
 import { notFound, parseBody } from "@appstrate/core/api-errors";
-import { scopedNameRegex } from "@appstrate/core/validation";
+import { packageIdSchema } from "@appstrate/core/validation";
 import { UI_MESSAGE_STREAM_HEADERS } from "ai";
 import { handleChatStream, type ChatEnv } from "./chat-stream.ts";
 import { stopStream } from "./stop-registry.ts";
@@ -55,18 +55,15 @@ export const renameSessionSchema = z.object({
   title: z.string().min(1).max(200),
 });
 
-/**
- * `PUT /api/chat/sessions/{id}/skills`. A malformed id is a 400; an unknown one
- * is a pin the turn reports as unresolved; duplicates are deduped after parsing.
- */
-export const sessionSkillsSchema = z.object({
-  skill_catalogue: z.boolean(),
-  pinned_skills: z
-    .array(
-      z.string().regex(scopedNameRegex, { error: "Each skill id must be in @scope/name form" }),
-    )
-    .max(MAX_PINNED_SKILLS, { error: `At most ${MAX_PINNED_SKILLS} pinned skills` }),
-});
+/** An unknown id is a pin the turn reports as unresolved, never a 400. */
+export const sessionSkillsSchema = z
+  .object({
+    skill_catalogue: z.boolean(),
+    pinned_skills: z
+      .array(packageIdSchema)
+      .max(MAX_PINNED_SKILLS, { error: `At most ${MAX_PINNED_SKILLS} pinned skills` }),
+  })
+  .strict();
 
 type SessionRow = typeof chatSessions.$inferSelect;
 type MessageRow = typeof chatMessages.$inferSelect;

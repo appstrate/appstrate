@@ -106,13 +106,14 @@ describe("chat session skills", () => {
     expect(session.pinned_skills).toEqual([]);
   });
 
-  it("refuses a non-boolean catalogue, a malformed id, and more pins than the ceiling", async () => {
+  it("refuses a non-boolean catalogue, a malformed id, an unknown field, and more pins than the ceiling", async () => {
     const id = mintSessionId();
     const atCap = Array.from({ length: MAX_PINNED_SKILLS }, (_, i) => `@acme/s${i}`);
     const overCap = [...atCap, "@acme/one-more"];
     for (const body of [
       { skill_catalogue: "yes", pinned_skills: [] },
       { skill_catalogue: true, pinned_skills: ["not-a-package-id"] },
+      { skill_catalogue: true, pinned_skills: [], skill_mode: "auto" },
       { skill_catalogue: true, pinned_skills: overCap },
     ]) {
       expect((await putSkills(id, body)).status).toBe(400);

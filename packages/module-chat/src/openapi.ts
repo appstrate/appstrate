@@ -7,6 +7,7 @@
  * clients automatically (search/describe/invoke_operation).
  */
 
+import { scopedNameRegex } from "@appstrate/core/validation";
 import { MAX_PINNED_SKILLS } from "./skills.ts";
 
 const stdHeaders = {
@@ -252,7 +253,11 @@ export const chatPaths = {
                 pinned_skills: {
                   type: "array",
                   maxItems: MAX_PINNED_SKILLS,
-                  items: { type: "string", description: "`@scope/name` package id" },
+                  items: {
+                    type: "string",
+                    pattern: scopedNameRegex.source,
+                    description: "`@scope/name` package id",
+                  },
                   description:
                     "Package ids to pin. Deduped server-side; the cap applies to the array as sent.",
                 },

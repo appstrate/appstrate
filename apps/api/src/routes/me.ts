@@ -68,7 +68,7 @@ import {
   listActiveSkills,
   resolveSkillsByIds,
 } from "../services/space-packages.ts";
-import { scopedNameRegex } from "@appstrate/core/validation";
+import { packageIdSchema } from "@appstrate/core/validation";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { listRecentForActor } from "../services/state/runs.ts";
 import { canReadRuns } from "../lib/run-visibility.ts";
@@ -463,9 +463,7 @@ const requestedSkillsSchema = z
   ])
   .pipe(
     z
-      .array(
-        z.string().regex(scopedNameRegex, { error: "Each skill id must be in @scope/name form" }),
-      )
+      .array(packageIdSchema)
       .max(MAX_REQUESTED_SKILLS, { error: `At most ${MAX_REQUESTED_SKILLS} skill ids` }),
   );
 

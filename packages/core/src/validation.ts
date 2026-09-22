@@ -65,6 +65,11 @@ export const scopedNameRegex: RegExp = (() => {
   return /^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 })();
 
+/** A package id (`@scope/name`) in a request body or query. */
+export const packageIdSchema = z
+  .string()
+  .regex(scopedNameRegex, { error: "Must be a package id in @scope/name form" });
+
 /** Zod enum for supported AFPS package types. Canonical export re-exposed from `@afps-spec/schema`. */
 export const packageTypeEnum = afpsPackageTypeEnum;
 /** Union type of supported package types. */
