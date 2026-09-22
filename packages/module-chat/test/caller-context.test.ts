@@ -518,27 +518,14 @@ describe("formatCallerContext", () => {
     expect(out).toContain("Reply in the user's language (fr)");
   });
 
-  it("renders the current space id verbatim, with its name when known", () => {
+  it("renders the current space id verbatim", () => {
     // The id is a PATH PARAMETER the model must reproduce (`activatePackage`),
     // so it is rendered literally rather than described.
-    const named = formatCallerContext(
-      {
-        user: { name: "Ada" },
-        org: { role: "member", name: "Acme" },
-        space: { id: "spc_abc123", name: "Growth" },
-      },
+    const out = formatCallerContext(
+      { user: { name: "Ada" }, org: { role: "member" }, space: { id: "spc_abc123" } },
       OPTS,
     );
-    expect(named).toContain('Current space: "Growth" (`spc_abc123`).');
-    const unnamed = formatCallerContext(
-      {
-        user: { name: "Ada" },
-        org: { role: "member" },
-        space: { id: "spc_abc123", name: null },
-      },
-      OPTS,
-    );
-    expect(unnamed).toContain("Current space: `spc_abc123`.");
+    expect(out).toContain("Current space: `spc_abc123`.");
     // No space on the payload (identity-only fallback) → no line at all.
     expect(
       formatCallerContext({ user: { name: "Ada" }, org: { role: "member" } }, OPTS),

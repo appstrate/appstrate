@@ -535,29 +535,26 @@ router.get("/context", requireSpaceContext(), async (c) => {
   const accessible = await packageAccessSpaces(c);
   const homeWritable = (pkg: Parameters<typeof homeWireForCaller>[0]) =>
     homeWireForCaller(pkg, accessible).home_writable;
-  const [spaceRow, connections, runnable, activeSkills, requestedSkills, recentRuns] =
-    await Promise.all([
-      // Named so a model can address `spaceId`-path operations (activation door).
-      db.select({ name: spaces.name }).from(spaces).where(eq(spaces.id, scope.spaceId)).limit(1),
-      mayReadIntegrations
-        ? listUsableIntegrationsForActor(scope, actor)
-        : Promise.resolve([] as Awaited<ReturnType<typeof listUsableIntegrationsForActor>>),
-      canRun
-        ? listRunnableAgents(scope, { homeWritable })
-        : Promise.resolve({ agents: [], truncated: false, total: 0 }),
-      canReadSkills
-        ? listActiveSkills(scope, { homeWritable })
-        : Promise.resolve({ skills: [], truncated: false, total: 0 }),
-      // Same gate as the catalogue: without it, nothing about skills at all.
-      canReadSkills
-        ? resolveSkillsByIds(scope, requestedSkillIds, { homeWritable })
-        : Promise.resolve({ resolved: [], unresolved: [] }),
-      // Actor-scoped, but still a runs read: the same permission `GET /api/runs`
-      // asks for (`runs:read` ∨ `runs:read-all`, `canReadRuns`).
-      mayReadRuns
-        ? listRecentForActor(scope, actor)
-        : Promise.resolve([] as Awaited<ReturnType<typeof listRecentForActor>>),
-    ]);
+  const [connections, runnable, activeSkills, requestedSkills, recentRuns] = await Promise.all([
+    mayReadIntegrations
+      ? listUsableIntegrationsForActor(scope, actor)
+      : Promise.resolve([] as Awaited<ReturnType<typeof listUsableIntegrationsForActor>>),
+    canRun
+      ? listRunnableAgents(scope, { homeWritable })
+      : Promise.resolve({ agents: [], truncated: false, total: 0 }),
+    canReadSkills
+      ? listActiveSkills(scope, { homeWritable })
+      : Promise.resolve({ skills: [], truncated: false, total: 0 }),
+    // Same gate as the catalogue: without it, nothing about skills at all.
+    canReadSkills
+      ? resolveSkillsByIds(scope, requestedSkillIds, { homeWritable })
+      : Promise.resolve({ resolved: [], unresolved: [] }),
+    // Actor-scoped, but still a runs read: the same permission `GET /api/runs`
+    // asks for (`runs:read` ∨ `runs:read-all`, `canReadRuns`).
+    mayReadRuns
+      ? listRecentForActor(scope, actor)
+      : Promise.resolve([] as Awaited<ReturnType<typeof listRecentForActor>>),
+  ]);
 
   return c.json({
     user: identity,
@@ -567,7 +564,8 @@ router.get("/context", requireSpaceContext(), async (c) => {
       name: (c.get("orgName") as string | undefined) ?? null,
       slug: (c.get("orgSlug") as string | undefined) ?? null,
     },
-    space: { id: scope.spaceId, name: spaceRow[0]?.name ?? null },
+    // A model needs the id to address `spaceId`-path operations (activation door).
+    space: { id: scope.spaceId },
     connections,
     recent_runs: recentRuns,
     agents: runnable.agents,

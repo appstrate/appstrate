@@ -172,7 +172,7 @@ interface CallerContext {
   user?: { name?: string | null; email?: string | null } | null;
   org?: { role?: string | null; name?: string | null; slug?: string | null } | null;
   /** Rendered: the model's only way to learn a `spaceId` path param. */
-  space?: { id?: string | null; name?: string | null } | null;
+  space?: { id?: string | null } | null;
   connections?:
     | {
         integration_id: string;
@@ -298,14 +298,7 @@ export function formatCallerContext(
   ];
   // Verbatim: a path parameter the model reproduces. Session-stable, so cache-safe.
   const spaceId = ctx.space?.id?.trim();
-  if (spaceId) {
-    const spaceName = ctx.space?.name?.trim();
-    lines.push(
-      spaceName
-        ? `Current space: "${spaceName}" (\`${spaceId}\`).`
-        : `Current space: \`${spaceId}\`.`,
-    );
-  }
+  if (spaceId) lines.push(`Current space: \`${spaceId}\`.`);
   // Ground "today" from the server clock. The chat carries no browser-supplied
   // clock/timezone (none is persisted server-side), so this is always UTC.
   //

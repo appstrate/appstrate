@@ -13286,8 +13286,7 @@ export interface operations {
                      *         "slug": "acme"
                      *       },
                      *       "space": {
-                     *         "id": "spc_abc123",
-                     *         "name": "Growth"
+                     *         "id": "spc_abc123"
                      *       },
                      *       "connections": [
                      *         {
@@ -13371,7 +13370,6 @@ export interface operations {
                         space: {
                             /** @description Space id, e.g. "spc_abc123". */
                             id: string;
-                            name: string | null;
                         };
                         /** @description The caller's own most recent runs (actor-scoped), newest first — lets an agent reference a recent or failed run without a discovery round-trip. */
                         recent_runs: {
