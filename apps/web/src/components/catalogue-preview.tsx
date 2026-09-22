@@ -8,165 +8,398 @@
  * whose breadcrumb claims the current space for a package that is not in it.
  * This reads in place: the rail stays, Back comes straight back.
  *
- * What it shows is what the library knows, which is exactly the question a
- * catalogue answers: what this is, where it comes from, and which spaces
- * already run it. Everything else — runs, versions, files, settings — belongs
- * to the package's page, one link away, and most of it says nothing at all
- * about a package this space has not activated yet.
+ * It answers the three questions a reader opens it with, in their order:
+ *
+ * 1. **What is it?** Name, version, description, where it comes from.
+ * 2. **Where is it, and what may I do there?** Its state in each space within
+ *    reach, the switch on the same line, graded by the reader's rights
+ *    (`lib/catalogue-sheet.ts`). An offer waiting on the reader heads the
+ *    sheet, because it is the one line that asks them for a decision.
+ * 3. **What does it need?** For an agent, its integrations, skills and inputs,
+ *    and per space the integrations that space does not run yet. Skills travel
+ *    with the agent (judged from its home) and are named, never linked: a skill
+ *    not shared to the reader's space would open on a 404.
+ *
+ * Runs, versions, files and settings stay on the package's own page, one link
+ * away.
  */
-import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
-import { ArrowLeft, ExternalLink, ShieldCheck } from "lucide-react";
+import { ArrowLeft, ExternalLink, Inbox, ShieldCheck } from "lucide-react";
 import { Link } from "react-router-dom";
+import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
 import { Button } from "@appstrate/ui/components/button";
+import { Switch } from "@appstrate/ui/components/switch";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@appstrate/ui/components/table";
 import type { PackageType } from "@appstrate/core/validation";
 import type { LibraryPackageItem, LibrarySpace } from "../hooks/use-library";
+import { fetchPackageDetail, PACKAGE_CONFIG } from "../hooks/use-packages";
+import { useCurrentOrgId, useOrg } from "../hooks/use-org";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { missingIntegrations } from "../lib/activation-closure";
+import type { CataloguePlacement } from "../lib/catalogue-placement";
+import {
+  sheetOffers,
+  sheetSpaceMode,
+  sheetSpaceRows,
+  type SheetSpaceRow,
+} from "../lib/catalogue-sheet";
+import { formatDateField } from "../lib/format-date";
 import { packageDetailPath } from "../lib/package-paths";
-import { useOrg } from "../hooks/use-org";
+import { packageKeys } from "../lib/query-keys";
 import { SettingsHeading } from "./settings/settings-heading";
-import { Spinner } from "./spinner";
+
+/**
+ * The space to read the package's detail FROM: the server answers only where
+ * it is placed, and the catalogue shows packages placed elsewhere than the
+ * space the reader stands in.
+ */
+function readingSpace(
+  placement: CataloguePlacement,
+  spaces: readonly LibrarySpace[],
+  current: string | null,
+): string | undefined {
+  if (placement.everywhere || placement.here) return current ?? undefined;
+  const reachable = (id: string | null) =>
+    id && spaces.some((space) => space.id === id) ? id : undefined;
+  return (
+    reachable(placement.homeSpaceId) ??
+    placement.activeIn[0] ??
+    placement.inactiveIn[0] ??
+    placement.offeredIn[0] ??
+    current ??
+    undefined
+  );
+}
+
+/** The input fields an agent asks for, by the title a launch form shows. */
+function inputNames(detail: AgentDetail): string[] {
+  const schema = detail.input?.schema as
+    { properties?: Record<string, { title?: string }> } | undefined;
+  const properties = schema?.properties ?? {};
+  const order = detail.input?.property_order ?? Object.keys(properties);
+  return order.map((key) => properties[key]?.title ?? key);
+}
 
 export function CataloguePreview({
   item,
   type,
   spaces,
-  isActivating,
-  targets,
-  defaultTarget,
-  onAdd,
+  placement,
+  grantOf,
+  integrations,
+  protocol,
+  busy,
+  onSetActive,
   onBack,
 }: {
   item: LibraryPackageItem;
   type: PackageType;
   spaces: LibrarySpace[];
-  isActivating: boolean;
-  /**
-   * The spaces this package could be added to BY THIS CALLER: not already
-   * running it, and granting them the activation there. Empty when there is
-   * nowhere left — a system agent is readable everywhere, and a package on in
-   * every reachable space has no target.
-   */
-  targets: { id: string; name: string }[];
-  /** The space to propose first: the one the reader narrowed to, or stands in. */
-  defaultTarget: string | null;
+  /** The row's placement, as the catalogue's own table reads it. */
+  placement: CataloguePlacement;
+  /** The reader's verdict for switching it on (`next: true`) or off in a space. */
+  grantOf: (spaceId: string, next: boolean) => boolean;
+  /** The library's integrations: what an agent's switch-on would still need. */
+  integrations: LibraryPackageItem[];
+  /** An integration's protocol, when the catalogue knows it. */
+  protocol?: string;
+  busy: boolean;
   /** Goes through the catalogue's own activation, which asks about integrations first. */
-  onAdd: (spaceId: string) => void;
+  onSetActive: (spaceId: string, next: boolean) => void;
   onBack: () => void;
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const { currentOrg } = useOrg();
-  const [target, setTarget] = useState<string>(
-    defaultTarget && targets.some((space) => space.id === defaultTarget)
-      ? defaultTarget
-      : (targets[0]?.id ?? ""),
+  const orgId = useCurrentOrgId();
+  const currentSpaceId = useCurrentSpaceId();
+  const from = readingSpace(placement, spaces, currentSpaceId);
+  const { data: detail } = useQuery({
+    queryKey: packageKeys.detail(PACKAGE_CONFIG[type].path, orgId, from ?? null, item.id, null),
+    queryFn: () => fetchPackageDetail(type, item.id, undefined, from),
+    enabled: !!orgId && !!from,
+    // The sheet reads without the detail; a refusal is not worth a retry.
+    retry: false,
+  });
+  const agent = type === "agent" ? (detail as AgentDetail | undefined) : undefined;
+  const other = type !== "agent" ? (detail as OrgPackageItemDetail | undefined) : undefined;
+
+  const rows = sheetSpaceRows(placement, spaces, grantOf);
+  const mode = sheetSpaceMode(placement, rows);
+  const offers = sheetOffers(rows);
+  const home = spaces.find((space) => space.id === placement.homeSpaceId);
+  const integrationName = (id: string) => integrations.find((row) => row.id === id)?.name || id;
+  /** What this space would still have to switch on for the agent to start. */
+  const missingIn = (spaceId: string): string[] =>
+    agent
+      ? missingIntegrations(agent.dependencies.integrations, integrations, spaceId, () => true).map(
+          (entry) => entry.name,
+        )
+      : [];
+
+  const provenance =
+    item.source === "system"
+      ? t("catalogue.sourceSystem")
+      : t("catalogue.sourceOrg", { name: currentOrg?.name ?? "" });
+  const version = detail?.version;
+  // Spelled out, so the locale test sees every key it declares used.
+  const typeLabel: Record<PackageType, string> = {
+    agent: t("catalogue.sheet.type.agent"),
+    skill: t("catalogue.sheet.type.skill"),
+    integration: t("catalogue.sheet.type.integration"),
+    "mcp-server": t("catalogue.sheet.type.mcp-server"),
+  };
+  const updatedAt = agent?.updatedAt ?? other?.updatedAt;
+
+  const stateLabel = (row: SheetSpaceRow) => {
+    const base =
+      row.state === "active"
+        ? t("catalogue.filter.active")
+        : row.state === "inactive"
+          ? t("catalogue.filter.inactive")
+          : row.state === "offered"
+            ? row.offeredBy
+              ? t("catalogue.sheet.offeredBy", { name: row.offeredBy })
+              : t("catalogue.offeredHere")
+            : t("catalogue.sheet.absent");
+    return row.home ? t("catalogue.sheet.atHome", { state: base }) : base;
+  };
+  const switchFor = (row: SheetSpaceRow) => (
+    <Switch
+      checked={row.state === "active"}
+      disabled={busy || !row.mayToggle}
+      aria-label={t("catalogue.spaceSwitch", { package: item.name || item.id, space: row.name })}
+      title={row.mayToggle ? undefined : t("library.cannotActivate", { ns: "common" })}
+      onCheckedChange={(next) => onSetActive(row.id, next === true)}
+    />
   );
-  const home = spaces.find((space) => space.id === item.home_space_id);
-  // Placed AND switched on: a placement that exists but is off does not run
-  // here, and this line answers "where does it run".
-  const installedIn = spaces.filter((space) =>
-    item.placements.some(
-      (placement) => placement.space_id === space.id && placement.state === "active",
-    ),
-  );
+  const missingText = (spaceId: string) => {
+    const names = missingIn(spaceId);
+    return names.length > 0 ? t("catalogue.sheet.missing", { names: names.join(", ") }) : null;
+  };
+
+  const usedBy = other?.agents ?? [];
+  const agentSkills = agent?.dependencies.skills ?? [];
+  const agentInputs = agent ? inputNames(agent) : [];
+  const runtimeTools = Array.isArray(agent?.manifest?.runtime_tools)
+    ? (agent.manifest.runtime_tools as unknown[]).length
+    : 0;
 
   return (
     <div>
-      <Button variant="ghost" size="sm" className="mb-3 -ml-2 gap-1.5" onClick={onBack}>
-        <ArrowLeft />
-        {t("catalogue.back")}
-      </Button>
-
-      <div className="flex min-h-9 items-start justify-between gap-4">
-        <SettingsHeading className="mb-0" title={item.name || item.id} />
-        {/* Adding is done HERE, on the sheet, and says which space: it is a
-            considered act — the space, and what the package needs there — not
-            a switch in a grid of empty ones. With one possible space the
-            choice is shown, not asked. */}
-        {targets.length > 0 && (
-          <div className="flex shrink-0 items-center gap-2">
-            {targets.length > 1 ? (
-              <Select value={target} onValueChange={setTarget}>
-                <SelectTrigger className="h-9 w-44" aria-label={t("catalogue.addTarget")}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {targets.map((space) => (
-                    <SelectItem key={space.id} value={space.id}>
-                      {space.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : null}
-            <Button type="button" disabled={isActivating || !target} onClick={() => onAdd(target)}>
-              {isActivating && <Spinner />}
-              {targets.length > 1
-                ? t("catalogue.add")
-                : t("catalogue.addTo", { space: targets[0]!.name })}
-            </Button>
-          </div>
-        )}
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <Button variant="ghost" size="sm" className="-ml-2 gap-1.5" onClick={onBack}>
+          <ArrowLeft />
+          {t("catalogue.back")}
+        </Button>
+        <Link
+          to={packageDetailPath(type, item.id)}
+          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-sm underline-offset-4 hover:underline"
+        >
+          <ExternalLink className="size-3.5" />
+          {t("catalogue.openFullPage")}
+        </Link>
       </div>
 
-      {item.description && <p className="text-muted-foreground mt-2 text-sm">{item.description}</p>}
+      <div className="flex items-start justify-between gap-4">
+        <SettingsHeading className="mb-0" title={item.name || item.id} />
+        <span className="text-muted-foreground shrink-0 pt-1 text-sm">
+          {[typeLabel[type], version ? `v${version}` : null].filter(Boolean).join(" · ")}
+        </span>
+      </div>
+      <p className="text-muted-foreground mt-1 flex flex-wrap items-center gap-x-1.5 text-xs">
+        {item.source === "system" && <ShieldCheck className="size-3.5 shrink-0" />}
+        {[
+          provenance,
+          updatedAt
+            ? t("catalogue.sheet.updatedAt", { date: formatDateField(updatedAt, "date") })
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      </p>
 
-      <dl className="mt-6 space-y-4 text-sm">
-        <div>
-          <dt className="text-muted-foreground text-xs tracking-wide uppercase">
-            {t("catalogue.origin")}
-          </dt>
-          <dd className="mt-1 flex items-center gap-1.5">
-            {item.source === "system" ? (
-              <>
-                <ShieldCheck className="text-muted-foreground size-3.5 shrink-0" />
-                {t("catalogue.sourceSystem")}
-              </>
-            ) : (
-              t("catalogue.sourceOrg", { name: currentOrg?.name ?? "" })
+      {/* The one line that asks the reader for a decision heads the sheet.
+          It acts on THAT space alone, through the catalogue's own activation,
+          which asks about the agent's integrations before writing. */}
+      {offers.map((offer) => {
+        const missing = missingText(offer.id);
+        return (
+          <div
+            key={offer.id}
+            className="border-border bg-card mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm"
+          >
+            <div className="flex min-w-0 items-start gap-2.5">
+              <Inbox className="text-muted-foreground mt-0.5 size-4 shrink-0" />
+              <div className="min-w-0">
+                <p>
+                  {offer.offeredBy
+                    ? t("catalogue.sheet.offerBy", { name: offer.offeredBy, space: offer.name })
+                    : t("catalogue.sheet.offer", { space: offer.name })}
+                </p>
+                <p className="text-muted-foreground mt-0.5 text-xs">
+                  {missing ?? t("catalogue.sheet.offerCredentials")}
+                </p>
+              </div>
+            </div>
+            {offer.mayToggle && (
+              <Button size="sm" disabled={busy} onClick={() => onSetActive(offer.id, true)}>
+                {t("catalogue.sheet.activateIn", { space: offer.name })}
+              </Button>
             )}
-          </dd>
-        </div>
-        {home && (
-          <div>
-            <dt className="text-muted-foreground text-xs tracking-wide uppercase">
-              {t("catalogue.homeSpace")}
-            </dt>
-            {/* Where the package lives, which is where it is edited (#1437). */}
-            <dd className="mt-1">{home.name}</dd>
+          </div>
+        );
+      })}
+
+      {item.description && <p className="mt-4 text-sm">{item.description}</p>}
+
+      <section className="mt-6">
+        <h3 className="text-muted-foreground mb-2 text-xs tracking-wide uppercase">
+          {t("catalogue.sheet.spaces")}
+        </h3>
+        {mode === "everywhere" && <p className="text-sm">{t("catalogue.sheet.everywhere")}</p>}
+        {mode === "readonly" && (
+          <p className="text-sm">
+            {placement.activeIn.length > 0
+              ? t("catalogue.sheet.activeIn", {
+                  spaces: rows
+                    .filter((row) => row.state === "active")
+                    .map((row) => row.name)
+                    .join(", "),
+                })
+              : t("catalogue.activeNowhere")}
+          </p>
+        )}
+        {mode === "single" && rows[0] && (
+          <div className="border-border flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm">
+            <div className="min-w-0">
+              <p>
+                <span className="font-medium">{rows[0].name}</span>
+                <span className="text-muted-foreground"> · {stateLabel(rows[0])}</span>
+              </p>
+              {missingText(rows[0].id) && (
+                <p className="text-muted-foreground mt-0.5 text-xs">{missingText(rows[0].id)}</p>
+              )}
+            </div>
+            {switchFor(rows[0])}
           </div>
         )}
-        <div>
-          <dt className="text-muted-foreground text-xs tracking-wide uppercase">
-            {t("catalogue.activeIn")}
-          </dt>
-          <dd className="mt-1">
-            {installedIn.length > 0
-              ? installedIn.map((space) => space.name).join(" · ")
-              : t("catalogue.activeNowhere")}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground text-xs tracking-wide uppercase">
-            {t("catalogue.identifier")}
-          </dt>
-          <dd className="mt-1 font-mono text-xs break-all">{item.id}</dd>
-        </div>
-      </dl>
+        {mode === "table" && (
+          <div className="overflow-hidden rounded-lg border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t("catalogue.filter.space")}</TableHead>
+                  <TableHead>{t("catalogue.filter.state")}</TableHead>
+                  {/* Only an agent has a dependency another space must hold. */}
+                  {type === "agent" && <TableHead>{t("catalogue.sheet.missingColumn")}</TableHead>}
+                  <TableHead className="w-20 text-right">{t("catalogue.filter.active")}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((row) => (
+                  <TableRow key={row.id}>
+                    <TableCell className="font-medium">{row.name}</TableCell>
+                    <TableCell className="text-muted-foreground">{stateLabel(row)}</TableCell>
+                    {type === "agent" && (
+                      <TableCell className="text-muted-foreground">
+                        {missingIn(row.id).join(", ") || "—"}
+                      </TableCell>
+                    )}
+                    <TableCell className="text-right">{switchFor(row)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </section>
 
-      <Link
-        to={packageDetailPath(type, item.id)}
-        className="text-muted-foreground hover:text-foreground mt-6 inline-flex items-center gap-1.5 text-sm underline-offset-4 hover:underline"
-      >
-        <ExternalLink className="size-3.5" />
-        {t("catalogue.openFullPage")}
-      </Link>
+      {agent && (
+        <section className="mt-6">
+          <h3 className="text-muted-foreground mb-2 text-xs tracking-wide uppercase">
+            {t("catalogue.sheet.uses")}
+          </h3>
+          <dl className="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-3 text-sm">
+            <dt className="text-muted-foreground">{t("catalogue.sheet.integrations")}</dt>
+            <dd>
+              {agent.dependencies.integrations.length > 0 ? (
+                <>
+                  {agent.dependencies.integrations
+                    .map((entry) => integrationName(entry.id))
+                    .join(", ")}
+                  <span className="text-muted-foreground block text-xs">
+                    {t("catalogue.sheet.integrationsHint")}
+                  </span>
+                </>
+              ) : (
+                t("catalogue.sheet.none")
+              )}
+            </dd>
+            {agentSkills.length > 0 && (
+              <>
+                <dt className="text-muted-foreground">{t("catalogue.sheet.skills")}</dt>
+                <dd>
+                  {/* Named, never linked: a skill not shared to the reader's
+                      space opens on a 404, and it needs nothing there anyway. */}
+                  {agentSkills.map((skill) => skill.name ?? skill.id).join(", ")}
+                  <span className="text-muted-foreground block text-xs">
+                    {t("catalogue.sheet.skillsHint")}
+                  </span>
+                </dd>
+              </>
+            )}
+            {agentInputs.length > 0 && (
+              <>
+                <dt className="text-muted-foreground">{t("catalogue.sheet.inputs")}</dt>
+                <dd>{agentInputs.join(", ")}</dd>
+              </>
+            )}
+            {runtimeTools > 0 && (
+              <>
+                <dt className="text-muted-foreground">{t("catalogue.sheet.tools")}</dt>
+                <dd>{t("catalogue.sheet.toolCount", { count: runtimeTools })}</dd>
+              </>
+            )}
+          </dl>
+        </section>
+      )}
+
+      <section className="mt-6">
+        <h3 className="text-muted-foreground mb-2 text-xs tracking-wide uppercase">
+          {t("catalogue.sheet.details")}
+        </h3>
+        <dl className="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-3 text-sm">
+          {protocol && (
+            <>
+              <dt className="text-muted-foreground">{t("catalogue.column.protocol")}</dt>
+              <dd>{protocol}</dd>
+            </>
+          )}
+          {usedBy.length > 0 && (
+            <>
+              <dt className="text-muted-foreground">{t("catalogue.sheet.usedBy")}</dt>
+              <dd>{usedBy.map((entry) => entry.display_name || entry.id).join(", ")}</dd>
+            </>
+          )}
+          {home && (
+            <>
+              <dt className="text-muted-foreground">{t("catalogue.homeSpace")}</dt>
+              {/* Where the package lives, which is where it is edited (#1437). */}
+              <dd>{t("catalogue.sheet.homeHint", { space: home.name })}</dd>
+            </>
+          )}
+          <dt className="text-muted-foreground">{t("catalogue.identifier")}</dt>
+          <dd className="font-mono text-xs break-all">{item.id}</dd>
+        </dl>
+      </section>
     </div>
   );
 }

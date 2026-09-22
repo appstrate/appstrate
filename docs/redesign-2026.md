@@ -1591,9 +1591,8 @@ response only ever carries the spaces the caller can enter.
   reader opens with. The old `/catalogue/org/...` links still resolve.
 - **Each half has one form, and the reader does not choose it.** Découvrir is
   BROWSING — a name, what it does, where it comes from — so it is cards, and
-  adding is done on the package's sheet: "Ajouter à [espace]", listing only
-  the spaces this caller may activate it in, through the same activation that
-  asks about missing integrations first. A switch per space was noise there:
+  adding is done on the package's sheet (below), through the same activation
+  that asks about missing integrations first. A switch per space was noise there:
   every row of that half is placed nowhere, so every cell read "off". Vos
   espaces is MANAGING — states compared down a column — so it is a table. No
   view toggle on either: it would offer each half the other's wrong shape.
@@ -1674,6 +1673,35 @@ with it. The share dialog says the same thing before the offer goes out. The
 rule is `lib/activation-closure`, with the case where silence is right — an
 integration the caller cannot see is not named, since naming it would leak that
 it exists.
+
+**The package sheet answers three questions, graded by reach (22 September)**
+
+The sheet a row opens was a name, a space menu and an "Ajouter" button: two
+gestures for a question whose answer reads better at a glance. It now answers,
+in order, what the package is, where it is and what the reader may do there,
+and what it needs.
+
+- **Header**: type and version, provenance, last update. The detail is read
+  from a space where the package is PLACED (`fetchPackageDetail(..., spaceId)`),
+  since the server answers only there and the catalogue shows packages placed
+  elsewhere than the space the reader stands in.
+- **An offer heads the sheet**: "Julie Ferrand l'a proposé à Bac à sable", with
+  what that space would still have to switch on, and "Activer dans Bac à
+  sable". It is the one line asking the reader for a decision.
+- **Espaces is graded by reach** (`lib/catalogue-sheet`, tested): a table of
+  every reachable space (state, what is missing there for an agent, the
+  switch) when there are several; one line with its switch when there is one;
+  a read-only "Actif dans" when the reader may switch it nowhere; one sentence
+  for a system package readable everywhere. The menu is gone.
+- **Ce qu'il utilise** (agents): integrations ("s'activent et se connectent
+  dans chaque espace"), skills ("suivent l'agent : rien à activer"), inputs,
+  built-in tools. Skills are named, never linked: a skill not shared to the
+  reader's space opens on a 404. Skills and integrations show who uses them.
+
+Not done, on purpose: listing an agent's embedded skills in the recipient
+space's Skills list. That list answers "what can I use here", and an embedded
+skill can be neither opened nor added to another agent there. If reuse is ever
+wanted, the answer is a request to share, not a read-only row.
 
 **What is left**
 

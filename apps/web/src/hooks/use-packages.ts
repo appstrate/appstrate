@@ -105,11 +105,19 @@ function fetchPackageDetail<T extends PackageType>(
   type: T,
   packageId: string,
   version?: string,
+  spaceId?: string,
 ): Promise<PackageDetailMap[T]>;
 async function fetchPackageDetail(
   type: PackageType,
   packageId: string,
   version?: string,
+  /**
+   * The space to read it FROM, when not the current one. A package is readable
+   * only where it is placed, and the catalogue shows packages placed in spaces
+   * other than the one the reader stands in. The middleware leaves a header the
+   * caller set alone.
+   */
+  spaceId?: string,
 ): Promise<AgentDetail | OrgPackageItemDetail> {
   const path = splitPackageRef(packageId);
   // Omitted lets the server pick the definition this caller may see — their
@@ -117,14 +125,17 @@ async function fetchPackageDetail(
   // otherwise. An explicit `draft` is an author's read, and every type answers
   // it the same way (`403 draft_not_writable` for anybody else).
   const query = version ? { query: { version } } : {};
+  const headers = spaceId ? { headers: { "X-Space-Id": spaceId } } : {};
   if (type === "agent") {
     const { data } = await client.GET("/api/packages/agents/{scope}/{name}", {
       params: { path, ...query },
+      ...headers,
     });
     return normalizeAgentDetail(data!);
   }
   const { data } = await client.GET(`/api/packages/${PACKAGE_CONFIG[type].path}/{scope}/{name}`, {
     params: { path, ...query },
+    ...headers,
   });
   return normalizePackageItemDetail(data!);
 }

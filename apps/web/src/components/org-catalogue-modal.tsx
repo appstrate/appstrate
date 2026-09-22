@@ -662,27 +662,22 @@ export function OrgCatalogueModal({
           item={reading}
           type={active}
           spaces={library?.spaces ?? []}
-          isActivating={activate.isPending}
-          // Every space it could still be added to by this caller: not running
-          // it, and granting the activation there. A system agent, skill or
-          // MCP server is readable everywhere already — nowhere to add it.
-          targets={
-            placementById.get(reading.id)?.everywhere
-              ? []
-              : spaces
-                  .filter(
-                    (space) =>
-                      !placementById.get(reading.id)?.activeIn.includes(space.id) &&
-                      maySetPackageActive(grantById.get(space.id), active, true),
-                  )
-                  .map((space) => ({ id: space.id, name: space.name }))
+          placement={placementOf(reading)}
+          grantOf={(targetSpaceId, next) =>
+            maySetPackageActive(grantById.get(targetSpaceId), active, next)
           }
-          defaultTarget={chosenSpaces[0] ?? spaceId ?? null}
-          onAdd={(targetSpaceId) =>
+          integrations={library?.packages.integration ?? []}
+          protocol={
+            active === "integration" && integrationById.get(reading.id)
+              ? integrationProtocol(integrationById.get(reading.id)!)
+              : undefined
+          }
+          busy={activate.isPending}
+          onSetActive={(targetSpaceId, next) =>
             void onSetActive(
               { id: reading.id, displayName: reading.name || reading.id, type: active },
               targetSpaceId,
-              true,
+              next,
             )
           }
           onBack={preview.close}
