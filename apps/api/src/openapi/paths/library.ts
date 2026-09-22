@@ -37,7 +37,9 @@ const SPACES_SCHEMA = {
 /** The typed package matrix — identical in both shapes. */
 const PACKAGES_SCHEMA = {
   type: "object",
-  description: "Packages grouped by type. Every group is always present (possibly empty).",
+  description:
+    "Packages grouped by type. Every group is always present (possibly empty)." +
+    ' Unlisted packages (`_meta["dev.appstrate/visibility"].level = "unlisted"`) are not on it and stay reachable by exact id.',
   required: ["agent", "skill", "mcp-server", "integration"],
   properties: {
     agent: { $ref: "#/components/schemas/LibraryPackageList" },

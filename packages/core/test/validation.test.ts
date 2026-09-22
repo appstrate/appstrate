@@ -877,6 +877,18 @@ describe("validateManifest — v2 common fields (§3.1)", () => {
     expect(result.valid).toBe(true);
   });
 
+  it("_meta — keeps `dev.appstrate/visibility` verbatim on a skill", () => {
+    // The listing-visibility extension (AFPS §10.1 vendor namespace) is stored
+    // and read back off `draft_manifest` by the catalogue queries, so the
+    // round trip through validation must not normalize or drop it.
+    const visibility = { level: "unlisted" };
+    const result = validateManifest(
+      validSkillManifest({ _meta: { "dev.appstrate/visibility": visibility } }),
+    );
+    expect(result.valid).toBe(true);
+    expect(result.manifest?._meta).toEqual({ "dev.appstrate/visibility": visibility });
+  });
+
   it("_meta — rejects scalar values under a namespace key (§10.1 strictness)", () => {
     // AFPS §10.1: `_meta.<reverse-dns-key>` MUST be a JSON object. The canonical
     // schema enforces this — the previous appstrate-local laxer copy accepted

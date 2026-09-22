@@ -12,7 +12,8 @@ const listPackagesSharedDescription =
   "here and switched OFF, and an offer nobody has taken up, are NOT on it — that is " +
   "the space library's subject (`GET /api/spaces/{spaceId}/library`), which names " +
   "each placement's origin and state and carries the switch that activates it. For " +
-  "the organization-wide map of placements, use `GET /api/library`.";
+  "the organization-wide map of placements, use `GET /api/library`." +
+  ' Unlisted packages (`_meta["dev.appstrate/visibility"].level = "unlisted"`) are not on it and stay reachable by exact id.';
 
 /**
  * The `?version` selector of the three generic package detail routes (skill /

@@ -24,7 +24,7 @@ import { db } from "@appstrate/db/client";
 import { spacePackages, packages, packageShares, packageDistTags } from "@appstrate/db/schema";
 import { notFound, parseBody } from "../lib/errors.ts";
 import { inputSettingsSchema } from "../lib/jsonb-schemas.ts";
-import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
+import { orgOrSystemFilter, listedFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import type { PackageType } from "@appstrate/core/validation";
@@ -596,6 +596,11 @@ export async function getSpacePackage(scope: SpaceScope, packageId: string) {
  * {@link isPackageActiveHere}, with the library's projection and with the index
  * listings, so what an index page shows, what the caller-context hints tell the
  * model it may invoke, and what the run gate lets through are one set.
+ *
+ * The two LISTINGS below conjoin `listedFilter` on top of it and the run gate
+ * does not: an unlisted package is off the catalogue and still runs. That is
+ * the one direction the sets may differ in — a listing may drop a row, never
+ * add one — so no page can offer what a run would refuse.
  */
 function activePackagesFilter(scope: SpaceScope, type: PackageType) {
   return and(
@@ -657,7 +662,7 @@ export async function listActivePackages(scope: SpaceScope, type: PackageType) {
     .from(packages)
     .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
     .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
-    .where(activePackagesFilter(scope, type))
+    .where(and(activePackagesFilter(scope, type), listedFilter()))
     .orderBy(...packageListingOrder());
 }
 
@@ -761,7 +766,7 @@ async function listActivePackageHints<T extends PackageHint>(
       packageDistTags,
       and(eq(packageDistTags.packageId, packages.id), eq(packageDistTags.tag, "latest")),
     )
-    .where(activePackagesFilter(scope, type))
+    .where(and(activePackagesFilter(scope, type), listedFilter()))
     .orderBy(...packageListingOrder())
     .limit(limit);
 

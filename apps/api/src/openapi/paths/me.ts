@@ -527,7 +527,9 @@ export const mePaths = {
                       "Agents the caller can run in the current space (capped). Only " +
                       "present when the caller holds the `agents:run` permission; empty otherwise. " +
                       "When `agents_truncated` is true, the full list is reachable via the " +
-                      "`listAgents` operation.",
+                      "`listAgents` operation. Unlisted packages " +
+                      '(`_meta["dev.appstrate/visibility"].level = "unlisted"`) are off this list ' +
+                      "and out of the total, and stay runnable by exact id.",
                     items: {
                       type: "object",
                       required: [
@@ -586,7 +588,9 @@ export const mePaths = {
                       "(capped). Only present when the caller holds the `agents:run` permission; " +
                       "empty otherwise. Skills are not run directly — declare them under an agent " +
                       "manifest's `dependencies.skills`. When `skills_truncated` is true, the " +
-                      "full list is reachable via the `listSkills` operation.",
+                      "full list is reachable via the `listSkills` operation. Unlisted packages " +
+                      '(`_meta["dev.appstrate/visibility"].level = "unlisted"`) are off this list ' +
+                      "and out of the total, and stay resolvable by exact id.",
                     items: {
                       type: "object",
                       required: [

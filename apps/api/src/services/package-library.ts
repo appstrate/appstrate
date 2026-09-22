@@ -10,7 +10,7 @@ import {
   spacePackages,
   user,
 } from "@appstrate/db/schema";
-import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
+import { orgOrSystemFilter, listedFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import {
   homeWireForCaller,
@@ -151,7 +151,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
           inArray(spacePackages.spaceId, accessibleIds),
         ),
       )
-      .where(and(orgOrSystemFilter(orgId), notEphemeralFilter()))
+      .where(and(orgOrSystemFilter(orgId), notEphemeralFilter(), listedFilter()))
       .orderBy(packages.id),
     // The sharer is named only while they are still a MEMBER of this
     // organization. `package_shares.shared_by` is `ON DELETE SET NULL` on
