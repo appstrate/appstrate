@@ -40,7 +40,6 @@ import { CHAT_TOOL_STEP_BUDGET, CHAT_TURN_DEADLINE_MS } from "@appstrate/core/ch
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
 import { applyOperationIndexPolicy } from "../operation-index.ts";
 import { logger } from "../logger.ts";
-import type { LoadedSkill } from "../skill-mentions.ts";
 import { PiChatUiStreamMapper } from "./ui-stream-mapper.ts";
 import type { AgentSessionEvent } from "./pi-events.ts";
 import { buildPlatformMcpTools } from "./mcp-tools.ts";
@@ -74,8 +73,6 @@ export interface PiChatInput {
   chatSessionId: string | null;
   /** Canonical active UIMessage branch, including the current user head. */
   messages: UIMessage[];
-  /** `/skill` mention bodies by package id, projected into the user turn text (`skill-mentions.ts`). */
-  skills: ReadonlyMap<string, LoadedSkill>;
   /** Base system persona (+ caller context) — MCP instructions are appended here. */
   system: string;
   generation: ModelGenerationSettings;
@@ -420,7 +417,6 @@ export function runPiChat(input: PiChatInput): Response {
               content: [{ type: "text", text: system }],
               timestamp: 0,
             }),
-            loadedSkills: input.skills,
           },
         );
         const sessionManager = reconstructPiSession(SessionManager, projectedTurn.history);

@@ -22,8 +22,7 @@ import {
 } from "../../../apps/api/test/helpers/auth.ts";
 import { persistUserMessage, persistAssistantMessage, ensureSession } from "../src/persistence.ts";
 import { db } from "@appstrate/db/client";
-import { chatMessages } from "@appstrate/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import type { UIMessage } from "ai";
 
 const app = getTestApp();
@@ -245,31 +244,6 @@ describe("chat session read-state", () => {
     expect(rename.status).toBe(204);
     await persistUserMessage(id, uiMessage("u4", "user", "Encore une question"));
     expect(await titleOf(id)).toBe("renommée");
-  });
-
-  // The raw directive stays stored; both title paths show the chip label instead.
-  it("titles a mention-opening turn with the chip label, not the raw directive", async () => {
-    const id = await createSession();
-    await persistUserMessage(
-      id,
-      uiMessage("u1", "user", ":skill[/copilot]{name=@appstrate/copilot} aide-moi"),
-    );
-    expect(await titleOf(id)).toBe("/copilot aide-moi");
-
-    // The stored form keeps the directive — only the title is projected.
-    const [row] = await db
-      .select({ content: chatMessages.content })
-      .from(chatMessages)
-      .where(eq(chatMessages.sessionId, id))
-      .orderBy(chatMessages.seq)
-      .limit(1);
-    const stored = row!.content as { parts: { text: string }[] };
-    expect(stored.parts[0]!.text).toContain(":skill[/copilot]{name=@appstrate/copilot}");
-
-    // The scan path (`deriveTitle`) reads that stored form and must agree.
-    await db.execute(sql`UPDATE chat_sessions SET title = NULL WHERE id = ${id}`);
-    await persistAssistantMessage(id, uiMessage("a1", "assistant", "Voilà."), "u1");
-    expect(await titleOf(id)).toBe("/copilot aide-moi");
   });
 
   /**

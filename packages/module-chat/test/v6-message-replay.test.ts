@@ -27,7 +27,7 @@ import { REDACTED_CONNECT_LINK } from "../src/connect-offer.ts";
 const MODEL = { api: "anthropic-messages", provider: "anthropic", model: "claude" } as const;
 
 /** Token estimate is irrelevant here — the projection's SHAPE is under test. */
-const OPTIONS = { estimateTokens: () => 1, baseTokens: 0, loadedSkills: new Map() };
+const OPTIONS = { estimateTokens: () => 1, baseTokens: 0 };
 
 /**
  * A v6-persisted thread: a user turn, an assistant turn carrying every part kind

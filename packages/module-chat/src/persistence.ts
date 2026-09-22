@@ -26,7 +26,6 @@ import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { notFound } from "@appstrate/core/api-errors";
 import { uiMessageText } from "./message-text.ts";
-import { splitSkillDirectives } from "./skill-mentions.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import type { ChatSkillSelection } from "./skills.ts";
 import type { UIMessage } from "ai";
@@ -428,16 +427,8 @@ function titleCandidate(message: UIMessage): string | null {
 
 /** A message's text as a title: trimmed to 60 chars (57 + ellipsis); null when empty. */
 function titleFromText(text: string): string | null {
-  const plain = withoutSkillDirectives(text);
-  if (!plain) return null;
-  return plain.length > 60 ? `${plain.slice(0, 57)}…` : plain;
-}
-
-/** `/skill` directives collapse to the label the composer chip showed. */
-function withoutSkillDirectives(text: string): string {
-  return splitSkillDirectives(text)
-    .map((segment) => (segment.kind === "text" ? segment.text : segment.label))
-    .join("");
+  if (!text) return null;
+  return text.length > 60 ? `${text.slice(0, 57)}…` : text;
 }
 
 /**

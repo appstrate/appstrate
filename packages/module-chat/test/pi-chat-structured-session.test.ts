@@ -11,11 +11,7 @@ import {
 } from "../src/pi-chat/structured-session.ts";
 
 const { estimateTokens } = await loadPiCodingAgentSdk();
-const OPTIONS: BuildStructuredPiTurnOptions = {
-  estimateTokens,
-  baseTokens: 0,
-  loadedSkills: new Map(),
-};
+const OPTIONS: BuildStructuredPiTurnOptions = { estimateTokens, baseTokens: 0 };
 
 const MODEL: PiHistoryModel = {
   api: "openai-completions" as Api,
@@ -345,46 +341,6 @@ describe("structured Pi session reconstruction", () => {
   it("rejects a projection that does not end at the active user branch head", () => {
     expect(() => buildStructuredPiTurn(toolThread.slice(0, -1), MODEL, OPTIONS)).toThrow(
       "must end with a user message",
-    );
-  });
-});
-
-describe("buildStructuredPiTurn — /skill mentions", () => {
-  const mention = ":skill[/copilot]{name=@appstrate/copilot}";
-
-  it("projects a loaded body into the history AND into this turn's prompt", () => {
-    const thread: UIMessage[] = [
-      { id: "u1", role: "user", parts: [{ type: "text", text: `Suis ${mention}` }] },
-      { id: "a1", role: "assistant", parts: [{ type: "text", text: "ok" }] },
-      { id: "u2", role: "user", parts: [{ type: "text", text: `Encore ${mention}` }] },
-    ];
-
-    const turn = buildStructuredPiTurn(thread, MODEL, {
-      ...OPTIONS,
-      loadedSkills: new Map([
-        [
-          "@appstrate/copilot",
-          { package_id: "@appstrate/copilot", version: "1.0.0", body: "FAIS X" },
-        ],
-      ]),
-    });
-
-    const first = turn.history.find((message) => message.role === "user");
-    expect(JSON.stringify(first?.content)).toContain(
-      "[Skill @appstrate/copilot (v1.0.0) loaded — follow these instructions]",
-    );
-    expect(JSON.stringify(first?.content)).toContain("FAIS X");
-    // The head message goes through the same replacement — it is the prompt.
-    expect(turn.prompt).toBe("Encore [Skill @appstrate/copilot already loaded above]");
-    expect(turn.prompt).not.toContain(":skill[");
-  });
-
-  it("renders a directive as unresolved when no body was loaded", () => {
-    const thread: UIMessage[] = [
-      { id: "u1", role: "user", parts: [{ type: "text", text: mention }] },
-    ];
-    expect(buildStructuredPiTurn(thread, MODEL, OPTIONS).prompt).toBe(
-      "[Skill @appstrate/copilot could not be loaded: not resolved for this turn]",
     );
   });
 });

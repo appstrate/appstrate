@@ -199,7 +199,6 @@ async function runStubbedTurn(abortSettles: boolean) {
       { id: "u1", role: "user", parts: [{ type: "text", text: "dis bonjour" }] },
     ] as UIMessage[],
     system: "You are a helpful assistant.",
-    skills: new Map(),
     generation: {},
     platformMcp: { url: MCP_URL, headers: {}, fetch: transport.fetch },
     abortSignal: stop.signal,

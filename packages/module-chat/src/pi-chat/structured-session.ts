@@ -17,7 +17,6 @@ import { getToolName, isToolUIPart, type UIMessage } from "ai";
 import type { Api, Message } from "@appstrate/runner-pi";
 import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import { messagesWithAttachmentsAsText } from "../attachments.ts";
-import { messagesWithSkillsAsText, type LoadedSkill } from "../skill-mentions.ts";
 import { redactConnectPayload, splitJsonText } from "../connect-offer.ts";
 import { uiMessageText } from "../message-text.ts";
 import { PI_CHAT_CWD } from "./resource-loader.ts";
@@ -39,8 +38,6 @@ export interface BuildStructuredPiTurnOptions {
    * so the figure is a floor, not a measurement.
    */
   baseTokens: number;
-  /** A mention missing here renders as unresolved: the model never sees a raw directive. */
-  loadedSkills: ReadonlyMap<string, LoadedSkill>;
 }
 
 interface StructuredPiTurn {
@@ -286,10 +283,9 @@ function assistantMessages(
 export function buildStructuredPiTurn(
   input: UIMessage[],
   model: PiHistoryModel,
-  { estimateTokens, baseTokens, loadedSkills }: BuildStructuredPiTurnOptions,
+  { estimateTokens, baseTokens }: BuildStructuredPiTurnOptions,
 ): StructuredPiTurn {
-  // Skills second, so a skill body is never scanned for file parts.
-  const messages = messagesWithSkillsAsText(messagesWithAttachmentsAsText(input), loadedSkills);
+  const messages = messagesWithAttachmentsAsText(input);
   const last = messages.at(-1);
   if (!last || last.role !== "user") {
     throw new Error("The active Pi chat branch must end with a user message.");

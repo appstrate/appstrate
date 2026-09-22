@@ -29,17 +29,11 @@ import { platformMcpUrl } from "./platform-mcp.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import { materializeUserAttachments } from "./attachments.ts";
-import { loadMentionedSkills, mentionedSkillIds, type LoadedSkill } from "./skill-mentions.ts";
 import { runPiChat, type PiChatInput } from "./pi-chat/engine.ts";
 import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
 import { acquirePiChatSlot, chatCapacityResponse } from "./pi-chat/concurrency.ts";
 import { turnPermissions } from "./turn-permissions.ts";
-import {
-  buildSystemPrompt,
-  buildCallerContextBlock,
-  spaceScopedHeaders,
-  type ChatEnv,
-} from "./prompt.ts";
+import { buildSystemPrompt, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
 import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "./skills.ts";
 export type { ChatEnv } from "./prompt.ts";
 import { finalizeChatStream } from "./finalize-stream.ts";
@@ -243,9 +237,6 @@ export async function handleChatStream(
   const messages = body.messages as UIMessage[];
   logger.info("chat turn", { turns: messages.length });
 
-  // Every mention in the branch: the projection re-reads each body every turn.
-  const mentionedSkills = mentionedSkillIds(messages);
-
   const sessionId = body.id;
   let lastMessage = messages[messages.length - 1] as UIMessage | undefined;
 
@@ -336,15 +327,6 @@ export async function handleChatStream(
   const composeInline = canComposeInline((p) => permissions.includes(p));
   const canReadSkills = permissions.includes("skills:read");
   const phaseAStart = Date.now();
-
-  // Never rejects, so an early return below leaves no unhandled rejection.
-  const mentionedSkillsPromise: Promise<ReadonlyMap<string, LoadedSkill>> = mentionedSkills.length
-    ? loadMentionedSkills(
-        deps,
-        { origin, headers: spaceScopedHeaders(headers, spaceId), log: logger },
-        mentionedSkills,
-      )
-    : Promise.resolve(new Map());
 
   // ── Preamble phase B (overlapped with A) ─────────────────────────────────
   // Only the caller-context block. It depends on the space id and the caller's
@@ -636,7 +618,6 @@ export async function handleChatStream(
     "x-org-id": orgId,
   };
   mcpHeaders["x-space-id"] = spaceId;
-  const loadedSkills = await mentionedSkillsPromise;
 
   try {
     const response = await finalize(
@@ -653,7 +634,6 @@ export async function handleChatStream(
         chatSessionId: meteringSessionId,
         messages,
         system,
-        skills: loadedSkills,
         generation: generationSettings,
         platformMcp: {
           url: platformMcpUrl(origin, orgId),

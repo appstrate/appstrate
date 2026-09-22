@@ -224,7 +224,7 @@ describe("chat attachments", () => {
     const turn = buildStructuredPiTurn(
       [rewritten],
       { api: "openai-completions", provider: "openai", model: "attachment-test" },
-      { estimateTokens, baseTokens: 0, loadedSkills: new Map() },
+      { estimateTokens, baseTokens: 0 },
     );
     expect(turn.prompt).toContain(fileId);
     expect(turn.prompt).toContain("[Attached file: rapport.txt");

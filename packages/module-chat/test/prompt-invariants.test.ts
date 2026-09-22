@@ -145,11 +145,6 @@ describe("full persona invariants", () => {
     expect(FULL).toContain("`(pinned)` is one the user chose for this conversation");
   });
 
-  it("teaches that an injected `[Skill … loaded]` block IS the skill's content", () => {
-    expect(FULL).toContain("[Skill @scope/name … loaded — follow these instructions]");
-    expect(FULL).toContain("IS that skill's content");
-  });
-
   it("names the same heading and lead strings the context block renders", () => {
     const block = formatCallerContext(
       {

@@ -116,8 +116,6 @@ export function SkillsPicker({ sessionId, getHeaders, initialSelection }: Skills
                 {t("skills.pinned", { n: pinned.length })}
               </p>
             )}
-            {/* The `/` mention has no affordance of its own; this is where it is found. */}
-            <p className="text-muted-foreground mt-0.5">{t("skills.mention.hint")}</p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>

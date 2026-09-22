@@ -43,8 +43,6 @@ import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/regist
 import { errorHandler } from "../../../apps/api/src/middleware/error-handler.ts";
 import { initSystemModelProviderKeys } from "../../../apps/api/src/services/model-registry.ts";
 import { buildSystemPrompt } from "../src/prompt.ts";
-import { messagesWithSkillsAsText } from "../src/skill-mentions.ts";
-import { encodePackageIdPath } from "@appstrate/core/naming";
 import { chatLoopbackStrategy } from "../src/loopback-auth.ts";
 
 // The chat handler reads the system model registry; the HTTP harness initializes it at boot.
@@ -540,51 +538,6 @@ describe("handleChatStream", () => {
     for (const absent of ["## Skills", PIN, "getSkill", "listSkills"]) {
       expect(system).not.toContain(absent);
     }
-
-    await waitForAssistantPersist(sessionId);
-  });
-
-  it("loads a `/skill` mention through the package route and injects its body into the turn", async () => {
-    // Read from the route `getSkill` serves, projected into the user turn text,
-    // never into the cached system prompt.
-    const sessionId = mintSessionId();
-    const SKILL = "@acme/x";
-    const BODY = "# Procédure X\n\nSuis ces étapes.";
-    const skillPaths: string[] = [];
-    const dispatch = async (req: Request): Promise<Response> => {
-      const path = new URL(req.url).pathname;
-      if (path.startsWith("/api/packages/skills/")) {
-        skillPaths.push(path);
-        return Response.json({ content: BODY, version: "3.1.0" });
-      }
-      return scriptedDispatch()(req);
-    };
-
-    const { engine, calls } = scriptedEngine();
-    const res = await postChat(sessionId, undefined, engine, {
-      dispatch,
-      parts: [{ type: "text", text: `:skill[/x]{name=${SKILL}}` }],
-    });
-    expect(res.status).toBe(200);
-    await collectUiChunks(res);
-
-    // One read, by the encoded path — `@` on the scope, `/` still a separator.
-    expect(skillPaths).toEqual([`/api/packages/skills/${encodePackageIdPath(SKILL)}`]);
-
-    // The engine is handed the raw directive plus the loaded body; projecting
-    // the two the way the Pi turn builder does is what the model reads.
-    const projected = messagesWithSkillsAsText(calls[0]!.messages, calls[0]!.skills);
-    const text = projected
-      .flatMap((message) => message.parts ?? [])
-      .filter((part) => part.type === "text")
-      .map((part) => (part as { text: string }).text)
-      .join("\n");
-    expect(text).toContain(`[Skill ${SKILL} (v3.1.0) loaded — follow these instructions]`);
-    expect(text).toContain("Suis ces étapes.");
-    // The directive itself is gone from what the model reads, and the system
-    // prompt never carried the body.
-    expect(text).not.toContain(`:skill[/x]{name=${SKILL}}`);
-    expect(calls[0]!.system).not.toContain("Suis ces étapes.");
 
     await waitForAssistantPersist(sessionId);
   });

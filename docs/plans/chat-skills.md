@@ -16,29 +16,21 @@ skills indexed for a turn =
     platform defaults            (module-chat constant, always)
   ∪ pinned on the session        (chat_sessions.pinned_skills)
   ∪ the space catalogue          (when chat_sessions.skill_catalogue)
-skills loaded for a turn  = `/skill` mentions in the user messages
 ```
 
 A caller without `skills:read` gets no skills index at all, platform defaults
 included — `getSkill` would refuse every body anyway.
 
-Two levels of loading, as in the Agent Skills spec:
-
-- **Index** — one line per skill (id, version, label, description) in the
-  `## Skills` section of the system prompt, deterministic order. The model
-  loads a body on demand through `invoke_operation` → `getSkill`, which applies
-  the platform's single definition-read rule (the draft when writable, else the
-  latest published version).
-- **Direct load** — a `/skill` mention puts the body in the _user turn text_,
-  never in the system prompt.
+Progressive disclosure, as in the Agent Skills spec: one line per skill (id,
+version, label, description) in the `## Skills` section of the system prompt,
+deterministic order; the model loads a body on demand through
+`invoke_operation` → `getSkill`, which applies the platform's single
+definition-read rule (the draft when writable, else the latest published
+version). No body ever enters the system prompt.
 
 The system prompt is ONE `cache_control` block: what renders there is
 byte-identical across turns for the same session state (sorted, no clocks, no
 counters); changing pins or the catalogue switch may miss the cache once.
-
-Trust: a body is content the caller can already read, injected as user-turn
-text; the `[Skill … loaded]` marker is a legibility aid, not a fence, and a
-pasted directive resolves with the caller's own permissions.
 
 ## `unlisted` visibility
 
@@ -67,8 +59,7 @@ reach); a malformed id or more than 30 ids is a 400. One round trip.
 `@appstrate/copilot`, `@appstrate/web-search` and `@appstrate/connector-choice`
 are a constant in module-chat (`src/skills.ts`), shipped as system packages
 (`scripts/system-packages/skill-*-1.0.0/`) marked unlisted. They are always
-indexed, whatever the session state, and are offered neither in the picker nor
-in the `/` popover. A default that does not resolve is an operator warning
+indexed, whatever the session state, and are never offered in the picker. A default that does not resolve is an operator warning
 (logged once per process), never a prompt line. These three skills are written
 for the chat assistant — they read its `## Your context` block — which is why
 they are unlisted platform defaults and not agent dependencies. Their bodies
@@ -102,31 +93,16 @@ it creates the row for a client-minted id, as the first turn does — so a picke
 write on a fresh conversation makes it appear in the sidebar with no messages —
 and it never bumps `updatedAt`. Every session
 DTO carries both fields. There is no chat-specific skill listing: the picker
-and the `/` popover read `GET /api/packages/skills`.
+reads `GET /api/packages/skills`.
 
 UI: a picker in the composer (catalogue switch + one pin checkbox per skill).
 The selection lives in local state seeded from the session detail; writes are
 coalesced (one in flight, the newest wins) and reverted on failure.
 
-## `/skill` mention
-
-The `/` popover opens only when the catalogue has at least one skill matching
-what follows the `/` (a bare `/` opens it only when the catalogue is non-empty). It
-inserts the assistant-ui default directive `:skill[/name]{name=@scope/name}`,
-persisted raw in the user message (audit trail) and rendered as a chip.
-
-Every turn, module-chat parses the directives across all user messages and
-re-reads the bodies through the in-process `getSkill` (the route re-checks
-`skills:read`). Each directive is projected into the user turn text: the first
-occurrence of an id becomes the body (capped at 32 KiB), later ones a
-back-reference, a failure a one-line reason. At most 10 distinct skills are
-mentioned per conversation.
-
-Accepted trade-off: bodies are re-read, not frozen, so an edited or revoked
-skill changes a history block that was already answered.
-
 ## Out of scope
 
+- A `/skill` mention that loads a body into one message (#1309 open question
+  5): a pin plus `getSkill` covers it; propose it on its own if usage asks.
 - Per-space default skills inherited by new sessions.
 - Exposing the platform defaults to external MCP clients through `get_me`.
 - A dedicated `load_skill` MCP tool — measure `getSkill` first.
