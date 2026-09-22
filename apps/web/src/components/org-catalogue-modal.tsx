@@ -95,6 +95,7 @@ import {
 } from "./catalogue-columns";
 import { RailButton } from "./settings/rail-link";
 import { RailGroup, RailHeader } from "./settings/rail-shell";
+import { SettingsHeading } from "./settings/settings-heading";
 import { Spinner } from "./spinner";
 
 /**
@@ -518,6 +519,7 @@ export function OrgCatalogueModal({
 
   const spaceColumns = useCatalogueSpaceColumns({
     spaces: spaceColumnsInput,
+    currentSpaceId: spaceId,
     type: active,
     placementOf: (item) => placementById.get(item.id),
     busy: activate.isPending,
@@ -656,9 +658,9 @@ export function OrgCatalogueModal({
       reserveCloseArea
       // Where the reader is, kept in place while the pane scrolls: the kind
       // they are browsing, or the package they opened, with the way back.
-      contentHeader={
+      contentHeader={(stuck) =>
         reading ? (
-          <div className="flex min-w-0 items-center gap-1.5">
+          <div className="flex min-w-0 items-center gap-2">
             <Button
               variant="ghost"
               size="sm"
@@ -668,11 +670,26 @@ export function OrgCatalogueModal({
               <ArrowLeft />
               {t("catalogue.back")}
             </Button>
-            <span className="text-muted-foreground shrink-0">/</span>
-            <span className="truncate text-sm font-medium">{reading.name || reading.id}</span>
+            {/* The package's name belongs to the page below; the band borrows
+                it only once that page has scrolled past its own title. */}
+            <span
+              className={cn(
+                "truncate text-sm font-medium transition-opacity duration-200",
+                stuck ? "opacity-100" : "opacity-0",
+              )}
+            >
+              {reading.name || reading.id}
+            </span>
           </div>
         ) : (
-          <span className="text-sm font-semibold">{t(kind.titleKey)}</span>
+          <span
+            className={cn(
+              "text-sm font-semibold transition-opacity duration-200",
+              stuck ? "opacity-100" : "opacity-0",
+            )}
+          >
+            {t(kind.titleKey)}
+          </span>
         )
       }
       onClose={onClose}
@@ -716,6 +733,7 @@ export function OrgCatalogueModal({
           view={view}
           header={
             <>
+              <SettingsHeading className="mb-4" title={t(kind.titleKey)} />
               {/* The offers waiting for an answer, said above the table and
                   one click from being the only rows in it. Not a second list
                   of them: they ARE rows of this table, and a copy above it

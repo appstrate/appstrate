@@ -462,7 +462,16 @@ export function CataloguePreview({
                   // The alert above names a space; this is that space. Same
                   // tint as the alert, so the eye carries one to the other.
                   <TableRow key={row.id} className={row.state === "offered" ? "bg-primary/5" : ""}>
-                    <TableCell className="font-medium">{row.name}</TableCell>
+                    <TableCell className="font-medium">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate">{row.name}</span>
+                        {row.id === currentSpaceId && (
+                          <span className="bg-primary/15 text-primary rounded px-1 text-[10px] leading-4 font-medium">
+                            {t("catalogue.here")}
+                          </span>
+                        )}
+                      </span>
+                    </TableCell>
                     <TableCell className="text-muted-foreground">{stateLabel(row)}</TableCell>
                     {missingAnywhere && (
                       <TableCell className="text-muted-foreground">

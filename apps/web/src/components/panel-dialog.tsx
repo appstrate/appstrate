@@ -13,7 +13,7 @@
  * whole rule: nested scrolling is what makes these surfaces confusing, not
  * scrolling as such.
  */
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@appstrate/ui/cn";
 import { Dialog, DialogContent, DialogTitle } from "@appstrate/ui/components/dialog";
 import { ScrollArea } from "@appstrate/ui/components/scroll-area";
@@ -45,11 +45,12 @@ interface PanelDialogProps {
    *
    * The dialog's close control floats over that pane, so without an opaque
    * band the content slides under it and the cross lands on whatever text
-   * happens to be passing. The band is that opaque surface, and since it is
-   * there anyway it carries where the reader is — a back control, a title —
-   * instead of being empty reserved space.
+   * happens to be passing. At rest the band is invisible — the pane starts
+   * with its own heading, and a second one plus a rule would be chrome nobody
+   * asked for. It takes its background, its rule and, through `stuck`,
+   * whatever names the page, only once the pane has scrolled.
    */
-  contentHeader?: ReactNode;
+  contentHeader?: (stuck: boolean) => ReactNode;
   children: ReactNode;
   onClose: () => void;
 }
@@ -68,6 +69,28 @@ export function PanelDialog({
   onClose,
 }: PanelDialogProps) {
   const isMobile = useIsMobile();
+  // Whether the pane has scrolled past its own top. Read off the scroll
+  // container itself — found by walking up from a sentinel, since the pane is
+  // a `ScrollArea` viewport on one path and a plain overflow div on the other,
+  // and neither is reachable from here by name.
+  const [stuck, setStuck] = useState(false);
+  // A callback ref rather than an object ref: the band is rendered inside the
+  // dialog's portal, and the node has to be caught when it attaches there.
+  const [pane, setPane] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!pane) return;
+    const read = () => setStuck(pane.scrollTop > 4);
+    read();
+    pane.addEventListener("scroll", read, { passive: true });
+    return () => pane.removeEventListener("scroll", read);
+  }, [pane]);
+  const attach = (node: HTMLDivElement | null) => {
+    let scroller: HTMLElement | null = node?.parentElement ?? null;
+    while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) {
+      scroller = scroller.parentElement;
+    }
+    setPane(scroller);
+  };
   const content = (
     <div
       className={cn(
@@ -81,12 +104,21 @@ export function PanelDialog({
       {/* `pr-10` clears the dialog's own close button, which is absolutely
           positioned top-right and would otherwise sit on the selector. */}
       {contentHeader && (
-        // Sticky, opaque, and inset the way the pane is: `-mx-6` cancels the
-        // pane's padding so the band spans its full width, `pr-14` keeps the
-        // close control's corner free.
-        <div className="bg-background sticky top-0 z-20 -mx-6 mb-4 border-b px-6 py-2 pr-14">
-          {contentHeader}
-        </div>
+        <>
+          {/* Sticky, and inset the way the pane is: `-mx-6` cancels the pane's
+              padding so the band spans its full width, `pr-14` keeps the close
+              control's corner free. */}
+          <div
+            className={cn(
+              "sticky top-0 z-20 -mx-6 mb-4 px-6 py-2 pr-14 transition-colors duration-200",
+              stuck && "bg-background border-b",
+            )}
+          >
+            {contentHeader(stuck)}
+          </div>
+          {/* Only a handle on the scrolling pane. */}
+          <div ref={attach} aria-hidden className="-mt-4 h-px" />
+        </>
       )}
       {mobileNav && <div className="mb-4 pr-10 md:hidden">{mobileNav}</div>}
       {children}

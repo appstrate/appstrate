@@ -223,12 +223,15 @@ export function useCatalogueProtocolColumn(
  */
 export function useCatalogueSpaceColumns({
   spaces,
+  currentSpaceId,
   type,
   placementOf,
   busy,
   onSetActive,
 }: {
   spaces: readonly { id: string; name: string; grant?: SpaceGrant }[];
+  /** The space the app is standing in — named, because the catalogue spans them all. */
+  currentSpaceId: string | null;
   type: PackageType;
   placementOf: (item: CardItem) => CataloguePlacement | undefined;
   busy: boolean;
@@ -239,6 +242,18 @@ export function useCatalogueSpaceColumns({
   return spaces.map((space, index) => ({
     id: `space:${space.id}`,
     header: space.name,
+    // The catalogue reads every space at once, so which one the rest of the
+    // app is acting in has to be SAID: it is where a launch, a run and a
+    // connection land, and nothing else on this screen says it.
+    headerNode:
+      space.id === currentSpaceId ? (
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate">{space.name}</span>
+          <span className="bg-primary/15 text-primary rounded px-1 text-[10px] leading-4 font-medium">
+            {t("catalogue.here")}
+          </span>
+        </span>
+      ) : undefined,
     // Controls, not content: the row's link is placed elsewhere, and the
     // switches below are raised over the overlay it stretches across the row.
     control: true,

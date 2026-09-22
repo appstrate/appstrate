@@ -1299,6 +1299,7 @@
   "catalogue.identifier": "Identifiant",
   "catalogue.openFullPage": "Ouvrir la fiche complète",
   "catalogue.everywhere": "Partout",
+  "catalogue.here": "ici",
   "catalogue.sourceOrg": "{{name}} (organisation)",
   "catalogue.sourceSystem": "Appstrate (système)",
   "catalogue.moreActions": "Actions pour {{name}}",

@@ -112,6 +112,9 @@ const SETS = {
           { id: "spc_b", name: "Production" },
           { id: "spc_c", name: "Bac à sable" },
         ],
+        // The space the app stands in carries an "ici" pill beside its name:
+        // the widest head this column set can draw.
+        currentSpaceId: "spc_a",
         type: "agent",
         placementOf: () => undefined,
         busy: false,

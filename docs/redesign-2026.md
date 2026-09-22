@@ -1746,11 +1746,27 @@ wanted, the answer is a request to share, not a read-only row.
 
 The dialog's close control floats over the content pane, so everything scrolled
 under it and the cross landed on whatever text was passing. `PanelDialog` takes
-a `contentHeader` now: an opaque band, sticky at the top of that pane, with the
-corner kept free for the cross. Since it is there anyway it says where the
-reader is — the kind they are browsing, or "← Retour au catalogue / Radar IA"
-on a package's sheet, which is where the sheet's back control now lives. The
-list's own heading went with it: the band carries the name once.
+a `contentHeader(stuck)` now: a band sticky at the top of that pane, with the
+corner kept free for the cross. **At rest it is invisible** — the back control
+and the cross, no rule, no second title, because the page under it opens with
+its own. Once the pane scrolls it takes a background and a rule, and what names
+the page fades in: the kind being browsed, or the package's name beside
+"Retour au catalogue".
+
+`stuck` is read off the scrolling element itself, found by walking up from a
+node in the band. Two things cost time here and are pinned: an object `ref` on
+that node stays `null` when the effect runs (the band lives in the dialog's
+portal), so it is a CALLBACK ref that catches the node and stores the scroller
+in state; and the scroller is not reachable by name — it is `ScrollArea`'s
+viewport on one path and a plain overflow div on the other.
+
+**Which space you are standing in, said in the catalogue**
+
+The catalogue reads every space at once, so the one the rest of the app acts in
+— where a launch, a run and a connection land — was nowhere on the screen. The
+column head of that space, and its row on a sheet, carry a small "ici" pill.
+Not the implicit "ici" the catalogue used to have, which claimed a context
+without naming it: this names the space and changes nothing else.
 
 **The share alert and the row it names share a tint**
 
