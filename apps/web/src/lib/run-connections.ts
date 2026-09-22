@@ -5,14 +5,8 @@ import type { EnrichedRun } from "@appstrate/shared-types";
 export type ConnectionUsed = NonNullable<EnrichedRun["connections_used"]>[number];
 
 /**
- * Group a run's `connections_used` by integration.
- *
- * The snapshot holds one entry per BOUND connection, so an integration bound
- * to several contributes several entries sharing an `integration_id` — the
- * run panel renders one card per integration listing each of them. First-seen
- * integration order is preserved, and so is the snapshot order inside a group:
- * that order is the resolver's, and renumbering it would make two runs of the
- * same agent look different for no reason.
+ * The snapshot holds one entry per BOUND connection, so several can share an
+ * `integration_id`; both orders are the resolver's and are preserved as-is.
  */
 export function groupByIntegration(used: ConnectionUsed[]): [string, ConnectionUsed[]][] {
   const groups = new Map<string, ConnectionUsed[]>();

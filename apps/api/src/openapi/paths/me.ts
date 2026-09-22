@@ -152,7 +152,7 @@ export const mePaths = {
                             properties: {
                               connection_id: { type: "string" },
                               kind: { type: "string", enum: ["integration"] },
-                              label: { type: ["string", "null"] },
+                              label: { type: "string" },
                               scopes_granted: { type: "array", items: { type: "string" } },
                               connected_at: { type: "string", format: "date-time" },
                               needs_reconnection: { type: "boolean" },

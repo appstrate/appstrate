@@ -39,7 +39,6 @@ import {
   useDeleteMemberIntegrationPin,
 } from "../../hooks/use-member-integration-pins";
 import { useHostedConnectPopup } from "./use-integration-oauth-popup";
-import { connectionDisplayLabel } from "./connection-label";
 import { connectableAuthKeys } from "./connectable-auth-keys";
 import {
   requiredScopesForAgent,
@@ -197,7 +196,7 @@ export function IntegrationConnectionPicker({
     const label = lockedConnectionIds
       .map((id) => {
         const pinned = byId(id);
-        return pinned ? connectionDisplayLabel(pinned) : id;
+        return pinned ? pinned.label : id;
       })
       .join(" · ");
     return (
@@ -221,9 +220,8 @@ export function IntegrationConnectionPicker({
     );
   }
 
-  // The actor's explicit pick: their member pin (pin mode) or the controlled
-  // override value (override mode). Empty means "no member pin" in pin mode
-  // and "inherit" in override mode — `displayedConnectionIds` owns that split.
+  // Empty means "no member pin" in pin mode and "inherit" in override mode —
+  // `displayedConnectionIds` owns that split.
   const explicitIds = overrideMode ? persistence.value : memberPinnedConnectionIds;
   const boundIds = displayedConnectionIds({
     overrideMode,
@@ -231,37 +229,28 @@ export function IntegrationConnectionPicker({
     resolvedIds: resolvedConnectionIds,
   });
   const dirty = draft !== null;
-  // What the CHECKBOXES show. An inheriting override opens on the cascade's
-  // answer so the first click refines it instead of starting from nothing —
-  // pre-checked in the menu only; the trigger still reads "inherit", and
-  // nothing is written until "Valider".
+  // Checkboxes only: an inheriting override pre-checks the cascade's answer so
+  // the first click refines it, while the trigger still reads "inherit".
   const checkedIds = draft ?? (boundIds.length > 0 ? boundIds : resolvedConnectionIds);
   const checked = new Set(checkedIds);
   const atCap = checked.size >= MAX_CONNECTIONS_PER_INTEGRATION;
-  // Single accessible connection = no set to compose. Clicking the row binds
-  // it outright, which is the pre-multi-connection interaction verbatim.
+  // Nothing to compose — clicking the row binds it outright, as it always did.
   const oneClick = candidates.length === 1;
 
-  // What the TRIGGER reflects: the bound set, never the uncommitted draft.
+  // The trigger reflects the bound set, never the uncommitted draft.
   const displayConns = boundIds.map(byId).filter((c): c is IntegrationCandidate => !!c);
-  // What the WARNINGS answer for: the set "Valider" would write while the
-  // user composes one, else the bound set. An override with no pick is a
-  // valid inherit state, so it warns about nothing.
+  // Warnings answer for the set "Valider" would write, so an override with no
+  // pick — a valid inherit state — warns about nothing.
   const verdictConns = (dirty ? checkedIds : boundIds)
     .map(byId)
     .filter((c): c is IntegrationCandidate => !!c);
   const underScopedConns = verdictConns.filter((c) => c.missing_scopes.length > 0);
   const underScoped = underScopedConns.length > 0;
-  // Two connections sharing a label are unaddressable (the agent picks by
-  // label), so the run 412s `duplicate_connection_label`. Same rule as the
-  // resolver's, from core — never `connectionDisplayLabel`.
+  // Same rule as the resolver's 412 `duplicate_connection_label`, from core.
   const collidingLabels = [...new Set(labelsSharedBy(verdictConns).map((c) => c.label))];
   const hasCandidates = candidates.length > 0;
 
-  // Route the composed set to its persistence: a member pin (agent page) or
-  // the controlled override value (schedule). Both refresh the resolution so
-  // the candidate list / scope diff re-render (a freshly connected account
-  // shows up, the ✓ moves). A write REPLACES the set.
+  // A write REPLACES the set; the refresh re-resolves the candidate list.
   const commit = async (connectionIds: string[]) => {
     if (overrideMode) persistence.onChange(connectionIds);
     else await upsertPin.mutateAsync({ agentPackageId, integrationId, connectionIds });
@@ -319,9 +308,7 @@ export function IntegrationConnectionPicker({
       ?.resolution.candidates;
     const added = freshCandidates?.find((c) => !before.has(c.id));
     // A fresh connection JOINS the bound set — replacing it would silently
-    // unbind connections the user had already chosen. `toggleCapped` returns
-    // the input by identity when the cap blocks the addition, and then there
-    // is nothing to write.
+    // unbind what the user already chose; identity means the cap blocked it.
     const next = added ? toggleCapped(boundIds, added.id, MAX_CONNECTIONS_PER_INTEGRATION) : null;
     if (next && next !== boundIds) await commit(next);
     else await refresh();
@@ -329,7 +316,7 @@ export function IntegrationConnectionPicker({
 
   const triggerLabel =
     displayConns.length === 1
-      ? connectionDisplayLabel(displayConns[0]!)
+      ? displayConns[0]!.label
       : displayConns.length > 1
         ? t("detail.integrationMemberPicker.selectedCount", { count: displayConns.length })
         : overrideMode
@@ -439,15 +426,12 @@ export function IntegrationConnectionPicker({
             return (
               <DropdownMenuItem
                 key={c.id}
-                // A row of a composed set IS a checkbox to a screen reader —
-                // the accessible name is the row's own text, so the box below
-                // is decorative.
+                // A row of a composed set IS a checkbox to a screen reader,
+                // named by its own text — so the box below is decorative.
                 {...(oneClick ? {} : { role: "menuitemcheckbox", "aria-checked": isChecked })}
-                // The cap is a real refusal, not a silent no-op: the row goes
-                // disabled so click and Enter both say so.
+                // The cap is a refusal, not a silent no-op.
                 disabled={!oneClick && atCap && !isChecked}
-                // Toggling must not close the menu: the set is composed over
-                // several clicks and written by "Valider".
+                // Toggling must not close the menu — "Valider" writes.
                 onSelect={(e) => {
                   if (oneClick) {
                     void commit([c.id]);
@@ -463,8 +447,7 @@ export function IntegrationConnectionPicker({
                 ) : (
                   <Checkbox
                     checked={isChecked}
-                    // The row carries the role, the name and the event; the
-                    // box is a glyph.
+                    // The row carries the role, name and event; this is a glyph.
                     aria-hidden
                     tabIndex={-1}
                     className="pointer-events-none"
@@ -472,7 +455,7 @@ export function IntegrationConnectionPicker({
                 )}
                 <div className="flex min-w-0 flex-1 flex-col">
                   <div className="flex items-center gap-1.5">
-                    <span className="truncate font-medium">{connectionDisplayLabel(c)}</span>
+                    <span className="truncate font-medium">{c.label}</span>
                     {tl && (
                       <Badge variant="outline" className="text-[0.6rem]">
                         {tl}
@@ -586,8 +569,7 @@ export function IntegrationConnectionPicker({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      {/* Two bound connections answering to the same name: the agent addresses
-          each by its label, so the run is refused until one is renamed. */}
+      {/* Same name twice: the run is refused until one is renamed. */}
       {collidingLabels.length > 0 && (
         <div
           className="mt-1.5 flex flex-col gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
@@ -610,9 +592,8 @@ export function IntegrationConnectionPicker({
           </Link>
         </div>
       )}
-      {/* A displayed connection is under-scoped → the run is blocked
-          server-side (insufficient_scopes). Owner can upgrade via
-          incremental consent; a foreign owner can only be flagged. */}
+      {/* Under-scoped → blocked server-side. The owner can upgrade in place;
+          a foreign owner can only be flagged. */}
       {underScopedConns.map((conn) => (
         <div
           key={conn.id}

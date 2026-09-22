@@ -90,9 +90,8 @@ async function verifyRunToken(c: Context): Promise<{
     versionRef: string | null;
     /**
      * Snapshot of the connection resolver output frozen at run kickoff
-     * (#199) — the SET of connections bound per integration. It is what
-     * authorises a `connection_id` on the credentials routes: a run token may
-     * only read the credentials of the connections ITS cascade bound.
+     * (#199) — the SET bound per integration, which is what authorises a
+     * `connection_id` on the credentials routes.
      */
     resolvedConnections: Record<string, { connectionId: string; source: string }[]> | null;
     /**
@@ -500,24 +499,13 @@ export function createInternalRouter() {
     }
   }
 
-  /**
-   * `?connection_id=` — WHICH of the run's bound connections the sidecar is
-   * asking for. A run can bind several connections to one integration and each
-   * spawn spec is one of them, so the caller always knows which; there is no
-   * "the connection of this integration" left to default to.
-   */
   const connectionIdQuerySchema = z.uuid();
 
   /**
-   * Resolve + authorise the `connection_id` query param.
-   *
-   * Two refusals, both 400 and both deliberate:
-   *   - absent or not a uuid → the caller is speaking the retired
-   *     single-connection protocol; failing loud beats picking a connection on
-   *     its behalf, which is how a run silently ran against the wrong account.
-   *   - not in `runs.resolved_connections[packageId]` → this run's cascade did
-   *     not bind it. The run token authorises the connections the run bound,
-   *     not every connection the actor owns on the integration.
+   * Two 400s, both deliberate: absent/malformed, because picking a connection
+   * for the caller is how a run silently used the wrong account; and not in
+   * `runs.resolved_connections[packageId]`, because a run token authorises the
+   * connections ITS cascade bound, not every one the actor owns.
    */
   function requireBoundConnectionId(
     c: Context,
@@ -576,12 +564,10 @@ export function createInternalRouter() {
 
   // GET /internal/integration-credentials/:scope/:name?connection_id=<uuid>
   // Sidecar-only. Returns the LIVE credential payload + per-auth HTTP
-  // delivery plans for ONE connection the running agent's run bound to an
-  // integration it depends on. `connection_id` is REQUIRED and must be one of
-  // `runs.resolved_connections[packageId]` (400 otherwise) — a run binding N
-  // connections has N credential surfaces and the caller names the one it
-  // spawned for. OAuth tokens are refreshed proactively if within the lead
-  // window; POST .../refresh forces a refresh regardless.
+  // delivery plans for ONE connection the run bound to an integration it
+  // depends on. `connection_id` is REQUIRED and must be in
+  // `runs.resolved_connections[packageId]` (400 otherwise). OAuth tokens are
+  // refreshed proactively within the lead window; POST .../refresh forces one.
   //
   // A 2xx on the RUN path always carries a usable credential surface — the only
   // EMPTY payload this endpoint serves belongs to the connect-run branch above.
@@ -640,8 +626,8 @@ export function createInternalRouter() {
   // POST /internal/integration-credentials/:scope/:name/refresh?connection_id=<uuid>
   // Sidecar-only. Called by the sidecar (api_call adapter + MITM listener) when
   // an upstream 401 is seen. Force-refreshes THAT connection's credential (same
-  // required + run-bound `connection_id` guard as the GET) and returns the
-  // fresh payload (200). When the credential cannot be recovered —
+  // `connection_id` guard as the GET) and returns the fresh payload (200). When
+  // the credential cannot be recovered —
   // a revoked OAuth refresh token, an unrefreshable OAuth auth, OR any
   // non-OAuth auth (api_key/basic), since there is nothing to refresh after a
   // 401 — `resolveLiveIntegrationCredentials` flags the connection

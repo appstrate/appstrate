@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the connection display/ownership helpers.
+ * Unit tests for the connection ownership helper.
  *
  * `isConnectionOwnedBy` gates every owner-only control on the integration
  * detail page — delete, the share toggle, the OAuth renew CTA — against lists
@@ -12,19 +12,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { connectionDisplayLabel, isConnectionOwnedBy } from "../connection-label";
-
-describe("connectionDisplayLabel", () => {
-  it("renders the label verbatim", () => {
-    expect(connectionDisplayLabel({ label: "work@acme.com" })).toBe("work@acme.com");
-  });
-
-  it("does not substitute anything for a label that looks like an account id", () => {
-    // The column is NOT NULL; there is no account-id fallback left to hide a
-    // missing name behind, which is what makes label collisions detectable.
-    expect(connectionDisplayLabel({ label: "acct-1" })).toBe("acct-1");
-  });
-});
+import { isConnectionOwnedBy } from "../connection-label";
 
 describe("isConnectionOwnedBy", () => {
   const mine = { owner_type: "user", owner_id: "user_1" } as const;

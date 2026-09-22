@@ -92,7 +92,7 @@ describe("McpHost — registration", () => {
     try {
       const host = new McpHost();
       await host.register({ connection: CONN_A, namespace: "fs", client: fs.client });
-      expect(host.size()).toBe(2);
+      expect(host.buildTools().length).toBe(2);
     } finally {
       await fs.pair.close();
     }
@@ -424,7 +424,7 @@ describe("McpHost — dispose", () => {
       await host.register({ connection: CONN_A, namespace: "fs", client: fs.client });
       await host.dispose();
       await host.dispose(); // no throw
-      expect(host.size()).toBe(0);
+      expect(host.buildTools().length).toBe(0);
     } finally {
       await fs.pair.close();
     }
@@ -694,7 +694,7 @@ describe("McpHost — allowedTools filter", () => {
         client: fs.client,
         allowedTools: ["read_file"],
       });
-      expect(host.size()).toBe(1);
+      expect(host.buildTools().length).toBe(1);
       const built = host.buildTools();
       expect(built.map((t) => t.descriptor.name)).toEqual(["fs__read_file"]);
     } finally {
@@ -707,7 +707,7 @@ describe("McpHost — allowedTools filter", () => {
     try {
       const host = new McpHost();
       await host.register({ connection: CONN_A, namespace: "fs", client: fs.client });
-      expect(host.size()).toBe(2);
+      expect(host.buildTools().length).toBe(2);
     } finally {
       await fs.pair.close();
     }
@@ -723,7 +723,7 @@ describe("McpHost — allowedTools filter", () => {
         client: fs.client,
         allowedTools: [],
       });
-      expect(host.size()).toBe(0);
+      expect(host.buildTools().length).toBe(0);
     } finally {
       await fs.pair.close();
     }
@@ -764,7 +764,7 @@ describe("McpHost — allowedTools filter", () => {
         // (zero tools registered) rather than silently let through.
         allowedTools: ["fs__read_file"],
       });
-      expect(host.size()).toBe(0);
+      expect(host.buildTools().length).toBe(0);
     } finally {
       await fs.pair.close();
     }
@@ -784,7 +784,7 @@ describe("McpHost — hidden_tools defensive filter (R8a)", () => {
         allowedTools: ["read_file", "write_file"],
         hiddenTools: ["write_file"],
       });
-      expect(host.size()).toBe(1);
+      expect(host.buildTools().length).toBe(1);
       const built = host.buildTools();
       expect(built.map((t) => t.descriptor.name)).toEqual(["fs__read_file"]);
     } finally {
@@ -818,7 +818,7 @@ describe("McpHost — hidden_tools defensive filter (R8a)", () => {
     try {
       const host = new McpHost();
       await host.register({ connection: CONN_A, namespace: "fs", client: fs.client });
-      expect(host.size()).toBe(2);
+      expect(host.buildTools().length).toBe(2);
     } finally {
       await fs.pair.close();
     }
@@ -837,7 +837,7 @@ describe("McpHost — hidden_tools defensive filter (R8a)", () => {
         client: fs.client,
         hiddenTools: ["write_file"],
       });
-      expect(host.size()).toBe(1);
+      expect(host.buildTools().length).toBe(1);
       const built = host.buildTools();
       expect(built.map((t) => t.descriptor.name)).toEqual(["fs__read_file"]);
     } finally {
@@ -1006,7 +1006,7 @@ describe("McpHost — one integration, several connections", () => {
       await host.register({ namespace: "@orga/ssh", client: work.client, connection: CONN_A });
       await host.register({ namespace: "@orga/ssh", client: perso.client, connection: CONN_B });
       // One descriptor, not `ssh_2__ssh_exec`: the second connection is a route.
-      expect(host.size()).toBe(1);
+      expect(host.buildTools().length).toBe(1);
       expect(host.routeCount()).toBe(2);
 
       const tools = host.buildTools();
@@ -1222,9 +1222,8 @@ describe("McpHost — one integration, several connections", () => {
   });
 
   it("refuses to share a tool name with an upstream that binds no connection", async () => {
-    // An integration declaring no auth has nothing to select, so it can only
-    // ever own its namespace alone; a second runner there would be
-    // unaddressable from the model's side.
+    // The connect-run path binds no connection, so it has nothing to select
+    // and can only own its namespace alone.
     const a = await makeUpstream(sshTool("a"));
     const b = await makeUpstream(sshTool("b"));
     try {

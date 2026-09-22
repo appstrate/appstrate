@@ -5,10 +5,8 @@
  * `MitmCredentialSource`. Backs both `GET /internal/integration-credentials/
  * {scope}/{name}` (read-current) and `POST .../refresh` (force-refresh-then-read).
  *
- * The caller names WHICH of the run's bound connections it wants
- * (`connection_id`, validated against `runs.resolved_connections` by the
- * route): a run can bind several connections to one integration, and each one
- * gets its own credential surface. For that connection:
+ * The caller names WHICH bound connection it wants (`connection_id`): a run can
+ * bind several to one integration, each with its own credential surface. For it:
  *
  *   1. Find the connection row for the run's actor.
  *   2. If the auth is OAuth2 AND (forced OR within the lead window),
@@ -73,14 +71,10 @@ interface ResolveLiveCredentialsOptions {
 }
 
 /**
- * This function NEVER returns an empty payload: every state in which a
- * credential was expected but could not be produced throws. The sidecar reads
- * an empty payload as "no `delivery.http` auths, skip the MITM listener
- * entirely" and boots the run anyway, so a silent empty return would turn a
- * broken connection into an agent reporting "the API is unavailable" against a
- * fleet of uncredentialed 401s. (The connect-run branch in `routes/internal.ts`
- * answers its own empty payload without reaching here: it has a grant, not a
- * connection, and exists to MINT the credential.)
+ * NEVER returns an empty payload: the sidecar reads one as "no `delivery.http`
+ * auths, skip the MITM listener" and boots anyway, so every unproducible
+ * credential throws instead. (The connect-run branch in `routes/internal.ts`
+ * answers its own empty payload without reaching here.)
  *
  * Throws ApiError on:
  *   - 404: integration not declared by the agent, not active, or the named
@@ -110,23 +104,12 @@ export async function resolveLiveIntegrationCredentials(
     agentPackageId: string;
     actor: Actor | null;
     /**
-     * WHICH of the run's bound connections this request is for. Required: the
-     * sidecar runs one credentials source per spawn spec, and a spec is one
-     * connection, so the caller always knows. There is no "the connection of
-     * this integration" to fall back to.
-     *
-     * The route has already checked it against `runs.resolved_connections`
-     * (400 otherwise); this resolver enforces the narrower property the route
-     * cannot — that the row is still reachable by the run's actor.
+     * WHICH bound connection this request is for. Required — a spec is one
+     * connection, so the caller always knows. The route checked it against
+     * `runs.resolved_connections`; this checks the row is still reachable.
      */
     connectionId: string;
-    /**
-     * Snapshot from `runs.resolved_connections` — the SET of connections the
-     * cascade bound per integration (admin pin / org default / run override /
-     * schedule override / member pin / auto fallback). Read here only to name
-     * the SOURCE of {@link connectionId} in the failure messages; selection is
-     * `connectionId`'s job.
-     */
+    /** Read ONLY to name the cascade source of {@link connectionId} in errors. */
     resolvedConnections?: Record<string, readonly SnapshotConnection[]> | null;
     /**
      * Snapshot from `runs.resolved_integration_versions` (#686). When present,
@@ -169,14 +152,8 @@ export async function resolveLiveIntegrationCredentials(
     { spaceId: context.spaceId, actor: context.actor },
   );
   if (!connection) {
-    // STATE A — nothing to decrypt. The row this request names is no longer
-    // reachable by the run's actor (deleted, unshared, moved to another
-    // space). 404: there is no row to flag `needsReconnection` on, and 410
-    // would lie about one having been flagged. Answering the empty payload
-    // here (the old behaviour) made the sidecar skip the MITM listener: every
-    // upstream call left uncredentialed and the agent reported a generic "the
-    // API is unavailable". A run binding N connections loses only this one; the
-    // sidecar's other runners on the same integration keep theirs.
+    // STATE A — 404 and not 410: no row is left to flag `needsReconnection` on.
+    // Only THIS connection is lost; the run's other runners keep theirs.
     logger.warn("Integration credentials unavailable — no accessible connection", {
       runId: context.runId,
       integrationId,

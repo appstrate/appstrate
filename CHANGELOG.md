@@ -178,23 +178,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     snapshot bound — `400` otherwise, naming the bound ids. There is no "first
     connection" to fall back to.
 
-  **Operators, two steps, in this order.** Drizzle **0069** (`label` `SET NOT
-NULL`, plus the pin and org-default unique indexes widened to include
-  `connection_id`) applies automatically at boot. Around it runs
-  `scripts/migration/0018-connection-sets.sql`, which has **two sections meant
-  for two different moments** — do not feed the file to psql in one go.
-  **Section A**, with the platform stopped and BEFORE the new image boots, mints
-  `Connexion N` for any `integration_connections` row whose `label` is still
-  NULL; skip it only when the read-only pre-flight at the end of the file counts
-  zero, since one NULL row makes 0069 raise `23502` and rolls the whole pending
-  batch back. **Section B**, AFTER the batch has applied at boot, rewrites
+  **Operators, one step.** Stop the platform, run
+  `scripts/migration/0018-connection-sets.sql` (rewrites
   `runs.connection_overrides`, `runs.resolved_connections` and
   `package_schedules.connection_overrides` from one pick per integration to a
-  set — it writes a shape only the new readers accept. Both sections are
-  idempotent and print their counts before and after; every "after" must read 0.
-  The runbook, with the control query that tells "nothing to rewrite" apart from
-  "nothing at all", is `scripts/migration/README.md`. Existing pins and defaults
-  stay valid: one row is a set of one.
+  set — a shape only the new readers accept), then deploy the new image: drizzle
+  **0069** self-applies at boot, minting `Connexion N` for any NULL `label`
+  beside its own `SET NOT NULL` and widening the pin and org-default unique
+  indexes to include `connection_id`. `0018` is idempotent and prints its counts
+  before and after; every "after" must read 0. The runbook, with the control
+  query that tells "nothing to rewrite" apart from "nothing at all", is
+  `scripts/migration/README.md`. Existing pins and defaults stay valid: one row
+  is a set of one.
 
 ## [1.0.0-beta.59] - 2026-09-18
 

@@ -117,9 +117,8 @@ export const WORKSPACE_ENV_VAR = "APPSTRATE_WORKSPACE";
  * ready-to-append `"<id8>-"` segment, or `""` when there is no connection.
  */
 export function connectionKey(connectionId: string | undefined): string {
-  // No connection (an integration declaring no auth, or a connect run) means
-  // one runner by construction — nothing to key apart, so the segment is
-  // dropped rather than filled with a synthesised stand-in.
+  // The connect-run path binds no connection and spawns one runner, so the
+  // segment is dropped rather than filled with a synthesised stand-in.
   return connectionId === undefined ? "" : `${connectionId.slice(0, 8)}-`;
 }
 

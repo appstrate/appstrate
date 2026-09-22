@@ -5,10 +5,10 @@
  * `block_user_connections` toggle + connection metadata edits
  * (label, sharedWithOrg). Consumed by the routes in `routes/integrations.ts`.
  *
- * Pin model (flat): one SET of connections per (space, agent, integration,
- * scope), stored as one row per bound connection.
+ * Pin model (flat): one SET per (space, agent, integration, scope), one row
+ * per bound connection.
  * Scope = admin (`user_id IS NULL`) OR member (`user_id = caller.id`).
- * Each pin row carries a `connection_id`; the connection's own `auth_key`
+ * The pin row carries a `connection_id`; the connection's own `auth_key`
  * is denormalised on the PinSummary for display but never part of the
  * uniqueness key — OAuth and api_key connections are interchangeable at
  * runtime.
@@ -44,6 +44,7 @@ import {
   missingScopesForConnection,
   manifestAuthKeySet,
   labelsSharedBy,
+  normalizeConnectionIds,
   MAX_CONNECTIONS_PER_INTEGRATION,
   type ConnectionResolutionSource,
 } from "@appstrate/core/integration";
@@ -142,20 +143,9 @@ export async function setBlockUserConnections(
 // ─────────────────────────── Pin CRUD ─────────────────────────────────────────
 
 /**
- * Validate a bound connection set at a WRITE (admin pins, member pins, org
- * defaults — the resolver only ever echoes a set a write already validated)
- * and return it in canonical order.
- *
- * Duplicates are refused here rather than left to the unique index, which
- * would answer a raw 500, and rather than deduplicated silently: the same
- * connection twice is a set whose labels cannot be distinct.
- *
- * Canonical order is ascending LOWERCASE id. A pin is a SET — its rows are
- * written in one transaction under one timestamp, so nothing but the id can
- * order a read of them, and a writer echoing the caller's order would give the
- * same set two representations. The case fold is the other half of that: Zod's
- * `z.uuid()` accepts `A1B2…`, Postgres stores and returns `a1b2…`, so an
- * unfolded echo would disagree with the very next read on both case AND order.
+ * Cap + {@link normalizeConnectionIds} + sort, at every set WRITE. Sorting is
+ * what gives a set ONE representation: its rows share a write timestamp, so
+ * nothing but the id can order a read of them.
  */
 export function canonicalConnectionSet(ids: string[], field: string): string[] {
   if (ids.length === 0 || ids.length > MAX_CONNECTIONS_PER_INTEGRATION) {
@@ -163,19 +153,14 @@ export function canonicalConnectionSet(ids: string[], field: string): string[] {
       `\`${field}\` must hold between 1 and ${MAX_CONNECTIONS_PER_INTEGRATION} connection ids`,
     );
   }
-  const folded = ids.map((id) => id.toLowerCase());
-  if (new Set(folded).size !== folded.length) {
+  const normalized = normalizeConnectionIds(ids);
+  if (normalized === null) {
     throw invalidRequest(`\`${field}\` must not repeat a connection id`);
   }
-  return folded.sort();
+  return normalized.sort();
 }
 
-/**
- * Refuse a set whose rows collide on a label, with the resolver's own wording
- * and code. Both checks are needed and neither subsumes the other: this one
- * stops an unaddressable set being CREATED, the resolver's re-checks at every
- * run because a connection can be renamed after the set was written.
- */
+/** Refuse a colliding set here; the resolver re-checks for a LATER rename. */
 export function assertDistinctConnectionLabels(
   integrationId: string,
   rows: readonly ConnectionRow[],
@@ -191,16 +176,7 @@ interface PinJoinRow {
   conn: ConnectionRow | null;
 }
 
-/**
- * Fold the N rows of one pin into one summary per (agent, integration). The
- * rows of a set share a scope and a write timestamp by construction, so the
- * first row carries the summary's metadata, and callers order the SELECT by
- * `connection_id` — see {@link canonicalConnectionSet}.
- *
- * `createdAt` is therefore when the CURRENT set was written, not when the
- * (agent, integration) was first pinned: a write replaces the rows, so no
- * row survives an edit to carry an older birth date.
- */
+/** Fold one pin's N rows into one summary; `createdAt` = the current set's write. */
 function toPinSummaries(rows: PinJoinRow[]): PinSummary[] {
   const byPin = new Map<string, PinJoinRow[]>();
   for (const row of rows) {
@@ -299,23 +275,14 @@ interface SetPinInput {
  *   3. is `sharedWithOrg=true` (pinning a personal connection would
  *      leak the admin's identity to other members at run time).
  *
- * Flat model: one SET per (space, agent, integration, admin-scope).
  * Each connection carries its own authKey — pinning a PAT connection
- * overrides the agent's oauth-by-default just by virtue of being a
- * picked connection.
+ * overrides the agent's oauth-by-default just by virtue of being picked.
  */
 export async function upsertIntegrationPin(
   scope: SpaceScope,
   integrationId: string,
   input: SetPinInput,
-  /**
-   * Optional TEST seam, the shape `revokePackageShare` already uses
-   * (`services/package-shares.ts`). `onBeforeCommit` runs INSIDE this
-   * transaction, after the delete and the insert and before it commits, so a
-   * test can hold one writer open and observe what a CONCURRENT writer does
-   * against uncommitted rows — the one way the advisory lock below is
-   * observable from outside. Production never passes it.
-   */
+  /** TEST seam (`revokePackageShare`'s shape): runs in-transaction, pre-commit. */
   opts?: { onBeforeCommit?: () => Promise<void> },
 ): Promise<PinSummary> {
   return upsertPin({
@@ -331,21 +298,8 @@ export async function upsertIntegrationPin(
 }
 
 /**
- * Shared set-replacement for admin (`userId IS NULL`) and member
- * (`userId = actor`) pins. Both scopes delete-then-insert on the same flat
- * key `(space, agent, integration, scope)` inside ONE transaction, differing
- * only by the userId predicate, the connection validation opts, and
- * `createdBy`.
- *
- * Delete-then-insert rather than a per-row upsert: the write carries the
- * whole set, so a connection the caller dropped has to disappear in the same
- * transaction that adds the new ones. A partial set is a different pin from
- * the one the caller asked for, and the resolver would bind it on the next
- * run without a trace.
- *
- * `createdBy` is re-stamped on every write for both scopes — a replacement is
- * an authorship event, and for a member pin the writer is the member either
- * way.
+ * Delete-then-insert rather than a per-row upsert: a connection the caller
+ * dropped must disappear with the write that adds the new ones.
  */
 async function upsertPin(args: {
   scope: SpaceScope;
@@ -355,7 +309,6 @@ async function upsertPin(args: {
   userIdValue: string | null;
   validateOpts: { requireShared?: boolean; allowOwnedBy?: string };
   createdBy: string | null;
-  /** Test-only seam — see {@link upsertIntegrationPin}. */
   onBeforeCommit?: () => Promise<void>;
 }): Promise<PinSummary> {
   const { scope, agentPackageId, integrationId, userIdValue, createdBy } = args;
@@ -372,13 +325,8 @@ async function upsertPin(args: {
   const lockKey = `ip_set:${scope.spaceId}:${agentPackageId}:${integrationId}:${userIdValue ?? ""}`;
 
   await db.transaction(async (tx) => {
-    // Serialize the whole set write per (space, agent, integration, scope).
-    // Delete-then-insert is not atomic under READ COMMITTED: two concurrent
-    // PUTs each delete what they can see, then both insert, and the table ends
-    // up holding the UNION of two sets — past the cap, and matching neither
-    // caller's intent. Under the lock the second waits and its delete sees the
-    // first's committed rows, so the last writer wins whole. Same primitive,
-    // same reasoning as the label numbering in `integration-connections.ts`.
+    // Not atomic under READ COMMITTED: without this, two concurrent PUTs both
+    // delete what they can see, both insert, and the UNION survives.
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
     await tx
       .delete(integrationPins)
@@ -402,7 +350,6 @@ async function upsertPin(args: {
         updatedAt: now,
       })),
     );
-    // Test-only seam — see `opts.onBeforeCommit` on `upsertIntegrationPin`.
     if (args.onBeforeCommit) await args.onBeforeCommit();
   });
 
@@ -495,8 +442,7 @@ interface UpsertMemberPinInput {
 }
 
 /**
- * Replace the member-scope pin set (`integration_pins` rows with `user_id`
- * set).
+ * Replace the member-scope pin set (`integration_pins` rows with `user_id`).
  *
  * Member writes their own preference for this (agent, integration) —
  * the persisted rows the resolver sees on every run (layer 5 of the
@@ -582,10 +528,7 @@ export async function listMemberPinsForAgent(
 // ─────────────────────────── Connection metadata edits ────────────────────────
 
 interface UpdateConnectionMetadataInput {
-  /**
-   * A rename, never a clear: `integration_connections.label` is NOT NULL
-   * because the sidecar keys its `connection` tool parameter on it.
-   */
+  /** A rename, never a clear — the column is NOT NULL. */
   label?: string;
   sharedWithOrg?: boolean;
 }
@@ -838,21 +781,15 @@ async function resolveAgentIntegrationPick(args: {
   let status: IntegrationPickStatus;
   let resolvedConnectionIds: string[] = [];
   let resolvedMissingScopes: string[] = [];
-  let resolvedOwnedByActor = false;
 
   if (resolved) {
     resolvedConnectionIds = resolved.map((r) => r.connectionId);
-    // Every member of a bound set carries the same cascade layer.
     status = pickStatusForSource(resolved[0]!.source);
-    resolvedOwnedByActor = resolved.every(
-      (r) => candidates.find((c) => c.id === r.connectionId)?.is_own ?? false,
-    );
   } else if (err) {
     switch (err.code) {
       case "insufficient_scopes":
         resolvedConnectionIds = err.connectionId ? [err.connectionId] : [];
         resolvedMissingScopes = err.missingScopes ?? [];
-        resolvedOwnedByActor = err.ownedByActor ?? false;
         status = err.source ? pickStatusForSource(err.source) : "auto";
         break;
       case "must_choose_connection":
@@ -884,7 +821,6 @@ async function resolveAgentIntegrationPick(args: {
     status,
     resolved_connection_ids: resolvedConnectionIds,
     resolved_missing_scopes: resolvedMissingScopes,
-    resolved_owned_by_actor: resolvedOwnedByActor,
     admin_pinned_connection_ids: adminPinnedConnectionIds,
     member_pinned_connection_ids: memberPinnedConnectionIds,
     org_default_connection_ids: orgDefaultConnectionIds,

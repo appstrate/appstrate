@@ -5420,8 +5420,8 @@ export interface components {
             /** @enum {string} */
             status: "admin_locked" | "pinned" | "auto" | "must_choose" | "duplicate_label" | "none" | "stale" | "needs_reconnection";
             resolved_connection_ids: string[];
+            /** @description Missing scopes on the one connection an `insufficient_scopes` verdict names; empty otherwise. */
             resolved_missing_scopes: string[];
-            resolved_owned_by_actor: boolean;
             admin_pinned_connection_ids: string[];
             member_pinned_connection_ids: string[];
             org_default_connection_ids: string[];
@@ -13114,7 +13114,7 @@ export interface operations {
                                 connection_id: string;
                                 /** @enum {string} */
                                 kind: "integration";
-                                label: string | null;
+                                label: string;
                                 scopes_granted: string[];
                                 /** Format: date-time */
                                 connected_at: string;

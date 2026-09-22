@@ -1812,7 +1812,6 @@ export const schemas = {
       "status",
       "resolved_connection_ids",
       "resolved_missing_scopes",
-      "resolved_owned_by_actor",
       "admin_pinned_connection_ids",
       "member_pinned_connection_ids",
       "org_default_connection_ids",
@@ -1839,8 +1838,12 @@ export const schemas = {
         items: { type: "string" },
         maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
       },
-      resolved_missing_scopes: { type: "array", items: { type: "string" } },
-      resolved_owned_by_actor: { type: "boolean" },
+      resolved_missing_scopes: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Missing scopes on the one connection an `insufficient_scopes` verdict names; empty otherwise.",
+      },
       admin_pinned_connection_ids: {
         type: "array",
         items: { type: "string" },

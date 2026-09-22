@@ -69,17 +69,10 @@ interface McpHostUpstream {
   /** Connected client (any transport). */
   client: AppstrateMcpClient;
   /**
-   * Which of the integration's bound connections this upstream serves. N
-   * connections of one integration register the SAME namespaced tool names;
-   * the label is the route key, and the value the agent picks with the
-   * injected `connection` parameter. `accountId` only decorates that
-   * parameter's description so the model can tell two labels apart.
-   *
-   * Absent for an integration that declares no auth: it binds no connection,
-   * so its namespace holds exactly one runner and there is nothing to select
-   * between. Such an upstream routes under the `null` key and never gets the
-   * selector — a synthesised stand-in label would put a choice in front of the
-   * model that does not exist.
+   * The connection this upstream serves; N connections share a tool name and
+   * the label tells them apart. Absent on the connect-run path, which routes
+   * under `null` and gets no selector — a synthesised label would offer the
+   * model a choice that does not exist.
    */
   connection?: { label: string; accountId: string | null };
   /**
@@ -133,53 +126,32 @@ interface McpHostOptions {
   onLog?: (event: { source: string; level: string; data: unknown }) => void;
 }
 
-/**
- * Name of the selector parameter the host injects on a tool served by more
- * than one connection. Reserved: an upstream that already declares it makes
- * the injection impossible and fails boot.
- */
+/** Reserved: an upstream that declares it cannot be served by N connections. */
 const CONNECTION_PARAM = "connection";
 
-/**
- * Route key: the connection label, or `null` for an upstream that serves no
- * connection at all (an integration declaring no auth).
- */
 type ConnectionKey = string | null;
 
-/** One (tool, connection) dispatch target. */
 interface ToolRoute {
   client: AppstrateMcpClient;
   accountId: string | null;
 }
 
-/**
- * Does this descriptor already declare the reserved selector property? Such a
- * tool cannot be served by several connections — injecting the selector would
- * shadow the upstream's own parameter.
- */
 function declaresConnectionParam(descriptor: Tool | undefined): boolean {
   const schema = descriptor?.inputSchema as { properties?: Record<string, unknown> } | undefined;
   const properties = schema?.properties;
   return properties !== undefined && Object.hasOwn(properties, CONNECTION_PARAM);
 }
 
-/**
- * Upstream descriptor + the required `connection` selector, for a tool that N
- * connections serve. The account id is what lets the model tell two labels
- * apart when the label alone is opaque.
- */
 function withConnectionParam(descriptor: Tool, routes: Map<ConnectionKey, ToolRoute>): Tool {
   const labels = routeLabels(routes);
   const schema = descriptor.inputSchema as unknown as Record<string, unknown>;
   const properties = { ...((schema.properties as Record<string, unknown> | undefined) ?? {}) };
   properties[CONNECTION_PARAM] = {
     type: "string",
-    // The enum values stay VERBATIM: they are the dispatch keys `callTool`
-    // looks up, so sanitising them would make a routable connection
-    // unselectable. The prose below is the injection surface, and the label is
-    // member-editable while the account id comes from the provider — so both
-    // fragments, and the assembled sentence, go through the same sanitiser
-    // `sanitiseToolDescriptor` already ran over the rest of this descriptor.
+    // Enum values stay VERBATIM — they are the keys `callTool` looks up, so
+    // sanitising them would make a routable connection unselectable. The prose
+    // is the injection surface: `label` is member-editable and `accountId`
+    // provider-supplied, so both go through the descriptor's own sanitiser.
     enum: labels,
     description: sanitiseTextField(
       `Connection to use for this call. ${labels
@@ -199,21 +171,15 @@ function withConnectionParam(descriptor: Tool, routes: Map<ConnectionKey, ToolRo
   };
 }
 
-/** Strip hidden/control characters and cap one interpolated label fragment. */
 function safeFragment(value: string): string {
   return sanitiseTextField(value, MAX_PARAMETER_DESCRIPTION_BYTES) ?? "";
 }
 
-/**
- * The selectable labels of a multi-connection tool. `null` never appears here:
- * {@link McpHost.addRoute} refuses to put a connectionless upstream on a
- * shared tool name, so a routes map of size > 1 has string keys only.
- */
+/** `null` never survives here: {@link McpHost.addRoute} refuses to share a name with it. */
 function routeLabels(routes: Map<ConnectionKey, ToolRoute>): string[] {
   return [...routes.keys()].filter((key): key is string => key !== null);
 }
 
-/** Tool-level (model-visible) error for an absent or unknown selector value. */
 function connectionSelectionError(
   toolName: string,
   received: unknown,
@@ -238,14 +204,10 @@ function connectionSelectionError(
  * Multiplexing host — aggregates tools from N upstream MCP clients.
  *
  * Lifecycle:
- *   1. `register({ namespace, client, connection })` — ingest an upstream MCP
- *      server for ONE of the integration's bound connections.
+ *   1. `register({ namespace, client, connection })` — ingest one upstream.
  *      Calls `listTools()` on the client and snapshots the descriptors.
- *   2. Tool dispatch: `tools/call` on the host's outward face routes to
- *      the right upstream by (tool name, connection label). A name served by
- *      more than one connection carries an injected required `connection`
- *      enum; a name served by one is advertised exactly as its upstream
- *      declared it.
+ *   2. Tool dispatch: `tools/call` routes by (tool name, connection label);
+ *      see {@link withConnectionParam} for the selector a shared name gets.
  *   3. `dispose()` — closes every client. Idempotent.
  *
  * The host renames each upstream tool to `{namespace}__{name}` and
@@ -255,19 +217,13 @@ function connectionSelectionError(
  */
 export class McpHost {
   private readonly upstreams = new Map<string, McpHostUpstream>();
-  // Requested (raw) namespace → the slot it was allocated and the connection
-  // labels already registered there. Another connection of the SAME
-  // integration (identical raw namespace, label not yet seen) reuses the slot
-  // so its tools become routes; two DIFFERENT integrations whose slugs collide
-  // register the same label and are still disambiguated onto `_2`.
+  // Requested (raw) namespace → its allocated slot + the labels already there.
+  // Keyed on the RAW id so another connection of the same integration reuses
+  // the slot, while two different packages sharing a slug still get `_2`.
   private readonly namespaceSlots = new Map<string, { slot: string; labels: Set<ConnectionKey> }>();
   private readonly toolToNamespace = new Map<string, string>();
-  // Per-tool → per-connection-label → owning client. Decoupled from
-  // `upstreams` (namespace → primary client) so a single namespace can
-  // aggregate tools from more than one client (e.g. a spawned server + the
-  // in-process `api_call`, see `intoNamespace`) AND so the N connections of
-  // one integration share a tool name instead of colliding on it. Dispatch
-  // routes by this map, never by namespace alone.
+  // Per-tool → per-connection-label → owning client. Decoupled from `upstreams`
+  // so one namespace can aggregate several clients AND several connections.
   private readonly toolRoutes = new Map<string, Map<ConnectionKey, ToolRoute>>();
   // Trust provenance for collision handling. A trusted first-party descriptor
   // canonically replaces a same-named untrusted descriptor; trusted/trusted
@@ -318,11 +274,8 @@ export class McpHost {
     }
     const label: ConnectionKey = upstream.connection?.label ?? null;
     const slot = this.namespaceSlots.get(upstream.namespace);
-    // The kickoff-time distinct-label check runs against `integration_connections`
-    // rows a member can rename between kickoff and spawn, so two specs of one
-    // integration can still arrive sharing a label. Routing them would make one
-    // silently unreachable; throwing lands the second on the boot report's
-    // `failed[]` and aborts the run, which is what a stale binding deserves.
+    // A member can rename a connection after the kickoff-time distinct-label
+    // check, and routing a duplicate leaves one permanently unaddressable.
     if (!merging && slot?.labels.has(label)) {
       throw new Error(
         `McpHost: duplicate connection ${JSON.stringify(label)} for ${JSON.stringify(upstream.namespace)} — two spawn specs of one integration cannot share a label`,
@@ -416,9 +369,7 @@ export class McpHost {
         }
         incomingNames.add(candidate);
         if (this.toolToNamespace.has(candidate)) {
-          // Another connection of the same integration already holds the name:
-          // that is a route, not a collision. Only between equally-trusted
-          // upstreams — see the trust guard in the registration loop below.
+          // Another connection holds the name: a route, not a collision.
           if (
             this.toolTrusted.get(candidate) === true &&
             !this.toolRoutes.get(candidate)!.has(upstream.connection?.label ?? null)
@@ -524,11 +475,9 @@ export class McpHost {
       // both still get pushed onto `toolDescriptors` — the agent would see a
       // duplicate name and the first tool would become unreachable. Suffix
       // `_2`, `_3`, … until free, mirroring namespace disambiguation.
-      // ONE collision rule: a name already held under a DIFFERENT connection
-      // label is a route (the same tool reached through another connection);
-      // only a same-name/same-label clash is a genuine collision. Trust must
-      // match — a sibling connection runs the same package, so a trust
-      // mismatch is a shadowing attempt, never a route.
+      // ONE collision rule: same name + DIFFERENT label = a route; same name +
+      // same label = a collision. Trust must match — a sibling connection runs
+      // the same package, so a trust mismatch is shadowing, never a route.
       const canRoute = (name: string): boolean =>
         this.toolToNamespace.has(name) &&
         !this.toolRoutes.get(name)!.has(label) &&
@@ -558,10 +507,7 @@ export class McpHost {
         }
         const base = finalName;
         let suffix = 2;
-        // Stop at the first free slot OR the first one this connection can
-        // route into, so a second connection lands on the SAME suffixed name
-        // its sibling tool took rather than inventing a third,
-        // single-connection name.
+        // First free OR routable slot: a sibling connection reuses the suffix.
         while (this.toolToNamespace.has(finalName) && !canRoute(finalName)) {
           finalName = `${base}_${suffix}`;
           suffix += 1;
@@ -590,9 +536,8 @@ export class McpHost {
 
     // Merged upstreams (`intoNamespace`) contribute tools but never become the
     // namespace's primary client — keep the pre-existing primary in place.
-    // Another CONNECTION of the same integration does become the primary: the
-    // connect-login hook calls `getUpstreamClient` immediately after its own
-    // register, so "last registered wins" is exactly the client it needs.
+    // Another connection DOES become the primary: connect-login calls
+    // `getUpstreamClient` right after its own register, so last-wins is right.
     if (!merging) this.upstreams.set(normalisedNs, effectiveUpstream);
     return normalisedNs;
   }
@@ -601,12 +546,6 @@ export class McpHost {
     return { client: upstream.client, accountId: upstream.connection?.accountId ?? null };
   }
 
-  /**
-   * Attach another connection to an already-registered tool name. The served
-   * descriptor stays the one registered first (every connection of an
-   * integration runs the same package), so the second connection contributes
-   * a route, not a descriptor.
-   */
   private addRoute(
     name: string,
     upstream: McpHostUpstream,
@@ -615,15 +554,12 @@ export class McpHost {
   ): void {
     const routes = this.toolRoutes.get(name)!;
     const label: ConnectionKey = upstream.connection?.label ?? null;
-    // A connectionless upstream has no selector value, so it can never share a
-    // tool name — there would be no way to address either side of the split.
+    // No selector value ⇒ neither side of such a split would be addressable.
     if (label === null || routes.has(null)) {
       throw new Error(
         `McpHost: tool ${JSON.stringify(name)} is served by an upstream that binds no connection, so it cannot also be served by another`,
       );
     }
-    // The selector is injected from here on; an upstream that declares its own
-    // `connection` property would be silently shadowed by it.
     const served = this.toolDescriptors.find((d) => d.name === name);
     if (declaresConnectionParam(served) || declaresConnectionParam(incoming)) {
       throw new Error(
@@ -648,17 +584,7 @@ export class McpHost {
     return allocateMcpToolNamespace(base, new Set(this.upstreams.keys()));
   }
 
-  /** Total number of upstream-advertised tools currently known. */
-  size(): number {
-    return this.toolDescriptors.length;
-  }
-
-  /**
-   * Total (tool, connection) routes. This — not {@link size} — is what an
-   * integration's boot counts: the second connection of an integration adds
-   * routes to existing descriptors, so `size()` would report it as zero tools
-   * and fail the "declared ⇒ callable" gate.
-   */
+  /** Routes, not descriptors: a second connection adds no descriptor but is not zero tools. */
   routeCount(): number {
     let total = 0;
     for (const routes of this.toolRoutes.values()) total += routes.size;
@@ -698,16 +624,8 @@ export class McpHost {
     for (const desc of this.toolDescriptors) {
       if (firstPartyNames.has(desc.name)) continue;
       const originalName = this.originalToolNames.get(desc.name)!;
-      // Route by the per-tool index, not the namespace — a namespace may
-      // aggregate tools from more than one client (`intoNamespace`) and from
-      // more than one connection.
       const routes = this.toolRoutes.get(desc.name);
       if (!routes || routes.size === 0) continue;
-      // Trust boundary (defense-in-depth): the canonical run-event channel
-      // (`appstrate/events`) belongs to the platform's first-party runtime
-      // tools only. No third-party integration tool routed through here
-      // legitimately produces it, so strip the key before returning —
-      // a forged `_meta` can't reach the agent's re-emit path.
       const forward = async (
         route: ToolRoute,
         args: Record<string, unknown>,

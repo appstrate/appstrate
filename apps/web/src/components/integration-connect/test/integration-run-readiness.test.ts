@@ -17,7 +17,6 @@ function resolution(over: Partial<IntegrationAgentResolution>): IntegrationAgent
     status: "auto",
     resolved_connection_ids: ["conn_1"],
     resolved_missing_scopes: [],
-    resolved_owned_by_actor: true,
     admin_pinned_connection_ids: [],
     member_pinned_connection_ids: [],
     org_default_connection_ids: [],

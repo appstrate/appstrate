@@ -18,7 +18,6 @@ import { useSetPackageActive } from "../../hooks/use-library";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useCurrentSpaceGrant } from "../../hooks/use-permissions";
 import { maySetPackageActive } from "../../lib/package-permissions";
-import { connectionDisplayLabel } from "../integration-connect/connection-label";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
 import { resolutionBlocksRun } from "../integration-connect/integration-run-readiness";
 
@@ -240,7 +239,7 @@ function buildReuseInfo(
 ): string {
   // `label` is the connection's display name (identity or "Connexion N"),
   // always set at creation. A run may bind several — name them all.
-  const account = connections.map(connectionDisplayLabel).join(" · ");
+  const account = connections.map((c) => c.label).join(" · ");
   if (agentCount <= 1) {
     return t("detail.integrationReuseSingle", { account, count: connections.length });
   }

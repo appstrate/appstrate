@@ -179,15 +179,8 @@ interface BootIntegrationsResult {
    * as trusted in-process MCP servers on the same host — one pipeline.
    */
   tools: AppstrateToolDefinition[];
-  /**
-   * Per-CONNECTION spawn outcome — one entry per spec, so an integration
-   * bound to N connections contributes N entries distinguished by
-   * `connectionLabel`. `vendored` is the AFPS §7.1 build-provenance flag
-   * forwarded from `IntegrationSpawnSpec.manifest.server.vendored` (local
-   * sources only).
-   */
+  /** Per-CONNECTION outcome — one entry per spec. Shape: {@link IntegrationBootReport}. */
   spawned: IntegrationBootReport["spawned"];
-  /** Per-connection failures — captured here; the agent aborts the run on any. */
   failed: IntegrationBootReport["failed"];
   /**
    * Structured boot report fetched by the agent via `GET /integrations/boot-report`.
@@ -199,28 +192,11 @@ interface BootIntegrationsResult {
   shutdown: () => Promise<void>;
 }
 
-/**
- * The route key the McpHost dispatches on. `spec.connection.id` stays out of
- * it: the id addresses the platform's credential endpoints, the label is what
- * the agent sees and selects. `undefined` passes straight through — an
- * integration declaring no auth binds no connection.
- */
-function hostConnection(
-  spec: IntegrationSpawnSpec,
-): { label: string; accountId: string | null } | undefined {
-  return spec.connection;
-}
-
-/**
- * Breadcrumb / log prefix. N specs share an `integrationId`, so the label is
- * what makes a boot trail attributable to one connection. A connectionless
- * integration has exactly one spec, so its id alone is already unambiguous.
- */
+/** Breadcrumb / log prefix: N specs share an `integrationId`, the label does not. */
 function specTag(spec: IntegrationSpawnSpec): string {
   return spec.connection ? `${spec.integrationId} [${spec.connection.label}]` : spec.integrationId;
 }
 
-/** Report/log field, omitted rather than invented when there is no connection. */
 function connectionLabelOf(spec: IntegrationSpawnSpec): { connectionLabel?: string } {
   return spec.connection ? { connectionLabel: spec.connection.label } : {};
 }
@@ -309,10 +285,7 @@ export async function extractBundle(
 ): Promise<string> {
   // Namespace is the integration package id (e.g. `@scope/name`). Both `@`
   // and `/` are illegal in a mkdtemp template under macOS/Linux — collapse
-  // to a path-safe slug. The connection key follows it because N connections
-  // of one integration share the namespace; a connectionless integration has
-  // only one runner, so there is nothing to key apart. The directory is
-  // private to this run anyway.
+  // to a path-safe slug, then the connection key: N connections share a namespace.
   const safe = namespace.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
   const root = await mkdtemp(join(tmpdir(), `afps-integ-${safe}-${connectionKey(connectionId)}`));
   // Memory-bounded streaming unzip: a hostile/oversized bundle can't OOM the
@@ -357,9 +330,8 @@ export async function extractBundle(
  *      refresh storms) and retry once. Caller-override 401s pass through.
  *
  * Auth selection: in practice the credentials payload carries EXACTLY ONE
- * auth — a spec is bound to exactly ONE `integration_connections` row
- * (`spec.connection`), and the resolver returns only that row's auth for the
- * `connection_id` this source reads with (see
+ * auth — a spec is bound to ONE `integration_connections` row, and the
+ * resolver returns only that row's auth (see
  * `integration-credentials-resolver.ts`, asserted by its
  * `auths.length === 1` test). So this is a trivial pick, not a second policy
  * site: the oauth2-first / first-with-a-plan ordering is just a defensive
@@ -1045,7 +1017,7 @@ async function spawnAndConnectLocalIntegration(params: {
   const allocatedNs = await host.register({
     namespace: spec.namespace,
     client: wrapped,
-    connection: hostConnection(spec),
+    connection: spec.connection,
     // Niveau 2 Phase 3 — McpHost.register filters `tools/list` to the agent's
     // declared tools. `undefined` keeps the legacy "all tools allowed".
     ...(params.allowedTools !== undefined ? { allowedTools: params.allowedTools } : {}),
@@ -1360,11 +1332,9 @@ export async function bootIntegrations(
       const hasApiCall = (spec.apiCalls?.length ?? 0) > 0;
       const hasHttpDelivery =
         spec.httpDeliveryAuths !== undefined && Object.keys(spec.httpDeliveryAuths).length > 0;
-      // No connection ⇒ the integration declares no auth ⇒ there is no
-      // credential to read, and the run-token credentials surface would refuse
-      // the call for want of a `connection_id`. A `remote` spec that somehow
-      // arrives connectionless still fails loud at the `!source` guard below
-      // rather than booting a hosted MCP with no credential.
+      // No connection ⇒ nothing to read, and the run-token credentials surface
+      // refuses a call without a `connection_id`. A connectionless `remote`
+      // spec still fails loud at the `!source` guard below.
       const connectionId = spec.connection?.id;
       const needsSource =
         connectionId !== undefined &&
@@ -1468,7 +1438,7 @@ export async function bootIntegrations(
           const allocatedNamespace = await host.register({
             namespace: spec.namespace,
             client: wrapped,
-            connection: hostConnection(spec),
+            connection: spec.connection,
             trusted: true,
             allowedTools: defs.map((d) => d.descriptor.name),
             // `hidden_tools` is a runtime boundary, not merely catalog/UI
@@ -1545,7 +1515,7 @@ export async function bootIntegrations(
         const allocatedNs = await host.register({
           namespace: spec.namespace,
           client,
-          connection: hostConnection(spec),
+          connection: spec.connection,
           // Phase 3 tool allowlist still applies — McpHost filters
           // tools/list before exposing them to the agent.
           allowedTools: spec.toolAllowlist,
@@ -1872,9 +1842,7 @@ export async function runConnectOnce(
     // is mandatory here — its initial payload is a placeholder session with an
     // empty value; the real session is what `runConnectLogin` captures via
     // `setSessionOutputs` on this same source.
-    // No `connectionId`: a connect run is MINTING the credential that becomes a
-    // connection, so there is no row to name. The platform answers this call
-    // from its grant-authorised branch, which never reads the query.
+    // No `connectionId`: a connect run MINTS the credential that becomes one.
     const source = createIntegrationCredentialsSource({
       integrationId: spec.integrationId,
       platformApiUrl: bundleFetchOpts.platformApiUrl,

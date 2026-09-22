@@ -161,7 +161,6 @@ describe("/api/integrations/:packageId admin surface", () => {
     status: string;
     resolved_connection_ids: string[];
     resolved_missing_scopes: string[];
-    resolved_owned_by_actor: boolean;
     admin_pinned_connection_ids: string[];
     member_pinned_connection_ids: string[];
     org_default_connection_ids: string[];
@@ -197,7 +196,6 @@ describe("/api/integrations/:packageId admin surface", () => {
       expect(body).toHaveProperty("status");
       expect(body).toHaveProperty("resolved_connection_ids");
       expect(body).toHaveProperty("resolved_missing_scopes");
-      expect(body).toHaveProperty("resolved_owned_by_actor");
       expect(body).toHaveProperty("admin_pinned_connection_ids");
       expect(body).toHaveProperty("member_pinned_connection_ids");
       expect(body).toHaveProperty("org_default_connection_ids");
@@ -209,7 +207,6 @@ describe("/api/integrations/:packageId admin surface", () => {
       // resolver picks it auto → status="auto", resolved=owned connection.
       expect(body.status).toBe("auto");
       expect(body.resolved_connection_ids).toEqual([connId]);
-      expect(body.resolved_owned_by_actor).toBe(true);
     });
 
     it("returns 'none' status when actor has no accessible connection", async () => {

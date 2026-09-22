@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run (10). Enforced at every WRITE (pins, org defaults, run and schedule
   overrides), never in the resolver: the cascade only echoes a set a write
   already validated, and the fallback produces at most one.
+- **New export `normalizeConnectionIds` (`@appstrate/core/integration`)** —
+  folds a caller-supplied connection-id set onto one representation (lowercased,
+  caller's order kept) and answers `null` when an id repeats. The one rule the
+  launch overrides and the pin/org-default writes share: `z.uuid()` accepts
+  `A1B2…` while Postgres returns `a1b2…`, and the resolver looks a pick up in a
+  Map keyed on what the database returned.
 - **New export `labelsSharedBy` (`@appstrate/core/integration`)** — given the
   rows of a connection set, the ones whose `label` another row of the set
   carries verbatim. The single definition of the collision rule: the API

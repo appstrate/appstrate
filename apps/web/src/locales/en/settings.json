@@ -409,7 +409,6 @@
   "connections.orgLabel": "Organization",
   "connections.editLabel": "Edit label",
   "connections.labelPlaceholder": "e.g. Personal, Work...",
-  "connections.unnamed": "(unlabeled)",
   "connections.sharedBadge": "Shared with org",
   "connections.shareWithOrgLabel": "Make this connection available to other users of this organization",
   "connections.reusedByLabel": "Reuse",

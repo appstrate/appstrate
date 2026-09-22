@@ -180,6 +180,28 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
     expect(row!.resolvedConnections![INTEGRATION]!.map((c) => c.connectionId)).toEqual([a, b]);
   });
 
+  it("resolves an UPPERCASE connection id — the schema folds it before the resolver", async () => {
+    // `z.uuid()` accepts either case; Postgres stores and returns the lower
+    // one, and the resolver keys its lookup on what the database returned. An
+    // unfolded id would 412 `override_connection_unavailable` instead.
+    await seedIntegration(INTEGRATION);
+    await seedDefaultModel();
+    const picked = await seedConnection(INTEGRATION);
+    await seedConnection(INTEGRATION);
+
+    const res = await post("/api/runs/inline", {
+      manifest: inlineManifest([INTEGRATION]),
+      prompt: "do the thing",
+      connection_overrides: { [INTEGRATION]: [picked.toUpperCase()] },
+    });
+
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { id: string };
+    const [row] = await db.select().from(runs).where(eq(runs.id, created.id));
+    expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [picked] });
+    expect(row!.resolvedConnections![INTEGRATION]!.map((c) => c.connectionId)).toEqual([picked]);
+  });
+
   it("refuses a two-connection bind whose labels collide (duplicate_connection_label)", async () => {
     await seedIntegration(INTEGRATION);
     await seedDefaultModel();

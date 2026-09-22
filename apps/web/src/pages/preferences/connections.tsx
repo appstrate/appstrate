@@ -44,26 +44,26 @@ function LabelEditor({
   saving,
   onSave,
 }: {
-  current: string | null;
+  current: string;
   saving: boolean;
   onSave: (next: string) => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(current ?? "");
+  const [value, setValue] = useState(current);
 
   if (!editing) {
     return (
       <button
         type="button"
         onClick={() => {
-          setValue(current ?? "");
+          setValue(current);
           setEditing(true);
         }}
         className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-xs"
         title={t("connections.editLabel")}
       >
-        <span>{current ?? t("connections.unnamed")}</span>
+        <span>{current}</span>
         <Pencil className="h-3 w-3" />
       </button>
     );
@@ -185,9 +185,7 @@ function ConnectionRow({
           {onUpdateLabel ? (
             <LabelEditor current={conn.label} saving={updating} onSave={onUpdateLabel} />
           ) : (
-            <span className="text-foreground text-sm font-medium">
-              {conn.label ?? conn.identity ?? t("connections.unnamed")}
-            </span>
+            <span className="text-foreground text-sm font-medium">{conn.label}</span>
           )}
           {statusBadge(t, conn)}
           {conn.shared_with_org && (

@@ -271,10 +271,12 @@ export interface IntegrationAgentResolution {
   status: IntegrationPickStatus;
   /** Connections the next run would bind; empty for none/must_choose/stale. */
   resolved_connection_ids: string[];
-  /** Missing scopes on the resolved connection (empty unless under-scoped). */
+  /**
+   * Missing scopes on the one connection an `insufficient_scopes` verdict
+   * names; empty otherwise. Not per bound connection — the resolver stops at
+   * the first member that fails its health check.
+   */
   resolved_missing_scopes: string[];
-  /** True when the resolved connection belongs to the calling actor. */
-  resolved_owned_by_actor: boolean;
   /** Admin pin connection set (status admin_locked), else empty. */
   admin_pinned_connection_ids: string[];
   /** The actor's own member pin connection set, else empty. */

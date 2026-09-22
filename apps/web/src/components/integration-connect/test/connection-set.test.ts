@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the set semantics every connection-composing surface shares.
- *
- * Both helpers encode a rule a component would otherwise re-derive four
- * times: the write cap (`toggleCapped`) and what "no explicit pick" means
- * (`displayedConnectionIds`). The second one is the load-bearing asymmetry —
- * a member pin with none still shows the cascade's answer, a schedule/run
- * override with none is *inherit* and must show nothing — so it is pinned
- * here rather than left to the picker's JSX.
+ * Set semantics shared by every connection-composing surface: the write cap,
+ * and the pin-vs-override asymmetry of "no explicit pick".
  */
 
 import { describe, it, expect } from "bun:test";

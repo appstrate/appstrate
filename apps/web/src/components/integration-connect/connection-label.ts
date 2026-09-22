@@ -1,24 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Display name for an integration connection.
- *
- * `label` is the single source of truth: it's set at creation to the extracted
- * identity (email/login from `extractTokenIdentity`) or, for identity-less
- * credentials (api_key/basic/custom/PAT), to "Connexion N", and the column is
- * NOT NULL — a run binding several connections of one integration addresses
- * each by its label.
- */
-
-interface ConnectionLabelFields {
-  label: string;
-}
-
-/** The connection's display name. */
-export function connectionDisplayLabel(c: ConnectionLabelFields): string {
-  return c.label;
-}
-
 interface ConnectionOwnerFields {
   owner_type: "user" | "end_user";
   owner_id: string;

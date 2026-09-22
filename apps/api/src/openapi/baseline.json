@@ -11983,7 +11983,7 @@
                                   "enum": ["integration"]
                                 },
                                 "label": {
-                                  "type": ["string", "null"]
+                                  "type": "string"
                                 },
                                 "scopes_granted": {
                                   "type": "array",
@@ -25873,7 +25873,6 @@
           "status",
           "resolved_connection_ids",
           "resolved_missing_scopes",
-          "resolved_owned_by_actor",
           "admin_pinned_connection_ids",
           "member_pinned_connection_ids",
           "org_default_connection_ids",
@@ -25906,10 +25905,8 @@
             "type": "array",
             "items": {
               "type": "string"
-            }
-          },
-          "resolved_owned_by_actor": {
-            "type": "boolean"
+            },
+            "description": "Missing scopes on the one connection an `insufficient_scopes` verdict names; empty otherwise."
           },
           "admin_pinned_connection_ids": {
             "type": "array",

@@ -39,7 +39,10 @@
 
 import { z } from "zod";
 import { collectOverridableDependencyIds } from "@appstrate/core/dependencies";
-import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import {
+  MAX_CONNECTIONS_PER_INTEGRATION,
+  normalizeConnectionIds,
+} from "@appstrate/core/integration";
 import { ApiError } from "./errors.ts";
 import { isValidDependencyOverride } from "../services/input-parser.ts";
 
@@ -61,11 +64,12 @@ import { isValidDependencyOverride } from "../services/input-parser.ts";
  *  - `.max(MAX_CONNECTIONS_PER_INTEGRATION)`: the cap is a write-time rule
  *    everywhere (pins, org defaults, overrides) — the resolver only echoes a
  *    set a write already validated.
- *  - no repeated id (case-insensitively — `z.uuid()` accepts either case and
- *    Postgres folds): the same connection twice is a set whose labels cannot
- *    be distinct, so it would 412 `duplicate_connection_label` at every fire.
- *    The same rule, same message, as `canonicalConnectionSet` applies at the
- *    pin and org-default writes.
+ *  - `normalizeConnectionIds` (core): lowercases every id and refuses a
+ *    repeat. The fold is what makes an uppercase id resolve at all — the
+ *    resolver keys its lookup on what Postgres returned — and a repeat is a
+ *    set whose labels cannot be distinct, so it would 412
+ *    `duplicate_connection_label` at every fire. Same helper as the pin and
+ *    org-default writes.
  *
  * It is also owned here rather than delegated to `parseRequestInput`:
  * `POST /api/runs/inline/validate` never calls the parser, so the guard would
@@ -78,8 +82,16 @@ export const connectionOverridesSchema = z.record(
     .array(z.string().min(1))
     .min(1)
     .max(MAX_CONNECTIONS_PER_INTEGRATION)
-    .refine((ids) => new Set(ids.map((id) => id.toLowerCase())).size === ids.length, {
-      message: "`connection_overrides` must not repeat a connection id",
+    .transform((ids, ctx) => {
+      const normalized = normalizeConnectionIds(ids);
+      if (normalized === null) {
+        ctx.addIssue({
+          code: "custom",
+          message: "`connection_overrides` must not repeat a connection id",
+        });
+        return z.NEVER;
+      }
+      return normalized;
     }),
 );
 

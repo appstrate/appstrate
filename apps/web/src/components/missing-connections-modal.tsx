@@ -328,13 +328,10 @@ function MissingRow({
 }
 
 /**
- * Remedy for `duplicate_connection_label`: the run bound several connections
- * whose labels collide, and the agent addresses each one BY its label, so no
- * re-pick fixes it — one of them has to be renamed. Lists the colliding rows,
- * with an inline rename field (the same `PATCH .../connections/{id}` the
- * integration page uses) on the ones the actor owns; renaming someone else's
- * shared connection is refused server-side, so a foreign row asks its owner
- * instead of offering a control that would 403.
+ * Remedy for `duplicate_connection_label`: the agent addresses each bound
+ * connection BY its label, so no re-pick fixes a collision — one has to be
+ * renamed. Renaming a foreign shared row is refused server-side, so those ask
+ * their owner instead of offering a control that would 403.
  */
 function DuplicateLabelFix({
   packageId,
@@ -343,14 +340,14 @@ function DuplicateLabelFix({
 }: {
   packageId: string;
   connections: { id: string; label: string; account_id: string; owned_by_actor: boolean }[];
-  /** Resolution candidates — the only surface carrying each owner's name. */
+  /** The only surface carrying each owner's name. */
   candidates?: IntegrationCandidate[];
 }) {
   const { t } = useTranslation(["agents"]);
   const rename = useUpdateIntegrationConnection();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  // Labels this modal has already written. Without them the field would snap
-  // back to the stale 412 payload and let the same PATCH be sent again.
+  // Without this the field snaps back to the stale 412 payload and lets the
+  // same PATCH be sent again.
   const [renamed, setRenamed] = useState<Record<string, string>>({});
 
   const ownerOf = (id: string): string =>

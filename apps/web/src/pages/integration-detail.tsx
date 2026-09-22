@@ -123,10 +123,7 @@ import { useAuth } from "../hooks/use-auth";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useSetPackageActive } from "../hooks/use-library";
 import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
-import {
-  connectionDisplayLabel,
-  isConnectionOwnedBy,
-} from "../components/integration-connect/connection-label";
+import { isConnectionOwnedBy } from "../components/integration-connect/connection-label";
 import { isOauthAuthConnectable } from "../components/integration-connect/connectable-auth-keys";
 import { ConnectionStatusBadge } from "../components/integration-connect/connection-status-badge";
 
@@ -842,7 +839,7 @@ function BlockUserConnectionsToggle({
  * information as a badge instead, where a suffix would fight the rename UI.
  */
 function connectionOptionLabel(c: IntegrationConnection): string {
-  const base = connectionDisplayLabel(c);
+  const base = c.label;
   return c.owner_name ? `${base} — ${c.owner_name}` : base;
 }
 
@@ -1272,11 +1269,11 @@ function ConnectionTableRow({
   const { user } = useAuth();
   const { can } = usePermissions();
   const [editing, setEditing] = useState(false);
-  const [draftLabel, setDraftLabel] = useState(connection.label ?? "");
+  const [draftLabel, setDraftLabel] = useState(connection.label);
   const [confirmDelete, setConfirmDelete] = useState(false);
   // `label` is the single source of truth (set at creation to the identity or
   // "Connexion N"); render it verbatim.
-  const name = connectionDisplayLabel(connection);
+  const name = connection.label;
   const isShared = connection.shared_with_org === true;
   // The list now returns org-shared connections owned by OTHER members, so
   // every per-row control has to be gated on the same rule the API enforces —
@@ -1289,19 +1286,19 @@ function ConnectionTableRow({
   const isOwn = isConnectionOwnedBy(connection, user?.id);
   const canRename = isOwn || can("integrations:configure");
   const startEdit = () => {
-    setDraftLabel(connection.label ?? "");
+    setDraftLabel(connection.label);
     setEditing(true);
   };
   const cancelEdit = () => {
     setEditing(false);
-    setDraftLabel(connection.label ?? "");
+    setDraftLabel(connection.label);
   };
   const submitLabel = () => {
     const next = draftLabel.trim();
     // The label is NOT NULL on the wire — a run binding several connections of
     // one integration addresses each by its label — so an empty field cancels
     // the edit rather than clearing the name.
-    if (next === "" || next === (connection.label ?? "")) {
+    if (next === "" || next === connection.label) {
       setEditing(false);
       return;
     }

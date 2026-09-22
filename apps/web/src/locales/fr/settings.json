@@ -409,7 +409,6 @@
   "connections.orgLabel": "Organisation",
   "connections.editLabel": "Modifier le libellé",
   "connections.labelPlaceholder": "Ex : Perso, Boulot...",
-  "connections.unnamed": "(sans libellé)",
   "connections.sharedBadge": "Partagée avec l'org",
   "connections.shareWithOrgLabel": "Rendre cette connexion utilisable par les autres utilisateurs de l'organisation",
   "connections.reusedByLabel": "Réutilisation",

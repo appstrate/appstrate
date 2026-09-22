@@ -1142,6 +1142,20 @@ export function validateAgentIntegrationScopes(
 export const MAX_CONNECTIONS_PER_INTEGRATION = 10;
 
 /**
+ * Fold a bound connection set onto one representation: ids lowercased,
+ * caller's order kept. `null` when an id repeats — the same connection twice
+ * is a set whose labels cannot be distinct.
+ *
+ * The fold is load-bearing, not cosmetic: Zod's `z.uuid()` accepts `A1B2…`,
+ * Postgres stores and returns `a1b2…`, and the resolver looks a pick up in a
+ * Map keyed on what the database returned.
+ */
+export function normalizeConnectionIds(ids: readonly string[]): string[] | null {
+  const folded = ids.map((id) => id.toLowerCase());
+  return new Set(folded).size === folded.length ? folded : null;
+}
+
+/**
  * Rows whose `label` is shared verbatim with another row of the set. The
  * agent addresses each bound connection BY its label, so a shared one makes
  * the set unaddressable — this is the single definition of that collision,

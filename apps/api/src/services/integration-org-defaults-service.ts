@@ -8,14 +8,10 @@
  * agent that consumes the integration, instead of one `integration_pins`
  * set per agent. `enforce` discriminates strength (see the table doc in
  * `packages/db/src/schema/integration-org-defaults.ts` and the resolver
- * cascade in `integration-connection-resolver.ts`); the N rows of one
- * default share it by construction, because a write replaces the whole set.
+ * cascade in `integration-connection-resolver.ts`).
  *
  * Same target validation as admin pins (`validatePinTarget` with
- * `requireShared`), applied to EVERY member: each connection must exist,
- * belong to this space, reference this integration, and be
- * `sharedWithOrg = true` — an admin can't coerce a member's personal
- * connection.
+ * `requireShared`), applied to EVERY member.
  */
 
 import { and, eq, sql } from "drizzle-orm";
@@ -32,7 +28,6 @@ import {
 /** Identical wire shape to {@link IntegrationOrgDefault}; aliased for the canonical pattern (cf. `PinSummary`). */
 type OrgDefaultSummary = IntegrationOrgDefault;
 
-/** One space's default for one integration, as the resolver's layers 2 and 6 read it. */
 export interface OrgDefaultPick {
   connectionIds: string[];
   enforce: boolean;
@@ -74,10 +69,6 @@ export async function getOrgDefault(
   return {
     integration_package_id: integrationId,
     connection_ids: rows.map((r) => r.connectionId),
-    // Display hints derived from the set's first row: a set whose members sit
-    // on different auths is legal (a PAT and an OAuth account of the same
-    // provider), and the surface that needs per-connection auth reads the
-    // connection list, not this summary.
     auth_key: first.authKey,
     enforce: first.enforce,
     createdAt: first.createdAt.toISOString(),
@@ -88,10 +79,6 @@ export async function getOrgDefault(
 /**
  * Resolver-facing map for one space: integrationId → {connectionIds,
  * enforce}. Loaded alongside pins in `resolveConnectionsForRun`.
- *
- * Ordered by `connection_id` for the same reason the pin readers are: the N
- * rows of one default are written in one transaction under one timestamp, so
- * only the id gives a stable order.
  */
 export async function listOrgDefaultsForResolver(
   spaceId: string,
@@ -115,18 +102,13 @@ export async function listOrgDefaultsForResolver(
 }
 
 /**
- * Replace the org default set for (space, integration).
- *
- * Delete-then-insert inside ONE transaction rather than a per-row upsert: the
- * write carries the whole set, so a member the caller dropped has to disappear
- * in the same statement that adds the new ones — a partial set is a different
- * governance decision from the one the admin made.
+ * Replace the org default set. Delete-then-insert in ONE transaction: a member
+ * the caller dropped must disappear with the write that adds the new ones.
  */
 export async function upsertOrgDefault(
   scope: SpaceScope,
   integrationId: string,
   input: UpsertOrgDefaultInput,
-  /** Test-only seam — same shape and same purpose as `upsertIntegrationPin`'s. */
   opts?: { onBeforeCommit?: () => Promise<void> },
 ): Promise<OrgDefaultSummary> {
   const connectionIds = canonicalConnectionSet(input.connectionIds, "connection_ids");
@@ -140,10 +122,8 @@ export async function upsertOrgDefault(
   const now = new Date();
   const lockKey = `iod_set:${scope.spaceId}:${integrationId}`;
   await db.transaction(async (tx) => {
-    // Serialize the whole set write per (space, integration) — see the same
-    // lock in `integration-pins-service.ts`. Without it two concurrent PUTs
-    // leave the union of their sets behind, past the cap and, worse, with the
-    // two `enforce` values mixed across rows the resolver reads as one.
+    // Without it two concurrent PUTs leave the union of their sets behind,
+    // with both `enforce` values mixed across rows the resolver reads as one.
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
     await tx
       .delete(integrationOrgDefaults)
@@ -164,7 +144,6 @@ export async function upsertOrgDefault(
         updatedAt: now,
       })),
     );
-    // Test-only seam — see `opts.onBeforeCommit` on the signature above.
     if (opts?.onBeforeCommit) await opts.onBeforeCommit();
   });
 
