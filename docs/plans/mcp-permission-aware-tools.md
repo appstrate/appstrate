@@ -134,7 +134,10 @@ SDK refuses with "Unknown tool" before any handler runs, and each of those
 branches was unreachable by construction. Their telemetry goes with them — the
 `"denied"` member of `McpInvokeOutcome` and the `mcp.operation.denied` audit
 action are removed. A refusal is the route guard's own audit, once (RBAC spec
-§4.3), which is the rule this plan started from.
+§4.3), which is the rule this plan started from. The accepted gap: a client
+calling a tool it was never declared — a stale tool list held across an upgrade
+— gets `-32602 Unknown tool` and leaves no audit row, since nothing was
+dispatched and no privilege was exercised.
 
 ### Search, describe, invoke
 

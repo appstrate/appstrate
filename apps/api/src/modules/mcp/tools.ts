@@ -105,8 +105,11 @@ export interface McpToolEvent {
   tool: McpToolName;
   /** Wall-clock duration of the handler, milliseconds. */
   durationMs: number;
-  /** `search_operations`: number of matches returned. */
-  resultCount?: number;
+  /**
+   * Rows the caller is SHOWN: `search_operations` granted matches after
+   * `limit`, `list_files` projected rows. Not how many matched.
+   */
+  shownCount?: number;
   /** `search_operations`: matches withheld for lack of permission. */
   deniedCount?: number;
   /** `invoke_operation`: which operation, its method/path, and the outcome. */
@@ -398,7 +401,7 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
     emit(ctx, {
       tool: "search_operations",
       durationMs: performance.now() - start,
-      resultCount: shown.length,
+      shownCount: shown.length,
       deniedCount: denied.length,
     });
 
@@ -1280,7 +1283,7 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
     emit(ctx, {
       tool: "list_files",
       durationMs: performance.now() - start,
-      resultCount: files.length,
+      shownCount: files.length,
     });
     return textResult({ files, has_more: body?.hasMore === true });
   };

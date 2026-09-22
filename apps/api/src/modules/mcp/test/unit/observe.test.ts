@@ -51,14 +51,14 @@ function makeTools(permissions: string[], status = 200) {
 describe("observe — search_operations", () => {
   beforeEach(() => resetCatalog());
 
-  it("emits a search event carrying the result count and a duration", async () => {
+  it("emits a search event carrying the shown count and a duration", async () => {
     const { byName, events } = makeTools(["mcp:read"]);
     await byName.get("search_operations")!.handler({ query: "agent", limit: 3 }, noExtra);
     expect(events.length).toBe(1);
     const e = events[0]!;
     expect(e.tool).toBe("search_operations");
-    expect(typeof e.resultCount).toBe("number");
-    expect(e.resultCount).toBeLessThanOrEqual(3);
+    expect(typeof e.shownCount).toBe("number");
+    expect(e.shownCount).toBeLessThanOrEqual(3);
     expect(typeof e.durationMs).toBe("number");
     expect(e.durationMs).toBeGreaterThanOrEqual(0);
     // How often a caller's role is what stood between it and a match — the
@@ -67,10 +67,10 @@ describe("observe — search_operations", () => {
     expect(e.deniedCount).toBeGreaterThan(0);
   });
 
-  it("reports a zero result count for a no-match query (search hit-rate signal)", async () => {
+  it("reports a zero shown count for a no-match query (search hit-rate signal)", async () => {
     const { byName, events } = makeTools(["mcp:read"]);
     await byName.get("search_operations")!.handler({ query: "zzznotarealthing_xyzzy" }, noExtra);
-    expect(events[0]!.resultCount).toBe(0);
+    expect(events[0]!.shownCount).toBe(0);
     // Nothing matched, so nothing was denied either — the two counters move
     // independently.
     expect(events[0]!.deniedCount).toBe(0);

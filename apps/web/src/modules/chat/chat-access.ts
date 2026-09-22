@@ -83,6 +83,9 @@ const CHAT_CAPABILITIES: readonly ChatCapability[] = [
     // Browsing (`list_files`), not reading: `read_file` applies the file ACL,
     // not `files:read`, so a "read your files" row would deny what is allowed.
     // `mcp:read` alone reaches it — this is not an `invoke_operation` call.
+    // `list_files` is declared when the `listFiles` operation's own guard is
+    // granted (`buildMcpTools`, apps/api/src/modules/mcp/tools.ts); that guard
+    // is `files:read` today, and this row tracks it.
     id: "browseFiles",
     labelKey: "access.capability.browseFiles",
     held: (ctx) => ctx.can("mcp:read") && ctx.can("files:read"),

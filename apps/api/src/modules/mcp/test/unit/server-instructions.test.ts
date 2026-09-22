@@ -123,6 +123,39 @@ describe("MCP server instructions — run guidance", () => {
     }
   });
 
+  // Same rule, applied inside a bullet rather than to a whole paragraph: an act
+  // that needs `invoke_operation` is absent for a caller who was never declared
+  // that tool, even when the bullet around it survives.
+  const READ_ONLY = new Set(["mcp:read"]);
+  const INVOKER = new Set(["mcp:read", "mcp:invoke"]);
+
+  it("withholds the invoke-only acts from a caller who can only read", () => {
+    const readOnly = prose(READ_ONLY);
+    // `query: { limit, offset }` is `invoke_operation`'s argument envelope and
+    // `GET /api/integrations` is an operation to call — neither is reachable.
+    expect(readOnly).not.toContain("query: { limit, offset }");
+    expect(readOnly).not.toContain("GET /api/integrations");
+    // The control: the bullets around them, and the section holding both, stay
+    // — this is a targeted removal, not a collapsed prompt.
+    expect(readOnly).toContain("Integration preference");
+    expect(readOnly).toContain("## Beyond the per-operation schemas");
+  });
+
+  it("teaches both to a caller holding `mcp:invoke`", () => {
+    const invoker = prose(INVOKER);
+    expect(invoker).toContain("query: { limit, offset }");
+    expect(invoker).toContain("GET /api/integrations");
+  });
+
+  it("promises a conflict report only where importing is possible", () => {
+    // The sentence tells the model what to do INSTEAD of importing; without the
+    // tool there is no mutation to be talked out of.
+    expect(buildServerInstructions(READ_ONLY, true, false)).not.toContain("non-importable");
+    expect(buildServerInstructions(INVOKER, true, true)).toContain("non-importable");
+    // True of validation on its own, so it is written for every caller.
+    expect(prose(READ_ONLY)).toContain("Archive bytes stay server-side throughout.");
+  });
+
   it("keeps the integration-preference bullet for both — it stands on its own", () => {
     // The negative control for the case above: the run prose disappearing is a
     // targeted removal, not the whole "Beyond the per-operation schemas"

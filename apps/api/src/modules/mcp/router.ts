@@ -209,7 +209,7 @@ export function buildServerInstructions(
     ? "then call describe_operation for its input schema and invoke_operation to run it"
     : "then call describe_operation for what it does and the shape of its input";
   const packageImportGuidance = packageImportAvailable
-    ? "Call `import_package_file` only when validation returns BOTH `valid: true` AND `importable: true`, and the user asked to add the package."
+    ? " Call `import_package_file` only when validation returns BOTH `valid: true` AND `importable: true`, and the user asked to add the package. If conflicts make it non-importable, report them instead of attempting a doomed mutation."
     : "";
   const inlineShortcut = inline
     ? " For an inline run, pass a PARTIAL canonical AFPS `manifest`: normally set a concise task-specific `display_name` plus the dependencies/configuration needed for the task. The platform derives `name` and defaults omitted boilerplate, `runtime_tools` (log, output, publish_file), and an open object output schema. Every provided field replaces its default exactly; arrays and nested objects are never merged, so `runtime_tools: []` stays empty. You may override every field with a complete deterministic manifest; a strict `output.schema` requires an explicit runtime tool selection containing `output`. The chat shows ONLY lines the run emits via `log`, so instruct it in the top-level `prompt` to log meaningful steps whenever that tool is selected."
@@ -219,10 +219,22 @@ export function buildServerInstructions(
   const packageFiles = inline
     ? "MCP package authoring — call `get_runtime_capabilities` first, have one inline run create the manifest + executable files, package them from the package root with the available shell tools (for example `python3 -m zipfile -c package.afps manifest.json <entry-point> ...`), then publish that archive with `publish_file` and pass the returned `appfile://` URI to `validate_package_file`."
     : "MCP package files — to check an existing archive, pass its `appfile://` URI to `validate_package_file`.";
+  // Both fragments below hand the model an act it cannot perform without
+  // `invoke_operation`: the `query` envelope is that tool's argument shape, and
+  // `GET /api/integrations` is an operation to call. The preference ORDER they
+  // sit beside names no tool, so it is written for every caller.
+  const heavyListBullet = invokes
+    ? `- Heavy list responses — list operations paginate with \`query: { limit, offset }\`, and some (e.g. \`listIntegrations\`) also take a \`fields\` selector (comma-separated projection; describe_operation shows it when available). On heavy lists request only the fields you need — e.g. \`fields: "id,active,block_user_connections"\` on \`listIntegrations\` — and read a single row's detail operation when you need its full \`manifest\`.
+`
+    : "";
+  const integrationListing = invokes
+    ? ` \`GET /api/integrations\` lists every integration with an \`active\` flag (activated for this space) and \`block_user_connections\`; use it to tell tiers 2 and 3 apart. Do not silently activate or connect an integration the caller did not ask for — surface that it would be needed and let them decide.`
+    : "";
   // Everything below is about getting a run off the ground, so it is absent
   // together for a caller who cannot launch one: the two run sentences of the
   // opening paragraph, the asynchronous-run pair, and the readiness/connect
-  // guidance. The integration-preference bullet stands on its own and stays.
+  // guidance. Of the integration-preference bullet only its first sentence —
+  // the preference order itself, which names no tool — stands on its own.
   const runIntro = runs
     ? ` When you need a newly launched run's progress or result, prefer the run_and_wait tool directly; it already owns launch plus waiting and declares its own schema. For intentionally fire-and-forget runs, use ${runOps} through describe_operation and invoke_operation.`
     : "";
@@ -245,16 +257,15 @@ Organization → Spaces (id \`spc_…\`, one default) → Agents → Runs. End-u
 This MCP server is scoped to ONE organization — the one this endpoint serves — and every operation runs against it plus its default space; you never send those ids per call. To act in another organization, connect that organization's own MCP server (its URL carries its id). Within the org, operations use the default space unless an operation takes an explicit space id.
 
 ## Beyond the per-operation schemas
-${runBullets}- ${[packageFiles, packageImportGuidance, "If conflicts make it non-importable, report them instead of attempting a doomed mutation. Archive bytes stay server-side throughout."].filter(Boolean).join(" ")}
+${runBullets}- ${packageFiles}${packageImportGuidance} Archive bytes stay server-side throughout.
 - Streaming/SSE operations (live logs, realtime) cannot be called through this server; fetch logs or poll instead.
 - Wire JSON is snake_case, except universal id/timestamp fields (id, createdAt…) which stay camelCase.
-- Heavy list responses — list operations paginate with \`query: { limit, offset }\`, and some (e.g. \`listIntegrations\`) also take a \`fields\` selector (comma-separated projection; describe_operation shows it when available). On heavy lists request only the fields you need — e.g. \`fields: "id,active,block_user_connections"\` on \`listIntegrations\` — and read a single row's detail operation when you need its full \`manifest\`.
-${
-  authors
-    ? `- Integration tool selection — an agent's \`integrations_configuration[id].tools\` resolves as: omitted/undefined → inherits the integration's \`default_tools\`; \`[]\` → no tools (overrides the default); \`["a","b"]\` → exactly those tools; \`"*"\` → all upstream tools (requires \`allow_undeclared_tools\`). A declared integration whose selection resolves to NOTHING is rejected at publish and at import (\`no_tools_selected\` on \`integrations_configuration.<id>.tools\`) and aborts the run at container boot — so never leave an integration declared with an empty effective selection: either select at least one tool, or remove it from \`dependencies.integrations\`. An integration's \`default_tools\` and full \`tool_catalog\` are on its detail operation (\`GET /api/integrations/{packageId}\`); read it before selecting tools so you pick real tool names and know what the default already covers.
+${heavyListBullet}${
+    authors
+      ? `- Integration tool selection — an agent's \`integrations_configuration[id].tools\` resolves as: omitted/undefined → inherits the integration's \`default_tools\`; \`[]\` → no tools (overrides the default); \`["a","b"]\` → exactly those tools; \`"*"\` → all upstream tools (requires \`allow_undeclared_tools\`). A declared integration whose selection resolves to NOTHING is rejected at publish and at import (\`no_tools_selected\` on \`integrations_configuration.<id>.tools\`) and aborts the run at container boot — so never leave an integration declared with an empty effective selection: either select at least one tool, or remove it from \`dependencies.integrations\`. An integration's \`default_tools\` and full \`tool_catalog\` are on its detail operation (\`GET /api/integrations/{packageId}\`); read it before selecting tools so you pick real tool names and know what the default already covers.
 `
-    : ""
-}- Integration preference — when a task needs an integration, prefer in order: (1) one the caller has already connected (listed in your caller context / get_me — connecting it was an explicit choice), then (2) one that is activated for this space but not yet connected, then (3) one that is neither. \`GET /api/integrations\` lists every integration with an \`active\` flag (activated for this space) and \`block_user_connections\`; use it to tell tiers 2 and 3 apart. Do not silently activate or connect an integration the caller did not ask for — surface that it would be needed and let them decide.${connectBullets}
+      : ""
+  }- Integration preference — when a task needs an integration, prefer in order: (1) one the caller has already connected (listed in your caller context / get_me — connecting it was an explicit choice), then (2) one that is activated for this space but not yet connected, then (3) one that is neither.${integrationListing}${connectBullets}
 
 ${OPERATION_INDEX_HEADING}
 ${buildOperationIndex(permissions)}`;
@@ -495,7 +506,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
         path: event.path,
         status: event.status,
         outcome: event.outcome,
-        resultCount: event.resultCount,
+        shownCount: event.shownCount,
         deniedCount: event.deniedCount,
       });
       if (event.tool === "invoke_operation" && event.outcome === "invoked") {
