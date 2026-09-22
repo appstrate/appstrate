@@ -126,7 +126,7 @@ export function SkillsPicker({ sessionId }: { sessionId: string }) {
         sideOffset={6}
         collisionPadding={12}
         aria-label={t("skills.title")}
-        className="flex max-h-[min(26rem,calc(100dvh-8rem))] w-[min(23rem,calc(100vw-1.5rem))] flex-col p-3"
+        className="flex max-h-[min(26rem,var(--radix-popover-content-available-height))] w-[min(23rem,calc(100vw-1.5rem))] flex-col p-3"
       >
         <p className="shrink-0 text-sm font-medium">{t("skills.title")}</p>
 
@@ -147,9 +147,13 @@ export function SkillsPicker({ sessionId }: { sessionId: string }) {
                 <RadioGroupItem value={mode} id={`skills-mode-${mode}`} className="mt-0.5" />
                 <label htmlFor={`skills-mode-${mode}`} className="min-w-0 cursor-pointer">
                   <span className="block text-xs font-medium">{t(MODE_KEYS[mode].label)}</span>
-                  <span className="text-muted-foreground block text-[0.7rem] leading-snug">
-                    {t(MODE_KEYS[mode].hint)}
-                  </span>
+                  {/* One hint at a time — the selected mode's — so the list below
+                      keeps the room; the other two are one click away. */}
+                  {mode === discovery && (
+                    <span className="text-muted-foreground block text-[0.7rem] leading-snug">
+                      {t(MODE_KEYS[mode].hint)}
+                    </span>
+                  )}
                 </label>
               </div>
             ))}
