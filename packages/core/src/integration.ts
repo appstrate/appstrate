@@ -1134,11 +1134,21 @@ export function validateAgentIntegrationScopes(
 // ────────────────────────────────────────────────────────────────────
 
 /**
+ * Hard cap on the connections one declared integration may bind in a single
+ * run. Enforced at every WRITE (pins, org defaults, run and schedule
+ * overrides) rather than in the resolver: the cascade only ever echoes a set
+ * a write already validated, and the fallback produces at most one.
+ */
+export const MAX_CONNECTIONS_PER_INTEGRATION = 10;
+
+/**
  * Per-integration connection picks. Used on `runs.connection_overrides`
  * (caller's run-time choice) and `package_schedules.connection_overrides`
- * (frozen at schedule create). Shape: `{ "@scope/integration": "<connection_id>" }`.
+ * (frozen at schedule create). Shape:
+ * `{ "@scope/integration": ["<connection_id>", ...] }`, 1..
+ * {@link MAX_CONNECTIONS_PER_INTEGRATION} entries per key.
  */
-export type ConnectionOverrides = Record<string, string>;
+export type ConnectionOverrides = Record<string, string[]>;
 
 /** Where a resolved connection came from — drives the audit + UI badge. */
 export type ConnectionResolutionSource =
@@ -1166,9 +1176,12 @@ export interface ResolvedConnection {
 
 /**
  * Snapshot of the resolver output for one run. Persisted on
- * `runs.resolved_connections`. Shape: `{ "@scope/integration": ResolvedConnection }`.
+ * `runs.resolved_connections`. Shape:
+ * `{ "@scope/integration": ResolvedConnection[] }` — one entry per bound
+ * connection, 1..{@link MAX_CONNECTIONS_PER_INTEGRATION} per declared
+ * integration.
  */
-export type ResolvedConnectionMap = Record<string, ResolvedConnection>;
+export type ResolvedConnectionMap = Record<string, ResolvedConnection[]>;
 
 /** Error codes the resolver emits per integration. */
 export type ConnectionResolutionErrorCode =
@@ -1177,11 +1190,13 @@ export type ConnectionResolutionErrorCode =
   | "pinned_connection_unavailable"
   | "override_connection_unavailable"
   | "must_choose_connection"
+  | "duplicate_connection_label"
   | "insufficient_scopes"
   | "auth_key_mismatch";
 
 /**
- * One connection the caller may pick from on `must_choose_connection`.
+ * One connection carried by a connection-set error (`must_choose_connection`,
+ * `duplicate_connection_label`).
  *
  * Carries what it takes to TELL the candidates apart, not just to name them.
  * An id alone is opaque: a model reading the 412 has to fetch the connection
@@ -1206,7 +1221,12 @@ export interface ConnectionCandidate {
 export interface ConnectionResolutionError {
   integrationId: string;
   code: ConnectionResolutionErrorCode;
-  /** The connections the caller may pick from when `code === "must_choose_connection"`. */
+  /**
+   * On `must_choose_connection`, the connections the caller may pick from.
+   * On `duplicate_connection_label`, the bound connections that collide on a
+   * label — the label is the agent's handle for a connection, so a set whose
+   * labels are not distinct is unaddressable and the caller must rename.
+   */
   candidateConnections?: ConnectionCandidate[];
   /**
    * The connection the error is bound to:

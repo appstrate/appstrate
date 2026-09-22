@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New export `ConnectionCandidate` (`@appstrate/core/integration`)** — one
   connection the caller may pick from on `must_choose_connection`, carrying
   `id`, `label`, `accountId` and `ownedByActor`.
+- **New export `MAX_CONNECTIONS_PER_INTEGRATION` (`@appstrate/core/integration`)** —
+  the cap on how many connections one declared integration may bind in a single
+  run (10). Enforced at every WRITE (pins, org defaults, run and schedule
+  overrides), never in the resolver: the cascade only echoes a set a write
+  already validated, and the fallback produces at most one.
 - **New export `canComposeInline` (`@appstrate/core/permissions`)** — whether
   a caller may compose an inline agent: `agents:write` and `agents:run`. Takes a
   membership test, so a `Set` or an array both fit.
@@ -21,6 +26,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   close carries neither.
 
 ### Changed
+
+- **BREAKING: an integration binds a SET of connections, not one**
+  (`@appstrate/core/integration`, `@appstrate/core/sidecar-types`). One agent
+  declaration, one or more connections — two Gmail accounts, three SSH hosts —
+  with the same tools, so the shape had to move from a pick to a set:
+  - `ConnectionOverrides` is `Record<string, string[]>` (was
+    `Record<string, string>`), 1..`MAX_CONNECTIONS_PER_INTEGRATION` ids per key;
+  - `ResolvedConnectionMap` is `Record<string, ResolvedConnection[]>` (was
+    `Record<string, ResolvedConnection>`); `ResolvedConnection` itself is
+    unchanged;
+  - `IntegrationSpawnSpec` gains a REQUIRED
+    `connection: { id, label, accountId }`. N connections of one integration
+    emit N specs sharing `integrationId`, `namespace` and `toolAllowlist`;
+    `connection` is what tells them apart. Always present — a single connection
+    is the degenerate case of a set, not a separate mode;
+  - `IntegrationBootReport.spawned[]` gains a required `connectionLabel` and
+    `failed[]` an optional one (a failure can precede connection binding), since
+    entries no longer differ by `integrationId` + `namespace` alone.
+
+  There is deliberately no `string | string[]` union and no "fall back to the
+  first connection": the array is the only accepted shape, and a value left in
+  the old one fails loudly. Wrap each existing value in an array. On the wire,
+  `connection_overrides` / `resolved_connections` carry arrays, and the pin and
+  org-default bodies take `connection_ids` where they took `connection_id`.
+
+- **BREAKING: `ConnectionResolutionErrorCode` gains `duplicate_connection_label`**
+  (`@appstrate/core/integration`) — a 412 raised when the connections bound to
+  one integration do not carry distinct labels. The label is the handle the
+  agent names a connection by, so a colliding set is unaddressable. It carries
+  `candidateConnections` (the rows sharing a label), the same field
+  `must_choose_connection` uses. Exhaustive `switch`es over the code must handle
+  it.
 
 - **BREAKING: `ConnectionResolutionError.candidateConnectionIds` is replaced by
   `candidateConnections`** (`@appstrate/core/integration`), an array of

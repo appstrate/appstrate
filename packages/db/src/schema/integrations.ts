@@ -113,8 +113,11 @@ export const integrationConnections = pgTable(
     // (email/login) when available, else "Connexion N" (N = existing connection
     // count + 1 in the same (space, integration, owner) group). Stable for the
     // row's lifetime; user-editable. The UI shows it verbatim — a single source
-    // of truth, no render-time fallback gymnastics.
-    label: text("label"),
+    // of truth, no render-time fallback gymnastics. NOT NULL because the
+    // sidecar keys its `connection` tool parameter (a required string enum) on
+    // this value, so a run binding several connections cannot address a
+    // nameless one.
+    label: text("label").notNull(),
     // Owner-set opt-in: when true, this connection is selectable by
     // any actor of the same space during the run-time fallback
     // resolution (see integration-connection-resolver). Off by default

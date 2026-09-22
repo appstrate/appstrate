@@ -249,6 +249,16 @@ export interface IntegrationSpawnSpec {
   /** McpHost namespace — tool names are prefixed with `{namespace}__`. */
   namespace: string;
   /**
+   * The ONE connection this spec is spawned for. A run binding N connections
+   * of the same integration emits N specs sharing `integrationId`, `namespace`
+   * and `toolAllowlist`; `connection` is what tells them apart, and the
+   * `label` is the agent-facing handle the sidecar's `connection` tool
+   * parameter selects on. Always present — a single connection is the
+   * degenerate case of a set, not a separate mode, so the sidecar never has a
+   * "which connection?" branch.
+   */
+  connection: { id: string; label: string; accountId: string | null };
+  /**
    * AFPS source kind — peer discriminant for the sidecar's spawn-mode
    * dispatch. Mirrors `manifest.source.kind` from the integration manifest
    * and is the authoritative selector for the local/remote/api branches in
@@ -767,7 +777,8 @@ export interface IntegrationBootReport {
   /** Runtime adapter that ran the integrations (`"process"` | `"docker"` | `"none"`). */
   adapter: string;
   /**
-   * Per-integration success — namespace + count of tools surfaced to the agent.
+   * Per-connection success — one entry per spawn spec, so an integration
+   * bound to N connections contributes N entries.
    * `vendored` mirrors the AFPS §7.1 `source.server.vendored` build-provenance
    * signal forwarded from `IntegrationSpawnSpec.manifest.server.vendored` (set
    * only for local sources; omitted otherwise).
@@ -775,15 +786,29 @@ export interface IntegrationBootReport {
   spawned: Array<{
     integrationId: string;
     namespace: string;
+    /**
+     * Which connection this entry booted: N entries can share
+     * `integrationId` + `namespace`, so the label is the only thing that
+     * makes a boot line — and the breadcrumb trail built from it — legible.
+     */
+    connectionLabel: string;
     toolCount: number;
     vendored?: boolean;
   }>;
   /**
-   * Per-integration failure — the error that prevented spawn/connect/register,
+   * Per-connection failure — the error that prevented spawn/connect/register,
    * OR the boot-contract violation of registering zero callable tools (a
    * declared integration that exposes nothing did not launch as declared).
    */
-  failed: Array<{ integrationId: string; error: string }>;
+  failed: Array<{
+    integrationId: string;
+    /**
+     * Optional because a failure can precede connection binding (a spec that
+     * never parsed has no label to report).
+     */
+    connectionLabel?: string;
+    error: string;
+  }>;
   /** Ordered per-phase breadcrumbs for the run-log boot trail. */
   breadcrumbs: IntegrationBootBreadcrumb[];
 }

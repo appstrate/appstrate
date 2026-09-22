@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-(space, agent, integration, user?) connection pin.
+ * Per-(space, agent, integration, user?) connection pin. A pin is a SET of
+ * connections: N rows sharing (space, agent, integration, scope) are one pin
+ * binding N connections, which is why `connection_id` is part of the unique
+ * index below.
  *
  * Two scopes share this table, discriminated by `user_id`:
  *
@@ -10,31 +13,39 @@
  *     overridden by member pins, run/schedule overrides, or fallback.
  *
  *   - `user_id IS NOT NULL` — **member preference pin**. The member's
- *     persisted "for MY runs of this agent, use MY connection X" choice.
+ *     persisted "for MY runs of this agent, use MY connections X, Y" choice.
  *     Written via `/api/me/integration-pins/...` by the member themselves.
- *     Used to replace the ephemeral R5 localStorage pick with a record
- *     the resolver sees on every run.
  *
- * Resolver cascade (see `apps/api/src/services/integration-connection-resolver.ts`):
+ * Resolver cascade (see `apps/api/src/services/integration-connection-resolver.ts`).
+ * EVERY layer yields a SET of connections; the first non-empty set wins whole —
+ * sets are never merged across layers, so a member pin of two connections
+ * replaces an org default of three rather than adding to it:
  *
  *   1. admin pin (this table, `user_id IS NULL`)        ← force, all actors
- *   2. runs.connection_overrides                          (run-time pick)
- *   3. schedules.connection_overrides                     (frozen at schedule create)
- *   4. member pin (this table, `user_id = actor.id`)    ← preference, this actor
- *   5. fallback: actor's accessible connections
+ *   2. org default ENFORCE (integration_org_defaults)
+ *   3. runs.connection_overrides                          (run-time pick)
+ *   4. schedules.connection_overrides                     (frozen at schedule create)
+ *   5. member pin (this table, `user_id = actor.id`)    ← preference, this actor
+ *   6. org default SOFT (integration_org_defaults)
+ *   7. fallback: actor's accessible connections
  *      = own + (shared_with_org AND space match)
  *      → 1 match → auto, 0 → not_connected, N → must_choose
+ *      (the fallback NEVER auto-binds a set of N)
  *
- * A pin must reference a connection accessible to the actor at run time.
+ * Writes REPLACE the whole set in one transaction — `PUT` carries the complete
+ * set, `DELETE` clears it. There is no unitary add/remove endpoint, so a pin
+ * is never observed half-written.
+ *
+ * Every pinned connection must be accessible to the actor at run time.
  * For admin pins, validation lives in the pin service (admin can't pin
  * a member's personal connection — would let them coerce credentials by
  * sleight of hand). For member pins, validation also lives in the
  * service (member can only pin a connection they themselves can see).
  *
- * FK on connectionId is ON DELETE CASCADE: when the pinned connection
- * vanishes, the pin row disappears and the resolver naturally falls
- * through to the next layer. No half-broken pin pointing at a stale
- * UUID.
+ * FK on connectionId is ON DELETE CASCADE: when a pinned connection vanishes
+ * its row disappears and the set shrinks; when the last one goes the resolver
+ * naturally falls through to the next layer. No half-broken pin pointing at a
+ * stale UUID.
  */
 
 import { pgTable, text, uuid, timestamp, index, uniqueIndex } from "drizzle-orm/pg-core";
@@ -65,7 +76,7 @@ export const integrationPins = pgTable(
      * pick agents — see the table-level doc).
      */
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
-    /** The connection actors will be coerced to use. CASCADE on delete. */
+    /** One member of the pinned set. CASCADE on delete. */
     connectionId: uuid("connection_id")
       .notNull()
       .references(() => integrationConnections.id, { onDelete: "cascade" }),
@@ -85,16 +96,18 @@ export const integrationPins = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    // One row per (space, agent, integration, scope). The
-    // coalesce trick keeps the unique constraint usable for both scopes —
-    // empty-string sentinel on the NULL side avoids PostgreSQL's
-    // "NULLs distinct in unique" caveat. Admin and member pins can
-    // therefore coexist on the same (agent, integration).
+    // One row per (space, agent, integration, scope, CONNECTION): the pin is a
+    // set, so `connection_id` is what makes the members distinct while still
+    // forbidding the same connection twice in one set. The coalesce trick keeps
+    // the constraint usable for both scopes — empty-string sentinel on the NULL
+    // side avoids PostgreSQL's "NULLs distinct in unique" caveat. Admin and
+    // member pins can therefore coexist on the same (agent, integration).
     uniqueIndex("idx_integration_pins_unique").on(
       table.spaceId,
       table.packageId,
       table.integrationId,
       sql`coalesce(${table.userId}, '')`,
+      table.connectionId,
     ),
     // Resolver hot path: fetch all pins for (space, agent) in one round trip,
     // then partition by user_id at space level.
@@ -103,7 +116,7 @@ export const integrationPins = pgTable(
     // by the impact-list confirm modal on /connections destructive delete.
     index("idx_integration_pins_connection").on(table.connectionId),
     // Member-pin partial index: lookups filtering by `user_id` (member
-    // self-management endpoints + resolver layer 4) hit only the small
+    // self-management endpoints + resolver layer 5) hit only the small
     // member-scoped subset, not the admin-pin majority.
     index("idx_integration_pins_user")
       .on(table.userId)

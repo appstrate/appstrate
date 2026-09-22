@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-(space, integration) default connection — the org-wide baseline
- * the resolver uses for EVERY agent that consumes the integration, unless a
- * more specific layer overrides it.
+ * Per-(space, integration) default connection SET — the org-wide baseline the
+ * resolver uses for EVERY agent that consumes the integration, unless a more
+ * specific layer overrides it. N rows sharing (space, integration) are one
+ * default binding N connections, which is why `connection_id` is part of the
+ * unique index below.
  *
  * This is the cross-agent governance primitive that `integration_pins` is
- * not: a pin is keyed per `(agent, integration)`, so forcing one connection
- * across N agents meant N pin rows. An org default is keyed per
- * `(space, integration)` — one row covers every agent.
+ * not: a pin is keyed per `(agent, integration)`, so forcing a connection
+ * across N agents meant N pin rows per connection. An org default is keyed per
+ * `(space, integration)` — one set covers every agent.
  *
  * `enforce` discriminates the two governance strengths:
  *
@@ -22,7 +24,15 @@
  *     beating run/schedule overrides and member pins. A per-agent admin pin
  *     still wins (the agent-specific exception).
  *
- * Resolver cascade (see `apps/api/src/services/integration-connection-resolver.ts`):
+ * The N rows of one (space, integration) share a single `enforce` BY
+ * CONSTRUCTION: the service writes the whole set in one transaction, so the
+ * column can never disagree row to row and the resolver reads it off any
+ * member. Nothing in SQL enforces that, and nothing needs to — there is no
+ * write path that touches one row of a set.
+ *
+ * Resolver cascade (see `apps/api/src/services/integration-connection-resolver.ts`).
+ * EVERY layer yields a SET; the first non-empty set wins whole, sets are never
+ * merged across layers:
  *
  *   1. admin pin           (integration_pins, user_id IS NULL)   ← per-agent force
  *   2. org default ENFORCE (this table, enforce = true)          ← org-wide force
@@ -30,13 +40,17 @@
  *   4. schedules.connection_overrides
  *   5. member pin          (integration_pins, user_id = actor)   ← per-agent preference
  *   6. org default SOFT    (this table, enforce = false)         ← org-wide default
- *   7. fallback: actor's accessible connections (own + shared)
+ *   7. fallback: actor's accessible connections (own + shared);
+ *      1 → auto, 0 → not_connected, N → must_choose. Never auto-binds N.
  *
- * Same invariants as admin pins: the referenced connection MUST be
+ * Writes REPLACE the whole set in one transaction — `PUT` carries the complete
+ * set, `DELETE` clears it. There is no unitary add/remove endpoint.
+ *
+ * Same invariants as admin pins: every referenced connection MUST be
  * `shared_with_org = true` (validation in the org-defaults service — an
  * admin can't coerce a member's personal connection). FK on connectionId is
- * ON DELETE CASCADE: when the connection vanishes the default disappears and
- * the resolver falls through to the next layer.
+ * ON DELETE CASCADE: when a connection vanishes its row disappears and the set
+ * shrinks; when the last one goes the resolver falls through to the next layer.
  */
 
 import {
@@ -66,7 +80,7 @@ export const integrationOrgDefaults = pgTable(
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
     /**
-     * The connection every agent will use by default. Must be sharedWithOrg=true.
+     * One member of the default set every agent uses. Must be sharedWithOrg=true.
      *
      * The FK is declared in the table-config block below with an EXPLICIT name.
      * Drizzle's generated name for it —
@@ -76,7 +90,11 @@ export const integrationOrgDefaults = pgTable(
      * matters.
      */
     connectionId: uuid("connection_id").notNull(),
-    /** true = org-wide force (locks members); false = soft default (members can deviate). */
+    /**
+     * true = org-wide force (locks members); false = soft default (members can
+     * deviate). Uniform across the rows of one (space, integration) — see the
+     * table doc.
+     */
     enforce: boolean("enforce").notNull().default(false),
     /**
      * Admin who set the default.
@@ -91,8 +109,14 @@ export const integrationOrgDefaults = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    // One default per (space, integration).
-    uniqueIndex("idx_integration_org_defaults_unique").on(table.spaceId, table.integrationId),
+    // One row per (space, integration, CONNECTION): the default is a set, so
+    // `connection_id` distinguishes its members while still forbidding the same
+    // connection twice in one set.
+    uniqueIndex("idx_integration_org_defaults_unique").on(
+      table.spaceId,
+      table.integrationId,
+      table.connectionId,
+    ),
     // Resolver hot path: load all defaults for a space in one query.
     // Reverse lookup for the unshare / destructive-delete impact guard.
     index("idx_integration_org_defaults_connection").on(table.connectionId),
