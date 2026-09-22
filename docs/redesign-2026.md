@@ -1584,7 +1584,7 @@ response only ever carries the spaces the caller can enter.
 
 - **The first axis is possession, not provenance**, as a segmented control at
   the head of the rail — the way Studio / Chat head the navigation — rather
-  than a menu hiding one of two values. "Vos espaces" against
+  than a menu hiding one of two values. "Espaces" against
   "Découvrir" — what is already placed in a space you reach, against what you
   could still place. Provenance (the org's packages, Appstrate's) became a
   filter, which is what it is: an attribute of a package, not the question a
@@ -1628,6 +1628,36 @@ response only ever carries the spaces the caller can enter.
   withdraw an offer. Activating is deliberately not there — it is the switch in
   a named column, and a menu item could only ever mean "the space the app
   happens to be in".
+
+**There is no organization-wide share, and what that leaves for Découvrir**
+
+Every org package has exactly one home space — a database constraint
+(`packages_org_package_has_home`) — and reaches others only through an offer,
+space by space. A package is in a space for one of three reasons: its HOME, an
+OFFER, or because it is a SYSTEM package, readable everywhere. So Découvrir
+holds two things only: Appstrate packages switched on nowhere (mostly
+integrations — a system agent or skill is usable everywhere already), and, in a
+single space's view, CANDIDATES whose home grants the caller `share`. A package
+homed in a space the caller does not reach is invisible to them, by design.
+
+Two defects found by checking that, both fixed:
+
+- **Every `none` was read as an offer.** The wire says `none` for "no row in
+  this space", whatever put the package there; only `via: shared` + `none` is
+  an offer. A system integration nobody switched on is `none` too, so a real
+  instance (66 system integrations) would have counted dozens of fake offers
+  per space. `isPendingOffer` is the one predicate now, tested on the three
+  reasons.
+- **The catalogue was broken for anyone but an owner or admin.** It read
+  `GET /api/library`, which #1437 restricted to them. Members now read
+  `GET /api/spaces/{id}/library` for each space they belong to, merged into the
+  same shape (`lib/merge-space-libraries`) — the same screen, graded by the
+  rule the server applies. The lab could not show it, signing in as an owner:
+  its `/api/library` now answers 403 to a member, like the server.
+
+The lab also carried a package placed nowhere although homed in Default — a
+state the model forbids, written to give Découvrir a subject. It was the
+fixture that made a non-existent case look real.
 
 **What an activation leaves undone, said before it is done**
 

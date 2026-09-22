@@ -58,7 +58,11 @@ import { maySetPackageActive } from "../lib/package-permissions";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useRevokePackageShare } from "../hooks/use-package-shares";
 import { useAllIntegrations } from "../hooks/use-integrations";
-import { useLibrary, useSetPackageActive, type LibraryPackageItem } from "../hooks/use-library";
+import {
+  useCatalogueLibrary,
+  useSetPackageActive,
+  type LibraryPackageItem,
+} from "../hooks/use-library";
 import {
   cataloguePlacement,
   inPlacedTab,
@@ -147,7 +151,7 @@ export function OrgCatalogueModal({
   const spaceId = useCurrentSpaceId();
   const orgId = useCurrentOrgId();
   const { currentOrg } = useOrg();
-  const { data: library, isLoading, error } = useLibrary();
+  const { data: library, isLoading, error } = useCatalogueLibrary();
   const activate = useSetPackageActive();
   const list = useLocalListParams();
   // Each half has the form its job needs, and the reader does not choose it.
@@ -243,7 +247,7 @@ export function OrgCatalogueModal({
   // Integrations split by execution, as on their page: remote (API or hosted
   // MCP) or local (an MCP server run in the sandbox).
   const [execution, setExecution] = useState<IntegrationExecution>("remote");
-  const ofKind = (library?.packages[active] ?? []) as LibraryPackageItem[];
+  const ofKind: LibraryPackageItem[] = library?.packages[active] ?? [];
   const placementById = new Map(ofKind.map((item) => [item.id, placementOf(item)] as const));
   const spaceNameOf = (id: string) => spaces.find((space) => space.id === id)?.name ?? id;
   // The two halves of the first axis: what is already placed in a space this

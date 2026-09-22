@@ -12,6 +12,7 @@
 import type { PackageType } from "@appstrate/core/validation";
 import type { Scenario } from "./scenario";
 import * as f from "./fixtures";
+import { getRole } from "./role";
 import { projectDraftFiles } from "../lib/package-file-drafts";
 import type { PackageFileEntry, PackageFileWriteOperation } from "../lib/package-file-tree";
 
@@ -274,6 +275,53 @@ function list<T>(rows: T[], scenario: Scenario, heavy?: T[]): T[] {
   return rows;
 }
 
+/** The organization's map, with the activations the lab's lists made overlaid. */
+function libraryResponse() {
+  return {
+    status: 200,
+    body: {
+      ...f.library,
+      packages: Object.fromEntries(
+        Object.entries(f.library.packages).map(([type, rows]) => [
+          type,
+          rows.map((pkg) => ({
+            ...pkg,
+            // The overlay the lists use, expressed as PLACEMENTS: a package a
+            // catalogue activated in a space is placed there and running.
+            placements: f.library.spaces.flatMap((space) => {
+              const existing = pkg.placements.find((p) => p.space_id === space.id);
+              const activated =
+                pkg.source !== "system" && activeIdsFor(type as "agent", space.id).has(pkg.id);
+              if (existing) {
+                return [{ ...existing, state: activated ? ("active" as const) : existing.state }];
+              }
+              return activated
+                ? [
+                    {
+                      space_id: space.id,
+                      via: "shared" as const,
+                      state: "active" as const,
+                      shared_by: null,
+                    },
+                  ]
+                : [];
+            }),
+          })),
+        ]),
+      ),
+    },
+  };
+}
+
+/** What the server answers anybody but an owner or admin (`routes/library.ts`). */
+const forbiddenLibrary = {
+  status: 403,
+  body: {
+    title: "Forbidden",
+    detail: "The organization library requires the user's own credential holding owner or admin",
+  },
+};
+
 const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   /* Identity — the three reads main.tsx fires before React mounts. */
   {
@@ -337,10 +385,20 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
           packages: Object.fromEntries(
             Object.entries(f.library.packages).map(([type, rows]) => [
               type,
-              rows.map((pkg) => ({
-                ...pkg,
-                placements: pkg.placements.filter((placement) => placement.space_id === spaceId),
-              })),
+              rows
+                .map((pkg) => ({
+                  ...pkg,
+                  placements: pkg.placements.filter((placement) => placement.space_id === spaceId),
+                }))
+                // As the server does (`services/package-library.ts`): a package
+                // with no placement here is listed only as a CANDIDATE — one
+                // whose home grants this caller `share`, so one click would
+                // offer and activate it — and never into a personal space.
+                .filter(
+                  (pkg) =>
+                    pkg.placements.length > 0 ||
+                    (pkg.home_shareable && spaceId !== "app_lab_personal"),
+                ),
             ]),
           ),
         },
@@ -351,41 +409,11 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     method: "GET",
     pattern: /^\/api\/library$/,
     // The matrix reads the same overlay as the lists, so a box ticked here and
-    // a package activated from a catalogue tell the same story.
-    handler: () => ({
-      status: 200,
-      body: {
-        ...f.library,
-        packages: Object.fromEntries(
-          Object.entries(f.library.packages).map(([type, rows]) => [
-            type,
-            rows.map((pkg) => ({
-              ...pkg,
-              // The overlay the lists use, expressed as PLACEMENTS: a package a
-              // catalogue activated in a space is placed there and running.
-              placements: f.library.spaces.flatMap((space) => {
-                const existing = pkg.placements.find((p) => p.space_id === space.id);
-                const activated =
-                  pkg.source !== "system" && activeIdsFor(type as "agent", space.id).has(pkg.id);
-                if (existing) {
-                  return [{ ...existing, state: activated ? ("active" as const) : existing.state }];
-                }
-                return activated
-                  ? [
-                      {
-                        space_id: space.id,
-                        via: "shared" as const,
-                        state: "active" as const,
-                        shared_by: null,
-                      },
-                    ]
-                  : [];
-              }),
-            })),
-          ]),
-        ),
-      },
-    }),
+    // a package activated from a catalogue tell the same story. Owners and
+    // admins only, as on the server: anybody else gets the 403 that kept the
+    // catalogue broken for members while the lab signed in as an owner.
+    handler: () =>
+      getRole() === "owner" || getRole() === "admin" ? libraryResponse() : forbiddenLibrary,
   },
   {
     method: "GET",

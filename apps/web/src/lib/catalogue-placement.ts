@@ -54,9 +54,22 @@ export interface CataloguePlacement {
   everywhere: boolean;
 }
 
+/**
+ * The wire's `none` means "no row in this space", whatever put the package
+ * there — and only one of those reasons is an OFFER. A placement made by a
+ * share and switched on by nobody asks somebody for a decision; a SYSTEM
+ * integration nobody switched on, or a package at home nobody enabled, is
+ * simply off. Reading every `none` as an offer made the navigation count one
+ * "offer" per Appstrate integration per space — dozens on a real instance.
+ */
 function stateOf(placement: LibraryPlacement): PlacementState {
   if (placement.state === "active") return "active";
-  return placement.state === "none" ? "offered" : "inactive";
+  return placement.state === "none" && placement.via === "shared" ? "offered" : "inactive";
+}
+
+/** An offer nobody has taken up — the only placement that waits on a person. */
+function isPendingOffer(placement: LibraryPlacement): boolean {
+  return placement.state === "none" && placement.via === "shared";
 }
 
 export function cataloguePlacement(
@@ -68,7 +81,7 @@ export function cataloguePlacement(
   const offeredBy: Record<string, string | null> = {};
   for (const placement of pkg.placements) {
     byState[stateOf(placement)].push(placement.space_id);
-    if (placement.state === "none")
+    if (isPendingOffer(placement))
       offeredBy[placement.space_id] = placement.shared_by?.name ?? null;
   }
   const mine = spaceId
@@ -81,7 +94,13 @@ export function cataloguePlacement(
     offeredIn: byState.offered,
     offeredBy,
     homeSpaceId: pkg.home_space_id,
-    unplaced: pkg.placements.length === 0,
+    // Nothing of this caller's yet: no space holds it by its home or by an
+    // offer, and no space runs it. A system integration readable everywhere
+    // but switched on nowhere is exactly that — something to DISCOVER — even
+    // though the wire lists it with a placement in every space.
+    unplaced: !pkg.placements.some(
+      (placement) => placement.via !== "system" || placement.state === "active",
+    ),
     everywhere: options.everywhere ?? false,
   };
 }
@@ -98,8 +117,5 @@ export function inPlacedTab(placement: CataloguePlacement): boolean {
  * three decisions, taken by three different people.
  */
 export function pendingOfferCount(packages: readonly LibraryPackageItem[]): number {
-  return packages.reduce(
-    (total, pkg) => total + pkg.placements.filter((placement) => placement.state === "none").length,
-    0,
-  );
+  return packages.reduce((total, pkg) => total + pkg.placements.filter(isPendingOffer).length, 0);
 }

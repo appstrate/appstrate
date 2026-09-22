@@ -3850,17 +3850,20 @@ export const library: Json200<"/api/library", "get"> = {
         ],
       },
       {
-        // Placed in no space at all: the subject of the catalogue's second
-        // half, and the state nothing else in this lab holds.
+        // Homed in Production and nowhere else: a space that does not run it
+        // shows its switch off, and a member of Default alone would be offered
+        // it as a CANDIDATE — its home grants them the share.
         id: "@tractr/veille-concurrence",
         name: "Veille concurrence",
         description: "Surveille les annonces des concurrents et résume la semaine.",
         source: "local",
-        home_space_id: "app_lab_default",
+        home_space_id: APP_ID,
         home_writable: true,
         home_deletable: true,
         home_shareable: true,
-        placements: [],
+        placements: [
+          { space_id: APP_ID, via: "home" as const, state: "active" as const, shared_by: null },
+        ],
       },
       {
         id: "@tractr/debrief-appel",
@@ -3943,6 +3946,25 @@ export const library: Json200<"/api/library", "get"> = {
     ].map((pkg) => ({ ...pkg, type: "skill" as const })),
     integration: [
       {
+        // Shipped with the instance and switched on nowhere: readable in every
+        // team space (a placement each, `via: "system"`), running in none —
+        // the honest content of Découvrir.
+        id: "@appstrate/slack",
+        name: "Slack",
+        description: "Messages et canaux.",
+        source: "system",
+        home_space_id: null,
+        home_writable: false,
+        home_deletable: false,
+        home_shareable: false,
+        placements: ["app_lab_default", APP_ID, "app_lab_sandbox"].map((space_id) => ({
+          space_id,
+          via: "system" as const,
+          state: "none" as const,
+          shared_by: null,
+        })),
+      },
+      {
         id: "@appstrate/google-drive",
         name: "Google Drive",
         description: "Fichiers, documents et dossiers partagés.",
@@ -3954,24 +3976,24 @@ export const library: Json200<"/api/library", "get"> = {
         placements: [
           {
             space_id: "app_lab_default",
-            via: "home" as const,
+            via: "system" as const,
             state: "active" as const,
             shared_by: null,
           },
           {
             space_id: APP_ID,
-            via: "shared" as const,
+            via: "system" as const,
             state: "active" as const,
-            shared_by: { user_id: USER_ID, name: "Olivier Tarbès" },
+            shared_by: null,
           },
           {
             // Switched OFF in the sandbox: an agent activated there declares
             // Drive and cannot run without it, which is the case the catalogue
             // has to raise before writing.
             space_id: "app_lab_sandbox",
-            via: "shared" as const,
+            via: "system" as const,
             state: "inactive" as const,
-            shared_by: { user_id: USER_ID, name: "Olivier Tarbès" },
+            shared_by: null,
           },
         ],
       },

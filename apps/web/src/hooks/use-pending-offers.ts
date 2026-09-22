@@ -21,16 +21,16 @@
 
 import { pendingOfferCount } from "../lib/catalogue-placement";
 import type { PackageType } from "@appstrate/core/validation";
-import { useLibrary } from "./use-library";
+import { useCatalogueLibrary } from "./use-library";
 
 export function usePendingOfferCount(): number {
-  const { data } = useLibrary();
+  const { data } = useCatalogueLibrary();
   return data ? pendingOfferCount(Object.values(data.packages).flat()) : 0;
 }
 
 /** The first kind holding an offer, so a link lands on a tab that shows one. */
 export function usePendingOfferKind(): PackageType | null {
-  const { data } = useLibrary();
+  const { data } = useCatalogueLibrary();
   if (!data) return null;
   const kinds = ["agent", "skill", "integration", "mcp-server"] as const;
   return kinds.find((kind) => pendingOfferCount(data.packages[kind] ?? []) > 0) ?? null;

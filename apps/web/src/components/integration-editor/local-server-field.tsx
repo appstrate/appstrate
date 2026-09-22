@@ -25,7 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@appstrate/ui/components/select";
-import { useLibrary } from "../../hooks/use-library";
+import { useCatalogueLibrary } from "../../hooks/use-library";
 import { usePackageVersions } from "../../hooks/use-packages";
 import { ImportModal } from "../import-modal";
 
@@ -42,7 +42,7 @@ export function LocalServerField({
   onChange: (patch: { serverName?: string; serverVersion?: string }) => void;
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
-  const { data: library, isLoading } = useLibrary();
+  const { data: library, isLoading } = useCatalogueLibrary();
   const [importing, setImporting] = useState(false);
   const servers = library?.packages["mcp-server"] ?? [];
   const known = servers.find((server) => server.id === name);

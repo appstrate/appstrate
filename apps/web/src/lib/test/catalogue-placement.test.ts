@@ -70,6 +70,55 @@ describe("cataloguePlacement", () => {
   });
 });
 
+describe("what is an offer, and what is merely off", () => {
+  it("does not call a system integration nobody switched on an offer", () => {
+    // `none` on the wire is "no row here", whatever put it there. Reading it as
+    // an offer counted one per Appstrate integration per space.
+    const placement = cataloguePlacement(
+      pkg([{ space_id: "spc_a", state: "none", via: "system" }], null),
+      "spc_a",
+    );
+    expect(placement.here).toBe("inactive");
+    expect(placement.offeredIn).toEqual([]);
+  });
+
+  it("does not call a package at home nobody enabled an offer either", () => {
+    const placement = cataloguePlacement(
+      pkg([{ space_id: "spc_home", state: "none", via: "home" }]),
+      "spc_home",
+    );
+    expect(placement.here).toBe("inactive");
+  });
+
+  it("sends a system integration switched on nowhere to Découvrir", () => {
+    const placement = cataloguePlacement(
+      pkg(
+        [
+          { space_id: "spc_a", state: "none", via: "system" },
+          { space_id: "spc_b", state: "none", via: "system" },
+        ],
+        null,
+      ),
+      "spc_a",
+    );
+    expect(inPlacedTab(placement)).toBe(false);
+  });
+
+  it("keeps it in Espaces once one space runs it", () => {
+    const placement = cataloguePlacement(
+      pkg(
+        [
+          { space_id: "spc_a", state: "active", via: "system" },
+          { space_id: "spc_b", state: "none", via: "system" },
+        ],
+        null,
+      ),
+      "spc_b",
+    );
+    expect(inPlacedTab(placement)).toBe(true);
+  });
+});
+
 describe("pendingOfferCount", () => {
   it("counts placements, not packages: one offer per space is one decision", () => {
     expect(
@@ -80,6 +129,9 @@ describe("pendingOfferCount", () => {
           { space_id: "spc_home", state: "active", via: "home" },
         ]),
         pkg([{ space_id: "spc_c", state: "inactive" }]),
+        // Not offers: off for a reason nobody has to decide on.
+        pkg([{ space_id: "spc_d", state: "none", via: "system" }], null),
+        pkg([{ space_id: "spc_home", state: "none", via: "home" }]),
       ]),
     ).toBe(2);
   });

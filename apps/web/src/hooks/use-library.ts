@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useMemo } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import { parseScopedName } from "@appstrate/core/naming";
 import { $api, client, type paths } from "../api/client";
 import { useCurrentSpaceId } from "./use-current-space";
 import { agentsKeys, packageKeys } from "../lib/query-keys";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { useOrgOnlyScope } from "./use-org-scope";
+import { usePermissions } from "./use-permissions";
+import { useSpaces } from "./use-spaces";
+import { mergeSpaceLibraries } from "../lib/merge-space-libraries";
 
 /**
  * Wire shape from the OpenAPI spec (`GET /api/library`) — the organization
@@ -29,14 +32,57 @@ export type LibrarySpace = LibraryResponse["spaces"][number];
  */
 export type LibraryPlacement = LibraryPackageItem["placements"][number];
 
-export function useLibrary() {
+function useLibrary(options: { enabled?: boolean } = {}) {
   const scope = useOrgOnlyScope();
   return $api.useQuery(
     "get",
     "/api/library",
     { params: { header: scope.header } },
-    { enabled: scope.enabled },
+    { enabled: scope.enabled && (options.enabled ?? true) },
   );
+}
+
+/**
+ * The library every screen but the organization's own administration reads.
+ *
+ * `GET /api/library` answers owners and admins only (`routes/library.ts`), so
+ * reading it for anyone else is a 403 that left the catalogue — and the
+ * navigation's offer count beside it — as an error for every member. An
+ * administrator still reads it directly; everybody else gets the SAME shape,
+ * merged from the library of each space they are a member of
+ * (`lib/merge-space-libraries`). One screen, graded by the rule the server
+ * already applies: nobody is shown a space they cannot enter.
+ */
+export function useCatalogueLibrary() {
+  const scope = useOrgOnlyScope();
+  const { orgRole } = usePermissions();
+  const isOrgAdmin = orgRole === "owner" || orgRole === "admin";
+  const org = useLibrary({ enabled: isOrgAdmin });
+  const { data: spaces } = useSpaces(!isOrgAdmin);
+  const perSpace = useQueries({
+    queries: (isOrgAdmin ? [] : (spaces ?? []))
+      // A space the caller is listed in but cannot enter (`closed`) has no
+      // library to read for them.
+      .filter((space) => space.access === "member")
+      .map((space) => ({
+        ...$api.queryOptions("get", "/api/spaces/{spaceId}/library", {
+          params: { path: { spaceId: space.id }, header: scope.header },
+        }),
+        enabled: scope.enabled,
+      })),
+  });
+  // Merged on every render rather than memoised: a handful of spaces, a few
+  // hundred rows, and no dependency list that could fall out of step.
+  const merged =
+    isOrgAdmin || perSpace.some((query) => !query.data)
+      ? undefined
+      : mergeSpaceLibraries(perSpace.map((query) => query.data!));
+  if (isOrgAdmin) return { data: org.data, isLoading: org.isLoading, error: org.error };
+  return {
+    data: merged,
+    isLoading: spaces === undefined || perSpace.some((query) => query.isLoading),
+    error: perSpace.find((query) => query.error)?.error ?? null,
+  };
 }
 
 /**
