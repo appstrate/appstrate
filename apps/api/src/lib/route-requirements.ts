@@ -3,10 +3,11 @@
 /**
  * What a route requires, read off the handler markers of Hono's route table
  * and matched segment by segment as Hono matches, since several operations
- * have no route of their own. An operation is SERVED when a terminal handler
- * matches it, whatever its method or path shape; middleware only adds its
- * guard. Guards mounted after a space re-scope (`markSpaceRescope`) are
- * enforced in the space the PATH names, so they are reported apart and never filter.
+ * have no route of their own. An operation is SERVED by the first terminal
+ * handler that matches it, whatever its method or path shape; middleware
+ * matching before it only adds its guard. Guards mounted after a space
+ * re-scope (`markSpaceRescope`) are enforced in the space the PATH names, so
+ * they are reported apart and never filter.
  */
 
 import { PERMISSION_REQUIREMENT_MARKER } from "@appstrate/core/permissions";
@@ -66,10 +67,13 @@ export function markFallback<T extends object>(handler: T): T {
   return markHandler(handler, FALLBACK);
 }
 
-/** Hono's own test (`hono/utils/handler`, an internal module): a handler that
- *  declares `next` is middleware. Read on the target, since `app.route()`
- *  wraps a sub-app's handlers in a `(c, next)` shim when it has an `onError`. */
-function servesOperation(handler: unknown): boolean {
+/** Hono's convention, not its dispatch: a handler declaring `next` is
+ *  middleware (`isMiddleware` reads `length > 1`). So a middleware written with
+ *  rest args or a defaulted `next` reads as serving, and `app.mount()`, whose
+ *  handler declares `next`, never serves. Read on the target, since
+ *  `app.route()` wraps a sub-app's handlers in a `(c, next)` shim when it has
+ *  an `onError`. */
+export function servesOperation(handler: unknown): boolean {
   if (typeof handler !== "function") return false;
   const target = findTargetHandler(handler as (...args: never[]) => unknown);
   return !isMiddleware(target) && !hasHandlerMarker(handler, FALLBACK);
@@ -125,13 +129,17 @@ function lookup(
   for (const entry of entries) {
     if (entry.method !== "ALL" && entry.method !== method) continue;
     if (!matches(entry, template)) continue;
-    if (entry.serves) served = true;
     if (entry.rescope) rescoped = true;
     if (entry.rowDecides) conditional = true;
     if (entry.requirement !== null) {
       // A guard reached twice is one requirement to the model.
       const into = rescoped ? targetSpaceRequirements : requirements;
       if (!into.includes(entry.requirement)) into.push(entry.requirement);
+    }
+    // Hono answers with the first terminal handler; nothing after it runs.
+    if (entry.serves) {
+      served = true;
+      break;
     }
   }
   if (!served) return undefined;

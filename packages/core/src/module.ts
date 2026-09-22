@@ -103,7 +103,9 @@ export interface AppstrateModule {
    * Each operation must be served by a terminal handler on a route this
    * module's router mounts (an `ALL` prefix proxy such as
    * `router.all("/x/*", handler)` counts); a documented operation no route
-   * serves makes the platform refuse to boot.
+   * serves makes the platform refuse to boot. A sub-app attached with
+   * `mount()` does not count — forward to it from a route handler instead:
+   * `router.all("/x/*", (c) => handler(c.req.raw))`.
    */
   openApiPaths?(): Record<string, unknown>;
 

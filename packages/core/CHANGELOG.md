@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A guard carrying the boolean `appstrate.permissionGuard` marker but no
+  `PERMISSION_REQUIREMENT_MARKER` requirement is no longer read as row-aware**
+  — the platform now reads it as naming no requirement, where 11.1.0 read it as
+  conditional. A middleware whose verdict comes from the row it loads declares
+  that with the registry symbol `Symbol.for("appstrate.rowAuthority")` set to
+  `true` on the mounted function
+  (`Object.defineProperty(mw, Symbol.for("appstrate.rowAuthority"), { value: true })`);
+  being a registry symbol, a module stamps it without importing the platform.
+- **Every operation a module's `openApiPaths()` documents must be served by a
+  terminal route handler, or the platform refuses to boot.** Middleware alone
+  does not serve, nor does a sub-app attached with `mount()`: forward to it from
+  a route handler, `router.all("/x/*", (c) => handler(c.req.raw))`.
+
 ## [11.1.0] — 2026-09-22
 
 ### Added

@@ -349,6 +349,31 @@ describe("lookup — a terminal handler serves, middleware never does", () => {
     expect(marked("GET", "/api/ghost")).toBeUndefined();
   });
 
+  it("stops at the first terminal handler — nothing matching after it is reported", async () => {
+    // Hono answers with the first terminal handler; a guard or marker mounted
+    // after it never runs, so reporting it would hide a reachable operation.
+    const app = new Hono<AppEnv>();
+    app.get("/api/things/:id", ok);
+    app.use("/api/things/*", requireAnyPermission(["agents:write"]), rowAuthority());
+    const requirement = served(deriveRouteRequirements(app.routes), "GET", "/api/things/{id}");
+    expect(requirement.requirements).toEqual([]);
+    expect(requirement.conditional).toBe(false);
+    // The control: Hono answers without running the late guard.
+    expect((await app.request("/api/things/1")).status).toBe(200);
+  });
+
+  it("does not serve a sub-app attached with `mount()` — its handler declares `next`", async () => {
+    const external = (request: Request) => new Response(new URL(request.url).pathname);
+    const app = new Hono<AppEnv>();
+    app.mount("/api/ext", external);
+    expect(deriveRouteRequirements(app.routes)("GET", "/api/ext/{path}")).toBeUndefined();
+    // Hono does answer it: the table refuses on purpose, so boot names the gap.
+    expect((await app.request("/api/ext/a")).status).toBe(200);
+    // The spelling that counts: a route handler forwarding the raw request.
+    const routed = rootTableOf((root) => root.all("/api/ext/*", (c) => external(c.req.raw)));
+    expect(served(routed, "GET", "/api/ext/{path}").requirements).toEqual([]);
+  });
+
   it("classifies through the wrapper `app.route()` adds for a sub-app's `onError`", () => {
     const app = mounted((sub) => {
       sub.use("/things/:id", requirePermission("agents", "read"));

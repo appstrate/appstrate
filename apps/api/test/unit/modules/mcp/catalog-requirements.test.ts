@@ -7,12 +7,15 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { Hono } from "hono";
+import { Hono, type Context, type Next } from "hono";
 import { getTestApp } from "../../../helpers/app.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { registerPlatformApp } from "../../../../src/lib/platform-app.ts";
-import { deriveRouteRequirements } from "../../../../src/lib/route-requirements.ts";
-import { isGranted } from "../../../../src/lib/route-requirements.ts";
+import {
+  deriveRouteRequirements,
+  isGranted,
+  servesOperation,
+} from "../../../../src/lib/route-requirements.ts";
 import {
   knownSpaceLevelPermissions,
   orgPermissions,
@@ -76,22 +79,54 @@ describe("the lookup the catalog joins on", () => {
     const requirementFor = deriveRouteRequirements(getTestApp().routes);
     expect(requirementFor("POST", "/api/nothing-mounts-this/{id}")).toBeUndefined();
   });
+});
 
-  it("finds no method served by middleware alone", () => {
-    // An exact-path `use()` is an `ALL` mount, which serves every method: one
-    // at `/api/spaces/:id` would make `PUT` exist to this lookup, unguarded.
-    const requirementFor = deriveRouteRequirements(getTestApp().routes);
-    expect(requirementFor("PUT", "/api/spaces/{id}")).toBeUndefined();
-    // The control: the methods that route does mount still resolve.
-    expect(requirementFor("GET", "/api/spaces/{id}")).toBeDefined();
+type RouteEntry = { method: string; path: string; handler: unknown };
+
+/** Entries read as serving that a later entry of the same registration follows. */
+function terminalsBeforeTheEnd(routes: readonly RouteEntry[]): string[] {
+  return routes.flatMap((route, i) => {
+    const next = routes[i + 1];
+    const sameRegistration = next?.method === route.method && next.path === route.path;
+    return sameRegistration && servesOperation(route.handler)
+      ? [`${route.method} ${route.path}`]
+      : [];
+  });
+}
+
+describe("the arity convention the lookup relies on", () => {
+  // `servesOperation` trusts Hono's convention that middleware declares `next`;
+  // a middleware written `(...args)` would read as serving and end the lookup.
+  // In one registration only the last handler may be terminal.
+  it("holds on every registration of the real route table", () => {
+    const routes = getTestApp().routes;
+    expect(terminalsBeforeTheEnd(routes)).toEqual([]);
+    // The control: registrations with middleware in front exist to judge.
+    const chained = routes.filter(
+      (route, i) => routes[i + 1]?.method === route.method && routes[i + 1]?.path === route.path,
+    );
+    expect(chained.length).toBeGreaterThan(200);
+  });
+
+  it("catches a rest-args middleware in front of a handler", () => {
+    const app = new Hono<AppEnv>();
+    app.get(
+      "/x",
+      async (...args: [Context<AppEnv>, Next]) => {
+        await args[1]();
+      },
+      (c) => c.text("ok"),
+    );
+    expect(terminalsBeforeTheEnd(app.routes)).toEqual(["GET /x"]);
   });
 });
 
 /**
  * `/api/` operations with no permission guard and no `rowAuthority()` marker —
  * an unguarded route, GET included, is advertised to every caller — each with
- * the authority that stands in for a guard. A trailing `*` is a prefix match,
- * anything else exact. An entry that stops matching fails the suite.
+ * the authority that stands in for a guard. A trailing `/*` matches beneath
+ * the path, anything else is exact — a bare `x*` matches nothing and reads as
+ * stale, since it would also admit `x-anything`. An entry that stops matching fails the suite.
  */
 const NO_MOUNTED_GUARD: ReadonlyArray<{ path: string; why: string }> = [
   // ── The request's own credential is the authority — no RBAC grant to check.
@@ -111,10 +146,15 @@ const NO_MOUNTED_GUARD: ReadonlyArray<{ path: string; why: string }> = [
     path: "/api/model-providers-oauth/pair/redeem",
     why: "the one-shot pairing token minted for `npx @appstrate/connect-helper`",
   },
-  { path: "/api/runs/{runId}/events*", why: "runner ingestion — HMAC `verifyRunSignature`" },
+  { path: "/api/runs/{runId}/events", why: "runner ingestion — HMAC `verifyRunSignature`" },
+  { path: "/api/runs/{runId}/events/*", why: "runner ingestion — HMAC `verifyRunSignature`" },
   // NOT `/api/runs/{runId}*`: `sink/extend` carries `agents:run`.
   {
-    path: "/api/runs/{runId}/files*",
+    path: "/api/runs/{runId}/files",
+    why: "runner I/O — HMAC `verifyRunSignature` / `verifyRunUploadSignature`",
+  },
+  {
+    path: "/api/runs/{runId}/files/*",
     why: "runner I/O — HMAC `verifyRunSignature` / `verifyRunUploadSignature`",
   },
   { path: "/api/runs/{runId}/workspace", why: "runner input — HMAC `verifyRunSignature`" },
@@ -128,7 +168,8 @@ const NO_MOUNTED_GUARD: ReadonlyArray<{ path: string; why: string }> = [
   // Two exact entries: `/api/profiles/batch` carries `members:read`.
   { path: "/api/profile", why: "the person's own account (`isUserPrincipal`)" },
   { path: "/api/profile/password", why: "the person's own account (`isUserPrincipal`)" },
-  { path: "/api/notifications*", why: "filtered by the caller's actor; another's is a 404" },
+  { path: "/api/notifications", why: "filtered by the caller's actor; another's is a 404" },
+  { path: "/api/notifications/*", why: "filtered by the caller's actor; another's is a 404" },
   { path: "/api/uploads", why: "mints an upload token into the caller's own space, nothing else" },
   { path: "/api/welcome/setup", why: "onboarding, on the person's own credential only" },
   // Exact: every other route under `/api/orgs/…` IS guarded.
@@ -144,7 +185,11 @@ const NO_MOUNTED_GUARD: ReadonlyArray<{ path: string; why: string }> = [
 
   // ── Platform-operator authority, outside org RBAC entirely.
   {
-    path: "/api/admin/storage-deletion-jobs*",
+    path: "/api/admin/storage-deletion-jobs",
+    why: "platform-operator surface (`requirePlatformAdmin`), not a row and not a grant",
+  },
+  {
+    path: "/api/admin/storage-deletion-jobs/*",
     why: "platform-operator surface (`requirePlatformAdmin`), not a row and not a grant",
   },
 ];
@@ -154,7 +199,7 @@ const PRESENT_ONLY_WITH_EE: ReadonlySet<string> = new Set(["/api/billing/webhook
 
 function covers(list: ReadonlyArray<{ path: string }>, pathTemplate: string): boolean {
   return list.some(({ path }) =>
-    path.endsWith("*") ? pathTemplate.startsWith(path.slice(0, -1)) : pathTemplate === path,
+    path.endsWith("/*") ? pathTemplate.startsWith(path.slice(0, -1)) : pathTemplate === path,
   );
 }
 
