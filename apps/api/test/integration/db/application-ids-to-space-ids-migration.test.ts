@@ -326,8 +326,9 @@ const SEED = `
   VALUES ('run_m0003_a', '${ORG}', '${APP_A}', '@m0003/agent', 'u_m0003_platform', 'success');
 
   INSERT INTO integration_connections
-    (integration_package_id, auth_key, account_id, space_id, user_id, credentials_encrypted)
-  VALUES ('@m0003/agent', 'primary', 'acct_m0003', '${APP_A}', 'u_m0003_platform', 'enc_m0003');
+    (integration_package_id, auth_key, account_id, label, space_id, user_id, credentials_encrypted)
+  VALUES ('@m0003/agent', 'primary', 'acct_m0003', 'acct_m0003', '${APP_A}',
+          'u_m0003_platform', 'enc_m0003');
 
   INSERT INTO audit_events (org_id, space_id, actor_type, actor_id, action, resource_type, resource_id)
   VALUES ('${ORG}', '${APP_A}', 'user', 'u_m0003_platform', 'application.created', 'application', '${APP_A}');
