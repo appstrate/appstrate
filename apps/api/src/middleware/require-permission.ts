@@ -30,8 +30,9 @@ import { forbidden } from "../lib/errors.ts";
 import type { Resource, Action } from "../lib/permissions.ts";
 import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
 
-/** Stamped by every route-level permission guard (core's `makePermissionGuard`
- *  stamps it too). Read by the agent-lookup ordering conformance test. */
+/** Stamped by every route-level permission guard, core's `makePermissionGuard`
+ *  included. Read by the agent-lookup ordering conformance test, which proves a
+ *  guard is mounted before any agent lookup. */
 export const PERMISSION_GUARD = Symbol.for("appstrate.permissionGuard");
 
 /** True when `handler` rejects unauthorized callers before the chain continues.
@@ -55,10 +56,16 @@ export function isSpaceRescope(handler: unknown): boolean {
 
 const ROW_AUTHORITY = Symbol.for("appstrate.rowAuthority");
 
+/** Mark a middleware whose verdict comes from the row it loads, so no static
+ *  permission describes the routes it guards. */
+export function markRowAuthority<T extends object>(handler: T): T {
+  return markHandler(handler, ROW_AUTHORITY);
+}
+
 /** A passthrough declaring that the handler after it decides authority on the
- *  row it loads, so no static permission describes the route. */
+ *  row it loads. */
 export function rowAuthority(): MiddlewareHandler<AppEnv> {
-  return markHandler(async (_c: Context<AppEnv>, next: Next) => next(), ROW_AUTHORITY);
+  return markRowAuthority(async (_c: Context<AppEnv>, next: Next) => next());
 }
 
 /** True when `handler` declares the row, not a permission, as the authority. */
@@ -101,8 +108,9 @@ export function assertPermission<R extends Resource>(
  *
  * The joined form is also stamped as the guard's requirement, so a route-table
  * reader sees the same string the audit records (`lib/route-requirements.ts`
- * splits it back). An empty list is refused at construction: it would stamp
- * `""`, which that reader takes for a row-aware guard, i.e. a grant.
+ * splits it back). An empty list is refused at construction: the guard would
+ * deny everyone while stamping `""`, which that reader takes for no
+ * requirement, i.e. a grant.
  */
 export function requireAnyPermission(permissions: readonly string[]) {
   if (permissions.length === 0) {
@@ -117,6 +125,5 @@ export function requireAnyPermission(permissions: readonly string[]) {
     }
     return next();
   }, PERMISSION_GUARD);
-  Object.defineProperty(guard, PERMISSION_REQUIREMENT_MARKER, { value: required });
-  return guard;
+  return markHandler(guard, PERMISSION_REQUIREMENT_MARKER, required);
 }

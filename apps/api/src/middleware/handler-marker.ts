@@ -17,9 +17,14 @@
 
 import { findTargetHandler } from "hono/utils/handler";
 
-/** Stamp `marker` on `handler` and return it, for a factory to `return` directly. */
-export function markHandler<T extends object>(handler: T, marker: symbol): T {
-  Object.defineProperty(handler, marker, { value: true });
+/** Stamp `marker` on `handler` and return it, for a factory to `return` directly.
+ *  A `value` other than `true` is read with {@link readHandlerMarker}. */
+export function markHandler<T extends object>(
+  handler: T,
+  marker: symbol,
+  value: unknown = true,
+): T {
+  Object.defineProperty(handler, marker, { value });
   return handler;
 }
 
@@ -40,13 +45,9 @@ export function hasHandlerMarker(handler: unknown, marker: symbol): boolean {
 }
 
 /**
- * The value stamped under `marker`, or `undefined` when absent.
- *
- * A marker may carry more than "present": a permission guard stamps the
- * requirement string it will test, so the route table answers *which*
- * permission a route needs and not merely *that* it needs one. Read through
- * the same unwrapping as {@link hasHandlerMarker} — see its note on Hono's
- * `route()` re-wrapping.
+ * The value stamped under `marker`, or `undefined` when absent — e.g. the
+ * requirement string a permission guard tests. Read through the same
+ * unwrapping as {@link hasHandlerMarker}.
  */
 export function readHandlerMarker(handler: unknown, marker: symbol): unknown {
   if (typeof handler !== "function") return undefined;

@@ -21,10 +21,12 @@ import {
   type RouteRequirement,
   type RouteRequirementLookup,
 } from "../../src/lib/route-requirements.ts";
-import { readHandlerMarker } from "../../src/middleware/handler-marker.ts";
+import { markHandler, readHandlerMarker } from "../../src/middleware/handler-marker.ts";
 import { requirePackageInOrg } from "../../src/middleware/guards.ts";
 import {
+  isRowAuthority,
   markSpaceRescope,
+  PERMISSION_GUARD,
   requireAnyPermission,
   requirePermission,
   rowAuthority,
@@ -156,6 +158,22 @@ describe("lookup — exact mounts", () => {
     expect(requirement.conditional).toBe(true);
   });
 
+  it("takes the row-authority marker, not a bare guard stamp, for the row deciding", () => {
+    // One way to say it: `requirePackageInOrg` carries the marker itself, and a
+    // permission guard naming no requirement is not read as row-aware.
+    expect(isRowAuthority(requirePackageInOrg())).toBe(true);
+    const bareGuard = markHandler(
+      async (_c: Context<AppEnv>, next: Next) => next(),
+      PERMISSION_GUARD,
+    );
+    const requirement = served(
+      tableOf((sub) => sub.delete("/things/:id", bareGuard, ok)),
+      "DELETE",
+      "/api/things/{id}",
+    );
+    expect(requirement.conditional).toBe(false);
+  });
+
   it("reads an explicit `rowAuthority()` the same way — the handler decides", () => {
     // No guard runs before the handler at all: the row it loads is the only
     // authority, and nothing static describes it.
@@ -219,8 +237,7 @@ describe("lookup — prefix mounts", () => {
 
   it("folds a prefix guard onto the prefix's own template", () => {
     // Hono runs `app.use("/api/x/*")` for `/api/x` itself, so a guard mounted
-    // that way gates the collection route too — which is why `spaces.ts`
-    // mounts both forms side by side.
+    // that way gates the collection route too.
     const requirement = served(
       tableOf(
         (sub) => sub.get("/x", ok),
@@ -268,9 +285,9 @@ describe("lookup — prefix mounts", () => {
     expect(table("DELETE", "/api/kept")).toBeUndefined();
   });
 
-  it("keeps a guard mounted as `ALL /*`, which the SPA catch-all rule once ate", () => {
+  it("keeps a guard mounted as `ALL /*`, the SPA catch-all's path", () => {
     // `app.use("/*", …)` and the SPA fallback share a path and nothing else:
-    // discarding both dropped a guard covering the whole app.
+    // discarding both would drop a guard covering the whole app.
     const table = rootTableOf((app) => {
       app.use("/*", requirePermission("agents", "read"));
       app.post("/api/kept", ok);
@@ -293,6 +310,56 @@ describe("lookup — prefix mounts", () => {
     expect(table("POST", "/api/ghost")).toBeUndefined();
     // The control: a real prefix mount beneath the same catch-all still serves.
     expect(served(table, "POST", "/api/auth/sign-in/email").requirements).toEqual([]);
+  });
+});
+
+describe("lookup — segment by segment, as Hono matches", () => {
+  // Each case below was checked against Hono itself: the guard answers 403 on
+  // a concrete request exactly where the table reports it.
+  const table = tableOf((sub) => {
+    sub.use("/spaces/:spaceId/*", requirePermission("spaces", "read"));
+    sub.get("/spaces/:id/members", ok);
+    sub.get("/spaces/current/members", ok);
+    sub.get("/spaces/:id", ok);
+  });
+
+  it("matches a mount param whatever the template names it", () => {
+    expect(served(table, "GET", "/api/spaces/{id}/members").requirements).toEqual(["spaces:read"]);
+  });
+
+  it("covers a literal template segment with a mount param", () => {
+    expect(served(table, "GET", "/api/spaces/current/members").requirements).toEqual([
+      "spaces:read",
+    ]);
+  });
+
+  it("covers the bare prefix of a param wildcard, and serves it from a param route", () => {
+    expect(served(table, "GET", "/api/spaces/{id}").requirements).toEqual(["spaces:read"]);
+    expect(served(table, "GET", "/api/spaces/x").requirements).toEqual(["spaces:read"]);
+  });
+
+  it("never covers a `{param}` template with a mount literal", () => {
+    // The guard runs for `current` only; `{id}` also names every value it
+    // skips, so attributing it would filter operations it never gates.
+    const literalMount = tableOf((sub) => {
+      sub.use("/spaces/current/*", requirePermission("spaces", "write"));
+      sub.get("/spaces/:id/members", ok);
+    });
+    expect(served(literalMount, "GET", "/api/spaces/{id}/members").requirements).toEqual([]);
+  });
+
+  it("tests a constrained mount param against a literal, and covers a template param", () => {
+    const constrained = tableOf((sub) => {
+      sub.use("/things/:thingId{[0-9]+}/*", requirePermission("agents", "read"));
+      sub.get("/things/42/logs", ok);
+      sub.get("/things/latest/logs", ok);
+      sub.get("/things/:id/logs", ok);
+    });
+    expect(served(constrained, "GET", "/api/things/42/logs").requirements).toEqual(["agents:read"]);
+    expect(served(constrained, "GET", "/api/things/latest/logs").requirements).toEqual([]);
+    expect(served(constrained, "GET", "/api/things/{id}/logs").requirements).toEqual([
+      "agents:read",
+    ]);
   });
 });
 
