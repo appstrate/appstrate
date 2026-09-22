@@ -12,7 +12,6 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { canRunAgents } from "@appstrate/core/permissions";
 import { resolveChatCapabilities, type ChatAccessContext } from "./chat-access.ts";
 import { PACKAGE_PERMISSIONS, type SpaceGrant } from "../../lib/package-permissions.ts";
 
@@ -191,34 +190,22 @@ describe("running an agent", () => {
     expect(verdicts(context([...CONVERSES, "agents:run", "runs:read-all"])).runAgents).toBe(true);
   });
 
-  it("cannot diverge from core's `canRunAgents`, over every subset of what it reads", () => {
-    // The row and the predicate the MCP server declares `run_and_wait` on are
-    // the SAME function now; this is what keeps them that way. Re-spelling the
-    // disjunction here — or dropping a conjunct from either side — makes one of
-    // the 64 subsets disagree. The `mcp:*` half is the row's own: it is the
-    // transport and the dispatching tool, which core does not know about.
-    const universe = [
-      "agents:run",
-      "runs:read",
-      "runs:read-all",
-      "mcp:read",
-      "mcp:invoke",
-      "chat:write",
-    ] as const;
+  // The row-vs-permissions agreement over every subset is pinned once, on the
+  // shared derivation itself (`packages/module-chat/test/capabilities.test.ts`).
+});
 
-    for (let mask = 0; mask < 1 << universe.length; mask++) {
-      const permissions = universe.filter((_, i) => mask & (1 << i));
-      const held = new Set<string>(permissions);
-      const expected =
-        held.has("chat:write") &&
-        held.has("mcp:read") &&
-        held.has("mcp:invoke") &&
-        canRunAgents((permission) => held.has(permission));
-      expect({ permissions, runAgents: verdicts(context([...permissions])).runAgents }).toEqual({
-        permissions,
-        runAgents: expected,
-      });
-    }
+describe("creating an agent", () => {
+  it("is denied without `mcp:invoke`, which `createAgent` dispatches through", () => {
+    // `agents:write` is not enough on its own: the assistant creates an agent by
+    // calling `invoke_operation`, so a turn without it holds a grant it can
+    // never use — and the server persona drops the authoring half for the same
+    // reason. A row keyed on `agents:write` alone would show a granted chip
+    // whose act is unreachable, and hide the composer's toggle behind it.
+    expect(verdicts(context(["chat:write", "mcp:read", "agents:write"])).createAgents).toBe(false);
+    // Control: the same set plus the dispatching tool holds the row.
+    expect(
+      verdicts(context(["chat:write", "mcp:read", "mcp:invoke", "agents:write"])).createAgents,
+    ).toBe(true);
   });
 });
 

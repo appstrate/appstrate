@@ -125,12 +125,9 @@ export function httpStatusOf(unwrapped: unknown): number | undefined {
 }
 
 /**
- * Whether an unwrapped payload represents a failure.
- *
- * There is deliberately no `outcome` check: `outcome` (`McpInvokeOutcome` in
- * `apps/api/src/modules/mcp/tools.ts`) is TELEMETRY, never a field of a tool
- * RESULT payload — a rejected call surfaces as a thrown `McpError`, which the
- * `{ code, message }` branch below already catches. Do not re-add it.
+ * Whether an unwrapped payload represents a failure. `outcome` is telemetry,
+ * never a result field: a rejected call arrives as a thrown `McpError`, caught
+ * by the `{ code, message }` branch below.
  */
 function isErrorPayload(unwrapped: unknown): boolean {
   const rec = asRecord(unwrapped);

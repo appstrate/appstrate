@@ -19,6 +19,7 @@ import type { Context } from "hono";
 import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/core/naming";
 import type { PrincipalKind } from "@appstrate/core/module";
 import { logger } from "./logger.ts";
+import { reaches, type TurnCapabilities } from "./capabilities.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 
 /** Structural mirror of `SpaceRoleRef` (`apps/api/src/lib/space-role.ts`) — not importable from here. */
@@ -78,45 +79,47 @@ export type ChatEnv = {
 };
 
 /**
- * Assemble the chat persona from what the turn's token carries
- * (`turnPermissions`): `canAuthorAgents` is `agents:write`, `canReadRuns` is
- * invoke ∧ run-read, `canRunAgents` adds the launch (the conjunction
- * `run_and_wait` is DECLARED on, so it implies `canReadRuns`), and
- * `canComposeInline` adds authoring on top of that. Instructions for an act
- * the token lacks are absent rather than contradicted, so the persona agrees
- * with the tool set that same token is shown; the platform, not this text,
- * refuses the act.
+ * Assemble the chat persona from the turn's capabilities. Instructions for an
+ * act the turn cannot perform are ABSENT rather than contradicted, so the
+ * persona agrees with the tool set the turn's own token is shown; the platform,
+ * not this text, refuses the act. The conjunctions themselves are not spelled
+ * here — `turnCapabilities` owns them, and the web access chip reads the same
+ * derivation.
  */
-export function buildSystemPrompt(options: {
-  canReadRuns: boolean;
-  canRunAgents: boolean;
-  canComposeInline: boolean;
-  canAuthorAgents: boolean;
-}): string {
-  const runs = (yes: string, no = "") => (options.canRunAgents ? yes : no);
-  const reads = (yes: string, no = "") => (options.canReadRuns ? yes : no);
-  const inline = (yes: string, no = "") => (options.canComposeInline ? yes : no);
-  const author = (yes: string, no = "") => (options.canAuthorAgents ? yes : no);
+export function buildSystemPrompt(capabilities: TurnCapabilities): string {
+  const { invokes, authors } = capabilities;
+  const mayRun = reaches(capabilities.runLevel, "run");
+  const mayRead = reaches(capabilities.runLevel, "read");
+  const mayCompose = capabilities.runLevel === "compose";
+  const runs = (yes: string, no = "") => (mayRun ? yes : no);
+  const reads = (yes: string, no = "") => (mayRead ? yes : no);
+  const inline = (yes: string, no = "") => (mayCompose ? yes : no);
+  const author = (yes: string, no = "") => (authors ? yes : no);
+  const invoke = (yes: string, no = "") => (invokes ? yes : no);
   // The id-verbatim bullet has two halves and is dropped whole when neither
   // applies — a bullet naming no target is worse than no bullet.
-  const idVerbatimBullet = options.canAuthorAgents
+  const idVerbatimBullet = authors
     ? `- Use every \`@scope/name\` id verbatim: ${runs("in `dependencies.integrations`, in `run_and_wait`'s `scope`/`name`, and in `dependencies.skills`", "in `dependencies.integrations` and in `dependencies.skills`")}.\n`
     : runs("- Use every `@scope/name` id verbatim: in `run_and_wait`'s `scope`/`name`.\n");
   // Both truncatable lists are themselves conditional (agents on running,
   // skills on authoring); with neither rendered the bullet describes nothing.
   const truncatedListBullet =
-    options.canRunAgents || options.canAuthorAgents
+    mayRun || authors
       ? `- A list marked \`(list truncated)\` is partial: call \`invoke_operation\` with \`operation_id: "listAgents"\` or \`"listSkills"\` for the full one.\n`
       : "";
   return `You are Appstrate's assistant. You help the user operate their Appstrate instance through the available tools.
 
-**You have no ability of your own to act on the outside world.** You cannot browse the web, read email, call third-party APIs, or use any integration or MCP directly. Your only power is invoking Appstrate operations.${runs(" You are the brain/orchestrator; your hands are Appstrate agents. Any request that needs an integration, an MCP, or any action external to Appstrate MUST be carried out by running an agent and reading its result back — never by you claiming to have done it yourself.", " Never claim to have carried out an action external to Appstrate yourself.")}
+**You have no ability of your own to act on the outside world.** You cannot browse the web, read email, call third-party APIs, or use any integration or MCP directly. Your only power is ${invoke("invoking Appstrate operations", "looking Appstrate's own operations up and reading what it already exposes to you")}.${runs(" You are the brain/orchestrator; your hands are Appstrate agents. Any request that needs an integration, an MCP, or any action external to Appstrate MUST be carried out by running an agent and reading its result back — never by you claiming to have done it yourself.", " Never claim to have carried out an action external to Appstrate yourself.")}
 
-Use the tools to ground every action. For ordinary Appstrate API work, search for the right operation, read its schema, then invoke it.${runs(` When you need a newly launched run's progress or result in this turn, prefer calling \`run_and_wait\` directly: it owns launch plus waiting and already declares its argument schema. ${inline("The `runAgent` and `runInline` operations remain", "The `runAgent` operation remains")} available through \`describe_operation\` and \`invoke_operation\` when you intentionally need fire-and-forget semantics.`)} Never invent an operationId or argument shape.
+Use the tools to ground every action. For ordinary Appstrate API work, ${invoke(
+    "search for the right operation with `search_operations`, read its schema with `describe_operation`, then invoke it with `invoke_operation`",
+    "search for the right operation with `search_operations` and read its schema with `describe_operation`: you can look things up, you cannot act — answer the user from what you read, and never claim to have carried an operation out",
+  )}.${runs(` When you need a newly launched run's progress or result in this turn, prefer calling \`run_and_wait\` directly: it owns launch plus waiting and already declares its argument schema. ${inline("The `runAgent` and `runInline` operations remain", "The `runAgent` operation remains")} available through \`describe_operation\` and \`invoke_operation\` when you intentionally need fire-and-forget semantics.`)} Never invent an operationId or argument shape.
 
 Choosing what to do:
-- If the request is a pure Appstrate operation, call that operation directly with \`invoke_operation\`: the operation index in your instructions is the authority on what you may call, so never name an act it does not carry.${runs(" NEVER spin up a run for something the platform API already does — that wastes credits and time.")}
-- If the request is to summarise, analyse, or answer questions about a file available as an \`appfile://\` URI, call \`read_file\` first. When it returns readable text, answer directly from that content${runs("; do NOT launch a run merely to read or analyse it. Use a run only when direct reading does not provide usable content (for example, it returns metadata only or binary/blob data), the task needs specialised processing such as OCR or code, or the user asks for a new file deliverable")}.
+${invoke(
+  `- If the request is a pure Appstrate operation, call that operation directly with \`invoke_operation\`: the operation index in your instructions is the authority on what you may call, so never name an act it does not carry.${runs(" NEVER spin up a run for something the platform API already does — that wastes credits and time.")}\n`,
+)}- If the request is to summarise, analyse, or answer questions about a file available as an \`appfile://\` URI, call \`read_file\` first. When it returns readable text, answer directly from that content${runs("; do NOT launch a run merely to read or analyse it. Use a run only when direct reading does not provide usable content (for example, it returns metadata only or binary/blob data), the task needs specialised processing such as OCR or code, or the user asks for a new file deliverable")}.
 ${runs(
   `- If the request needs external information or context and names no source, default to the integrations already available to the user — connected ones first, then ones activated for this space — rather than answering from memory or asking which source to use. Ask only when no available integration plausibly covers the need.
 - If the request needs an integration, an MCP, or any external action, run an agent:
@@ -177,7 +180,7 @@ ${idVerbatimBullet}${runs(`- ${inline("Prefer running an existing agent over doi
 `)}${author(`- Skills are not run on their own. When you build or configure an agent and one of the listed skills fits the task, declare it under the agent manifest's \`dependencies.skills\` keyed by its id (e.g. \`"@appstrate/web-research": "^1.2.0"\`) — use the version shown, or \`"*"\` if none. The run route validates that declared skills exist.
 `)}${truncatedListBullet}${reads(`- The context carries NO run history. When the user asks about a recent or failed run${runs(", or wants to re-run something")}, without naming it, call \`listRuns\` (newest first) before answering, then fetch full details with the run get operation when needed.
 `)}
-The context lists the permissions this turn holds, in the same \`resource:action\` vocabulary as an operation's \`required_permissions\`. An operation that needs one outside that list is refused by the platform: say which permission is missing instead of attempting it, and never claim an ability the list does not carry.`;
+The context lists the permissions this turn holds, in the same \`resource:action\` vocabulary as an operation's \`required_permissions\`. An operation that needs one outside that list is refused by the platform: say which permission is missing${invoke(" instead of attempting it")}, and never claim an ability the list does not carry.`;
 }
 
 /** Shape of GET /api/me/context (the `get_me` payload). Validated loosely. */
@@ -246,10 +249,12 @@ export function normalizeChatLocale(raw: string | undefined): string {
 }
 
 /**
- * Why a draft-only agent is (or is not) runnable this turn. Under a role
- * preview it is the narrowed set, not the human, that withholds the draft — the
- * same person sees this line about their OWN agent — so the hint names the
- * preview rather than telling them they do not author it.
+ * Why a draft-only agent is (or is not) runnable this turn. `home_writable`
+ * comes from `/api/me/context`, dispatched with `x-view-as` forwarded, so it
+ * FOLLOWS the role preview; only the authoring toggle is invisible to it, that
+ * one narrowing the minted token, not these headers. So the not-writable branch
+ * names the preview rather than telling the same person they do not author
+ * their own agent, and the writable one states the effect alone.
  */
 function draftOnlyHint(input: {
   homeWritable: boolean;
@@ -261,12 +266,8 @@ function draftOnlyHint(input: {
       ? "; draft only, not runnable under this role preview"
       : "; draft only, not runnable — nothing published and you do not author it";
   }
-  // A draft runs on the author's `agents:write`, which the turn drops when
-  // authoring is off.
   if (input.author) return "; draft only, yours to run — pass version=draft";
-  return input.rolePreview
-    ? "; draft, not runnable under this role preview — it does not grant agent authoring"
-    : "; draft, not runnable in this turn — agent authoring is off or not granted here";
+  return "; draft, not runnable in this turn — this turn does not hold agent authoring";
 }
 
 /**
@@ -278,8 +279,8 @@ export function formatCallerContext(
   opts: {
     locale?: string;
     now?: Date;
-    canAuthorAgents: boolean;
-    canRunAgents: boolean;
+    /** What the turn may do, as `turnCapabilities` derived it. */
+    capabilities: TurnCapabilities;
     /** Whether a role preview (`X-View-As`) narrowed this turn. */
     rolePreview: boolean;
     /** Rendered role in the current space, or `null` when there is none to name. */
@@ -288,8 +289,8 @@ export function formatCallerContext(
     permissions: readonly string[];
   },
 ): string {
-  const author = opts.canAuthorAgents;
-  const runnable = opts.canRunAgents;
+  const author = opts.capabilities.authors;
+  const runnable = reaches(opts.capabilities.runLevel, "run");
   const ctx = (raw ?? {}) as CallerContext;
   const name = ctx.user?.name?.trim();
   const email = ctx.user?.email?.trim();
@@ -456,15 +457,13 @@ export async function buildCallerContextBlock(
     deps: ChatPlatformDeps;
     /** UI language forwarded by the client (`X-Chat-Locale`); defaults to fr. */
     locale?: string;
-    /** Whether the turn's token holds `agents:write` (see `turnPermissions`). */
-    canAuthorAgents: boolean;
-    /** Whether the turn may launch an agent AND read the run back. */
-    canRunAgents: boolean;
+    /** What the turn may do, derived from its post-`turnPermissions` set. */
+    capabilities: TurnCapabilities;
     /** The turn's permission set, post-`turnPermissions`. */
     permissions: readonly string[];
   },
 ): Promise<string> {
-  const { origin, headers, spaceId, user, deps, locale, canAuthorAgents, canRunAgents } = args;
+  const { origin, headers, spaceId, user, deps, locale, capabilities } = args;
   // The persona's while previewing: this block tells the model what the caller
   // may do, and every operation it names is checked against the persona.
   const persona = c.get("viewAs");
@@ -484,8 +483,7 @@ export async function buildCallerContextBlock(
       },
       {
         locale,
-        canAuthorAgents,
-        canRunAgents,
+        capabilities,
         rolePreview,
         spaceRole,
         permissions: args.permissions,
@@ -502,8 +500,7 @@ export async function buildCallerContextBlock(
     if (res.ok) {
       return formatCallerContext((await res.json()) as CallerContext, {
         locale,
-        canAuthorAgents,
-        canRunAgents,
+        capabilities,
         rolePreview,
         spaceRole,
         permissions: args.permissions,

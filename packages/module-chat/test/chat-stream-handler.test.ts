@@ -43,6 +43,7 @@ import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/regist
 import { errorHandler } from "../../../apps/api/src/middleware/error-handler.ts";
 import { initSystemModelProviderKeys } from "../../../apps/api/src/services/model-registry.ts";
 import { buildSystemPrompt } from "../src/prompt.ts";
+import { turnCapabilities } from "../src/capabilities.ts";
 import { chatLoopbackStrategy } from "../src/loopback-auth.ts";
 
 // The chat handler reads the system model registry; the HTTP harness initializes it at boot.
@@ -486,14 +487,7 @@ describe("handleChatStream", () => {
     // (4) The system prompt was assembled from the caller context. There are no
     // inline MCP instructions on this path: the engine's own handshake delivers
     // them, and it is handed the org-scoped URL to open it with.
-    expect(input.system).toContain(
-      buildSystemPrompt({
-        canReadRuns: false,
-        canRunAgents: false,
-        canComposeInline: false,
-        canAuthorAgents: false,
-      }).slice(0, 64),
-    );
+    expect(input.system).toContain(buildSystemPrompt(turnCapabilities(() => false)).slice(0, 64));
     expect(input.system).toContain(CONTEXT_ORG_MARKER);
     expect(input.platformMcp.url).toContain(`/api/mcp/o/${encodeURIComponent(ctx.orgId)}`);
     expect(input.platformMcp.headers.Authorization).toMatch(/^Bearer /);
@@ -657,6 +651,10 @@ describe("handleChatStream", () => {
     const REDUCED_MARKER = "Do not create or modify an agent in this turn";
     /** The tool a turn is taught only when it may launch AND read the run back. */
     const RUN_MARKER = "run_and_wait";
+    /** The one authoring rule that needs no run — taught on `agents:write` ∧ invoke. */
+    const SKILLS_MARKER = "Skills are not run on their own";
+    /** A skill the context block lists only to a turn that may author an agent. */
+    const SKILL_ID = "@acme/research";
 
     // A builder as the platform grants it: running needs the MCP pair
     // (`mcp:read`, the transport floor, ∧ `mcp:invoke` — no tool call reaches a
@@ -670,11 +668,16 @@ describe("handleChatStream", () => {
       "runs:read",
     ]);
 
-    async function turn(permissions: Set<string>, agentAuthoring?: boolean) {
+    async function turn(
+      permissions: Set<string>,
+      agentAuthoring?: boolean,
+      context?: () => Response,
+    ) {
       const { engine, calls } = scriptedEngine();
       const res = await postChat(mintSessionId(), undefined, engine, {
         permissions,
         ...(agentAuthoring === undefined ? {} : { agentAuthoring }),
+        ...(context === undefined ? {} : { context }),
       });
       expect(res.status).toBe(200);
       await collectUiChunks(res);
@@ -765,6 +768,34 @@ describe("handleChatStream", () => {
       expect(system).not.toContain(INLINE_MARKER);
       // Absent, not contradicted: the branch is gone, not answered with a refusal.
       expect(system).not.toContain(REDUCED_MARKER);
+    });
+
+    it("teaches no authoring without `mcp:invoke` — `createAgent` dispatches through it", async () => {
+      // `agents:write` with no way to dispatch is a grant the turn can never
+      // use: the persona used to teach skills and `dependencies.*` to it, and
+      // the context block used to list the skills, while the composer's toggle
+      // was hidden and the access chip said "create agents: denied".
+      const withSkill = () =>
+        Response.json({
+          user: { name: "Chat Tester", email: "chat-tester@test.com" },
+          org: { role: "owner", name: CONTEXT_ORG_MARKER, slug: "chat-handler-test" },
+          connections: [],
+          agents: [],
+          skills: [{ package_id: SKILL_ID, display_name: "Research", version: "1.2.0" }],
+          recent_runs: [],
+        });
+      const { system } = await turn(new Set(["mcp:read", "agents:write"]), true, withSkill);
+      expect(system).not.toContain(SKILLS_MARKER);
+      expect(system).not.toContain(SKILL_ID);
+      expect(system).not.toContain("## Skills you can attach to an agent");
+      // Control: the same set plus `mcp:invoke` IS taught both.
+      const { system: invoking } = await turn(
+        new Set(["mcp:read", "mcp:invoke", "agents:write"]),
+        true,
+        withSkill,
+      );
+      expect(invoking).toContain(SKILLS_MARKER);
+      expect(invoking).toContain(SKILL_ID);
     });
 
     it("keeps the run-history rule for a turn that reads runs but cannot launch", async () => {

@@ -10,6 +10,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { formatCallerContext, buildCallerContextBlock } from "../src/prompt.ts";
+import { turnCapabilities } from "../src/capabilities.ts";
 import type { ChatPlatformDeps } from "../src/platform-services.ts";
 
 /** Minimal Hono-context stub exposing the `c.get(key)` reads the builder makes. */
@@ -44,14 +45,23 @@ function fakeDeps(respond: (req: Request) => Response): {
   };
 }
 
+/** The turn's capabilities, from the permission set a role actually grants. */
+function caps(permissions: readonly string[]) {
+  return turnCapabilities((permission) => permissions.includes(permission));
+}
+
+/** A builder: the MCP pair, the launch, run-read and authoring. */
+const BUILDER = ["mcp:read", "mcp:invoke", "agents:run", "agents:write", "runs:read"];
+/** The same caller with the authoring toggle off (or a persona without it). */
+const NO_AUTHORING = BUILDER.filter((permission) => permission !== "agents:write");
+
 /**
  * Opts every case shares; a case that is ABOUT one of them overrides it. The
- * three permission-shaped fields are required, so a literal per call would be
- * noise the reader has to diff.
+ * permission-shaped fields are required, so a literal per call would be noise
+ * the reader has to diff.
  */
 const BASE_OPTS = {
-  canAuthorAgents: true,
-  canRunAgents: true,
+  capabilities: caps(BUILDER),
   rolePreview: false,
   spaceRole: "builder",
   permissions: ["agents:read", "mcp:invoke"],
@@ -147,8 +157,7 @@ describe("formatCallerContext", () => {
     // stays byte-stable across turns (one cache breakpoint covers it).
     const identity = { user: { name: "Ada" }, org: { role: "member" } };
     const out = formatCallerContext(identity, {
-      canAuthorAgents: true,
-      canRunAgents: true,
+      capabilities: caps(BUILDER),
       rolePreview: false,
       spaceRole: "builder",
       permissions: ["mcp:invoke", "agents:read", "mcp:read"],
@@ -161,8 +170,7 @@ describe("formatCallerContext", () => {
   it("marks the role line as a preview, omits it without a role, and says `none` for an empty set", () => {
     const identity = { user: { name: "Ada" }, org: { role: "member" } };
     const preview = formatCallerContext(identity, {
-      canAuthorAgents: false,
-      canRunAgents: false,
+      capabilities: caps([]),
       rolePreview: true,
       spaceRole: "operator",
       permissions: [],
@@ -170,8 +178,7 @@ describe("formatCallerContext", () => {
     expect(preview).toContain("Role in this space: operator — role preview active");
     expect(preview).toContain("Permissions this turn: none");
     const roleless = formatCallerContext(identity, {
-      canAuthorAgents: false,
-      canRunAgents: false,
+      capabilities: caps([]),
       rolePreview: false,
       spaceRole: null,
       permissions: ["mcp:read"],
@@ -199,18 +206,23 @@ describe("formatCallerContext", () => {
     };
     const preview = formatCallerContext(raw, {
       ...BASE_OPTS,
-      canAuthorAgents: false,
+      capabilities: caps(NO_AUTHORING),
       rolePreview: true,
     });
     expect(preview).toContain("draft only, not runnable under this role preview");
     expect(preview).not.toContain("you do not author it");
     // Outside a preview the permission set IS the caller's, so the fact holds.
-    const real = formatCallerContext(raw, { ...BASE_OPTS, canAuthorAgents: false });
+    const real = formatCallerContext(raw, { ...BASE_OPTS, capabilities: caps(NO_AUTHORING) });
     expect(real).toContain("draft only, not runnable — nothing published and you do not author it");
     expect(real).not.toContain("role preview");
   });
 
-  it("names the preview for a draft the caller authors but the persona cannot run", () => {
+  it("gives ONE cause-neutral reason for a writable draft the turn cannot run", () => {
+    // `home_writable` is the HUMAN's answer: `/api/me/context` is dispatched
+    // with the caller's raw headers, so it sees neither the preview nor the
+    // authoring toggle. The turn holding no `agents:write` is therefore all this
+    // line can know — naming the preview as the cause was a guess, and wrong
+    // whenever the toggle was what dropped it.
     const raw = {
       user: { name: "Ada" },
       org: { role: "member" },
@@ -224,12 +236,19 @@ describe("formatCallerContext", () => {
         },
       ],
     };
+    const hint = "; draft, not runnable in this turn — this turn does not hold agent authoring";
     expect(
-      formatCallerContext(raw, { ...BASE_OPTS, canAuthorAgents: false, rolePreview: true }),
-    ).toContain("draft, not runnable under this role preview — it does not grant agent authoring");
-    expect(formatCallerContext(raw, { ...BASE_OPTS, canAuthorAgents: false })).toContain(
-      "draft, not runnable in this turn — agent authoring is off or not granted here",
+      formatCallerContext(raw, {
+        ...BASE_OPTS,
+        capabilities: caps(NO_AUTHORING),
+        rolePreview: true,
+      }),
+    ).toContain(hint);
+    expect(formatCallerContext(raw, { ...BASE_OPTS, capabilities: caps(NO_AUTHORING) })).toContain(
+      hint,
     );
+    // Control: with authoring held, the same draft is advertised as runnable.
+    expect(formatCallerContext(raw, BASE_OPTS)).toContain("draft only, yours to run");
   });
 
   it("advertises no draft as runnable when the turn may not author agents", () => {
@@ -243,9 +262,9 @@ describe("formatCallerContext", () => {
     };
     const raw = { user: { name: "Ada" }, org: { role: "member" }, agents: [draft] };
     expect(formatCallerContext(raw, BASE_OPTS)).toContain("yours to run");
-    const off = formatCallerContext(raw, { ...BASE_OPTS, canAuthorAgents: false });
+    const off = formatCallerContext(raw, { ...BASE_OPTS, capabilities: caps(NO_AUTHORING) });
     expect(off).toContain(
-      "draft, not runnable in this turn — agent authoring is off or not granted here",
+      "draft, not runnable in this turn — this turn does not hold agent authoring",
     );
     // Distinct from the "draft only, not runnable" rule, which means never runnable.
     expect(off).not.toContain("draft only, not runnable");
@@ -259,9 +278,9 @@ describe("formatCallerContext", () => {
       skills: [{ package_id: "@acme/research", display_name: "Research" }],
     };
     expect(formatCallerContext(raw, BASE_OPTS)).toContain("## Skills you can attach");
-    expect(formatCallerContext(raw, { ...BASE_OPTS, canAuthorAgents: false })).not.toContain(
-      "## Skills",
-    );
+    expect(
+      formatCallerContext(raw, { ...BASE_OPTS, capabilities: caps(NO_AUTHORING) }),
+    ).not.toContain("## Skills");
   });
 
   it("says nothing about the draft for a PUBLISHED agent", () => {
@@ -578,8 +597,7 @@ describe("buildCallerContextBlock", () => {
       spaceId: "spc_1",
       user,
       deps,
-      canAuthorAgents: true,
-      canRunAgents: true,
+      capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
     });
     // Block is rendered from the dispatched payload, not from request context.
@@ -605,8 +623,7 @@ describe("buildCallerContextBlock", () => {
       spaceId: "spc_1",
       user,
       deps,
-      canAuthorAgents: false,
-      canRunAgents: false,
+      capabilities: caps([]),
       permissions: ["mcp:read", "mcp:invoke"],
     });
     expect(out).not.toContain("## Existing agents you can run");
@@ -635,8 +652,7 @@ describe("buildCallerContextBlock", () => {
       spaceId: "spc_1",
       user,
       deps,
-      canAuthorAgents: false,
-      canRunAgents: true,
+      capabilities: caps(NO_AUTHORING),
       permissions: ["mcp:read", "mcp:invoke"],
     };
     const preview = await buildCallerContextBlock(
@@ -665,8 +681,7 @@ describe("buildCallerContextBlock", () => {
       spaceId: "spc_1",
       user,
       deps,
-      canAuthorAgents: false,
-      canRunAgents: true,
+      capabilities: caps(NO_AUTHORING),
       permissions: ["mcp:read", "mcp:invoke"],
     };
     const preview = await buildCallerContextBlock(
@@ -701,8 +716,7 @@ describe("buildCallerContextBlock", () => {
       spaceId: "spc_1",
       user,
       deps,
-      canAuthorAgents: true,
-      canRunAgents: true,
+      capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
     });
     expect(out).toContain("Ada (ada@acme.com)");
@@ -716,8 +730,7 @@ describe("buildCallerContextBlock", () => {
       spaceId: "spc_1",
       user,
       deps,
-      canAuthorAgents: true,
-      canRunAgents: true,
+      capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
     });
     expect(out).toBe("");
