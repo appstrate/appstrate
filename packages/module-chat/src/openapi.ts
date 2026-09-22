@@ -54,8 +54,8 @@ export const chatComponentSchemas = {
   },
   // One row of the chat's skill picker: the platform defaults every turn
   // indexes, then the space's own catalogue. `source` says which half a row
-  // came from — a `platform` row is indexed whatever the space holds and is
-  // therefore not pinnable, a `space` row is.
+  // came from — a `platform` row is indexed by default, a `space` row only
+  // through the catalogue or a pin; both can be pinned.
   //
   // This documents the `ChatSkillEntry` interface of `./skills.ts`, which is
   // what `routes.ts` builds. A JSON Schema cannot be derived from a TS type

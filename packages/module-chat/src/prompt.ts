@@ -113,7 +113,7 @@ export function buildSystemPrompt(options: {
   const author = (yes: string, no = "") => (options.canAuthorAgents ? yes : no);
   const discovery = options.skillDiscovery;
   const discoveryRule = {
-    auto: `The list under \`${SKILL_CATALOGUE_LEAD}\` is a catalogue you have not loaded: read those descriptions the same way and load one when it clearly matches. When that catalogue is marked \`(list truncated)\`, call \`listSkills\` to see the rest.`,
+    auto: `When \`## Skills\` also shows a list under \`${SKILL_CATALOGUE_LEAD}\`, that list is a catalogue you have not loaded: read those descriptions the same way and load one when it clearly matches. When that catalogue is marked \`(list truncated)\`, call \`listSkills\` to see the rest.`,
     on_demand:
       "No catalogue of other skills is shown to you. Call `listSkills` only when the user asks for a skill you do not see listed.",
     // The empty case is the NO-SECTION case: with no pins there is nothing to

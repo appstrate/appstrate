@@ -188,7 +188,9 @@ describe("full persona invariants", () => {
     });
     // `auto` IS the default mode, so it reads like the persona built with it.
     expect(auto).toBe(FULL);
-    expect(auto).toContain("`Other skills in this space (not loaded):` is a catalogue");
+    expect(auto).toContain(
+      "a list under `Other skills in this space (not loaded):`, that list is a catalogue",
+    );
     expect(onDemand).toContain("No catalogue of other skills is shown to you");
     expect(onDemand).not.toContain("is a catalogue you have not loaded");
     expect(manual).toContain("Load only the skills listed under `## Skills`");

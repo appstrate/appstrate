@@ -5,7 +5,8 @@
  * renders one back in the sent bubble. With `skill-directive.ts` (the string
  * contract) and `skill-trigger.ts` (when the popover may open) — the pure
  * halves, split out because the lint gate refuses a module exporting both
- * components and plain functions — these are the ONLY places assistant-ui's
+ * components and plain functions — plus the `Unstable_TriggerPopoverRoot`
+ * wrapper in `thread.tsx`, these are the ONLY places assistant-ui's
  * `unstable_*` surface is touched, so a version bump is something you read.
  */
 
