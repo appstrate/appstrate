@@ -146,6 +146,9 @@ describe("connectOfferTarget", () => {
   it("refuses every other resolution code, connect-flow relay or not", () => {
     for (const code of [
       "must_choose_connection",
+      // Renaming a connection is not a connect flow: another consent (or
+      // another connection) makes the collision worse, not better.
+      "duplicate_connection_label",
       "auth_key_mismatch",
       "pinned_connection_unavailable",
       "override_connection_unavailable",

@@ -154,6 +154,7 @@ describe("credential-proxy integration-resolver", () => {
         integrationId: INTEGRATION_ID,
         authKey: "primary",
         accountId: "acct-1",
+        label: "acct-1",
         spaceId: ctx.defaultSpaceId,
         userId: opts.userId ?? null,
         endUserId: opts.endUserId ?? null,

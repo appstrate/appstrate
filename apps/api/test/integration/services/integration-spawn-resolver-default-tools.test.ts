@@ -66,6 +66,7 @@ async function seedConnection(ctx: TestContext) {
     integrationId: INTEG,
     authKey: "primary",
     accountId: "default",
+    label: "default",
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     endUserId: null,

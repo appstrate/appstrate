@@ -120,6 +120,7 @@ describe("resolveRunPreflight — integration manifests are read at the PIN", ()
       integrationId: INTEG,
       authKey: "primary",
       accountId: "acct-schedpin",
+      label: "acct-schedpin",
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,

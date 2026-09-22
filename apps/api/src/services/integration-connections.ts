@@ -21,6 +21,7 @@
  */
 
 import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { asRecord } from "@appstrate/core/safe-json";
 import { db } from "@appstrate/db/client";
 import {
   spacePackages,
@@ -144,6 +145,20 @@ async function loadManifestOrThrow(
  */
 interface ActorConnectionRow {
   id: string;
+  /**
+   * The agent-facing handle. A run binding several connections to one
+   * integration spawns one runner per connection and the sidecar routes
+   * `(tool name, label) → client`, so the LIVE label — not the kickoff
+   * snapshot's audit copy — is what the spawn spec must carry.
+   */
+  label: string;
+  /**
+   * `identity_claims.account_id` — the upstream account this connection speaks
+   * for (`$.host` for SSH, the `sub`/email claim elsewhere). Rendered into the
+   * `connection` parameter's description so the LLM can tell two labels apart.
+   * `null` when the auth declared no identity claims.
+   */
+  accountId: string | null;
   credentialsEncrypted: string;
   expiresAt: Date | null;
   scopesGranted: string[];
@@ -166,6 +181,20 @@ interface ActorConnectionRow {
  */
 export interface ResolvedConnectionRow extends ActorConnectionRow {
   authKey: string;
+}
+
+/**
+ * AFPS §7.4 — the upstream account a connection speaks for, read from the
+ * claims the auth's `identity_claims` mapping extracted at connect time. An
+ * auth that declares no mapping has none, which is `null`, not a placeholder:
+ * the value is shown to the agent to tell two connections apart, and a shared
+ * default string would tell it nothing.
+ */
+function accountIdFromClaims(identityClaims: unknown): string | null {
+  const claims = asRecord(identityClaims);
+  return typeof claims.account_id === "string" && claims.account_id.length > 0
+    ? claims.account_id
+    : null;
 }
 
 /**
@@ -207,6 +236,8 @@ async function loadActorConnection(
   const rows = await db
     .select({
       id: integrationConnections.id,
+      label: integrationConnections.label,
+      identityClaims: integrationConnections.identityClaims,
       credentialsEncrypted: integrationConnections.credentialsEncrypted,
       expiresAt: integrationConnections.expiresAt,
       scopesGranted: integrationConnections.scopesGranted,
@@ -232,14 +263,7 @@ async function loadActorConnection(
   // When a connectionId override is set, the WHERE clause already narrowed
   // to that row — skip the own-vs-shared tiebreaker.
   if (context.connectionId) {
-    const picked = rows[0]!;
-    return {
-      id: picked.id,
-      credentialsEncrypted: picked.credentialsEncrypted,
-      expiresAt: picked.expiresAt,
-      scopesGranted: picked.scopesGranted,
-      clientRef: picked.clientRef,
-    };
+    return toActorConnectionRow(rows[0]!);
   }
 
   // Prefer the actor's own row (any) over shared rows. The OR predicate
@@ -249,13 +273,27 @@ async function loadActorConnection(
     context.actor.type === "user"
       ? r.userId === context.actor.id
       : r.endUserId === context.actor.id;
-  const picked = rows.find(ownsRow) ?? rows[0]!;
+  return toActorConnectionRow(rows.find(ownsRow) ?? rows[0]!);
+}
+
+/** Narrow a selected row to the shape credential/spawn resolvers consume. */
+function toActorConnectionRow(row: {
+  id: string;
+  label: string;
+  identityClaims: unknown;
+  credentialsEncrypted: string;
+  expiresAt: Date | null;
+  scopesGranted: string[];
+  clientRef: string | null;
+}): ActorConnectionRow {
   return {
-    id: picked.id,
-    credentialsEncrypted: picked.credentialsEncrypted,
-    expiresAt: picked.expiresAt,
-    scopesGranted: picked.scopesGranted,
-    clientRef: picked.clientRef,
+    id: row.id,
+    label: row.label,
+    accountId: accountIdFromClaims(row.identityClaims),
+    credentialsEncrypted: row.credentialsEncrypted,
+    expiresAt: row.expiresAt,
+    scopesGranted: row.scopesGranted,
+    clientRef: row.clientRef,
   };
 }
 
@@ -286,6 +324,8 @@ async function loadAccessibleConnectionById(
   const [row] = await db
     .select({
       id: integrationConnections.id,
+      label: integrationConnections.label,
+      identityClaims: integrationConnections.identityClaims,
       integrationId: integrationConnections.integrationId,
       authKey: integrationConnections.authKey,
       credentialsEncrypted: integrationConnections.credentialsEncrypted,
@@ -319,8 +359,7 @@ async function loadAccessibleConnectionById(
         (expectedAuthKey !== null ? ` auth '${expectedAuthKey}'` : ""),
     );
   }
-  const { integrationId: _integrationId, ...resolved } = row;
-  return resolved;
+  return { ...toActorConnectionRow(row), authKey: row.authKey };
 }
 
 /**

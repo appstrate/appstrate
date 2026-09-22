@@ -174,6 +174,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
       integrationId: INTEG,
       authKey: "session",
       accountId: "default",
+      label: "default",
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,

@@ -93,6 +93,7 @@ async function seedAll(ctx: TestContext, manifest: Record<string, unknown>) {
     integrationId: INTEG,
     authKey: "session",
     accountId: "default",
+    label: "default",
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     endUserId: null,

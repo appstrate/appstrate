@@ -81,7 +81,7 @@ function buildIntegrationManifest(id: string, required: boolean) {
 
 interface ReadinessResolution {
   status: string;
-  resolved_connection_id: string | null;
+  resolved_connection_ids: string[];
 }
 interface ReadinessBody {
   blocks_run: boolean;
@@ -134,6 +134,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
       endUserId: null,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret-value" } }),
       scopesGranted: [],
+      label: "Readiness",
     });
   }
 
@@ -207,7 +208,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     expect(body.errors).toHaveLength(0);
     const integ = body.integrations.find((i) => i.integration_id === INTEGRATION);
     expect(integ!.run_blocking).toBe(false);
-    expect(integ!.resolution.resolved_connection_id).not.toBeNull();
+    expect(integ!.resolution.resolved_connection_ids).toHaveLength(1);
   });
 
   // #770 — readiness must assess the SELECTED version's manifest, not always the

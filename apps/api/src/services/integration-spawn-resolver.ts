@@ -11,10 +11,11 @@
  *   2. Loads the integration's bundle bytes — system packages from the
  *      in-memory registry (loaded at boot), local packages from object
  *      storage via `downloadVersionZip`.
- *   3. For each declared auth in `manifest.auths`, finds the actor's
- *      connection in `integration_connections`, decrypts, and (for
- *      oauth2) proactively refreshes if the token is past its lead
- *      window.
+ *   3. Emits ONE spec per connection the run bound to that integration
+ *      (`runs.resolved_connections[id]`, 1..N): same `integrationId`, same
+ *      `namespace`, same tool surface — the credential material is what
+ *      differs. Each spec's connection row is decrypted and, for oauth2,
+ *      proactively refreshed if the token is past its lead window.
  *   4. Materialises the `delivery.env` mapping into a flat env dict
  *      (one entry per env var, value taken from the credential field
  *      named in `from`).
@@ -93,11 +94,13 @@ interface ResolveIntegrationsInput {
   agentManifest: Record<string, unknown>;
   /**
    * Snapshot of the cascade frozen at run kickoff
-   * (`runs.resolved_connections`). When set, the spawn loader looks up
-   * `snapshot[integrationId].connectionId` to pick the one connection
-   * (admin pin / run override / schedule override / member pin / auto
-   * fallback). When omitted, falls back to live actor-based lookup
-   * (auto-pick when the actor has exactly one accessible connection).
+   * (`runs.resolved_connections`). `snapshot[integrationId]` is the SET of
+   * connections the cascade bound (admin pin / org default / run override /
+   * schedule override / member pin / auto fallback) — one spec is emitted per
+   * member. An integration with no entry at all has no set to spawn from and
+   * falls back to the live actor-based lookup, which yields AT MOST ONE
+   * connection (the cascade's own auto-pick rule): that is the no-snapshot
+   * path, not a "pick the first of the set" rule.
    */
   resolvedConnections?: ResolvedConnectionMap | null;
   /**
@@ -136,6 +139,14 @@ export interface DroppedIntegration {
    * Omitted when `reason` already says everything.
    */
   readonly detail?: string;
+  /**
+   * Which of the integration's bound connections this drop is about. A run
+   * binding N connections to one integration can lose a subset of them, and
+   * `integrationId` alone cannot say which — the label is what the operator
+   * (and the agent) name a connection by. Omitted when the drop happened
+   * before any connection was bound (package missing, not active, …).
+   */
+  readonly connectionLabel?: string;
 }
 
 /**
@@ -149,21 +160,29 @@ interface ResolveIntegrationSpawnsResult {
   readonly dropped: DroppedIntegration[];
 }
 
-/** Internal per-integration outcome — mirrors `fetchIntegrationManifest`'s shape. */
-type ResolveOneResult =
-  | { ok: true; spec: IntegrationSpawnSpec }
-  | { ok: false; reason: IntegrationDropReason; detail?: string };
+/** A drop before the caller attributes it to its integration. */
+type IntegrationDrop = Omit<DroppedIntegration, "integrationId">;
 
-/** Terse `{ ok: false }` constructor, so each drop site stays one line. */
+/**
+ * Internal per-integration outcome. Not a success/failure union any more: one
+ * integration bound to N connections can spawn some of them and lose others,
+ * so both lists travel together.
+ */
+interface ResolveOneResult {
+  readonly specs: readonly IntegrationSpawnSpec[];
+  readonly drops: readonly IntegrationDrop[];
+}
+
+/** Terse whole-integration drop, so each pre-connection drop site stays one line. */
 function drop(reason: IntegrationDropReason, detail?: string): ResolveOneResult {
-  return { ok: false, reason, ...(detail !== undefined ? { detail } : {}) };
+  return { specs: [], drops: [{ reason, ...(detail !== undefined ? { detail } : {}) }] };
 }
 
 /**
- * Return one `IntegrationSpawnSpec` per integration that's (a) declared
- * on the agent, (b) active in the space, AND (c) connected by
- * the actor, ALONGSIDE one {@link DroppedIntegration} per integration that
- * failed any of those checks.
+ * Return one `IntegrationSpawnSpec` per CONNECTION bound to an integration
+ * that's (a) declared on the agent, (b) active in the space, AND (c)
+ * connected by the actor, ALONGSIDE one {@link DroppedIntegration} per
+ * integration — or per connection — that failed any of those checks.
  *
  * Dropping is a deliberate degradation — the product supports running an
  * agent whose integrations are only partly connected (the pre-flight picker
@@ -201,7 +220,7 @@ export async function resolveIntegrationSpawns(
           spaceId,
           actor,
           entry.tools,
-          resolvedConnections?.[entry.id] ?? null,
+          resolvedConnections?.[entry.id] ?? [],
           entry.auth_key,
           input.manifestCache,
         );
@@ -230,17 +249,12 @@ export async function resolveIntegrationSpawns(
 
   const specs: IntegrationSpawnSpec[] = [];
   const dropped: DroppedIntegration[] = [];
-  // Declaration order is preserved on both lists (map-then-partition).
+  // Declaration order is preserved on both lists (map-then-partition), and
+  // within one integration the order of its bound connections is too.
   outcomes.forEach((outcome, i) => {
-    if (outcome.ok) {
-      specs.push(outcome.spec);
-      return;
-    }
-    dropped.push({
-      integrationId: entries[i]!.id,
-      reason: outcome.reason,
-      ...(outcome.detail !== undefined ? { detail: outcome.detail } : {}),
-    });
+    const integrationId = entries[i]!.id;
+    specs.push(...outcome.specs);
+    for (const entry of outcome.drops) dropped.push({ integrationId, ...entry });
   });
   return { specs, dropped };
 }
@@ -251,7 +265,7 @@ async function resolveOne(
   spaceId: string,
   actor: Actor,
   agentToolSelection: readonly string[] | "*" | undefined,
-  resolvedConnection: ResolvedConnection | null,
+  boundConnections: readonly ResolvedConnection[],
   requiredAuthKey: string | undefined,
   manifestCache?: IntegrationManifestCache,
 ): Promise<ResolveOneResult> {
@@ -506,160 +520,191 @@ async function resolveOne(
   }
   // sourceKind === "none" (or unknown) → serverless, serverSpec stays undefined.
 
-  // An integration is viable if EITHER `delivery.env` OR `delivery.http`
-  // resolved to something — pure-http integrations (no env vars) still
-  // need to spawn with an empty `spawnEnv`. apiCall integrations are
-  // viable on a resolved connection alone: their credentials flow at
-  // runtime through `/internal/integration-credentials`, and a `custom`
-  // auth (no server-side injection) legitimately resolves no delivery.
-  const deliveries = await resolveDeliveries(
-    integrationId,
-    spaceId,
-    actor,
-    manifest,
-    resolvedConnection,
-    exposeApiCall,
-    referencedMcpServer,
-    requiredAuthKey,
-  );
-  if (!deliveries) {
-    // resolveDeliveries already logged the fine-grained reason (missing
-    // connection, decrypt failure, no delivery mapping) server-side; the
-    // run-visible marker collapses them to one actionable bucket — from the
-    // operator's seat every one of them means "no usable credential".
-    return drop("no_delivery");
-  }
-
-  // Namespace = the manifest name's slug portion, normalised by the
-  // MCP host. We pass the package id; McpHost.normaliseNamespace does
-  // the slug + length cap.
-  const namespace = integrationId;
-
-  // The connect-login tool is a credential-acquisition primitive, never an
-  // agent-facing capability — exclude it from the allowlist so the agent's
-  // LLM can never invoke it directly. (It is normally not in the selection
-  // anyway, but defence-in-depth: an author could have listed it.)
-  //
-  // AFPS §4.4 wildcard — when the effective selection is `"*"`, emit `undefined`
-  // so the sidecar's McpHost passes every upstream tool through (legacy
-  // "all tools allowed" path). The connect-login tool would otherwise reach
-  // the agent surface under that passthrough, so we append its name to
-  // `hiddenTools` below (the McpHost belt-and-suspenders filter that runs
-  // AFTER the allowlist). Without this, an integration with a `connect.tool`
-  // login primitive would expose the credential-acquisition tool to the
-  // agent's LLM whenever an agent opted into the wildcard.
-  let toolAllowlist: readonly string[] | undefined;
-  if (wildcardSelection) {
-    toolAllowlist = undefined;
-  } else {
-    const baseAllowlist = effectiveSelection ?? [];
-    toolAllowlist = deliveries.connectLogin
-      ? (baseAllowlist as readonly string[]).filter((t) => t !== deliveries.connectLogin!.toolName)
-      : baseAllowlist;
-  }
-
-  // R8a hidden-tools sidecar filter. Union of:
-  //   - `manifest.hidden_tools` (explicit opt-out)
-  //   - the connect-login `toolName` when the wildcard branch is in effect
-  //     (only then does the allowlist no longer filter it out)
-  // Connect tools never reach the agent's LLM regardless of agent selection.
-  const hiddenToolsUnion: string[] = [...new Set(manifest.hidden_tools ?? [])];
-  if (wildcardSelection && deliveries.connectLogin) {
-    const loginName = deliveries.connectLogin.toolName;
-    if (!hiddenToolsUnion.includes(loginName)) hiddenToolsUnion.push(loginName);
-  }
-
   // Peer discriminant for the sidecar's spawn-mode dispatch. Mirrors
   // `source.kind`; defaults to `"none"` when the manifest didn't declare a
   // recognised source (serverless fall-back — the sidecar skips spawn and
   // wires only the api_call tool(s), if any).
   const specSourceKind: "local" | "remote" | "none" = sourceKind ?? "none";
 
-  const spec: IntegrationSpawnSpec = {
-    integrationId,
-    namespace,
-    sourceKind: specSourceKind,
-    manifest: {
-      name: manifest.name,
-      version: manifest.version,
-      // Serverless integrations (`sourceKind: "none"`) omit `server` in the
-      // spec — the sidecar's serverless path (no spec.manifest.server) skips
-      // spawn and only wires the generic api_call tool. Local runners
-      // (node|python|binary|uv, resolved from the referenced mcp-server) emit
-      // `{ type, entry_point, packageId, version }`. Remote MCP
-      // (`sourceKind: "remote"`) emits `{ url, transport }` only — `server.type`
-      // is intentionally absent because the spawn-mode discriminant lives on
-      // `spec.sourceKind`, not in the AFPS `mcpServerTypeEnum` slot.
-      ...(serverSpec
-        ? {
-            server: {
-              ...(serverSpec.type ? { type: serverSpec.type } : {}),
-              ...(serverSpec.entry_point ? { entry_point: serverSpec.entry_point } : {}),
-              // AFPS — the referenced mcp-server package id, so the sidecar
-              // fetches the runnable server bundle from
-              // `GET /internal/mcp-server-bundle/...` (local sources only).
-              ...(serverSpec.packageId ? { packageId: serverSpec.packageId } : {}),
-              // #588 — the concrete resolved version, so the sidecar fetches
-              // `?version=…` and the bytes match the manifest read above.
-              ...(serverSpec.version ? { version: serverSpec.version } : {}),
-              // Phase 7 — propagate the remote MCP URL so the sidecar can open
-              // a Streamable HTTP client against it. Mutually exclusive with
-              // `entry_point` (enforced by `integrationManifestSchema`).
-              ...(serverSpec.url ? { url: serverSpec.url } : {}),
-              // AFPS §7.1 — `streamable-http` | `sse`, required by the
-              // manifest schema. Only emitted on remote sources.
-              ...(serverSpec.transport ? { transport: serverSpec.transport } : {}),
-            },
-          }
-        : {}),
-    },
-    ...(apiCalls.length > 0 ? { apiCalls } : {}),
-    // R8a defensive filter — surface `manifest.hidden_tools` to the
-    // sidecar so the McpHost can drop them from `tools/list` at runtime,
-    // independent of whether the import-time catalog resolver already
-    // removed them. This guards against fixtures / direct DB writes that
-    // bypass `resolveIntegrationToolCatalog`. Under the wildcard branch
-    // we also union in the connect-login tool name so the agent's LLM
-    // can never see the credential-acquisition primitive. Omitted when
-    // both sources are empty.
-    ...(hiddenToolsUnion.length > 0 ? { hiddenTools: hiddenToolsUnion } : {}),
-    spawnEnv: deliveries.spawnEnv,
-    // For remote HTTP MCP we deliberately drop `httpDeliveryAuths`: the
-    // sidecar's HTTP path reads the access token directly from the
-    // credentials source and injects it into the outbound MCP request,
-    // bypassing the per-integration MITM listener (which doesn't exist).
-    ...(deliveries.httpDeliveryAuths && !isRemoteHttp
-      ? { httpDeliveryAuths: deliveries.httpDeliveryAuths }
-      : {}),
-    // Niveau 2 Phase 3 — the allowlist is the EFFECTIVE selection computed
-    // above: the agent's explicit `integrations_configuration[id].tools` when
-    // it declared one, otherwise the integration's `default_tools` (§4.4). An
-    // absent agent selection does NOT collapse to `[]`. A genuinely empty
-    // selection fails the boot in `assertIntegrationExposesTools`.
-    //
-    // AFPS §4.4 wildcard — `toolAllowlist === undefined` instructs the
-    // sidecar (via the conditional spread below) to omit the field, which
-    // McpHost interprets as "all tools allowed" (legacy passthrough).
-    ...(toolAllowlist !== undefined ? { toolAllowlist } : {}),
-    ...(deliveries.connectLogin ? { connectLogin: deliveries.connectLogin } : {}),
-    ...(deliveries.fileMounts && Object.keys(deliveries.fileMounts).length > 0
-      ? { fileMounts: deliveries.fileMounts }
-      : {}),
-    // Issue #543 — explicit egress signal for no-injection local runners.
-    // The sidecar mounts a plain CONNECT egress listener when this is set and
-    // no injection plan exists. Dropped for remote HTTP (no runner to route).
-    ...(deliveries.needsEgress && !isRemoteHttp ? { needsEgress: true } : {}),
-    // Opt-in shared workspace mount declared on the referenced
-    // mcp-server. Only emitted for local sources — remote and
-    // serverless integrations have no runner container/process to
-    // mount into. A malformed `_meta` throws synchronously here so a
-    // bad manifest fails fast at run kickoff rather than producing a
-    // silently-degraded spawn that the operator can't diagnose.
-    ...(referencedMcpServer && specSourceKind === "local"
+  // Opt-in shared workspace mount declared on the referenced mcp-server. Only
+  // for local sources — remote and serverless integrations have no runner
+  // container/process to mount into. Resolved ONCE per integration: it depends
+  // on the mcp-server manifest, not on the connection, and a malformed `_meta`
+  // must throw fast for the whole integration (the caller turns it into a
+  // `resolve_error` drop) rather than N times inside the per-connection loop.
+  const workspaceMount =
+    referencedMcpServer && specSourceKind === "local"
       ? resolveWorkspaceMount(integrationId, referencedMcpServer)
-      : {}),
-  };
-  return { ok: true, spec };
+      : {};
+
+  // An integration declaring N connections spawns N runners — same
+  // `integrationId`, same `namespace`, same tool surface. `namespace` stays the
+  // package id (McpHost.normaliseNamespace does the slug + length cap); the
+  // sidecar routes `(tool name, connection label) → client` rather than
+  // suffixing names, which is why nothing here varies per connection except the
+  // credential material.
+  //
+  // `[null]` is the NO-SNAPSHOT path (see `resolvedConnections` above): a live
+  // auto-pick that yields at most one connection. A snapshot entry always
+  // carries the full bound set.
+  const picks: readonly (ResolvedConnection | null)[] =
+    boundConnections.length > 0 ? boundConnections : [null];
+
+  const outcomes = await Promise.all(
+    picks.map(async (pick): Promise<IntegrationSpawnSpec | IntegrationDrop> => {
+      // An integration is viable if EITHER `delivery.env` OR `delivery.http`
+      // resolved to something — pure-http integrations (no env vars) still
+      // need to spawn with an empty `spawnEnv`. apiCall integrations are
+      // viable on a resolved connection alone: their credentials flow at
+      // runtime through `/internal/integration-credentials`, and a `custom`
+      // auth (no server-side injection) legitimately resolves no delivery.
+      const deliveries = await resolveDeliveries(
+        integrationId,
+        spaceId,
+        actor,
+        manifest,
+        pick,
+        exposeApiCall,
+        referencedMcpServer,
+        requiredAuthKey,
+      );
+      if (!deliveries) {
+        // resolveDeliveries already logged the fine-grained reason (missing
+        // connection, decrypt failure, no delivery mapping) server-side; the
+        // run-visible marker collapses them to one actionable bucket — from the
+        // operator's seat every one of them means "no usable credential" — and
+        // names WHICH connection lost it.
+        return { reason: "no_delivery", ...(pick?.label ? { connectionLabel: pick.label } : {}) };
+      }
+
+      // The connect-login tool is a credential-acquisition primitive, never an
+      // agent-facing capability — exclude it from the allowlist so the agent's
+      // LLM can never invoke it directly. (It is normally not in the selection
+      // anyway, but defence-in-depth: an author could have listed it.)
+      //
+      // AFPS §4.4 wildcard — when the effective selection is `"*"`, emit
+      // `undefined` so the sidecar's McpHost passes every upstream tool through
+      // (legacy "all tools allowed" path). The connect-login tool would
+      // otherwise reach the agent surface under that passthrough, so we append
+      // its name to `hiddenTools` below (the McpHost belt-and-suspenders filter
+      // that runs AFTER the allowlist). Without this, an integration with a
+      // `connect.tool` login primitive would expose the credential-acquisition
+      // tool to the agent's LLM whenever an agent opted into the wildcard.
+      //
+      // Computed per connection: the login primitive is declared by the AUTH
+      // the connection was made against, and two connections on one integration
+      // may sit on different auths.
+      const loginToolName = deliveries.connectLogin?.toolName;
+      let toolAllowlist: readonly string[] | undefined;
+      if (wildcardSelection) {
+        toolAllowlist = undefined;
+      } else {
+        // The wildcard is handled by the branch above, so what remains is a
+        // concrete list; the cast says so without re-running the guard.
+        const baseAllowlist = (effectiveSelection ?? []) as readonly string[];
+        toolAllowlist =
+          loginToolName === undefined
+            ? baseAllowlist
+            : baseAllowlist.filter((t) => t !== loginToolName);
+      }
+
+      // R8a hidden-tools sidecar filter. Union of:
+      //   - `manifest.hidden_tools` (explicit opt-out)
+      //   - the connect-login `toolName` when the wildcard branch is in effect
+      //     (only then does the allowlist no longer filter it out)
+      // Connect tools never reach the agent's LLM regardless of agent selection.
+      const hiddenToolsUnion: string[] = [...new Set(manifest.hidden_tools ?? [])];
+      if (wildcardSelection && loginToolName && !hiddenToolsUnion.includes(loginToolName)) {
+        hiddenToolsUnion.push(loginToolName);
+      }
+
+      return {
+        integrationId,
+        namespace: integrationId,
+        connection: deliveries.connection,
+        sourceKind: specSourceKind,
+        manifest: {
+          name: manifest.name,
+          version: manifest.version,
+          // Serverless integrations (`sourceKind: "none"`) omit `server` in the
+          // spec — the sidecar's serverless path (no spec.manifest.server) skips
+          // spawn and only wires the generic api_call tool. Local runners
+          // (node|python|binary|uv, resolved from the referenced mcp-server) emit
+          // `{ type, entry_point, packageId, version }`. Remote MCP
+          // (`sourceKind: "remote"`) emits `{ url, transport }` only — `server.type`
+          // is intentionally absent because the spawn-mode discriminant lives on
+          // `spec.sourceKind`, not in the AFPS `mcpServerTypeEnum` slot.
+          ...(serverSpec
+            ? {
+                server: {
+                  ...(serverSpec.type ? { type: serverSpec.type } : {}),
+                  ...(serverSpec.entry_point ? { entry_point: serverSpec.entry_point } : {}),
+                  // AFPS — the referenced mcp-server package id, so the sidecar
+                  // fetches the runnable server bundle from
+                  // `GET /internal/mcp-server-bundle/...` (local sources only).
+                  ...(serverSpec.packageId ? { packageId: serverSpec.packageId } : {}),
+                  // #588 — the concrete resolved version, so the sidecar fetches
+                  // `?version=…` and the bytes match the manifest read above.
+                  ...(serverSpec.version ? { version: serverSpec.version } : {}),
+                  // Phase 7 — propagate the remote MCP URL so the sidecar can open
+                  // a Streamable HTTP client against it. Mutually exclusive with
+                  // `entry_point` (enforced by `integrationManifestSchema`).
+                  ...(serverSpec.url ? { url: serverSpec.url } : {}),
+                  // AFPS §7.1 — `streamable-http` | `sse`, required by the
+                  // manifest schema. Only emitted on remote sources.
+                  ...(serverSpec.transport ? { transport: serverSpec.transport } : {}),
+                },
+              }
+            : {}),
+        },
+        ...(apiCalls.length > 0 ? { apiCalls } : {}),
+        // R8a defensive filter — surface `manifest.hidden_tools` to the
+        // sidecar so the McpHost can drop them from `tools/list` at runtime,
+        // independent of whether the import-time catalog resolver already
+        // removed them. This guards against fixtures / direct DB writes that
+        // bypass `resolveIntegrationToolCatalog`. Under the wildcard branch
+        // we also union in the connect-login tool name so the agent's LLM
+        // can never see the credential-acquisition primitive. Omitted when
+        // both sources are empty.
+        ...(hiddenToolsUnion.length > 0 ? { hiddenTools: hiddenToolsUnion } : {}),
+        spawnEnv: deliveries.spawnEnv,
+        // For remote HTTP MCP we deliberately drop `httpDeliveryAuths`: the
+        // sidecar's HTTP path reads the access token directly from the
+        // credentials source and injects it into the outbound MCP request,
+        // bypassing the per-integration MITM listener (which doesn't exist).
+        ...(deliveries.httpDeliveryAuths && !isRemoteHttp
+          ? { httpDeliveryAuths: deliveries.httpDeliveryAuths }
+          : {}),
+        // Niveau 2 Phase 3 — the allowlist is the EFFECTIVE selection computed
+        // above: the agent's explicit `integrations_configuration[id].tools` when
+        // it declared one, otherwise the integration's `default_tools` (§4.4). An
+        // absent agent selection does NOT collapse to `[]`. A genuinely empty
+        // selection fails the boot in `assertIntegrationExposesTools`.
+        //
+        // AFPS §4.4 wildcard — `toolAllowlist === undefined` instructs the
+        // sidecar (via the conditional spread below) to omit the field, which
+        // McpHost interprets as "all tools allowed" (legacy passthrough).
+        ...(toolAllowlist !== undefined ? { toolAllowlist } : {}),
+        ...(deliveries.connectLogin ? { connectLogin: deliveries.connectLogin } : {}),
+        ...(deliveries.fileMounts && Object.keys(deliveries.fileMounts).length > 0
+          ? { fileMounts: deliveries.fileMounts }
+          : {}),
+        // Issue #543 — explicit egress signal for no-injection local runners.
+        // The sidecar mounts a plain CONNECT egress listener when this is set and
+        // no injection plan exists. Dropped for remote HTTP (no runner to route).
+        ...(deliveries.needsEgress && !isRemoteHttp ? { needsEgress: true } : {}),
+        ...workspaceMount,
+      } satisfies IntegrationSpawnSpec;
+    }),
+  );
+
+  const specs: IntegrationSpawnSpec[] = [];
+  const drops: IntegrationDrop[] = [];
+  for (const outcome of outcomes) {
+    if ("reason" in outcome) drops.push(outcome);
+    else specs.push(outcome);
+  }
+  return { specs, drops };
 }
 
 /**
@@ -691,6 +736,12 @@ function resolveWorkspaceMount(
 }
 
 interface ResolvedDeliveries {
+  /**
+   * The connection this delivery plan was rendered from — copied verbatim onto
+   * `IntegrationSpawnSpec.connection`, which is what tells N otherwise
+   * identical specs apart.
+   */
+  connection: IntegrationSpawnSpec["connection"];
   spawnEnv: Record<string, string>;
   httpDeliveryAuths?: NonNullable<IntegrationSpawnSpec["httpDeliveryAuths"]>;
   /**
@@ -719,19 +770,20 @@ interface ResolvedDeliveries {
 }
 
 /**
- * Resolve the delivery plan (env + http) for ONE connection on this
- * integration. Returns `null` when the connection can't be loaded or
- * its auth declares no usable delivery mapping.
+ * Resolve the delivery plan (env + http) for ONE of the connections bound to
+ * this integration. Returns `null` when the connection can't be loaded or its
+ * auth declares no usable delivery mapping — the caller turns that into a
+ * per-connection drop, so a dead member never black-holes its siblings.
  *
- * The runtime model: one connection per integration. The connection
- * carries its own `authKey` which selects the `manifest.auths[X]`
- * declaration we extract delivery from. OAuth and api_key connections
- * are interchangeable — the chosen one's shape drives credential
- * injection.
+ * The connection carries its own `authKey`, which selects the
+ * `manifest.auths[X]` declaration delivery is extracted from. OAuth and
+ * api_key connections are interchangeable — the chosen one's shape drives
+ * credential injection, and two connections on one integration may sit on
+ * different auths.
  *
- * `resolvedConnection` (the cascade's frozen pick) is the authoritative
- * source when present. Otherwise we fall back to a live auto-pick over
- * the actor's accessible connections on this integration.
+ * `resolvedConnection` (one member of the cascade's frozen set) is the
+ * authoritative source when present. `null` is the no-snapshot path: a live
+ * auto-pick over the actor's accessible connections, which yields at most one.
  */
 async function resolveDeliveries(
   integrationId: string,
@@ -744,16 +796,12 @@ async function resolveDeliveries(
   requiredAuthKey: string | undefined,
 ): Promise<ResolvedDeliveries | null> {
   const auths = (manifest.auths ?? {}) as Record<string, AfpsManifestAuth>;
-  if (Object.keys(auths).length === 0) {
-    // Integration declares no auth — spawn with no extra env, no MITM.
-    return { spawnEnv: {} };
-  }
 
-  // Load the one connection chosen by the cascade. When the agent dep
-  // pins an `auth_key` (AFPS §4.1), narrow the live-credentials
-  // auto-pick to that single auth — the resolver snapshot already
-  // honoured the pin, this is the parity guarantee for the no-snapshot
-  // path (e.g. legacy callers that don't run the cascade upstream).
+  // Load this member of the bound set. When the agent dep pins an `auth_key`
+  // (AFPS §4.1), narrow the live-credentials auto-pick to that single auth —
+  // the resolver snapshot already honoured the pin, this is the parity
+  // guarantee for the no-snapshot path (e.g. legacy callers that don't run the
+  // cascade upstream).
   const row = await selectAccessibleConnection(
     integrationId,
     Object.keys(auths),
@@ -765,10 +813,21 @@ async function resolveDeliveries(
     logger.info("no resolved connection for integration; skipping delivery entries", {
       integrationId,
       actorType: actor.type,
+      connectionId: resolvedConnection?.connectionId ?? null,
       hadSnapshot: resolvedConnection !== null,
     });
     return null;
   }
+
+  // What the agent addresses this runner by, read from the LIVE row this spec
+  // decrypts. The cascade snapshot carries a label too, but that copy is the
+  // run's audit trail (it survives a rename or a delete); the tool surface the
+  // sidecar builds must name the connection as it is NOW.
+  const connection: IntegrationSpawnSpec["connection"] = {
+    id: row.id,
+    label: row.label,
+    accountId: row.accountId,
+  };
 
   const auth = auths[row.authKey];
   if (!auth) {
@@ -852,6 +911,7 @@ async function resolveDeliveries(
       },
     };
     return {
+      connection,
       spawnEnv: {},
       httpDeliveryAuths,
       connectLogin: {
@@ -1076,6 +1136,7 @@ async function resolveDeliveries(
   // still served (for {{var}} substitution) via the live endpoint.
   if (!resolvedAtLeastOne && !hasApiCall) return null;
   return {
+    connection,
     spawnEnv,
     ...(Object.keys(httpDeliveryAuths).length > 0 ? { httpDeliveryAuths } : {}),
     ...(Object.keys(fileMounts).length > 0 ? { fileMounts } : {}),
