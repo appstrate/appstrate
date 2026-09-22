@@ -1696,17 +1696,27 @@ and what it needs.
 - **An offer is an alert**, the shape every other line naming a state and its
   remedy has: "Julie Ferrand l'a proposé à Bac à sable", what that space would
   still have to switch on, and "Activer dans Bac à sable".
-- **The reference facts are ONE property list under the title**, the way a page
-  of properties reads: icon, label, value, in two groups told apart by a rule
-  rather than a title — what the package uses, then what it is. Two cards were
+- **The reference facts are property lists under headings of their own** —
+  "Ce qu'il utilise", "Détails", then "Espaces", the three of them the same
+  `SettingsHeading` the settings pages use. Each row is icon, label, value.
+  A wider gap alone was tried first to separate the two groups and read as an
+  accident of spacing: a grouping the reader has to infer is not a grouping. Two cards were
   tried first and gave the values half the panel's width, wrapping an
   identifier mid-word; and a card frames a content of its own, which a list of
   properties is not. Deliberately not tabs either: the sheet is a preview
   inside a panel that already has a rail, and hiding either half behind a tab
   would make the reader click to learn whether the agent needs an integration
   the target space lacks, which is the question the sheet exists to answer. One
-  section heading remains on the page, "Espaces": everything above it is read,
-  everything below it is decided.
+  The headings also settle the tabs question a second time: the sheet is three
+  short blocks, and tabbing "informations" against "espaces" would land the
+  reader on the half they cannot act in while the offer alert and the switch it
+  presses ended up on either side of a tab. Every row is ONE line of the same height,
+  ruled off from the next: a long value truncates (its full text in `title`)
+  and the rule that explains it ("Suivent l'agent : rien à activer") sits at
+  the end of that same line, never under it, which is what made the list ragged.
+  "Ouvrir la fiche complète" sits on the TITLE's line, not the back link's:
+  leaving for the package's page acts on the package, while Back is the panel's
+  own navigation.
 - **Espaces is graded by reach** (`lib/catalogue-sheet`, tested): a table of
   every reachable space (state, what is missing there for an agent, the
   switch) when there are several; one line with its switch when there is one;

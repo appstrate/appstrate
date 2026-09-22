@@ -125,14 +125,27 @@ function PropertyRow({
   children: ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-0.5 py-1.5 sm:flex-row sm:gap-4">
+    // One line, always: every row is the same height, so the list reads as a
+    // block rather than a ragged column. A long value is truncated with its
+    // full text in `title`, and the rule that explains it sits at the END of
+    // the same line rather than under it.
+    <div className="flex h-10 items-center gap-4">
       <dt className="text-muted-foreground flex w-40 shrink-0 items-center gap-2 text-sm">
         <Icon className="size-3.5 shrink-0" aria-hidden />
         {label}
       </dt>
-      <dd className="min-w-0 text-sm">
-        {children}
-        {hint && <span className="text-muted-foreground block text-xs">{hint}</span>}
+      <dd className="flex min-w-0 flex-1 items-baseline gap-3 text-sm">
+        <span
+          className="min-w-0 truncate"
+          title={typeof children === "string" ? children : undefined}
+        >
+          {children}
+        </span>
+        {hint && (
+          <span className="text-muted-foreground ml-auto hidden shrink-0 text-xs sm:inline">
+            {hint}
+          </span>
+        )}
       </dd>
     </div>
   );
@@ -247,22 +260,23 @@ export function CataloguePreview({
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <Button variant="ghost" size="sm" className="-ml-2 gap-1.5" onClick={onBack}>
-          <ArrowLeft />
-          {t("catalogue.back")}
-        </Button>
-        {/* An action, in the shape every other action has: leaving for the
-            package's own page is one, and a discreet link read as decoration. */}
-        <Button asChild variant="outline" size="sm" className="gap-1.5">
+      <Button variant="ghost" size="sm" className="mb-3 -ml-2 gap-1.5" onClick={onBack}>
+        <ArrowLeft />
+        {t("catalogue.back")}
+      </Button>
+
+      {/* The action sits on the TITLE's line, not on the back link's: leaving
+          for the package's own page acts on the package, while Back is the
+          panel's own navigation. */}
+      <div className="flex items-start justify-between gap-4">
+        <SettingsHeading className="mb-2" title={item.name || item.id} />
+        <Button asChild variant="outline" size="sm" className="shrink-0 gap-1.5">
           <Link to={packageDetailPath(type, item.id)}>
             <ExternalLink className="size-3.5" />
             {t("catalogue.openFullPage")}
           </Link>
         </Button>
       </div>
-
-      <SettingsHeading className="mb-2" title={item.name || item.id} />
       {/* What the package IS, in the badges the package's own header uses. */}
       <div className="flex flex-wrap items-center gap-1.5">
         <Badge variant="secondary">{typeLabel[type]}</Badge>
@@ -279,81 +293,86 @@ export function CataloguePreview({
 
       {item.description && <p className="mt-4 text-sm">{item.description}</p>}
 
-      {/* The package's properties, one list rather than two cards: they are
-          not a content of their own, they are what this package IS and what it
-          USES, and a frame around a property list draws a border that answers
-          to nothing. The two groups are told apart by a rule, not by a title —
-          the labels already say which is which. */}
-      <dl className="mt-5">
-        {agent && (
-          <PropertyRow
-            icon={Boxes}
-            label={t("catalogue.sheet.integrations")}
-            hint={
-              agent.dependencies.integrations.length > 0
-                ? t("catalogue.sheet.integrationsHint")
-                : undefined
-            }
-          >
-            {agent.dependencies.integrations.length > 0
-              ? agent.dependencies.integrations.map((entry) => integrationName(entry.id)).join(", ")
-              : t("catalogue.sheet.none")}
+      {/* The package's properties, in blocks each under a heading of its own —
+          the same heading "Espaces" carries below. A gap alone had to be read
+          as a grouping, and read as an accident of spacing instead. A list
+          rather than cards: these are not a content of their own, and a frame
+          around a property list draws a border that answers to nothing. */}
+      {agent && (
+        <SettingsGroup title={t("catalogue.sheet.uses")} className="mt-6 mb-6">
+          <dl className="divide-border divide-y border-t">
+            <PropertyRow
+              icon={Boxes}
+              label={t("catalogue.sheet.integrations")}
+              hint={
+                agent.dependencies.integrations.length > 0
+                  ? t("catalogue.sheet.integrationsHint")
+                  : undefined
+              }
+            >
+              {agent.dependencies.integrations.length > 0
+                ? agent.dependencies.integrations
+                    .map((entry) => integrationName(entry.id))
+                    .join(", ")
+                : t("catalogue.sheet.none")}
+            </PropertyRow>
+            {agentSkills.length > 0 && (
+              <PropertyRow
+                icon={Wrench}
+                label={t("catalogue.sheet.skills")}
+                hint={t("catalogue.sheet.skillsHint")}
+              >
+                {/* Named, never linked: a skill not shared to the reader's
+                    space opens on a 404, and it needs nothing there anyway. */}
+                {agentSkills.map((skill) => skill.name ?? skill.id).join(", ")}
+              </PropertyRow>
+            )}
+            {agentInputs.length > 0 && (
+              <PropertyRow icon={TextCursorInput} label={t("catalogue.sheet.inputs")}>
+                {agentInputs.join(", ")}
+              </PropertyRow>
+            )}
+            {runtimeTools > 0 && (
+              <PropertyRow icon={Hammer} label={t("catalogue.sheet.tools")}>
+                {t("catalogue.sheet.toolCount", { count: runtimeTools })}
+              </PropertyRow>
+            )}
+          </dl>
+        </SettingsGroup>
+      )}
+
+      <SettingsGroup title={t("catalogue.sheet.details")} className={agent ? "mb-6" : "mt-6 mb-6"}>
+        <dl className="divide-border divide-y border-t">
+          {protocol && (
+            <PropertyRow icon={Plug} label={t("catalogue.column.protocol")}>
+              {protocol}
+            </PropertyRow>
+          )}
+          {usedBy.length > 0 && (
+            <PropertyRow icon={Layers} label={t("catalogue.sheet.usedBy")}>
+              {usedBy.map((entry) => entry.display_name || entry.id).join(", ")}
+            </PropertyRow>
+          )}
+          {home && (
+            // Where the package lives, which is where it is edited (#1437).
+            <PropertyRow
+              icon={House}
+              label={t("catalogue.homeSpace")}
+              hint={t("catalogue.sheet.homeHint")}
+            >
+              {home.name}
+            </PropertyRow>
+          )}
+          {updatedAt && (
+            <PropertyRow icon={Clock} label={t("catalogue.sheet.updated")}>
+              {formatDateField(updatedAt, "date")}
+            </PropertyRow>
+          )}
+          <PropertyRow icon={Hash} label={t("catalogue.identifier")}>
+            <span className="font-mono text-xs break-all">{item.id}</span>
           </PropertyRow>
-        )}
-        {agent && agentSkills.length > 0 && (
-          <PropertyRow
-            icon={Wrench}
-            label={t("catalogue.sheet.skills")}
-            hint={t("catalogue.sheet.skillsHint")}
-          >
-            {/* Named, never linked: a skill not shared to the reader's space
-                opens on a 404, and it needs nothing there anyway. */}
-            {agentSkills.map((skill) => skill.name ?? skill.id).join(", ")}
-          </PropertyRow>
-        )}
-        {agent && agentInputs.length > 0 && (
-          <PropertyRow icon={TextCursorInput} label={t("catalogue.sheet.inputs")}>
-            {agentInputs.join(", ")}
-          </PropertyRow>
-        )}
-        {agent && runtimeTools > 0 && (
-          <PropertyRow icon={Hammer} label={t("catalogue.sheet.tools")}>
-            {t("catalogue.sheet.toolCount", { count: runtimeTools })}
-          </PropertyRow>
-        )}
-      </dl>
-      {/* What it IS, under a rule rather than a title: the labels already tell
-          the two groups apart. */}
-      <dl className={agent ? "border-border mt-3 border-t pt-3" : "mt-1"}>
-        {protocol && (
-          <PropertyRow icon={Plug} label={t("catalogue.column.protocol")}>
-            {protocol}
-          </PropertyRow>
-        )}
-        {usedBy.length > 0 && (
-          <PropertyRow icon={Layers} label={t("catalogue.sheet.usedBy")}>
-            {usedBy.map((entry) => entry.display_name || entry.id).join(", ")}
-          </PropertyRow>
-        )}
-        {home && (
-          // Where the package lives, which is where it is edited (#1437).
-          <PropertyRow
-            icon={House}
-            label={t("catalogue.homeSpace")}
-            hint={t("catalogue.sheet.homeHint")}
-          >
-            {home.name}
-          </PropertyRow>
-        )}
-        {updatedAt && (
-          <PropertyRow icon={Clock} label={t("catalogue.sheet.updated")}>
-            {formatDateField(updatedAt, "date")}
-          </PropertyRow>
-        )}
-        <PropertyRow icon={Hash} label={t("catalogue.identifier")}>
-          <span className="font-mono text-xs break-all">{item.id}</span>
-        </PropertyRow>
-      </dl>
+        </dl>
+      </SettingsGroup>
 
       {/* The one line that asks the reader for a decision: an alert, like
           every other line in the product that names a state and its remedy.
