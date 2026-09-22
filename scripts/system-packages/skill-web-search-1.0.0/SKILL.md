@@ -1,6 +1,6 @@
 ---
 name: web-search
-description: "Méthode pour chercher ou lire le web, que le chat ne peut faire lui-même : vérifier l'accès web réellement disponible, puis lancer UN run inline qui embarque l'intégration web, avec l'effort borné et les sources citées. Charge ce skill dès qu'une demande suppose une recherche web, la lecture d'une ou plusieurs URLs, ou une veille sur des sources externes. Seul @appstrate/firecrawl est livré avec la plateforme ; quand aucun accès n'existe, annonce-le plutôt que d'inventer."
+description: "À charger dès qu'une demande suppose une recherche web, la lecture d'une ou plusieurs URLs, ou une veille sur des sources externes."
 ---
 
 # Recherche web par run inline
@@ -24,10 +24,6 @@ que ce que tu as vu dans ton contexte ou dans `listIntegrations`.
    ici ») et propose l'alternative réelle — qu'il colle le contenu, ou qu'un
    administrateur ajoute un fournisseur. **N'invente jamais un résultat, une
    source ou une intégration.**
-
-Pour savoir si une intégration présente a une connexion utilisable sans lancer
-de run : `getIntegration` (`path_params: { packageId: "@appstrate/firecrawl" }`)
-et lis `auths[].ready`.
 
 ## 2. Recette A — une recherche en langage naturel
 
@@ -56,15 +52,7 @@ Même forme, autre prompt : pour chaque URL fournie, un POST sur
 plus par run) et demande un extrait, pas la page entière, quand seul un point
 précis est cherché.
 
-## 4. Borner l'effort — toujours les trois lignes
-
-Tout prompt de sous-agent porte :
-
-1. un **plafond** explicite (« au plus 2 recherches », « au plus 5 pages ») ;
-2. un **critère d'arrêt** (« arrête-toi à 5 sources pertinentes ») ;
-3. `output` comme **dernière action obligatoire**.
-
-## 5. Restituer
+## 4. Restituer
 
 - **Cite les sources** telles que le run les a renvoyées : titre + URL. Une
   affirmation sans source rattachable ne sort pas.

@@ -1,6 +1,6 @@
 ---
 name: connector-choice
-description: "Méthode pour choisir la bonne variante de connecteur quand plusieurs couvrent le même service (variante MCP distante en -mcp contre variante API), à partir de l'état d'auth réel de chaque variante, et pour la faire connecter sans jamais demander de secret dans la conversation. Charge ce skill quand il faut brancher un nouvel outil, quand un run échoue faute d'intégration prête, ou quand l'utilisateur demande comment connecter un service."
+description: "À charger quand il faut brancher un nouvel outil, qu'un run échoue faute d'intégration prête, ou que l'utilisateur demande comment connecter un service."
 ---
 
 # Choisir la bonne variante de connecteur
@@ -16,8 +16,7 @@ Le bloc `## Your context` ne liste que les intégrations **déjà connectées** 
 service pas encore branché n'y figure pas, et sa variante `-mcp` non plus. Il
 faut donc la chercher :
 
-1. `listIntegrations` — c'est la liste de ce qui existe réellement dans cet
-   espace.
+1. `listIntegrations`.
 2. Pour le service demandé, cherche le voisin dont l'identifiant se termine par
    `-mcp`. Le nom nu est presque toujours la variante API.
 3. Deux variantes existent → ne tranche pas sur l'identifiant, lis leur état

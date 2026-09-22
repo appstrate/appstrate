@@ -1,6 +1,6 @@
 ---
 name: copilot
-description: "Méthode pour faire naître une automatisation avec l'utilisateur : entretien ancré sur son rôle et ses outils, propositions concrètes tirées de ses intégrations, choix de la forme la plus légère (run inline, agent enregistré, agent planifié), puis assemblage (skill de l'organisation, agent, planification). Charge ce skill dès que l'intention est de créer, automatiser ou déléguer quelque chose, quand l'utilisateur ne sait pas par où commencer, ou quand il vient de connecter des outils. Inutile pour seulement lancer ou inspecter un agent existant."
+description: "À charger dès que l'utilisateur veut créer, automatiser ou déléguer quelque chose, ou ne sait pas par où commencer. Pas pour lancer un agent existant."
 ---
 
 # Copilote de création d'agents
@@ -88,11 +88,10 @@ en une minute ; un agent créé à l'aveugle se jette.
 
 ## 4. Assembler
 
-1. **Vérifier l'existant.** Les agents lançables sont dans ton contexte, les
-   skills de l'organisation aussi. Complète au besoin avec `listAgents` ou
-   `listSkills`. Ne crée jamais un doublon d'une méthode existante : elle porte
-   peut-être des ajustements de l'utilisateur, la dupliquer les perd. En cas
-   d'hésitation entre deux skills, lis-les avec `getSkill` — c'est gratuit.
+1. **Vérifier l'existant.** Ne crée jamais un doublon d'une méthode
+   existante : elle porte peut-être des ajustements de l'utilisateur, la
+   dupliquer les perd. En cas d'hésitation entre deux skills, lis-les avec
+   `getSkill` — c'est gratuit.
 
 2. **La méthode d'abord, l'agent ensuite** — uniquement quand elle est
    réutilisable. `createSkill` prend `manifest` + `content` :
