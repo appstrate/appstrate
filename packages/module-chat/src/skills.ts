@@ -45,7 +45,7 @@ export interface ResolveChatSkillsInput {
   catalogueTruncated: boolean;
 }
 
-export interface ResolvedChatSkills {
+interface ResolvedChatSkills {
   indexed: IndexedSkill[];
   catalogue: SkillHint[];
   catalogueTruncated: boolean;

@@ -27,7 +27,6 @@ const FULL = buildSystemPrompt({
   canComposeInline: true,
   canAuthorAgents: true,
   canReadSkills: true,
-  skillCatalogue: true,
 });
 
 describe("full persona invariants", () => {
@@ -145,24 +144,20 @@ describe("full persona invariants", () => {
     expect(FULL).toContain("`(pinned)` is one the user chose for this conversation");
   });
 
-  it("names the same heading and lead strings the context block renders", () => {
+  it("names the same heading the context block renders", () => {
     const block = formatCallerContext(
       {
         user: { name: "Ada" },
         requested_skills: [{ package_id: "@appstrate/copilot", source: "system" }],
-        skills: [{ package_id: "@acme/pdf" }],
       },
       OPTS,
     );
-    for (const heading of ["## Skills", "Other skills in this space (not loaded):"]) {
-      expect(block).toContain(heading);
-      expect(FULL).toContain(`\`${heading}\``);
-    }
+    expect(block).toContain("## Skills");
+    expect(FULL).toContain("`## Skills`");
   });
 
   it("never lets a platform default become an agent dependency", () => {
     expect(FULL).toContain("Never declare a skill marked `(platform)`");
-    expect(FULL).toContain("fits the task and is not marked `(platform)`, attach it under");
   });
 
   it("teaches the loading rules whatever the turn may author", () => {
@@ -170,25 +165,15 @@ describe("full persona invariants", () => {
       canComposeInline: false,
       canAuthorAgents: false,
       canReadSkills: true,
-      skillCatalogue: true,
     });
     expect(REDUCED).toContain('`operation_id: "getSkill"`');
     expect(REDUCED).toContain("guides for YOU");
   });
 
-  it("flips the catalogue sentence with the session's catalogue switch", () => {
-    const off = buildSystemPrompt({
-      canComposeInline: true,
-      canAuthorAgents: true,
-      canReadSkills: true,
-      skillCatalogue: false,
-    });
+  it("forbids browsing `listSkills` outside the two cases that need it", () => {
     expect(FULL).toContain(
-      "The list under `Other skills in this space (not loaded):` is not loaded",
+      "Never call `listSkills` to browse: only when the user asks for a skill you do not see listed, or the list is marked `(list truncated)`",
     );
-    expect(FULL).not.toContain("No catalogue of other skills is shown to you");
-    expect(off).toContain("No catalogue of other skills is shown to you");
-    expect(off).not.toContain("Other skills in this space");
   });
 
   it("teaches nothing about skills to a turn without `skills:read`", () => {
@@ -196,13 +181,11 @@ describe("full persona invariants", () => {
       canComposeInline: true,
       canAuthorAgents: true,
       canReadSkills: false,
-      skillCatalogue: true,
     });
     for (const skillRule of [
       "getSkill",
       "listSkills",
       "## Skills",
-      "Other skills in this space",
       "Skills are not run on their own",
       "attach it under `dependencies.skills`",
       "the skills available to you",
@@ -298,14 +281,12 @@ describe("the persona without inline composition", () => {
     canComposeInline: false,
     canAuthorAgents: false,
     canReadSkills: true,
-    skillCatalogue: true,
   });
   /** `agents:write` without `agents:run`: may author agents, not compose one inline. */
   const AUTHOR_ONLY = buildSystemPrompt({
     canComposeInline: false,
     canAuthorAgents: true,
     canReadSkills: true,
-    skillCatalogue: true,
   });
 
   it("teaches no way to compose one", () => {

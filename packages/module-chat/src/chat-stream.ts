@@ -364,7 +364,6 @@ export async function handleChatStream(
           // UI language forwarded by the client; validated/defaulted in the builder.
           locale: c.req.header("X-Chat-Locale"),
           canAuthorAgents,
-          canReadSkills,
           skills,
         }).finally(() => {
           phaseBMs = Date.now() - phaseBStart;
@@ -375,7 +374,7 @@ export async function handleChatStream(
         (error: unknown) => ({ ok: false as const, error }),
       );
 
-  const [models, skillSelection] = await Promise.all([
+  const [models] = await Promise.all([
     listModels(origin, inferenceHeaders, platformFetch),
     sessionSkills,
   ]);
@@ -476,7 +475,6 @@ export async function handleChatStream(
     canComposeInline: composeInline,
     canAuthorAgents,
     canReadSkills,
-    skillCatalogue: skillSelection.catalogue,
   });
   if (contextBlock) system += `\n\n${contextBlock}`;
 

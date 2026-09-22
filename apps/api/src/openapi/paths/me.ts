@@ -681,8 +681,8 @@ export const mePaths = {
                   unresolved_skills: {
                     type: "array",
                     description:
-                      "Requested ids that did not resolve (unknown, not active here, or no " +
-                      "`skills:read`), in request order.",
+                      "Requested ids that did not resolve (unknown, not active here, or out of " +
+                      "reach), in request order. Empty without `skills:read`.",
                     items: { type: "string" },
                   },
                 },

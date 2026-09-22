@@ -494,8 +494,7 @@ describe("handleChatStream", () => {
     expect(requested[0]).toContain(PIN);
 
     const system = calls[0]!.system;
-    // The persona's catalogue-off sentence, and a block that agrees with it.
-    expect(system).toContain("No catalogue of other skills is shown to you");
+    // The catalogue is off, so the block drops it; pins are still indexed.
     expect(system).not.toContain("Other skills in this space");
     expect(system).not.toContain("@acme/catalogued");
     expect(system).toContain(`\`${PIN}\` (pinned)`);
@@ -503,9 +502,9 @@ describe("handleChatStream", () => {
     await waitForAssistantPersist(sessionId);
   });
 
-  it("requests, renders and teaches no skill on a turn without `skills:read`", async () => {
-    // `getSkill` needs `skills:read` and `/api/me/context` reports every id
-    // unresolved without it, so the turn must not ask (nor warn about defaults).
+  it("teaches no skill on a turn without `skills:read`", async () => {
+    // The persona follows the turn's token; the context block renders what the
+    // route answers, and the route answers no skill without `skills:read`.
     const sessionId = mintSessionId();
     const PIN = "@acme/pinned-skill";
     await db.insert(chatSessions).values({
@@ -532,7 +531,6 @@ describe("handleChatStream", () => {
     await collectUiChunks(res);
 
     expect(contextUrls).toHaveLength(1);
-    expect(contextUrls[0]!.searchParams.has("skills")).toBe(false);
     const system = calls[0]!.system;
     expect(system).toContain(CONTEXT_ORG_MARKER);
     for (const absent of ["## Skills", PIN, "getSkill", "listSkills"]) {
@@ -592,7 +590,6 @@ describe("handleChatStream", () => {
         canComposeInline: false,
         canAuthorAgents: false,
         canReadSkills: false,
-        skillCatalogue: true,
       }).slice(0, 64),
     );
     expect(input.system).toContain(CONTEXT_ORG_MARKER);

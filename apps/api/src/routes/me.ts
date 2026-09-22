@@ -548,10 +548,10 @@ router.get("/context", requireSpaceContext(), async (c) => {
       canReadSkills
         ? listActiveSkills(scope, { homeWritable })
         : Promise.resolve({ skills: [], truncated: false, total: 0 }),
-      // Same gate as the catalogue; refused ids are reported, not dropped.
+      // Same gate as the catalogue: without it, nothing about skills at all.
       canReadSkills
         ? resolveSkillsByIds(scope, requestedSkillIds, { homeWritable })
-        : Promise.resolve({ resolved: [], unresolved: requestedSkillIds }),
+        : Promise.resolve({ resolved: [], unresolved: [] }),
       // Actor-scoped, but still a runs read: the same permission `GET /api/runs`
       // asks for (`runs:read` ∨ `runs:read-all`, `canReadRuns`).
       mayReadRuns

@@ -676,7 +676,6 @@ describe("buildCallerContextBlock", () => {
       user,
       deps,
       canAuthorAgents: true,
-      canReadSkills: true,
       skills: { catalogue: true, pinned: [] },
     });
     // Block is rendered from the dispatched payload, not from request context.
@@ -698,7 +697,6 @@ describe("buildCallerContextBlock", () => {
       user,
       deps,
       canAuthorAgents: true,
-      canReadSkills: true,
       // A pin that is ALSO a default must not be asked for twice, and the
       // order must not depend on how the session stored it.
       skills: { catalogue: true, pinned: ["@acme/mine", "@appstrate/copilot"] },
@@ -707,34 +705,6 @@ describe("buildCallerContextBlock", () => {
     expect(asked).toBe(
       ["@acme/mine", ...PLATFORM_DEFAULT_SKILLS].sort().join(","), // sorted, deduped
     );
-  });
-
-  it("requests and renders no skill without `skills:read`", async () => {
-    // Every requested id would come back unresolved and `getSkill` would 403:
-    // asking would only index nothing and warn of a deployment fault that is not one.
-    const { deps, lastRequest } = fakeDeps(() =>
-      Response.json({
-        user: { name: "Ada" },
-        skills: [{ package_id: "@acme/pdf" }],
-        requested_skills: [{ package_id: "@appstrate/copilot", source: "system" }],
-        unresolved_skills: ["@acme/mine", ...PLATFORM_DEFAULT_SKILLS],
-      }),
-    );
-    const out = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
-      origin: "http://127.0.0.1:3000",
-      headers: {},
-      spaceId: "spc_1",
-      user,
-      deps,
-      canAuthorAgents: true,
-      canReadSkills: false,
-      skills: { catalogue: true, pinned: ["@acme/mine"] },
-    });
-    expect(new URL(lastRequest()!.url).searchParams.has("skills")).toBe(false);
-    expect(out).toContain("Ada");
-    for (const absent of ["## Skills", "@appstrate/copilot", "@acme/pdf", "@acme/mine"]) {
-      expect(out).not.toContain(absent);
-    }
   });
 
   it("falls back to identity-only when the dispatch 400s (no app context)", async () => {
@@ -746,7 +716,6 @@ describe("buildCallerContextBlock", () => {
       user,
       deps,
       canAuthorAgents: true,
-      canReadSkills: true,
       skills: { catalogue: true, pinned: [] },
     });
     expect(out).toContain("Ada (ada@acme.com)");
@@ -761,7 +730,6 @@ describe("buildCallerContextBlock", () => {
       user,
       deps,
       canAuthorAgents: true,
-      canReadSkills: true,
       skills: { catalogue: true, pinned: [] },
     });
     expect(out).toBe("");

@@ -13447,7 +13447,7 @@ export interface operations {
                             /** @enum {string} */
                             source: "system" | "local";
                         }[];
-                        /** @description Requested ids that did not resolve (unknown, not active here, or no `skills:read`), in request order. */
+                        /** @description Requested ids that did not resolve (unknown, not active here, or out of reach), in request order. Empty without `skills:read`. */
                         unresolved_skills: string[];
                     };
                 };

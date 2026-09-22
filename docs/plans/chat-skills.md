@@ -19,7 +19,9 @@ skills indexed for a turn =
 ```
 
 A caller without `skills:read` gets no skills index at all, platform defaults
-included — `getSkill` would refuse every body anyway.
+included — `getSkill` would refuse every body anyway. The route is the one gate:
+`/api/me/context` answers no skill field without it, and the chat renders what
+the payload holds. Only the persona reads the grant, from the turn's token.
 
 Progressive disclosure, as in the Agent Skills spec: one line per skill (id,
 version, label, description) in the `## Skills` section of the system prompt,
@@ -52,15 +54,17 @@ and `listIntegrations` (`services/integration-service.ts`).
 `GET /api/me/context?skills=<comma-separated ids>` resolves the named skills by
 exact id for the caller in the current space, unlisted included:
 `requested_skills` (sorted) and `unresolved_skills` (unknown, inactive or out of
-reach); a malformed id or more than 30 ids is a 400. One round trip.
+reach), both empty without `skills:read`; a malformed id or more than 30 ids is
+a 400. One round trip.
 
 ## Platform default skills
 
 `@appstrate/copilot`, `@appstrate/web-search` and `@appstrate/connector-choice`
 are a constant in module-chat (`src/skills.ts`), shipped as system packages
 (`scripts/system-packages/skill-*-1.0.0/`) marked unlisted. They are always
-indexed, whatever the session state, and are never offered in the picker. A default that does not resolve is an operator warning
-(logged once per process), never a prompt line. These three skills are written
+indexed, whatever the session state, and are never offered in the picker. A
+default that does not resolve — a space may switch a system skill off — is not
+indexed, and says nothing: that is a choice, not a fault. These three skills are written
 for the chat assistant — they read its `## Your context` block — which is why
 they are unlisted platform defaults and not agent dependencies. Their bodies
 carry only what the persona (`prompt.ts`) and the MCP server instructions

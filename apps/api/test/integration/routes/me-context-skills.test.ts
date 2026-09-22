@@ -100,7 +100,7 @@ describe("GET /api/me/context?skills=", () => {
     expect(typeof body.space.name).toBe("string");
   });
 
-  it("resolves nothing and reports every id unresolved without `skills:read`", async () => {
+  it("answers nothing about the requested skills without `skills:read`", async () => {
     // `agents:run` without `skills:read`: the payload builds, the skill halves are refused.
     const apiKey = await seedApiKey({
       createdBy: ctx.user.id,
@@ -115,7 +115,7 @@ describe("GET /api/me/context?skills=", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as ContextBody;
     expect(body.requested_skills).toEqual([]);
-    expect(body.unresolved_skills).toEqual([LISTED, UNLISTED]);
+    expect(body.unresolved_skills).toEqual([]);
     expect(body.skills).toEqual([]);
   });
 
