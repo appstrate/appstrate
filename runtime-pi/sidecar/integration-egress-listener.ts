@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-integration PLAIN CONNECT egress listener (issue #543).
+ * Per-connection PLAIN CONNECT egress listener (issue #543).
  *
  * A local-source runner sits on the per-run network (`internal: true` in
  * docker mode) with no direct egress. When the integration injects a
@@ -67,7 +67,7 @@ interface CreateEgressListenerOptions {
 }
 
 /**
- * Create a per-integration plain CONNECT egress listener on an ephemeral port.
+ * Create a per-connection plain CONNECT egress listener on an ephemeral port.
  * Returns a {@link MitmListenerHandle}-shaped handle for uniform lifecycle
  * management alongside MITM listeners.
  */

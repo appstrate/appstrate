@@ -160,4 +160,20 @@ describe("boot report — one entry per connection", () => {
       await result.shutdown();
     }
   });
+
+  it("fails an agent-run spec that binds no connection, before any credentials fetch", async () => {
+    const { result, seen } = await boot([spec(undefined), spec(CONN_B)], ["conn-b"]);
+    try {
+      expect(result.failed).toEqual([
+        { integrationId: INTEGRATION_ID, error: "agent-run spawn spec binds no connection" },
+      ]);
+      expect(seen).toEqual([
+        `/internal/integration-credentials/${INTEGRATION_ID}?connection_id=conn-b`,
+      ]);
+      // CONTROL — the bound sibling still boots.
+      expect(result.spawned.map((entry) => entry.connectionLabel)).toEqual(["perso"]);
+    } finally {
+      await result.shutdown();
+    }
+  });
 });

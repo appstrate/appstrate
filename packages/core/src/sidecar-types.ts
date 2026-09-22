@@ -174,10 +174,10 @@ export interface SidecarLaunchSpec {
 }
 
 /**
- * Per-integration spec consumed by the sidecar. The platform launcher
+ * Per-connection spec consumed by the sidecar. The platform launcher
  * resolves the chain `agent.dependencies.integrations[id] →
- * spacePackages → integration_connections` and emits one entry
- * per installed-and-connected integration.
+ * spacePackages → integration_connections` and emits one entry per
+ * connection bound to each installed integration.
  *
  * Bundle bytes are NOT inlined — they would blow past the Linux env
  * size limit (~1 MB) on real-world servers (the Gmail MCP server
@@ -249,13 +249,10 @@ export interface IntegrationSpawnSpec {
   /** McpHost namespace — tool names are prefixed with `{namespace}__`. */
   namespace: string;
   /**
-   * The ONE connection this spec is spawned for. A run binding N connections
-   * of the same integration emits N specs sharing `integrationId`, `namespace`
-   * and `toolAllowlist`; `connection` is what tells them apart, and `label` is
-   * the agent-facing handle the sidecar's `connection` tool parameter selects
-   * on. Absent in exactly one case — a connect run, where the connection row
-   * does not exist yet because creating it is what the run is for. Every other
-   * spec is spawned from a bound connection and carries it.
+   * The connection this spec is spawned for; N specs of one integration share
+   * everything else. `label` is the value of the sidecar's `connection` tool
+   * selector. Absent only on a connect run, which mints the credential that
+   * becomes a connection — every agent-run spec carries it.
    */
   connection?: { id: string; label: string; accountId: string | null };
   /**
@@ -772,18 +769,12 @@ export interface IntegrationBootBreadcrumb {
 export interface IntegrationBootReport {
   /** False when any declared integration failed to boot — the agent aborts the run. */
   ok: boolean;
-  /**
-   * Count of spawn specs declared via `INTEGRATIONS_TO_SPAWN_JSON` — one per
-   * (integration, connection), so an integration bound to N connections
-   * contributes N. It is a count of connections, not of integrations, which is
-   * why it is not named `declared`.
-   */
+  /** Count of spawn specs in `INTEGRATIONS_TO_SPAWN_JSON` — one per bound connection. */
   declaredConnections: number;
   /** Runtime adapter that ran the integrations (`"process"` | `"docker"` | `"none"`). */
   adapter: string;
   /**
-   * Per-connection success — one entry per spawn spec, so an integration
-   * bound to N connections contributes N entries.
+   * Per-connection success — one entry per spawn spec.
    * `vendored` mirrors the AFPS §7.1 `source.server.vendored` build-provenance
    * signal forwarded from `IntegrationSpawnSpec.manifest.server.vendored` (set
    * only for local sources; omitted otherwise).
@@ -791,13 +782,7 @@ export interface IntegrationBootReport {
   spawned: Array<{
     integrationId: string;
     namespace: string;
-    /**
-     * Which connection this entry booted: N entries can share
-     * `integrationId` + `namespace`, so the label is the only thing that
-     * makes a boot line — and the breadcrumb trail built from it — legible.
-     * Absent only on a connect run, the one case where the spec bound no
-     * connection ({@link IntegrationSpawnSpec.connection}).
-     */
+    /** Tells apart N entries sharing `integrationId` + `namespace`. */
     connectionLabel?: string;
     toolCount: number;
     vendored?: boolean;
@@ -809,10 +794,7 @@ export interface IntegrationBootReport {
    */
   failed: Array<{
     integrationId: string;
-    /**
-     * Optional because a failure can precede connection binding (a spec that
-     * never parsed has no label to report).
-     */
+    /** Absent on the whole-boot `integrationId: "*"` entry and on a spec binding no connection. */
     connectionLabel?: string;
     error: string;
   }>;

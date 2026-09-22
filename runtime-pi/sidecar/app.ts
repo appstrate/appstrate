@@ -613,7 +613,7 @@ export function createApp(deps: AppDeps): Hono {
   // order and only for routes registered after it) and before the `mountMcp`
   // call at the bottom of this function, which is why `/mcp` is covered too.
   //
-  // Nothing runner-facing lives on this app: the per-integration egress / MITM
+  // Nothing runner-facing lives on this app: the per-connection egress / MITM
   // listeners and the DNS responder are their own `Bun.serve` listeners
   // (`integration-egress-listener.ts`, `integration-mitm-listener.ts`,
   // `integration-dns-responder.ts`), and the forward proxy is a separate one

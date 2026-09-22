@@ -124,12 +124,6 @@ function makeExtension(
           metadata?: Record<string, unknown>;
           sourceMimeType?: string;
           partSizeBytes?: number;
-          // Present on the advertised schema this tool re-declares as its own
-          // parameters, because the sidecar injected the selector on BOTH
-          // `api_upload` and its `api_call` sibling. `api_upload` runs
-          // agent-side (direct.ts routes it here instead of forwarding), so
-          // the value stops at this handler: the resolver has to put it back
-          // on every chunk it dispatches, or the sibling refuses the call.
           connection?: string;
         };
 

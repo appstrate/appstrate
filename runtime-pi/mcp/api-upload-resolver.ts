@@ -85,12 +85,7 @@ interface IntegrationUploadRequest {
    * The integration is implied by the tool name.
    */
   apiCallToolName: string;
-  /**
-   * Which connection the caller selected, when the integration is bound to
-   * more than one. Absent for a single-connection integration — the host
-   * advertises no selector then, and sending one would be rejected. Pinned
-   * for the whole upload: every chunk goes to the same connection.
-   */
+  /** Selector for a multi-connection integration, put on every dispatched chunk. */
   connection?: string;
   target: string;
   fromFile: string;
@@ -234,7 +229,6 @@ export class McpApiUploadResolver {
 
     const adapterCtx: AdapterContext = {
       apiCallToolName: req.apiCallToolName,
-      ...(req.connection !== undefined ? { connection: req.connection } : {}),
       target: req.target,
       totalBytes,
       metadata: req.metadata ?? {},
@@ -292,7 +286,7 @@ export class McpApiUploadResolver {
       // ctx.signal is typically already aborted on this path, so
       // aliasing it would short-circuit the DELETE inside mcp.callTool
       // and leak the upstream session.
-      this.fireAbort(adapter, state, adapterCtx);
+      this.fireAbort(adapter, state, adapterCtx, req.connection);
       return failure(adapter, err, bytesAcked);
     }
 
@@ -302,7 +296,7 @@ export class McpApiUploadResolver {
       throwIfAborted(ctx.signal);
       finalResult = await adapter.finalize(state, adapterCtx);
     } catch (err) {
-      this.fireAbort(adapter, state, adapterCtx);
+      this.fireAbort(adapter, state, adapterCtx, req.connection);
       return failure(adapter, err, bytesAcked);
     }
 
@@ -346,12 +340,17 @@ export class McpApiUploadResolver {
    * timeout caps the worst-case orphaned-promise lifetime so a slow
    * upstream cannot hold a reference to the run forever.
    */
-  private fireAbort(adapter: UploadAdapter, state: unknown, ctx: AdapterContext): void {
+  private fireAbort(
+    adapter: UploadAdapter,
+    state: unknown,
+    ctx: AdapterContext,
+    connection: string | undefined,
+  ): void {
     if (state === undefined) return;
     const cleanupSignal = AbortSignal.timeout(ABORT_CLEANUP_TIMEOUT_MS);
     const cleanupCtx: AdapterContext = {
       ...ctx,
-      apiCall: this.makeApiCall(cleanupSignal, ctx.connection),
+      apiCall: this.makeApiCall(cleanupSignal, connection),
       signal: cleanupSignal,
     };
     void adapter.abort(state, cleanupCtx).catch(() => {});
@@ -377,9 +376,7 @@ export class McpApiUploadResolver {
     return async (req: AdapterApiCallRequest): Promise<AdapterApiCallResponse> => {
       // The `{ns}__api_call` tool does NOT accept a tool-name argument
       // (the integration is fixed by the tool name), so we dispatch to
-      // the named tool directly. The connection selector is held by the
-      // resolver rather than by each adapter: it is a property of the upload,
-      // not of the individual chunk request.
+      // the named tool directly.
       const toolName = req.apiCallToolName;
       const args: Record<string, unknown> = {
         target: req.target,

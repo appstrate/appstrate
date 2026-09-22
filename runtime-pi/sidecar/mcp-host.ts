@@ -37,7 +37,6 @@ import {
 } from "@appstrate/core/naming";
 import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
 import {
-  MAX_PARAMETER_DESCRIPTION_BYTES,
   sanitiseTextField,
   sanitiseToolDescriptor,
   type AppstrateMcpClient,
@@ -68,12 +67,7 @@ interface McpHostUpstream {
   namespace: string;
   /** Connected client (any transport). */
   client: AppstrateMcpClient;
-  /**
-   * The connection this upstream serves; N connections share a tool name and
-   * the label tells them apart. Absent on the connect-run path, which routes
-   * under `null` and gets no selector — a synthesised label would offer the
-   * model a choice that does not exist.
-   */
+  /** The bound connection this upstream serves; its label is the selector value. */
   connection?: { label: string; accountId: string | null };
   /**
    * Niveau 2 Phase 3 — agent-declared MCP tool allowlist. When set, only
@@ -129,11 +123,23 @@ interface McpHostOptions {
 /** Reserved: an upstream that declares it cannot be served by N connections. */
 const CONNECTION_PARAM = "connection";
 
+/**
+ * Sized so the label → account mapping of 10 connections (80-char labels,
+ * email-length account ids) is never truncated.
+ */
+const CONNECTION_DESCRIPTION_MAX_BYTES = 4096;
+
+/** `null` keys only a connect run's sole upstream, which never gains a sibling route. */
 type ConnectionKey = string | null;
 
 interface ToolRoute {
   client: AppstrateMcpClient;
   accountId: string | null;
+  originalName: string;
+}
+
+function siblingKey(trusted: boolean, originalName: string): string {
+  return `${trusted ? "t" : "u"}:${originalName}`;
 }
 
 function declaresConnectionParam(descriptor: Tool | undefined): boolean {
@@ -151,16 +157,13 @@ function withConnectionParam(descriptor: Tool, routes: Map<ConnectionKey, ToolRo
     // Enum values stay VERBATIM — they are the keys `callTool` looks up, so
     // sanitising them would make a routable connection unselectable. The prose
     // is the injection surface: `label` is member-editable and `accountId`
-    // provider-supplied, so both go through the descriptor's own sanitiser.
+    // provider-supplied, so the description goes through the text sanitiser.
     enum: labels,
     description: sanitiseTextField(
       `Connection to use for this call. ${labels
-        .map(
-          (label) =>
-            `${safeFragment(label)} → ${safeFragment(routes.get(label)!.accountId ?? "no account id")}`,
-        )
+        .map((label) => `${label} → ${routes.get(label)!.accountId ?? "no account id"}`)
         .join("; ")}`,
-      MAX_PARAMETER_DESCRIPTION_BYTES,
+      CONNECTION_DESCRIPTION_MAX_BYTES,
     ),
   };
   const required = Array.isArray(schema.required) ? [...(schema.required as string[])] : [];
@@ -171,11 +174,6 @@ function withConnectionParam(descriptor: Tool, routes: Map<ConnectionKey, ToolRo
   };
 }
 
-function safeFragment(value: string): string {
-  return sanitiseTextField(value, MAX_PARAMETER_DESCRIPTION_BYTES) ?? "";
-}
-
-/** `null` never survives here: {@link McpHost.addRoute} refuses to share a name with it. */
 function routeLabels(routes: Map<ConnectionKey, ToolRoute>): string[] {
   return [...routes.keys()].filter((key): key is string => key !== null);
 }
@@ -225,13 +223,15 @@ export class McpHost {
   // Per-tool → per-connection-label → owning client. Decoupled from `upstreams`
   // so one namespace can aggregate several clients AND several connections.
   private readonly toolRoutes = new Map<string, Map<ConnectionKey, ToolRoute>>();
+  // Slot → (trust, ORIGINAL upstream name) → final name, so a later connection
+  // lands on the name the first one got, fallback and suffix included.
+  private readonly siblingNames = new Map<string, Map<string, string>>();
   // Trust provenance for collision handling. A trusted first-party descriptor
   // canonically replaces a same-named untrusted descriptor; trusted/trusted
   // collisions remain fatal because they indicate a platform contract bug.
   private readonly toolTrusted = new Map<string, boolean>();
   // Every distinct client registered, primary or merged — closed on dispose.
   private readonly clients = new Set<AppstrateMcpClient>();
-  private readonly originalToolNames = new Map<string, string>();
   private readonly toolDescriptors: Tool[] = [];
   private readonly options: McpHostOptions;
   private disposed = false;
@@ -368,14 +368,8 @@ export class McpHost {
           throw new Error(`McpHost: trusted tool name collision on ${JSON.stringify(candidate)}`);
         }
         incomingNames.add(candidate);
+        if (this.siblingName(normalisedNs, true, tool.name, label) !== undefined) continue;
         if (this.toolToNamespace.has(candidate)) {
-          // Another connection holds the name: a route, not a collision.
-          if (
-            this.toolTrusted.get(candidate) === true &&
-            !this.toolRoutes.get(candidate)!.has(upstream.connection?.label ?? null)
-          ) {
-            continue;
-          }
           if (this.toolTrusted.get(candidate) === false) {
             trustedReplacements.add(candidate);
           } else {
@@ -388,8 +382,11 @@ export class McpHost {
         if (index >= 0) this.toolDescriptors.splice(index, 1);
         this.toolToNamespace.delete(name);
         this.toolRoutes.delete(name);
-        this.originalToolNames.delete(name);
         this.toolTrusted.delete(name);
+        const siblings = this.siblingNames.get(normalisedNs);
+        for (const [key, finalName] of siblings ?? []) {
+          if (finalName === name) siblings!.delete(key);
+        }
         this.options.onLog?.({
           source: `host:${normalisedNs}`,
           level: "warn",
@@ -440,6 +437,11 @@ export class McpHost {
         });
         continue;
       }
+      const sibling = this.siblingName(normalisedNs, upstream.trusted === true, tool.name, label);
+      if (sibling !== undefined) {
+        this.addRoute(sibling, effectiveUpstream, sanitised, tool.name, normalisedNs);
+        continue;
+      }
       // Trusted first-party tools are already emitted in the canonical body
       // form. Preserve it verbatim so auth-scoped synthetic names such as
       // `api_call__primary` keep their auth-scoped token suffix. The third-party
@@ -471,21 +473,10 @@ export class McpHost {
       // `finalName` after `normaliseMcpToolBody` collapses separators (e.g.
       // `list-issues`, `list_issues`, and `list.issues` all → `list_issues`).
       // Without this guard the later tool would silently overwrite the
-      // earlier one's index entries (toolRoutes / originalToolNames) while
-      // both still get pushed onto `toolDescriptors` — the agent would see a
-      // duplicate name and the first tool would become unreachable. Suffix
-      // `_2`, `_3`, … until free, mirroring namespace disambiguation.
-      // ONE collision rule: same name + DIFFERENT label = a route; same name +
-      // same label = a collision. Trust must match — a sibling connection runs
-      // the same package, so a trust mismatch is shadowing, never a route.
-      const canRoute = (name: string): boolean =>
-        this.toolToNamespace.has(name) &&
-        !this.toolRoutes.get(name)!.has(label) &&
-        this.toolTrusted.get(name) === (upstream.trusted === true);
-      if (canRoute(finalName)) {
-        this.addRoute(finalName, effectiveUpstream, sanitised, normalisedNs);
-        continue;
-      }
+      // earlier one's `toolRoutes` entry while both still get pushed onto
+      // `toolDescriptors` — the agent would see a duplicate name and the
+      // first tool would become unreachable. Suffix `_2`, `_3`, … until free,
+      // mirroring namespace disambiguation.
       if (this.toolToNamespace.has(finalName)) {
         // Trusted platform capabilities always own their canonical name,
         // independent of registration order. When an untrusted upstream is
@@ -507,8 +498,7 @@ export class McpHost {
         }
         const base = finalName;
         let suffix = 2;
-        // First free OR routable slot: a sibling connection reuses the suffix.
-        while (this.toolToNamespace.has(finalName) && !canRoute(finalName)) {
+        while (this.toolToNamespace.has(finalName)) {
           finalName = `${base}_${suffix}`;
           suffix += 1;
         }
@@ -522,16 +512,18 @@ export class McpHost {
             allocated: finalName,
           },
         });
-        if (canRoute(finalName)) {
-          this.addRoute(finalName, effectiveUpstream, sanitised, normalisedNs);
-          continue;
-        }
       }
       this.toolToNamespace.set(finalName, normalisedNs);
-      this.toolRoutes.set(finalName, new Map([[label, this.routeFor(effectiveUpstream)]]));
+      this.toolRoutes.set(
+        finalName,
+        new Map([[label, this.routeFor(effectiveUpstream, tool.name)]]),
+      );
       this.toolTrusted.set(finalName, upstream.trusted === true);
-      this.originalToolNames.set(finalName, tool.name);
       this.toolDescriptors.push({ ...sanitised, name: finalName });
+      const siblings = this.siblingNames.get(normalisedNs) ?? new Map<string, string>();
+      this.siblingNames.set(normalisedNs, siblings);
+      const key = siblingKey(upstream.trusted === true, tool.name);
+      if (!siblings.has(key)) siblings.set(key, finalName);
     }
 
     // Merged upstreams (`intoNamespace`) contribute tools but never become the
@@ -542,31 +534,41 @@ export class McpHost {
     return normalisedNs;
   }
 
-  private routeFor(upstream: McpHostUpstream): ToolRoute {
-    return { client: upstream.client, accountId: upstream.connection?.accountId ?? null };
+  private routeFor(upstream: McpHostUpstream, originalName: string): ToolRoute {
+    return {
+      client: upstream.client,
+      accountId: upstream.connection?.accountId ?? null,
+      originalName,
+    };
+  }
+
+  /** The name another connection of this slot gave `originalName`, when this label can join it. */
+  private siblingName(
+    slot: string,
+    trusted: boolean,
+    originalName: string,
+    label: ConnectionKey,
+  ): string | undefined {
+    const name = this.siblingNames.get(slot)?.get(siblingKey(trusted, originalName));
+    return name !== undefined && !this.toolRoutes.get(name)!.has(label) ? name : undefined;
   }
 
   private addRoute(
     name: string,
     upstream: McpHostUpstream,
     incoming: Tool,
+    originalName: string,
     namespace: string,
   ): void {
     const routes = this.toolRoutes.get(name)!;
     const label: ConnectionKey = upstream.connection?.label ?? null;
-    // No selector value ⇒ neither side of such a split would be addressable.
-    if (label === null || routes.has(null)) {
-      throw new Error(
-        `McpHost: tool ${JSON.stringify(name)} is served by an upstream that binds no connection, so it cannot also be served by another`,
-      );
-    }
     const served = this.toolDescriptors.find((d) => d.name === name);
     if (declaresConnectionParam(served) || declaresConnectionParam(incoming)) {
       throw new Error(
         `McpHost: connection_param_conflict — tool ${JSON.stringify(name)} already declares a "${CONNECTION_PARAM}" property, so the per-connection selector cannot be injected`,
       );
     }
-    routes.set(label, this.routeFor(upstream));
+    routes.set(label, this.routeFor(upstream, originalName));
     this.options.onLog?.({
       source: `host:${namespace}`,
       level: "info",
@@ -623,7 +625,6 @@ export class McpHost {
     const thirdParty: AppstrateToolDefinition[] = [];
     for (const desc of this.toolDescriptors) {
       if (firstPartyNames.has(desc.name)) continue;
-      const originalName = this.originalToolNames.get(desc.name)!;
       const routes = this.toolRoutes.get(desc.name);
       if (!routes || routes.size === 0) continue;
       const forward = async (
@@ -633,7 +634,7 @@ export class McpHost {
       ): Promise<CallToolResult> =>
         stripForgedRuntimeEvents(
           await route.client.callTool(
-            { name: originalName, arguments: args },
+            { name: route.originalName, arguments: args },
             { ...(extra.signal ? { signal: extra.signal } : {}) },
           ),
         );
@@ -685,9 +686,9 @@ export class McpHost {
     this.namespaceSlots.clear();
     this.toolToNamespace.clear();
     this.toolRoutes.clear();
+    this.siblingNames.clear();
     this.toolTrusted.clear();
     this.clients.clear();
-    this.originalToolNames.clear();
     this.toolDescriptors.length = 0;
   }
 }

@@ -2,7 +2,7 @@
 #
 # Appstrate MCP Runner — Node.js
 #
-# Spawned per-integration by the sidecar (`runtime-pi/sidecar/integrations-boot.ts`)
+# Spawned per bound connection by the sidecar (`runtime-pi/sidecar/integrations-boot.ts`)
 # when an AFPS integration manifest declares `server.type: "node"`. The
 # sidecar `docker create`s this image, `docker cp`s the integration bundle
 # into `/bundle`, and `docker start -ai`s the container — stdio is piped
@@ -15,7 +15,7 @@
 #
 # Build for the HOST architecture (the sidecar's `docker run` pins no
 # platform; an emulated runner pays a ~4x cold-start penalty on the
-# per-integration 30s connect deadline). CI builds multi-arch via buildx.
+# per-connection 30s connect deadline). CI builds multi-arch via buildx.
 #
 #   docker build \
 #     -t appstrate-mcp-runner-node:latest \

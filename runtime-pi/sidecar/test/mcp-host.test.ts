@@ -1221,25 +1221,93 @@ describe("McpHost — one integration, several connections", () => {
     }
   });
 
-  it("refuses to share a tool name with an upstream that binds no connection", async () => {
-    // The connect-run path binds no connection, so it has nothing to select
-    // and can only own its namespace alone.
-    const a = await makeUpstream(sshTool("a"));
-    const b = await makeUpstream(sshTool("b"));
+  it("gives one upstream tool ONE name across connections, fallback name included", async () => {
+    // `1st_run` has no valid namespaced form, so it gets the positional
+    // `tool_<n>` fallback — which must not differ between the two connections.
+    const withInvalidName = (who: string): AppstrateToolDefinition[] => [
+      ...sshTool(who),
+      {
+        descriptor: {
+          name: "1st_run",
+          description: "first run",
+          inputSchema: { type: "object", properties: {} },
+        },
+        handler: async () => ({ content: [{ type: "text", text: `${who}:1st_run` }] }),
+      },
+    ];
+    const work = await makeUpstream(withInvalidName("web-1"));
+    const perso = await makeUpstream(withInvalidName("db"));
     try {
       const host = new McpHost();
-      await host.register({ namespace: "@orga/public", client: a.client });
-      // CONTROL — connectionless single upstream: schema untouched.
-      const schema = host.buildTools()[0]!.descriptor.inputSchema as {
-        properties: Record<string, unknown>;
+      await host.register({ namespace: "@orga/ssh", client: work.client, connection: CONN_A });
+      await host.register({ namespace: "@orga/ssh", client: perso.client, connection: CONN_B });
+      const tools = host.buildTools();
+      expect(tools.map((t) => t.descriptor.name)).toEqual([
+        "orga_ssh__ssh_exec",
+        "orga_ssh__tool_1",
+      ]);
+      const fallback = tools[1]!;
+      const schema = fallback.descriptor.inputSchema as {
+        properties: Record<string, { enum?: string[] }>;
       };
-      expect(schema.properties).toEqual({ command: { type: "string" } });
-      await expect(
-        host.register({ namespace: "@orga/public", client: b.client, connection: CONN_A }),
-      ).rejects.toThrow(/binds no connection/);
+      expect(schema.properties.connection!.enum).toEqual(["work", "perso"]);
+      const reached = await fallback.handler({ connection: "perso" }, {} as never);
+      expect(reached.content).toEqual([{ type: "text", text: "db:1st_run" }]);
     } finally {
-      await a.pair.close();
-      await b.pair.close();
+      await work.pair.close();
+      await perso.pair.close();
+    }
+  });
+
+  it("strips the selector before forwarding the arguments upstream", async () => {
+    const echo = (): AppstrateToolDefinition[] => [
+      {
+        descriptor: {
+          name: "ssh_exec",
+          description: "echo",
+          inputSchema: { type: "object", properties: { command: { type: "string" } } },
+        },
+        handler: async (args) => ({ content: [{ type: "text", text: JSON.stringify(args) }] }),
+      },
+    ];
+    const work = await makeUpstream(echo());
+    const perso = await makeUpstream(echo());
+    try {
+      const host = new McpHost();
+      await host.register({ namespace: "@orga/ssh", client: work.client, connection: CONN_A });
+      await host.register({ namespace: "@orga/ssh", client: perso.client, connection: CONN_B });
+      const result = await host
+        .buildTools()[0]!
+        .handler({ command: "uptime", connection: "perso" }, {} as never);
+      expect(JSON.parse((result.content as unknown as [{ text: string }])[0].text)).toEqual({
+        command: "uptime",
+      });
+    } finally {
+      await work.pair.close();
+      await perso.pair.close();
+    }
+  });
+
+  it("describes all ten connections of 80-char labels without truncating", async () => {
+    const connections = Array.from({ length: 10 }, (_, i) => ({
+      label: `${String(i).padStart(2, "0")}-${"x".repeat(77)}`,
+      accountId: `account-${i}@example.com`,
+    }));
+    const upstreams = await Promise.all(connections.map((c) => makeUpstream(sshTool(c.label))));
+    try {
+      const host = new McpHost();
+      for (const [i, connection] of connections.entries()) {
+        await host.register({ namespace: "@orga/ssh", client: upstreams[i]!.client, connection });
+      }
+      const schema = host.buildTools()[0]!.descriptor.inputSchema as {
+        properties: Record<string, { description?: string }>;
+      };
+      const last = connections[9]!;
+      expect(schema.properties.connection!.description).toEndWith(
+        `${last.label} → ${last.accountId}`,
+      );
+    } finally {
+      for (const upstream of upstreams) await upstream.pair.close();
     }
   });
 });

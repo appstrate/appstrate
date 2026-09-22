@@ -87,13 +87,6 @@ export interface AdapterApiCallRequest {
  */
 export interface AdapterContext {
   apiCallToolName: string;
-  /**
-   * Connection selector pinned for this upload, when the integration is bound
-   * to more than one. Adapters never read it — the resolver's `apiCall`
-   * wrapper puts it on every chunk — but the abort path rebuilds that wrapper
-   * from this context, so it has to travel with it.
-   */
-  connection?: string;
   /** Original target URL from the agent. The adapter MAY substitute
    *  per-protocol session URLs after init. */
   target: string;

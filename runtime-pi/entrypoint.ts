@@ -267,8 +267,8 @@ async function progress(message: string, data?: Record<string, unknown>): Promis
 
 /**
  * Cap on how long we wait for the sidecar's boot report. Generous: it
- * exceeds the sidecar's per-integration MCP connect deadline (30 s) plus
- * headroom for a few sequential integrations, so a report that never
+ * exceeds the sidecar's per-connection MCP connect deadline (30 s) plus
+ * headroom for a few sequential connections, so a report that never
  * arrives means an integration boot genuinely hung — which we treat as a
  * fatal "did not start as declared", not a transient blip.
  */
