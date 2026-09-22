@@ -167,6 +167,11 @@ does the same for the run bullets (`runOps`, the shortcut, the readiness
 guidance). `chat-stream.ts` computes all three flags from the turn's
 permission set, as it does for two today.
 
+The caller-context block carries the caller's role in the current space and
+the turn's permission set as DATA, in the same `resource:action` vocabulary as
+an operation's `required_permissions`, so the model joins the two itself
+instead of inferring what it may call.
+
 Flipping the authoring toggle already re-mints the token per turn, so the
 declarations follow without `listChanged`.
 

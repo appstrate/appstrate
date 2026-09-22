@@ -370,6 +370,7 @@ export async function handleChatStream(
       locale: c.req.header("X-Chat-Locale"),
       canAuthorAgents,
       canRunAgents: runAgents,
+      permissions,
     })
       .finally(() => {
         // Wall time of the block itself.

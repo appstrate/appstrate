@@ -107,14 +107,13 @@ describe("full persona invariants", () => {
     // Retrying the run or re-running the connect flow can never clear a 412:
     // connecting is personal, activating is space-wide. Activation IS
     // reachable (`activateIntegration` is in the platform's operation surface),
-    // and RBAC decides who may call it — an admin fixes it in one step, a member
-    // gets a 403 and is told to ask one. Nothing in the chat pre-computes that
-    // right: quoting the operation instead of asserting the outcome is what
-    // keeps this honest for both roles.
+    // and RBAC decides who may call it. Nothing in the chat pre-computes that
+    // right: quoting the operation, and letting the 403 name what it required,
+    // is what keeps this honest for every permission set.
     expect(FULL).toContain("integration_not_active");
     expect(FULL).toMatch(/do NOT re-run and do NOT restart the connect flow/);
     expect(FULL).toContain("activateIntegration");
-    expect(FULL).toMatch(/administrator must activate/);
+    expect(FULL).toMatch(/the 403 names the permission it required under `required_permissions`/);
   });
 
   it("drops the stale claim that a prompt-pasted appfile:// URI gives no access", () => {
@@ -148,14 +147,23 @@ describe("caller-context prompt hygiene", () => {
       locale: "en-US",
       canAuthorAgents: true,
       canRunAgents: true,
+      rolePreview: false,
+      spaceRole: "builder",
+      permissions: ["agents:read", "mcp:invoke"],
     });
     expect(out).toContain("Reply in the user's language (en)");
   });
 
   it("defaults the reply language to fr without a locale", () => {
-    expect(formatCallerContext(identity, { canAuthorAgents: true, canRunAgents: true })).toContain(
-      "Reply in the user's language (fr)",
-    );
+    expect(
+      formatCallerContext(identity, {
+        canAuthorAgents: true,
+        canRunAgents: true,
+        rolePreview: false,
+        spaceRole: "builder",
+        permissions: ["agents:read", "mcp:invoke"],
+      }),
+    ).toContain("Reply in the user's language (fr)");
   });
 
   it("keeps the block free of standing instructions — they belong to the system prompt", () => {
@@ -172,7 +180,13 @@ describe("caller-context prompt hygiene", () => {
         skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
         skills_truncated: true,
       },
-      { canAuthorAgents: true, canRunAgents: true },
+      {
+        canAuthorAgents: true,
+        canRunAgents: true,
+        rolePreview: false,
+        spaceRole: "builder",
+        permissions: ["agents:read", "mcp:invoke"],
+      },
     );
     // Gone from the block…
     for (const imperative of [
@@ -231,7 +245,7 @@ describe("the persona without inline composition", () => {
     expect(REDUCED).toContain("default to the integrations already available");
     expect(REDUCED).toContain("call `read_file` first");
     expect(REDUCED).toContain('{ kind:"agent", scope, name, version?, input? }');
-    expect(REDUCED).toContain("Respect the user's role");
+    expect(REDUCED).toContain("The context lists the permissions this turn holds");
   });
 
   it("states the published-agent and `output` contracts once, in both personas", () => {
@@ -275,10 +289,6 @@ describe("the persona without inline composition", () => {
     expect(AUTHOR_ONLY).toContain(skills);
     expect(AUTHOR_ONLY).not.toContain("Do not create or modify an agent");
     expect(AUTHOR_ONLY).not.toContain('kind:"inline"');
-    // Configuring or activating stays open (`agents:configure`); "manage" would not.
-    expect(FULL).toContain("manage agents");
-    expect(REDUCED).not.toContain("manage agents");
-    expect(REDUCED).toContain("configure or activate agents");
     // Manifest fields mean nothing to a turn that may not author an agent.
     expect(FULL).toContain("`dependencies.integrations`");
     expect(REDUCED).not.toContain("dependencies.");
@@ -344,6 +354,33 @@ describe("the persona without agent runs", () => {
     }
   });
 
+  it("closes on the permission list, not on a vague deference to the role", () => {
+    // The context block now carries the turn's set in the `required_permissions`
+    // vocabulary, so the closing rule can be joined against it.
+    for (const persona of [NO_RUNS, FULL]) {
+      expect(persona).toContain("The context lists the permissions this turn holds");
+      expect(persona).toContain("say which permission is missing instead of attempting it");
+      expect(persona).not.toContain("Respect the user's role");
+    }
+  });
+
+  it("enumerates no permission-gated act — the operation index is the authority", () => {
+    // The index the engine appends is filtered per operation by the route
+    // guards. A persona that names acts attributes them to a caller whose index
+    // may not carry them: an operator asked "what can you do?" answered from the
+    // prompt instead of from its tools.
+    for (const enumerated of ["manage agents", "configure or activate", "schedule"]) {
+      expect(NO_RUNS).not.toContain(enumerated);
+      expect(FULL).not.toContain(enumerated);
+    }
+    for (const persona of [NO_RUNS, FULL]) {
+      expect(persona).toContain(
+        "If the request is a pure Appstrate operation, call that operation directly with `invoke_operation`",
+      );
+      expect(persona).toContain("the operation index in your instructions is the authority");
+    }
+  });
+
   it("contradicts nothing — no refusal is asserted in the model's place", () => {
     for (const contradiction of ["cannot run", "not allowed to run", "you may not run"]) {
       expect(NO_RUNS).not.toContain(contradiction);
@@ -354,7 +391,7 @@ describe("the persona without agent runs", () => {
     expect(NO_RUNS).toContain("You are Appstrate's assistant");
     expect(NO_RUNS).toContain("call `read_file` first");
     expect(NO_RUNS).toContain("Never invent an operationId or argument shape");
-    expect(NO_RUNS).toContain("Respect the user's role");
+    expect(NO_RUNS).toContain("The context lists the permissions this turn holds");
   });
 
   it("keeps skill authoring, which needs no run", () => {
@@ -372,10 +409,22 @@ describe("the persona without agent runs", () => {
       org: { role: "member" },
       agents: [{ package_id: "@acme/triage", takes_input: false }],
     };
-    expect(formatCallerContext(raw, { canRunAgents: true, canAuthorAgents: true })).toContain(
-      "## Existing agents you can run",
-    );
-    const off = formatCallerContext(raw, { canRunAgents: false, canAuthorAgents: true });
+    expect(
+      formatCallerContext(raw, {
+        canRunAgents: true,
+        canAuthorAgents: true,
+        rolePreview: false,
+        spaceRole: "builder",
+        permissions: ["agents:read", "mcp:invoke"],
+      }),
+    ).toContain("## Existing agents you can run");
+    const off = formatCallerContext(raw, {
+      canRunAgents: false,
+      canAuthorAgents: true,
+      rolePreview: false,
+      spaceRole: "builder",
+      permissions: ["agents:read", "mcp:invoke"],
+    });
     expect(off).not.toContain("## Existing agents you can run");
     expect(off).not.toContain("@acme/triage");
     // The identity half survives — date and role grounding do not depend on runs.
