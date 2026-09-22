@@ -63,7 +63,7 @@ import { Badge } from "@appstrate/ui/components/badge";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
-import { MAX_CONNECTIONS_PER_INTEGRATION, labelsSharedBy } from "@appstrate/core/integration";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
 import {
   Table,
@@ -86,7 +86,7 @@ import { VersionHistory } from "../components/version-history";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { ConnectionTeardownSteps } from "../components/integration-connect/connection-teardown-steps";
-import { toggleCapped } from "../components/integration-connect/connection-set";
+import { keepAvailable, sharedLabels, toggleCapped } from "../lib/connection-set";
 import { Modal } from "../components/modal";
 import { SourceBadge } from "../components/source-badge";
 import { DefaultCell } from "../components/default-cell";
@@ -123,7 +123,7 @@ import { useAuth } from "../hooks/use-auth";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useSetPackageActive } from "../hooks/use-library";
 import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
-import { isConnectionOwnedBy } from "../components/integration-connect/connection-label";
+import { isConnectionOwnedBy } from "../components/integration-connect/connection-ownership";
 import { isOauthAuthConnectable } from "../components/integration-connect/connectable-auth-keys";
 import { ConnectionStatusBadge } from "../components/integration-connect/connection-status-badge";
 
@@ -851,20 +851,14 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
   const remove = useDeleteIntegrationOrgDefault();
 
   const shared = (connections ?? []).filter((c) => c.shared_with_org === true);
-  const connectionDisplay = (id: string): string => {
-    const c = (connections ?? []).find((x) => x.id === id);
-    if (!c) return id;
-    return connectionOptionLabel(c);
-  };
 
   const [connectionIds, setConnectionIds] = useState<string[]>([]);
   const [enforce, setEnforce] = useState(false);
 
-  // The set the form may hold: a default that names a connection since
-  // un-shared must not be silently resent, so the seed drops it and the admin
-  // sees exactly what the next save would write.
-  const seedIds = (orgDefault?.connection_ids ?? []).filter((id) =>
-    shared.some((c) => c.id === id),
+  // Seeded with only what is still shared, so the form shows what a save writes.
+  const seedIds = keepAvailable(
+    orgDefault?.connection_ids ?? [],
+    shared.map((c) => c.id),
   );
   // Order carries no meaning in a set — sort so a server reordering does not
   // read as a change and wipe the admin's in-progress edit.
@@ -876,8 +870,7 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
     setEnforce(orgDefault?.enforce ?? false);
   }
 
-  const selected = shared.filter((c) => connectionIds.includes(c.id));
-  const colliding = labelsSharedBy(selected);
+  const colliding = sharedLabels(shared.filter((c) => connectionIds.includes(c.id)));
 
   return (
     <div
@@ -901,42 +894,12 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
             <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
               {t("integration.admin.orgDefault.connections")}
             </Label>
-            {/* The default is a SET — every checked connection is bound on
-                every run of every consuming agent, and the write replaces the
-                whole set. */}
-            <div className="flex flex-col gap-1" data-testid="org-default-connections">
-              {shared.map((c) => (
-                <div key={c.id} className="flex items-center gap-2 text-xs">
-                  <Checkbox
-                    id={`org-default-connection-${c.id}`}
-                    checked={connectionIds.includes(c.id)}
-                    disabled={
-                      !connectionIds.includes(c.id) &&
-                      connectionIds.length >= MAX_CONNECTIONS_PER_INTEGRATION
-                    }
-                    onCheckedChange={() =>
-                      setConnectionIds((prev) =>
-                        toggleCapped(prev, c.id, MAX_CONNECTIONS_PER_INTEGRATION),
-                      )
-                    }
-                    // Radix renders a <button>: wrapping it in a <label> gives
-                    // it no accessible name, htmlFor + aria-label do.
-                    aria-label={connectionDisplay(c.id)}
-                    data-testid={`org-default-connection-${c.id}`}
-                  />
-                  <label htmlFor={`org-default-connection-${c.id}`}>
-                    {connectionDisplay(c.id)}
-                  </label>
-                </div>
-              ))}
-            </div>
-            {colliding.length > 0 && (
-              <p className="mt-1 text-[0.7rem] text-amber-600 dark:text-amber-400">
-                {t("integration.admin.duplicateLabel", {
-                  labels: [...new Set(colliding.map((c) => c.label))].join(", "),
-                })}
-              </p>
-            )}
+            <ConnectionSetChecklist
+              connections={shared}
+              value={connectionIds}
+              onChange={setConnectionIds}
+              idPrefix="org-default-connection"
+            />
           </div>
           <div className="flex items-center gap-2 pb-1 text-xs">
             <Checkbox
@@ -981,6 +944,54 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
 }
 
 /**
+ * One checkbox per connection composing a set (the write replaces the whole
+ * set), capped at {@link MAX_CONNECTIONS_PER_INTEGRATION}; flags colliding labels.
+ */
+function ConnectionSetChecklist({
+  connections,
+  value,
+  onChange,
+  idPrefix,
+}: {
+  connections: IntegrationConnection[];
+  value: string[];
+  onChange: (next: string[]) => void;
+  idPrefix: string;
+}) {
+  const { t } = useTranslation("settings");
+  const colliding = sharedLabels(connections.filter((c) => value.includes(c.id)));
+  return (
+    <>
+      <div className="flex flex-col gap-1" data-testid={`${idPrefix}s`}>
+        {connections.map((c) => {
+          const id = `${idPrefix}-${c.id}`;
+          const isChecked = value.includes(c.id);
+          return (
+            <div key={c.id} className="flex items-center gap-2 text-xs">
+              <Checkbox
+                id={id}
+                checked={isChecked}
+                disabled={!isChecked && value.length >= MAX_CONNECTIONS_PER_INTEGRATION}
+                onCheckedChange={() =>
+                  onChange(toggleCapped(value, c.id, MAX_CONNECTIONS_PER_INTEGRATION))
+                }
+                data-testid={id}
+              />
+              <label htmlFor={id}>{connectionOptionLabel(c)}</label>
+            </div>
+          );
+        })}
+      </div>
+      {colliding.length > 0 && (
+        <p className="mt-1 text-[0.7rem] text-amber-600 dark:text-amber-400">
+          {t("integration.admin.duplicateLabel", { labels: colliding.join(", ") })}
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
  * Centralised pin management. One pin per (agent, integration), holding the
  * whole bound SET — admin picks which shared connections a given agent uses,
  * and a write replaces the set. Flat model: no authKey to disambiguate (each
@@ -1009,8 +1020,9 @@ function PinManagementSection({ packageId }: { packageId: string }) {
     return connectionOptionLabel(c);
   };
 
-  const selectedConnections = pinnableConnections.filter((c) => newConnectionIds.includes(c.id));
-  const colliding = labelsSharedBy(selectedConnections);
+  const colliding = sharedLabels(
+    pinnableConnections.filter((c) => newConnectionIds.includes(c.id)),
+  );
 
   const onSubmitNewPin = () => {
     if (!newAgent || newConnectionIds.length === 0 || colliding.length > 0) return;
@@ -1058,9 +1070,6 @@ function PinManagementSection({ packageId }: { packageId: string }) {
                   {t("integration.admin.pinManagement.colAgent")}
                 </TableHead>
                 <TableHead className="h-auto px-3 py-2">
-                  {t("integration.admin.pinManagement.colAuth")}
-                </TableHead>
-                <TableHead className="h-auto px-3 py-2">
                   {t("integration.admin.pinManagement.colConnections")}
                 </TableHead>
                 <TableHead className="h-auto w-12 px-3 py-2" />
@@ -1068,16 +1077,8 @@ function PinManagementSection({ packageId }: { packageId: string }) {
             </TableHeader>
             <TableBody>
               {(pins ?? []).map((p) => (
-                <TableRow
-                  key={`${p.packageId}-${p.auth_key}`}
-                  data-testid={`pin-row-${p.packageId}-${p.auth_key}`}
-                >
+                <TableRow key={p.packageId} data-testid={`pin-row-${p.packageId}`}>
                   <TableCell className="px-3 py-2">{agentDisplayName(p.packageId)}</TableCell>
-                  <TableCell className="px-3 py-2">
-                    <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
-                      {p.auth_key}
-                    </span>
-                  </TableCell>
                   <TableCell className="px-3 py-2">
                     {p.connection_ids.map(connectionDisplay).join(" · ")}
                   </TableCell>
@@ -1141,37 +1142,12 @@ function PinManagementSection({ packageId }: { packageId: string }) {
             <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
               {t("integration.admin.pinManagement.colConnections")}
             </Label>
-            <div className="flex flex-col gap-1" data-testid="pin-add-connections">
-              {pinnableConnections.map((c) => (
-                <div key={c.id} className="flex items-center gap-2 text-xs">
-                  <Checkbox
-                    id={`pin-add-connection-${c.id}`}
-                    checked={newConnectionIds.includes(c.id)}
-                    disabled={
-                      !newConnectionIds.includes(c.id) &&
-                      newConnectionIds.length >= MAX_CONNECTIONS_PER_INTEGRATION
-                    }
-                    onCheckedChange={() =>
-                      setNewConnectionIds((prev) =>
-                        toggleCapped(prev, c.id, MAX_CONNECTIONS_PER_INTEGRATION),
-                      )
-                    }
-                    // Radix renders a <button>: wrapping it in a <label> gives
-                    // it no accessible name, htmlFor + aria-label do.
-                    aria-label={connectionDisplay(c.id)}
-                    data-testid={`pin-add-connection-${c.id}`}
-                  />
-                  <label htmlFor={`pin-add-connection-${c.id}`}>{connectionDisplay(c.id)}</label>
-                </div>
-              ))}
-            </div>
-            {colliding.length > 0 && (
-              <p className="mt-1 text-[0.7rem] text-amber-600 dark:text-amber-400">
-                {t("integration.admin.duplicateLabel", {
-                  labels: [...new Set(colliding.map((c) => c.label))].join(", "),
-                })}
-              </p>
-            )}
+            <ConnectionSetChecklist
+              connections={pinnableConnections}
+              value={newConnectionIds}
+              onChange={setNewConnectionIds}
+              idPrefix="pin-add-connection"
+            />
           </div>
           <Button
             size="sm"
@@ -1295,9 +1271,8 @@ function ConnectionTableRow({
   };
   const submitLabel = () => {
     const next = draftLabel.trim();
-    // The label is NOT NULL on the wire — a run binding several connections of
-    // one integration addresses each by its label — so an empty field cancels
-    // the edit rather than clearing the name.
+    // A run addresses each bound connection by its label, so the label cannot
+    // be cleared: an empty field cancels the edit.
     if (next === "" || next === connection.label) {
       setEditing(false);
       return;

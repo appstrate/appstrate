@@ -428,7 +428,6 @@
   "integration.admin.exceptions.title": "Exceptions par agent (admin)",
   "integration.admin.exceptions.help": "Remplacez le défaut pour des agents spécifiques. Une exception prime sur le défaut pour cet agent.",
   "integration.admin.pinManagement.colAgent": "Agent",
-  "integration.admin.pinManagement.colAuth": "Auth",
   "integration.admin.pinManagement.colConnections": "Connexions",
   "integration.admin.pinManagement.delete": "Supprimer cette épingle",
   "integration.admin.pinManagement.add": "Épingler",

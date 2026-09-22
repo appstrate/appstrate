@@ -21,6 +21,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { client } from "../api/client";
+import { onMutationError } from "./use-mutations";
 
 interface UpsertMemberPinInput {
   agentPackageId: string;
@@ -45,6 +46,7 @@ export function useUpsertMemberIntegrationPin() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["get", "/api/me/integration-pins"] });
     },
+    onError: onMutationError,
   });
 }
 
@@ -69,5 +71,6 @@ export function useDeleteMemberIntegrationPin() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["get", "/api/me/integration-pins"] });
     },
+    onError: onMutationError,
   });
 }

@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { isConnectionOwnedBy } from "../connection-label";
+import { isConnectionOwnedBy } from "../connection-ownership";
 
 describe("isConnectionOwnedBy", () => {
   const mine = { owner_type: "user", owner_id: "user_1" } as const;

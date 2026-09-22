@@ -238,7 +238,7 @@ function buildReuseInfo(
   t: (k: string, opts?: Record<string, unknown>) => string,
 ): string {
   // `label` is the connection's display name (identity or "Connexion N"),
-  // always set at creation. A run may bind several — name them all.
+  // always set at creation.
   const account = connections.map((c) => c.label).join(" · ");
   if (agentCount <= 1) {
     return t("detail.integrationReuseSingle", { account, count: connections.length });

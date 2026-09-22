@@ -18,7 +18,6 @@ import { getModelIcon } from "./icons";
 import { useIntegrationDetail } from "../hooks/use-integrations";
 import { connectableAuthKeysForAgent } from "@appstrate/core/integration";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
-import { EMPTY_CONNECTION_SET } from "./integration-connect/connection-set";
 import { ModelGenerationFields } from "./model-generation-fields";
 import {
   reconcileModelGenerationSettings,
@@ -45,8 +44,8 @@ export interface RunOverridesValue {
    * Per-integration connection picks — frozen at schedule create/edit so
    * every fire uses the same rows. Loses to admin pins; beats
    * schedule-less fallback + per-run overrides on the actor. Map of SETS:
-   * `{ "@scope/integration": ["<connection_id>", ...] }`, 1..10 per key.
-   * Each chosen connection carries its own `auth_key`.
+   * `{ "@scope/integration": ["<connection_id>", ...] }`, up to
+   * `MAX_CONNECTIONS_PER_INTEGRATION` per key.
    */
   connection_overrides?: Record<string, string[]>;
 }
@@ -256,19 +255,12 @@ export function RunOverridesPanel({
           version={version}
           value={value.connection_overrides ?? {}}
           onChange={(next) => {
-            // Drop empty sets — an empty set === "Inherit", which is the
-            // absence of an override; sending it would be a spurious pick
-            // the resolver would have to disambiguate.
-            const compacted: Record<string, string[]> = {};
-            for (const [intId, connIds] of Object.entries(next)) {
-              if (connIds.length > 0) compacted[intId] = connIds;
-            }
-            if (Object.keys(compacted).length === 0) {
+            if (Object.keys(next).length === 0) {
               const { connection_overrides: _omit, ...rest } = value;
               void _omit;
               onChange(rest);
             } else {
-              onChange({ ...value, connection_overrides: compacted });
+              onChange({ ...value, connection_overrides: next });
             }
           }}
         />
@@ -314,7 +306,7 @@ function ScheduleConnectionOverridesSection({
             agentPackageId={agentPackageId}
             integration={integ}
             version={version}
-            value={value[integ.id] ?? EMPTY_CONNECTION_SET}
+            value={value[integ.id] ?? []}
             onChange={(connIds) => {
               const next = { ...value };
               if (connIds.length > 0) next[integ.id] = connIds;

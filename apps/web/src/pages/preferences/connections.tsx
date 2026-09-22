@@ -69,9 +69,6 @@ function LabelEditor({
     );
   }
 
-  // The label is NOT NULL on the wire — a run binding several connections of
-  // one integration addresses each by its label — so an empty field cancels
-  // the edit rather than clearing the name.
   const commit = () => {
     const trimmed = value.trim();
     if (trimmed.length > 0) onSave(trimmed);

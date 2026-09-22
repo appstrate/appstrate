@@ -428,7 +428,6 @@
   "integration.admin.exceptions.title": "Per-agent exceptions (admin)",
   "integration.admin.exceptions.help": "Override the default for specific agents. An exception wins over the default for that agent.",
   "integration.admin.pinManagement.colAgent": "Agent",
-  "integration.admin.pinManagement.colAuth": "Auth",
   "integration.admin.pinManagement.colConnections": "Connections",
   "integration.admin.pinManagement.delete": "Remove this pin",
   "integration.admin.pinManagement.add": "Pin",

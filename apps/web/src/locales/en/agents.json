@@ -42,6 +42,7 @@
   "missingConnections.mustChoose.retry": "Run with these picks",
   "missingConnections.duplicateLabel.hint": "These connections share the same name. Rename one so the agent can tell them apart.",
   "missingConnections.duplicateLabel.rename": "Rename",
+  "missingConnections.duplicateLabel.renameField": "New name for {{account}}",
   "missingConnections.duplicateLabel.askOwner": "“{{label}}” belongs to {{owner}}: ask them to rename it.",
   "detail.integrationMemberPicker.title": "Choose the connections this agent uses",
   "detail.integrationMemberPicker.selectedCount_one": "{{count}} connection",

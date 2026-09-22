@@ -530,8 +530,6 @@ export function useUpdateIntegrationConnection() {
     // connections list.
     mutationFn: async (vars: {
       params: { path: { packageId: string; connectionId: string } };
-      // A rename only: the label is NOT NULL on the wire — a run binding
-      // several connections of one integration addresses each by its label.
       body: { label?: string; shared_with_org?: boolean };
     }) => {
       const { data } = await client.PATCH(

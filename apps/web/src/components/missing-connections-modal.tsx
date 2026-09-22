@@ -10,7 +10,6 @@ import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 import { resolutionBlocksRun } from "./integration-connect/integration-run-readiness";
-import { EMPTY_CONNECTION_SET } from "./integration-connect/connection-set";
 import {
   useIntegrationDetail,
   useIntegrationAgentResolution,
@@ -71,13 +70,9 @@ export interface MissingIntegrationFieldError {
   /** Missing scopes — populated on insufficient_scopes for the OAuth re-consent upgrade. */
   missing_scopes?: string[];
   /**
-   * Candidate connections. On `must_choose_connection` they are the rows to
-   * choose among — deliberately unread there, since the row embeds the shared
-   * `IntegrationConnectionPicker` whose candidate list is a superset (see the
-   * module comment above); API and MCP callers, which have no picker, choose
-   * from this field. On `duplicate_connection_label` they are the BOUND rows
-   * that share a label, and the row DOES read them: the remedy is renaming
-   * one, not re-picking.
+   * On `must_choose_connection`: the rows to choose among, for API and MCP
+   * callers — the row's picker lists a superset, so it is unread here. On
+   * `duplicate_connection_label`: the BOUND rows sharing a label, read by the rename remedy.
    */
   candidate_connections?: {
     id: string;
@@ -93,11 +88,8 @@ export interface MissingIntegrationFieldError {
 }
 
 /**
- * Per-run connection picks, keyed by integration id. Matches the wire format
- * the run route expects on `connection_overrides` (mechanism #2, validated by
- * `input-parser.ts`: `Record<integrationId, connectionId[]>`, 1..10 per key).
- * Each chosen connection carries its own `auth_key`; storing it twice would
- * let the two diverge.
+ * Per-run picks in the run route's `connection_overrides` wire shape, validated in
+ * `apps/api/src/lib/launch-schemas.ts` (up to `MAX_CONNECTIONS_PER_INTEGRATION` ids per key).
  */
 type ConnectionOverridesMap = Record<string, string[]>;
 
@@ -218,7 +210,7 @@ export function MissingConnectionsModal({
             err={err}
             agentPackageId={agentPackageId}
             integrationEntries={integrationEntries}
-            pick={picks[parseField(err.field)] ?? EMPTY_CONNECTION_SET}
+            pick={picks[parseField(err.field)] ?? []}
             onPick={setPick}
           />
         ))}
@@ -340,7 +332,6 @@ function DuplicateLabelFix({
 }: {
   packageId: string;
   connections: { id: string; label: string; account_id: string; owned_by_actor: boolean }[];
-  /** The only surface carrying each owner's name. */
   candidates?: IntegrationCandidate[];
 }) {
   const { t } = useTranslation(["agents"]);
@@ -374,7 +365,9 @@ function DuplicateLabelFix({
                   className="h-7 max-w-[10rem] text-xs"
                   value={draft}
                   onChange={(e) => setDrafts((prev) => ({ ...prev, [c.id]: e.target.value }))}
-                  aria-label={t("missingConnections.duplicateLabel.rename")}
+                  aria-label={t("missingConnections.duplicateLabel.renameField", {
+                    account: c.account_id,
+                  })}
                   data-testid={`duplicate-label-input-${c.id}`}
                 />
                 <Button

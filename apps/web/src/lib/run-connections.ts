@@ -4,10 +4,7 @@ import type { EnrichedRun } from "@appstrate/shared-types";
 
 export type ConnectionUsed = NonNullable<EnrichedRun["connections_used"]>[number];
 
-/**
- * The snapshot holds one entry per BOUND connection, so several can share an
- * `integration_id`; both orders are the resolver's and are preserved as-is.
- */
+/** Several snapshot entries can share an `integration_id`; the resolver's orders are kept. */
 export function groupByIntegration(used: ConnectionUsed[]): [string, ConnectionUsed[]][] {
   const groups = new Map<string, ConnectionUsed[]>();
   for (const c of used) {

@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the run-detail connection grouping.
- *
- * `connections_used` went from "one entry per integration" to "one entry per
- * BOUND connection", so the panel can no longer key a card on
- * `integration_id` — two entries would collide. This pins the regrouping, and
- * the orders it must not disturb.
+ * `connections_used` holds one entry per BOUND connection, so the panel cannot
+ * key a card on `integration_id` — two entries would collide. This pins the
+ * grouping, and the orders it must not disturb.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -26,7 +23,6 @@ describe("groupByIntegration", () => {
   });
 
   it("keeps a single-connection integration a group of one", () => {
-    // Control: the degenerate case must read exactly as it did before sets.
     const rows = [used("@o/gmail", "work")];
     expect(groupByIntegration(rows)).toEqual([["@o/gmail", rows]]);
   });

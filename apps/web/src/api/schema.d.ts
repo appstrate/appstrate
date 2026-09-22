@@ -1683,12 +1683,12 @@ export interface paths {
         };
         /**
          * Get the org-wide default connection for this integration
-         * @description The cross-agent governance baseline: one default connection per (space, integration) used by every consuming agent. `enforce: true` locks every member; `enforce: false` is overridable by a member pin. Returns 204 when unset.
+         * @description The cross-agent governance baseline: one default connection set per (space, integration) used by every consuming agent. `enforce: true` locks every member; `enforce: false` is overridable by a member pin. Returns 204 when unset.
          */
         get: operations["getIntegrationOrgDefault"];
         /**
          * Set the org-wide default connection for this integration (admin)
-         * @description Replace the (space, integration) default connection SET. Keyed per-integration, NOT per-auth: the body carries the WHOLE set and this write replaces it in one transaction, so the N rows share a single `enforce`. Selecting connections of a different auth type replaces the current default rather than adding a second one. The response `auth_key` reflects the first connection's auth (derived).
+         * @description Replace the (space, integration) default connection SET. Keyed per-integration, NOT per-auth: the body carries the WHOLE set and this write replaces it, `enforce` included. Selecting connections of a different auth type replaces the current default rather than adding a second one.
          */
         put: operations["upsertIntegrationOrgDefault"];
         post?: never;
@@ -1748,7 +1748,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Pin an admin-shared connection to an agent for all members (admin) */
+        /** Pin a set of admin-shared connections to an agent for all members (admin) */
         put: operations["upsertIntegrationPin"];
         post?: never;
         /** Remove an admin pin (admin) */
@@ -1983,13 +1983,13 @@ export interface paths {
         get: operations["listMyIntegrationPins"];
         /**
          * Pin connections for the caller's runs of an agent
-         * @description Persists the caller's preference for an integration on this agent. Sits at cascade layer 5 — wins over the fallback ambiguity but loses to admin pins / run / schedule overrides. Replaces the previous R5 localStorage pick. The body carries the WHOLE set and this write replaces it; `DELETE` clears it. Idempotent — repeated calls rewrite the same set.
+         * @description Persists the caller's preference for an integration on this agent. Sits at cascade layer 5 — wins over a soft org default and the fallback, loses to an admin pin, an enforced org default and run / schedule overrides. The body carries the WHOLE set and this write replaces it; `DELETE` clears it. Idempotent — repeated calls rewrite the same set.
          */
         put: operations["upsertMyIntegrationPin"];
         post?: never;
         /**
          * Clear the caller's pin on a (agent, integration)
-         * @description Removes the caller's member pin so the resolver falls back to layer 5 (accessible connections). Idempotent — 204 even when no row exists.
+         * @description Removes the caller's member pin so the resolver falls back to layers 6-7 (soft org default, then accessible connections). Idempotent — 204 even when no row exists.
          */
         delete: operations["deleteMyIntegrationPin"];
         options?: never;
@@ -5415,10 +5415,11 @@ export interface components {
             value: string;
             note?: string;
         };
-        /** @description Per-integration connection verdict for an agent: which connection the next run uses (admin pin → run/schedule override → member pin → fallback + scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses. */
+        /** @description Per-integration connection verdict for an agent: which connections the next run binds (admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback, each layer a set and the fallback binding at most one; then a scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses. */
         IntegrationAgentResolution: {
             /** @enum {string} */
             status: "admin_locked" | "pinned" | "auto" | "must_choose" | "duplicate_label" | "none" | "stale" | "needs_reconnection";
+            /** @description The set the next run binds. On `duplicate_label` and on an `insufficient_scopes` verdict, the whole set the winning layer tried to bind. */
             resolved_connection_ids: string[];
             /** @description Missing scopes on the one connection an `insufficient_scopes` verdict names; empty otherwise. */
             resolved_missing_scopes: string[];
@@ -5474,13 +5475,9 @@ export interface components {
         IntegrationPin: {
             packageId: string;
             integration_package_id: string;
-            auth_key: string;
-            /** @description The whole pinned set. A write replaces it; there is no add/remove call. */
+            /** @description The whole pinned set, in the order it was written. A write replaces it. */
             connection_ids: string[];
-            /**
-             * Format: date-time
-             * @description When the CURRENT set was written — not when this (agent, integration) was first pinned: a write replaces the rows, so none survives an edit to carry an older date.
-             */
+            /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
@@ -6162,7 +6159,7 @@ export interface components {
             } | null;
             /** @description ID of the model_provider_credentials row resolved at run creation (audit + cost-attribution). */
             modelCredentialId: string | null;
-            /** @description Per-integration connection picks for this run (flat-connections mechanism #2). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration; each chosen connection carries its own authKey. Loses to admin pins (#1). */
+            /** @description Per-integration connection picks for this run (cascade layer 3). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration; each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats the schedule override, member pins, a soft org default and the fallback. */
             connection_overrides: {
                 [key: string]: string[];
             } | null;
@@ -6215,7 +6212,7 @@ export interface components {
             model_id_override: string | null;
             proxy_id_override: string | null;
             version_override: string | null;
-            /** @description Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..10 per integration. Replayed on every fire; loses to admin pins (#1), beats actor-fallback (#4). */
+            /** @description Per-integration connection picks frozen on the schedule row (cascade layer 4). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..10 per integration. Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback. */
             connection_overrides: {
                 [key: string]: string[];
             } | null;
@@ -7783,7 +7780,7 @@ export interface operations {
                     generation?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Proxy ID override for this run, or "none" to disable proxying. Takes priority over agent and org defaults. */
                     proxyId?: string;
-                    /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same picks. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and empty ids are refused at the write (`lib/launch-schemas.ts`): either would be skipped in silence by the connection resolver. Returns 412 `missing_integration_connection` if an id is not accessible to the actor, or `duplicate_connection_label` when the bound set shares a label. */
+                    /** @description Per-integration connection sets for THIS run (the run-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (at most one connection). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and empty ids are refused at the write (`lib/launch-schemas.ts`): either would be skipped in silence by the connection resolver. A set that cannot bind answers 412 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `duplicate_connection_label` (two bound connections share a label). */
                     connection_overrides?: {
                         [key: string]: string[];
                     };
@@ -8129,7 +8126,7 @@ export interface operations {
                     proxy_id_override?: string;
                     /** @description Which agent definition every run triggered by this schedule executes: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Omitting it is identical to `published` (latest published version; the working copy is opt-in via `draft` only). `draft` requires WRITE authority on the agent at THIS write — `403 draft_not_writable` otherwise — and is not re-checked at fire time, the way `connection_overrides` are frozen here too. The selected definition (manifest + prompt) is resolved at each fire — a schedule inheriting (`published`) on a never-published agent skips the fire and logs a warning until a version is published or `draft` is selected. */
                     version_override?: string;
-                    /** @description Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..10 per integration, always an ARRAY. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire. Empty arrays and empty ids are refused here: either would be skipped in silence by the connection resolver on every fire instead of failing at this write. */
+                    /** @description Per-integration connection sets frozen on the schedule row (the schedule-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..10 per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (at most one connection). Stored on `package_schedules.connection_overrides` and replayed on every fire. Empty arrays and empty ids are refused here: either would be skipped in silence by the connection resolver on every fire instead of failing at this write. Label distinctness is NOT checked at this write: a set whose connections share a label fails every fire with `duplicate_connection_label` until one is renamed. */
                     connection_overrides?: {
                         [key: string]: string[];
                     };
@@ -12102,7 +12099,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description A rename. The label cannot be cleared: it is NOT NULL, and a run binding several connections of one integration addresses each by its label. */
+                    /** @description A rename; the label cannot be cleared. It reaches the agent's model verbatim, so a whitespace-only label, or one holding a control character (line breaks and tabs included), a zero-width/invisible character or a bidirectional-override character is refused with 400. */
                     label?: string;
                     shared_with_org?: boolean;
                 };
@@ -12230,13 +12227,8 @@ export interface operations {
                     "application/json": {
                         integration_package_id: string;
                         connection_ids: string[];
-                        /** @description Auth type of the default's FIRST connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default set per (space, integration) regardless of auth_key; a set may mix auths, and the per-connection auth is read from the connection list. */
-                        auth_key: string;
                         enforce: boolean;
-                        /**
-                         * Format: date-time
-                         * @description When the CURRENT set was written — a write replaces the rows, so none survives an edit to carry an older date.
-                         */
+                        /** Format: date-time */
                         createdAt: string;
                         /** Format: date-time */
                         updatedAt: string;
@@ -12292,19 +12284,15 @@ export interface operations {
                     "application/json": {
                         integration_package_id: string;
                         connection_ids: string[];
-                        /** @description Auth type of the default's FIRST connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default set per (space, integration) regardless of auth_key; a set may mix auths, and the per-connection auth is read from the connection list. */
-                        auth_key: string;
                         enforce: boolean;
-                        /**
-                         * Format: date-time
-                         * @description When the CURRENT set was written — a write replaces the rows, so none survives an edit to carry an older date.
-                         */
+                        /** Format: date-time */
                         createdAt: string;
                         /** Format: date-time */
                         updatedAt: string;
                     };
                 };
             };
+            /** @description Refused: an empty set, more than 10 ids, a repeated id (compared case-insensitively), or connections whose labels are not distinct (the agent addresses each bound connection by its label); or a connection that is not shared, belongs to another integration or another space. */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -12498,7 +12486,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description The WHOLE pinned set — this write replaces it. 1..10 connections of this integration, each `shared_with_org`. */
+                    /** @description The WHOLE pinned set, in the order the run binds it — this write replaces it. Each connection must belong to this integration and be `shared_with_org`. */
                     connection_ids: string[];
                 };
             };
@@ -12515,6 +12503,7 @@ export interface operations {
                     "application/json": components["schemas"]["IntegrationPin"];
                 };
             };
+            /** @description Refused: an empty set, more than 10 ids, a repeated id (compared case-insensitively), or connections whose labels are not distinct (the agent addresses each bound connection by its label); or a connection that is not shared, belongs to another integration or another space. */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -13427,7 +13416,7 @@ export interface operations {
                     "application/json": components["schemas"]["IntegrationPin"];
                 };
             };
-            /** @description Validation failed (connection wrong integration/auth, or not accessible to caller). */
+            /** @description Refused: an empty set, more than 10 ids, a repeated id (compared case-insensitively), or connections whose labels are not distinct (the agent addresses each bound connection by its label); or a connection of another integration or space, or one neither owned by the caller nor shared. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -19562,7 +19551,7 @@ export interface operations {
                     input?: Record<string, never>;
                     /** @description `appfile://file_xxx` URIs to mount read-only into the run's `files/` directory — fan-in by reference, without declaring a file field in the manifest. The platform declares a reserved `_context_files` input field for them, so they go through the same ACL, byte/count caps and `file_links` chaining as any other file input, and are announced to the agent in its prompt. A manifest (or `input`) that already declares `_context_files` is rejected with a `400` — the name is reserved. */
                     context_files?: string[];
-                    /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same picks. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and empty ids are refused at the write (`lib/launch-schemas.ts`): either would be skipped in silence by the connection resolver. Returns 412 `missing_integration_connection` if an id is not accessible to the actor, or `duplicate_connection_label` when the bound set shares a label. */
+                    /** @description Per-integration connection sets for THIS run (the run-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (at most one connection). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and empty ids are refused at the write (`lib/launch-schemas.ts`): either would be skipped in silence by the connection resolver. A set that cannot bind answers 412 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `duplicate_connection_label` (two bound connections share a label). */
                     connection_overrides?: {
                         [key: string]: string[];
                     };
@@ -20849,7 +20838,7 @@ export interface operations {
                     proxy_id_override?: string | null;
                     /** @description Version selector (`draft` | `published` | version spec). Pass `null` to clear (back to the latest published version; the working copy is opt-in via `draft` only). `draft` requires WRITE authority on the agent, but only when this patch MOVES the selector: re-sending the value the row already holds decides nothing and is never refused, so a member editing the cron of someone else's draft schedule is not asked for an authority the request does not exercise. */
                     version_override?: string | null;
-                    /** @description Per-integration connection picks frozen on the schedule, one array of 1..10 connection ids per integration. Pass `null` to clear. Same array shape and same bounds as on create. */
+                    /** @description Per-integration connection sets frozen on the schedule, one array of 1..10 connection ids per integration. Pass `null` to clear. Same array shape, same bounds and same cascade layer as on create; label distinctness is likewise checked at each fire, not here. */
                     connection_overrides?: {
                         [key: string]: string[];
                     } | null;
@@ -23098,7 +23087,7 @@ export interface operations {
                     "application/json": components["schemas"]["IntegrationCredentialsResponse"];
                 };
             };
-            /** @description The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the caller is speaking the retired single-connection protocol and the platform will not pick a connection on its behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. */
+            /** @description The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -23166,7 +23155,7 @@ export interface operations {
                     "application/json": components["schemas"]["IntegrationCredentialsResponse"];
                 };
             };
-            /** @description The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the caller is speaking the retired single-connection protocol and the platform will not pick a connection on its behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. */
+            /** @description The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. */
             400: {
                 headers: {
                     [name: string]: unknown;

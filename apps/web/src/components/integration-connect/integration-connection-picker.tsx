@@ -42,10 +42,16 @@ import { useHostedConnectPopup } from "./use-integration-oauth-popup";
 import { connectableAuthKeys } from "./connectable-auth-keys";
 import {
   requiredScopesForAgent,
-  labelsSharedBy,
   MAX_CONNECTIONS_PER_INTEGRATION,
 } from "@appstrate/core/integration";
-import { displayedConnectionIds, toggleCapped, EMPTY_CONNECTION_SET } from "./connection-set";
+import {
+  canApplyConnectionSet,
+  checkedConnectionIds,
+  displayedConnectionIds,
+  joinCreatedConnection,
+  sharedLabels,
+  toggleCapped,
+} from "../../lib/connection-set";
 import { client } from "../../api/client";
 import { packageDetailPath, splitPackageRef } from "../../lib/package-paths";
 import { isVersioned } from "../../lib/version-selector";
@@ -53,17 +59,12 @@ import { isVersioned } from "../../lib/version-selector";
 /**
  * How the picker persists the actor's pick:
  *
- *  - `pin`      — writes a member `integration_pin` (agent page). Becomes the
- *                 agent-wide default for this member across every run. The
- *                 trigger reflects the server-resolved set.
- *  - `override` — controlled form value (schedule editor). Validating sets
- *                 `value` via `onChange`; nothing is persisted until the
- *                 schedule is saved, and the pick is scoped to THAT schedule
- *                 (`schedules.connection_overrides`, cascade layer 4 — below
- *                 admin pins, above member pins). Empty array = inherit.
+ *  - `pin`      — writes a member `integration_pin` (agent page), the
+ *                 agent-wide default for this member across every run.
+ *  - `override` — controlled form value (schedule editor, per-run modal);
+ *                 nothing is persisted until the form is. Empty = inherit.
  *
- * Either way the written value is the WHOLE set: a pin write replaces the
- * previous set, never merges into it.
+ * Either way a write carries the WHOLE set and replaces the previous one.
  *
  * Locks (admin pin, enforced org default) apply identically in both modes:
  * they sit above the schedule override in the resolver cascade, so a locked
@@ -81,11 +82,9 @@ type ConnectionPickerPersistence =
  * connection" entries (one per declared auth) that launch the connect flow
  * inline.
  *
- * A run binds 1..{@link MAX_CONNECTIONS_PER_INTEGRATION} connections per
- * integration, so the rows are checkboxes accumulating into a draft set that
- * the "Valider" entry writes in one go. The degenerate case is deliberately
- * frictionless: with a single accessible connection, clicking its row binds it
- * straight away, exactly as before.
+ * Rows are checkboxes composing a draft set (up to
+ * {@link MAX_CONNECTIONS_PER_INTEGRATION}) that "Valider" writes in one go;
+ * with a single candidate, clicking its row binds it directly.
  *
  * Single source of truth for "which connections?" UX — shared by the agent
  * page (member pins) and the schedule editor (per-schedule overrides) via the
@@ -136,9 +135,13 @@ export function IntegrationConnectionPicker({
   const { openPopup, isPending: oauthPending } = useHostedConnectPopup();
   const qc = useQueryClient();
   const navigate = useNavigate();
-  // Uncommitted checkbox state. `null` = untouched since the last write, so
-  // the draft reads the bound set; toggling forks it, "Valider" writes it.
+  // Uncommitted ticks (`null` = untouched); dropped when the menu closes.
   const [draft, setDraft] = useState<string[] | null>(null);
+  const [open, setOpen] = useState(false);
+  const onOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (!next) setDraft(null);
+  };
 
   const overrideMode = persistence.mode === "override";
   const auths = manifest.auths ?? {};
@@ -220,53 +223,58 @@ export function IntegrationConnectionPicker({
     );
   }
 
-  // Empty means "no member pin" in pin mode and "inherit" in override mode —
-  // `displayedConnectionIds` owns that split.
   const explicitIds = overrideMode ? persistence.value : memberPinnedConnectionIds;
   const boundIds = displayedConnectionIds({
     overrideMode,
     explicitIds,
     resolvedIds: resolvedConnectionIds,
   });
+  const candidateIds = candidates.map((c) => c.id);
   const dirty = draft !== null;
-  // Checkboxes only: an inheriting override pre-checks the cascade's answer so
-  // the first click refines it, while the trigger still reads "inherit".
-  const checkedIds = draft ?? (boundIds.length > 0 ? boundIds : resolvedConnectionIds);
+  const checkedIds = checkedConnectionIds({
+    draft,
+    explicitIds,
+    resolvedIds: resolvedConnectionIds,
+    candidateIds,
+  });
   const checked = new Set(checkedIds);
   const atCap = checked.size >= MAX_CONNECTIONS_PER_INTEGRATION;
-  // Nothing to compose — clicking the row binds it outright, as it always did.
   const oneClick = candidates.length === 1;
 
+  const toConns = (ids: string[]) => ids.map(byId).filter((c): c is IntegrationCandidate => !!c);
   // The trigger reflects the bound set, never the uncommitted draft.
-  const displayConns = boundIds.map(byId).filter((c): c is IntegrationCandidate => !!c);
+  const displayConns = toConns(boundIds);
+  const checkedConns = toConns(checkedIds);
   // Warnings answer for the set "Valider" would write, so an override with no
   // pick — a valid inherit state — warns about nothing.
-  const verdictConns = (dirty ? checkedIds : boundIds)
-    .map(byId)
-    .filter((c): c is IntegrationCandidate => !!c);
+  const verdictConns = dirty ? checkedConns : displayConns;
   const underScopedConns = verdictConns.filter((c) => c.missing_scopes.length > 0);
   const underScoped = underScopedConns.length > 0;
-  // Same rule as the resolver's 412 `duplicate_connection_label`, from core.
-  const collidingLabels = [...new Set(labelsSharedBy(verdictConns).map((c) => c.label))];
+  const collidingLabels = sharedLabels(verdictConns);
   const hasCandidates = candidates.length > 0;
+  const canApply = canApplyConnectionSet(checkedConns, explicitIds) && !upsertPin.isPending;
 
-  // A write REPLACES the set; the refresh re-resolves the candidate list.
-  const commit = async (connectionIds: string[]) => {
+  // An empty set clears the pick. False = refused; the mutation already toasted why.
+  const persist = async (connectionIds: string[]): Promise<boolean> => {
     if (overrideMode) persistence.onChange(connectionIds);
-    else await upsertPin.mutateAsync({ agentPackageId, integrationId, connectionIds });
-    setDraft(null);
+    else {
+      try {
+        if (connectionIds.length > 0) {
+          await upsertPin.mutateAsync({ agentPackageId, integrationId, connectionIds });
+        } else {
+          await deletePin.mutateAsync({ agentPackageId, integrationId });
+        }
+      } catch {
+        return false;
+      }
+    }
     await refresh();
+    setDraft(null);
+    return true;
   };
 
   const toggle = (connectionId: string) =>
     setDraft(toggleCapped(checkedIds, connectionId, MAX_CONNECTIONS_PER_INTEGRATION));
-
-  const clearPick = async () => {
-    if (overrideMode) persistence.onChange(EMPTY_CONNECTION_SET);
-    else await deletePin.mutateAsync({ agentPackageId, integrationId });
-    setDraft(null);
-    await refresh();
-  };
 
   const triggerConnect = async (authKey: string, opts?: { connectionId?: string }) => {
     if (!auths[authKey]) return;
@@ -307,10 +315,15 @@ export function IntegrationConnectionPicker({
     const freshCandidates = fresh?.integrations.find((i) => i.integration_id === integrationId)
       ?.resolution.candidates;
     const added = freshCandidates?.find((c) => !before.has(c.id));
-    // A fresh connection JOINS the bound set — replacing it would silently
-    // unbind what the user already chose; identity means the cap blocked it.
-    const next = added ? toggleCapped(boundIds, added.id, MAX_CONNECTIONS_PER_INTEGRATION) : null;
-    if (next && next !== boundIds) await commit(next);
+    const next = added
+      ? joinCreatedConnection({
+          explicitIds,
+          candidateIds,
+          createdId: added.id,
+          max: MAX_CONNECTIONS_PER_INTEGRATION,
+        })
+      : null;
+    if (next) await persist(next);
     else await refresh();
   };
 
@@ -326,18 +339,11 @@ export function IntegrationConnectionPicker({
             : status === "stale"
               ? t("detail.integrationMemberPicker.reconfigureLabel")
               : t("detail.integrationMemberPicker.connectLabel");
-  // Warning visuals when there's no usable connection OR the displayed set is
-  // under-scoped / label-colliding (run would be blocked). In override mode
-  // "no pick" is a valid inherit state, so only those two cases warn.
-  //
-  // The trigger paints amber on exactly the states that gate a run. In pin mode
-  // it reads the server's authoritative `run_blocking` flag (the same bulk
-  // connection-readiness query the launch badge uses — and the same resolver the
-  // run-kickoff 412 runs, including the required-auth carve-out for inert
-  // integrations), so the picker can never disagree with the badge.
-  //
-  // Override mode (schedule editor) keeps its own rule: "no pick" = inherit is
-  // valid, so only the SELECTED override set warns.
+  // Amber on exactly the states that gate a run. Pin mode reads the server's
+  // `run_blocking` flag (the bulk readiness query the launch badge uses, same
+  // resolver as the run-kickoff 412), so the picker never disagrees with the
+  // badge. In override mode "no pick" is a valid inherit state, so only a
+  // picked set that is under-scoped or label-colliding warns.
   const triggerWarn = overrideMode
     ? underScoped || collidingLabels.length > 0
     : (runBlocking ?? false);
@@ -391,7 +397,7 @@ export function IntegrationConnectionPicker({
 
   return (
     <div data-testid={`member-picker-${integrationId}`}>
-      <DropdownMenu>
+      <DropdownMenu open={open} onOpenChange={onOpenChange}>
         <DropdownMenuTrigger asChild>
           <Button
             variant="outline"
@@ -426,15 +432,13 @@ export function IntegrationConnectionPicker({
             return (
               <DropdownMenuItem
                 key={c.id}
-                // A row of a composed set IS a checkbox to a screen reader,
-                // named by its own text — so the box below is decorative.
+                // The row is the checkbox a screen reader sees; the box is a glyph.
                 {...(oneClick ? {} : { role: "menuitemcheckbox", "aria-checked": isChecked })}
-                // The cap is a refusal, not a silent no-op.
                 disabled={!oneClick && atCap && !isChecked}
                 // Toggling must not close the menu — "Valider" writes.
                 onSelect={(e) => {
                   if (oneClick) {
-                    void commit([c.id]);
+                    void persist([c.id]);
                     return;
                   }
                   e.preventDefault();
@@ -447,7 +451,6 @@ export function IntegrationConnectionPicker({
                 ) : (
                   <Checkbox
                     checked={isChecked}
-                    // The row carries the role, name and event; this is a glyph.
                     aria-hidden
                     tabIndex={-1}
                     className="pointer-events-none"
@@ -508,8 +511,14 @@ export function IntegrationConnectionPicker({
           })}
           {!oneClick && hasCandidates && (
             <DropdownMenuItem
-              disabled={checked.size === 0 || (!dirty && explicitIds.length > 0)}
-              onSelect={() => void commit(checkedIds)}
+              disabled={!canApply}
+              onSelect={(e) => {
+                // Stays open on a refused write, so the ticks stay editable.
+                e.preventDefault();
+                void persist(checkedIds).then((ok) => {
+                  if (ok) setOpen(false);
+                });
+              }}
               data-testid={`member-pick-apply-${integrationId}`}
             >
               <Check className="size-3.5" />
@@ -527,7 +536,7 @@ export function IntegrationConnectionPicker({
           )}
           {explicitIds.length > 0 && (
             <DropdownMenuItem
-              onSelect={() => void clearPick()}
+              onSelect={() => void persist([])}
               data-testid={`member-pick-reset-${integrationId}`}
             >
               <Check className="size-3.5 opacity-0" />

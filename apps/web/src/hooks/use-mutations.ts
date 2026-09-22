@@ -108,10 +108,11 @@ interface RunAgentParams {
   version?: string;
   /**
    * Per-integration connection picks for THIS run (#199 mechanism #2).
-   * Map of SETS: `{ "@scope/integration": ["<connectionId>", ...] }` —
-   * 1..10 per integration; each chosen connection carries its own
-   * `auth_key`. Wire format validated by `input-parser.ts`. Surfaced from
-   * the must_choose modal picker.
+   * Map of SETS: `{ "@scope/integration": ["<connectionId>", ...] }` — up to
+   * `MAX_CONNECTIONS_PER_INTEGRATION` per integration; each chosen connection
+   * carries its own `auth_key`. Wire format validated in
+   * `apps/api/src/lib/launch-schemas.ts`. Surfaced from the must_choose modal
+   * picker.
    */
   connectionOverrides?: Record<string, string[]>;
   /** Per-run model id override (wire `modelId`). From the run-with-options modal. */

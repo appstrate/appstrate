@@ -84,7 +84,6 @@ export function useUpdateMeIntegrationConnection() {
     }: OrgSpaceHeaders & {
       packageId: string;
       connectionId: string;
-      /** A rename. NOT NULL on the wire — the label is how a bound connection is addressed. */
       label?: string;
       sharedWithOrg?: boolean;
     }) => {
