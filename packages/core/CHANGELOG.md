@@ -5,7 +5,77 @@ All notable changes to `@appstrate/core` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [12.0.0]
+
+### Added
+
+- **New export `MAX_CONNECTIONS_PER_INTEGRATION` (`@appstrate/core/integration`)** —
+  the cap on how many connections one declared integration may bind in a single
+  run (10). Enforced at every WRITE (pins, org defaults, run and schedule
+  overrides), never in the resolver: the cascade only echoes a set a write
+  already validated, and the fallback produces at most one.
+- **New export `labelsSharedBy` (`@appstrate/core/integration`)** — given the
+  rows of a connection set, the ones whose `label` another row of the set
+  carries verbatim. The single definition of the collision rule: the API
+  resolver raises `duplicate_connection_label` on it, the pin and org-default
+  writes refuse on it, and the web pickers flag on it, so the three can never
+  disagree about what a duplicate is.
+- **`ConnectionResolutionError` gains optional `boundConnectionIds: string[]`**
+  (`@appstrate/core/integration`) — every connection the winning cascade layer
+  tried to bind, in its order. Set when every member was reachable but the set
+  still could not bind: a member failing its health check (e.g.
+  `insufficient_scopes`) or `duplicate_connection_label`. Additive.
+
+### Changed
+
+- **BREAKING: an integration binds a SET of connections, not one**
+  (`@appstrate/core/integration`, `@appstrate/core/sidecar-types`,
+  `@appstrate/core/platform-types`). One agent declaration, one or more
+  connections — two Gmail accounts, three SSH hosts — with the same tools, so
+  the shape had to move from a pick to a set:
+  - `ConnectionOverrides` is `Record<string, string[]>` (was
+    `Record<string, string>`), 1..`MAX_CONNECTIONS_PER_INTEGRATION` ids per key;
+  - `ResolvedConnectionMap` is `Record<string, ResolvedConnection[]>` (was
+    `Record<string, ResolvedConnection>`); `ResolvedConnection` itself is
+    unchanged;
+  - `InlineRunBody.connection_overrides` is `Record<string, string[]>` (was
+    `Record<string, string>`);
+  - `IntegrationSpawnSpec` gains an optional
+    `connection: { id: string; label: string; accountId: string | null }`. N
+    connections of one integration emit N specs sharing `integrationId` and
+    `namespace`; `connection` is what tells them apart. Absent in exactly one
+    case, a connect run, whose connection row does not exist yet;
+  - `IntegrationBootReport.declared` is renamed `declaredConnections` and
+    counts spawn specs — one per bound connection — rather than integrations;
+    `spawned[]` and `failed[]` entries each gain an optional `connectionLabel`,
+    since entries no longer differ by `integrationId` + `namespace` alone (a
+    `failed[]` entry omits it on the whole-boot `integrationId: "*"` entry and
+    on a spec that binds no connection).
+
+  There is deliberately no `string | string[]` union and no "fall back to the
+  first connection": the array is the only accepted shape, and a value left in
+  the old one fails loudly. Wrap each existing value in an array.
+
+- **BREAKING: `ConnectionResolutionErrorCode` gains `duplicate_connection_label`**
+  (`@appstrate/core/integration`) — raised when the connections bound to one
+  integration do not carry distinct labels. The label is the handle the agent
+  names a connection by, so a colliding set is unaddressable. It carries
+  `candidateConnections` (the rows sharing a label), the same field
+  `must_choose_connection` uses. Exhaustive `switch`es over the code must handle
+  it.
+
+- **BREAKING: a connection label is never null.** `ConnectionCandidate.label`
+  (`@appstrate/core/integration`) and `ResolutionFieldError.candidate_connections[].label`
+  (`@appstrate/core/api-errors`) are `string` (were `string | null`):
+  `integration_connections.label` is `NOT NULL` and never empty.
+
+- **`launchRunAndWait` (`@appstrate/core/run-and-wait-client`)**: the refusal
+  of a `connection_overrides` argument that is a string or not an object now
+  names the array shape (`{"@scope/integration": ["<connection_id>", ...]}`).
+  The map's values are still not checked client-side: a scalar value reaches
+  the launch route, which refuses it with a `400`.
+
+## [11.1.0] — 2026-09-22
 
 ### Added
 
@@ -17,23 +87,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New export `ConnectionCandidate` (`@appstrate/core/integration`)** — one
   connection the caller may pick from on `must_choose_connection`, carrying
   `id`, `label`, `accountId` and `ownedByActor`.
-- **New export `MAX_CONNECTIONS_PER_INTEGRATION` (`@appstrate/core/integration`)** —
-  the cap on how many connections one declared integration may bind in a single
-  run (10). Enforced at every WRITE (pins, org defaults, run and schedule
-  overrides), never in the resolver: the cascade only echoes a set a write
-  already validated, and the fallback produces at most one.
-- **New export `normalizeConnectionIds` (`@appstrate/core/integration`)** —
-  folds a caller-supplied connection-id set onto one representation (lowercased,
-  caller's order kept) and answers `null` when an id repeats. The one rule the
-  launch overrides and the pin/org-default writes share: `z.uuid()` accepts
-  `A1B2…` while Postgres returns `a1b2…`, and the resolver looks a pick up in a
-  Map keyed on what the database returned.
-- **New export `labelsSharedBy` (`@appstrate/core/integration`)** — given the
-  rows of a connection set, the ones whose `label` another row of the set
-  carries verbatim. The single definition of the collision rule: the API
-  resolver raises `duplicate_connection_label` on it, the pin and org-default
-  writes refuse on it, and the web pickers flag on it, so the three can never
-  disagree about what a duplicate is.
 - **New export `canComposeInline` (`@appstrate/core/permissions`)** — whether
   a caller may compose an inline agent: `agents:write` and `agents:run`. Takes a
   membership test, so a `Set` or an array both fit.
@@ -57,38 +110,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **BREAKING: an integration binds a SET of connections, not one**
-  (`@appstrate/core/integration`, `@appstrate/core/sidecar-types`). One agent
-  declaration, one or more connections — two Gmail accounts, three SSH hosts —
-  with the same tools, so the shape had to move from a pick to a set:
-  - `ConnectionOverrides` is `Record<string, string[]>` (was
-    `Record<string, string>`), 1..`MAX_CONNECTIONS_PER_INTEGRATION` ids per key;
-  - `ResolvedConnectionMap` is `Record<string, ResolvedConnection[]>` (was
-    `Record<string, ResolvedConnection>`); `ResolvedConnection` itself is
-    unchanged;
-  - `IntegrationSpawnSpec` gains an optional
-    `connection: { id, label, accountId }`. N connections of one integration
-    emit N specs sharing `integrationId`, `namespace` and `toolAllowlist`;
-    `connection` is what tells them apart. Absent in exactly one case, a connect
-    run, whose connection row does not exist yet;
-  - `IntegrationBootReport.spawned[]` and `failed[]` each gain an optional
-    `connectionLabel` (same reason, plus: a failure can precede binding), since
-    entries no longer differ by `integrationId` + `namespace` alone.
-
-  There is deliberately no `string | string[]` union and no "fall back to the
-  first connection": the array is the only accepted shape, and a value left in
-  the old one fails loudly. Wrap each existing value in an array. On the wire,
-  `connection_overrides` / `resolved_connections` carry arrays, and the pin and
-  org-default bodies take `connection_ids` where they took `connection_id`.
-
-- **BREAKING: `ConnectionResolutionErrorCode` gains `duplicate_connection_label`**
-  (`@appstrate/core/integration`) — a 412 raised when the connections bound to
-  one integration do not carry distinct labels. The label is the handle the
-  agent names a connection by, so a colliding set is unaddressable. It carries
-  `candidateConnections` (the rows sharing a label), the same field
-  `must_choose_connection` uses. Exhaustive `switch`es over the code must handle
-  it.
-
 - **BREAKING: `ConnectionResolutionError.candidateConnectionIds` is replaced by
   `candidateConnections`** (`@appstrate/core/integration`), an array of
   `ConnectionCandidate` instead of bare ids; on the wire
@@ -100,6 +121,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `connection_overrides`. The resolver already holds the rows, so the three
   distinguishing fields cost no extra query. Read `candidate_connections[].id`
   where the old array held the ids.
+
+## [11.0.0] — 2026-09-18
+
+### Changed
 
 - **BREAKING: `AuthResolution.principalKind` is a new REQUIRED member** (type
   `PrincipalKind`, with the tuple `PRINCIPAL_KINDS`, in `@appstrate/core/module`).

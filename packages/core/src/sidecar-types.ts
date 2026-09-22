@@ -250,7 +250,8 @@ export interface IntegrationSpawnSpec {
   namespace: string;
   /**
    * The connection this spec is spawned for; N specs of one integration share
-   * everything else. `label` is the value of the sidecar's `connection` tool
+   * the namespace and tool allowlist, each carrying its own auth's api_calls
+   * and login tool. `label` is the value of the sidecar's `connection` tool
    * selector. Absent only on a connect run, which mints the credential that
    * becomes a connection — every agent-run spec carries it.
    */
@@ -408,7 +409,7 @@ export interface IntegrationSpawnSpec {
   fileMounts?: Record<string, { content_b64: string; mode: string }>;
   /**
    * Phase 1.5 — per-auth `delivery.http` metadata. The sidecar starts a
-   * per-integration MITM HTTPS proxy and uses these plans to apply the shared
+   * per-connection MITM HTTPS proxy and uses these plans to apply the shared
    * header-prefix and caller-override policy on every upstream request whose
    * URL matches an `authorizedUris` pattern of the matching auth.
    *

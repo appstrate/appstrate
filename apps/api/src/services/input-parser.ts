@@ -86,7 +86,7 @@ export interface ParsedInput {
   /**
    * Per-integration connection picks for THIS run (#199).
    * Wire field `connectionOverrides` on the request body; flows into the
-   * resolver's mechanism #2 and is persisted on `runs.connection_overrides`.
+   * resolver's layer 3 (run override) and is persisted on `runs.connection_overrides`.
    * Shape: `{ "<integrationId>": ["<connectionId>", ...] }` — 1..N
    * connections per integration; each chosen connection carries its own
    * authKey.

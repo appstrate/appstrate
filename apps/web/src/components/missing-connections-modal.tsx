@@ -29,7 +29,7 @@ import {
  * upgrade / add flows. A validated SET accumulates into the modal's per-run
  * `connection_overrides` map; the footer's "Re-run with picks" button fires
  * the parent's `onRetryWithOverrides` callback with the full
- * `{ integrationId: connectionIds[] }` map (mechanism #2).
+ * `{ integrationId: connectionIds[] }` map (cascade layer 3, the run override).
  *
  * Reusing the picker keeps this modal in lockstep with the dropdown — same
  * candidate list, scope/lock verdicts and connect orchestration — instead of

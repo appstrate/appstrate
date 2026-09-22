@@ -132,7 +132,7 @@ const inlineRunBodySchema = z
      */
     context_files: z.array(z.unknown()).optional(),
     /**
-     * Per-integration connection picks for this run (resolver mechanism #2).
+     * Per-integration connection picks for this run (cascade layer 3, the run override).
      * Declared here so the parse keeps the field for the preflight's readiness
      * gate, which runs BEFORE `parseRequestInput` and would otherwise never see
      * it.

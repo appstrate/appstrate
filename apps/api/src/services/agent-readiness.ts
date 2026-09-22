@@ -38,7 +38,7 @@ interface AgentReadinessParams {
    */
   actor: Actor | null;
   /**
-   * Caller's run-time connection picks (mechanism #2 of the resolver
+   * Caller's run-time connection picks (layer 3 of the resolver
    * cascade). Threaded into the readiness check so the must_choose-retry
    * UX loop in `MissingConnectionsModal` actually completes: without it,
    * readiness re-fires must_choose on >1 candidates even when the caller
@@ -46,7 +46,7 @@ interface AgentReadinessParams {
    */
   runOverrides?: ConnectionOverrides | null;
   /**
-   * Schedule's frozen connection picks (mechanism #3). Plumbed for parity
+   * Schedule's frozen connection picks (cascade layer 4). Plumbed for parity
    * with `run-pipeline.ts:resolveRunConnectionsOrError` — schedules apply
    * their overrides once at fire time, and readiness should honour them.
    */

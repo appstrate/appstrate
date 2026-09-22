@@ -367,7 +367,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
   it("must_choose retry: posting connection_overrides exits the 412 loop", async () => {
     // The whole UX recovery loop: 412 → modal picks a candidate → retry the
     // POST with `connection_overrides: { [integ]: [connId] }` → resolver
-    // honours mechanism #2 (run override) → run kickoff proceeds. A
+    // honours the run override (layer 3) → run kickoff proceeds. A
     // regression in the override→resolver wiring would silently strand
     // users in the modal even after picking.
     await seedAgent({

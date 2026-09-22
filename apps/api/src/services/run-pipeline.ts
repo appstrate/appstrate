@@ -114,16 +114,17 @@ interface RunPipelineParams {
   /** API key ID that triggered the run (if auth via API key). */
   apiKeyId?: string;
   /**
-   * Per-(integration, authKey) connection id chosen by the caller for
-   * THIS run (#199). Persisted on `runs.connection_overrides` as the
-   * audit trail and fed into the resolver's mechanism #2 so the snapshot
-   * pins the right row. Loses to admin pins (mechanism #1).
+   * Per-integration connection set chosen by the caller for THIS run (#199).
+   * Persisted on `runs.connection_overrides` as the audit trail and fed into
+   * the resolver's run-override layer (3 of 7) so the snapshot binds that set.
+   * Loses to an admin pin and an enforced org default.
    */
   connectionOverrides?: ConnectionOverrides | null;
   /**
    * Schedule-frozen overrides loaded from `package_schedules.connection_overrides`.
-   * Same shape as `connectionOverrides`; loses to both admin pins and
-   * per-run overrides. Scheduler path only.
+   * Same shape as `connectionOverrides`; the schedule-override layer (4 of 7),
+   * which loses to an admin pin, an enforced org default and a run override.
+   * Scheduler path only.
    */
   scheduleConnectionOverrides?: ConnectionOverrides | null;
   /**
@@ -445,9 +446,11 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
 
   // --- Step 2b: Connection resolution snapshot (#199) ---
   //
-  // Apply the 4-mechanism cascade once at kickoff so:
-  //  - the spawn loader (run-context-builder) pins the same row admin/run intended,
-  //  - the credentials resolver (sidecar MITM refresh) honours that pick
+  // Apply the seven-layer cascade once at kickoff (admin pin → enforced org
+  // default → run override → schedule override → member pin → soft org
+  // default → fallback, which binds at most one connection) so:
+  //  - the spawn loader (run-context-builder) spawns the set the cascade bound,
+  //  - the credentials route (sidecar MITM refresh) authorises only that set
   //    long after kickoff via runs.resolved_connections.
   //
   // Readiness already ran in resolveRunPreflight WITH the same overrides

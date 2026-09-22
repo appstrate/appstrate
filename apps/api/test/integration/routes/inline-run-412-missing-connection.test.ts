@@ -153,7 +153,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
 
     const [row] = await db.select().from(runs).where(eq(runs.id, created.id));
     expect(row).toBeDefined();
-    // Mechanism #2 audit trail — what the caller asked for.
+    // Run-override audit trail — what the caller asked for.
     expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [picked] });
     // …and the resolver snapshot the spawn loader + MITM refresh read back.
     expect(row!.resolvedConnections).toMatchObject({

@@ -2,8 +2,7 @@
 --
 -- Run BEFORE the drizzle batch, with the platform STOPPED. The window is:
 -- stop → run this file → deploy the new image (`0069` applies at boot) →
--- reopen. Order is the plan's Déploiement section
--- (`docs/plans/multi-connection-per-integration.md` §9).
+-- reopen.
 --
 -- WHY that moment and not after the batch. It depends on nothing `0069` does —
 -- the columns are jsonb and neither their type nor any constraint on them
@@ -39,11 +38,23 @@
 -- leaves `{}` alone — `jsonb_object_agg` over zero pairs returns NULL, and an
 -- empty map must stay an empty map rather than become NULL.
 --
+-- NOT rewritten, and nothing to do: the copy of
+-- `package_schedules.connection_overrides` that each schedule's BullMQ job
+-- carries in Redis. At boot the scheduler upserts the job of every enabled
+-- schedule from its row — by then rewritten — BEFORE its worker starts, and
+-- the upsert replaces the pending job with one built from the new data. A
+-- job the sync skips (e.g. a schedule whose package is gone) still holds the
+-- old shape; every fire validates the copy it reads and records a visible
+-- failed run for it instead of launching (`apps/api/src/services/scheduler.ts`,
+-- `initScheduleWorker` and `triggerScheduledRun`).
+--
 -- One transaction, fenced. Three `UPDATE`s, no `INSERT`, no `DELETE`.
 --
--- Rows: UNMEASURED — rehearse against a restored dump (README, "Writing one",
--- requirement 4) and record what the before/after counts print. The "after"
--- counts must all read 0.
+-- Rows: NOT YET REHEARSED. Production holds rows in all three columns (every
+-- run since the snapshot shipped carries `resolved_connections`), so this is
+-- not a state no reachable database is in: rehearse against a restored dump
+-- (README, "Writing one", requirement 4) and record the before/after counts
+-- here BEFORE the window. The "after" counts must all read 0.
 --
 -- ROLLBACK: none is offered, and none is wanted. Collapsing an array back to
 -- its first element is lossy the moment a run has bound more than one
