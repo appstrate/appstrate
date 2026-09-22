@@ -30,7 +30,11 @@ import { FILE_URI_PREFIX, UPLOAD_URI_PREFIX } from "@appstrate/core/file-uri";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
-import { assertPermission, requirePermission } from "../middleware/require-permission.ts";
+import {
+  assertPermission,
+  requirePermission,
+  rowAuthority,
+} from "../middleware/require-permission.ts";
 import { invalidRequest, notFound, forbidden, ApiError } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { getActor } from "../lib/actor.ts";
@@ -190,10 +194,14 @@ function assertNoPlatformFileRefs(
 export function createRunsRemoteRouter() {
   const router = new Hono<AppEnv>();
 
+  // `rowAuthority()`: the mounted guard is `agents:run`, but the inline branch
+  // asks `agents:write` on top of it from inside the handler, on the request's
+  // own shape — the route table cannot show that second half.
   router.post(
     "/runs/remote",
     rateLimit(getPlatformRunLimits().per_org_global_rate_per_min),
     requirePermission("agents", "run"),
+    rowAuthority(),
     idempotency(),
     async (c) => {
       const body = await readJsonBody(c, CreateRemoteRunBodySchema);

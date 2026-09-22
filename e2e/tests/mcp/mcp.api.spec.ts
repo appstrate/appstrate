@@ -160,7 +160,10 @@ test.describe("MCP over an API key (full stack)", () => {
     });
     const searchPayload = toolPayload(search.envelope);
     expect(searchPayload.isError).toBe(false);
-    expect((searchPayload.data.count as number) ?? 0).toBeGreaterThan(0);
+    // `total` counts the matches this key may invoke (#1493 split the result
+    // into granted and `denied`); the owner-inherited key is granted some.
+    expect(searchPayload.data.total).toBeGreaterThan(0);
+    expect(searchPayload.data.operations).not.toHaveLength(0);
 
     // invoke a stable, side-effect-free GET (lists the org's spaces).
     const invoke = await mcpRpc(request, url, headers, {

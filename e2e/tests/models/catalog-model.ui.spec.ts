@@ -20,6 +20,7 @@
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { selectOption } from "../../helpers/radix.ts";
 import type { APIResponse, Locator, Page } from "@playwright/test";
+import anthropicCatalog from "../../../apps/api/src/data/pricing/anthropic.json" with { type: "json" };
 
 const SETTINGS_PATH = "/org-settings/models";
 /** The form modal's title, identical to the button that opens it. */
@@ -37,6 +38,11 @@ const MODEL_ID = "claude-sonnet-4-5-20250929";
 const MODEL_LABEL = "Claude Sonnet 4 5 20250929";
 /** Unique as a substring, so the row locator matches exactly one checkbox. */
 const OTHER_MODEL_ID = "claude-3-opus-20240229";
+/**
+ * Read from the catalog, never restated: the weekly LiteLLM refresh moves it
+ * (200k → 1M in #1479), and the assertion is "the row follows the catalog".
+ */
+const CATALOG_CONTEXT_WINDOW = anthropicCatalog[MODEL_ID].contextWindow;
 
 const NEW_LABEL = "Sonnet de l'équipe";
 
@@ -146,7 +152,7 @@ test.describe("Catalogued model — UI", () => {
     await expect(dialog).toBeHidden();
     await expect(page.getByText(NEW_LABEL).first()).toBeVisible();
     const renamed = (await listModels(apiClient)).find((m) => m.modelId === MODEL_ID);
-    expect(renamed).toMatchObject({ label: NEW_LABEL, contextWindow: 200000 });
+    expect(renamed).toMatchObject({ label: NEW_LABEL, contextWindow: CATALOG_CONTEXT_WINDOW });
   });
 
   test("answers for one capability without freezing the three it did not touch", async ({
@@ -164,7 +170,7 @@ test.describe("Catalogued model — UI", () => {
     // Taking the capabilities on prefills the four with what `GET /api/models`
     // resolved — the catalog's own numbers. Untick "Image" and nothing else.
     await dialog.locator("#mdl-capabilities-explicit").click();
-    await expect(dialog.locator("#mdl-ctx")).toHaveValue("200000");
+    await expect(dialog.locator("#mdl-ctx")).toHaveValue(String(CATALOG_CONTEXT_WINDOW));
     await dialog.locator("#mdl-input-image").click();
 
     const saved = page.waitForRequest(

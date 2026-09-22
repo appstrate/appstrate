@@ -10,15 +10,19 @@
 
 import { describe, expect, it } from "bun:test";
 import { formatCallerContext, buildCallerContextBlock } from "../src/prompt.ts";
-import type { ChatPlatformDeps } from "../src/platform-services.ts";
+import { turnCapabilities } from "../src/capabilities.ts";
 import { DEFAULT_SKILL_SELECTION, PLATFORM_DEFAULT_SKILLS } from "../src/skills.ts";
-
-const OPTS = { skills: DEFAULT_SKILL_SELECTION };
+import type { ChatPlatformDeps } from "../src/platform-services.ts";
 
 /** Minimal Hono-context stub exposing the `c.get(key)` reads the builder makes. */
 
 function fakeContext(vars: Record<string, unknown>): any {
   return { get: (k: string) => vars[k] };
+}
+
+/** The one `Role in this space:` line, so an assertion cannot match elsewhere in the block. */
+function roleLine(block: string): string | undefined {
+  return block.split("\n").find((line) => line.startsWith("Role in this space:"));
 }
 
 /** Deps whose dispatch returns a scripted Response and records the request. */
@@ -42,6 +46,36 @@ function fakeDeps(respond: (req: Request) => Response): {
   };
 }
 
+/** The turn's capabilities, from the permission set a role actually grants. */
+function caps(permissions: readonly string[]) {
+  return turnCapabilities((permission) => permissions.includes(permission));
+}
+
+/** A builder: the MCP pair, the launch, run-read and authoring. */
+const BUILDER = [
+  "mcp:read",
+  "mcp:invoke",
+  "agents:run",
+  "agents:write",
+  "runs:read",
+  "skills:read",
+];
+/** The same caller with the authoring toggle off (or a persona without it). */
+const NO_AUTHORING = BUILDER.filter((permission) => permission !== "agents:write");
+
+/**
+ * Opts every case shares; a case that is ABOUT one of them overrides it. The
+ * permission-shaped fields are required, so a literal per call would be noise
+ * the reader has to diff.
+ */
+const BASE_OPTS = {
+  capabilities: caps(BUILDER),
+  rolePreview: false,
+  spaceRole: "builder",
+  permissions: ["agents:read", "mcp:invoke"],
+  skills: DEFAULT_SKILL_SELECTION,
+} as const;
+
 describe("formatCallerContext", () => {
   it("renders identity, role, and connected integrations with their default tools", () => {
     const out = formatCallerContext(
@@ -58,7 +92,7 @@ describe("formatCallerContext", () => {
           { integration_id: "@appstrate/clickup", name: "ClickUp", source: "shared" },
         ],
       },
-      OPTS,
+      BASE_OPTS,
     );
     expect(out).toContain("## Your context");
     expect(out).toContain("Ada Lovelace (ada@acme.com)");
@@ -85,7 +119,7 @@ describe("formatCallerContext", () => {
           { integration_id: "@acme/none", name: "NoneTools", source: "own", default_tools: [] },
         ],
       },
-      OPTS,
+      BASE_OPTS,
     );
     expect(out).toContain("(own; default: all tools)");
     expect(out).toContain("no default — you must select tools explicitly");
@@ -117,13 +151,117 @@ describe("formatCallerContext", () => {
           },
         ],
       },
-      OPTS,
+      BASE_OPTS,
     );
     expect(out).toContain("`@acme/mine` — Mine (takes input: no; draft only, yours to run");
     expect(out).toContain("`@acme/theirs` — Theirs (takes input: no; draft only, not runnable");
     // The one the caller cannot write must not be advertised as runnable.
     const theirs = out.split("\n").find((line) => line.includes("@acme/theirs"))!;
     expect(theirs).not.toContain("version=draft");
+  });
+
+  it("renders the space role and the turn's permissions as joinable data", () => {
+    // Same `resource:action` vocabulary as an operation's `required_permissions`
+    // and the 403 hint, so the model joins the two itself. Sorted, so the block
+    // stays byte-stable across turns (one cache breakpoint covers it).
+    const identity = { user: { name: "Ada" }, org: { role: "member" } };
+    const out = formatCallerContext(identity, {
+      capabilities: caps(BUILDER),
+      rolePreview: false,
+      spaceRole: "builder",
+      permissions: ["mcp:invoke", "agents:read", "mcp:read"],
+      skills: DEFAULT_SKILL_SELECTION,
+    });
+    expect(out).toContain("Role in this space: builder");
+    expect(out).not.toContain("role preview active");
+    expect(out).toContain("Permissions this turn: agents:read, mcp:invoke, mcp:read");
+  });
+
+  it("marks the role line as a preview, omits it without a role, and says `none` for an empty set", () => {
+    const identity = { user: { name: "Ada" }, org: { role: "member" } };
+    const preview = formatCallerContext(identity, {
+      capabilities: caps([]),
+      rolePreview: true,
+      spaceRole: "operator",
+      permissions: [],
+      skills: DEFAULT_SKILL_SELECTION,
+    });
+    expect(preview).toContain("Role in this space: operator — role preview active");
+    expect(preview).toContain("Permissions this turn: none");
+    const roleless = formatCallerContext(identity, {
+      capabilities: caps([]),
+      rolePreview: false,
+      spaceRole: null,
+      permissions: ["mcp:read"],
+      skills: DEFAULT_SKILL_SELECTION,
+    });
+    expect(roleless).not.toContain("Role in this space:");
+    expect(roleless).toContain("Permissions this turn: mcp:read");
+    expect(roleless).not.toContain("Current space:");
+  });
+
+  it("blames the role preview, not the human, for a draft it cannot run", () => {
+    // Under `X-View-As` the persona narrows the permission set and
+    // `home_writable` follows it, so the SAME human reads this line about their
+    // own draft. Telling them they do not author it is a lie the preview causes.
+    const raw = {
+      user: { name: "Ada" },
+      org: { role: "member" },
+      agents: [
+        {
+          package_id: "@acme/mine",
+          display_name: "Mine",
+          takes_input: false,
+          published: false,
+          home_writable: false,
+        },
+      ],
+    };
+    const preview = formatCallerContext(raw, {
+      ...BASE_OPTS,
+      capabilities: caps(NO_AUTHORING),
+      rolePreview: true,
+    });
+    expect(preview).toContain("draft only, not runnable under this role preview");
+    expect(preview).not.toContain("you do not author it");
+    // Outside a preview the permission set IS the caller's, so the fact holds.
+    const real = formatCallerContext(raw, { ...BASE_OPTS, capabilities: caps(NO_AUTHORING) });
+    expect(real).toContain("draft only, not runnable — nothing published and you do not author it");
+    expect(real).not.toContain("role preview");
+  });
+
+  it("gives ONE cause-neutral reason for a writable draft the turn cannot run", () => {
+    // `home_writable` is the HUMAN's answer: `/api/me/context` is dispatched
+    // with the caller's raw headers, so it sees neither the preview nor the
+    // authoring toggle. The turn holding no `agents:write` is therefore all this
+    // line can know — naming the preview as the cause was a guess, and wrong
+    // whenever the toggle was what dropped it.
+    const raw = {
+      user: { name: "Ada" },
+      org: { role: "member" },
+      agents: [
+        {
+          package_id: "@acme/mine",
+          display_name: "Mine",
+          takes_input: false,
+          published: false,
+          home_writable: true,
+        },
+      ],
+    };
+    const hint = "; draft, not runnable in this turn — this turn does not hold agent authoring";
+    expect(
+      formatCallerContext(raw, {
+        ...BASE_OPTS,
+        capabilities: caps(NO_AUTHORING),
+        rolePreview: true,
+      }),
+    ).toContain(hint);
+    expect(formatCallerContext(raw, { ...BASE_OPTS, capabilities: caps(NO_AUTHORING) })).toContain(
+      hint,
+    );
+    // Control: with authoring held, the same draft is advertised as runnable.
+    expect(formatCallerContext(raw, BASE_OPTS)).toContain("draft only, yours to run");
   });
 
   it("advertises no draft as runnable when the turn may not author agents", () => {
@@ -136,10 +274,10 @@ describe("formatCallerContext", () => {
       home_writable: true,
     };
     const raw = { user: { name: "Ada" }, org: { role: "member" }, agents: [draft] };
-    expect(formatCallerContext(raw, { ...OPTS, canAuthorAgents: true })).toContain("yours to run");
-    const off = formatCallerContext(raw, { ...OPTS, canAuthorAgents: false });
+    expect(formatCallerContext(raw, BASE_OPTS)).toContain("yours to run");
+    const off = formatCallerContext(raw, { ...BASE_OPTS, capabilities: caps(NO_AUTHORING) });
     expect(off).toContain(
-      "draft, not runnable in this turn — agent authoring is off or not granted here",
+      "draft, not runnable in this turn — this turn does not hold agent authoring",
     );
     // Distinct from the "draft only, not runnable" rule, which means never runnable.
     expect(off).not.toContain("draft only, not runnable");
@@ -152,8 +290,8 @@ describe("formatCallerContext", () => {
       org: { role: "member" },
       skills: [{ package_id: "@acme/research", display_name: "Research" }],
     };
-    for (const canAuthorAgents of [true, false]) {
-      const out = formatCallerContext(raw, { ...OPTS, canAuthorAgents });
+    for (const permissions of [BUILDER, NO_AUTHORING]) {
+      const out = formatCallerContext(raw, { ...BASE_OPTS, capabilities: caps(permissions) });
       expect(out).toContain("## Skills");
       expect(out).toContain("`@acme/research`");
     }
@@ -175,7 +313,7 @@ describe("formatCallerContext", () => {
           { package_id: "@acme/mine", display_name: "Mine", description: "Pinned.", version: null },
         ],
       },
-      { skills: { catalogue: true, pinned: ["@acme/mine"] } },
+      { ...BASE_OPTS, skills: { catalogue: true, pinned: ["@acme/mine"] } },
     );
     expect(out).toContain("## Skills");
     expect(out).toContain("- `@acme/mine` (pinned) — Mine: Pinned.");
@@ -200,7 +338,7 @@ describe("formatCallerContext", () => {
         ],
         skills_truncated: true,
       },
-      { skills: { catalogue: true, pinned: [] } },
+      { ...BASE_OPTS, skills: { catalogue: true, pinned: [] } },
     );
     expect(out).toContain("Other skills in this space (not loaded):");
     expect(out).toContain("- `@acme/pdf` — PDF: Reads PDFs.");
@@ -220,7 +358,7 @@ describe("formatCallerContext", () => {
         requested_skills: [],
         skills: [{ package_id: "@acme/pdf", display_name: "PDF" }],
       },
-      { skills: { catalogue: true, pinned: [] } },
+      { ...BASE_OPTS, skills: { catalogue: true, pinned: [] } },
     );
     expect(out.split("## Skills")).toHaveLength(2);
     expect(out).not.toContain("###");
@@ -241,7 +379,7 @@ describe("formatCallerContext", () => {
         skills: [{ package_id: "@acme/pdf", display_name: "PDF" }],
         skills_truncated: true,
       },
-      { skills: { catalogue: false, pinned: [] } },
+      { ...BASE_OPTS, skills: { catalogue: false, pinned: [] } },
     );
     expect(out).toContain("## Skills");
     expect(out).not.toContain("Other skills in this space");
@@ -260,7 +398,7 @@ describe("formatCallerContext", () => {
         ],
         skills: [{ package_id: "@acme/pdf", display_name: "PDF" }],
       },
-      { skills: { catalogue: false, pinned: ["@acme/mine"] } },
+      { ...BASE_OPTS, skills: { catalogue: false, pinned: ["@acme/mine"] } },
     );
     expect(out).toContain("- `@acme/mine` (pinned) — Mine: Pinned.");
     expect(out).toContain("- `@appstrate/copilot` (platform) — Agent Copilot");
@@ -275,7 +413,7 @@ describe("formatCallerContext", () => {
         requested_skills: [],
         unresolved_skills: ["@acme/gone", "@appstrate/copilot"],
       },
-      { skills: { catalogue: true, pinned: ["@acme/gone"] } },
+      { ...BASE_OPTS, skills: { catalogue: true, pinned: ["@acme/gone"] } },
     );
     expect(out).toContain("`@acme/gone` is pinned to this conversation but is not available here");
     // A platform default missing from the deployment is an operator's problem,
@@ -286,7 +424,7 @@ describe("formatCallerContext", () => {
   it("omits the heading entirely when nothing resolves and nothing is catalogued", () => {
     const out = formatCallerContext(
       { user: { name: "Ada" }, org: { role: "member" }, skills: [], requested_skills: [] },
-      { skills: { catalogue: true, pinned: [] } },
+      { ...BASE_OPTS, skills: { catalogue: true, pinned: [] } },
     );
     expect(out).not.toContain("## Skills");
   });
@@ -308,7 +446,7 @@ describe("formatCallerContext", () => {
           },
         ],
       },
-      OPTS,
+      BASE_OPTS,
     );
     expect(out).toContain("`@acme/shipped` — Shipped (takes input: yes)");
     expect(out).not.toContain("draft only");
@@ -321,20 +459,22 @@ describe("formatCallerContext", () => {
         org: { role: "owner" },
         connections: [],
       },
-      OPTS,
+      BASE_OPTS,
     );
     expect(out).toContain("no connected integrations yet");
   });
 
   it("falls back to email, then a generic label, when the name is missing", () => {
     expect(
-      formatCallerContext({ user: { email: "ada@acme.com" }, org: { role: "guest" } }, OPTS),
+      formatCallerContext({ user: { email: "ada@acme.com" }, org: { role: "guest" } }, BASE_OPTS),
     ).toContain("assisting ada@acme.com");
-    expect(formatCallerContext({ org: { role: "guest" } }, OPTS)).toContain("assisting the user");
+    expect(formatCallerContext({ org: { role: "guest" } }, BASE_OPTS)).toContain(
+      "assisting the user",
+    );
   });
 
   it("omits the role clause when the role is absent", () => {
-    const out = formatCallerContext({ user: { name: "Ada" }, connections: [] }, OPTS);
+    const out = formatCallerContext({ user: { name: "Ada" }, connections: [] }, BASE_OPTS);
     expect(out).toContain("assisting Ada.");
     expect(out).not.toContain("role in this organization");
   });
@@ -360,7 +500,7 @@ describe("formatCallerContext", () => {
           },
         ],
       },
-      OPTS,
+      BASE_OPTS,
     );
     expect(out).toContain("## Existing agents you can run");
     expect(out).toContain("`@appstrate/triage`");
@@ -382,7 +522,7 @@ describe("formatCallerContext", () => {
         agents: [{ package_id: "@appstrate/triage", takes_input: false }],
         agents_truncated: true,
       },
-      OPTS,
+      BASE_OPTS,
     );
     // The marker is data; `buildSystemPrompt` owns what to DO about it (listAgents).
     expect(out).toContain("(list truncated)");
@@ -394,7 +534,7 @@ describe("formatCallerContext", () => {
       {
         agents: [{ package_id: "@appstrate/triage", takes_input: false }],
       },
-      OPTS,
+      BASE_OPTS,
     );
     expect(out).toContain("## Existing agents you can run");
     expect(out).toContain("`@appstrate/triage`");
@@ -408,7 +548,7 @@ describe("formatCallerContext", () => {
         connections: [],
         agents: [],
       },
-      OPTS,
+      BASE_OPTS,
     );
     expect(out).not.toContain("Existing agents you can run");
   });
@@ -436,7 +576,7 @@ describe("formatCallerContext", () => {
           { package_id: "@acme/bare", display_name: "@acme/bare", description: "Bare." },
         ],
       },
-      OPTS,
+      BASE_OPTS,
     );
     expect(out).toContain("## Skills");
     expect(out).toContain("`@appstrate/web-research`");
@@ -460,7 +600,7 @@ describe("formatCallerContext", () => {
         skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
         skills_truncated: true,
       },
-      OPTS,
+      BASE_OPTS,
     );
     // The marker is data; `buildSystemPrompt` owns what to DO about it (listSkills).
     // That instruction must name the operation: `search_operations` ranks
@@ -475,7 +615,7 @@ describe("formatCallerContext", () => {
       {
         skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
       },
-      OPTS,
+      BASE_OPTS,
     );
     expect(out).toContain("## Skills");
     expect(out).toContain("`@appstrate/web-research`");
@@ -489,16 +629,16 @@ describe("formatCallerContext", () => {
         connections: [],
         skills: [],
       },
-      OPTS,
+      BASE_OPTS,
     );
     expect(out).not.toContain("## Skills");
   });
 
   it("returns an empty string for an unusable payload (so injection is skipped)", () => {
-    expect(formatCallerContext({}, OPTS)).toBe("");
-    expect(formatCallerContext(null, OPTS)).toBe("");
+    expect(formatCallerContext({}, BASE_OPTS)).toBe("");
+    expect(formatCallerContext(null, BASE_OPTS)).toBe("");
     expect(
-      formatCallerContext({ user: { name: null, email: null }, org: { role: null } }, OPTS),
+      formatCallerContext({ user: { name: null, email: null }, org: { role: null } }, BASE_OPTS),
     ).toBe("");
   });
 
@@ -509,27 +649,13 @@ describe("formatCallerContext", () => {
         org: { role: "member", name: "Acme", slug: "acme" },
         connections: [],
       },
-      OPTS,
+      BASE_OPTS,
     );
     expect(out).toContain('in the organization "Acme" (`acme`)');
     // No browser clock/timezone is forwarded to this route — always server UTC.
     expect(out).toContain("Current date and time:");
     expect(out).toContain("(UTC, rounded to the hour)");
     expect(out).toContain("Reply in the user's language (fr)");
-  });
-
-  it("renders the current space id verbatim", () => {
-    // The id is a PATH PARAMETER the model must reproduce (`activatePackage`),
-    // so it is rendered literally rather than described.
-    const out = formatCallerContext(
-      { user: { name: "Ada" }, org: { role: "member" }, space: { id: "spc_abc123" } },
-      OPTS,
-    );
-    expect(out).toContain("Current space: `spc_abc123`.");
-    // No space on the payload (identity-only fallback) → no line at all.
-    expect(
-      formatCallerContext({ user: { name: "Ada" }, org: { role: "member" } }, OPTS),
-    ).not.toContain("Current space");
   });
 
   it("does NOT render recent runs — they would bust the prompt cache every turn", () => {
@@ -548,7 +674,7 @@ describe("formatCallerContext", () => {
           { package_id: "@acme/report", status: "success", run_number: 6 },
         ],
       },
-      OPTS,
+      BASE_OPTS,
     );
     // The payload field still exists (it backs the MCP `get_me` tool); the
     // RENDERING is what was removed. `started_at` rewrote the system prompt on
@@ -567,7 +693,7 @@ describe("formatCallerContext", () => {
         {
           recent_runs: [{ package_id: "@acme/report", status: "success", run_number: 1 }],
         },
-        OPTS,
+        BASE_OPTS,
       ),
     ).toBe("");
   });
@@ -597,7 +723,10 @@ describe("formatCallerContext", () => {
       skills: [{ package_id: "@acme/pdf", display_name: "PDF" }],
       unresolved_skills: ["@acme/gone"],
     };
-    const opts = { skills: { catalogue: true, pinned: ["@acme/mine", "@acme/gone"] } };
+    const opts = {
+      ...BASE_OPTS,
+      skills: { catalogue: true, pinned: ["@acme/mine", "@acme/gone"] },
+    };
     const at = new Date("2026-06-25T09:05:00.000Z");
     expect(formatCallerContext(ctx, { ...opts, now: at })).toBe(
       formatCallerContext(ctx, { ...opts, now: at }),
@@ -628,18 +757,22 @@ describe("formatCallerContext", () => {
     };
     const at = new Date("2026-06-25T09:05:00.000Z");
     const later = new Date("2026-06-25T09:50:00.000Z");
-    expect(formatCallerContext(ctx, { ...OPTS, now: later })).toBe(
-      formatCallerContext(ctx, { ...OPTS, now: at }),
+    expect(formatCallerContext(ctx, { ...BASE_OPTS, now: later })).toBe(
+      formatCallerContext(ctx, { ...BASE_OPTS, now: at }),
     );
     // And the rendered hour is the floor, not the raw stamp.
-    expect(formatCallerContext(ctx, { ...OPTS, now: at })).toContain("2026-06-25T09:00:00.000Z");
+    expect(formatCallerContext(ctx, { ...BASE_OPTS, now: at })).toContain(
+      "2026-06-25T09:00:00.000Z",
+    );
     // No time-of-day precision survives anywhere in the block.
-    expect(formatCallerContext(ctx, { ...OPTS, now: at })).not.toMatch(/T\d{2}:(?!00:00\.000Z)/);
+    expect(formatCallerContext(ctx, { ...BASE_OPTS, now: at })).not.toMatch(
+      /T\d{2}:(?!00:00\.000Z)/,
+    );
     // `opts.now` exists only to make the invariant testable, so the DEFAULT
     // clock has to be floored by the same code — a regression that floored the
     // injected stamp alone would leave everything above green while every real
     // turn re-rendered the block.
-    expect(formatCallerContext(ctx, OPTS)).toMatch(
+    expect(formatCallerContext(ctx, BASE_OPTS)).toMatch(
       /Current date and time: \d{4}-\d{2}-\d{2}T\d{2}:00:00\.000Z \(UTC, rounded to the hour\)/,
     );
   });
@@ -662,12 +795,15 @@ describe("buildCallerContextBlock", () => {
       spaceId: "spc_1",
       user,
       deps,
-      canAuthorAgents: true,
-      skills: { catalogue: true, pinned: [] },
+      capabilities: caps(BUILDER),
+      permissions: ["mcp:read", "mcp:invoke"],
+      skills: DEFAULT_SKILL_SELECTION,
     });
     // Block is rendered from the dispatched payload, not from request context.
     expect(out).toContain("`@appstrate/gmail`");
     expect(out).toContain("## Existing agents you can run");
+    // The path parameter of every space-scoped operation, as data.
+    expect(out).toContain("Current space: `spc_1`");
     // The space-scoped read carries the resolved space id on the dispatch.
     const req = lastRequest()!;
     expect(new URL(req.url).pathname).toBe("/api/me/context");
@@ -683,7 +819,8 @@ describe("buildCallerContextBlock", () => {
       spaceId: "spc_1",
       user,
       deps,
-      canAuthorAgents: true,
+      capabilities: caps(BUILDER),
+      permissions: ["mcp:read", "mcp:invoke"],
       // A pin that is ALSO a default must not be asked for twice, and the
       // order must not depend on how the session stored it.
       skills: { catalogue: true, pinned: ["@acme/mine", "@appstrate/copilot"] },
@@ -694,6 +831,107 @@ describe("buildCallerContextBlock", () => {
     );
   });
 
+  it("drops the runnable-agents section for a turn that cannot launch", async () => {
+    const payload = {
+      user: { name: "Ada", email: "ada@acme.com" },
+      org: { role: "member" },
+      agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+    };
+    const { deps } = fakeDeps(() => Response.json(payload));
+    const out = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
+      origin: "http://127.0.0.1:3000",
+      headers: {},
+      spaceId: "spc_1",
+      user,
+      deps,
+      capabilities: caps([]),
+      permissions: ["mcp:read", "mcp:invoke"],
+      skills: DEFAULT_SKILL_SELECTION,
+    });
+    expect(out).not.toContain("## Existing agents you can run");
+    expect(out).not.toContain("@appstrate/triage");
+    expect(out).toContain("Ada (ada@acme.com)");
+  });
+
+  it("derives the role preview from the persona on the request context", async () => {
+    const payload = {
+      user: { name: "Ada", email: "ada@acme.com" },
+      org: { role: "member" },
+      agents: [
+        {
+          package_id: "@acme/mine",
+          display_name: "Mine",
+          takes_input: false,
+          published: false,
+          home_writable: false,
+        },
+      ],
+    };
+    const { deps } = fakeDeps(() => Response.json(payload));
+    const args = {
+      origin: "http://127.0.0.1:3000",
+      headers: {},
+      spaceId: "spc_1",
+      user,
+      deps,
+      capabilities: caps(NO_AUTHORING),
+      permissions: ["mcp:read", "mcp:invoke"],
+      skills: DEFAULT_SKILL_SELECTION,
+    };
+    const preview = await buildCallerContextBlock(
+      fakeContext({
+        orgRole: "owner",
+        viewAs: { orgId: "org_1", orgRole: "member", space: null },
+      }),
+      args,
+    );
+    expect(preview).toContain("draft only, not runnable under this role preview");
+    expect(preview).not.toContain("you do not author it");
+    const real = await buildCallerContextBlock(fakeContext({ orgRole: "owner" }), args);
+    expect(real).toContain("you do not author it");
+  });
+
+  it("names the current space's role, which is already resolved under the persona", async () => {
+    // A persona may preview a DIFFERENT space than `X-Space-Id` — the ref then
+    // applies to neither this space nor this block (`personaSpaceMember`).
+    // `applySpacePermissions` resolved `spaceRole` for THIS space under the
+    // persona, so it is the one answer that agrees with the permissions line.
+    const payload = { user: { name: "Ada", email: "ada@acme.com" }, org: { role: "member" } };
+    const { deps } = fakeDeps(() => Response.json(payload));
+    const args = {
+      origin: "http://127.0.0.1:3000",
+      headers: {},
+      spaceId: "spc_1",
+      user,
+      deps,
+      capabilities: caps(NO_AUTHORING),
+      permissions: ["mcp:read", "mcp:invoke"],
+      skills: DEFAULT_SKILL_SELECTION,
+    };
+    const preview = await buildCallerContextBlock(
+      fakeContext({
+        orgRole: "owner",
+        spaceRole: { kind: "preset", preset: "builder" },
+        viewAs: {
+          orgId: "org_1",
+          orgRole: "member",
+          space: { spaceId: "spc_other", role: { kind: "preset", preset: "operator" } },
+        },
+      }),
+      args,
+    );
+    expect(roleLine(preview)).toBe("Role in this space: builder — role preview active");
+    // A custom bundle is named by its own name; without a preview, no marker.
+    const custom = await buildCallerContextBlock(
+      fakeContext({
+        orgRole: "member",
+        spaceRole: { kind: "custom", role: { id: "srl_1", name: "Analyste" } },
+      }),
+      args,
+    );
+    expect(roleLine(custom)).toBe("Role in this space: Analyste");
+  });
+
   it("falls back to identity-only when the dispatch 400s (no app context)", async () => {
     const { deps } = fakeDeps(() => new Response(null, { status: 400 }));
     const out = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
@@ -702,10 +940,12 @@ describe("buildCallerContextBlock", () => {
       spaceId: "spc_1",
       user,
       deps,
-      canAuthorAgents: true,
-      skills: { catalogue: true, pinned: [] },
+      capabilities: caps(BUILDER),
+      permissions: ["mcp:read", "mcp:invoke"],
+      skills: DEFAULT_SKILL_SELECTION,
     });
     expect(out).toContain("Ada (ada@acme.com)");
+    expect(out).toContain("Current space: `spc_1`");
   });
 
   it("degrades to no block on any other dispatch failure", async () => {
@@ -716,8 +956,9 @@ describe("buildCallerContextBlock", () => {
       spaceId: "spc_1",
       user,
       deps,
-      canAuthorAgents: true,
-      skills: { catalogue: true, pinned: [] },
+      capabilities: caps(BUILDER),
+      permissions: ["mcp:read", "mcp:invoke"],
+      skills: DEFAULT_SKILL_SELECTION,
     });
     expect(out).toBe("");
   });

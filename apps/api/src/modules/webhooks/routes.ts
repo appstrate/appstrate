@@ -17,7 +17,7 @@ import { z } from "zod";
 import type { AppEnv } from "../../types/index.ts";
 import { rateLimit } from "../../middleware/rate-limit.ts";
 import { idempotency } from "../../middleware/idempotency.ts";
-import { requireAnyPermission } from "../../middleware/require-permission.ts";
+import { requireAnyPermission, rowAuthority } from "../../middleware/require-permission.ts";
 import { listResponse } from "../../lib/list-response.ts";
 import { recordAuditFromContext } from "../../services/audit.ts";
 import {
@@ -308,13 +308,16 @@ export function createWebhooksRouter() {
     return webhook;
   }
 
-  // GET /api/webhooks/:id — get webhook detail
-  router.get("/api/webhooks/:id", rateLimit(300), async (c) => {
+  // GET /api/webhooks/:id — get webhook detail.
+  //
+  // `rowAuthority()` on every by-id route: `loadWebhookForAction` enters the
+  // ROW's space and judges there, so no mounted guard can state the requirement.
+  router.get("/api/webhooks/:id", rateLimit(300), rowAuthority(), async (c) => {
     return c.json(await loadWebhookForAction(c, "read"));
   });
 
   // PUT /api/webhooks/:id — update webhook (url, events, filters — not secret/level)
-  router.put("/api/webhooks/:id", rateLimit(10), async (c) => {
+  router.put("/api/webhooks/:id", rateLimit(10), rowAuthority(), async (c) => {
     // Permission check must still precede reading the body.
     await loadWebhookForAction(c, "write");
     const data = await readJsonBody(c, updateWebhookSchema);
@@ -330,7 +333,7 @@ export function createWebhooksRouter() {
   });
 
   // DELETE /api/webhooks/:id — delete webhook
-  router.delete("/api/webhooks/:id", rateLimit(10), async (c) => {
+  router.delete("/api/webhooks/:id", rateLimit(10), rowAuthority(), async (c) => {
     const id = c.req.param("id")!;
     await loadWebhookForAction(c, "delete");
     await deleteWebhook(webhookScope(c), id);
@@ -343,7 +346,7 @@ export function createWebhooksRouter() {
   });
 
   // POST /api/webhooks/:id/test — send a synthetic test.ping event
-  router.post("/api/webhooks/:id/test", rateLimit(5), async (c) => {
+  router.post("/api/webhooks/:id/test", rateLimit(5), rowAuthority(), async (c) => {
     const wh = await loadWebhookForAction(c, "write");
 
     const { eventId, payload } = buildEventEnvelope({
@@ -361,7 +364,7 @@ export function createWebhooksRouter() {
   // 7-day window (capped at 30 days). The response carries both the new
   // secret (for consumer migration) and the previous one (still valid
   // until the window closes), plus the deadline.
-  router.post("/api/webhooks/:id/rotate", rateLimit(5), async (c) => {
+  router.post("/api/webhooks/:id/rotate", rateLimit(5), rowAuthority(), async (c) => {
     const id = c.req.param("id")!;
     await loadWebhookForAction(c, "write");
     const parsed = await readJsonBody(c, rotateSecretSchema, { allowEmpty: true });
@@ -376,7 +379,7 @@ export function createWebhooksRouter() {
   });
 
   // GET /api/webhooks/:id/deliveries — delivery history
-  router.get("/api/webhooks/:id/deliveries", rateLimit(300), async (c) => {
+  router.get("/api/webhooks/:id/deliveries", rateLimit(300), rowAuthority(), async (c) => {
     await loadWebhookForAction(c, "read");
     // Coerce + bound the limit: a raw `Number("-5")`/`Number("x")` (NaN)
     // would otherwise reach the query and 500. Out-of-range / unparseable

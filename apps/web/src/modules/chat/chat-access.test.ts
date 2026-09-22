@@ -189,6 +189,24 @@ describe("running an agent", () => {
     expect(verdicts(context([...CONVERSES, "agents:run", "runs:read"])).runAgents).toBe(true);
     expect(verdicts(context([...CONVERSES, "agents:run", "runs:read-all"])).runAgents).toBe(true);
   });
+
+  // The row-vs-permissions agreement over every subset is pinned once, on the
+  // shared derivation itself (`packages/module-chat/test/capabilities.test.ts`).
+});
+
+describe("creating an agent", () => {
+  it("is denied without `mcp:invoke`, which `createAgent` dispatches through", () => {
+    // `agents:write` is not enough on its own: the assistant creates an agent by
+    // calling `invoke_operation`, so a turn without it holds a grant it can
+    // never use — and the server persona drops the authoring half for the same
+    // reason. A row keyed on `agents:write` alone would show a granted chip
+    // whose act is unreachable, and hide the composer's toggle behind it.
+    expect(verdicts(context(["chat:write", "mcp:read", "agents:write"])).createAgents).toBe(false);
+    // Control: the same set plus the dispatching tool holds the row.
+    expect(
+      verdicts(context(["chat:write", "mcp:read", "mcp:invoke", "agents:write"])).createAgents,
+    ).toBe(true);
+  });
 });
 
 describe("browsing files", () => {

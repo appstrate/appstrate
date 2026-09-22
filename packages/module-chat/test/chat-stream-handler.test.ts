@@ -43,6 +43,7 @@ import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/regist
 import { errorHandler } from "../../../apps/api/src/middleware/error-handler.ts";
 import { initSystemModelProviderKeys } from "../../../apps/api/src/services/model-registry.ts";
 import { buildSystemPrompt } from "../src/prompt.ts";
+import { turnCapabilities } from "../src/capabilities.ts";
 import { chatLoopbackStrategy } from "../src/loopback-auth.ts";
 
 // The chat handler reads the system model registry; the HTTP harness initializes it at boot.
@@ -485,7 +486,7 @@ describe("handleChatStream", () => {
     const { engine, calls } = scriptedEngine();
     const res = await postChat(sessionId, undefined, engine, {
       dispatch,
-      permissions: new Set(["skills:read"]),
+      permissions: new Set(["mcp:read", "mcp:invoke", "skills:read"]),
     });
     expect(res.status).toBe(200);
     await collectUiChunks(res);
@@ -585,13 +586,7 @@ describe("handleChatStream", () => {
     // (4) The system prompt was assembled from the caller context. There are no
     // inline MCP instructions on this path: the engine's own handshake delivers
     // them, and it is handed the org-scoped URL to open it with.
-    expect(input.system).toContain(
-      buildSystemPrompt({
-        canComposeInline: false,
-        canAuthorAgents: false,
-        canReadSkills: false,
-      }).slice(0, 64),
-    );
+    expect(input.system).toContain(buildSystemPrompt(turnCapabilities(() => false)).slice(0, 64));
     expect(input.system).toContain(CONTEXT_ORG_MARKER);
     expect(input.platformMcp.url).toContain(`/api/mcp/o/${encodeURIComponent(ctx.orgId)}`);
     expect(input.platformMcp.headers.Authorization).toMatch(/^Bearer /);
@@ -753,14 +748,35 @@ describe("handleChatStream", () => {
     /** The one argument a model needs to compose an inline agent, whatever the prose. */
     const INLINE_MARKER = 'kind:"inline"';
     const REDUCED_MARKER = "Do not create or modify an agent in this turn";
+    /** The tool a turn is taught only when it may launch AND read the run back. */
+    const RUN_MARKER = "run_and_wait";
+    /** The one authoring rule that needs no run — taught on `agents:write` ∧ invoke. */
+    const SKILLS_MARKER = "Skills are not run on their own";
+    /** A skill the context block lists only to a turn that may author an agent. */
+    const SKILL_ID = "@acme/research";
 
-    const BUILDER = new Set(["agents:read", "agents:run", "agents:write"]);
+    // A builder as the platform grants it: running needs the MCP pair
+    // (`mcp:read`, the transport floor, ∧ `mcp:invoke` — no tool call reaches a
+    // route without them) plus launch plus run-read.
+    const BUILDER = new Set([
+      "agents:read",
+      "agents:run",
+      "agents:write",
+      "mcp:invoke",
+      "mcp:read",
+      "runs:read",
+    ]);
 
-    async function turn(permissions: Set<string>, agentAuthoring?: boolean) {
+    async function turn(
+      permissions: Set<string>,
+      agentAuthoring?: boolean,
+      context?: () => Response,
+    ) {
       const { engine, calls } = scriptedEngine();
       const res = await postChat(mintSessionId(), undefined, engine, {
         permissions,
         ...(agentAuthoring === undefined ? {} : { agentAuthoring }),
+        ...(context === undefined ? {} : { context }),
       });
       expect(res.status).toBe(200);
       await collectUiChunks(res);
@@ -770,16 +786,25 @@ describe("handleChatStream", () => {
 
     it("keeps `agents:write` and teaches inline composition when on", async () => {
       const { token, system } = await turn(BUILDER, true);
-      expect(token).toEqual(["agents:read", "agents:run", "agents:write"]);
+      expect(token).toEqual([
+        "agents:read",
+        "agents:run",
+        "agents:write",
+        "mcp:invoke",
+        "mcp:read",
+        "runs:read",
+      ]);
       expect(system).toContain(INLINE_MARKER);
       expect(system).not.toContain(REDUCED_MARKER);
     });
 
     it("drops only `agents:write` from the token and the inline teaching when off", async () => {
       const { token, system } = await turn(BUILDER, false);
-      expect(token).toEqual(["agents:read", "agents:run"]);
+      expect(token).toEqual(["agents:read", "agents:run", "mcp:invoke", "mcp:read", "runs:read"]);
       expect(system).not.toContain(INLINE_MARKER);
       expect(system).toContain(REDUCED_MARKER);
+      // Running an EXISTING agent survives the switch — it needs no authoring.
+      expect(system).toContain(RUN_MARKER);
     });
 
     it("is on when the body carries no flag", async () => {
@@ -800,6 +825,91 @@ describe("handleChatStream", () => {
       expect(system).not.toContain(INLINE_MARKER);
       // It may still create agents: nothing tells it otherwise.
       expect(system).not.toContain(REDUCED_MARKER);
+    });
+
+    it("teaches no run to a launcher that could not read the run back", async () => {
+      // `agents:run` alone launches a container the turn can never poll — the
+      // same conjunction `run_and_wait` is declared on, so the tool is absent.
+      const { system } = await turn(new Set(["mcp:read", "mcp:invoke", "agents:run"]), true);
+      expect(system).not.toContain(RUN_MARKER);
+      expect(system).not.toContain(INLINE_MARKER);
+    });
+
+    it("teaches the run once launch and run-read are both held", async () => {
+      const { system } = await turn(
+        new Set(["mcp:read", "mcp:invoke", "agents:run", "runs:read-all"]),
+        true,
+      );
+      expect(system).toContain(RUN_MARKER);
+      // `runs:read-all` is a superset of `runs:read`, never a literal test.
+      expect(system).toContain('kind:"agent"');
+    });
+
+    it("teaches no run without `mcp:read` — the MCP transport admits nobody", async () => {
+      // `mcp:invoke` alone is not enough: the endpoint the chat's own MCP client
+      // talks to is guarded by `requireModulePermission("mcp", "read")`, so the
+      // turn could never list the tool it was taught. Same discriminator as the
+      // `mcp:invoke` case below — no `agents:write`, so REDUCED_MARKER would
+      // render if the run branch were still there.
+      const { system } = await turn(new Set(["mcp:invoke", "agents:run", "runs:read"]), true);
+      expect(system).not.toContain(RUN_MARKER);
+      expect(system).not.toContain(INLINE_MARKER);
+      expect(system).not.toContain(REDUCED_MARKER);
+    });
+
+    it("teaches no run without `mcp:invoke` — no tool call reaches a route", async () => {
+      // No `agents:write`, so the reduced branch's "do not create an agent"
+      // line WOULD render if the run branch were still there: its absence
+      // discriminates. (Holding `agents:write` makes that marker impossible
+      // whatever the run flag, which is why the set below omits it.)
+      const { system } = await turn(new Set(["mcp:read", "agents:run", "runs:read"]), true);
+      expect(system).not.toContain(RUN_MARKER);
+      expect(system).not.toContain(INLINE_MARKER);
+      // Absent, not contradicted: the branch is gone, not answered with a refusal.
+      expect(system).not.toContain(REDUCED_MARKER);
+    });
+
+    it("teaches no authoring without `mcp:invoke` — `createAgent` dispatches through it", async () => {
+      // `agents:write` and `skills:read` without `mcp:invoke` are grants the
+      // turn cannot dispatch, so neither the skill teaching nor the list renders.
+      const withSkill = () =>
+        Response.json({
+          user: { name: "Chat Tester", email: "chat-tester@test.com" },
+          org: { role: "owner", name: CONTEXT_ORG_MARKER, slug: "chat-handler-test" },
+          connections: [],
+          agents: [],
+          skills: [{ package_id: SKILL_ID, display_name: "Research", version: "1.2.0" }],
+          recent_runs: [],
+        });
+      const { system } = await turn(
+        new Set(["mcp:read", "agents:write", "skills:read"]),
+        true,
+        withSkill,
+      );
+      expect(system).not.toContain(SKILLS_MARKER);
+      expect(system).not.toContain(SKILL_ID);
+      expect(system).not.toContain("## Skills you can attach to an agent");
+      // Control: the same set plus `mcp:invoke` IS taught both.
+      const { system: invoking } = await turn(
+        new Set(["mcp:read", "mcp:invoke", "agents:write", "skills:read"]),
+        true,
+        withSkill,
+      );
+      expect(invoking).toContain(SKILLS_MARKER);
+      expect(invoking).toContain(SKILL_ID);
+    });
+
+    it("keeps the run-history rule for a turn that reads runs but cannot launch", async () => {
+      // Reading runs is its own conjunction (`mcp:invoke` ∧ run-read) and does
+      // not depend on `agents:run` — `listRuns` stays, `run_and_wait` does not.
+      const { system } = await turn(new Set(["mcp:read", "mcp:invoke", "runs:read"]), true);
+      expect(system).toContain("listRuns");
+      expect(system).toContain("Never quote run metrics");
+      expect(system).not.toContain(RUN_MARKER);
+      // A turn that cannot even read them is told neither.
+      const { system: blind } = await turn(new Set(["agents:read"]), true);
+      expect(blind).not.toContain("listRuns");
+      expect(blind).not.toContain("Never quote run metrics");
     });
   });
 });

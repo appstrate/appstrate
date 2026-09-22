@@ -53,7 +53,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
+import { requirePermission, rowAuthority } from "../middleware/require-permission.ts";
 import { invalidRequest, forbidden, notFound } from "../lib/errors.ts";
 import { assertBearerOnly } from "../lib/bearer-only.ts";
 import { LLM_PROXY_ROUTES, llmProxyUrlPath, type ProxiedApiShape } from "@appstrate/runner-pi";
@@ -95,10 +95,14 @@ export function createLlmProxyRouter() {
     const adapter = adapters[apiShape];
     // `sdkPath` doubles as the upstream path — see the note on the table.
     const upstreamPath = LLM_PROXY_ROUTES[apiShape].sdkPath;
+    // `rowAuthority()`: past `llm-proxy:call` the RUN named by `X-Run-Id`
+    // decides — a jwt principal may only bill a run it launched
+    // (`assertRunAttributable`).
     router.post(
       llmProxyUrlPath(apiShape),
       rateLimit(limits.rate_per_min),
       requirePermission("llm-proxy", "call"),
+      rowAuthority(),
       async (c) => handleProxy(c, adapter, upstreamPath, limits),
     );
   }
