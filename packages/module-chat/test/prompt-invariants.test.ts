@@ -120,15 +120,19 @@ describe("full persona invariants", () => {
 
   it("routes integration_not_active to activation, never to a retry", () => {
     // Retrying the run or re-running the connect flow can never clear a 412:
-    // connecting is personal, activating is space-wide. Activation IS
-    // reachable (`activateIntegration` is in the platform's operation surface),
-    // and RBAC decides who may call it. Nothing in the chat pre-computes that
-    // right: quoting the operation, and letting the 403 name what it required,
-    // is what keeps this honest for every permission set.
+    // connecting is personal, activating is per space. The persona names the
+    // real catalog operation with its path and body, because the model is told
+    // never to guess an operationId. `activatePackage` is decided in the space
+    // its path names, so its 403 carries the route's own error, never the
+    // caller-space `required_permissions` enrichment; claiming it would be false.
     expect(FULL).toContain("integration_not_active");
     expect(FULL).toMatch(/do NOT re-run and do NOT restart the connect flow/);
-    expect(FULL).toContain("activateIntegration");
-    expect(FULL).toMatch(/the 403 names the permission it required under `required_permissions`/);
+    expect(FULL).toContain("`activatePackage`");
+    expect(FULL).toContain("`POST /api/spaces/{spaceId}/packages`");
+    expect(FULL).toContain('{ "packageId": "<that integration id>" }');
+    expect(FULL).not.toContain("activateIntegration");
+    expect(FULL).toMatch(/report the refusal with its error and stop/);
+    expect(FULL).not.toMatch(/the 403 names the permission it required/);
   });
 
   it("drops the stale claim that a prompt-pasted appfile:// URI gives no access", () => {
@@ -383,6 +387,15 @@ describe("the persona without agent runs", () => {
     // Neither list is rendered, so the bullet about truncated lists is gone too.
     expect(NO_RUNS).not.toContain("(list truncated)");
     expect(NO_RUNS_AUTHOR).toContain("(list truncated)");
+  });
+
+  it("names the full-list operation only for a list the context renders", () => {
+    // Skills are listed on authoring, agents on running: each operation is
+    // named under the gate that shows its list, never under the other one.
+    expect(NO_RUNS_AUTHOR).toContain('`operation_id: "listSkills"`');
+    expect(NO_RUNS_AUTHOR).not.toContain("listAgents");
+    expect(REDUCED).toContain('`operation_id: "listAgents"`');
+    expect(REDUCED).not.toContain("listSkills");
   });
 
   it("lists no agent as runnable in the caller-context block", () => {

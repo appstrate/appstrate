@@ -87,7 +87,7 @@ import {
   type Dispatch,
   type McpObserver,
 } from "./tools.ts";
-import { buildOperationIndex } from "./catalog.ts";
+import { buildOperationIndex, getCatalog, operationGranted } from "./catalog.ts";
 import { canImportPackageFiles } from "./package-file-tools.ts";
 
 const MCP_SERVER_VERSION = "1.0.0";
@@ -179,6 +179,18 @@ export function buildServerInstructions(
   const invokes = permissions.has("mcp:invoke");
   const { runLevel, authors } = agentCapabilities(has, invokes);
   const runs = reaches(runLevel, "run");
+  // A sentence naming an operation renders only for a caller its route grants,
+  // unless the gate it sits under already implies that grant. A missing id is
+  // a rename — a programming error, not a caller without the grant.
+  const granted = (operationId: string): boolean => {
+    const operation = getCatalog().operations.get(operationId);
+    if (!operation) {
+      throw new Error(`Catalog has no \`${operationId}\` operation — the instructions name it`);
+    }
+    return operationGranted(operation, permissions);
+  };
+  const listsIntegrations = invokes && granted("listIntegrations");
+  const connects = runs && granted("initiateIntegrationConnect");
   const runningAgents = runs ? "configuring or running" : "configuring";
   const agentUse = authors ? "building or configuring" : runningAgents;
   // A `contextInjected` caller (the chat module) already injects the get_me
@@ -222,10 +234,10 @@ export function buildServerInstructions(
   // `GET /api/integrations` is an operation to call. The preference ORDER they
   // sit beside names no tool, so it is written for every caller.
   const heavyListBullet = invokes
-    ? `- Heavy list responses — list operations paginate with \`query: { limit, offset }\`, and some (e.g. \`listIntegrations\`) also take a \`fields\` selector (comma-separated projection; describe_operation shows it when available). On heavy lists request only the fields you need — e.g. \`fields: "id,active,block_user_connections"\` on \`listIntegrations\` — and read a single row's detail operation when you need its full \`manifest\`.
+    ? `- Heavy list responses — list operations paginate with \`query: { limit, offset }\`, and some${listsIntegrations ? " (e.g. `listIntegrations`)" : ""} also take a \`fields\` selector (comma-separated projection; describe_operation shows it when available). On heavy lists request only the fields you need${listsIntegrations ? ' — e.g. `fields: "id,active,block_user_connections"` on `listIntegrations` —' : ""} and read a single row's detail operation when you need its full \`manifest\`.
 `
     : "";
-  const integrationListing = invokes
+  const integrationListing = listsIntegrations
     ? ` \`GET /api/integrations\` lists every integration with an \`active\` flag (activated for this space) and \`block_user_connections\`; use it to tell tiers 2 and 3 apart. Do not silently activate or connect an integration the caller did not ask for — surface that it would be needed and let them decide.`
     : "";
   // Everything below is about getting a run off the ground, so it is absent
@@ -241,9 +253,19 @@ export function buildServerInstructions(
 - Shortcut — \`run_and_wait\` launches a run, exposes the created run to chat for live progress, then waits internally and returns \`{ id, packageId, status, done:true, result?, error? }\` once the run is terminal. Prefer it for launch-and-wait flows; use the fully discoverable ${runOps} when you deliberately want to launch without waiting. Do not call \`getRun\` after \`run_and_wait\` merely to wait again.${inlineShortcut}
 `
     : "";
+  // The item's own \`auth_key\` is always there to forward; the listing that
+  // can stand in for a missing one is offered only to a caller it grants.
+  const authKeySource = listsIntegrations
+    ? "<the error's auth_key, or a key from manifest.auths of the integration row from GET /api/integrations when the error carries none>"
+    : "<the error's auth_key>";
+  // Without the connect grant an item with no \`connect_url\` is reported as
+  // it stands: the flow that would mint one is absent, not refused.
+  const connectFlow = connects
+    ? ` When it does NOT, you MUST start the connect flow yourself (do not just describe it): CALL \`invoke_operation\` with \`operation_id: "initiateIntegrationConnect"\`, \`path_params: { packageId: "<id>", authKey: "${authKeySource}" }\` and \`body: { scopes: <the error's required_scopes, verbatim>, connection_id: <the error's connection_id, when it carries one — the existing connection is then reconnected/upgraded in place instead of duplicated> }\`. Forwarding \`required_scopes\` is what makes the consent cover the scopes the run needs instead of re-granting the same insufficient set. This op is auth-type-agnostic — it works for every auth (oauth2, api_key, basic, mtls, custom), so you never inspect the auth type yourself — and its result is what carries the \`connect_url\`; without that call there is none, so never promise a connect link you did not just obtain this turn.`
+    : "";
   const connectBullets = runs
     ? `
-- Connecting or reconnecting an integration before a run — an integration may be unconnected, expired, needs-reconnection, under-scoped, or otherwise unusable. Do NOT pre-validate just to launch a "do it now" ${inline ? "inline run" : "run"}: \`run_and_wait\` already runs the same readiness preflight and returns a 412 without consuming credits when the ${inline ? "manifest" : "agent"} cannot run. If \`run_and_wait\` fails with field errors whose \`field\` is \`integrations.<id>\`${inline ? " (or if you intentionally call `validateInlineRun` only to iterate/check readiness without launching)" : ""}, that integration is not ready — whatever the \`code\` (\`not_connected\`, \`needs_reconnection\`, \`insufficient_scopes\`, \`auth_key_mismatch\`, …), with ONE exception below. Handle each such error item by looking FIRST for a \`connect_url\` on the item. When it HAS one, the connect session is already minted and this tool result already carries it: do NOT call \`initiateIntegrationConnect\`, do NOT call any other tool, do not restate the connection request. When it does NOT, you MUST start the connect flow yourself (do not just describe it): CALL \`invoke_operation\` with \`operation_id: "initiateIntegrationConnect"\`, \`path_params: { packageId: "<id>", authKey: "<the error's auth_key, or a key from manifest.auths of the integration row from GET /api/integrations when the error carries none>" }\` and \`body: { scopes: <the error's required_scopes, verbatim>, connection_id: <the error's connection_id, when it carries one — the existing connection is then reconnected/upgraded in place instead of duplicated> }\`. Forwarding \`required_scopes\` is what makes the consent cover the scopes the run needs instead of re-granting the same insufficient set. This op is auth-type-agnostic — it works for every auth (oauth2, api_key, basic, mtls, custom), so you never inspect the auth type yourself — and its result is what carries the \`connect_url\`; without that call there is none, so never promise a connect link you did not just obtain this turn. ${connectDelivery} On a later turn, call \`run_and_wait\` again${inline ? " (or `validateInlineRun` if you are only checking readiness)" : ""}; when readiness passes, proceed with the run.
+- Connecting or reconnecting an integration before a run — an integration may be unconnected, expired, needs-reconnection, under-scoped, or otherwise unusable. Do NOT pre-validate just to launch a "do it now" ${inline ? "inline run" : "run"}: \`run_and_wait\` already runs the same readiness preflight and returns a 412 without consuming credits when the ${inline ? "manifest" : "agent"} cannot run. If \`run_and_wait\` fails with field errors whose \`field\` is \`integrations.<id>\`${inline ? " (or if you intentionally call `validateInlineRun` only to iterate/check readiness without launching)" : ""}, that integration is not ready — whatever the \`code\` (\`not_connected\`, \`needs_reconnection\`, \`insufficient_scopes\`, \`auth_key_mismatch\`, …), with ONE exception below. Handle each such error item by looking ${connects ? "FIRST " : ""}for a \`connect_url\` on the item. When it HAS one, the connect session is already minted and this tool result already carries it: do NOT call ${connects ? "`initiateIntegrationConnect`, do NOT call any other tool" : "any tool"}, do not restate the connection request.${connectFlow} ${connectDelivery} On a later turn, call \`run_and_wait\` again${inline ? " (or `validateInlineRun` if you are only checking readiness)" : ""}; when readiness passes, proceed with the run.
 - The exception — code \`must_choose_connection\` on \`integrations.<id>\` is NOT a connect problem: the integration is connected more than once and the platform needs you to say which connection to use. Do NOT start a connect flow for it (another connection makes the ambiguity worse). Retry the SAME \`run_and_wait\` call with the top-level \`connection_overrides\` argument, mapping that integration id to one candidate's \`id\`: \`connection_overrides: { "<id>": "<candidate_connection_id>" }\`. The key is the integration id itself — not the error's \`field\` path. The error's \`candidate_connections\` carry a \`label\`, an \`account_id\` and \`owned_by_actor\`: read those to choose — if the user named an account, match it there rather than listing connections in a separate call. Pick the candidate yourself when nothing distinguishes them; ask the user only if the choice visibly matters.`
     : "";
   return `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you ${surface} any operation of the Appstrate REST API — their own descriptions tell you how. ${grounding} The operation index at the end of these instructions lists the operations available to your role by tag; it is your primary way to find an operation. Default to picking an operationId straight from that index, ${pickOperation}. Reach for search_operations only when the index is genuinely ambiguous or a capability you expect isn't listed — not as a routine first step. Never guess an operationId or body shape: describe_operation (or search_operations' best_match) is the source of truth for the input schema.${runIntro}
@@ -260,7 +282,11 @@ ${runBullets}- ${packageFiles}${packageImportGuidance} Archive bytes stay server
 - Wire JSON is snake_case, except universal id/timestamp fields (id, createdAt…) which stay camelCase.
 ${heavyListBullet}${
     authors
-      ? `- Integration tool selection — an agent's \`integrations_configuration[id].tools\` resolves as: omitted/undefined → inherits the integration's \`default_tools\`; \`[]\` → no tools (overrides the default); \`["a","b"]\` → exactly those tools; \`"*"\` → all upstream tools (requires \`allow_undeclared_tools\`). A declared integration whose selection resolves to NOTHING is rejected at publish and at import (\`no_tools_selected\` on \`integrations_configuration.<id>.tools\`) and aborts the run at container boot — so never leave an integration declared with an empty effective selection: either select at least one tool, or remove it from \`dependencies.integrations\`. An integration's \`default_tools\` and full \`tool_catalog\` are on its detail operation (\`GET /api/integrations/{packageId}\`); read it before selecting tools so you pick real tool names and know what the default already covers.
+      ? `- Integration tool selection — an agent's \`integrations_configuration[id].tools\` resolves as: omitted/undefined → inherits the integration's \`default_tools\`; \`[]\` → no tools (overrides the default); \`["a","b"]\` → exactly those tools; \`"*"\` → all upstream tools (requires \`allow_undeclared_tools\`). A declared integration whose selection resolves to NOTHING is rejected at publish and at import (\`no_tools_selected\` on \`integrations_configuration.<id>.tools\`) and aborts the run at container boot — so never leave an integration declared with an empty effective selection: either select at least one tool, or remove it from \`dependencies.integrations\`.${
+          granted("getIntegration")
+            ? " An integration's `default_tools` and full `tool_catalog` are on its detail operation (`GET /api/integrations/{packageId}`); read it before selecting tools so you pick real tool names and know what the default already covers."
+            : ""
+        }
 `
       : ""
   }- Integration preference — when a task needs an integration, prefer in order: (1) one the caller has already connected (listed in your caller context / get_me — connecting it was an explicit choice), then (2) one that is activated for this space but not yet connected, then (3) one that is neither.${integrationListing}${connectBullets}

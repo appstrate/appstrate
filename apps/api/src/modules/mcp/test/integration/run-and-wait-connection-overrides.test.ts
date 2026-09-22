@@ -10,8 +10,8 @@
  *
  *   - the MCP tool did not declare the argument and the shared launch client
  *     did not put it in the launch body (unit-covered in
- *     `packages/core/test/run-and-wait-client.test.ts` + this module's
- *     `test/unit/run-and-wait.test.ts`);
+ *     `packages/core/test/run-and-wait-client.test.ts` +
+ *     `apps/api/test/unit/modules/mcp/run-and-wait.test.ts`);
  *   - `POST /api/runs/inline` stripped the field and never handed it to the
  *     readiness resolver (covered in
  *     `apps/api/test/integration/routes/inline-run-412-missing-connection.test.ts`).

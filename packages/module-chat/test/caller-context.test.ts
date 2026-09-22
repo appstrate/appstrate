@@ -185,6 +185,7 @@ describe("formatCallerContext", () => {
     });
     expect(roleless).not.toContain("Role in this space:");
     expect(roleless).toContain("Permissions this turn: mcp:read");
+    expect(roleless).not.toContain("Current space:");
   });
 
   it("blames the role preview, not the human, for a draft it cannot run", () => {
@@ -603,6 +604,8 @@ describe("buildCallerContextBlock", () => {
     // Block is rendered from the dispatched payload, not from request context.
     expect(out).toContain("`@appstrate/gmail`");
     expect(out).toContain("## Existing agents you can run");
+    // The path parameter of every space-scoped operation, as data.
+    expect(out).toContain("Current space: `spc_1`");
     // The space-scoped read carries the resolved space id on the dispatch.
     const req = lastRequest()!;
     expect(new URL(req.url).pathname).toBe("/api/me/context");
@@ -720,6 +723,7 @@ describe("buildCallerContextBlock", () => {
       permissions: ["mcp:read", "mcp:invoke"],
     });
     expect(out).toContain("Ada (ada@acme.com)");
+    expect(out).toContain("Current space: `spc_1`");
   });
 
   it("degrades to no block on any other dispatch failure", async () => {

@@ -14,10 +14,10 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { buildServerInstructions } from "../../router.ts";
+import { buildServerInstructions } from "../../../../src/modules/mcp/router.ts";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
-import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
-import { resetCatalog } from "../../catalog.ts";
+import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
+import { resetCatalog } from "../../../../src/modules/mcp/catalog.ts";
 
 // The appended operation index is filtered per operation against the mounted
 // guards, so building the instructions reads the route table.
@@ -25,9 +25,16 @@ await registerTestPlatformApp();
 
 /**
  * Launch and read back: the connect bullet is run-readiness guidance, so it is
- * only written for a caller who can get a run off the ground (`canRunAgents`).
+ * only written for a caller who can get a run off the ground (`canRunAgents`);
+ * its kickoff half also needs the grant `initiateIntegrationConnect` asks for.
  */
-const permissions = new Set(["mcp:read", "mcp:invoke", "agents:run", "runs:read"]);
+const permissions = new Set([
+  "mcp:read",
+  "mcp:invoke",
+  "agents:run",
+  "runs:read",
+  "integrations:connect",
+]);
 
 /** The connect bullet only — asserting on the whole prompt would match the index. */
 function connectBullet(contextInjected: boolean): string {
@@ -92,6 +99,44 @@ describe("MCP server instructions — connect bullet", () => {
   });
 });
 
+describe("MCP server instructions — named operations follow their grant", () => {
+  beforeEach(() => resetCatalog());
+
+  const RUNNER = ["mcp:read", "mcp:invoke", "agents:run", "runs:read"];
+
+  /** Prose only — the appended operation index would match on its own. */
+  function prose(caller: readonly string[]): string {
+    const instructions = buildServerInstructions(new Set(caller), false);
+    return instructions.slice(0, instructions.indexOf(OPERATION_INDEX_HEADING));
+  }
+
+  it("leaves the connect kickoff out for a caller its route refuses", () => {
+    // Ordered to call `initiateIntegrationConnect`, a caller without
+    // `integrations:connect` would collect a 403 instead of a connect link.
+    const cannotConnect = prose(RUNNER);
+    expect(cannotConnect).not.toContain("initiateIntegrationConnect");
+    // The control: the bullet is narrowed, not gone — the item's own link and
+    // the ambiguity exception still apply to this caller.
+    expect(cannotConnect).toContain("connect_url");
+    expect(cannotConnect).toContain("must_choose_connection");
+    expect(cannotConnect).not.toContain("When it does NOT");
+
+    expect(prose([...RUNNER, "integrations:connect"])).toContain("initiateIntegrationConnect");
+  });
+
+  it("offers the integration listing only to a caller granted `listIntegrations`", () => {
+    const withoutRead = prose(["mcp:read", "mcp:invoke"]);
+    expect(withoutRead).not.toContain("listIntegrations");
+    expect(withoutRead).not.toContain("GET /api/integrations");
+    // The control: the pagination advice around the example stays.
+    expect(withoutRead).toContain("query: { limit, offset }");
+
+    const withRead = prose(["mcp:read", "mcp:invoke", "integrations:read"]);
+    expect(withRead).toContain("listIntegrations");
+    expect(withRead).toContain("GET /api/integrations");
+  });
+});
+
 describe("MCP server instructions — run guidance", () => {
   beforeEach(() => resetCatalog());
 
@@ -126,8 +171,9 @@ describe("MCP server instructions — run guidance", () => {
   // Same rule, applied inside a bullet rather than to a whole paragraph: an act
   // that needs `invoke_operation` is absent for a caller who was never declared
   // that tool, even when the bullet around it survives.
-  const READ_ONLY = new Set(["mcp:read"]);
-  const INVOKER = new Set(["mcp:read", "mcp:invoke"]);
+  // `integrations:read` on both: what separates them is the invoke tool alone.
+  const READ_ONLY = new Set(["mcp:read", "integrations:read"]);
+  const INVOKER = new Set(["mcp:read", "mcp:invoke", "integrations:read"]);
 
   it("withholds the invoke-only acts from a caller who can only read", () => {
     const readOnly = prose(READ_ONLY);

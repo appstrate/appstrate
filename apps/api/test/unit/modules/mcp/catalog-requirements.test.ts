@@ -10,11 +10,16 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { Hono } from "hono";
-import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
-import { getPlatformRoutes, setPlatformApp } from "../../../../lib/platform-app.ts";
-import { deriveRouteRequirements } from "../../../../lib/route-requirements.ts";
-import { getCatalog, resetCatalog, type CatalogOperation } from "../../catalog.ts";
-import type { AppEnv } from "../../../../types/index.ts";
+import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
+import { getPlatformRoutes, setPlatformApp } from "../../../../src/lib/platform-app.ts";
+import { deriveRouteRequirements } from "../../../../src/lib/route-requirements.ts";
+import { knownSpaceLevelPermissions } from "../../../../src/lib/permissions.ts";
+import {
+  getCatalog,
+  resetCatalog,
+  type CatalogOperation,
+} from "../../../../src/modules/mcp/catalog.ts";
+import type { AppEnv } from "../../../../src/types/index.ts";
 
 await registerTestPlatformApp();
 
@@ -245,5 +250,53 @@ describe("requirement anchors", () => {
       requirements: ["api-keys:read"],
       targetSpaceRequirements: [],
     });
+  });
+
+  it("reads the OIDC per-space auth configuration as a requirement of the path's space", () => {
+    // The OIDC router enters the space `:id` names before `space-settings:write`
+    // runs, so an admin of that space is granted it whatever space they call from.
+    const misread = [
+      "getSpaceSocialProvider",
+      "getSpaceSmtpConfig",
+      "upsertSpaceSmtpConfig",
+    ].filter((operationId) => {
+      const requirement = op(operationId).requirement;
+      return (
+        requirement.requirements.length > 0 ||
+        !requirement.targetSpaceRequirements.includes("space-settings:write")
+      );
+    });
+    expect(misread).toEqual([]);
+  });
+});
+
+/** A path naming its space right after `/api/spaces/`: `/api/spaces/{id}/…`. */
+const PATH_SPACE = /^\/api\/spaces\/\{(id|spaceId)\}\//;
+
+describe("a route addressing a space by path enforces space permissions there", () => {
+  /** Catalog operations whose path names the space they act in. */
+  function pathSpaceOperations(): CatalogOperation[] {
+    return [...getCatalog().operations.values()].filter((operation) =>
+      PATH_SPACE.test(operation.pathTemplate),
+    );
+  }
+
+  it("reports no space-level permission as a caller-space requirement", () => {
+    // A space-level guard on such a route is only meaningful in the path's
+    // space; read as the caller's it hides the operation from an admin of the
+    // target while advertising it to one of the caller's space. Its presence
+    // here means the middleware entering that space is not `markSpaceRescope`d.
+    const spaceLevel = knownSpaceLevelPermissions();
+    const offenders = pathSpaceOperations().flatMap((operation) =>
+      operation.requirement.requirements
+        .filter((entry) => entry.split("|").some((alternative) => spaceLevel.has(alternative)))
+        .map((entry) => `${operation.operationId} (${key(operation)}): ${entry}`),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it("still has path-space operations to judge", () => {
+    // Control for the loop above: a pattern matching nothing would pass it.
+    expect(pathSpaceOperations().length).toBeGreaterThanOrEqual(20);
   });
 });

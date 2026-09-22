@@ -17,11 +17,11 @@ import {
   buildOperationIndex,
   operationGranted,
   type CatalogOperation,
-} from "../../catalog.ts";
-import { buildMcpTools, type Dispatch } from "../../tools.ts";
-import { internalDispatchHeader } from "../../../../lib/internal-dispatch.ts";
+} from "../../../../src/modules/mcp/catalog.ts";
+import { buildMcpTools, type Dispatch } from "../../../../src/modules/mcp/tools.ts";
+import { internalDispatchHeader } from "../../../../src/lib/internal-dispatch.ts";
 import { validateManifest } from "@appstrate/core/validation";
-import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
+import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 
 // The tools read the mounted route table (what each operation's guard requires)
 // to decide what this caller is shown.

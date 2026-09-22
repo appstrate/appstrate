@@ -101,11 +101,13 @@ export function buildSystemPrompt(capabilities: TurnCapabilities): string {
   const idVerbatimBullet = authors
     ? `- Use every \`@scope/name\` id verbatim: ${runs("in `dependencies.integrations`, in `run_and_wait`'s `scope`/`name`, and in `dependencies.skills`", "in `dependencies.integrations` and in `dependencies.skills`")}.\n`
     : runs("- Use every `@scope/name` id verbatim: in `run_and_wait`'s `scope`/`name`.\n");
-  // Both truncatable lists are themselves conditional (agents on running,
-  // skills on authoring); with neither rendered the bullet describes nothing.
+  // Each truncatable list is named under the gate that renders it (agents on
+  // running, skills on authoring): an operation for a list the context never
+  // shows is one its route need not grant. Neither rendered, no bullet.
+  const fullListOps = [...(mayRun ? ["listAgents"] : []), ...(authors ? ["listSkills"] : [])];
   const truncatedListBullet =
-    mayRun || authors
-      ? `- A list marked \`(list truncated)\` is partial: call \`invoke_operation\` with \`operation_id: "listAgents"\` or \`"listSkills"\` for the full one.\n`
+    fullListOps.length > 0
+      ? `- A list marked \`(list truncated)\` is partial: call \`invoke_operation\` with ${fullListOps.map((id, i) => (i === 0 ? `\`operation_id: "${id}"\`` : ` or \`"${id}"\``)).join("")} for the full one.\n`
       : "";
   return `You are Appstrate's assistant. You help the user operate their Appstrate instance through the available tools.
 
@@ -168,7 +170,7 @@ After a successful \`run_and_wait\`, deliver the result directly and briefly: pr
   "\n",
 )}${reads(`Never quote run metrics — duration, cost, token usage — in your replies, even when a run resource you read carries them: the chat UI already displays them on the run card. Report only what the run produced (its result) or why it failed (its error).
 
-`)}When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.${runs(` One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error on \`integrations.<id>\` means the integration is connected but not activated for this space — do NOT re-run and do NOT restart the connect flow (connecting is personal, activating is organization-wide). Activate it instead: call \`activateIntegration\` on that package id, then re-run once. If that call is refused, the 403 names the permission it required under \`required_permissions\` — report that missing permission and stop.`)}
+`)}When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error.${runs(` One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error on \`integrations.<id>\` means the integration is connected but not activated for this space — do NOT re-run and do NOT restart the connect flow (connecting is personal, activating is per space). Activate it instead: call \`activatePackage\` (\`POST /api/spaces/{spaceId}/packages\`, with \`spaceId\` the current space from your context block and the body \`{ "packageId": "<that integration id>" }\`), then re-run once. If that call is refused, report the refusal with its error and stop.`)}
 
 Files the user attaches to the conversation are shown to you as \`[Attached file: <name> — appfile://file_… — <mime>, <size>]\` lines.${runs(` Follow the direct-reading rule above before considering a run. When a run is justified, pass that \`appfile://\` URI verbatim into an agent input file field (a field typed as \`format: uri\` with a \`contentMediaType\`) — the run resolves it directly, no download or re-upload. \`upload://\` URIs work the same way. A published agent's input schema is a versioned contract the platform never rewrites, so a \`kind:"agent"\` run takes a file only through \`run_and_wait\`'s \`input\`, under one of the agent's DECLARED file fields.`)}${inline(` For an INLINE run, declare nothing: list the \`appfile://\` URIs in \`run_and_wait\`'s top-level \`context_files\` and the platform mounts them read-only under \`files/\` and announces them in the run's prompt — that is the cheap path, use it. Declaring the file field yourself in the manifest's \`input.schema\` (\`{"type":"string","format":"uri","contentMediaType":"<mime>"}\`) plus a top-level \`input\` also works. \`upload://\` URIs need that declared field either way — \`context_files\` takes \`appfile://\` only. Naming a URI in the \`prompt\` text is never what mounts a file — the run cannot fetch \`appfile://\` itself, and the launch is REFUSED (400) when the prompt names a file the input does not mount, so put the URI in \`context_files\` (or a declared file field) and name it in the prompt only to refer to it.`)} Never invent an \`appfile://\` URI.
 
@@ -285,6 +287,8 @@ export function formatCallerContext(
     rolePreview: boolean;
     /** Rendered role in the current space, or `null` when there is none to name. */
     spaceRole: string | null;
+    /** The space the turn acts in: path parameter of space-scoped operations. */
+    spaceId?: string;
     /** The TURN's permission set, post-`turnPermissions`. */
     permissions: readonly string[];
   },
@@ -321,6 +325,9 @@ export function formatCallerContext(
   // the two itself instead of guessing what it may call. The TURN's set, never
   // the caller's raw one: the authoring toggle narrows the token, and a block
   // naming what that token cannot do is a lie the platform then refuses.
+  // Space-scoped operations take the space in their PATH; the model has no
+  // other way to learn which one this turn acts in.
+  if (opts.spaceId) lines.push(`Current space: \`${opts.spaceId}\``);
   if (opts.spaceRole) {
     lines.push(
       `Role in this space: ${opts.spaceRole}${opts.rolePreview ? " — role preview active" : ""}`,
@@ -486,6 +493,7 @@ export async function buildCallerContextBlock(
         capabilities,
         rolePreview,
         spaceRole,
+        spaceId,
         permissions: args.permissions,
       },
     );
@@ -503,6 +511,7 @@ export async function buildCallerContextBlock(
         capabilities,
         rolePreview,
         spaceRole,
+        spaceId,
         permissions: args.permissions,
       });
     }

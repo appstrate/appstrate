@@ -10,9 +10,17 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
-import { getCatalog, resetCatalog, type CatalogOperation } from "../../catalog.ts";
-import { buildMcpTools, type Dispatch, type McpToolEvent } from "../../tools.ts";
-import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
+import {
+  getCatalog,
+  resetCatalog,
+  type CatalogOperation,
+} from "../../../../src/modules/mcp/catalog.ts";
+import {
+  buildMcpTools,
+  type Dispatch,
+  type McpToolEvent,
+} from "../../../../src/modules/mcp/tools.ts";
+import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 
 // `buildMcpTools` decides what this caller is shown from the guards mounted on
 // the routes, so it reads the route table.

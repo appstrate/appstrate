@@ -3,12 +3,12 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { ErrorCode, McpError, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
-import { resetCatalog } from "../../catalog.ts";
-import { buildServerInstructions } from "../../router.ts";
+import { resetCatalog } from "../../../../src/modules/mcp/catalog.ts";
+import { buildServerInstructions } from "../../../../src/modules/mcp/router.ts";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
-import { buildMcpTools, type Dispatch } from "../../tools.ts";
+import { buildMcpTools, type Dispatch } from "../../../../src/modules/mcp/tools.ts";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
-import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
+import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 
 // Both `buildMcpTools` (what this caller is shown) and the appended operation
 // index read the mounted guards off the route table.
