@@ -67,6 +67,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   removed and the platform overwrites them on submit whatever the body carried,
   and `POST …/connect/fields` rejects a submission naming one.
 
+- **An agent can use several connections of ONE integration in a single run.**
+  Two SSH hosts, two ClickUp workspaces, two mailboxes — one run, up to ten
+  connections per declared integration. **The tools do not change**: no suffixed
+  namespace, no duplicated tool, no second agent. When a namespace receives more
+  than one connection the sidecar injects a **required `connection` parameter**
+  on each of its tools — a string enum of the bound connections' labels, its
+  description pairing each label with that connection's account id — and strips
+  it again before forwarding (`runtime-pi/sidecar/mcp-host.ts`). A namespace
+  with a single connection is untouched: the advertised schema is byte-identical
+  to the one before this release, so an existing agent sees exactly what it saw.
+  A tool that already declares a `connection` property of its own cannot be
+  served by more than one connection — the sidecar fails boot with
+  `connection_param_conflict` rather than shadowing the upstream's parameter.
+  **Isolation is per connection, not per integration**: the platform emits one
+  spawn spec per connection (same integration, same namespace, same tool
+  allowlist) and the sidecar starts one runner for each, so every runner holds
+  exactly one connection's credential and the MITM listener refreshes exactly
+  that one — credentials are never shared across the set, and a call is routed
+  by `(tool name, connection label)`. The label is therefore the address, which
+  is why a set whose labels collide is refused at launch (see `### Changed`) and
+  why `integration_connections.label` is now `NOT NULL`. Binding is a human act
+  at every layer: only the last layer of the cascade auto-binds, and it still
+  binds at most one connection — several accessible connections and no explicit
+  pick remain a `412 must_choose_connection`, never a silent fan-out.
+
 ### Fixed
 
 - **The hosted connect form showed raw field names.** It derived inputs from the
@@ -117,6 +142,59 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `agents:write` in it for `appstrate run ./agent.afps`. The platform MCP
   `run_and_wait` tool and its server instructions offer `kind: "inline"` only to
   a caller holding both grants.
+
+- **BREAKING: an integration binds a SET of connections, so every connection
+  field on the wire is an ARRAY.** There is one shape, not two: a single pick
+  travels as a one-element array and a bare string is refused, because a
+  `string | string[]` union is a shape nobody can read twice the same way.
+  - `connection_overrides` is
+    `{ "@scope/integration": ["<connection_id>", …] }` — 1 to 10 ids per
+    integration, on `POST /api/agents/{scope}/{name}/run`,
+    `POST /api/runs/inline` (+ `/inline/validate`), schedule create/update and
+    the platform MCP `run_and_wait` tool. An empty array and an empty id are
+    both `400` at the write, not a shrug at the next fire
+    (`apps/api/src/lib/launch-schemas.ts`).
+  - `resolved_connections`, the snapshot a run answers with and the live
+    credentials route reads back, maps each integration to an ARRAY of resolved
+    connections.
+  - Member pins (`PUT /api/me/integration-pins`), admin pins
+    (`PUT /api/integrations/{packageId}/pins/{agentPackageId}`) and org defaults
+    (`PUT /api/integrations/{packageId}/default`) take and return
+    `connection_ids: string[]` where they took `connection_id`. Each write
+    carries the WHOLE set and REPLACES it; `DELETE` clears it. There is no
+    add-one or remove-one endpoint, so the members of an org default share one
+    `enforce` by construction.
+  - New `412 duplicate_connection_label`: the connections bound to one
+    integration must have distinct labels, since the label is what the tool's
+    `connection` argument names. The problem detail carries
+    `candidate_connections` — the rows that collide — and the remedy is renaming
+    one (`PATCH /api/integrations/{packageId}/connections/{connectionId}`), not
+    re-picking.
+  - `integration_connections.label` is `NOT NULL`. It was written on every
+    insert already; a nameless connection is now unaddressable, not merely
+    unnamed.
+  - `GET /internal/integration-credentials/{scope}/{name}` and its `/refresh`
+    sibling REQUIRE `?connection_id=<uuid>`, and it must be one the run's
+    snapshot bound — `400` otherwise, naming the bound ids. There is no "first
+    connection" to fall back to.
+
+  **Operators, two steps, in this order.** Drizzle **0069** (`label` `SET NOT
+NULL`, plus the pin and org-default unique indexes widened to include
+  `connection_id`) applies automatically at boot. Around it runs
+  `scripts/migration/0018-connection-sets.sql`, which has **two sections meant
+  for two different moments** — do not feed the file to psql in one go.
+  **Section A**, with the platform stopped and BEFORE the new image boots, mints
+  `Connexion N` for any `integration_connections` row whose `label` is still
+  NULL; skip it only when the read-only pre-flight at the end of the file counts
+  zero, since one NULL row makes 0069 raise `23502` and rolls the whole pending
+  batch back. **Section B**, AFTER the batch has applied at boot, rewrites
+  `runs.connection_overrides`, `runs.resolved_connections` and
+  `package_schedules.connection_overrides` from one pick per integration to a
+  set — it writes a shape only the new readers accept. Both sections are
+  idempotent and print their counts before and after; every "after" must read 0.
+  The runbook, with the control query that tells "nothing to rewrite" apart from
+  "nothing at all", is `scripts/migration/README.md`. Existing pins and defaults
+  stay valid: one row is a set of one.
 
 ## [1.0.0-beta.59] - 2026-09-18
 
