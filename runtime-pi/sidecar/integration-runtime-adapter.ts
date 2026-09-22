@@ -104,6 +104,21 @@ export interface SpawnIntegrationOptions {
  */
 export const WORKSPACE_ENV_VAR = "APPSTRATE_WORKSPACE";
 
+/**
+ * Per-runner artefact key for ONE connection of an integration. A run can bind
+ * several connections of one integration, and they share `spec.namespace`, so
+ * the extraction directory and the container name need this suffix to stay
+ * distinct.
+ *
+ * The connection id, not its label: the id is a uuid, unique by construction
+ * within a run and already path- and container-name-safe. A slug of the
+ * user-chosen label is neither — two labels differing past the truncation
+ * point ("…-eu-1" / "…-eu-2") would collapse onto one directory.
+ */
+export function connectionKey(connectionId: string): string {
+  return connectionId.slice(0, 8);
+}
+
 export interface SpawnedIntegration {
   /** MCP JSON-RPC transport the caller wires its `Client` against. */
   readonly transport: SubprocessTransport;

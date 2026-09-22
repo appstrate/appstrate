@@ -132,6 +132,13 @@ function normalizeIntegrationCredentialsWire(raw: unknown): IntegrationCredentia
 interface CreateIntegrationCredentialsSourceOptions {
   /** Package id (e.g. `@vendor/integration`). */
   integrationId: string;
+  /**
+   * Which of the run's bound connections this source serves. A run can bind
+   * several connections of one integration, so the package id alone no longer
+   * identifies a credential — every platform call carries `?connection_id=`
+   * and the platform rejects a request without it.
+   */
+  connectionId: string;
   /** Platform base URL (e.g. `http://appstrate-api:3000`). */
   platformApiUrl: string;
   /** Run token used as `Bearer` for both endpoints. */
@@ -397,7 +404,7 @@ export function createIntegrationCredentialsSource(
   }
 
   async function doRefresh(authKey: string): Promise<boolean> {
-    const url = `${options.platformApiUrl}/internal/integration-credentials/${options.integrationId}/refresh`;
+    const url = `${options.platformApiUrl}/internal/integration-credentials/${options.integrationId}/refresh?connection_id=${encodeURIComponent(options.connectionId)}`;
     let res: Response;
     try {
       res = await fetchFn(url, {
@@ -554,10 +561,11 @@ export function createIntegrationCredentialsSource(
  */
 export async function fetchInitialIntegrationCredentials(
   integrationId: string,
+  connectionId: string,
   opts: { platformApiUrl: string; runToken: string; fetchFn?: typeof fetch },
 ): Promise<IntegrationCredentialsWire> {
   const fetchFn = opts.fetchFn ?? fetch;
-  const url = `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}`;
+  const url = `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}?connection_id=${encodeURIComponent(connectionId)}`;
   const res = await fetchFn(url, {
     headers: { Authorization: `Bearer ${opts.runToken}` },
   });

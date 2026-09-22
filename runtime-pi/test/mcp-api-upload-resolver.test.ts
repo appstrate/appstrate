@@ -1307,3 +1307,54 @@ describe("McpApiUploadResolver — s3-multipart ETag round-trip", () => {
     }
   });
 });
+
+describe("McpApiUploadResolver — connection selector", () => {
+  /**
+   * `api_upload` executes agent-side but dispatches every chunk back through
+   * the sibling `{ns}__api_call`, which the sidecar's McpHost guards with a
+   * REQUIRED `connection` enum once the integration is bound to more than one
+   * connection. The selector the caller picked therefore has to ride every
+   * dispatch — init, each chunk, and the finalising call — or the upload dies
+   * on its first hop.
+   */
+  async function runUpload(connection?: string) {
+    const stub = new GoogleStubServer();
+    const seen: Array<string | undefined> = [];
+    const { pair, mcp } = await makePair(async (args) => {
+      seen.push(args.connection as string | undefined);
+      return stub.handle(args);
+    });
+    try {
+      const { workspace } = writeSyntheticFile("big.bin", 8 * 1024 * 1024);
+      const result = await new McpApiUploadResolver(mcp).executeUpload(
+        {
+          apiCallToolName: API_CALL_TOOL,
+          ...(connection !== undefined ? { connection } : {}),
+          target: "https://example.test/upload?uploadType=resumable",
+          fromFile: "big.bin",
+          uploadProtocol: "google-resumable" as UploadProtocol,
+          partSizeBytes: 4 * 1024 * 1024,
+        },
+        ctxBase(workspace),
+      );
+      return { result, seen };
+    } finally {
+      await pair.close();
+    }
+  }
+
+  it("puts the caller's connection on EVERY dispatched api_call", async () => {
+    const { result, seen } = await runUpload("db");
+    expect(result.ok).toBe(true);
+    // Init + 2 chunks, and not one of them may omit the selector.
+    expect(seen.length).toBeGreaterThan(1);
+    expect(seen).toEqual(seen.map(() => "db"));
+  });
+
+  it("CONTROL — a single-connection integration sends no connection at all", async () => {
+    const { result, seen } = await runUpload();
+    expect(result.ok).toBe(true);
+    expect(seen.length).toBeGreaterThan(1);
+    expect(seen).toEqual(seen.map(() => undefined));
+  });
+});

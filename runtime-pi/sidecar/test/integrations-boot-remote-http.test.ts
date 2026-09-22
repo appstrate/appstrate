@@ -8,6 +8,8 @@ import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 import type { IntegrationCredentialsSource } from "../integration-credentials-source.ts";
 import type { IntegrationCredentialsWire } from "@appstrate/connect";
 
+const CONN_A = { id: "conn-a", label: "work", accountId: null };
+
 /**
  * Unit coverage for the Phase-7 remote-HTTP credential-injection closure
  * (`customFetch`): the security-sensitive bit that injects the resolved
@@ -35,6 +37,7 @@ function spec(url: string = SERVER_URL): IntegrationSpawnSpec {
   return {
     integrationId: "@vendor/remote",
     namespace: "remote",
+    connection: CONN_A,
     sourceKind: "remote",
     manifest: { name: "remote", version: "1.0.0", server: { url, transport: "streamable-http" } },
     toolAllowlist: [],
@@ -325,6 +328,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     const noUrl = {
       integrationId: "@vendor/remote",
       namespace: "remote",
+      connection: CONN_A,
       sourceKind: "remote",
       manifest: { name: "remote", version: "1.0.0", server: {} },
       toolAllowlist: [],
@@ -350,6 +354,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     const bad = {
       integrationId: "@vendor/remote",
       namespace: "remote",
+      connection: CONN_A,
       sourceKind: "remote",
       manifest: {
         name: "remote",

@@ -635,7 +635,14 @@ if (sidecarUrl) {
       }).catch(() => {});
     }
     if (!bootReport.ok) {
-      const summary = bootReport.failed.map((f) => `${f.integrationId} (${f.error})`).join("; ");
+      // N connections of one integration fail independently, so the label is
+      // what tells two lines with the same integration id apart.
+      const summary = bootReport.failed
+        .map(
+          (f) =>
+            `${f.integrationId}${f.connectionLabel ? ` [${f.connectionLabel}]` : ""} (${f.error})`,
+        )
+        .join("; ");
       await die(
         `Integration boot failed — ${bootReport.failed.length} of ${bootReport.declared} ` +
           `integration(s) did not start: ${summary}`,

@@ -44,6 +44,7 @@ function emptyWire(): IntegrationCredentialsWire {
 function makeSource() {
   const fetchFn = (async () => new Response("", { status: 500 })) as unknown as typeof fetch;
   return createIntegrationCredentialsSource({
+    connectionId: "conn-a",
     integrationId: "@orga/wajax",
     platformApiUrl: "http://api",
     runToken: "run-tok",
@@ -117,10 +118,13 @@ function failingLoginTool(): AppstrateToolDefinition[] {
   ];
 }
 
+const CONN_A = { label: "Connexion 1", accountId: null };
+
 function spec(overrides?: Partial<IntegrationSpawnSpec>): IntegrationSpawnSpec {
   return {
     integrationId: "@orga/wajax",
     namespace: "@orga/wajax",
+    connection: { id: "conn-a", ...CONN_A },
     sourceKind: "local",
     manifest: {
       name: "@orga/wajax",
@@ -155,6 +159,7 @@ describe("runConnectLoginHook", () => {
       const allocatedNs = await host.register({
         namespace: "@orga/wajax",
         client,
+        connection: CONN_A,
         allowedTools: ["fetch_invoices"],
       });
 
@@ -191,6 +196,7 @@ describe("runConnectLoginHook", () => {
       const allocatedNs = await host.register({
         namespace: "@orga/wajax",
         client,
+        connection: CONN_A,
         allowedTools: [],
       });
       await expect(runConnectLoginHook(spec(), host, source, allocatedNs)).rejects.toThrow();
@@ -219,6 +225,7 @@ describe("runConnectLoginHook", () => {
       const allocatedNs = await host.register({
         namespace: "@orga/wajax",
         client,
+        connection: CONN_A,
         allowedTools: [],
       });
 
@@ -251,6 +258,7 @@ describe("runConnectLoginHook", () => {
       const allocatedNs = await host.register({
         namespace: "@orga/wajax",
         client,
+        connection: CONN_A,
         allowedTools: [],
       });
       const s = spec();
@@ -290,6 +298,7 @@ describe("runConnectLoginHook", () => {
       const allocatedNs = await host.register({
         namespace: "@orga/wajax",
         client,
+        connection: CONN_A,
         allowedTools: [],
       });
       await runConnectLoginHook(spec(), host, source, allocatedNs);

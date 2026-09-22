@@ -124,6 +124,12 @@ function makeExtension(
           metadata?: Record<string, unknown>;
           sourceMimeType?: string;
           partSizeBytes?: number;
+          // Injected by the sidecar's McpHost onto BOTH `api_upload` and its
+          // `api_call` sibling when the integration is bound to several
+          // connections. This tool executes agent-side, so nothing strips it
+          // for us: the resolver has to put it back on every chunk it
+          // dispatches, or the sibling refuses the call.
+          connection?: string;
         };
 
         const protocol = args.uploadProtocol;
@@ -167,6 +173,7 @@ function makeExtension(
         const result = await resolver.executeUpload(
           {
             apiCallToolName: apiCallTool,
+            ...(args.connection !== undefined ? { connection: args.connection } : {}),
             target: args.target,
             fromFile: args.fromFile,
             uploadProtocol: protocol as UploadProtocol,

@@ -26,6 +26,7 @@ function emptyWire(): IntegrationCredentialsWire {
 function makeSource() {
   const fetchFn = (async () => new Response("", { status: 500 })) as unknown as typeof fetch;
   return createIntegrationCredentialsSource({
+    connectionId: "conn-a",
     integrationId: "@test/integ",
     platformApiUrl: "http://api",
     runToken: "run-tok",

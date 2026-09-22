@@ -27,6 +27,8 @@ import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { bootIntegrations } from "../integrations-boot.ts";
 import { installPassthroughRunnerExec } from "./helpers/runner-exec.ts";
 
+const CONN_A = { id: "conn-a", label: "work", accountId: null };
+
 const FIXTURE_DIR = path.join(import.meta.dir, "fixtures/bun-toolkit");
 const INTEG_ID = "@appstrate/bun-toolkit";
 const SERVER_ID = "@appstrate/bun-toolkit-server";
@@ -46,6 +48,7 @@ function spec(): IntegrationSpawnSpec {
   return {
     integrationId: INTEG_ID,
     namespace: NAMESPACE,
+    connection: CONN_A,
     sourceKind: "local",
     manifest: {
       name: INTEG_ID,

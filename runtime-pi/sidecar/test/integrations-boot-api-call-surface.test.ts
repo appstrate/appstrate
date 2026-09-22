@@ -74,14 +74,19 @@ function platformFetch(authKeys: readonly string[]): typeof fetch {
   }) as unknown as typeof fetch;
 }
 
+const CONN_A = { id: "conn-a", label: "work", accountId: "work@example.com" };
+const CONN_B = { id: "conn-b", label: "perso", accountId: "perso@example.com" };
+
 function serverlessSpec(
   apiCalls: NonNullable<IntegrationSpawnSpec["apiCalls"]>,
   hiddenTools?: readonly string[],
   namespace = "drive",
+  connection: IntegrationSpawnSpec["connection"] = CONN_A,
 ): IntegrationSpawnSpec {
   return {
     integrationId: INTEGRATION_ID,
     namespace,
+    connection,
     sourceKind: "none",
     manifest: { name: INTEGRATION_ID, version: "1.0.0" },
     apiCalls,
@@ -97,16 +102,16 @@ function serverlessSpec(
   };
 }
 
-async function boot(spec: IntegrationSpawnSpec) {
+async function boot(...specs: IntegrationSpawnSpec[]) {
   const previousAdapter = process.env.INTEGRATION_RUNTIME_ADAPTER;
   process.env.INTEGRATION_RUNTIME_ADAPTER = "process";
   try {
     return await bootIntegrations(
-      [spec],
+      specs,
       {
         platformApiUrl: "http://platform.local",
         runToken: "run-token",
-        fetchFn: platformFetch((spec.apiCalls ?? []).map((call) => call.authKey)),
+        fetchFn: platformFetch(specs.flatMap((s) => (s.apiCalls ?? []).map((c) => c.authKey))),
       },
       apiCallDeps,
     );
@@ -250,6 +255,132 @@ describe("bootIntegrations — synthetic api_call surface", () => {
     try {
       expect(result.failed).toEqual([]);
       expect(result.tools.map((tool) => tool.descriptor.name)).toEqual(["drive__api_call"]);
+    } finally {
+      await result.shutdown();
+    }
+  });
+
+  it("serves ONE api_call tool for two connections, selected by a required enum", async () => {
+    const apiCalls = [
+      {
+        authKey: "primary",
+        toolName: "api_call",
+        authorizedUris: ["https://www.googleapis.com/**"],
+      },
+    ];
+    const result = await boot(
+      serverlessSpec(apiCalls, undefined, "drive", CONN_A),
+      serverlessSpec(apiCalls, undefined, "drive", CONN_B),
+    );
+    try {
+      expect(result.failed).toEqual([]);
+      // One descriptor, not `drive_2__api_call` — the second connection is a
+      // route on the first's name.
+      expect(result.tools.map((tool) => tool.descriptor.name)).toEqual(["drive__api_call"]);
+      const schema = result.tools[0]!.descriptor.inputSchema as {
+        properties: Record<string, { enum?: string[]; description?: string }>;
+        required: string[];
+      };
+      expect(schema.properties.connection!.enum).toEqual(["work", "perso"]);
+      expect(schema.required).toContain("connection");
+      expect(schema.properties.connection!.description).toContain("work → work@example.com");
+      expect(schema.properties.connection!.description).toContain("perso → perso@example.com");
+      // Both connections booted, and the report names each one.
+      expect(result.spawned.map((entry) => entry.connectionLabel)).toEqual(["work", "perso"]);
+      expect(result.spawned.map((entry) => entry.toolCount)).toEqual([1, 1]);
+    } finally {
+      await result.shutdown();
+    }
+  });
+
+  it("CONTROL — one connection leaves the api_call schema untouched", async () => {
+    const apiCalls = [
+      {
+        authKey: "primary",
+        toolName: "api_call",
+        authorizedUris: ["https://www.googleapis.com/**"],
+      },
+    ];
+    const result = await boot(serverlessSpec(apiCalls, undefined, "drive", CONN_A));
+    try {
+      expect(result.tools.map((tool) => tool.descriptor.name)).toEqual(["drive__api_call"]);
+      const schema = result.tools[0]!.descriptor.inputSchema as {
+        properties: Record<string, unknown>;
+        required?: string[];
+      };
+      expect(Object.keys(schema.properties)).not.toContain("connection");
+      expect(schema.required ?? []).not.toContain("connection");
+      expect(result.spawned[0]!.connectionLabel).toBe("work");
+    } finally {
+      await result.shutdown();
+    }
+  });
+
+  it("injects the selector on the api_upload companion too", async () => {
+    // The upload tool executes agent-side but dispatches through its
+    // `api_call` sibling, so it has to advertise the same selector.
+    const apiCalls = [
+      {
+        authKey: "primary",
+        toolName: "api_call",
+        authorizedUris: ["https://www.googleapis.com/**"],
+        uploadProtocols: ["google-resumable"],
+      },
+    ];
+    const result = await boot(
+      serverlessSpec(apiCalls, undefined, "drive", CONN_A),
+      serverlessSpec(apiCalls, undefined, "drive", CONN_B),
+    );
+    try {
+      expect(result.failed).toEqual([]);
+      expect(result.tools.map((tool) => tool.descriptor.name)).toEqual([
+        "drive__api_call",
+        "drive__api_upload",
+      ]);
+      for (const tool of result.tools) {
+        const schema = tool.descriptor.inputSchema as {
+          properties: Record<string, { enum?: string[] }>;
+          required: string[];
+        };
+        expect(schema.properties.connection!.enum).toEqual(["work", "perso"]);
+        expect(schema.required).toContain("connection");
+      }
+    } finally {
+      await result.shutdown();
+    }
+  });
+
+  it("keeps the multi-auth suffix orthogonal to the connection selector", async () => {
+    const apiCalls = [
+      {
+        authKey: "primary",
+        toolName: "api_call__primary",
+        authorizedUris: ["https://www.googleapis.com/**"],
+      },
+      {
+        authKey: "backup",
+        toolName: "api_call__backup",
+        authorizedUris: ["https://www.googleapis.com/**"],
+      },
+    ];
+    const result = await boot(
+      serverlessSpec(apiCalls, undefined, "drive", CONN_A),
+      serverlessSpec(apiCalls, undefined, "drive", CONN_B),
+    );
+    try {
+      expect(result.failed).toEqual([]);
+      // auth × connection: the auth suffix still names the tool, the
+      // connection is a parameter on each of them.
+      expect(result.tools.map((tool) => tool.descriptor.name)).toEqual([
+        "drive__api_call__primary",
+        "drive__api_call__backup",
+      ]);
+      for (const tool of result.tools) {
+        const schema = tool.descriptor.inputSchema as {
+          properties: Record<string, { enum?: string[] }>;
+        };
+        expect(schema.properties.connection!.enum).toEqual(["work", "perso"]);
+      }
     } finally {
       await result.shutdown();
     }

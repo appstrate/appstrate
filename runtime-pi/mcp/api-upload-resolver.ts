@@ -85,6 +85,13 @@ interface IntegrationUploadRequest {
    * The integration is implied by the tool name.
    */
   apiCallToolName: string;
+  /**
+   * Which connection the caller selected, when the integration is bound to
+   * more than one. Absent for a single-connection integration — the host
+   * advertises no selector then, and sending one would be rejected. Pinned
+   * for the whole upload: every chunk goes to the same connection.
+   */
+  connection?: string;
   target: string;
   fromFile: string;
   uploadProtocol: UploadProtocol;
@@ -227,12 +234,13 @@ export class McpApiUploadResolver {
 
     const adapterCtx: AdapterContext = {
       apiCallToolName: req.apiCallToolName,
+      ...(req.connection !== undefined ? { connection: req.connection } : {}),
       target: req.target,
       totalBytes,
       metadata: req.metadata ?? {},
       sourceMimeType: req.sourceMimeType,
       partSizeBytes,
-      apiCall: this.makeApiCall(ctx.signal),
+      apiCall: this.makeApiCall(ctx.signal, req.connection),
       signal: ctx.signal,
       hashUpdate: (bytes) => {
         hasher.update(bytes);
@@ -343,7 +351,7 @@ export class McpApiUploadResolver {
     const cleanupSignal = AbortSignal.timeout(ABORT_CLEANUP_TIMEOUT_MS);
     const cleanupCtx: AdapterContext = {
       ...ctx,
-      apiCall: this.makeApiCall(cleanupSignal),
+      apiCall: this.makeApiCall(cleanupSignal, ctx.connection),
       signal: cleanupSignal,
     };
     void adapter.abort(state, cleanupCtx).catch(() => {});
@@ -365,16 +373,19 @@ export class McpApiUploadResolver {
    * `adapter.abort` runs on a fresh, time-bounded signal so it doesn't
    * inherit the user's already-aborted cancellation signal.
    */
-  private makeApiCall(signal: AbortSignal) {
+  private makeApiCall(signal: AbortSignal, connection?: string) {
     return async (req: AdapterApiCallRequest): Promise<AdapterApiCallResponse> => {
       // The `{ns}__api_call` tool does NOT accept a tool-name argument
       // (the integration is fixed by the tool name), so we dispatch to
-      // the named tool directly.
+      // the named tool directly. The connection selector is held by the
+      // resolver rather than by each adapter: it is a property of the upload,
+      // not of the individual chunk request.
       const toolName = req.apiCallToolName;
       const args: Record<string, unknown> = {
         target: req.target,
         method: req.method,
       };
+      if (connection !== undefined) args.connection = connection;
       if (req.headers && Object.keys(req.headers).length > 0) args.headers = req.headers;
       if (req.body !== undefined) {
         if (typeof req.body === "string") {

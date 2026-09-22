@@ -27,6 +27,7 @@ import { createTransparentEgressListener } from "./integration-transparent-liste
 import {
   buildProxyEnvBlock,
   buildCaEnvBlock,
+  connectionKey,
   isPathSafeForMount,
   normalizeMountPath,
   registerIntegrationRuntimeAdapter,
@@ -794,7 +795,10 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
       const { runId, spec, bundleRoot, egress, workspaceHandle, onStderrLine } = options;
       const plan = planContainer(spec, bundleRoot);
       const safeNs = spec.namespace.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
-      const containerName = `appstrate-integ-${safeNs}-${runId.slice(0, 8)}-${Date.now()}`;
+      // The connection key is what keeps the N runners of one integration
+      // apart — `namespace` is shared by every connection of it.
+      const safeConn = connectionKey(spec.connection.id);
+      const containerName = `appstrate-integ-${safeNs}-${safeConn}-${runId.slice(0, 8)}-${Date.now()}`;
 
       // Only NON-secret routing env rides `-e` on the command line. The
       // integration credentials (`spec.spawnEnv`) are delivered via a 0600

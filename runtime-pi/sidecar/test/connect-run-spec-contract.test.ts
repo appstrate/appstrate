@@ -27,6 +27,8 @@ import { describe, it, expect } from "bun:test";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { runConnectOnce } from "../integrations-boot.ts";
 
+const CONN_A = { id: "conn-a", label: "work", accountId: null };
+
 const INTEGRATION_ID = "@scope/connect-it";
 const SERVER_ID = "@scope/connect-srv";
 const SERVER_VERSION = "1.4.2";
@@ -41,6 +43,7 @@ function connectSpec(server: Record<string, unknown>): IntegrationSpawnSpec {
   return {
     integrationId: INTEGRATION_ID,
     namespace: INTEGRATION_ID,
+    connection: CONN_A,
     sourceKind: "local",
     manifest: { name: INTEGRATION_ID, version: "1.0.0", server },
     spawnEnv: {},
@@ -240,7 +243,11 @@ describe("runConnectOnce — the connect spec the platform builder must emit", (
     expect(internalCalls).toEqual([
       {
         method: "GET",
-        path: `/internal/integration-credentials/${INTEGRATION_ID}`,
+        // The credentials source appends `?connection_id=` unconditionally, so
+        // a connect run carries it too — the platform's connect branch answers
+        // an empty payload and never reads it (there is no connection row yet:
+        // minting the credential that becomes one is the point of the run).
+        path: `/internal/integration-credentials/${INTEGRATION_ID}?connection_id=${CONN_A.id}`,
         authorization: "Bearer connect-token",
       },
       {

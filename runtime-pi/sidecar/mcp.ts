@@ -1695,6 +1695,12 @@ export interface ApiCallIntegrationConfig {
   toolName?: string;
   /** Integration package id (used as the proxy `integrationId` + audit source). */
   integrationId: string;
+  /**
+   * Which of the integration's bound connections this config serves. N
+   * configs of one integration share `namespace` and `toolName`; the host
+   * registers them under one tool name and routes calls by this label.
+   */
+  connection: { label: string; accountId: string | null };
   /** Resolve the integration's credentials into the proxy payload. */
   fetchCredentials: ApiCallDeps["fetchCredentials"];
   /** Force-refresh on a mid-run 401 and re-resolve (null when not rotated). */

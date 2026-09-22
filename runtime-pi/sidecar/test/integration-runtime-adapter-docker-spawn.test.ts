@@ -25,6 +25,8 @@ import {
 } from "../integration-runtime-adapter-docker.ts";
 import { selectIntegrationRuntimeAdapter } from "../integration-runtime-adapter.ts";
 
+const CONN_A = { id: "conn-a", label: "work", accountId: null };
+
 const FAKE_CONTAINER_ID = "c0ffee1234567890";
 
 interface DockerCall {
@@ -110,6 +112,7 @@ function spec(overrides: Partial<IntegrationSpawnSpec> = {}): IntegrationSpawnSp
   return {
     integrationId: "@tractr/gmail",
     namespace: "gmail",
+    connection: CONN_A,
     sourceKind: "local",
     manifest: {
       name: "@tractr/gmail",

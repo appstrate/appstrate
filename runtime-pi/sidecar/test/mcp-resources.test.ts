@@ -51,6 +51,7 @@ async function makeResourcesApp(overrides: Partial<AppDeps> = {}) {
       {
         namespace: "test",
         integrationId: "@test/integ",
+        connection: { label: "work", accountId: null },
         fetchCredentials: integResCreds,
         refreshCredentials: integResCreds,
       },
