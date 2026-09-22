@@ -5,14 +5,9 @@
  * at boot (absent when the module is disabled). Because these are normal
  * documented operations, the `mcp` module's meta-tools expose them to MCP
  * clients automatically (search/describe/invoke_operation).
- *
- * The skill-selection constants are IMPORTED from `./skills.ts`, not
- * transcribed: the discovery enum and the pin cap are already the Zod schema's
- * and the CHECK constraint's, and a hand-copied third spelling is what lets a
- * documented contract drift from the one the route enforces.
  */
 
-import { MAX_PINNED_SKILLS, SKILL_DISCOVERY_MODES } from "./skills.ts";
+import { MAX_PINNED_SKILLS } from "./skills.ts";
 
 const stdHeaders = {
   "Request-Id": { $ref: "#/components/headers/RequestId" },
@@ -22,7 +17,16 @@ const stdHeaders = {
 export const chatComponentSchemas = {
   ChatSession: {
     type: "object",
-    required: ["object", "id", "generating", "unread", "skill_discovery", "createdAt", "updatedAt"],
+    required: [
+      "object",
+      "id",
+      "generating",
+      "unread",
+      "skill_catalogue",
+      "pinned_skills",
+      "createdAt",
+      "updatedAt",
+    ],
     properties: {
       object: { type: "string", enum: ["chat_session"] },
       id: { type: "string", description: "Session ID (chs_ prefix)" },
@@ -36,39 +40,18 @@ export const chatComponentSchemas = {
         description:
           "Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/chat/sessions/{id}/read.",
       },
-      skill_discovery: {
-        type: "string",
-        enum: [...SKILL_DISCOVERY_MODES],
+      skill_catalogue: {
+        type: "boolean",
         description:
-          "How much of the space's skill catalogue this conversation indexes: `auto` (platform defaults + pins + catalogue), `on_demand` (defaults + pins), `manual` (pins only). A context-budget control, never an authorization boundary. Set via PUT /api/chat/sessions/{id}/skills.",
+          "Whether turns also list the space's skill catalogue. Platform default skills and pins are always indexed. A context-budget control, never an authorization boundary. Set via PUT /api/chat/sessions/{id}/skills.",
       },
       pinned_skills: {
         type: "array",
         items: { type: "string" },
-        description:
-          "Package ids (`@scope/name`) pinned to this conversation, sorted. Returned by `GET /api/chat/sessions/{id}` and by the `201` of `POST /api/chat/sessions` (empty there); OMITTED from `GET /api/chat/sessions`, whose page would otherwise cost one query per row.",
+        description: "Package ids (`@scope/name`) pinned to this conversation, sorted.",
       },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
-    },
-  },
-  // One row of the chat's skill picker: the platform defaults every turn
-  // indexes, then the space's own catalogue. `source` says which half a row
-  // came from — a `platform` row is indexed by default, a `space` row only
-  // through the catalogue or a pin; both can be pinned.
-  //
-  // This documents the `ChatSkillEntry` interface of `./skills.ts`, which is
-  // what `routes.ts` builds. A JSON Schema cannot be derived from a TS type
-  // here, so the two are kept in step by name and by `verify:openapi`.
-  ChatSkillEntry: {
-    type: "object",
-    required: ["package_id", "display_name", "description", "version", "source"],
-    properties: {
-      package_id: { type: "string", description: "`@scope/name` package id" },
-      display_name: { type: "string", description: "Falls back to the package id." },
-      description: { type: "string", description: "Empty string when the manifest declares none." },
-      version: { type: ["string", "null"], description: "Manifest version (semver), when known." },
-      source: { type: "string", enum: ["platform", "space"] },
     },
   },
   // One stored conversation message returned by `GET /sessions/{id}` so the
@@ -246,47 +229,12 @@ export const chatPaths = {
       },
     },
   },
-  "/api/chat/skills": {
-    get: {
-      operationId: "listChatSkills",
-      tags: ["Chat"],
-      summary: "List the skills the chat can use",
-      description:
-        'The platform default skills every chat turn indexes (`source: "platform"`), followed by the skills active in the current space (`source: "space"`), each sorted by package id. Feeds the composer\'s skill picker. Both halves are read with the caller\'s own permissions: without `skills:read` the list is empty rather than refused.',
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-      ],
-      responses: {
-        "200": {
-          description: "Skills the chat can index",
-          headers: stdHeaders,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["skills"],
-                properties: {
-                  skills: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/ChatSkillEntry" },
-                  },
-                },
-              },
-            },
-          },
-        },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "429": { description: "Rate limited (60/min per caller)" },
-      },
-    },
-  },
   "/api/chat/sessions/{id}/skills": {
     put: {
       operationId: "setChatSessionSkills",
       tags: ["Chat"],
       summary: "Set a chat session's skill selection",
-      description: `Replaces the conversation's discovery mode and its pinned skills in one call (the body is the state you want, not a patch). Duplicate ids are deduped server-side; at most ${MAX_PINNED_SKILLS} pins are stored. The session row is created if the client-minted id has none yet — exactly as the first turn would.`,
+      description: `Replaces whether the conversation lists the space's skill catalogue and its pinned skills in one call (the body is the state you want, not a patch). Duplicate ids are deduped server-side; at most ${MAX_PINNED_SKILLS} pins. The session row is created if the client-minted id has none yet — exactly as the first turn would.`,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -298,9 +246,9 @@ export const chatPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["skill_discovery", "pinned_skills"],
+              required: ["skill_catalogue", "pinned_skills"],
               properties: {
-                skill_discovery: { type: "string", enum: [...SKILL_DISCOVERY_MODES] },
+                skill_catalogue: { type: "boolean" },
                 pinned_skills: {
                   type: "array",
                   maxItems: MAX_PINNED_SKILLS,

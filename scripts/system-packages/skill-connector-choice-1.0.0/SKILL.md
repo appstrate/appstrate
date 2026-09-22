@@ -16,20 +16,18 @@ Le bloc `## Your context` ne liste que les intégrations **déjà connectées** 
 service pas encore branché n'y figure pas, et sa variante `-mcp` non plus. Il
 faut donc la chercher :
 
-1. `invoke_operation` avec `operation_id: "listIntegrations"` et
-   `query: { fields: "id,active" }` — c'est la liste de ce qui existe
-   réellement dans cet espace.
+1. `listIntegrations` — c'est la liste de ce qui existe réellement dans cet
+   espace.
 2. Pour le service demandé, cherche le voisin dont l'identifiant se termine par
    `-mcp`. Le nom nu est presque toujours la variante API.
 3. Deux variantes existent → ne tranche pas sur l'identifiant, lis leur état
-   d'auth (étape 2).
+   d'auth (section 2).
 
 ## 2. Lire l'état d'auth, puis trancher
 
 `getIntegration` (`path_params: { packageId: "@appstrate/<id>" }`) renvoie, pour
 chaque auth : `type`, `ready`, `connections`, `client_auto_provisioned`,
-`has_system_client`, `has_oauth_client` — plus `tool_catalog`, `default_tools`,
-`allow_undeclared_tools` et `active`.
+`has_system_client`, `has_oauth_client` — plus `tool_catalog` et `active`.
 
 Première ligne vraie gagne :
 
@@ -51,51 +49,17 @@ Quand les deux variantes coûtent pareil, prends celle qui couvre la tâche :
 regarde `tool_catalog` (MCP distant) contre `api_call` (variante API, qui atteint
 n'importe quel point de l'API du fournisseur autorisé).
 
-## 3. Conséquence immédiate sur la sélection des tools
-
-- **Variante API** — `default_tools: ["api_call"]` : omettre
-  `integrations_configuration.<id>.tools` suffit, l'héritage s'applique.
-- **Variante MCP distante** — pas de `default_tools` : tu **dois** nommer les
-  tools, pris tels quels dans le `tool_catalog` de `getIntegration`. `"*"` n'est
-  permis que si `allow_undeclared_tools` est vrai.
-- Dans les deux cas, une intégration déclarée dont la sélection de tools est
-  vide est refusée à la publication et interrompt le run : sélectionne au moins
-  un tool, ou retire l'intégration des dépendances.
-
-## 4. Faire connecter — sans jamais voir le secret
+## 3. Faire connecter — sans jamais voir le secret
 
 **Garde-fou absolu : ne demande jamais de coller une clé API, un client
-id/secret, un token ou un mot de passe dans la conversation.** Tout se saisit
-sur la page de connexion hébergée, quel que soit le type d'auth. Ne fabrique
-jamais une URL de connexion à la main.
-
-Le chemin le plus court est de lancer le run : la préflight le refuse sans
-consommer de crédit et l'erreur sur `integrations.<id>` porte souvent déjà un
-`connect_url` — dans ce cas, n'appelle rien d'autre. Sinon, démarre le flux
-toi-même avec `initiateIntegrationConnect`, en transmettant l'`auth_key` et les
-`required_scopes` que l'erreur a nommés.
-
-Le chat affiche le bouton de connexion à partir de ce résultat : **ne colle pas
-le lien, ne décris pas où cliquer**, termine le tour par une phrase disant que
-tu reprends une fois l'intégration connectée. Ne relance pas le flux à chaque
-tour pour un lien déjà donné.
+id/secret, un token ou un mot de passe dans la conversation** — tout se saisit
+sur la page de connexion hébergée, quel que soit le type d'auth.
 
 Si le fournisseur n'est pas configurable ici (403 au démarrage de la connexion),
 ne boucle pas : explique qu'un administrateur doit ajouter les identifiants
 d'application, et propose une alternative.
 
-## 5. Connecté n'est pas actif
-
-Une erreur `integration_not_active` sur `integrations.<id>` ne se répare pas en
-connectant davantage : connecter est personnel, activer est organisationnel.
-Active l'intégration dans l'espace avec `activatePackage`
-(`body: { packageId: "@appstrate/<id>" }` ; lis son schéma avec
-`describe_operation`, et reprends l'id d'espace de la ligne `Current space:`
-de ton contexte), puis relance une fois. L'activation est réservée aux
-administrateurs : sur un 403, dis simplement qu'un administrateur doit activer
-cette intégration, et arrête-toi.
-
-## 6. Quand rien ne convient
+## 4. Quand rien ne convient
 
 Aucune variante pour ce service : dis-le et propose ce qui existe réellement —
 un outil déjà connecté qui couvre le besoin, ou un export que l'utilisateur

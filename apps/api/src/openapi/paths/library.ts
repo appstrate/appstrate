@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
+import { UNLISTED_MARKER } from "../visibility.ts";
 
 /**
  * Library — the map of PLACEMENTS, in its two shapes.
@@ -39,7 +40,7 @@ const PACKAGES_SCHEMA = {
   type: "object",
   description:
     "Packages grouped by type. Every group is always present (possibly empty)." +
-    ' Unlisted packages (`_meta["dev.appstrate/visibility"].level = "unlisted"`) ARE on this map:' +
+    ` Unlisted packages (${UNLISTED_MARKER}) ARE on this map:` +
     " it is the placement/management view, not a catalogue, so the surfaces visibility hides a" +
     " package from are the per-type indexes and the caller-context hints, never this one.",
   required: ["agent", "skill", "mcp-server", "integration"],

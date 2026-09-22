@@ -1,16 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * `GET /api/me/context?skills=` — resolving named skills by EXACT id, next to
- * the capped catalogue the same payload already carries.
- *
- * The two reads answer different questions and must not collapse into one: the
- * CATALOGUE is what the space offers to browse (visibility applies), the
- * EXACT-ID read is what a caller already decided it wants (visibility does
- * not). Every assertion below carries the contrast — a listed sibling, an
- * unlisted one, and an id nothing answers — so a read that simply returned
- * everything, or nothing, cannot pass for one that resolved the right rows.
- */
+// `GET /api/me/context?skills=`: exact-id resolution ignores visibility, the catalogue
+// does not. Fixtures pair a listed, an unlisted and an unknown id so a read returning
+// everything or nothing cannot pass.
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
@@ -50,8 +42,7 @@ async function createSkill(ctx: TestContext, id: string, unlisted: boolean) {
         description: "A resolution fixture.",
         ...(unlisted ? { _meta: { [VISIBILITY_META_NAMESPACE]: { level: "unlisted" } } } : {}),
       },
-      // Frontmatter `name` is the UNSCOPED half of the id (the skill-frontmatter
-      // gate), and both values are quoted YAML strings.
+      // Frontmatter `name` is the unscoped half of the id (skill-frontmatter gate).
       content: `---\nname: "${id.split("/")[1]}"\ndescription: "A resolution fixture."\n---\n\nBody.`,
     }),
   });
@@ -76,13 +67,11 @@ describe("GET /api/me/context?skills=", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as ContextBody;
 
-    // Exact-id resolution ignores visibility — that is the whole point of the
-    // marker: a package hidden from the catalogue stays usable by name.
     expect(body.requested_skills.map((s) => s.package_id)).toEqual([LISTED, UNLISTED]);
     expect(body.requested_skills[0]?.version).toBe("1.0.0");
     expect(body.unresolved_skills).toEqual([UNKNOWN]);
 
-    // …and the CATALOGUE half is unchanged: still no unlisted row on it.
+    // The catalogue half still hides the unlisted row.
     const catalogue = body.skills.map((s) => s.package_id);
     expect(catalogue).toContain(LISTED);
     expect(catalogue).not.toContain(UNLISTED);
@@ -94,8 +83,6 @@ describe("GET /api/me/context?skills=", () => {
       { headers: authHeaders(ctx) },
     );
     const body = (await res.json()) as ContextBody;
-    // The chat renders this list into a single prompt-cache block: request
-    // order must not reach the rendering.
     expect(body.requested_skills.map((s) => s.package_id)).toEqual([LISTED, UNLISTED]);
   });
 
@@ -107,8 +94,6 @@ describe("GET /api/me/context?skills=", () => {
   });
 
   it("names the space the context was resolved in", async () => {
-    // An operation taking a `spaceId` path param (the activation door) is
-    // unreachable for a model whose context never states which space it is in.
     const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
     const body = (await res.json()) as ContextBody;
     expect(body.space.id).toBe(ctx.defaultSpaceId);
@@ -116,9 +101,7 @@ describe("GET /api/me/context?skills=", () => {
   });
 
   it("resolves nothing and reports every id unresolved without `skills:read`", async () => {
-    // A credential whose ceiling stops short of `skills:read`. It still holds
-    // `agents:run`, so the payload itself is built — only the skill halves are
-    // refused, and the refusal is legible rather than an empty list.
+    // `agents:run` without `skills:read`: the payload builds, the skill halves are refused.
     const apiKey = await seedApiKey({
       createdBy: ctx.user.id,
       orgId: ctx.orgId,
@@ -137,9 +120,7 @@ describe("GET /api/me/context?skills=", () => {
   });
 
   it("accepts the largest request the chat can build: every default plus a full pin set", async () => {
-    // The chat asks for `defaults ∪ pins` in one parameter; a cap below that
-    // sum would 400 a legitimate turn, which `buildCallerContextBlock` then
-    // degrades to an identity-only prompt. The ids need not resolve.
+    // The chat asks for `defaults ∪ pins` in one parameter; the cap must admit it.
     const ids = [
       ...PLATFORM_DEFAULT_SKILLS,
       ...Array.from({ length: MAX_PINNED_SKILLS }, (_, i) => `@ctxskill/pin-${i}`),

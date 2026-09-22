@@ -33,13 +33,15 @@
  *     canonical on `packages`.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import {
   syncSystemPackagesToDb,
-  SystemPackageOwnershipError,
+  isSystemPackage,
+  _setSystemPackagesForTesting,
   type SystemPackageEntry,
 } from "../../../src/services/system-packages.ts";
+import { logger } from "../../../src/lib/logger.ts";
 import { zipArtifact } from "@appstrate/core/zip";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
@@ -212,6 +214,7 @@ describe("syncSystemPackagesToDb", () => {
       syncedVersions: 2,
       unchangedPackages: 0,
       unchangedVersions: 0,
+      ownershipConflicts: [],
     });
 
     // Same registry, same bytes — the second pass must write nothing at all.
@@ -221,6 +224,7 @@ describe("syncSystemPackagesToDb", () => {
       syncedVersions: 0,
       unchangedPackages: 2,
       unchangedVersions: 2,
+      ownershipConflicts: [],
     });
 
     // ...and the persisted state is intact, not merely untouched-because-broken.
@@ -277,6 +281,7 @@ describe("syncSystemPackagesToDb", () => {
       syncedVersions: 1,
       unchangedPackages: 0,
       unchangedVersions: 0,
+      ownershipConflicts: [],
     });
 
     const [row] = await db
@@ -290,12 +295,8 @@ describe("syncSystemPackagesToDb", () => {
 
   // ─── Ownership safety gate ─────────────────────────────
 
-  it("REFUSES to convert an ORG-owned package into a system one, and fails the boot", async () => {
-    // `packages.id` is ONE namespace and nothing reserves a scope, so a system
-    // package shipped under an id an organization already published would
-    // otherwise rewrite that row to `source: "system", org_id: null` and
-    // overwrite its content — silently, at boot, in production. The UPSERT's
-    // `setWhere: isNull(org_id)` refuses the write and the sync throws.
+  it("skips an ORG-owned id (logged at error level) without failing the boot, and still syncs the rest", async () => {
+    // `packages.id` is one namespace: without the guard, this row would become system.
     const ctx = await createTestContext({ orgSlug: "sysclash" });
     const COLLIDING = "@appstrate/copilot";
     await seedPackage({
@@ -314,20 +315,61 @@ describe("syncSystemPackagesToDb", () => {
     });
 
     const entry = makeFixtureEntry({ id: COLLIDING, version: "1.0.0" });
-    const { canonical, versions } = buildRegistry([entry]);
+    // Control: a non-colliding system package in the SAME pass must still be
+    // written — the gate skips one id, not the whole sync.
+    const control = makeFixtureEntry({ id: "@sys-test/bystander", version: "1.0.0" });
+    const { canonical, versions } = buildRegistry([entry, control]);
 
-    // Fails loudly, and names both the id and the fix.
-    let thrown: unknown;
+    // Install the same set as the live registry the platform reads, restored after.
+    const restoreRegistry = _setSystemPackagesForTesting(canonical);
+    const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
+    // Resolves: a tenant's package must never crash-loop every org's boot.
+    let report: Awaited<ReturnType<typeof syncSystemPackagesToDb>>;
+    let errorCalls: unknown[][];
+    let collidingIsSystem: boolean;
+    let bystanderIsSystem: boolean;
     try {
-      await syncSystemPackagesToDb(canonical, versions);
-    } catch (err) {
-      thrown = err;
+      report = await syncSystemPackagesToDb(canonical, versions);
+      collidingIsSystem = isSystemPackage(COLLIDING);
+      bystanderIsSystem = isSystemPackage("@sys-test/bystander");
+    } finally {
+      errorCalls = [...errorSpy.mock.calls];
+      errorSpy.mockRestore();
+      restoreRegistry();
     }
-    // Its own class, because `bootBackground` swallows every OTHER failure of
-    // this sync into a warn and must rethrow this one (the process exits).
-    expect(thrown).toBeInstanceOf(SystemPackageOwnershipError);
-    expect((thrown as Error).message).toContain(COLLIDING);
-    expect((thrown as Error).message).toMatch(/[Rr]ename/);
+
+    // The org keeps full control of its package: the id left the live
+    // registry, the bystander did not.
+    expect(collidingIsSystem).toBe(false);
+    expect(bystanderIsSystem).toBe(true);
+    expect(report).toEqual({
+      syncedPackages: 1,
+      syncedVersions: 1,
+      unchangedPackages: 0,
+      unchangedVersions: 0,
+      ownershipConflicts: [COLLIDING],
+    });
+
+    // Logged at error level, naming the id, the owning org and the fix.
+    const conflictLogs = errorCalls.filter(
+      ([, fields]) => (fields as { packageId?: string } | undefined)?.packageId === COLLIDING,
+    );
+    expect(conflictLogs).toHaveLength(1);
+    expect(conflictLogs[0]![0]).toMatch(/[Rr]ename/);
+    expect(conflictLogs[0]![1]).toEqual({ packageId: COLLIDING, orgId: ctx.orgId });
+
+    // The control was written as a system package with its version.
+    const [bystander] = await db
+      .select({ orgId: packages.orgId, source: packages.source })
+      .from(packages)
+      .where(eq(packages.id, "@sys-test/bystander"))
+      .limit(1);
+    expect(bystander).toEqual({ orgId: null, source: "system" });
+    const bystanderVersions = await db
+      .select({ version: packageVersions.version })
+      .from(packageVersions)
+      .where(eq(packageVersions.packageId, "@sys-test/bystander"));
+    expect(bystanderVersions).toEqual([{ version: "1.0.0" }]);
 
     // The org's row is EXACTLY as it was: still theirs, still their content.
     const [row] = await db
@@ -343,8 +385,7 @@ describe("syncSystemPackagesToDb", () => {
     expect(row!.source).toBe("local");
     expect(row!.draftContent).toBe("ORG-AUTHORED BODY");
 
-    // …and the version pass never ran for it: no system version was registered
-    // under an id the organization owns.
+    // No system version registered under the org-owned id.
     const versionRows = await db
       .select({ version: packageVersions.version })
       .from(packageVersions)

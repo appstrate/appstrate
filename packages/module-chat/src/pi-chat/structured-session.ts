@@ -39,13 +39,8 @@ export interface BuildStructuredPiTurnOptions {
    * so the figure is a floor, not a measurement.
    */
   baseTokens: number;
-  /**
-   * Bodies for the `/skill` mentions the branch carries, keyed by package id
-   * (`skill-loader.ts`). Absent — an engine driven without the loader — leaves
-   * every directive rendered as an unresolved mention rather than as prose, so
-   * the model is never shown a raw directive it cannot act on.
-   */
-  loadedSkills?: ReadonlyMap<string, LoadedSkill>;
+  /** A mention missing here renders as unresolved: the model never sees a raw directive. */
+  loadedSkills: ReadonlyMap<string, LoadedSkill>;
 }
 
 interface StructuredPiTurn {
@@ -293,14 +288,8 @@ export function buildStructuredPiTurn(
   model: PiHistoryModel,
   { estimateTokens, baseTokens, loadedSkills }: BuildStructuredPiTurnOptions,
 ): StructuredPiTurn {
-  // Both composer affordances are flattened here, in the same pass and for the
-  // same reason: the model reads TEXT, and the serialization of what the user
-  // attached or mentioned belongs in one place. Skills come second so a skill
-  // body is never scanned for file parts it cannot contain.
-  const messages = messagesWithSkillsAsText(
-    messagesWithAttachmentsAsText(input),
-    loadedSkills ?? new Map(),
-  );
+  // Skills second, so a skill body is never scanned for file parts.
+  const messages = messagesWithSkillsAsText(messagesWithAttachmentsAsText(input), loadedSkills);
   const last = messages.at(-1);
   if (!last || last.role !== "user") {
     throw new Error("The active Pi chat branch must end with a user message.");

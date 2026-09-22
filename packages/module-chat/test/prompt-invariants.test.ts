@@ -10,7 +10,9 @@
 
 import { describe, expect, it } from "bun:test";
 import { buildSystemPrompt, formatCallerContext, normalizeChatLocale } from "../src/prompt.ts";
-import { DEFAULT_SKILL_DISCOVERY } from "../src/skills.ts";
+import { DEFAULT_SKILL_SELECTION } from "../src/skills.ts";
+
+const OPTS = { skills: DEFAULT_SKILL_SELECTION };
 
 /**
  * The ONE activation door's operationId (`POST /api/spaces/{spaceId}/packages`,
@@ -24,7 +26,8 @@ const ACTIVATION_OPERATION_ID = "activatePackage";
 const FULL = buildSystemPrompt({
   canComposeInline: true,
   canAuthorAgents: true,
-  skillDiscovery: DEFAULT_SKILL_DISCOVERY,
+  canReadSkills: true,
+  skillCatalogue: true,
 });
 
 describe("full persona invariants", () => {
@@ -113,118 +116,106 @@ describe("full persona invariants", () => {
 
   it("routes integration_not_active to activation, never to a retry", () => {
     // Retrying the run or re-running the connect flow can never clear a 412:
-    // connecting is personal, activating is space-wide. Activation IS
-    // reachable, and RBAC decides who may call it — an admin fixes it in one
-    // step, a member gets a 403 and is told to ask one. Nothing in the chat
-    // pre-computes that right: quoting the operation instead of asserting the
-    // outcome is what keeps this honest for both roles.
+    // connecting is personal, activating is per space. Activation IS
+    // reachable, and RBAC decides who may call it — a caller holding the
+    // activation grant fixes it in one step, anyone else gets a 403 and is told
+    // who must. Nothing in the chat pre-computes that right: quoting the
+    // operation instead of asserting the outcome keeps this honest for both.
     expect(FULL).toContain("integration_not_active");
     expect(FULL).toMatch(/do NOT re-run and do NOT restart the connect flow/);
+    expect(FULL).toContain("activating is per space");
     expect(FULL).toContain(`operation_id: "${ACTIVATION_OPERATION_ID}"`);
-    expect(FULL).toMatch(/administrator must activate/);
+    expect(FULL).toContain("refused (403) when the user lacks the permission to activate");
+    expect(FULL).toContain("someone who can activate integrations in this space must activate it");
+    expect(FULL).not.toContain("organization-wide");
+    expect(FULL).not.toContain("admin-only");
     // The remedy names a `spaceId` path param, which is only answerable
     // because the context block renders the current space.
     expect(FULL).toContain('path_params: { "spaceId"');
     expect(FULL).toContain('body: { "packageId"');
   });
 
-  it("names an activation operation the platform actually registers", () => {
-    // The persona used to name `activateIntegration`, which has never existed:
-    // a model following it burned a turn on `search_operations` and guessed.
-    // The real door is `activatePackage`, `POST /api/spaces/{spaceId}/packages`
-    // (apps/api/src/openapi/paths/spaces.ts). Pinned as a constant here rather
-    // than imported (see its declaration), and the negative below catches the
-    // name that never was.
-    expect(FULL).not.toContain("activateIntegration");
-  });
-
   it("teaches loading a skill through getSkill, one at a time, before acting", () => {
-    // The whole point of phase 2: the chat could NAME skills and never use one.
     expect(FULL).toContain("guides for YOU");
     expect(FULL).toContain('`operation_id: "getSkill"`');
     expect(FULL).toContain("LOAD IT BEFORE acting");
     expect(FULL).toContain("KEEP the leading `@`");
     expect(FULL).toContain("Load ONE at a time");
-    expect(FULL).toContain("Never reload a skill whose `content` already appears");
+    expect(FULL).toContain("Never call `getSkill` for a skill whose content already appears");
     expect(FULL).toContain("`(pinned)` is one the user chose for this conversation");
   });
 
   it("teaches that an injected `[Skill … loaded]` block IS the skill's content", () => {
-    // Phase 4: a `/skill` mention puts the body in the USER TURN TEXT. Without
-    // this sentence the model reads a block it has no name for and re-fetches
-    // the same skill through `getSkill` — paying for the body twice.
     expect(FULL).toContain("[Skill @scope/name … loaded — follow these instructions]");
     expect(FULL).toContain("IS that skill's content");
-    expect(FULL).toContain("never call `getSkill` for that skill again");
+  });
+
+  it("names the same heading and lead strings the context block renders", () => {
+    const block = formatCallerContext(
+      {
+        user: { name: "Ada" },
+        requested_skills: [{ package_id: "@appstrate/copilot" }],
+        skills: [{ package_id: "@acme/pdf" }],
+      },
+      OPTS,
+    );
+    for (const heading of ["## Skills", "Other skills in this space (not loaded):"]) {
+      expect(block).toContain(heading);
+      expect(FULL).toContain(`\`${heading}\``);
+    }
+  });
+
+  it("never lets a platform default become an agent dependency", () => {
+    expect(FULL).toContain("Never declare a skill marked `(platform)`");
+    expect(FULL).toContain("fits the task and is not marked `(platform)`, attach it under");
   });
 
   it("teaches the loading rules whatever the turn may author", () => {
-    // Skills are the assistant's own guides now — not something only an author
-    // of agents has a use for.
     const REDUCED = buildSystemPrompt({
       canComposeInline: false,
       canAuthorAgents: false,
-      skillDiscovery: DEFAULT_SKILL_DISCOVERY,
+      canReadSkills: true,
+      skillCatalogue: true,
     });
     expect(REDUCED).toContain('`operation_id: "getSkill"`');
     expect(REDUCED).toContain("guides for YOU");
   });
 
-  it("flips the catalogue sentence with the discovery mode", () => {
-    const auto = buildSystemPrompt({
+  it("flips the catalogue sentence with the session's catalogue switch", () => {
+    const off = buildSystemPrompt({
       canComposeInline: true,
       canAuthorAgents: true,
-      skillDiscovery: "auto",
+      canReadSkills: true,
+      skillCatalogue: false,
     });
-    const onDemand = buildSystemPrompt({
-      canComposeInline: true,
-      canAuthorAgents: true,
-      skillDiscovery: "on_demand",
-    });
-    const manual = buildSystemPrompt({
-      canComposeInline: true,
-      canAuthorAgents: true,
-      skillDiscovery: "manual",
-    });
-    // `auto` IS the default mode, so it reads like the persona built with it.
-    expect(auto).toBe(FULL);
-    expect(auto).toContain(
-      "a list under `Other skills in this space (not loaded):`, that list is a catalogue",
+    expect(FULL).toContain(
+      "The list under `Other skills in this space (not loaded):` is not loaded",
     );
-    expect(onDemand).toContain("No catalogue of other skills is shown to you");
-    expect(onDemand).not.toContain("is a catalogue you have not loaded");
-    expect(manual).toContain("Load only the skills listed under `## Skills`");
-    // The empty case is NAMED, and named as the block renders it: `manual` with
-    // no pins indexes nothing, catalogues nothing and notices nothing, so
-    // `formatCallerContext` emits NO `## Skills` section at all. A rule about
-    // "a section that lists none" would describe a heading the model never sees.
-    expect(manual).toContain("when no `## Skills` section appears, load no skill at all");
-    expect(manual).not.toContain("No catalogue of other skills is shown");
-    // A mode that shows no catalogue must not send the model browsing.
-    expect(manual).not.toContain("call `listSkills` to see the rest");
-    // …and the BLOCK agrees with that rule: `manual` with no pins renders no
-    // `## Skills` section, catalogue rows in the payload or not.
-    expect(
-      formatCallerContext(
-        {
-          user: { name: "Ada" },
-          org: { role: "member" },
-          skills: [{ package_id: "@acme/pdf", display_name: "PDF" }],
-        },
-        { skills: { discovery: "manual", pinned: [] } },
-      ),
-    ).not.toContain("## Skills");
+    expect(FULL).not.toContain("No catalogue of other skills is shown to you");
+    expect(off).toContain("No catalogue of other skills is shown to you");
+    expect(off).not.toContain("Other skills in this space");
   });
 
-  it("carries no trace of the retired attach-to-an-agent skills heading", () => {
-    expect(FULL).not.toContain("Skills you can attach to an agent");
-    expect(
-      formatCallerContext({
-        user: { name: "Ada" },
-        org: { role: "member" },
-        skills: [{ package_id: "@acme/pdf", display_name: "PDF" }],
-      }),
-    ).not.toContain("Skills you can attach to an agent");
+  it("teaches nothing about skills to a turn without `skills:read`", () => {
+    const noSkills = buildSystemPrompt({
+      canComposeInline: true,
+      canAuthorAgents: true,
+      canReadSkills: false,
+      skillCatalogue: true,
+    });
+    for (const skillRule of [
+      "getSkill",
+      "listSkills",
+      "## Skills",
+      "Other skills in this space",
+      "Skills are not run on their own",
+      "attach it under `dependencies.skills`",
+      "the skills available to you",
+    ]) {
+      expect(FULL).toContain(skillRule);
+      expect(noSkills).not.toContain(skillRule);
+    }
+    expect(noSkills).toContain('`operation_id: "listAgents"` for the full one');
   });
 
   it("drops the stale claim that a prompt-pasted appfile:// URI gives no access", () => {
@@ -254,27 +245,30 @@ describe("caller-context prompt hygiene", () => {
   const identity = { user: { name: "Ada" }, org: { role: "member" } };
 
   it("renders the forwarded locale in the reply-language line", () => {
-    const out = formatCallerContext(identity, { locale: "en-US" });
+    const out = formatCallerContext(identity, { ...OPTS, locale: "en-US" });
     expect(out).toContain("Reply in the user's language (en)");
   });
 
   it("defaults the reply language to fr without a locale", () => {
-    expect(formatCallerContext(identity)).toContain("Reply in the user's language (fr)");
+    expect(formatCallerContext(identity, OPTS)).toContain("Reply in the user's language (fr)");
   });
 
   it("keeps the block free of standing instructions — they belong to the system prompt", () => {
     // Everything the model must DO with the context lives in the persona
     // (`buildSystemPrompt`). The block renders data only; the sole exception is the
     // reply-language line, which is parameterised by the `X-Chat-Locale` header.
-    const out = formatCallerContext({
-      user: { name: "Ada" },
-      org: { role: "member" },
-      connections: [{ integration_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
-      agents: [{ package_id: "@appstrate/triage", takes_input: false }],
-      agents_truncated: true,
-      skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
-      skills_truncated: true,
-    });
+    const out = formatCallerContext(
+      {
+        user: { name: "Ada" },
+        org: { role: "member" },
+        connections: [{ integration_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
+        agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+        agents_truncated: true,
+        skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
+        skills_truncated: true,
+      },
+      OPTS,
+    );
     // Gone from the block…
     for (const imperative of [
       "Use the `@scope/name` id verbatim",
@@ -308,13 +302,15 @@ describe("the persona without inline composition", () => {
   const REDUCED = buildSystemPrompt({
     canComposeInline: false,
     canAuthorAgents: false,
-    skillDiscovery: DEFAULT_SKILL_DISCOVERY,
+    canReadSkills: true,
+    skillCatalogue: true,
   });
   /** `agents:write` without `agents:run`: may author agents, not compose one inline. */
   const AUTHOR_ONLY = buildSystemPrompt({
     canComposeInline: false,
     canAuthorAgents: true,
-    skillDiscovery: DEFAULT_SKILL_DISCOVERY,
+    canReadSkills: true,
+    skillCatalogue: true,
   });
 
   it("teaches no way to compose one", () => {

@@ -596,11 +596,8 @@ export async function getSpacePackage(scope: SpaceScope, packageId: string) {
  * {@link isPackageActiveHere}, with the library's projection and with the index
  * listings, so what an index page shows, what the caller-context hints tell the
  * model it may invoke, and what the run gate lets through are one set.
- *
- * The two LISTINGS below conjoin `listedFilter` on top of it and the run gate
- * does not: an unlisted package is off the catalogue and still runs. That is
- * the one direction the sets may differ in — a listing may drop a row, never
- * add one — so no page can offer what a run would refuse.
+ * Listings add `listedFilter` on top (drop rows, never add), so no page offers
+ * what the run gate would refuse.
  */
 function activePackagesFilter(scope: SpaceScope, type: PackageType) {
   return and(
@@ -718,11 +715,7 @@ interface HintOptions {
   }) => boolean;
 }
 
-/**
- * Columns every hint read projects from. Shared so the capped LISTING and the
- * exact-id resolution below cannot select different halves of the same row and
- * hand the model two different descriptions of one package.
- */
+/** Columns both hint reads (capped listing, exact-id resolution) select. */
 const hintColumns = {
   id: packages.id,
   type: packages.type,
@@ -745,12 +738,7 @@ type HintRow = {
   latestVersionId: number | null;
 };
 
-/**
- * Row → hint, the ONE projection both hint reads use. It is where
- * `package_id` / `published` / `home_writable` are decided, so extracting it
- * is what keeps the capped listing and the exact-id resolution honest about
- * the same row.
- */
+/** Row → hint, the one projection both hint reads use. */
 function projectPackageHint<T extends PackageHint>(
   row: HintRow,
   project: (base: PackageHint, manifest: Record<string, unknown>) => T,
@@ -771,10 +759,7 @@ function projectPackageHint<T extends PackageHint>(
   return project(base, manifest);
 }
 
-/**
- * Join condition for the `latest` dist-tag row {@link hintColumns} reads
- * `latestVersionId` from. Named so both hint reads join it identically.
- */
+/** Join on the `latest` dist-tag row {@link hintColumns} reads `latestVersionId` from. */
 function latestDistTagJoin() {
   return and(eq(packageDistTags.packageId, packages.id), eq(packageDistTags.tag, "latest"));
 }
@@ -899,22 +884,9 @@ export async function listActiveSkills(
 }
 
 /**
- * Resolve named skills by EXACT id for this space — the chat's index read,
- * where the caller already knows which skills it wants (platform defaults, a
- * session's pins) rather than browsing a catalogue.
- *
- * Deliberately WITHOUT {@link listedFilter}. Visibility is discoverability, not
- * authorization: an `unlisted` skill is off every catalogue and stays fully
- * resolvable by exact id, which is the entire point of the marker — the chat's
- * platform defaults ship unlisted precisely so they serve the assistant without
- * cluttering the user's skill catalogue. Everything else holds:
- * {@link activePackagesFilter} is the same org/placement/activation gate the run
- * path uses, and the caller re-checks `skills:read` before asking at all.
- *
- * One query, `ORDER BY package_id` so the rendered index is byte-stable across
- * turns (the chat's system prompt is a single prompt-cache block). `unresolved`
- * carries the ids no row answered, in REQUEST order — an unknown id is data for
- * the caller to report, never an error.
+ * Resolve named skills by exact id, without `listedFilter` (visibility ≠
+ * authorization); ordered by id so the rendered index is byte-stable.
+ * `unresolved` keeps request order.
  */
 export async function resolveSkillsByIds(
   scope: SpaceScope,

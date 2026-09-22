@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The `/skill` directive parser and the projection that turns a mention into
- * the text the model reads.
- *
- * The directive grammar is a FIXED CONTRACT with the composer (assistant-ui's
- * `unstable_defaultDirectiveFormatter`), and the projection lands inside the
- * prompt-cache prefix — so both the exact block strings and the determinism of
- * the projection are pinned here rather than left to the reader.
+ * The `/skill` directive parser, the mention loader and the projection. The
+ * grammar is a fixed contract with the composer, and the projection lands in
+ * the prompt-cache prefix, so exact block strings are pinned.
  */
 
 import { describe, expect, it } from "bun:test";
 import type { UIMessage } from "ai";
+import type { ChatPlatformDeps } from "../src/platform-services.ts";
 import {
+  MAX_MENTIONED_SKILLS,
   MAX_SKILL_BODY_BYTES,
   SKILL_TRUNCATION_MARKER,
+  TOO_MANY_SKILLS_REASON,
+  loadMentionedSkills,
   mentionedSkillIds,
   messagesWithSkillsAsText,
   parseSkillMentions,
@@ -218,5 +218,140 @@ describe("messagesWithSkillsAsText", () => {
   it("returns a message with no directive unchanged", () => {
     const message = user("u1", "aucune mention ici");
     expect(messagesWithSkillsAsText([message], new Map())[0]).toBe(message);
+  });
+});
+
+const warnings: { msg: string; data?: Record<string, unknown> }[] = [];
+const ARGS = {
+  origin: "http://127.0.0.1:3000",
+  headers: new Headers({ cookie: "session=abc", "x-space-id": "spc_1" }),
+  log: { warn: (msg: string, data?: Record<string, unknown>) => warnings.push({ msg, data }) },
+};
+
+/** A dispatch scripted per request that records every call. */
+function fakeDeps(respond: (req: Request) => Response | Promise<Response>): {
+  deps: Pick<ChatPlatformDeps, "dispatch">;
+  requests: Request[];
+} {
+  const requests: Request[] = [];
+  return {
+    deps: {
+      dispatch: async (req) => {
+        requests.push(req);
+        return respond(req);
+      },
+    },
+    requests,
+  };
+}
+
+const problem = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/problem+json" },
+  });
+
+describe("loadMentionedSkills", () => {
+  it("reads getSkill per id with the given headers, and maps content/version", async () => {
+    const { deps, requests } = fakeDeps(() =>
+      Response.json({ content: "# Copilot", version: "1.2.0" }),
+    );
+
+    const loaded = await loadMentionedSkills(deps, ARGS, ["@appstrate/copilot"]);
+
+    expect(loaded.get("@appstrate/copilot")).toEqual({
+      package_id: "@appstrate/copilot",
+      version: "1.2.0",
+      body: "# Copilot",
+    });
+    const url = new URL(requests[0]!.url);
+    // Two path params: the `@` stays on the scope and the `/` stays a
+    // separator — `encodeURIComponent` on the whole id would 404 here.
+    expect(url.pathname).toBe("/api/packages/skills/@appstrate/copilot");
+    expect(requests[0]!.headers.get("x-space-id")).toBe("spc_1");
+    expect(requests[0]!.headers.get("cookie")).toBe("session=abc");
+  });
+
+  it("carries the problem's code for a refused or missing read", async () => {
+    const { deps } = fakeDeps((req) =>
+      new URL(req.url).pathname.endsWith("/gone")
+        ? problem(404, { code: "package_not_found", title: "Not Found" })
+        : problem(403, { title: "Forbidden" }),
+    );
+
+    const loaded = await loadMentionedSkills(deps, ARGS, ["@acme/gone", "@acme/secret"]);
+
+    expect(loaded.get("@acme/gone")).toEqual({
+      package_id: "@acme/gone",
+      error: "package_not_found",
+    });
+    // No `code` in the body — the title is the next best thing to show.
+    expect(loaded.get("@acme/secret")).toEqual({ package_id: "@acme/secret", error: "Forbidden" });
+  });
+
+  it("falls back to the status when the error body is not a problem document", async () => {
+    const { deps } = fakeDeps(() => new Response("<html>oops</html>", { status: 502 }));
+    const loaded = await loadMentionedSkills(deps, ARGS, ["@acme/a"]);
+    expect(loaded.get("@acme/a")).toEqual({ package_id: "@acme/a", error: "HTTP 502" });
+  });
+
+  it("reports a skill row with no content rather than injecting an empty block", async () => {
+    const { deps } = fakeDeps(() => Response.json({ content: null, version: "1.0.0" }));
+    const loaded = await loadMentionedSkills(deps, ARGS, ["@acme/a"]);
+    expect(loaded.get("@acme/a")).toEqual({
+      package_id: "@acme/a",
+      error: "the skill has no content",
+    });
+  });
+
+  it("never throws: a thrown dispatch becomes a fixed reason, the error goes to the log", async () => {
+    warnings.length = 0;
+    const { deps } = fakeDeps(() => {
+      throw new Error("socket hang up at 10.0.0.7");
+    });
+    const loaded = await loadMentionedSkills(deps, ARGS, ["@acme/a"]);
+    expect(loaded.get("@acme/a")).toEqual({
+      package_id: "@acme/a",
+      error: "the skill could not be read",
+    });
+    expect(warnings).toHaveLength(1);
+    expect(String(warnings[0]!.data?.err)).toContain("socket hang up at 10.0.0.7");
+  });
+
+  it("caps the conversation at MAX_MENTIONED_SKILLS and refuses the overflow", async () => {
+    const { deps, requests } = fakeDeps(() => Response.json({ content: "x", version: null }));
+    const ids = Array.from({ length: MAX_MENTIONED_SKILLS + 2 }, (_, i) => `@acme/s${i}`);
+
+    const loaded = await loadMentionedSkills(deps, ARGS, ids);
+
+    expect(requests).toHaveLength(MAX_MENTIONED_SKILLS);
+    expect(loaded.size).toBe(ids.length);
+    for (const id of ids.slice(MAX_MENTIONED_SKILLS)) {
+      expect(loaded.get(id)).toEqual({ package_id: id, error: TOO_MANY_SKILLS_REASON });
+    }
+  });
+
+  it("dedupes ids before spending a dispatch on them", async () => {
+    const { deps, requests } = fakeDeps(() => Response.json({ content: "x", version: null }));
+    await loadMentionedSkills(deps, ARGS, ["@acme/a", "@acme/a", "@acme/b"]);
+    expect(requests).toHaveLength(2);
+  });
+
+  it("issues every read in parallel", async () => {
+    let inFlight = 0;
+    const gate = Promise.withResolvers<void>();
+    const { deps } = fakeDeps(async () => {
+      inFlight += 1;
+      // Every dispatch is entered before any of them resolves — otherwise the
+      // turn pays one round trip per mention on the TTFT path.
+      if (inFlight === 3) gate.resolve();
+      await gate.promise;
+      return Response.json({ content: "x", version: null });
+    });
+
+    const loaded = await loadMentionedSkills(deps, ARGS, ["@acme/a", "@acme/b", "@acme/c"]);
+
+    expect(inFlight).toBe(3);
+    expect(loaded.size).toBe(3);
   });
 });

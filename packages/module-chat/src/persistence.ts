@@ -21,14 +21,14 @@
  * here, because `deterministicMessageId` hashes it.
  */
 
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { chatMessages, chatSessions, chatSessionSkills } from "@appstrate/db/schema";
+import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { notFound } from "@appstrate/core/api-errors";
 import { uiMessageText } from "./message-text.ts";
 import { splitSkillDirectives } from "./skill-mentions.ts";
 import { notifySessionUpdate } from "./realtime.ts";
-import { toSkillDiscovery, type ChatSkillSelection, type SkillDiscovery } from "./skills.ts";
+import type { ChatSkillSelection } from "./skills.ts";
 import type { UIMessage } from "ai";
 
 /**
@@ -47,22 +47,15 @@ function toContent(message: UIMessage): Record<string, unknown> {
 
 /**
  * Create the session row if it does not exist yet (idempotent). The client
- * creates sessions up front, but a lazy ensure here closes the orphan-session
- * window (a row with zero messages) and lets the stream route be the single
- * writer of record.
- *
- * Returns the row's `skillDiscovery`, which a turn needs before it can render
- * its prompt: the upsert below already reads (or writes) that row, so the mode
- * rides back on the SAME round trip rather than costing a second query on the
- * pre-inference path. A row created here answers with the column default
- * (`auto`).
+ * mints the id; the stream route and `PUT …/skills` (a pin before the first
+ * message, so zero messages) both create the row. Returns its skill selection.
  */
 export async function ensureSession(
   id: string,
   orgId: string,
   userId: string,
   spaceId: string,
-): Promise<{ skillDiscovery: SkillDiscovery }> {
+): Promise<{ skillCatalogue: boolean; pinnedSkills: string[] }> {
   // The id is client-minted, so a caller could send an id that already belongs
   // to another tenant; a plain `DO NOTHING` would leave that row intact and we'd
   // then persist a message into it. `DO UPDATE … SET id = id` is a no-op write
@@ -99,64 +92,24 @@ export async function ensureSession(
       orgId: chatSessions.orgId,
       userId: chatSessions.userId,
       spaceId: chatSessions.spaceId,
-      skillDiscovery: chatSessions.skillDiscovery,
+      skillCatalogue: chatSessions.skillCatalogue,
+      pinnedSkills: chatSessions.pinnedSkills,
     });
   if (!row || row.orgId !== orgId || row.userId !== userId || row.spaceId !== spaceId) {
     throw notFound("Chat session not found");
   }
-  return { skillDiscovery: toSkillDiscovery(row.skillDiscovery) };
+  return { skillCatalogue: row.skillCatalogue, pinnedSkills: row.pinnedSkills };
 }
 
-/**
- * The package ids pinned to a conversation, sorted.
- *
- * SORTED HERE, once, because both readers need the same order for the same
- * reason: the turn renders them into the system prompt's single
- * `cache_control` block, and the session DTO must not hand the UI a list whose
- * order depends on insertion. `ORDER BY package_id` is the primary key's own
- * order, so the index answers it.
- *
- * A session with no row yet (a client-minted id on its first turn) answers `[]`
- * — this read deliberately does not join `chat_sessions`, so it can run
- * CONCURRENTLY with the {@link ensureSession} that creates it.
- */
-export async function loadSessionPins(sessionId: string): Promise<string[]> {
-  const rows = await db
-    .select({ packageId: chatSessionSkills.packageId })
-    .from(chatSessionSkills)
-    .where(eq(chatSessionSkills.sessionId, sessionId))
-    .orderBy(asc(chatSessionSkills.packageId));
-  return rows.map((row) => row.packageId);
-}
-
-/**
- * Replace a conversation's whole skill selection — the mode and the pin set —
- * in ONE transaction.
- *
- * Replace, not merge: the picker sends the state it wants, so a concurrent
- * write from another tab loses entirely rather than half-applying. The delete
- * and the insert must commit together, or a failure between them would leave a
- * conversation with no pins at all and no way for the client to know.
- *
- * The caller has already run {@link ensureSession}, so the FK below is
- * satisfiable and ownership is settled before anything is written here.
- */
+/** Wholesale, after {@link ensureSession}; `updatedAt` stays, so a pin never reorders the sidebar. */
 export async function setSessionSkills(
   sessionId: string,
   selection: ChatSkillSelection,
 ): Promise<void> {
-  await db.transaction(async (tx) => {
-    await tx
-      .update(chatSessions)
-      .set({ skillDiscovery: selection.discovery, updatedAt: new Date() })
-      .where(eq(chatSessions.id, sessionId));
-    await tx.delete(chatSessionSkills).where(eq(chatSessionSkills.sessionId, sessionId));
-    if (selection.pinned.length > 0) {
-      await tx
-        .insert(chatSessionSkills)
-        .values(selection.pinned.map((packageId) => ({ sessionId, packageId })));
-    }
-  });
+  await db
+    .update(chatSessions)
+    .set({ skillCatalogue: selection.catalogue, pinnedSkills: [...selection.pinned] })
+    .where(eq(chatSessions.id, sessionId));
 }
 
 /** Most recent message id in a session — the one a new message follows, or null. */
@@ -473,24 +426,14 @@ function titleCandidate(message: UIMessage): string | null {
   return titleFromText(uiMessageText(message.parts));
 }
 
-/**
- * A message's text as a title, trimmed to 60 chars (57 + ellipsis); null when
- * empty. `/skill` directives collapse to the label the composer chip showed —
- * the stored text keeps the raw directive, only this projection of it does not.
- * The ONE title helper: `titleCandidate` and `deriveTitle` both go through it.
- */
+/** A message's text as a title: trimmed to 60 chars (57 + ellipsis); null when empty. */
 function titleFromText(text: string): string | null {
   const plain = withoutSkillDirectives(text);
   if (!plain) return null;
   return plain.length > 60 ? `${plain.slice(0, 57)}…` : plain;
 }
 
-/**
- * Each `skill` directive replaced by its label, in source order — the title
- * projection of {@link splitSkillDirectives}, not a second walk of the same
- * text: a title that cut the directives anywhere else than the bubble does
- * would name a conversation after markup the user never sees.
- */
+/** `/skill` directives collapse to the label the composer chip showed. */
 function withoutSkillDirectives(text: string): string {
   return splitSkillDirectives(text)
     .map((segment) => (segment.kind === "text" ? segment.text : segment.label))

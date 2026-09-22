@@ -444,22 +444,12 @@ router.get("/connections/:connectionId/handoff", async (c) => {
   }
 });
 
-/**
- * Cap on `?skills=`. The parameter names skills the caller ALREADY knows it
- * wants (a chat's platform defaults plus the session's pins), so it is short by
- * construction; the cap only bounds what a hostile caller can make one query
- * fetch. Well above the pin ceiling the chat enforces.
- */
+/** Cap on `?skills=`; well above the chat's pin ceiling, it only bounds one query. */
 const MAX_REQUESTED_SKILLS = 30;
 
 /**
- * `?skills=@scope/a,@scope/b` — exact package ids to resolve alongside the
- * catalogue. Deduped, order-preserving (the response's `unresolved_skills`
- * answers in request order), and validated on SHAPE only: an id that is not
- * `@scope/name` cannot name a package, so the whole parameter is a 400, while
- * an id that is merely unknown or inaccessible comes back under
- * `unresolved_skills`. A caller must never have to guess which of the two a
- * 4xx meant.
+ * `?skills=@scope/a,@scope/b` — deduped, order-preserving; a malformed id is a
+ * 400, an unknown one is reported in `unresolved_skills`.
  */
 const requestedSkillsSchema = z
   .string()
@@ -522,9 +512,14 @@ router.get("/context", requireSpaceContext(), async (c) => {
   const permissions = callerPermissions(c);
   const canRun = permissions.has("agents:run");
   const canReadSkills = permissions.has("skills:read");
-  // Named skills (`?skills=`) answer to the SAME permission as the catalogue —
-  // visibility (`unlisted`) is discoverability, never authorization, so the
-  // exact-id read below deliberately skips `listedFilter` and nothing else.
+  // Runs and connections are enrichments like the two above, and they carry
+  // more than a hint: `recent_runs` names packages, statuses and error strings,
+  // and `connections` names the accounts attached in this space. A credential
+  // whose ceiling excludes `runs:read` is refused by `GET /api/runs`, so it
+  // must not read the same rows through this payload either. The route itself
+  // stays open — a role without runs still needs its identity and org.
+  const mayReadRuns = canReadRuns(permissions);
+  const mayReadIntegrations = permissions.has("integrations:read");
   const rawRequestedSkills = c.req.query("skills");
   let requestedSkillIds: string[] = [];
   if (rawRequestedSkills !== undefined) {
@@ -534,14 +529,6 @@ router.get("/context", requireSpaceContext(), async (c) => {
     }
     requestedSkillIds = parsed.data;
   }
-  // Runs and connections are enrichments like the two above, and they carry
-  // more than a hint: `recent_runs` names packages, statuses and error strings,
-  // and `connections` names the accounts attached in this space. A credential
-  // whose ceiling excludes `runs:read` is refused by `GET /api/runs`, so it
-  // must not read the same rows through this payload either. The route itself
-  // stays open — a role without runs still needs its identity and org.
-  const mayReadRuns = canReadRuns(permissions);
-  const mayReadIntegrations = permissions.has("integrations:read");
   // Resolved once for both hint listings: `home_writable` is what tells the
   // model whether a draft-only package is THIS caller's to run, and computing
   // it needs the caller's reach over every space, not the package rows.
@@ -550,11 +537,7 @@ router.get("/context", requireSpaceContext(), async (c) => {
     homeWireForCaller(pkg, accessible).home_writable;
   const [spaceRow, connections, runnable, activeSkills, requestedSkills, recentRuns] =
     await Promise.all([
-      // The space the caller is acting in. Named, not just identified: an
-      // operation that takes a `spaceId` path param (the activation door) is
-      // otherwise unreachable for a model whose context never states which
-      // space it is in. One indexed single-row read, issued in parallel with
-      // the listings below, so it never extends the critical path.
+      // Named so a model can address `spaceId`-path operations (activation door).
       db.select({ name: spaces.name }).from(spaces).where(eq(spaces.id, scope.spaceId)).limit(1),
       mayReadIntegrations
         ? listUsableIntegrationsForActor(scope, actor)
@@ -565,10 +548,7 @@ router.get("/context", requireSpaceContext(), async (c) => {
       canReadSkills
         ? listActiveSkills(scope, { homeWritable })
         : Promise.resolve({ skills: [], truncated: false, total: 0 }),
-      // Same gate, no cap: the caller named these ids, so the answer is exactly
-      // as long as the question. Without `skills:read` every requested id is
-      // reported unresolved rather than silently dropped — the caller then knows
-      // its request was refused, not that the skills are gone.
+      // Same gate as the catalogue; refused ids are reported, not dropped.
       canReadSkills
         ? resolveSkillsByIds(scope, requestedSkillIds, { homeWritable })
         : Promise.resolve({ resolved: [], unresolved: requestedSkillIds }),

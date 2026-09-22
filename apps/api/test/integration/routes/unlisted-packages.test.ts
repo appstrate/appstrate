@@ -1,21 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * `unlisted` visibility — the AFPS §10.1 vendor extension
- * `_meta["dev.appstrate/visibility"].level = "unlisted"`.
- *
- * Discoverability, never authorization: the package is off every CATALOGUE
- * surface — the per-type index, the caller-context hints the chat renders — and
- * still readable by exact id. The library map is deliberately NOT one of them:
- * it is the placement/management view its owner acts on. Each assertion carries
- * a LISTED sibling created the same way, so a listing that simply came back
- * empty cannot pass for a listing that excluded the right row.
- */
+// `unlisted` visibility: off the catalogues (index, context hints), on the library
+// map, still readable by exact id. Each listing assertion carries a listed sibling
+// so an empty listing cannot pass for one that excluded the right row.
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
+import {
+  authHeaders,
+  createTestContext,
+  memberContext,
+  type TestContext,
+} from "../../helpers/auth.ts";
+import { seedPackage } from "../../helpers/seed.ts";
 import { VISIBILITY_META_NAMESPACE } from "../../../src/lib/package-helpers.ts";
 
 const app = getTestApp();
@@ -70,12 +68,7 @@ describe("unlisted package visibility", () => {
     expect(ids).not.toContain(UNLISTED);
   });
 
-  /**
-   * The library is the MANAGEMENT map (placement state, owner/admin only), not
-   * a catalogue — so it is the one listing an unlisted package stays on. If it
-   * hid one too, an org's own unlisted package would appear on NO listing at
-   * all, leaving nothing to place, activate or delete it from.
-   */
+  // The management map is the one listing an unlisted package must stay on.
   it("GET /api/library maps the unlisted skill alongside its sibling", async () => {
     const res = await app.request("/api/library", { headers: authHeaders(ctx) });
     expect(res.status).toBe(200);
@@ -95,8 +88,7 @@ describe("unlisted package visibility", () => {
     const ids = body.skills.map((row) => row.package_id);
     expect(ids).toContain(LISTED);
     expect(ids).not.toContain(UNLISTED);
-    // `total` is a window count over the same filtered set, evaluated before
-    // the cap: an unlisted skill leaking into it would say the cap dropped one.
+    // The window `total` must not count the unlisted row either.
     expect(body.skills_total).toBe(body.skills.length);
   });
 
@@ -108,5 +100,36 @@ describe("unlisted package visibility", () => {
     const body = (await res.json()) as { id: string; content: string };
     expect(body.id).toBe(UNLISTED);
     expect(body.content).toBe(UNLISTED_BODY);
+  });
+
+  it("a plain member reads an unlisted SYSTEM skill by exact id, and does not see it listed", async () => {
+    const SYSTEM_UNLISTED = "@appstrate/vis-hidden-system";
+    const body = '---\nname: vis-hidden-system\ndescription: "Hidden."\n---\n\nSystem body.';
+    await seedPackage({
+      id: SYSTEM_UNLISTED,
+      orgId: null,
+      homeSpaceId: null,
+      source: "system",
+      type: "skill",
+      draftManifest: skillManifest(SYSTEM_UNLISTED, {
+        [VISIBILITY_META_NAMESPACE]: { level: "unlisted" },
+      }),
+      draftContent: body,
+    });
+    const member = await memberContext(ctx, "member");
+
+    const read = await app.request(`/api/packages/skills/${SYSTEM_UNLISTED}`, {
+      headers: authHeaders(member),
+    });
+    expect(read.status).toBe(200);
+    const detail = (await read.json()) as { id: string; content: string };
+    expect(detail.id).toBe(SYSTEM_UNLISTED);
+    expect(detail.content).toBe(body);
+
+    const list = await app.request("/api/packages/skills", { headers: authHeaders(member) });
+    expect(list.status).toBe(200);
+    const ids = ((await list.json()) as { data: { id: string }[] }).data.map((row) => row.id);
+    expect(ids).toContain(LISTED);
+    expect(ids).not.toContain(SYSTEM_UNLISTED);
   });
 });

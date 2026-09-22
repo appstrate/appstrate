@@ -1,26 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The composer's skill picker: how much of the space's skill catalogue this
- * conversation puts in front of the assistant, and which skills are always
- * there.
+ * The composer's skill picker: whether this conversation shows the assistant
+ * the space's catalogue, and which skills it always loads (pins).
  *
- * Two controls, one popover. The discovery mode is a context-budget choice
- * (`auto` | `on_demand` | `manual`) and never an authorization one — an
- * unindexed skill stays readable through the platform's own RBAC-gated
- * `getSkill`. The pins are the user's own override: a pinned skill is indexed
- * in every mode, including `manual`, which indexes nothing else.
- *
- * Both write through `useSessionSkills`, which patches the cache and coalesces
- * the PUTs, so a burst of checkbox clicks costs one settled request per pause.
+ * The selection is LOCAL state seeded once from the history payload; clicks
+ * apply optimistically and write through a coalescer. A failed write reverts
+ * to the last selection the server confirmed.
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { BookOpenIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
-import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group";
 import {
   Tooltip,
   TooltipContent,
@@ -28,49 +21,59 @@ import {
   TooltipTrigger,
 } from "@appstrate/ui/components/tooltip";
 import { cn } from "@appstrate/ui/cn";
-import { MAX_PINNED_SKILLS, SKILL_DISCOVERY_MODES, type SkillDiscovery } from "../skills.ts";
-import { groupSkillsBySource, type ChatSkillEntry } from "./chat-skills.ts";
-import { useChatHeaders, useChatHost } from "./runtime-context.ts";
+import { MAX_PINNED_SKILLS, type ChatSkillSelection } from "../skills.ts";
+import {
+  createSkillsWriter,
+  putSessionSkills,
+  settleSkillsWrite,
+  skillPickerRows,
+  togglePinned,
+  type SkillsWriter,
+} from "./chat-skills.ts";
+import { useChatHost, type GetHeaders } from "./runtime-context.ts";
 import { useChatSkillsCatalog } from "./use-chat-skills.ts";
-import { useSessionSkills } from "./use-session-skills.ts";
 
-/**
- * Literal keys, one per mode — never `t(\`skills.discovery.${mode}\`)`. The
- * locale gate resolves call sites statically, and an interpolated key would
- * need an exemption entry for what is a fixed three-member set.
- */
-const MODE_KEYS: Record<SkillDiscovery, { label: string; hint: string }> = {
-  auto: { label: "skills.discovery.auto", hint: "skills.discovery.autoHint" },
-  on_demand: { label: "skills.discovery.onDemand", hint: "skills.discovery.onDemandHint" },
-  manual: { label: "skills.discovery.manual", hint: "skills.discovery.manualHint" },
-};
-
-const GROUP_KEYS: Record<ChatSkillEntry["source"], string> = {
-  platform: "skills.group.platform",
-  space: "skills.group.space",
-};
-
-/**
- * A package id as a DOM id fragment: `@acme/x` → `-acme-x`. The raw id puts `@`
- * and `/` in an `id`/`htmlFor` pair — legal in HTML5, but unusable from a CSS
- * selector without escaping, so anything reaching for one (a test, a style)
- * breaks on it rather than on the id it meant.
- */
+/** `@acme/x` → `-acme-x`: `@` and `/` in an `id` break CSS selectors. */
 function domIdPart(packageId: string): string {
   return packageId.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 }
 
-export function SkillsPicker({ sessionId }: { sessionId: string }) {
+interface SkillsPickerProps {
+  sessionId: string;
+  getHeaders: GetHeaders | undefined;
+  initialSelection: ChatSkillSelection;
+}
+
+export function SkillsPicker({ sessionId, getHeaders, initialSelection }: SkillsPickerProps) {
   const { t } = useChatHost();
-  const getHeaders = useChatHeaders();
   const [open, setOpen] = useState(false);
-  const { discovery, pinned, setDiscovery, togglePin, atPinCap } = useSessionSkills(
-    sessionId,
-    getHeaders,
-  );
+  const [selection, setSelection] = useState(initialSelection);
+  const confirmedRef = useRef(initialSelection);
+  const writerRef = useRef<SkillsWriter | null>(null);
   const { skills, loading, failed } = useChatSkillsCatalog();
-  const groups = groupSkillsBySource(skills);
+
+  const pinned = selection.pinned;
   const pinnedSet = new Set(pinned);
+  const atPinCap = pinned.length >= MAX_PINNED_SKILLS;
+  const rows = skillPickerRows(skills, pinned);
+
+  const apply = (next: ChatSkillSelection) => {
+    setSelection(next);
+    writerRef.current ??= createSkillsWriter(
+      (sent) => putSessionSkills(getHeaders, sessionId, sent),
+      (outcome) => {
+        const settled = settleSkillsWrite(confirmedRef.current, outcome);
+        confirmedRef.current = settled.confirmed;
+        if (settled.revert) setSelection(settled.confirmed);
+      },
+    );
+    writerRef.current.write(next);
+  };
+
+  const togglePin = (packageId: string) => {
+    const next = togglePinned(pinned, packageId);
+    if (next !== pinned) apply({ ...selection, pinned: next });
+  };
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -82,8 +85,8 @@ export function SkillsPicker({ sessionId }: { sessionId: string }) {
                 type="button"
                 variant="ghost"
                 size="icon"
-                // The count is painted as a badge; a screen reader gets it here
-                // or not at all.
+                data-testid="skills-picker-trigger"
+                // The badge count is painted; a screen reader gets it here.
                 aria-label={
                   pinned.length > 0
                     ? t("skills.labelCount", { n: pinned.length })
@@ -113,9 +116,7 @@ export function SkillsPicker({ sessionId }: { sessionId: string }) {
                 {t("skills.pinned", { n: pinned.length })}
               </p>
             )}
-            {/* The `/` mention is the other half of this feature and has no
-                affordance of its own — the composer cannot advertise a
-                character. This tooltip is where a user finds out. */}
+            {/* The `/` mention has no affordance of its own; this is where it is found. */}
             <p className="text-muted-foreground mt-0.5">{t("skills.mention.hint")}</p>
           </TooltipContent>
         </Tooltip>
@@ -127,42 +128,27 @@ export function SkillsPicker({ sessionId }: { sessionId: string }) {
         sideOffset={6}
         collisionPadding={12}
         aria-label={t("skills.title")}
+        data-testid="skills-picker-popover"
         className="flex max-h-[min(26rem,var(--radix-popover-content-available-height))] w-[min(23rem,calc(100vw-1.5rem))] flex-col p-3"
       >
         <p className="shrink-0 text-sm font-medium">{t("skills.title")}</p>
 
-        <div className="mt-2 shrink-0">
-          <div className="text-muted-foreground px-1 py-1 text-[0.65rem] font-semibold tracking-wider uppercase">
-            {t("skills.discovery.label")}
-          </div>
-          {/* Radix gives the group `role="radiogroup"`; the heading above is a
-              plain div, so the name has to be stated rather than inferred. */}
-          <RadioGroup
-            value={discovery}
-            onValueChange={(value) => setDiscovery(value as SkillDiscovery)}
-            aria-label={t("skills.discovery.label")}
-            className="mt-0.5 gap-1.5"
-          >
-            {SKILL_DISCOVERY_MODES.map((mode) => (
-              <div key={mode} className="flex items-start gap-2">
-                <RadioGroupItem value={mode} id={`skills-mode-${mode}`} className="mt-0.5" />
-                <label htmlFor={`skills-mode-${mode}`} className="min-w-0 cursor-pointer">
-                  <span className="block text-xs font-medium">{t(MODE_KEYS[mode].label)}</span>
-                  {/* One hint at a time — the selected mode's — so the list below
-                      keeps the room; the other two are one click away. */}
-                  {mode === discovery && (
-                    <span className="text-muted-foreground block text-[0.7rem] leading-snug">
-                      {t(MODE_KEYS[mode].hint)}
-                    </span>
-                  )}
-                </label>
-              </div>
-            ))}
-          </RadioGroup>
+        <div className="mt-2 flex shrink-0 items-start gap-2 px-1">
+          <Checkbox
+            id="skills-catalogue"
+            data-testid="skills-catalogue-toggle"
+            checked={selection.catalogue}
+            onCheckedChange={(checked) => apply({ ...selection, catalogue: checked === true })}
+            className="mt-0.5"
+          />
+          <label htmlFor="skills-catalogue" className="min-w-0 cursor-pointer">
+            <span className="block text-xs font-medium">{t("skills.catalogue.label")}</span>
+            <span className="text-muted-foreground block text-[0.7rem] leading-snug">
+              {t("skills.catalogue.hint")}
+            </span>
+          </label>
         </div>
 
-        {/* The cap is the server's (`MAX_PINNED_SKILLS`); a refused 21st pin is
-            otherwise a checkbox that simply does not tick. */}
         {atPinCap && (
           <p className="text-muted-foreground mt-2 shrink-0 px-1 text-[0.7rem] leading-snug">
             {t("skills.pinnedMax", { max: MAX_PINNED_SKILLS })}
@@ -170,60 +156,65 @@ export function SkillsPicker({ sessionId }: { sessionId: string }) {
         )}
 
         <div className="mt-3 min-h-0 flex-1 overflow-y-auto border-t pt-2">
+          <div className="text-muted-foreground px-1 py-1 text-[0.65rem] font-semibold tracking-wider uppercase">
+            {t("skills.pinHeading")}
+          </div>
           {loading ? (
             <p className="text-muted-foreground px-1 py-3 text-center text-xs">
               {t("skills.loading")}
             </p>
           ) : failed ? (
             <p className="text-destructive px-1 py-3 text-center text-xs">{t("skills.error")}</p>
-          ) : groups.length === 0 ? (
+          ) : rows.length === 0 ? (
             <p className="text-muted-foreground px-1 py-3 text-center text-xs">
               {t("skills.empty")}
             </p>
           ) : (
-            groups.map((group, i) => (
-              <div key={group.source} className={i > 0 ? "mt-2 border-t pt-2" : undefined}>
-                <div className="text-muted-foreground px-1 py-1 text-[0.65rem] font-semibold tracking-wider uppercase">
-                  {t(GROUP_KEYS[group.source])}
-                </div>
-                {group.skills.map((skill) => {
-                  const id = `skills-pin-${domIdPart(skill.package_id)}`;
-                  const checked = pinnedSet.has(skill.package_id);
-                  return (
-                    <div key={skill.package_id} className="flex items-start gap-2 rounded-md p-1">
-                      <Checkbox
-                        id={id}
-                        checked={checked}
-                        disabled={!checked && atPinCap}
-                        onCheckedChange={() => togglePin(skill.package_id)}
-                        className="mt-0.5 shrink-0"
-                      />
-                      <label
-                        htmlFor={id}
-                        className={cn(
-                          "min-w-0 flex-1 cursor-pointer",
-                          !checked && atPinCap && "opacity-50",
-                        )}
-                      >
-                        <span className="flex items-baseline gap-1.5">
-                          <span className="truncate text-xs font-medium">
-                            {skill.display_name || skill.package_id}
-                          </span>
-                          {skill.version && (
-                            <span className="text-muted-foreground shrink-0 text-[0.65rem]">
-                              v{skill.version}
-                            </span>
-                          )}
+            rows.map(({ skill, available }) => {
+              const id = `skills-pin-${domIdPart(skill.package_id)}`;
+              const checked = pinnedSet.has(skill.package_id);
+              return (
+                <div key={skill.package_id} className="flex items-start gap-2 rounded-md p-1">
+                  <Checkbox
+                    id={id}
+                    data-testid={`skill-pin-${skill.package_id}`}
+                    checked={checked}
+                    disabled={!checked && atPinCap}
+                    onCheckedChange={() => togglePin(skill.package_id)}
+                    className="mt-0.5 shrink-0"
+                  />
+                  <label
+                    htmlFor={id}
+                    className={cn(
+                      "min-w-0 flex-1 cursor-pointer",
+                      !checked && atPinCap && "opacity-50",
+                    )}
+                  >
+                    <span className="flex items-baseline gap-1.5">
+                      <span className="truncate text-xs font-medium">
+                        {skill.display_name ?? skill.package_id}
+                      </span>
+                      {skill.version && (
+                        <span className="text-muted-foreground shrink-0 text-[0.65rem]">
+                          v{skill.version}
                         </span>
+                      )}
+                    </span>
+                    {available ? (
+                      skill.description && (
                         <span className="text-muted-foreground line-clamp-2 text-[0.7rem] leading-snug">
                           {skill.description}
                         </span>
-                      </label>
-                    </div>
-                  );
-                })}
-              </div>
-            ))
+                      )
+                    ) : (
+                      <span className="text-muted-foreground text-[0.7rem] leading-snug italic">
+                        {t("skills.unavailable")}
+                      </span>
+                    )}
+                  </label>
+                </div>
+              );
+            })
           )}
         </div>
       </PopoverContent>

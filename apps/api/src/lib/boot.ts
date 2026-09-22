@@ -39,11 +39,7 @@ import { initSystemIntegrations } from "../services/integration-client-registry.
 import { registerModelProviders } from "../services/model-providers/registry.ts";
 import { initRunLimits } from "../services/run-limits.ts";
 import { initProxyLimits } from "../services/proxy-limits.ts";
-import {
-  initSystemPackages,
-  syncSystemPackagesToDb,
-  SystemPackageOwnershipError,
-} from "../services/system-packages.ts";
+import { initSystemPackages, syncSystemPackagesToDb } from "../services/system-packages.ts";
 import { listOrphanRunIds } from "../services/state/runs.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { initScheduleWorker } from "../services/scheduler.ts";
@@ -239,14 +235,8 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
   const env = (await import("@appstrate/env")).getEnv();
 
   // Reconcile the loaded system packages into the DB + S3.
+  // An org-owned id collision is logged and skipped inside the sync, never thrown.
   await syncSystemPackagesToDb().catch((err) => {
-    // FATAL, unlike every other failure of this sync. A transient S3 or pool
-    // error heals on the next boot and must not take the instance down; an id
-    // an ORGANIZATION owns never heals, and the only alternative to exiting is
-    // a system package that silently never ships (or, without the guard that
-    // raises this, an org's package overwritten in place). The message names
-    // the colliding ids and the fix.
-    if (err instanceof SystemPackageOwnershipError) throw err;
     logger.warn("Could not sync system packages", {
       error: getErrorMessage(err),
     });

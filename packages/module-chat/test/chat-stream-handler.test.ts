@@ -28,7 +28,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { Hono } from "hono";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { chatMessages, chatSessions, chatSessionSkills } from "@appstrate/db/schema";
+import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../../apps/api/test/helpers/auth.ts";
 import { createUIMessageStreamResponse, type UIMessageChunk } from "ai";
@@ -443,13 +443,9 @@ describe("handleChatStream", () => {
     }
   });
 
-  it("carries the session's own discovery mode and pins into the system prompt", async () => {
-    // The mode is PERSISTED per conversation, and two independent consumers
-    // have to agree on it within one turn: `buildSystemPrompt` (which sentence
-    // the model reads about browsing) and `buildCallerContextBlock` (which
-    // skills the block actually renders). They are wired from ONE read of the
-    // session row, and this is the test that the read reaches both — the unit
-    // suites can only prove each half in isolation.
+  it("carries the session's own catalogue switch and pins into the system prompt", async () => {
+    // Persona and context block must agree within one turn; both are wired from
+    // the one session-row read, which only this end-to-end test can prove.
     const sessionId = mintSessionId();
     const PIN = "@acme/pinned-skill";
     await db.insert(chatSessions).values({
@@ -458,9 +454,9 @@ describe("handleChatStream", () => {
       userId: ctx.user.id,
       spaceId: ctx.defaultSpaceId,
       title: null,
-      skillDiscovery: "manual",
+      skillCatalogue: false,
+      pinnedSkills: [PIN],
     });
-    await db.insert(chatSessionSkills).values({ sessionId, packageId: PIN });
 
     // Echo back whatever `?skills=` asked for, so the rendered index is a
     // function of what the handler requested.
@@ -475,7 +471,7 @@ describe("handleChatStream", () => {
         org: { role: "owner", name: CONTEXT_ORG_MARKER, slug: "chat-handler-test" },
         connections: [],
         agents: [],
-        // The catalogue is non-empty on purpose: `manual` must drop it.
+        // Non-empty on purpose: the catalogue switch is off, so it must not render.
         skills: [{ package_id: "@acme/catalogued", display_name: "Catalogued" }],
         requested_skills: ids.map((id) => ({
           package_id: id,
@@ -488,7 +484,10 @@ describe("handleChatStream", () => {
     };
 
     const { engine, calls } = scriptedEngine();
-    const res = await postChat(sessionId, undefined, engine, { dispatch });
+    const res = await postChat(sessionId, undefined, engine, {
+      dispatch,
+      permissions: new Set(["skills:read"]),
+    });
     expect(res.status).toBe(200);
     await collectUiChunks(res);
 
@@ -496,23 +495,57 @@ describe("handleChatStream", () => {
     expect(requested[0]).toContain(PIN);
 
     const system = calls[0]!.system;
-    // The persona's `manual` sentence — not the `auto` one.
-    expect(system).toContain("Load only the skills listed under `## Skills`");
-    expect(system).not.toContain("is a catalogue you have not loaded");
-    // …and the block agrees: the pin is indexed, the catalogue is not rendered.
-    expect(system).toContain(`\`${PIN}\` (pinned)`);
+    // The persona's catalogue-off sentence, and a block that agrees with it.
+    expect(system).toContain("No catalogue of other skills is shown to you");
     expect(system).not.toContain("Other skills in this space");
+    expect(system).not.toContain("@acme/catalogued");
+    expect(system).toContain(`\`${PIN}\` (pinned)`);
+
+    await waitForAssistantPersist(sessionId);
+  });
+
+  it("requests, renders and teaches no skill on a turn without `skills:read`", async () => {
+    // `getSkill` needs `skills:read` and `/api/me/context` reports every id
+    // unresolved without it, so the turn must not ask (nor warn about defaults).
+    const sessionId = mintSessionId();
+    const PIN = "@acme/pinned-skill";
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      spaceId: ctx.defaultSpaceId,
+      title: null,
+      pinnedSkills: [PIN],
+    });
+    const contextUrls: URL[] = [];
+    const dispatch = async (req: Request): Promise<Response> => {
+      const url = new URL(req.url);
+      if (url.pathname === "/api/me/context") contextUrls.push(url);
+      return scriptedDispatch()(req);
+    };
+
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      dispatch,
+      permissions: new Set(["agents:read", "agents:run"]),
+    });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+
+    expect(contextUrls).toHaveLength(1);
+    expect(contextUrls[0]!.searchParams.has("skills")).toBe(false);
+    const system = calls[0]!.system;
+    expect(system).toContain(CONTEXT_ORG_MARKER);
+    for (const absent of ["## Skills", PIN, "getSkill", "listSkills"]) {
+      expect(system).not.toContain(absent);
+    }
 
     await waitForAssistantPersist(sessionId);
   });
 
   it("loads a `/skill` mention through the package route and injects its body into the turn", async () => {
-    // The sibling of the pins test, for the OTHER half of the mechanism: a
-    // directive in the user's own text. The turn must read the body from the
-    // same route `getSkill` serves — by the ENCODED package path, since
-    // `encodeURIComponent` on the whole id 404s a route that exists — and hand
-    // it to the engine, which projects it into the USER TURN TEXT (never the
-    // system prompt, whose single cache block a 32 KiB body would bust).
+    // Read from the route `getSkill` serves, projected into the user turn text,
+    // never into the cached system prompt.
     const sessionId = mintSessionId();
     const SKILL = "@acme/x";
     const BODY = "# Procédure X\n\nSuis ces étapes.";
@@ -539,7 +572,7 @@ describe("handleChatStream", () => {
 
     // The engine is handed the raw directive plus the loaded body; projecting
     // the two the way the Pi turn builder does is what the model reads.
-    const projected = messagesWithSkillsAsText(calls[0]!.messages, calls[0]!.skills ?? new Map());
+    const projected = messagesWithSkillsAsText(calls[0]!.messages, calls[0]!.skills);
     const text = projected
       .flatMap((message) => message.parts ?? [])
       .filter((part) => part.type === "text")
@@ -604,7 +637,8 @@ describe("handleChatStream", () => {
       buildSystemPrompt({
         canComposeInline: false,
         canAuthorAgents: false,
-        skillDiscovery: "auto",
+        canReadSkills: false,
+        skillCatalogue: true,
       }).slice(0, 64),
     );
     expect(input.system).toContain(CONTEXT_ORG_MARKER);

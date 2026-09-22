@@ -46,9 +46,7 @@ Croise rôle × outils, puis filtre par ce qui est réellement branchable ici :
 
 - intégrations **connectées** (bloc `## Your context`) — utilisables tout de
   suite, ce sont elles qui portent tes meilleures propositions ;
-- intégrations **livrées mais non connectées** — `invoke_operation` avec
-  `operation_id: "listIntegrations"` et `query: { fields: "id,active" }` pour
-  une réponse légère ;
+- intégrations **livrées mais non connectées** — `listIntegrations` ;
 - **rien de tel** — dis-le, et traite le branchement avec la méthode
   `connector-choice`.
 
@@ -94,8 +92,7 @@ en une minute ; un agent créé à l'aveugle se jette.
    skills de l'organisation aussi. Complète au besoin avec `listAgents` ou
    `listSkills`. Ne crée jamais un doublon d'une méthode existante : elle porte
    peut-être des ajustements de l'utilisateur, la dupliquer les perd. En cas
-   d'hésitation entre deux skills, lis-les avec `getSkill`
-   (`path_params: { scope, name }`, le `@` conservé sur le scope) — c'est gratuit.
+   d'hésitation entre deux skills, lis-les avec `getSkill` — c'est gratuit.
 
 2. **La méthode d'abord, l'agent ensuite** — uniquement quand elle est
    réutilisable. `createSkill` prend `manifest` + `content` :
@@ -114,15 +111,9 @@ en une minute ; un agent créé à l'aveugle se jette.
    qu'une fois, ne crée aucun package : mets-la dans le prompt.
 
 3. **L'agent.** `createAgent` prend `manifest` (AFPS) + `content` (le prompt,
-   en markdown). Lis le schéma avec `describe_operation` sur `createAgent`, ne
-   devine pas sa forme. Deux points qui ne se voient pas dans le schéma :
-   déclare chaque intégration sous `dependencies.integrations` **et** sélectionne
-   ses tools sous `integrations_configuration.<id>.tools` — une intégration
-   déclarée dont la sélection est vide fait échouer la publication puis le run ;
-   déclare les skills sous `dependencies.skills` avec un intervalle satisfiable.
+   en markdown).
 
-4. **Prouver.** Lance-le une fois avec `run_and_wait` en `kind:"agent"`
-   (`version: "draft"` tant que rien n'est publié et que l'agent est le sien),
+4. **Prouver.** Lance-le une fois avec `run_and_wait` en `kind:"agent"`,
    montre le résultat, ajuste avec lui.
 
 5. **Planifier** si c'est un ⏰ : `createSchedule` sur le `scope`/`name` de
@@ -134,21 +125,10 @@ des tickets_ à ton espace, tu pourras l'ajuster ».
 
 ## Garde-fous
 
-- **Aucun secret dans la conversation.** Ne demande jamais de coller une clé,
-  un client id/secret, un token ni un mot de passe : la connexion passe par la
-  page hébergée. Méthode : `connector-choice`.
-- **Connecter avant de lancer.** Un run dont une intégration n'est pas prête
-  échoue en préflight sans consommer de crédit, et l'erreur porte l'offre de
-  connexion — ne promets jamais un lien que tu n'as pas obtenu dans ce tour.
-- **`integration_not_active`** sur `integrations.<id>` : l'intégration est
-  connectée mais pas activée dans cet espace. N'ouvre pas une connexion de plus,
-  active-la (`activatePackage`, réservé aux administrateurs) puis relance une
-  fois.
 - **Ne crée et ne modifie rien sans accord explicite**, en particulier un agent
   qui tourne déjà. Propose, puis exécute.
-- **Ces trois méthodes de la plateforme (`@appstrate/copilot`,
-  `@appstrate/web-search`, `@appstrate/connector-choice`) sont les tiennes**,
-  pas des dépendances : ne les déclare jamais dans le `dependencies.skills` d'un
-  agent. Copie la méthode dans un skill de l'organisation si elle lui est utile.
+- **Réutiliser une méthode de la plateforme.** Si la méthode d'un skill que tu
+  as chargé pour toi-même sert à l'agent, copie-la dans un skill de
+  l'organisation.
 - **Honnêteté.** Si une idée demande un accès que l'instance n'a pas, dis-le et
   propose le chemin, plutôt que de la présenter comme faisable.

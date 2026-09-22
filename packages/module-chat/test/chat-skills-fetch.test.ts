@@ -1,20 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The two chat-skill requests, pinned against a scripted `fetch`.
- *
- * Both are hand-written against routes that live outside the typed client, so
- * nothing else checks the URL, the method, or the snake_case body the server
- * parses with Zod. A camelCase key here would type-check and 400 at runtime.
+ * The two chat-skill requests, pinned against a scripted `fetch`: nothing
+ * else checks their URL, method, or the snake_case body the server parses.
  */
 
 import { afterEach, describe, expect, it } from "bun:test";
-import {
-  chatSkillsQueryKey,
-  fetchChatSkills,
-  putSessionSkills,
-  type ChatSkillEntry,
-} from "../src/ui/chat-skills.ts";
+import { chatSkillsQueryKey, fetchChatSkills, putSessionSkills } from "../src/ui/chat-skills.ts";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -36,14 +28,11 @@ function scripted(response: () => Response): Capture {
   return capture;
 }
 
-const entry = (over: Partial<ChatSkillEntry> = {}): ChatSkillEntry => ({
-  package_id: "@appstrate/copilot",
-  display_name: "Copilot",
-  description: "Assemble un agent",
-  version: "1.0.0",
-  source: "platform",
-  ...over,
-});
+const json = (body: unknown) =>
+  new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
 
 describe("chatSkillsQueryKey", () => {
   it("scopes the catalogue to one space", () => {
@@ -53,44 +42,60 @@ describe("chatSkillsQueryKey", () => {
 });
 
 describe("fetchChatSkills", () => {
-  it("GETs the catalogue with the host scoping headers and unwraps `skills`", async () => {
-    const skills = [entry(), entry({ package_id: "@acme/tone", source: "space" })];
-    const capture = scripted(
-      () =>
-        new Response(JSON.stringify({ skills }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
+  it("GETs the space listing with the scoping headers and projects each row", async () => {
+    const capture = scripted(() =>
+      json({
+        object: "list",
+        hasMore: false,
+        data: [
+          {
+            id: "@acme/tone",
+            name: "Tone",
+            description: "Adjusts tone",
+            version: "1.2.0",
+            icon: null,
+            keywords: [],
+            source: "local",
+          },
+          { id: "@acme/bare", name: "@acme/bare", description: null, version: null },
+        ],
+      }),
     );
 
     const got = await fetchChatSkills(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
 
-    expect(String(capture.input)).toBe("/api/chat/skills");
+    expect(String(capture.input)).toBe("/api/packages/skills");
     expect(capture.init?.credentials).toBe("include");
     expect(capture.init?.headers).toEqual({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" });
-    expect(got).toEqual(skills);
+    expect(got).toEqual([
+      {
+        package_id: "@acme/tone",
+        display_name: "Tone",
+        description: "Adjusts tone",
+        version: "1.2.0",
+      },
+      { package_id: "@acme/bare", display_name: "@acme/bare", description: null, version: null },
+    ]);
   });
 
-  it("treats a payload without `skills` as an empty catalogue", async () => {
-    scripted(
-      () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
-    );
+  it("reads a 403 (no `skills:read`) as nothing to offer", async () => {
+    scripted(() => new Response(null, { status: 403 }));
     expect(await fetchChatSkills(() => ({}))).toEqual([]);
   });
 
-  it("throws on a refused read", async () => {
-    scripted(() => new Response(null, { status: 403 }));
-    await expect(fetchChatSkills(() => ({}))).rejects.toThrow("HTTP 403");
+  it("throws on any other refusal", async () => {
+    scripted(() => new Response(null, { status: 500 }));
+    await expect(fetchChatSkills(() => ({}))).rejects.toThrow("HTTP 500");
   });
 });
 
 describe("putSessionSkills", () => {
-  it("PUTs the snake_case body the route parses, with a normalized pin set", async () => {
+  it("PUTs the snake_case body the route parses", async () => {
     const capture = scripted(() => new Response(null, { status: 204 }));
 
     await putSessionSkills(() => ({ "X-Space-Id": "spc_a" }), "chs_1", {
-      discovery: "manual",
-      pinned: ["@scope/b", "@scope/a", "@scope/b"],
+      catalogue: false,
+      pinned: ["@scope/a", "@scope/b"],
     });
 
     expect(String(capture.input)).toBe("/api/chat/sessions/chs_1/skills");
@@ -101,7 +106,7 @@ describe("putSessionSkills", () => {
       "X-Space-Id": "spc_a",
     });
     expect(JSON.parse(String(capture.init?.body))).toEqual({
-      skill_discovery: "manual",
+      skill_catalogue: false,
       pinned_skills: ["@scope/a", "@scope/b"],
     });
   });
@@ -109,7 +114,7 @@ describe("putSessionSkills", () => {
   it("throws when the server refuses the write", async () => {
     scripted(() => new Response(null, { status: 400 }));
     await expect(
-      putSessionSkills(() => ({}), "chs_1", { discovery: "auto", pinned: [] }),
+      putSessionSkills(() => ({}), "chs_1", { catalogue: true, pinned: [] }),
     ).rejects.toThrow("HTTP 400");
   });
 });

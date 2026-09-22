@@ -151,13 +151,8 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
           inArray(spacePackages.spaceId, accessibleIds),
         ),
       )
-      // Deliberately WITHOUT `listedFilter`. The library is the MANAGEMENT map,
-      // not a catalogue: it is the only surface that shows WHERE a package sits
-      // and whether the space runs it, and it is owner/admin-only. Dropping an
-      // org's own unlisted package from it would leave no listing anywhere that
-      // shows the thing its authors have to place, activate or delete.
-      // Visibility is discoverability — the catalogue surfaces (the per-type
-      // index, the caller-context hints) are where it applies.
+      // No `listedFilter`: the management map is the one listing that must still
+      // show an unlisted package to those who place, activate or delete it.
       .where(and(orgOrSystemFilter(orgId), notEphemeralFilter()))
       .orderBy(packages.id),
     // The sharer is named only while they are still a MEMBER of this

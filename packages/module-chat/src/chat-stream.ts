@@ -29,22 +29,21 @@ import { platformMcpUrl } from "./platform-mcp.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import { materializeUserAttachments } from "./attachments.ts";
-import { mentionedSkillIds, type LoadedSkill } from "./skill-mentions.ts";
-import { loadMentionedSkills } from "./skill-loader.ts";
+import { loadMentionedSkills, mentionedSkillIds, type LoadedSkill } from "./skill-mentions.ts";
 import { runPiChat, type PiChatInput } from "./pi-chat/engine.ts";
 import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
 import { acquirePiChatSlot, chatCapacityResponse } from "./pi-chat/concurrency.ts";
 import { turnPermissions } from "./turn-permissions.ts";
-import { buildSystemPrompt, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
-import { DEFAULT_SKILL_DISCOVERY, type ChatSkillSelection } from "./skills.ts";
+import {
+  buildSystemPrompt,
+  buildCallerContextBlock,
+  spaceScopedHeaders,
+  type ChatEnv,
+} from "./prompt.ts";
+import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "./skills.ts";
 export type { ChatEnv } from "./prompt.ts";
 import { finalizeChatStream } from "./finalize-stream.ts";
-import {
-  ensureSession,
-  loadSessionPins,
-  persistUserMessage,
-  persistAssistantMessage,
-} from "./persistence.ts";
+import { ensureSession, persistUserMessage, persistAssistantMessage } from "./persistence.ts";
 import { registerStopController, unregisterStopController } from "./stop-registry.ts";
 import { setActiveStream, clearActiveStream } from "./resumable.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
@@ -244,12 +243,7 @@ export async function handleChatStream(
   const messages = body.messages as UIMessage[];
   logger.info("chat turn", { turns: messages.length });
 
-  // The `/skill` mentions of the WHOLE branch, not just this turn's message: a
-  // body loaded by an earlier mention has to stay in the conversation, and the
-  // projection that puts it there is rebuilt from scratch every turn
-  // (`skill-mentions.ts`). Read off the parsed body, before anything is
-  // materialized or persisted — the directive text is what the user sent and
-  // what stays stored.
+  // Every mention in the branch: the projection re-reads each body every turn.
   const mentionedSkills = mentionedSkillIds(messages);
 
   const sessionId = body.id;
@@ -280,20 +274,13 @@ export async function handleChatStream(
   // `Promise.all` — a foreign-tenant 404 still surfaces before anything is
   // materialized into the session, and attaching the join in the same tick is
   // what keeps a rejection from ever going unhandled.
-  //
-  // It also carries the turn's SKILL SELECTION back. The upsert returns the
-  // session's `skill_discovery` (no extra query), and the pin set is read
-  // alongside it rather than after it: `chat_session_skills` is keyed by the
-  // session id alone, so the SELECT needs nothing the upsert produces and the
-  // two go out together. An ephemeral turn (no session id, or a message with no
-  // id) has no row to read and takes the defaults.
   const sessionSkills: Promise<ChatSkillSelection> =
     sessionId && lastMessage?.id
-      ? Promise.all([
-          ensureSession(sessionId, orgId, user.id, spaceId),
-          loadSessionPins(sessionId),
-        ]).then(([session, pinned]) => ({ discovery: session.skillDiscovery, pinned }))
-      : Promise.resolve({ discovery: DEFAULT_SKILL_DISCOVERY, pinned: [] });
+      ? ensureSession(sessionId, orgId, user.id, spaceId).then((row) => ({
+          catalogue: row.skillCatalogue,
+          pinned: row.pinnedSkills,
+        }))
+      : Promise.resolve(DEFAULT_SKILL_SELECTION);
 
   const origin = selfOrigin();
   const headers = forwardedHeaders(c);
@@ -347,21 +334,28 @@ export async function handleChatStream(
   const permissions = turnPermissions(c.get("permissions"), body.agent_authoring !== false);
   const canAuthorAgents = permissions.includes("agents:write");
   const composeInline = canComposeInline((p) => permissions.includes(p));
+  const canReadSkills = permissions.includes("skills:read");
   const phaseAStart = Date.now();
 
+  // Never rejects, so an early return below leaves no unhandled rejection.
+  const mentionedSkillsPromise: Promise<ReadonlyMap<string, LoadedSkill>> = mentionedSkills.length
+    ? loadMentionedSkills(
+        deps,
+        { origin, headers: spaceScopedHeaders(headers, spaceId), log: logger },
+        mentionedSkills,
+      )
+    : Promise.resolve(new Map());
+
   // ── Preamble phase B (overlapped with A) ─────────────────────────────────
-  // Only the caller-context block. It depends on the space id, the caller's
-  // headers and the session's skill selection — never on the chosen model or
-  // the admission gate — so it is chained on `sessionSkills` above and starts
-  // the moment that one round trip resolves, still overlapping the model list,
-  // the attachment materialization, the credential resolution and the gate
-  // rather than waiting behind them. Chained rather than issued in parallel
-  // because the block RENDERS the selection: asking `/api/me/context` to
-  // resolve the session's pins requires knowing them. It is a READ
-  // (`/api/me/context`); a turn the gate rejects has dispatched it for nothing,
-  // which is acceptable — what a rejected turn must not do is persist a user
-  // message, open an MCP session or record usage, none of which happen before
-  // the gate.
+  // Only the caller-context block. It depends on the space id and the caller's
+  // headers — never on the chosen model or the admission gate — so it is chained
+  // on the session row (it renders the pins) and starts the moment that resolves,
+  // overlapping the model list, the attachment materialization, the
+  // credential resolution and the gate rather than waiting behind them. It is a
+  // READ (`/api/me/context`); a turn the gate rejects has dispatched it for
+  // nothing, which is acceptable — what a rejected turn must not do is persist
+  // a user message, open an MCP session or record usage, none of which happen
+  // before the gate.
   //
   // There is NO platform-MCP probe here: the Pi engine opens its OWN MCP
   // connection from `platformMcp.url`, and the MCP server's instructions reach
@@ -370,31 +364,16 @@ export async function handleChatStream(
   // `platformMcp` optimistically; if the `mcp` module is absent the engine just
   // gets no tools.
   //
-  // Started BEFORE phase B, not chained behind it: the mention loader reads
-  // `GET /api/packages/skills/{scope}/{name}` per id and depends on nothing the
-  // session row produces, so it does not wait on that round trip and overlaps
-  // the caller-context read. Like phase B it settles to a result and never
-  // rejects (`loadMentionedSkills` turns every failure into a per-skill
-  // reason), so an early return between here and the join leaves no unhandled
-  // rejection.
-  const mentionedSkillsPromise: Promise<ReadonlyMap<string, LoadedSkill>> = mentionedSkills.length
-    ? loadMentionedSkills(deps, { origin, headers, spaceId }, mentionedSkills)
-    : Promise.resolve(new Map());
-
-  // Started HERE, before the chain, so `phaseBMs` covers the whole phase —
-  // including the wait on the session row the block is chained behind. Starting
-  // it inside `.then()` would time the HTTP read alone and report a phase that
-  // is systematically shorter than the one the turn actually paid for.
-  const phaseBStart = Date.now();
-  let phaseBMs = 0;
   // The promise settles to a RESULT and never rejects: every early return
   // between here and the point the block is consumed (invalid generation
   // settings, a gate rejection) would otherwise leave a rejection with no
   // handler. The error is rethrown where the block is consumed.
+  const phaseBStart = Date.now();
+  let phaseBMs = 0;
   const contextBlockPromise: Promise<{ ok: true; block: string } | { ok: false; error: unknown }> =
     sessionSkills
-      .then((skills) => {
-        return buildCallerContextBlock(c, {
+      .then((skills) =>
+        buildCallerContextBlock(c, {
           origin,
           headers,
           spaceId,
@@ -403,14 +382,12 @@ export async function handleChatStream(
           // UI language forwarded by the client; validated/defaulted in the builder.
           locale: c.req.header("X-Chat-Locale"),
           canAuthorAgents,
-          // The session's own mode and pins — the same pair `buildSystemPrompt`
-          // is given below, so the persona and the block agree by construction.
+          canReadSkills,
           skills,
         }).finally(() => {
-          // Wall time of the whole phase: the session-row wait plus the block.
           phaseBMs = Date.now() - phaseBStart;
-        });
-      })
+        }),
+      )
       .then(
         (block) => ({ ok: true as const, block }),
         (error: unknown) => ({ ok: false as const, error }),
@@ -516,9 +493,8 @@ export async function handleChatStream(
   let system = buildSystemPrompt({
     canComposeInline: composeInline,
     canAuthorAgents,
-    // Must agree with what `buildCallerContextBlock` above rendered — same
-    // value, read once from the session row.
-    skillDiscovery: skillSelection.discovery,
+    canReadSkills,
+    skillCatalogue: skillSelection.catalogue,
   });
   if (contextBlock) system += `\n\n${contextBlock}`;
 
@@ -579,10 +555,9 @@ export async function handleChatStream(
   }
 
   // Everything before generation, for an ADMITTED turn: the two overlapped
-  // phases (their wall times, not a sum — they start together and OVERLAP, but
-  // neither contains the other: phase A ends at the model-list join, phase B
-  // whenever its own read settles, which may be after that), the claim/persist
-  // round trips, and the whole span since the request was parsed. A rejected turn (gate, dead credential, unsupported family,
+  // phases (their wall times, not a sum — phase B may outlast phase A),
+  // the claim/persist round trips, and the whole span since the request was
+  // parsed. A rejected turn (gate, dead credential, unsupported family,
   // saturated capacity) returns above and is not measured here.
   logger.info("chat preamble", {
     credentialMode,
@@ -661,10 +636,6 @@ export async function handleChatStream(
     "x-org-id": orgId,
   };
   mcpHeaders["x-space-id"] = spaceId;
-  // Join the mention loader. The bodies are projected into the USER TURN TEXT
-  // by `buildStructuredPiTurn`, so they must be in hand before the engine input
-  // is built — awaiting here costs nothing the overlap above did not already
-  // buy.
   const loadedSkills = await mentionedSkillsPromise;
 
   try {

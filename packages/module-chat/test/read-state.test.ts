@@ -247,13 +247,7 @@ describe("chat session read-state", () => {
     expect(await titleOf(id)).toBe("renommée");
   });
 
-  /**
-   * A first turn that opens with a `/skill` mention must not title the
-   * conversation with the formatter's source text. The raw directive stays in
-   * storage (audit trail); the TITLE shows what the user saw in the composer.
-   * Both title paths share one helper, so the stored-form scan is asserted with
-   * the same fixture.
-   */
+  // The raw directive stays stored; both title paths show the chip label instead.
   it("titles a mention-opening turn with the chip label, not the raw directive", async () => {
     const id = await createSession();
     await persistUserMessage(

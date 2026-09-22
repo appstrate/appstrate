@@ -7,12 +7,7 @@
  */
 
 import type { UIMessage } from "ai";
-import {
-  defaultSkillSelection,
-  normalizeDiscovery,
-  normalizePinned,
-  type SessionHistory,
-} from "./chat-skills.ts";
+import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
 import { requestHeaders } from "./request-headers.ts";
 import type { GetHeaders } from "./runtime-context.ts";
 
@@ -131,20 +126,17 @@ interface StoredMessage {
   content: Record<string, unknown>;
 }
 
+/** A conversation as the detail route serves it: history + skill selection. */
+export interface SessionHistory {
+  messages: UIMessage[];
+  skills: ChatSkillSelection;
+}
+
 /**
- * A conversation as the detail route serves it: its history, ready to seed
- * `useChat({ messages })`, and its skill selection.
- *
  * Stored `content` is the ai-sdk/v6 UIMessage minus its id (the id rides in the
  * row), so we reconstruct `{ id, ...content }`. A not-yet-persisted session
- * (a freshly-minted id whose first message hasn't been sent) 404s → empty
- * history and the DEFAULT selection, which is exactly what such a session
- * resolves to server-side: the row the first turn (or the picker) creates
- * carries those same defaults.
- *
- * The selection rides along rather than getting a request of its own: the
- * picker and the thread must never disagree about the conversation they are
- * both looking at, and one payload cannot disagree with itself.
+ * 404s → empty history and the default selection, which is what the server
+ * resolves such a session to.
  */
 export async function loadHistory(
   getHeaders: GetHeaders | null | undefined,
@@ -154,22 +146,16 @@ export async function loadHistory(
     credentials: "include",
     headers: requestHeaders(getHeaders),
   });
-  if (res.status === 404) return { messages: [], skills: defaultSkillSelection() };
+  if (res.status === 404) return { messages: [], skills: DEFAULT_SKILL_SELECTION };
   if (!res.ok) throw new Error(`Failed to load session (HTTP ${res.status})`);
   const body = (await res.json()) as {
     messages?: StoredMessage[];
-    skill_discovery?: unknown;
-    pinned_skills?: unknown;
+    skill_catalogue: boolean;
+    pinned_skills: string[];
   };
   return {
-    // Spread `content` FIRST, then apply the authoritative row `id` — the id
-    // lives in `message_id` and `content` is stored without it, but if a stored
-    // payload ever carried a stray `id` key, a trailing spread would clobber the
-    // real id. Ordering id last makes the row id win.
+    // Row `id` LAST: a stray `id` inside a stored `content` must not win.
     messages: (body.messages ?? []).map((e) => ({ ...e.content, id: e.id }) as UIMessage),
-    skills: {
-      discovery: normalizeDiscovery(body.skill_discovery),
-      pinned: normalizePinned(body.pinned_skills),
-    },
+    skills: { catalogue: body.skill_catalogue, pinned: body.pinned_skills },
   };
 }

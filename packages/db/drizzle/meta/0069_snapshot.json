@@ -8865,46 +8865,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.chat_session_skills": {
-      "name": "chat_session_skills",
-      "schema": "",
-      "columns": {
-        "session_id": {
-          "name": "session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "package_id": {
-          "name": "package_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "chat_session_skills_session_id_chat_sessions_id_fk": {
-          "name": "chat_session_skills_session_id_chat_sessions_id_fk",
-          "tableFrom": "chat_session_skills",
-          "tableTo": "chat_sessions",
-          "columnsFrom": ["session_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "chat_session_skills_session_id_package_id_pk": {
-          "name": "chat_session_skills_session_id_package_id_pk",
-          "columns": ["session_id", "package_id"]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.chat_sessions": {
       "name": "chat_sessions",
       "schema": "",
@@ -8957,12 +8917,19 @@
           "primaryKey": false,
           "notNull": false
         },
-        "skill_discovery": {
-          "name": "skill_discovery",
-          "type": "text",
+        "skill_catalogue": {
+          "name": "skill_catalogue",
+          "type": "boolean",
           "primaryKey": false,
           "notNull": true,
-          "default": "'auto'"
+          "default": true
+        },
+        "pinned_skills": {
+          "name": "pinned_skills",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
         },
         "created_at": {
           "name": "created_at",
@@ -9076,12 +9043,7 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "chat_sessions_skill_discovery": {
-          "name": "chat_sessions_skill_discovery",
-          "value": "\"chat_sessions\".\"skill_discovery\" in ('auto', 'on_demand', 'manual')"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     }
   },

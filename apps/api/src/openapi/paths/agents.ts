@@ -2,6 +2,7 @@
 
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { AGENT_INPUT_SETTINGS_PROPERTIES } from "../schemas.ts";
+import { UNLISTED_OFF_CATALOGUE } from "../visibility.ts";
 
 /**
  * Agents paths — includes both agents.ts and user-agents.ts endpoints
@@ -15,7 +16,7 @@ export const agentsPaths = {
       summary: "List all agents",
       description:
         "Returns the agents ACTIVE in the space named by `X-Space-Id`, with running run counts — the set that space can launch: a system agent, or one placed there (homed or offered) and switched on. An agent placed here and switched OFF, and an offer nobody has taken up, are NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it; the agent's own detail opens either way. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by." +
-        ' Unlisted packages (`_meta["dev.appstrate/visibility"].level = "unlisted"`) are not on it and stay reachable by exact id.',
+        UNLISTED_OFF_CATALOGUE,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

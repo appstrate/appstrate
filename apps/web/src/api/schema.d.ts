@@ -1121,7 +1121,7 @@ export interface paths {
         get?: never;
         /**
          * Set a chat session's skill selection
-         * @description Replaces the conversation's discovery mode and its pinned skills in one call (the body is the state you want, not a patch). Duplicate ids are deduped server-side; at most 20 pins are stored. The session row is created if the client-minted id has none yet — exactly as the first turn would.
+         * @description Replaces whether the conversation lists the space's skill catalogue and its pinned skills in one call (the body is the state you want, not a patch). Duplicate ids are deduped server-side; at most 20 pins. The session row is created if the client-minted id has none yet — exactly as the first turn would.
          */
         put: operations["setChatSessionSkills"];
         post?: never;
@@ -1163,26 +1163,6 @@ export interface paths {
          * @description Reconnect to the session's in-flight generation (the client's native AI-SDK `useChat({ resume: true })` calls this on mount). Returns the live UIMessage stream when a turn is generating, otherwise `204`. Lets a mid-inference page reload continue tokens exactly where they were.
          */
         get: operations["resumeChatStream"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/chat/skills": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List the skills the chat can use
-         * @description The platform default skills every chat turn indexes (`source: "platform"`), followed by the skills active in the current space (`source: "space"`), each sorted by package id. Feeds the composer's skill picker. Both halves are read with the caller's own permissions: without `skills:read` the list is empty rather than refused.
-         */
-        get: operations["listChatSkills"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5320,29 +5300,14 @@ export interface components {
             generating: boolean;
             /** @description Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/chat/sessions/{id}/read. */
             unread: boolean;
-            /**
-             * @description How much of the space's skill catalogue this conversation indexes: `auto` (platform defaults + pins + catalogue), `on_demand` (defaults + pins), `manual` (pins only). A context-budget control, never an authorization boundary. Set via PUT /api/chat/sessions/{id}/skills.
-             * @enum {string}
-             */
-            skill_discovery: "auto" | "on_demand" | "manual";
-            /** @description Package ids (`@scope/name`) pinned to this conversation, sorted. Returned by `GET /api/chat/sessions/{id}` and by the `201` of `POST /api/chat/sessions` (empty there); OMITTED from `GET /api/chat/sessions`, whose page would otherwise cost one query per row. */
-            pinned_skills?: string[];
+            /** @description Whether turns also list the space's skill catalogue. Platform default skills and pins are always indexed. A context-budget control, never an authorization boundary. Set via PUT /api/chat/sessions/{id}/skills. */
+            skill_catalogue: boolean;
+            /** @description Package ids (`@scope/name`) pinned to this conversation, sorted. */
+            pinned_skills: string[];
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
-        };
-        ChatSkillEntry: {
-            /** @description `@scope/name` package id */
-            package_id: string;
-            /** @description Falls back to the package id. */
-            display_name: string;
-            /** @description Empty string when the manifest declares none. */
-            description: string;
-            /** @description Manifest version (semver), when known. */
-            version: string | null;
-            /** @enum {string} */
-            source: "platform" | "space";
         };
         EeBillingAccount: {
             plan: {
@@ -10056,8 +10021,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @enum {string} */
-                    skill_discovery: "auto" | "on_demand" | "manual";
+                    skill_catalogue: boolean;
                     /** @description Package ids to pin. Deduped server-side; the cap applies to the array as sent. */
                     pinned_skills: string[];
                 };
@@ -10153,43 +10117,6 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             /** @description Rate limited (120/min per caller) */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    listChatSkills: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Skills the chat can index */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        skills: components["schemas"]["ChatSkillEntry"][];
-                    };
-                };
-            };
-            403: components["responses"]["Forbidden"];
-            /** @description Rate limited (60/min per caller) */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -13321,7 +13248,7 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Comma-separated `@scope/name` skill ids to resolve by EXACT id, in addition to the capped `skills` catalogue. Unlike the catalogue this read ignores visibility, so an `unlisted` skill (`_meta["dev.appstrate/visibility"].level = "unlisted"`) resolves here — visibility is discoverability, never authorization. Ids are deduped and capped at 30; a malformed id (not `@scope/name`) rejects the whole parameter with 400, while an unknown or inaccessible id comes back under `unresolved_skills`. Requires `skills:read` like the catalogue; without it every requested id is reported unresolved.
+                 * @description Comma-separated `@scope/name` skill ids to resolve by exact id into `requested_skills`, unlisted ones included. At most 30 distinct ids; a malformed id or more than 30 is a 400, an unknown or unreadable id lands in `unresolved_skills`.
                  * @example @appstrate/copilot,@appstrate/web-search
                  */
                 skills?: string;
@@ -13440,7 +13367,7 @@ export interface operations {
                             /** @description Organization slug. */
                             slug?: string | null;
                         };
-                        /** @description The space this context was resolved in (`X-Space-Id`, the API key's space, or the org default). Every space-scoped operation that takes a `spaceId` path parameter — the activation door `POST /api/spaces/{spaceId}/packages` in particular — reads it from here. */
+                        /** @description The space this context resolved in (`X-Space-Id`, the API key's space, or the org default). Its `id` is the `spaceId` path parameter of space-scoped operations such as `POST /api/spaces/{spaceId}/packages`. */
                         space: {
                             /** @description Space id, e.g. "spc_abc123". */
                             id: string;
@@ -13467,7 +13394,7 @@ export interface operations {
                             /** @description AFPS §4.4 — tool(s) an agent inherits when it declares this integration without an `integrations_configuration.<id>.tools` selection. Absent or `[]` means an agent that declares this integration without its own selection ends up with nothing callable, which publish/import reject and the run aborts on — such an agent must select a tool explicitly. To use any other tool, inspect the full `tool_catalog` via GET /api/integrations/{packageId}. */
                             default_tools?: string[] | "*";
                         }[];
-                        /** @description Agents the caller can run in the current space (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the full list is reachable via the `listAgents` operation. Unlisted packages (`_meta["dev.appstrate/visibility"].level = "unlisted"`) are off this list and out of the total, and stay runnable by exact id. */
+                        /** @description Agents the caller can run in the current space (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the full list is reachable via the `listAgents` operation. Unlisted packages (`_meta["dev.appstrate/visibility"].level = "unlisted"`) are neither listed nor counted. */
                         agents: {
                             /** @description Invokable identifier, e.g. "@appstrate/triage". */
                             package_id: string;
@@ -13486,7 +13413,7 @@ export interface operations {
                         agents_truncated: boolean;
                         /** @description Total runnable agents before the cap. */
                         agents_total: number;
-                        /** @description Skills the caller could attach to an agent in the current space (capped). A catalogue read, not a runnable hint: only present when the caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the full list is reachable via the `listSkills` operation. Unlisted packages (`_meta["dev.appstrate/visibility"].level = "unlisted"`) are off this list and out of the total, and stay resolvable by exact id. */
+                        /** @description Skills the caller could attach to an agent in the current space (capped). A catalogue read, not a runnable hint: only present when the caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the full list is reachable via the `listSkills` operation. Unlisted packages (`_meta["dev.appstrate/visibility"].level = "unlisted"`) are neither listed nor counted. */
                         skills: {
                             /** @description Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills. */
                             package_id: string;
@@ -13505,7 +13432,7 @@ export interface operations {
                         skills_truncated: boolean;
                         /** @description Total active skills before the cap. */
                         skills_total: number;
-                        /** @description The skills named by the `skills` query parameter that resolved in this space, sorted by `package_id`. Unlike `skills` this is an exact-id read: it is neither capped nor filtered by visibility, so an `unlisted` skill appears here and not in the catalogue. Empty when the parameter is absent or the caller lacks `skills:read`. */
+                        /** @description Skills named by the `skills` query parameter that resolved in this space (unlisted included), sorted by `package_id`. Empty without the parameter or without `skills:read`. */
                         requested_skills: {
                             /** @description Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills. */
                             package_id: string;
@@ -13520,11 +13447,12 @@ export interface operations {
                             /** @enum {string} */
                             source: "system" | "local";
                         }[];
-                        /** @description Requested ids no skill answered — unknown, not active in this space, or refused for lack of `skills:read` — in request order. Never an error: a caller's stale pin is data, not a failure. */
+                        /** @description Requested ids that did not resolve (unknown, not active here, or no `skills:read`), in request order. */
                         unresolved_skills: string[];
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };

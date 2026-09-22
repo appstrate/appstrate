@@ -1,16 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * When the `/` popover may open. assistant-ui's default detection opens on ANY
- * word-initial `/`, and an open trigger swallows Enter even with zero matching
- * items — so `regarde /outputs` + Enter sends nothing and looks like a broken
- * composer. A `matcher` narrows DETECTION, not the item list.
- *
- * Detection mirrors the library default (`detectTrigger.js`): scan back from
- * the caret, stop at whitespace, accept a `/` that starts a word. The added
- * rule is the same SUBSTRING test the library's own item filter runs
- * (`matchesTriggerItemQuery`), so an open trigger always has rows behind it.
- */
+// An open `/` trigger swallows Enter even with no rows (`regarde /outputs` would
+// not send), so it opens only on queries some skill id contains — never on none.
 
 import type { Unstable_Mention, Unstable_TriggerMatch } from "@assistant-ui/react";
 
@@ -36,27 +27,19 @@ function detectWordInitialTrigger(
   return null;
 }
 
-/** `/copilot (@appstrate)` → `copilot`; the part a user is typing towards. */
-function labelNamePart(label: string): string {
-  const bare = label.startsWith("/") ? label.slice(1) : label;
-  const space = bare.indexOf(" ");
-  return space === -1 ? bare : bare.slice(0, space);
-}
-
-/** Would the popover have this item in it for `query`? */
+// A label's name part is a substring of its id, so the id alone decides.
 function skillMatchesQuery(item: Unstable_Mention, query: string): boolean {
-  const q = query.toLowerCase();
-  if (q === "") return true;
-  return labelNamePart(item.label).toLowerCase().includes(q) || item.id.toLowerCase().includes(q);
+  return item.id.toLowerCase().includes(query.toLowerCase());
 }
 
-/** A bare `/` always opens — it lists everything, loading catalogue included. */
+/** A bare `/` lists everything, so it opens whenever there is something to list. */
 export function createSkillTriggerMatcher(items: readonly Unstable_Mention[]) {
   return (
     text: string,
     triggerChar: string,
     cursorPosition: number,
   ): Unstable_TriggerMatch | null => {
+    if (items.length === 0) return null;
     const match = detectWordInitialTrigger(text, triggerChar, cursorPosition);
     if (match === null || match.query === "") return match;
     return items.some((item) => skillMatchesQuery(item, match.query)) ? match : null;

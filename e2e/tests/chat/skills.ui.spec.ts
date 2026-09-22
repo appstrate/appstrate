@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Skills in the chat, from the browser (docs/plans/chat-skills.md, phases 3-4).
- *
- * The picker writes the conversation's skill selection before any message is
- * sent — the server creates the session row on that write — and the `/`
- * popover inserts the exact directive the server parses back on every turn.
- * Route tests cover each half; what only a browser shows is that the two
- * surfaces read one cache entry and that the composer's own Enter-to-send is
- * not hijacked by the trigger.
+ * Skills in the chat, from the browser: the picker stores the selection before
+ * any message is sent, and the `/` popover inserts the directive the server
+ * parses. What only a browser shows is that both surfaces work on a
+ * conversation with no row yet, and that Enter-to-send is not hijacked.
  */
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { createSkill } from "../../helpers/seed.ts";
 
-const COMPOSER = "textarea[placeholder='Message Appstrate…']";
+interface SessionRow {
+  id: string;
+  skill_catalogue: boolean;
+  pinned_skills: string[];
+}
 
-test("pins a skill before the first message, then mentions it with /", async ({
+test("hides the catalogue and pins a skill before the first message, then mentions it", async ({
   authedPage: page,
   apiClient,
   browserCtx,
@@ -27,76 +27,57 @@ test("pins a skill before the first message, then mentions it with /", async ({
   const packageId = `${scope}/${name}`;
 
   await page.goto("/chat");
-  await expect(page.locator(COMPOSER)).toBeVisible();
+  const composer = page.getByTestId("chat-composer-input");
+  await expect(composer).toBeVisible();
 
-  // ── Picker: manual mode + one pin, on a conversation with no row yet ──────
-  await page.getByRole("button", { name: "Compétences", exact: true }).click();
-  const popover = page.getByRole("dialog", { name: "Compétences de la conversation" });
+  await page.getByTestId("skills-picker-trigger").click();
+  const popover = page.getByTestId("skills-picker-popover");
   await expect(popover).toBeVisible();
-  // `click` + `toBeChecked`, not `check()`: the state lands on the next render
-  // (optimistic cache patch), and `check()` reads it synchronously after the click.
-  const manual = popover.getByRole("radio", { name: "Manuelle" });
-  await manual.click();
-  await expect(manual).toBeChecked();
-  // By accessible name: the checkbox gets it from its `<label htmlFor>`, whose
-  // `id` is a slug of the package id — so this also proves the pairing survives.
-  const pin = popover.getByRole("checkbox", { name: `Test Skill ${name}` });
+  const catalogue = popover.getByTestId("skills-catalogue-toggle");
+  await expect(catalogue).toBeChecked();
+  await catalogue.click();
+  await expect(catalogue).not.toBeChecked();
+  const pin = popover.getByTestId(`skill-pin-${packageId}`);
   await pin.click();
   await expect(pin).toBeChecked();
-  await page.screenshot({ path: "test-results/chat-skills-picker.png" });
   await page.keyboard.press("Escape");
   await expect(popover).toBeHidden();
 
-  // The write created the session: the list carries the mode, the detail the pin.
+  // The PUTs run after the clicks, through a coalescer: poll until the row settles.
   await expect
     .poll(async () => {
       const res = await apiClient.get("/chat/sessions");
-      const body = (await res.json()) as { data: { id: string; skill_discovery: string }[] };
-      return body.data.map((s) => s.skill_discovery);
+      const body = (await res.json()) as { data: SessionRow[] };
+      return body.data.map((s) => ({
+        skill_catalogue: s.skill_catalogue,
+        pinned_skills: s.pinned_skills,
+      }));
     })
-    .toEqual(["manual"]);
-  const list = (await (await apiClient.get("/chat/sessions")).json()) as {
-    data: { id: string }[];
-  };
-  const detail = (await (await apiClient.get(`/chat/sessions/${list.data[0]!.id}`)).json()) as {
-    pinned_skills: string[];
-  };
-  expect(detail.pinned_skills).toEqual([packageId]);
+    .toEqual([{ skill_catalogue: false, pinned_skills: [packageId] }]);
 
-  // ── `/` mention: the popover lists the skill and inserts the directive ────
-  const composer = page.locator(COMPOSER);
   await composer.click();
   await composer.pressSequentially(`/${name.slice(0, 8)}`);
-  const row = page.getByRole("option", { name: new RegExp(`/${name}`) });
+  const row = page.getByTestId("skill-mention-option").filter({ hasText: `/${name}` });
   await expect(row).toBeVisible();
-  await page.screenshot({ path: "test-results/chat-skills-mention.png" });
   await page.keyboard.press("Enter");
   await expect(composer).toHaveValue(new RegExp(`:skill\\[/${name}\\]\\{name=${packageId}\\}`));
-  // The insertion closed the popover: no row survives the selection.
-  await expect(page.getByRole("option")).toHaveCount(0);
+  await expect(page.getByTestId("skill-mention-popover")).toHaveCount(0);
 });
 
 test("leaves a `/word` that matches no skill alone", async ({ authedPage: page }) => {
-  // The trigger's matcher, from the outside. An OPEN trigger swallows Enter
-  // even with zero matching items, so a popover that opened here would make
-  // `regarde /outputs` unsendable — the feature breaking a message that has
-  // nothing to do with skills.
+  // An OPEN trigger swallows Enter even with no rows, so it must not open here.
   await page.goto("/chat");
-  const composer = page.locator(COMPOSER);
+  const composer = page.getByTestId("chat-composer-input");
   await expect(composer).toBeVisible();
-
-  // The popover element itself, not its rows: with no matcher it OPENS on any
-  // word-initial `/` and renders its empty state, which has no `option` in it —
-  // so counting rows would pass either way.
-  const popover = page.locator('[aria-label="Compétences à charger"]');
+  const popover = page.getByTestId("skill-mention-popover");
 
   await composer.click();
   await composer.pressSequentially("regarde /outputs");
   await expect(popover).toHaveCount(0);
-  await expect(page.getByRole("option")).toHaveCount(0);
   await expect(composer).toHaveValue("regarde /outputs");
 
+  // Sent, not swallowed: the composer clears and the text reaches the thread.
   await page.keyboard.press("Enter");
-  // Still closed: Enter went to the composer, not to a trigger selection.
-  await expect(popover).toHaveCount(0);
+  await expect(composer).toHaveValue("");
+  await expect(page.getByText("regarde /outputs").first()).toBeVisible();
 });

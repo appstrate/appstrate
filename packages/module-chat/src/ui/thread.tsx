@@ -245,13 +245,8 @@ function Composer({ slot }: { slot?: React.ReactNode }) {
   // No focus ring on the box: the app's global `textarea:focus` ring is too
   // intense here. min-h-9 + px-0 override the global `textarea { min-h-80px }`
   // base rule (utilities beat the base layer) for a compact, Codex-like field.
-  //
-  // `Unstable_TriggerPopoverRoot` wraps the whole composer, not just the
-  // popover: it is what provides the composer-input plugin registry that
-  // `ComposerPrimitive.Input` (a plain textarea here) consults on keydown, so
-  // ↑/↓/Enter/Esc only reach the `/` popover when the Input is a descendant of
-  // it. It renders no DOM, so the layout is unchanged; `relative` on the box
-  // below is what the popover positions against.
+  // `Unstable_TriggerPopoverRoot` must wrap the Input too: without it, ↑/↓/Enter/Esc
+  // never reach the `/` popover. It renders no DOM; the popover anchors on `relative`.
   return (
     <ComposerPrimitive.Unstable_TriggerPopoverRoot>
       <ComposerPrimitive.Root className="bg-card relative flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
@@ -263,6 +258,7 @@ function Composer({ slot }: { slot?: React.ReactNode }) {
         <ComposerPrimitive.Input
           rows={1}
           autoFocus
+          data-testid="chat-composer-input"
           placeholder="Message Appstrate…"
           className="placeholder:text-muted-foreground max-h-40 min-h-9 w-full resize-none border-0 bg-transparent px-0 py-1 text-sm shadow-none outline-none focus:ring-0 focus-visible:ring-0 focus-visible:outline-none"
         />
@@ -363,12 +359,8 @@ function UserMessage() {
         </div>
       </MessagePrimitive.If>
       {/* The text bubble. Guarded on content so an attachment-only message (no
-          text part) doesn't paint an empty grey pill.
-
-          `Text` is overridden so a persisted `:skill[…]{name=…}` directive shows
-          as a chip instead of its raw syntax. The TEXT is what the server
-          re-resolves on every turn, so it is never rewritten here — only its
-          presentation. Still not markdown: the bubble shows what was typed. */}
+          text part) doesn't paint an empty grey pill. A `:skill[…]` directive
+          renders as a chip; the text itself, re-resolved each turn, is untouched. */}
       <MessagePrimitive.If hasContent>
         <div className="bg-muted text-foreground max-w-[80%] rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap">
           <MessagePrimitive.Parts

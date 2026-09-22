@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
+import { UNLISTED_MARKER } from "../visibility.ts";
 
 /**
  * User-scoped identity routes (`/api/me/*`).
@@ -13,11 +14,7 @@ import { STD_RESPONSE_HEADERS } from "../headers.ts";
  * The other routes in this namespace run inside org (or space) context.
  */
 
-/**
- * One skill hint in `GET /api/me/context`. Declared once because the catalogue
- * (`skills`) and the exact-id resolution (`requested_skills`) are the SAME
- * projection over the same rows — two spellings of it would let the two drift.
- */
+/** One skill hint in `GET /api/me/context`, shared by `skills` and `requested_skills`. */
 const skillHintSchema = {
   type: "object",
   required: [
@@ -474,14 +471,9 @@ export const mePaths = {
           in: "query",
           required: false,
           description:
-            "Comma-separated `@scope/name` skill ids to resolve by EXACT id, in addition to the " +
-            "capped `skills` catalogue. Unlike the catalogue this read ignores visibility, so an " +
-            '`unlisted` skill (`_meta["dev.appstrate/visibility"].level = "unlisted"`) resolves ' +
-            "here — visibility is discoverability, never authorization. Ids are deduped and " +
-            "capped at 30; a malformed id (not `@scope/name`) rejects the whole parameter with " +
-            "400, while an unknown or inaccessible id comes back under `unresolved_skills`. " +
-            "Requires `skills:read` like the catalogue; without it every requested id is " +
-            "reported unresolved.",
+            "Comma-separated `@scope/name` skill ids to resolve by exact id into " +
+            "`requested_skills`, unlisted ones included. At most 30 distinct ids; a malformed " +
+            "id or more than 30 is a 400, an unknown or unreadable id lands in `unresolved_skills`.",
           schema: { type: "string" },
           example: "@appstrate/copilot,@appstrate/web-search",
         },
@@ -538,10 +530,9 @@ export const mePaths = {
                   space: {
                     type: "object",
                     description:
-                      "The space this context was resolved in (`X-Space-Id`, the API key's " +
-                      "space, or the org default). Every space-scoped operation that takes a " +
-                      "`spaceId` path parameter — the activation door " +
-                      "`POST /api/spaces/{spaceId}/packages` in particular — reads it from here.",
+                      "The space this context resolved in (`X-Space-Id`, the API key's space, " +
+                      "or the org default). Its `id` is the `spaceId` path parameter of " +
+                      "space-scoped operations such as `POST /api/spaces/{spaceId}/packages`.",
                     required: ["id", "name"],
                     properties: {
                       id: { type: "string", description: 'Space id, e.g. "spc_abc123".' },
@@ -606,9 +597,8 @@ export const mePaths = {
                       "Agents the caller can run in the current space (capped). Only " +
                       "present when the caller holds the `agents:run` permission; empty otherwise. " +
                       "When `agents_truncated` is true, the full list is reachable via the " +
-                      "`listAgents` operation. Unlisted packages " +
-                      '(`_meta["dev.appstrate/visibility"].level = "unlisted"`) are off this list ' +
-                      "and out of the total, and stay runnable by exact id.",
+                      "`listAgents` operation. " +
+                      `Unlisted packages (${UNLISTED_MARKER}) are neither listed nor counted.`,
                     items: {
                       type: "object",
                       required: [
@@ -667,9 +657,8 @@ export const mePaths = {
                       "(capped). A catalogue read, not a runnable hint: only present when the " +
                       "caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent " +
                       "manifest's `dependencies.skills`. When `skills_truncated` is true, the " +
-                      "full list is reachable via the `listSkills` operation. Unlisted packages " +
-                      '(`_meta["dev.appstrate/visibility"].level = "unlisted"`) are off this list ' +
-                      "and out of the total, and stay resolvable by exact id.",
+                      "full list is reachable via the `listSkills` operation. " +
+                      `Unlisted packages (${UNLISTED_MARKER}) are neither listed nor counted.`,
                     items: skillHintSchema,
                   },
                   skills_truncated: {
@@ -684,19 +673,16 @@ export const mePaths = {
                   requested_skills: {
                     type: "array",
                     description:
-                      "The skills named by the `skills` query parameter that resolved in this " +
-                      "space, sorted by `package_id`. Unlike `skills` this is an exact-id read: " +
-                      "it is neither capped nor filtered by visibility, so an `unlisted` skill " +
-                      "appears here and not in the catalogue. Empty when the parameter is absent " +
-                      "or the caller lacks `skills:read`.",
+                      "Skills named by the `skills` query parameter that resolved in this space " +
+                      "(unlisted included), sorted by `package_id`. Empty without the parameter " +
+                      "or without `skills:read`.",
                     items: skillHintSchema,
                   },
                   unresolved_skills: {
                     type: "array",
                     description:
-                      "Requested ids no skill answered — unknown, not active in this space, or " +
-                      "refused for lack of `skills:read` — in request order. Never an error: a " +
-                      "caller's stale pin is data, not a failure.",
+                      "Requested ids that did not resolve (unknown, not active here, or no " +
+                      "`skills:read`), in request order.",
                     items: { type: "string" },
                   },
                 },
@@ -760,6 +746,7 @@ export const mePaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
       },

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+import { UNLISTED_OFF_CATALOGUE } from "../visibility.ts";
 
 /**
  * Shared tail of the four per-type list descriptions (skills / agents /
@@ -13,7 +14,7 @@ const listPackagesSharedDescription =
   "the space library's subject (`GET /api/spaces/{spaceId}/library`), which names " +
   "each placement's origin and state and carries the switch that activates it. For " +
   "the organization-wide map of placements, use `GET /api/library`." +
-  ' Unlisted packages (`_meta["dev.appstrate/visibility"].level = "unlisted"`) are not on it and stay reachable by exact id.';
+  UNLISTED_OFF_CATALOGUE;
 
 /**
  * The `?version` selector of the three generic package detail routes (skill /

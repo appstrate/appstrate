@@ -4,7 +4,7 @@
   "type": "skill",
   "schema_version": "0.1",
   "display_name": "Recherche web (run inline)",
-  "description": "Méthode pour chercher ou lire le web, que le chat ne peut faire lui-même : vérifier l'accès web réellement disponible, puis lancer UN run inline qui embarque l'intégration web, avec l'effort borné et les sources citées. Charge ce skill dès qu'une demande suppose une recherche web, la lecture d'une ou plusieurs URLs, ou une veille sur des sources externes. Seul @appstrate/firecrawl est livré avec la plateforme ; quand aucun accès n'existe, le skill dit de l'annoncer plutôt que d'inventer.",
+  "description": "Méthode pour chercher ou lire le web, que le chat ne peut faire lui-même : vérifier l'accès web réellement disponible, puis lancer UN run inline qui embarque l'intégration web, avec l'effort borné et les sources citées. Charge ce skill dès qu'une demande suppose une recherche web, la lecture d'une ou plusieurs URLs, ou une veille sur des sources externes. Seul @appstrate/firecrawl est livré avec la plateforme ; quand aucun accès n'existe, annonce-le plutôt que d'inventer.",
   "license": "Apache-2.0",
   "_meta": {
     "dev.appstrate/visibility": { "level": "unlisted" }

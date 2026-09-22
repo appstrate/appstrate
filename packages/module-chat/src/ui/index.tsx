@@ -81,6 +81,7 @@ import { getAgentAuthoringEnabled } from "./agent-authoring-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
 import { AgentAuthoringToggle } from "./agent-authoring-toggle.tsx";
 import { SkillsPicker } from "./skills-picker.tsx";
+import { DEFAULT_SKILL_SELECTION } from "../skills.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
 
@@ -283,9 +284,6 @@ export function ChatPage({
     () => (
       <div className="flex items-center gap-2">
         {canAuthorAgents ? <AgentAuthoringToggle /> : null}
-        {/* Reads its headers from context (the provider is above `Conversation`),
-            so the only new dependency here is the conversation it writes to. */}
-        <SkillsPicker sessionId={activeId} />
         <ModelSelect
           models={models}
           selectedId={selectedModel}
@@ -296,7 +294,7 @@ export function ChatPage({
         {composerActions}
       </div>
     ),
-    [canAuthorAgents, activeId, models, selectedModel, generation, composerActions],
+    [canAuthorAgents, models, selectedModel, generation, composerActions],
   );
 
   // The server's view of the ACTIVE conversation, reduced to two primitives so
@@ -410,6 +408,7 @@ const Conversation = memo(function Conversation({
   id,
   getHeaders,
   isPersisted,
+  composerSlot,
   ...rest
 }: ConversationProps) {
   // Freeze persistence at mount. The runtime key (`id`) is stable across the
@@ -432,7 +431,25 @@ const Conversation = memo(function Conversation({
   });
 
   // Stable identity: `ConversationInner` keys its store-attach effect on it.
-  const initialMessages = useMemo(() => history.data?.messages ?? [], [history.data]);
+  const initialMessages = useMemo(() => history.data?.messages ?? [], [history.data?.messages]);
+
+  // The picker lives here, under the `key={id}` remount, so its local selection
+  // is seeded once per conversation and never written back into this query.
+  // A failed read has no stored selection to seed it: its first click would PUT
+  // over the stored pins, so the composer goes without a picker instead.
+  const initialSkills = history.data?.skills ?? DEFAULT_SKILL_SELECTION;
+  const skillsReadable = !history.isError;
+  const slot = useMemo(
+    () => (
+      <div className="flex items-center gap-2">
+        {skillsReadable && (
+          <SkillsPicker sessionId={id} getHeaders={getHeaders} initialSelection={initialSkills} />
+        )}
+        {composerSlot}
+      </div>
+    ),
+    [id, getHeaders, initialSkills, skillsReadable, composerSlot],
+  );
 
   if (persistedAtMount && history.isPending) {
     return (
@@ -447,6 +464,7 @@ const Conversation = memo(function Conversation({
       getHeaders={getHeaders}
       isPersisted={persistedAtMount}
       initialMessages={initialMessages}
+      composerSlot={slot}
       {...rest}
     />
   );

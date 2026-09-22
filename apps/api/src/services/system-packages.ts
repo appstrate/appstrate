@@ -16,27 +16,6 @@ import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 
 export type { SystemPackageEntry };
 
-/**
- * A system package's id is already owned by an ORGANIZATION's own package.
- *
- * Its own class because the boot call site swallows a sync failure into a warn
- * — right, for a transient S3 or pool error, wrong for this one: the collision
- * cannot heal on the next boot, and the alternative to failing is a system
- * package that silently never ships. `lib/boot.ts` rethrows this one, and only
- * this one, which exits the process.
- */
-export class SystemPackageOwnershipError extends Error {
-  constructor(readonly packageIds: readonly string[]) {
-    super(
-      `System package id(s) already owned by an organization: ${[...packageIds].sort().join(", ")}. ` +
-        "A system package must never overwrite an organization's own package, so the sync refused to " +
-        "write. Rename the organization package (publish it under a different @scope/name id) and " +
-        "restart.",
-    );
-    this.name = "SystemPackageOwnershipError";
-  }
-}
-
 /** What one `syncSystemPackagesToDb` pass actually wrote. */
 interface SystemPackageSyncReport {
   /** `packages` rows inserted or updated. */
@@ -47,6 +26,8 @@ interface SystemPackageSyncReport {
   unchangedPackages: number;
   /** Versions already registered from byte-identical archives. */
   unchangedVersions: number;
+  /** System ids skipped because an organization already owns the row (sorted). */
+  ownershipConflicts: string[];
 }
 
 /** System packages dir: AFPS packages live alongside the API source. */
@@ -117,6 +98,18 @@ export function isSystemPackage(id: string): boolean {
 }
 
 /**
+ * Drop ids from the live registry (a fresh Map, never a mutation of the one
+ * installed). Called by the sync for an org-owned id: left in, the org's own
+ * package would read as system — refused by the update/delete/version routes,
+ * served the system manifest, authorized as system in bundles — so the org
+ * could not apply the rename the boot log asks for.
+ */
+function dropFromSystemRegistry(ids: ReadonlySet<string>): void {
+  systemPackages = new Map([...systemPackages].filter(([id]) => !ids.has(id)));
+  systemPackageVersions = systemPackageVersions.filter((entry) => !ids.has(entry.packageId));
+}
+
+/**
  * Test-only: install a registry and return the undo. `getTestApp()` skips
  * `boot()`, so the registry is empty under test and every boot-registry branch
  * (e.g. the mcp-server byte route's system short-circuit — the one caller
@@ -144,7 +137,8 @@ export function _setSystemPackagesForTesting(
  * - UPSERT one `packages` row per packageId at the canonical (highest semver) version
  * - Register every loaded version in `package_versions` (idempotent)
  * - Refuse-overwrite on integrity drift without a version bump (the safety gate)
- * - THROW when a system id is already owned by an organization (the other gate)
+ * - Skip (and log at error level) a system id already owned by an organization
+ *   (the other gate) — one tenant's package must never stop every org's boot
  *
  * Returns what it did. A boot over an unchanged package set must report zero
  * writes — that is the contract the content-addressed skip guards below exist
@@ -157,7 +151,13 @@ export async function syncSystemPackagesToDb(
   const canonicalPackages = canonical ?? getSystemPackages();
   const allVersions = versions ?? getAllSystemPackageVersions();
   if (canonicalPackages.size === 0) {
-    return { syncedPackages: 0, syncedVersions: 0, unchangedPackages: 0, unchangedVersions: 0 };
+    return {
+      syncedPackages: 0,
+      syncedVersions: 0,
+      unchangedPackages: 0,
+      unchangedVersions: 0,
+      ownershipConflicts: [],
+    };
   }
 
   let syncedPackages = 0;
@@ -165,7 +165,7 @@ export async function syncSystemPackagesToDb(
   let unchangedPackages = 0;
   let unchangedVersions = 0;
   /** Ids whose `packages` row belongs to an ORGANIZATION — see the UPSERT below. */
-  const ownershipConflicts: string[] = [];
+  const ownershipConflicts = new Set<string>();
 
   // One SHA-256 per loaded archive, shared by both passes below (the canonical
   // pass and the version pass hash the same `zipBuffer` for the canonical
@@ -217,7 +217,8 @@ export async function syncSystemPackagesToDb(
     // `draftManifest` / `draftContent` / `files` were all derived from the
     // exact same bytes already persisted — there is nothing to write, and
     // nothing to re-upload. The row's identity columns are compared too so a
-    // drifted `type` / `source` / `orgId` still heals in place. Without this,
+    // drifted `type` / `source` still heals in place (an org-owned row falls
+    // through to the UPSERT, which refuses it). Without this,
     // every boot re-ran 66 UPSERTs (plus an S3 re-upload) to write back
     // byte-identical values.
     //
@@ -241,20 +242,8 @@ export async function syncSystemPackagesToDb(
       return;
     }
 
-    // `setWhere: isNull(orgId)` is the OWNERSHIP GUARD, and it is the whole
-    // reason this write reads its `RETURNING`. `packages.id` is one global
-    // namespace shared by system and org packages, and nothing reserves a scope
-    // — so a system package shipped under an id an organization already
-    // published would, without this predicate, rewrite that org's row to
-    // `source: "system", org_id: null` and overwrite its content, silently, at
-    // boot. A SYSTEM row may be refreshed; an ORG row is never touched.
-    //
-    // An INSERT returns its row, a permitted UPDATE returns the updated row, and
-    // a conflict the predicate refused returns NOTHING — which is the only way
-    // this statement can write zero rows, so an empty result IS the collision.
-    // It is collected and thrown after the pass (`docs/NO_TRANSITIONAL_CODE.md`:
-    // fail loudly, never fall back), not swallowed into a warn — a boot that
-    // reports success while a system package is missing is the failure mode.
+    // `setWhere: isNull(orgId)`: never overwrite an organization's row; zero
+    // rows written = collision, logged and skipped (no upload, no version).
     const written = await db
       .insert(packages)
       .values({
@@ -283,7 +272,18 @@ export async function syncSystemPackagesToDb(
       .returning({ id: packages.id });
 
     if (written.length === 0) {
-      ownershipConflicts.push(id);
+      ownershipConflicts.add(id);
+      const [owner] = await db
+        .select({ orgId: packages.orgId })
+        .from(packages)
+        .where(eq(packages.id, id))
+        .limit(1);
+      logger.error(
+        "System package id is already owned by an organization — skipped, the " +
+          "system package is NOT installed. Rename the organization package " +
+          "(publish it under a different @scope/name id) and restart.",
+        { packageId: id, orgId: owner?.orgId ?? null },
+      );
       return;
     }
 
@@ -372,14 +372,12 @@ export async function syncSystemPackagesToDb(
     }),
   );
 
-  // Before the version pass, so a collision never registers a `package_versions`
-  // row under an id an organization owns. The message names every colliding id
-  // and the one fix an operator has: rename the ORG package (republish it under
-  // a different `@scope/name`) — the system id is a platform constant and
-  // cannot move. Boot fails; there is deliberately no degraded mode.
-  if (ownershipConflicts.length > 0) throw new SystemPackageOwnershipError(ownershipConflicts);
+  // Never register a version under an org-owned id, and on this deployment
+  // the id is simply not a system package.
+  if (ownershipConflicts.size > 0) dropFromSystemRegistry(ownershipConflicts);
+  const versionsToSync = allVersions.filter((entry) => !ownershipConflicts.has(entry.packageId));
 
-  await mapWithConcurrency(allVersions, SYNC_CONCURRENCY, (entry) =>
+  await mapWithConcurrency(versionsToSync, SYNC_CONCURRENCY, (entry) =>
     syncVersion(entry).catch((err) => {
       logger.warn("Failed to register system package version", {
         packageId: entry.packageId,
@@ -389,12 +387,20 @@ export async function syncSystemPackagesToDb(
     }),
   );
 
+  const conflicts = [...ownershipConflicts].sort();
   logger.info("System packages synced", {
     packages: syncedPackages,
     versions: syncedVersions,
     unchangedPackages,
     unchangedVersions,
+    ownershipConflicts: conflicts,
   });
 
-  return { syncedPackages, syncedVersions, unchangedPackages, unchangedVersions };
+  return {
+    syncedPackages,
+    syncedVersions,
+    unchangedPackages,
+    unchangedVersions,
+    ownershipConflicts: conflicts,
+  };
 }

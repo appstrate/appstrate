@@ -1,18 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The `/skill` mention contract, from both ends.
- *
- * The composer popover and the server's turn resolver never call each other:
- * they agree only on ONE string shape, `:skill[/name]{name=@scope/name}`,
- * WRITTEN by assistant-ui's default directive formatter and READ by
- * `parseSkillMentions` (`src/skill-mentions.ts`). This file is the one place
- * the two halves meet, so it runs the real formatter into the real parser.
- *
- * Two things can silently break the agreement — a label that happens to equal
- * the id (the formatter then OMITS `{name=…}` and the package id is lost), and
- * a library change to the syntax itself. Either one turns every mention into
- * prose in a running conversation with no error anywhere; both fail here.
+ * The `/skill` mention contract, from both ends: assistant-ui's real directive
+ * formatter into the server's real `parseSkillMentions`. A label equal to its
+ * id (the formatter then omits `{name=…}`) or a syntax change fails here.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -20,29 +11,33 @@ import { unstable_defaultDirectiveFormatter } from "@assistant-ui/react";
 import { parseSkillMentions } from "../src/skill-mentions.ts";
 import { skillMentionItems } from "../src/ui/skill-directive.ts";
 import { createSkillTriggerMatcher } from "../src/ui/skill-trigger.ts";
-import type { ChatSkillEntry } from "../src/ui/chat-skills.ts";
+import type { SkillHint } from "../src/skills.ts";
 
-function entry(packageId: string, over: Partial<ChatSkillEntry> = {}): ChatSkillEntry {
+function entry(packageId: string, over: Partial<SkillHint> = {}): SkillHint {
   return {
     package_id: packageId,
     display_name: packageId,
     description: `description of ${packageId}`,
     version: "1.0.0",
-    source: "space",
     ...over,
   };
 }
 
 describe("skillMentionItems", () => {
   it("labels a skill with a slash and its name part, keeping the id intact", () => {
-    expect(skillMentionItems([entry("@appstrate/copilot", { source: "platform" })])).toEqual([
+    expect(skillMentionItems([entry("@appstrate/copilot")])).toEqual([
       {
         id: "@appstrate/copilot",
         type: "skill",
         label: "/copilot",
         description: "description of @appstrate/copilot",
-        metadata: { source: "platform" },
       },
+    ]);
+  });
+
+  it("omits the description of a skill that declares none", () => {
+    expect(skillMentionItems([entry("@acme/bare", { description: null })])).toEqual([
+      { id: "@acme/bare", type: "skill", label: "/bare" },
     ]);
   });
 
@@ -68,14 +63,6 @@ describe("skillMentionItems", () => {
     ]);
   });
 
-  it("carries the source through so the popover can flag platform skills", () => {
-    const items = skillMentionItems([
-      entry("@appstrate/copilot", { source: "platform" }),
-      entry("@acme/notes", { source: "space" }),
-    ]);
-    expect(items.map((i) => i.metadata)).toEqual([{ source: "platform" }, { source: "space" }]);
-  });
-
   it("preserves the catalogue's order", () => {
     const ids = ["@z/one", "@a/two", "@m/three"];
     expect(skillMentionItems(ids.map((id) => entry(id))).map((i) => i.id)).toEqual(ids);
@@ -84,7 +71,7 @@ describe("skillMentionItems", () => {
 
 describe("directive round-trip", () => {
   it("serialises a mention item to the exact string the server parses", () => {
-    const [item] = skillMentionItems([entry("@appstrate/copilot", { source: "platform" })]);
+    const [item] = skillMentionItems([entry("@appstrate/copilot")]);
     expect(unstable_defaultDirectiveFormatter.serialize(item!)).toBe(
       ":skill[/copilot]{name=@appstrate/copilot}",
     );
@@ -116,20 +103,9 @@ describe("directive round-trip", () => {
   });
 });
 
-/**
- * When the `/` popover may open at all.
- *
- * The composer's Enter is swallowed by an OPEN trigger even when it matches
- * nothing, so `regarde /outputs` + Enter would send no message — the feature
- * breaking a composer that has nothing to do with skills. The matcher is the
- * fix: it narrows DETECTION, not the item list, so an unmatchable `/word` never
- * opens the trigger and Enter stays the composer's own send.
- */
+// An open trigger swallows Enter even with no rows: `/word` matching nothing must not open it.
 describe("createSkillTriggerMatcher", () => {
-  const items = skillMentionItems([
-    entry("@appstrate/copilot", { source: "platform" }),
-    entry("@acme/web-search"),
-  ]);
+  const items = skillMentionItems([entry("@appstrate/copilot"), entry("@acme/web-search")]);
   const matcher = createSkillTriggerMatcher(items);
   const at = (text: string) => matcher(text, "/", text.length);
 
@@ -145,8 +121,7 @@ describe("createSkillTriggerMatcher", () => {
   });
 
   it("opens on a substring, like the item filter the popover then runs", () => {
-    // `/search` would list `/web-search`: a matcher stricter than
-    // `matchesTriggerItemQuery` hides rows the library was ready to show.
+    // `/search` lists `/web-search`: a stricter matcher would hide those rows.
     expect(at("/search")?.query).toBe("search");
     expect(at("/SEARCH")?.query).toBe("SEARCH");
     expect(at("/pilot")?.query).toBe("pilot");
@@ -165,9 +140,11 @@ describe("createSkillTriggerMatcher", () => {
     expect(at("src/copilot")).toBeNull();
   });
 
-  it("never opens on a query with an empty catalogue, but still opens on a bare `/`", () => {
+  it("never opens with an empty catalogue, not even on a bare `/`", () => {
+    // A runner's 403 reads as `[]`: an open popover there would only swallow Enter.
     const empty = createSkillTriggerMatcher([]);
-    expect(empty("/", "/", 1)).toEqual({ query: "", offset: 0, endOffset: 1 });
+    expect(empty("/", "/", 1)).toBeNull();
+    expect(empty("regarde /", "/", 9)).toBeNull();
     expect(empty("/cop", "/", 4)).toBeNull();
   });
 });

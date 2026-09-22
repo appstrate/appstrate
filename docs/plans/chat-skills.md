@@ -1,255 +1,137 @@
 # Skills in the chat
 
-Supersedes PR #851, #1126 and #1165 and implements issue #1309. One mechanism,
-four sources, delivered in four phases (one commit each).
+Implements issue #1309 (replaces the earlier attempts #851, #1126 and #1165).
 
 ## Problem
 
-The chat can _name_ skills but never _use_ one. `packages/module-chat/src/prompt.ts`
-renders a 15-entry catalogue titled "Skills you can attach to an agent"; the
-SKILL.md body is never read. The chat's Pi session is deliberately resource-free
-(`pi-chat/resource-loader.ts`: `noSkills`, no package discovery, no builtin
-tools, cwd `/tmp`), so Pi's native skill directory cannot be used. Nothing
-ships as a system skill today, and there is no way to hide a package from the
-catalogue.
+The chat could _name_ skills but never _use_ one, and its Pi session is
+deliberately resource-free (`pi-chat/resource-loader.ts`: `noSkills`), so Pi's
+native skill directory is not an option. Nothing could hide a package from a
+catalogue either.
 
-## Design
+## Model
 
 ```
-effective skills(turn) =
-    platform defaults      (module-chat constant, system packages, unlisted)
-  ∪ pinned on the session  (chat_session_skills)
-  ∪ mentioned in a message (`/skill` directive in the user text)
-  (+ the space catalogue when discovery is `auto`)
+skills indexed for a turn =
+    platform defaults            (module-chat constant, always)
+  ∪ pinned on the session        (chat_sessions.pinned_skills)
+  ∪ the space catalogue          (when chat_sessions.skill_catalogue)
+skills loaded for a turn  = `/skill` mentions in the user messages
 ```
 
-Two levels of loading, as in the Agent Skills spec, Claude Code and Codex:
+A caller without `skills:read` gets no skills index at all, platform defaults
+included — `getSkill` would refuse every body anyway.
 
-- **Index** — name + description in the system prompt, deterministic order.
-  Used for platform defaults, pinned skills and the catalogue. The body is
-  loaded on demand by the model through `invoke_operation` → `getSkill`
-  (scope/name path params, no version selector: the platform's single
-  definition-read rule applies — the author's draft when writable, else the
+Two levels of loading, as in the Agent Skills spec:
+
+- **Index** — one line per skill (id, version, label, description) in the
+  `## Skills` section of the system prompt, deterministic order. The model
+  loads a body on demand through `invoke_operation` → `getSkill`, which applies
+  the platform's single definition-read rule (the draft when writable, else the
   latest published version).
-- **Direct load** — the SKILL.md body enters the _user turn text_, never the
-  system prompt, so the cached prefix survives. Used for `/skill` mentions.
-  Mentions are re-resolved on every turn from the persisted directive, so a
-  loaded body stays in the conversation history (Claude Code semantics); a
-  second mention of an already-loaded skill yields a one-line
-  "already loaded" note instead of a second copy.
+- **Direct load** — a `/skill` mention puts the body in the _user turn text_,
+  never in the system prompt.
 
-Prompt cache: the system prompt is ONE `cache_control` block (`prompt.ts`).
-Everything the resolver renders there must be byte-identical across turns for
-the same session state: sorted by package id, no clocks, no per-turn counters.
-Changing pins or discovery is an explicit user act and may miss the cache once.
+The system prompt is ONE `cache_control` block: what renders there is
+byte-identical across turns for the same session state (sorted, no clocks, no
+counters); changing pins or the catalogue switch may miss the cache once.
 
-Visibility (`unlisted`) is discoverability only, never authorization. Access is
-always re-checked at turn time against `skills:read` and package accessibility;
-an inaccessible pinned skill is skipped with one deterministic notice line.
+Trust: a body is content the caller can already read, injected as user-turn
+text; the `[Skill … loaded]` marker is a legibility aid, not a fence, and a
+pasted directive resolves with the caller's own permissions.
 
-Discovery mode (per session, persisted, default `auto`):
+## `unlisted` visibility
 
-| mode        | index                         | model guidance                                     |
-| ----------- | ----------------------------- | -------------------------------------------------- |
-| `auto`      | defaults + pinned + catalogue | load when relevant; `listSkills` for the long tail |
-| `on_demand` | defaults + pinned             | no catalogue; call `listSkills` only when asked    |
-| `manual`    | pinned only                   | load nothing the user did not pin or mention       |
+`_meta["dev.appstrate/visibility"].level = "unlisted"` (AFPS vendor extension).
+One SQL predicate, `listedFilter()` (`apps/api/src/lib/package-helpers.ts`),
+narrows the catalogue listings — in SQL, so caps and totals stay honest — at
+four sites: `listOrgItems` (`services/package-items/crud.ts`),
+`listActivePackageHints` and `listActivePackages` (`services/space-packages.ts`)
+and `listIntegrations` (`services/integration-service.ts`).
 
-This is a context-budget control, not a security boundary: `invoke_operation`
-stays generic and RBAC-gated.
+- Not the library (`services/package-library.ts`), the management map: hiding
+  an org's unlisted package there would leave it on no page at all.
+- Exact-id reads (`getSkill`, `getAgent`, dependency and version resolution)
+  are untouched. Visibility is discoverability, never authorization.
+- Covered by integration tests on the listings, not by a predicate unit test.
 
-Trust model. A skill body is org-authored content the caller may already read
-(`skills:read`, re-checked at turn time), injected as USER-TURN text — the same
-trust a run already extends to everything under `dependencies.skills`. The
-`[Skill … loaded]` marker is a legibility affordance, not a security fence: a
-user can type any instruction into their own chat, so the marker claims nothing
-the surrounding text could not. And a directive pasted from elsewhere is not an
-escalation — it names an id, and the loader resolves it with the caller's own
-permissions, so it loads only what that caller may read, or nothing.
+## Caller context
 
-Decisions taken (with alternatives rejected):
+`GET /api/me/context?skills=<comma-separated ids>` resolves the named skills by
+exact id for the caller in the current space, unlisted included:
+`requested_skills` (sorted) and `unresolved_skills` (unknown, inactive or out of
+reach); a malformed id or more than 30 ids is a 400. One round trip.
 
-- No `_meta` "assistant skill" marker (#1165): a platform default is a constant
-  list in module-chat; the package does not describe its consumer.
-- No body-in-system-prompt mode (Cursor "Always"): costs the body every turn
-  and busts the single cache block. Pin + mention once gives the same result.
-- Catalogue description = `manifest.description` (what the hint listing already
-  reads); the SKILL.md frontmatter description addresses the run-time agent.
-- Ordering of the catalogue: pinned/defaults are outside the cap; the cap
-  itself stays 15 in `packageListingOrder()` order. No recency ranking — it
-  would reorder the index between turns.
-- Mentions use `/` (Claude Code convention); `@` is reserved for entities and
-  collides with `@scope/name` ids.
-- Mentioned skills are NOT auto-pinned and pinned skills are NOT propagated to
-  inline sub-agents; the model sees them in its index and attaches them when
-  relevant.
+## Platform default skills
 
-## Phase 1 — `unlisted` visibility
+`@appstrate/copilot`, `@appstrate/web-search` and `@appstrate/connector-choice`
+are a constant in module-chat (`src/skills.ts`), shipped as system packages
+(`scripts/system-packages/skill-*-1.0.0/`) marked unlisted. They are always
+indexed, whatever the session state, and are offered neither in the picker nor
+in the `/` popover. A default that does not resolve is an operator warning
+(logged once per process), never a prompt line. These three skills are written
+for the chat assistant — they read its `## Your context` block — which is why
+they are unlisted platform defaults and not agent dependencies. Their bodies
+carry only what the persona (`prompt.ts`) and the MCP server instructions
+(`modules/mcp/router.ts`) do not already say.
 
-`_meta["dev.appstrate/visibility"] = { "level": "unlisted" }` (AFPS §10.1
-vendor extension; `_meta` already validated and preserved by core).
+Boot: the system-package sync upserts with `setWhere: isNull(orgId)` — it
+refuses to overwrite an organization-owned row under the same id. The collision
+is logged at error level (id, owning org, the fix: rename the org package),
+reported in `ownershipConflicts`, and that system package is skipped — no row
+write, no version registered, and the id is dropped from the system registry,
+so the org keeps full control of its package; the boot continues. Pre-deploy check, on prod:
+`SELECT id, org_id FROM packages WHERE id IN ('@appstrate/copilot', '@appstrate/web-search', '@appstrate/connector-choice');`
+— any row with a non-null `org_id` must be renamed first.
 
-- One SQL predicate `listedFilter()` next to `orgOrSystemFilter` /
-  `notEphemeralFilter` (`apps/api/src/services/package-filters.ts` or wherever
-  those live): `draft_manifest #>> '{_meta,dev.appstrate/visibility,level}' IS DISTINCT FROM 'unlisted'`.
-  Applied in every listing query that feeds a CATALOGUE, and there are two:
-  `listOrgItems` (`package-items/crud.ts`, the per-type index pages) and
-  `listActivePackageHints` (`space-packages.ts`, the caller-context hints). In
-  SQL, not in JS, so the hint cap and `total` stay honest.
-- NOT in `getPackageLibrary` (`package-library.ts`). The library is the
-  placement/management map — owner/admin only, one row per package with where it
-  sits and whether the space runs it — so hiding a package there would leave an
-  org's own unlisted package on no listing at all, with nothing to place,
-  activate or delete it from.
-- A TS twin `isUnlisted(manifest)` in `apps/api/src/lib/package-visibility.ts`
-  only if a JS-side reader needs it; otherwise do not add it.
-- Exact-id reads (`getSkill`, `getAgent`, dependency resolution, version
-  resolution) are untouched.
-- Tests: unit for the predicate; integration proving an unlisted skill is
-  absent from `GET /api/packages/skills` and `/api/me/context` `skills`, PRESENT
-  on `GET /api/library`, and readable by
-  `GET /api/packages/skills/{scope}/{name}`.
+## Per-conversation choice
 
-## Phase 2 — resolver, index, loading, platform default skills
+Migration `0069` adds two columns to `chat_sessions`:
 
-Server (apps/api):
+- `skill_catalogue boolean NOT NULL DEFAULT true` — whether the space
+  catalogue is indexed;
+- `pinned_skills text[] NOT NULL DEFAULT '{}'` — sorted, deduplicated, at most
+  20, no FK. A pin that no longer resolves renders one notice line, and still
+  shows in the picker so it can be removed.
 
-- `GET /api/me/context?skills=<comma-separated ids>` resolves the named skills
-  by exact id for the caller in the current space (system packages and any
-  package `activePackagesFilter` accepts, listed or not; `skills:read`
-  required, else empty). Response gains `requested_skills: [{package_id,
-display_name, description, version, source}]` (sorted by package_id) and
-  `unresolved_skills: string[]`. Unknown/inaccessible ids land in
-  `unresolved_skills`, never 4xx. OpenAPI + generated types updated.
+Rejected: a `chat_session_skills` table (a replace-on-write set read with the
+session row needs none); a three-mode enum ("pins only" removed 3 index lines).
 
-Module-chat:
+`PUT /api/chat/sessions/{id}/skills` `{ skill_catalogue, pinned_skills }` → 204;
+it creates the row for a client-minted id, as the first turn does — so a picker
+write on a fresh conversation makes it appear in the sidebar with no messages —
+and it never bumps `updatedAt`. Every session
+DTO carries both fields. There is no chat-specific skill listing: the picker
+and the `/` popover read `GET /api/packages/skills`.
 
-- `src/skills.ts`: `PLATFORM_DEFAULT_SKILLS` (`@appstrate/copilot`,
-  `@appstrate/web-search`, `@appstrate/connector-choice`), the
-  `SkillDiscovery` enum, and a pure `resolveChatSkills({ discovery, pinned,
-defaults, requested, unresolved, catalogue })` → `{ indexed, notices,
-catalogue }` with deterministic ordering. Unit-tested.
-- `buildCallerContextBlock` passes `skills=defaults ∪ pinned` on the dispatch
-  (phase 2 has no pins yet: defaults only, discovery `auto`).
-- `formatCallerContext` renders `## Skills` with one entry per indexed skill
-  (`- \`@scope/name\` (v1.2.0) — Display name: description`), then the
-catalogue block when discovery is `auto`, then notices.
-- `buildSystemPrompt` gains the loading rules: load before acting when a skill
-  clearly matches, one at a time, via `invoke_operation` `getSkill` with
-  `scope` / `name` (keep the `@`); do not reload a skill whose body is already
-  in the conversation; when authoring an agent, attach relevant skills under
-  `dependencies.skills` (existing sentence, kept). The "attach to an agent"
-  wording is author-gated as today; the load rules are not.
-- Byte-identical rendering across turns for the same inputs: test with the
-  existing `opts.now` seam pattern (`caller-context.test.ts`).
+UI: a picker in the composer (catalogue switch + one pin checkbox per skill).
+The selection lives in local state seeded from the session detail; writes are
+coalesced (one in flight, the newest wins) and reverted on failure.
 
-System skills (`scripts/system-packages/skill-<name>-1.0.0/`, built into
-`system-packages/*.afps` by `bun run scripts/build-system-packages.ts`; the
-`--check` drift gate runs in `bun run check`):
+## `/skill` mention
 
-- `@appstrate/copilot` — agent-creation copilot (interview → propose →
-  assemble). `@appstrate/web-search` — search/read the web through an inline
-  run. `@appstrate/connector-choice` — pick the right connector variant.
-- Every instruction MUST match the current platform: `run_and_wait`
-  (`kind:"inline"` / `kind:"agent"`), `appfile://` + `context_files`,
-  `publish_file`, `outputs/`, `invoke_operation`/`describe_operation`. No
-  `wait_for_run`, no `POST /api/runs/inline`, no `report`, no
-  `document://`, no package that does not ship (only `@appstrate/firecrawl`
-  ships for web access). Read `packages/module-chat/src/prompt.ts` and
-  `apps/api/src/modules/mcp/router.ts` first.
-- `manifest.json`: `type: "skill"`, `schema_version` as other system packages,
-  `display_name`, `description` (≤ 1024 chars, written for the chat: what it
-  does AND when to load it), `license: "Apache-2.0"`, `_meta` unlisted.
-- `SKILL.md` frontmatter: `name`, `description` — QUOTED YAML strings (prod
-  has 17 skills with unparseable frontmatter from bare colons). Body ≤ 300
-  lines, French like the existing content, no personal instance references.
-- Conformance: `bun test packages/runner-pi/test/skill-frontmatter-parity.test.ts`
-  and whatever gate `#1252` added must pass on the new archives.
-- PRE-DEPLOY CHECK (these are the first system packages under generic ids, and
-  nothing reserves a scope): run
-  `SELECT id, org_id FROM packages WHERE id IN ('@appstrate/copilot', '@appstrate/web-search', '@appstrate/connector-choice');`
-  on prod first. Any row with a non-null `org_id` must be renamed before the
-  deploy — the boot sync refuses to overwrite it and fails the boot naming the id.
+The `/` popover opens only when the catalogue has at least one skill matching
+what follows the `/` (a bare `/` opens it only when the catalogue is non-empty). It
+inserts the assistant-ui default directive `:skill[/name]{name=@scope/name}`,
+persisted raw in the user message (audit trail) and rendered as a chip.
 
-## Phase 3 — pins, discovery mode, picker
+Every turn, module-chat parses the directives across all user messages and
+re-reads the bodies through the in-process `getSkill` (the route re-checks
+`skills:read`). Each directive is projected into the user turn text: the first
+occurrence of an id becomes the body (capped at 32 KiB), later ones a
+back-reference, a failure a one-line reason. At most 10 distinct skills are
+mentioned per conversation.
 
-Schema (migration `0069`, hand-written SQL + snapshot + journal like 0067/0068;
-`verify:no-migration-dml` must pass):
+Accepted trade-off: bodies are re-read, not frozen, so an edited or revoked
+skill changes a history block that was already answered.
 
-- `chat_sessions.skill_discovery text NOT NULL DEFAULT 'auto'` + CHECK in
-  (`auto`, `on_demand`, `manual`).
-- `chat_session_skills (session_id text NOT NULL REFERENCES chat_sessions ON DELETE CASCADE, package_id text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (session_id, package_id))`.
-  `package_id` is the `@scope/name` id (same as `packages.id`); no FK, a
-  deleted package is an unresolved pin skipped at turn time.
+## Out of scope
 
-Routes (module-chat `routes.ts`, all `chat:write` / `chat:read`):
-
-- `GET /api/chat/skills` → `{ skills: [{package_id, display_name, description,
-version, source: "platform" | "space"}] }`: the platform defaults resolved
-  through `/api/me/context?skills=` plus the space catalogue
-  (`GET /api/packages/skills`, dispatched in-process, first 100). One list
-  for the picker and the `/` popover.
-- `PUT /api/chat/sessions/:id/skills` body `{ skill_discovery, pinned_skills:
-string[] }` (Zod: enum + array of `@scope/name`, max 20, deduped). Calls
-  `ensureSession` first (a fresh client-minted id has no row yet; the write
-  creates it exactly like the first turn does), then replaces the pin set
-  and the mode in one transaction, `notifySessionUpdate`, 204.
-- `toSessionDto` gains `skill_discovery` and `pinned_skills` (sorted). The
-  list route may leave `pinned_skills` out; the detail route includes it.
-- `chat-stream.ts`: read `skill_discovery` + pins from the session row (the
-  `ensureSession` round trip already returns the row — extend it rather than
-  add a query), pass them to the resolver. Turn body gains nothing.
-
-UI (module-chat `ui/`):
-
-- `skills-picker.tsx` in `composerSlot` next to `ModelSelect`: a button with
-  the pinned count; popover with the discovery mode (3 options, one line of
-  hint each) and the skill list from `GET /api/chat/skills` with a pin
-  checkbox per row. Writes go through `PUT …/skills` with optimistic React
-  Query update; the session query key is invalidated.
-- i18n keys in `apps/web/src/locales/{fr,en}/chat.json` (flat dotted keys),
-  `t` from `useChatHost()`.
-- Follow `agent-authoring-toggle.tsx` / `model-select.tsx` for look and feel.
-
-## Phase 4 — `/skill` mention
-
-Directive syntax in the user text: the assistant-ui default formatter
-(`unstable_defaultDirectiveFormatter`, `@assistant-ui/core`), one directive
-per mention: `:skill[/name]{name=@scope/name}`. The label is what the chip
-shows; `name` carries the package id. No custom formatter. The server regex
-is strict (type `skill`, id `@[a-z0-9-]+/[a-z0-9-]+`); anything else stays
-prose.
-
-Server (module-chat):
-
-- `src/skill-mentions.ts`: `parseSkillMentions(text)` and
-  `messagesWithSkillsAsText(messages, bodies)` mirroring `attachments.ts`:
-  replaces each directive with `[Skill @scope/name (v…) loaded]\n<body>` the
-  first time an id appears in the history, and `[Skill @scope/name already
-loaded above]` afterwards. Unresolved → `[Skill @scope/name could not be
-loaded: <reason>]`.
-- Resolution: the union of mentioned ids across ALL user messages, fetched
-  through in-process dispatch of `getSkill` in parallel with phase B of the
-  preamble (`chat-stream.ts`), `skills:read` re-checked by the route itself.
-  Body cap 32 KiB per skill (truncate with a marker). Applied inside
-  `buildStructuredPiTurn` next to `messagesWithAttachmentsAsText`.
-- The persisted user message keeps the raw directive text (audit trail).
-
-UI:
-
-- `ComposerPrimitive.Unstable_TriggerPopoverRoot` + `Unstable_TriggerPopover`
-  char `/` with `unstable_useMentionAdapter({ items })` over
-  `GET /api/chat/skills` (shared hook with the picker), `.Directive` with the
-  default formatter. Wrap the `unstable_*` API in ONE component
-  (`skill-mention.tsx`) so a library change touches one file.
-- User bubble: render `:skill[…]{…}` directives as chips (parse in
-  `thread.tsx` `UserMessage`, reuse the parser from `skill-mentions.ts`).
-
-## Out of scope (deliberately)
-
-- Per-space default skills (inherit into new sessions) — the resolver's
-  `defaults` input is where they would plug in.
-- Exposing platform defaults to external MCP clients through `get_me`.
+- Per-space default skills inherited by new sessions.
+- Exposing the platform defaults to external MCP clients through `get_me`.
 - A dedicated `load_skill` MCP tool — measure `getSkill` first.
-- `resolved_skill_versions` on runs and `dependency_overrides` (#1165) —
-  separate PRs.
+- `resolved_skill_versions` on runs and `dependency_overrides` (#1165).
+- Scope reservation (follow-up): package creation does not reserve the org
+  scope — the JSON create route accepts any `@scope`, so an organization can
+  hold an `@appstrate/…` id. The boot sync only contains it (logs, skips the
+  system package, keeps booting).

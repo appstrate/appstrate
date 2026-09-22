@@ -1,51 +1,39 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `/skill` mentions — the DIRECT-LOAD half of the chat's skill mechanism.
- *
- * The composer writes a mention as one assistant-ui directive
- * (`unstable_defaultDirectiveFormatter`, `@assistant-ui/core`):
- *
- *     :skill[/copilot]{name=@appstrate/copilot}
- *
- * The label is what the chip shows; `name` carries the package id. That raw
- * text is what gets PERSISTED — the message is never rewritten, so the
- * transcript records what was asked, not what was resolved.
- *
- * The body enters the USER TURN TEXT, never the system prompt: the prompt is
- * one `cache_control` block (`prompt.ts`) and a 32 KiB body there would bust
- * the cached prefix on the mention turn and on every turn after it.
- *
- * So the projection below runs on EVERY turn, over the whole history, and is
- * pure GIVEN `(messages, loaded)`. The LOADER is what may change between turns:
- * bodies are re-read by design, so a mention follows the skill's current
- * definition and a revoked skill stops loading.
+ * `/skill` mentions. Directive `:skill[label]{name=@scope/name}` persisted raw;
+ * the body is projected into the turn text on every turn (cache-safe). Bodies
+ * are re-read every turn, so an edited or revoked skill changes a block of
+ * history that was already answered — accepted, because the persisted text must
+ * stay the directive. The UI bundles this file: runtime imports stay browser-safe.
  */
 
 import type { UIMessage } from "ai";
+import type { Logger } from "@appstrate/core/logger";
+import { encodePackageIdPath } from "@appstrate/core/naming";
 import { scopedNameRegex } from "@appstrate/core/validation";
+import type { ChatPlatformDeps } from "./platform-services.ts";
 
-/**
- * One skill body, capped. 32 KiB is ~8k tokens — a generous SKILL.md, and far
- * enough below a turn's context that a pathological skill cannot eat the
- * conversation. Applied here rather than in the loader: what must be bounded is
- * the model-facing serialization, and this file is where it is written.
- */
+/** ~8k tokens: a generous SKILL.md that still cannot eat the conversation. */
 export const MAX_SKILL_BODY_BYTES = 32 * 1024;
 
-/** Appended to a body the cap cut, so the model knows it is reading a fragment. */
 export const SKILL_TRUNCATION_MARKER = "\n[… truncated]";
 
-/** A skill whose SKILL.md was read for this turn. */
+/** Every loaded body is replayed on every later turn, so this bounds the history. */
+export const MAX_MENTIONED_SKILLS = 10;
+
+export const TOO_MANY_SKILLS_REASON = "too many skills mentioned in one conversation";
+
+const UNREADABLE_REASON = "the skill could not be read";
+const UNKNOWN_REASON = "not resolved for this turn";
+
 export interface LoadedSkillBody {
   package_id: string;
-  /** Manifest version, `null` when the definition read declares none. */
   version: string | null;
-  /** The SKILL.md content, uncapped — {@link messagesWithSkillsAsText} caps it. */
+  /** Uncapped; {@link messagesWithSkillsAsText} caps it. */
   body: string;
 }
 
-/** A skill the loader could not read, with the reason the model is shown. */
 export interface LoadedSkillError {
   package_id: string;
   error: string;
@@ -53,41 +41,19 @@ export interface LoadedSkillError {
 
 export type LoadedSkill = LoadedSkillBody | LoadedSkillError;
 
-/**
- * Reason for a mentioned id the loaded map does not mention at all — as opposed
- * to one it explicitly failed on, which carries its own reason.
- */
-const UNKNOWN_REASON = "not resolved for this turn";
-
-/**
- * The directive grammar, strict on both halves: type `skill` and nothing else,
- * id in the AFPS scoped-name shape. Anything else stays prose, so typing
- * `:skill[` in a sentence is safe. The id pattern is deliberately LOOSER than
- * {@link scopedNameRegex} — this finds candidates, that validator decides;
- * re-typing its anchored source here is what would let the two drift.
- */
+// Finds candidates only; `scopedNameRegex` decides, so the two cannot drift.
 const SKILL_DIRECTIVE_RE = /:skill\[([^\]\n]{1,1024})\]\{name=(@[a-z0-9-]+\/[a-z0-9-]+)\}/g;
 
-/** One `/skill` mention, located in the text it was found in. */
 export interface SkillMention {
-  /** The package id carried by the directive's `name` attribute. */
   id: string;
-  /** The directive's label — what the composer chip displays. */
   label: string;
-  /** The directive's exact source text, for replacement in place. */
+  /** Exact source text, for replacement in place. */
   raw: string;
-  /** Character offset of `raw` in the text it was parsed from. */
   index: number;
 }
 
-/**
- * Every valid `skill` directive in one text part, in source order. Pure: no
- * lookups, no I/O — the UI parses user bubbles with this same function.
- */
 export function parseSkillMentions(text: string): SkillMention[] {
   const out: SkillMention[] = [];
-  // A fresh regex per call: `lastIndex` on a module-level /g regex is state,
-  // and state here would make two identical calls disagree.
   const re = new RegExp(SKILL_DIRECTIVE_RE.source, "g");
   for (let m = re.exec(text); m !== null; m = re.exec(text)) {
     const id = m[2]!;
@@ -97,19 +63,10 @@ export function parseSkillMentions(text: string): SkillMention[] {
   return out;
 }
 
-/** One run of a persisted text: prose, or a directive resolved to its parts. */
 export type SkillTextSegment =
   { kind: "text"; text: string } | { kind: "skill"; label: string; id: string };
 
-/**
- * Split a persisted text on its directives; the prose runs are the literal
- * gaps between them.
- *
- * ONE home for that projection, because three consumers must agree on it: the
- * user bubble renders the segments as chips, the conversation title maps them
- * to their labels, and both have to cut the text exactly where the server's own
- * parser finds a directive.
- */
+/** Shared by the bubble chips and the session title, so both cut where the server parses. */
 export function splitSkillDirectives(text: string): SkillTextSegment[] {
   const out: SkillTextSegment[] = [];
   let cursor = 0;
@@ -122,22 +79,13 @@ export function splitSkillDirectives(text: string): SkillTextSegment[] {
   return out;
 }
 
-/** The text parts of one message, in order. */
 function textParts(message: UIMessage): { text: string }[] {
   return (message.parts ?? []).flatMap((part) =>
     part.type === "text" ? [part as { text: string }] : [],
   );
 }
 
-/**
- * The union of the ids mentioned by ALL user messages of the branch, in
- * first-appearance order, deduped.
- *
- * The whole history, not just the new turn: a body must stay in the
- * conversation once it was loaded there (Claude Code semantics), and the
- * projection is rebuilt from scratch on every turn — so every turn re-resolves
- * every mention the branch ever made.
- */
+/** Ids mentioned by every user message of the branch, deduped, in first-appearance order. */
 export function mentionedSkillIds(messages: UIMessage[]): string[] {
   const seen = new Set<string>();
   for (const message of messages) {
@@ -149,47 +97,71 @@ export function mentionedSkillIds(messages: UIMessage[]): string[] {
   return [...seen];
 }
 
-/** Cut `body` to {@link MAX_SKILL_BODY_BYTES}, on a character boundary. */
+/** The problem's stable `code`, else its `title`, else the bare status. */
+async function refusalReason(res: Response): Promise<string> {
+  try {
+    const problem = (await res.json()) as { code?: unknown; title?: unknown };
+    if (typeof problem?.code === "string" && problem.code) return problem.code;
+    if (typeof problem?.title === "string" && problem.title) return problem.title;
+  } catch {
+    // Not a problem document.
+  }
+  return `HTTP ${res.status}`;
+}
+
+/**
+ * Read each SKILL.md through the route `getSkill` serves, with the caller's own
+ * headers, so a mention is authorized as a load is. Never throws.
+ */
+export async function loadMentionedSkills(
+  deps: Pick<ChatPlatformDeps, "dispatch">,
+  args: { origin: string; headers: Headers; log: Pick<Logger, "warn"> },
+  ids: readonly string[],
+): Promise<Map<string, LoadedSkill>> {
+  const distinct = [...new Set(ids)];
+  const loaded = await Promise.all(
+    distinct.slice(0, MAX_MENTIONED_SKILLS).map(async (id): Promise<LoadedSkill> => {
+      try {
+        const url = new URL(`/api/packages/skills/${encodePackageIdPath(id)}`, args.origin);
+        const res = await deps.dispatch(new Request(url.toString(), { headers: args.headers }));
+        if (!res.ok) return { package_id: id, error: await refusalReason(res) };
+        const detail = (await res.json()) as { content?: unknown; version?: unknown };
+        const body = typeof detail?.content === "string" ? detail.content : "";
+        if (!body) return { package_id: id, error: "the skill has no content" };
+        const version = typeof detail.version === "string" ? detail.version : null;
+        return { package_id: id, version, body };
+      } catch (err) {
+        args.log.warn("chat skill mention could not be read", { skill: id, err: String(err) });
+        return { package_id: id, error: UNREADABLE_REASON };
+      }
+    }),
+  );
+
+  const out = new Map<string, LoadedSkill>();
+  for (const skill of loaded) out.set(skill.package_id, skill);
+  for (const id of distinct.slice(MAX_MENTIONED_SKILLS)) {
+    out.set(id, { package_id: id, error: TOO_MANY_SKILLS_REASON });
+  }
+  return out;
+}
+
 function capBody(body: string): string {
   const bytes = new TextEncoder().encode(body);
   if (bytes.length <= MAX_SKILL_BODY_BYTES) return body;
-  // The byte cut can land mid-sequence; the decoder emits U+FFFD for that tail
-  // and dropping it is what puts the cut back on a character boundary.
+  // A mid-sequence cut decodes to a trailing U+FFFD; dropping it lands on a character.
   const head = new TextDecoder().decode(bytes.slice(0, MAX_SKILL_BODY_BYTES)).replace(/�$/, "");
   return `${head}${SKILL_TRUNCATION_MARKER}`;
 }
 
-/** The model-facing block for the FIRST occurrence of a successfully loaded id. */
 function loadedBlock(skill: LoadedSkillBody): string {
   const version = skill.version ? ` (v${skill.version})` : "";
   return `[Skill ${skill.package_id}${version} loaded — follow these instructions]\n${capBody(skill.body)}`;
 }
 
-/** The block for a later occurrence of an id whose body is already above. */
-function alreadyLoadedBlock(id: string): string {
-  return `[Skill ${id} already loaded above]`;
-}
-
-/** The block for a mention the loader could not satisfy. */
-function unloadableBlock(id: string, reason: string): string {
-  return `[Skill ${id} could not be loaded: ${reason}]`;
-}
-
 /**
- * Return a copy of the thread with every `skill` directive in a USER message
- * replaced by its model-facing block — the body the first time an id appears in
- * the conversation, a one-line back-reference afterwards, a reason when it
- * could not be read.
- *
- * Mirrors `messagesWithAttachmentsAsText`: same place in the pipeline
- * (`buildStructuredPiTurn`), same "return the message unchanged when there is
- * nothing to rewrite" rule, same principle that the model-facing serialization
- * of a composer affordance lives in exactly one file.
- *
- * The first/later distinction is what makes a mention idempotent across turns:
- * mentioning an already-mentioned skill costs one line, not a second copy of
- * the body. `seen` is walked in message order, so it depends on the
- * conversation and never on the order the loader happened to resolve ids in.
+ * Each directive of a USER message replaced by its model-facing block: the body
+ * at an id's first appearance, a back-reference afterwards, a reason when it
+ * could not be read. `seen` follows message order, never loader order.
  */
 export function messagesWithSkillsAsText(
   messages: UIMessage[],
@@ -213,14 +185,12 @@ export function messagesWithSkillsAsText(
         for (const mention of mentions) {
           text += part.text.slice(cursor, mention.index);
           const skill = loaded.get(mention.id);
-          if (!skill) {
-            text += unloadableBlock(mention.id, UNKNOWN_REASON);
-          } else if ("error" in skill) {
-            // An unreadable skill repeats its reason at every mention: there is
-            // no body above to point back to, and silence would read as loaded.
-            text += unloadableBlock(mention.id, skill.error);
+          if (!skill || "error" in skill) {
+            // Repeated at every mention: there is no body above to point back to.
+            const reason = skill ? skill.error : UNKNOWN_REASON;
+            text += `[Skill ${mention.id} could not be loaded: ${reason}]`;
           } else if (seen.has(mention.id)) {
-            text += alreadyLoadedBlock(mention.id);
+            text += `[Skill ${mention.id} already loaded above]`;
           } else {
             seen.add(mention.id);
             text += loadedBlock(skill);

@@ -273,8 +273,6 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   ChatSession:
     "module-chat wire DTO; ISO timestamps, no shared-type (UI uses the generated spec type)",
   ChatMessage: "module-chat opaque history-node wire DTO; no shared-type",
-  ChatSkillEntry:
-    "module-chat skill-picker wire DTO, projected from /api/me/context + /api/packages/skills; no persisted row and no shared-type",
   // @appstrate/module-ee billing wire DTOs. The module keeps a Drizzle schema
   // of its own (packages/module-ee/drizzle/schema.ts), so none of these has a
   // shared-type in this repo at all; the dashboard consumes the generated spec
