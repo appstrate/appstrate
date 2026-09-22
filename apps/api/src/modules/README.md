@@ -34,10 +34,11 @@ apps/api/src/modules/<id>/
 
 Module tests are split by dependency footprint, not by feature:
 
-- **Colocate in `apps/api/src/modules/<id>/test/`** — pure unit tests of module-internal logic that do not need a database, a running Hono app, or the shared `test/helpers/` infrastructure (e.g. envelope builders, signing, cron parsing, schema coercion).
-- **Keep in `apps/api/test/integration/`** — anything that touches the DB, calls the HTTP app via `getTestApp()`, or relies on shared factories (`seedPackage`, `createTestContext`, `truncateAll`). These depend on the global test preload (Docker infra, migrations) and must stay in the top-level test tree so they share one setup cost.
+- **`apps/api/src/modules/<id>/test/`** — pure unit tests of module-internal logic that need no shared `test/helpers/` infrastructure (e.g. envelope builders, signing, cron parsing, schema coercion).
+- **`apps/api/test/unit/modules/<id>/`** — tests that use shared helpers but no data: they read or register the shared test app (`getTestApp()`, `registerTestPlatformApp()`) and stub dispatch, with no seeding, no `truncateAll`, no HTTP request through the app. They run on every PR.
+- **`apps/api/test/integration/`** (or the module's own `src/modules/<id>/test/integration/`) — anything that seeds or reads the DB (`seedPackage`, `createTestContext`, `truncateAll`) or sends requests through the HTTP app. CI excludes `**/test/integration/**` from the PR gate; these run on the `integration` label and post-merge on `main`.
 
-The rule is "colocate tests that can run in isolation, centralize tests that share infrastructure." Don't invent a parallel helper tree inside the module just to avoid an integration import.
+Don't invent a parallel helper tree inside the module just to avoid an integration import.
 
 ## Required manifest shape
 

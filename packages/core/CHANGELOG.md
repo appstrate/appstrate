@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [11.1.0] — 2026-09-22
+
 ### Added
 
 - **New exports `RunLevel`, `reaches`, `agentCapabilities`
@@ -28,11 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New export `RUNS_READ_PERMISSIONS` (`@appstrate/core/permissions`)** — the
   `["runs:read", "runs:read-all"]` tuple `canReadRuns` is defined from.
 - **New export `PERMISSION_REQUIREMENT_MARKER`
-  (`@appstrate/core/permissions`)** — the symbol under which every guard
-  `makePermissionGuard` builds now also carries the requirement it checks (one
-  `resource:action`, or several joined with `|`), beside the unchanged boolean
-  `appstrate.permissionGuard` marker; a guard carrying the boolean alone is
-  row-aware. See `apps/api/src/middleware/handler-marker.ts`.
+  (`@appstrate/core/permissions`)** — the symbol under which a guard carries
+  the requirement it checks, beside the unchanged boolean
+  `appstrate.permissionGuard` marker. Every guard `makePermissionGuard` builds
+  stamps the single `resource:action` it tests; the platform's
+  `requireAnyPermission` stamps its disjunction as `a|b`. Read back off the
+  route table by `apps/api/src/lib/route-requirements.ts`.
 - **`AppstrateTurnMetadata` gains optional `modelId` and `modelLabel`
   (`@appstrate/core/chat-turn-metadata`)** — the model a chat turn ran on,
   stamped when the engine closes the turn. Additive: a turn the engine did not
@@ -51,6 +54,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `connection_overrides`. The resolver already holds the rows, so the three
   distinguishing fields cost no extra query. Read `candidate_connections[].id`
   where the old array held the ids.
+
+## [11.0.0] — 2026-09-18
+
+### Changed
 
 - **BREAKING: `AuthResolution.principalKind` is a new REQUIRED member** (type
   `PrincipalKind`, with the tuple `PRINCIPAL_KINDS`, in `@appstrate/core/module`).

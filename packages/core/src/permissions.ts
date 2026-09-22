@@ -177,8 +177,7 @@ export function canReadRuns(has: (permission: CorePermission) => boolean): boole
 
 /**
  * Whether a caller may launch an agent AND read the run back: a launch nobody
- * can poll still provisions a container and bills the spend. The MCP
- * `run_and_wait` declaration and the chat access chip both ask this.
+ * can poll still provisions a container and bills the spend.
  */
 export function canRunAgents(has: (permission: CorePermission) => boolean): boolean {
   return has("agents:run") && canReadRuns(has);
@@ -196,10 +195,9 @@ export function reaches(level: RunLevel, floor: RunLevel): boolean {
 
 /**
  * Run level and authoring for a caller, given whether it can dispatch at all
- * (`invokes` is the transport/module half core does not know). The MCP server's
- * tool set, its `instructions`, the chat persona and the web access chip all
- * read this one derivation, so "authors" cannot mean a different conjunction in
- * each of the four.
+ * (`invokes` is the transport/module half core does not know). Read by the
+ * surfaces that have no route table to derive grants from (the chat persona,
+ * the web access chip), so "authors" means one conjunction across them.
  */
 export function agentCapabilities(
   has: (permission: CorePermission) => boolean,
@@ -759,7 +757,7 @@ export function setPermissionDenialHandler(handler: PermissionDenialHandler | nu
  * Registry symbol carrying the requirement a guard checks: one
  * `resource:action`, or several joined with `|` for a disjunction. A row-aware
  * guard carries none — only the row it loads decides. Read back off Hono's
- * route table via `apps/api/src/middleware/handler-marker.ts`.
+ * route table by `apps/api/src/lib/route-requirements.ts`.
  */
 export const PERMISSION_REQUIREMENT_MARKER = Symbol.for("appstrate.permissionRequirement");
 
