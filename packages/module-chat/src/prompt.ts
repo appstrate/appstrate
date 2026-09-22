@@ -240,10 +240,10 @@ export function normalizeChatLocale(raw: string | undefined): string {
  */
 export function formatCallerContext(
   raw: unknown,
-  opts?: { locale?: string; now?: Date; canAuthorAgents?: boolean; canRunAgents?: boolean },
+  opts: { locale?: string; now?: Date; canAuthorAgents: boolean; canRunAgents: boolean },
 ): string {
-  const author = opts?.canAuthorAgents ?? true;
-  const runnable = opts?.canRunAgents ?? true;
+  const author = opts.canAuthorAgents;
+  const runnable = opts.canRunAgents;
   const ctx = (raw ?? {}) as CallerContext;
   const name = ctx.user?.name?.trim();
   const email = ctx.user?.email?.trim();
@@ -285,13 +285,13 @@ export function formatCallerContext(
   // i.e. most interactive turns.
   //
   // `opts.now` exists so the stability invariant is testable without fake timers.
-  const now = new Date(opts?.now ?? Date.now());
+  const now = new Date(opts.now ?? Date.now());
   now.setUTCMinutes(0, 0, 0);
   lines.push(`Current date and time: ${now.toISOString()} (UTC, rounded to the hour).`);
   // UI language forwarded by the client (`X-Chat-Locale`), defaulting to the
   // platform's default locale (fr) when absent.
   lines.push(
-    `Reply in the user's language (${normalizeChatLocale(opts?.locale)}) unless they switch.`,
+    `Reply in the user's language (${normalizeChatLocale(opts.locale)}) unless they switch.`,
   );
   if (ctx.connections?.length) {
     // Render the exact package id (and version when known) so the model can use
@@ -408,7 +408,7 @@ export async function buildCallerContextBlock(
         user: { name: user.name ?? null, email: user.email ?? null },
         org: { role: role ?? null, name: orgName ?? null, slug: orgSlug ?? null },
       },
-      { locale },
+      { locale, canAuthorAgents, canRunAgents },
     );
 
   try {

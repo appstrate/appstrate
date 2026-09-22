@@ -7,8 +7,9 @@
  * lookup keyed on exact paths would: `app.on(["POST"], "/api/auth/*")` serves
  * a dozen operations from one entry, `router.all("/proxy")` serves five
  * methods from one, and a prefix guard gates everything beneath it. An
- * operation the reader cannot find degrades to "public", so each of those
- * shapes is pinned here — against real guards on real Hono apps.
+ * operation the reader cannot find resolves to `undefined` — the caller, not
+ * this table, turns that into a failure — so each of those shapes is pinned
+ * here, against real guards on real Hono apps.
  */
 
 import { describe, it, expect } from "bun:test";

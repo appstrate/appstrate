@@ -41,19 +41,22 @@ function fakeDeps(respond: (req: Request) => Response): {
 
 describe("formatCallerContext", () => {
   it("renders identity, role, and connected integrations with their default tools", () => {
-    const out = formatCallerContext({
-      user: { name: "Ada Lovelace", email: "ada@acme.com" },
-      org: { role: "member" },
-      connections: [
-        {
-          integration_id: "@appstrate/gmail",
-          name: "Gmail",
-          source: "own",
-          default_tools: ["api_call"],
-        },
-        { integration_id: "@appstrate/clickup", name: "ClickUp", source: "shared" },
-      ],
-    });
+    const out = formatCallerContext(
+      {
+        user: { name: "Ada Lovelace", email: "ada@acme.com" },
+        org: { role: "member" },
+        connections: [
+          {
+            integration_id: "@appstrate/gmail",
+            name: "Gmail",
+            source: "own",
+            default_tools: ["api_call"],
+          },
+          { integration_id: "@appstrate/clickup", name: "ClickUp", source: "shared" },
+        ],
+      },
+      { canAuthorAgents: true, canRunAgents: true },
+    );
     expect(out).toContain("## Your context");
     expect(out).toContain("Ada Lovelace (ada@acme.com)");
     expect(out).toContain('whose role is "member"');
@@ -69,15 +72,18 @@ describe("formatCallerContext", () => {
   });
 
   it("renders the wildcard and empty default-tools markers", () => {
-    const out = formatCallerContext({
-      user: { name: "Ada" },
-      org: { role: "member" },
-      connections: [
-        { integration_id: "@acme/all", name: "AllTools", source: "own", default_tools: "*" },
-        // An explicit empty default also reads as "no default" (must select).
-        { integration_id: "@acme/none", name: "NoneTools", source: "own", default_tools: [] },
-      ],
-    });
+    const out = formatCallerContext(
+      {
+        user: { name: "Ada" },
+        org: { role: "member" },
+        connections: [
+          { integration_id: "@acme/all", name: "AllTools", source: "own", default_tools: "*" },
+          // An explicit empty default also reads as "no default" (must select).
+          { integration_id: "@acme/none", name: "NoneTools", source: "own", default_tools: [] },
+        ],
+      },
+      { canAuthorAgents: true, canRunAgents: true },
+    );
     expect(out).toContain("(own; default: all tools)");
     expect(out).toContain("no default — you must select tools explicitly");
   });
@@ -87,26 +93,29 @@ describe("formatCallerContext", () => {
     // run route reserves the draft to whoever may WRITE the agent, so telling
     // the model otherwise buys a 403 loop. The two rows below differ ONLY in
     // `home_writable`, so the contrast is that flag and nothing else.
-    const out = formatCallerContext({
-      user: { name: "Ada" },
-      org: { role: "member" },
-      agents: [
-        {
-          package_id: "@acme/mine",
-          display_name: "Mine",
-          takes_input: false,
-          published: false,
-          home_writable: true,
-        },
-        {
-          package_id: "@acme/theirs",
-          display_name: "Theirs",
-          takes_input: false,
-          published: false,
-          home_writable: false,
-        },
-      ],
-    });
+    const out = formatCallerContext(
+      {
+        user: { name: "Ada" },
+        org: { role: "member" },
+        agents: [
+          {
+            package_id: "@acme/mine",
+            display_name: "Mine",
+            takes_input: false,
+            published: false,
+            home_writable: true,
+          },
+          {
+            package_id: "@acme/theirs",
+            display_name: "Theirs",
+            takes_input: false,
+            published: false,
+            home_writable: false,
+          },
+        ],
+      },
+      { canAuthorAgents: true, canRunAgents: true },
+    );
     expect(out).toContain("`@acme/mine` — Mine (takes input: no; draft only, yours to run");
     expect(out).toContain("`@acme/theirs` — Theirs (takes input: no; draft only, not runnable");
     // The one the caller cannot write must not be advertised as runnable.
@@ -124,8 +133,10 @@ describe("formatCallerContext", () => {
       home_writable: true,
     };
     const raw = { user: { name: "Ada" }, org: { role: "member" }, agents: [draft] };
-    expect(formatCallerContext(raw, { canAuthorAgents: true })).toContain("yours to run");
-    const off = formatCallerContext(raw, { canAuthorAgents: false });
+    expect(formatCallerContext(raw, { canAuthorAgents: true, canRunAgents: true })).toContain(
+      "yours to run",
+    );
+    const off = formatCallerContext(raw, { canAuthorAgents: false, canRunAgents: true });
     expect(off).toContain(
       "draft, not runnable in this turn — agent authoring is off or not granted here",
     );
@@ -140,74 +151,96 @@ describe("formatCallerContext", () => {
       org: { role: "member" },
       skills: [{ package_id: "@acme/research", display_name: "Research" }],
     };
-    expect(formatCallerContext(raw, { canAuthorAgents: true })).toContain(
+    expect(formatCallerContext(raw, { canAuthorAgents: true, canRunAgents: true })).toContain(
       "## Skills you can attach",
     );
-    expect(formatCallerContext(raw, { canAuthorAgents: false })).not.toContain("## Skills");
+    expect(formatCallerContext(raw, { canAuthorAgents: false, canRunAgents: true })).not.toContain(
+      "## Skills",
+    );
   });
 
   it("says nothing about the draft for a PUBLISHED agent", () => {
     // The negative control: the suffix is about the draft, not about authorship
     // — an author of a published agent gets the plain line.
-    const out = formatCallerContext({
-      user: { name: "Ada" },
-      org: { role: "member" },
-      agents: [
-        {
-          package_id: "@acme/shipped",
-          display_name: "Shipped",
-          takes_input: true,
-          published: true,
-          home_writable: true,
-        },
-      ],
-    });
+    const out = formatCallerContext(
+      {
+        user: { name: "Ada" },
+        org: { role: "member" },
+        agents: [
+          {
+            package_id: "@acme/shipped",
+            display_name: "Shipped",
+            takes_input: true,
+            published: true,
+            home_writable: true,
+          },
+        ],
+      },
+      { canAuthorAgents: true, canRunAgents: true },
+    );
     expect(out).toContain("`@acme/shipped` — Shipped (takes input: yes)");
     expect(out).not.toContain("draft only");
   });
 
   it("states explicitly when the user has no connected integrations", () => {
-    const out = formatCallerContext({
-      user: { name: "Ada", email: "ada@acme.com" },
-      org: { role: "owner" },
-      connections: [],
-    });
+    const out = formatCallerContext(
+      {
+        user: { name: "Ada", email: "ada@acme.com" },
+        org: { role: "owner" },
+        connections: [],
+      },
+      { canAuthorAgents: true, canRunAgents: true },
+    );
     expect(out).toContain("no connected integrations yet");
   });
 
   it("falls back to email, then a generic label, when the name is missing", () => {
     expect(
-      formatCallerContext({ user: { email: "ada@acme.com" }, org: { role: "guest" } }),
+      formatCallerContext(
+        { user: { email: "ada@acme.com" }, org: { role: "guest" } },
+        { canAuthorAgents: true, canRunAgents: true },
+      ),
     ).toContain("assisting ada@acme.com");
-    expect(formatCallerContext({ org: { role: "guest" } })).toContain("assisting the user");
+    expect(
+      formatCallerContext(
+        { org: { role: "guest" } },
+        { canAuthorAgents: true, canRunAgents: true },
+      ),
+    ).toContain("assisting the user");
   });
 
   it("omits the role clause when the role is absent", () => {
-    const out = formatCallerContext({ user: { name: "Ada" }, connections: [] });
+    const out = formatCallerContext(
+      { user: { name: "Ada" }, connections: [] },
+      { canAuthorAgents: true, canRunAgents: true },
+    );
     expect(out).toContain("assisting Ada.");
     expect(out).not.toContain("role in this organization");
   });
 
   it("renders the runnable-agent block with invokable id and input flag", () => {
-    const out = formatCallerContext({
-      user: { name: "Ada", email: "ada@acme.com" },
-      org: { role: "member" },
-      connections: [],
-      agents: [
-        {
-          package_id: "@appstrate/triage",
-          display_name: "Inbox Triage",
-          description: "Sorts incoming email.",
-          takes_input: false,
-        },
-        {
-          package_id: "@acme/report",
-          display_name: "Report",
-          description: "Builds a report.",
-          takes_input: true,
-        },
-      ],
-    });
+    const out = formatCallerContext(
+      {
+        user: { name: "Ada", email: "ada@acme.com" },
+        org: { role: "member" },
+        connections: [],
+        agents: [
+          {
+            package_id: "@appstrate/triage",
+            display_name: "Inbox Triage",
+            description: "Sorts incoming email.",
+            takes_input: false,
+          },
+          {
+            package_id: "@acme/report",
+            display_name: "Report",
+            description: "Builds a report.",
+            takes_input: true,
+          },
+        ],
+      },
+      { canAuthorAgents: true, canRunAgents: true },
+    );
     expect(out).toContain("## Existing agents you can run");
     expect(out).toContain("`@appstrate/triage`");
     expect(out).toContain("Inbox Triage: Sorts incoming email.");
@@ -220,51 +253,68 @@ describe("formatCallerContext", () => {
   });
 
   it("marks the agent list as truncated without restating how to page it", () => {
-    const out = formatCallerContext({
-      user: { name: "Ada" },
-      org: { role: "member" },
-      connections: [],
-      agents: [{ package_id: "@appstrate/triage", takes_input: false }],
-      agents_truncated: true,
-    });
+    const out = formatCallerContext(
+      {
+        user: { name: "Ada" },
+        org: { role: "member" },
+        connections: [],
+        agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+        agents_truncated: true,
+      },
+      { canAuthorAgents: true, canRunAgents: true },
+    );
     // The marker is data; `buildSystemPrompt` owns what to DO about it (listAgents).
     expect(out).toContain("(list truncated)");
     expect(out).not.toContain('`operation_id: "listAgents"`');
   });
 
   it("renders a context block from agents alone (no identity/connections)", () => {
-    const out = formatCallerContext({
-      agents: [{ package_id: "@appstrate/triage", takes_input: false }],
-    });
+    const out = formatCallerContext(
+      {
+        agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+      },
+      { canAuthorAgents: true, canRunAgents: true },
+    );
     expect(out).toContain("## Existing agents you can run");
     expect(out).toContain("`@appstrate/triage`");
   });
 
   it("omits the agent block when there are no runnable agents", () => {
-    const out = formatCallerContext({
-      user: { name: "Ada" },
-      org: { role: "member" },
-      connections: [],
-      agents: [],
-    });
+    const out = formatCallerContext(
+      {
+        user: { name: "Ada" },
+        org: { role: "member" },
+        connections: [],
+        agents: [],
+      },
+      { canAuthorAgents: true, canRunAgents: true },
+    );
     expect(out).not.toContain("Existing agents you can run");
   });
 
   it("renders the attachable-skills block with id, version and dependencies.skills guidance", () => {
-    const out = formatCallerContext({
-      user: { name: "Ada", email: "ada@acme.com" },
-      org: { role: "member" },
-      connections: [],
-      skills: [
-        {
-          package_id: "@appstrate/web-research",
-          display_name: "Web Research",
-          description: "Multi-source web search.",
-          version: "1.2.0",
-        },
-        { package_id: "@acme/pdf", display_name: "PDF", description: "Reads PDFs.", version: null },
-      ],
-    });
+    const out = formatCallerContext(
+      {
+        user: { name: "Ada", email: "ada@acme.com" },
+        org: { role: "member" },
+        connections: [],
+        skills: [
+          {
+            package_id: "@appstrate/web-research",
+            display_name: "Web Research",
+            description: "Multi-source web search.",
+            version: "1.2.0",
+          },
+          {
+            package_id: "@acme/pdf",
+            display_name: "PDF",
+            description: "Reads PDFs.",
+            version: null,
+          },
+        ],
+      },
+      { canAuthorAgents: true, canRunAgents: true },
+    );
     expect(out).toContain("## Skills you can attach to an agent");
     expect(out).toContain("`@appstrate/web-research`");
     expect(out).toContain("(v1.2.0)");
@@ -278,13 +328,16 @@ describe("formatCallerContext", () => {
   });
 
   it("marks the skill list as truncated without restating how to page it", () => {
-    const out = formatCallerContext({
-      user: { name: "Ada" },
-      org: { role: "member" },
-      connections: [],
-      skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
-      skills_truncated: true,
-    });
+    const out = formatCallerContext(
+      {
+        user: { name: "Ada" },
+        org: { role: "member" },
+        connections: [],
+        skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
+        skills_truncated: true,
+      },
+      { canAuthorAgents: true, canRunAgents: true },
+    );
     // The marker is data; `buildSystemPrompt` owns what to DO about it (listSkills).
     // That instruction must name the operation: `search_operations` ranks
     // `listSkills` below every create/delete variant, so a keyword search is
@@ -294,37 +347,49 @@ describe("formatCallerContext", () => {
   });
 
   it("renders a context block from skills alone (no identity/connections/agents)", () => {
-    const out = formatCallerContext({
-      skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
-    });
+    const out = formatCallerContext(
+      {
+        skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
+      },
+      { canAuthorAgents: true, canRunAgents: true },
+    );
     expect(out).toContain("## Skills you can attach to an agent");
     expect(out).toContain("`@appstrate/web-research`");
   });
 
   it("omits the skills block when there are no installed skills", () => {
-    const out = formatCallerContext({
-      user: { name: "Ada" },
-      org: { role: "member" },
-      connections: [],
-      skills: [],
-    });
+    const out = formatCallerContext(
+      {
+        user: { name: "Ada" },
+        org: { role: "member" },
+        connections: [],
+        skills: [],
+      },
+      { canAuthorAgents: true, canRunAgents: true },
+    );
     expect(out).not.toContain("Skills you can attach");
   });
 
   it("returns an empty string for an unusable payload (so injection is skipped)", () => {
-    expect(formatCallerContext({})).toBe("");
-    expect(formatCallerContext(null)).toBe("");
-    expect(formatCallerContext({ user: { name: null, email: null }, org: { role: null } })).toBe(
-      "",
-    );
+    expect(formatCallerContext({}, { canAuthorAgents: true, canRunAgents: true })).toBe("");
+    expect(formatCallerContext(null, { canAuthorAgents: true, canRunAgents: true })).toBe("");
+    expect(
+      formatCallerContext(
+        { user: { name: null, email: null }, org: { role: null } },
+        { canAuthorAgents: true, canRunAgents: true },
+      ),
+    ).toBe("");
   });
 
   it("renders org name/slug and grounds date/language from the server (UTC + fr)", () => {
-    const out = formatCallerContext({
-      user: { name: "Ada", email: "ada@acme.com" },
-      org: { role: "member", name: "Acme", slug: "acme" },
-      connections: [],
-    });
+    const out = formatCallerContext(
+      {
+        user: { name: "Ada", email: "ada@acme.com" },
+        org: { role: "member", name: "Acme", slug: "acme" },
+        connections: [],
+      },
+      { canAuthorAgents: true, canRunAgents: true },
+    );
     expect(out).toContain('in the organization "Acme" (`acme`)');
     // No browser clock/timezone is forwarded to this route — always server UTC.
     expect(out).toContain("Current date and time:");
@@ -333,20 +398,23 @@ describe("formatCallerContext", () => {
   });
 
   it("does NOT render recent runs — they would bust the prompt cache every turn", () => {
-    const out = formatCallerContext({
-      user: { name: "Ada" },
-      org: { role: "member" },
-      recent_runs: [
-        {
-          package_id: "@appstrate/triage",
-          status: "failed",
-          run_number: 7,
-          started_at: "2026-06-25T09:00:00.000Z",
-          error: "Gmail token expired",
-        },
-        { package_id: "@acme/report", status: "success", run_number: 6 },
-      ],
-    });
+    const out = formatCallerContext(
+      {
+        user: { name: "Ada" },
+        org: { role: "member" },
+        recent_runs: [
+          {
+            package_id: "@appstrate/triage",
+            status: "failed",
+            run_number: 7,
+            started_at: "2026-06-25T09:00:00.000Z",
+            error: "Gmail token expired",
+          },
+          { package_id: "@acme/report", status: "success", run_number: 6 },
+        ],
+      },
+      { canAuthorAgents: true, canRunAgents: true },
+    );
     // The payload field still exists (it backs the MCP `get_me` tool); the
     // RENDERING is what was removed. `started_at` rewrote the system prompt on
     // every turn that launched a run, invalidating its single cache breakpoint
@@ -360,9 +428,12 @@ describe("formatCallerContext", () => {
 
   it("returns an empty block when recent_runs is the only usable field", () => {
     expect(
-      formatCallerContext({
-        recent_runs: [{ package_id: "@acme/report", status: "success", run_number: 1 }],
-      }),
+      formatCallerContext(
+        {
+          recent_runs: [{ package_id: "@acme/report", status: "success", run_number: 1 }],
+        },
+        { canAuthorAgents: true, canRunAgents: true },
+      ),
     ).toBe("");
   });
 
@@ -376,16 +447,22 @@ describe("formatCallerContext", () => {
     };
     const at = new Date("2026-06-25T09:05:00.000Z");
     const later = new Date("2026-06-25T09:50:00.000Z");
-    expect(formatCallerContext(ctx, { now: later })).toBe(formatCallerContext(ctx, { now: at }));
+    expect(
+      formatCallerContext(ctx, { now: later, canAuthorAgents: true, canRunAgents: true }),
+    ).toBe(formatCallerContext(ctx, { now: at, canAuthorAgents: true, canRunAgents: true }));
     // And the rendered hour is the floor, not the raw stamp.
-    expect(formatCallerContext(ctx, { now: at })).toContain("2026-06-25T09:00:00.000Z");
+    expect(
+      formatCallerContext(ctx, { now: at, canAuthorAgents: true, canRunAgents: true }),
+    ).toContain("2026-06-25T09:00:00.000Z");
     // No time-of-day precision survives anywhere in the block.
-    expect(formatCallerContext(ctx, { now: at })).not.toMatch(/T\d{2}:(?!00:00\.000Z)/);
+    expect(
+      formatCallerContext(ctx, { now: at, canAuthorAgents: true, canRunAgents: true }),
+    ).not.toMatch(/T\d{2}:(?!00:00\.000Z)/);
     // `opts.now` exists only to make the invariant testable, so the DEFAULT
     // clock has to be floored by the same code — a regression that floored the
     // injected stamp alone would leave everything above green while every real
     // turn re-rendered the block.
-    expect(formatCallerContext(ctx)).toMatch(
+    expect(formatCallerContext(ctx, { canAuthorAgents: true, canRunAgents: true })).toMatch(
       /Current date and time: \d{4}-\d{2}-\d{2}T\d{2}:00:00\.000Z \(UTC, rounded to the hour\)/,
     );
   });

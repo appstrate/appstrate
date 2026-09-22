@@ -13,11 +13,12 @@
  * kinds — delivery — and whether authoring guidance is present at all.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, beforeEach } from "bun:test";
 import { buildServerInstructions } from "../../router.ts";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { setPlatformApp } from "../../../../lib/platform-app.ts";
+import { resetCatalog } from "../../catalog.ts";
 
 // The appended operation index is filtered per operation against the mounted
 // guards, so building the instructions now reads the route table.
@@ -40,6 +41,8 @@ function connectBullet(contextInjected: boolean): string {
 }
 
 describe("MCP server instructions — connect bullet", () => {
+  beforeEach(() => resetCatalog());
+
   it("names the readiness refusal as a 412 and never as a 400", () => {
     // The readiness envelope is `412 missing_integration_connection`
     // (services/agent-readiness.ts); a model told to expect a 400 treats the
@@ -91,6 +94,8 @@ describe("MCP server instructions — connect bullet", () => {
 });
 
 describe("MCP server instructions — run guidance", () => {
+  beforeEach(() => resetCatalog());
+
   // Rule 1: an act the caller's set makes structurally impossible is ABSENT,
   // not contradicted. `run_and_wait` is declared on `canRunAgents`, so every
   // paragraph that teaches running goes with it — dropping that gate makes
@@ -129,6 +134,8 @@ describe("MCP server instructions — run guidance", () => {
 });
 
 describe("MCP server instructions — agent authoring", () => {
+  beforeEach(() => resetCatalog());
+
   it("teaches tool selection and `dependencies.*` only to a caller holding `agents:write`", () => {
     const withWrite = buildServerInstructions(new Set(["mcp:read", "agents:write"]), true);
     const without = buildServerInstructions(permissions, true);

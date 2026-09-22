@@ -325,7 +325,10 @@ export async function handleChatStream(
   // Without `mcp:invoke` no tool call reaches a route at all, so it gates both:
   // reading a run's history, and the launch-plus-poll `run_and_wait` is DECLARED
   // on (launching a run the turn could never read back is a billed orphan).
-  const invokes = permissions.includes("mcp:invoke");
+  // `mcp:read` is the transport floor (`modules/mcp/router.ts` guards the endpoint with it) —
+  // the server-side builders run behind it and need only `mcp:invoke`; the web chip spells
+  // the same pair (`apps/web/src/modules/chat/chat-access.ts` `invokes`).
+  const invokes = permissions.includes("mcp:read") && permissions.includes("mcp:invoke");
   const readRuns = invokes && canReadRuns(has);
   const runAgents = invokes && canRunAgents(has);
   // Same conjunctions as `apps/api/src/modules/mcp/router.ts` — its twin.

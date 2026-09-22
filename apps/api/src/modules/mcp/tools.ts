@@ -1526,6 +1526,8 @@ export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
     ...(operationGranted(listFilesOperation(), ctx.permissions) ? [buildListFilesTool(ctx)] : []),
     buildReadFileTool(ctx),
     ...buildPackageFileTools(ctx),
+    // `search_operations` stays under an injected index — `best_match` still
+    // saves a `describe_operation` round-trip.
     ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx)]),
   ];
 }

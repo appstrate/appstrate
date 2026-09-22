@@ -124,7 +124,14 @@ export function httpStatusOf(unwrapped: unknown): number | undefined {
   return typeof rec?.status === "number" ? rec.status : undefined;
 }
 
-/** Whether an unwrapped payload represents a failure. */
+/**
+ * Whether an unwrapped payload represents a failure.
+ *
+ * There is deliberately no `outcome` check: `outcome` (`McpInvokeOutcome` in
+ * `apps/api/src/modules/mcp/tools.ts`) is TELEMETRY, never a field of a tool
+ * RESULT payload — a rejected call surfaces as a thrown `McpError`, which the
+ * `{ code, message }` branch below already catches. Do not re-add it.
+ */
 function isErrorPayload(unwrapped: unknown): boolean {
   const rec = asRecord(unwrapped);
   if (!rec) return false;

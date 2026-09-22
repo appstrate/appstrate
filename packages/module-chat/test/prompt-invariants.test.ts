@@ -144,27 +144,36 @@ describe("caller-context prompt hygiene", () => {
   const identity = { user: { name: "Ada" }, org: { role: "member" } };
 
   it("renders the forwarded locale in the reply-language line", () => {
-    const out = formatCallerContext(identity, { locale: "en-US" });
+    const out = formatCallerContext(identity, {
+      locale: "en-US",
+      canAuthorAgents: true,
+      canRunAgents: true,
+    });
     expect(out).toContain("Reply in the user's language (en)");
   });
 
   it("defaults the reply language to fr without a locale", () => {
-    expect(formatCallerContext(identity)).toContain("Reply in the user's language (fr)");
+    expect(formatCallerContext(identity, { canAuthorAgents: true, canRunAgents: true })).toContain(
+      "Reply in the user's language (fr)",
+    );
   });
 
   it("keeps the block free of standing instructions — they belong to the system prompt", () => {
     // Everything the model must DO with the context lives in the persona
     // (`buildSystemPrompt`). The block renders data only; the sole exception is the
     // reply-language line, which is parameterised by the `X-Chat-Locale` header.
-    const out = formatCallerContext({
-      user: { name: "Ada" },
-      org: { role: "member" },
-      connections: [{ integration_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
-      agents: [{ package_id: "@appstrate/triage", takes_input: false }],
-      agents_truncated: true,
-      skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
-      skills_truncated: true,
-    });
+    const out = formatCallerContext(
+      {
+        user: { name: "Ada" },
+        org: { role: "member" },
+        connections: [{ integration_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
+        agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+        agents_truncated: true,
+        skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
+        skills_truncated: true,
+      },
+      { canAuthorAgents: true, canRunAgents: true },
+    );
     // Gone from the block…
     for (const imperative of [
       "Use the `@scope/name` id verbatim",
@@ -363,10 +372,10 @@ describe("the persona without agent runs", () => {
       org: { role: "member" },
       agents: [{ package_id: "@acme/triage", takes_input: false }],
     };
-    expect(formatCallerContext(raw, { canRunAgents: true })).toContain(
+    expect(formatCallerContext(raw, { canRunAgents: true, canAuthorAgents: true })).toContain(
       "## Existing agents you can run",
     );
-    const off = formatCallerContext(raw, { canRunAgents: false });
+    const off = formatCallerContext(raw, { canRunAgents: false, canAuthorAgents: true });
     expect(off).not.toContain("## Existing agents you can run");
     expect(off).not.toContain("@acme/triage");
     // The identity half survives — date and role grounding do not depend on runs.

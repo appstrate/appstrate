@@ -4,9 +4,13 @@
  * Conformance gate: the permission the MCP surface shows for an operation is
  * the permission the route enforces. Catalog from the OpenAPI document,
  * requirement from Hono's route table; an operationId whose route the reader
- * cannot find falls back to "no requirement" — indistinguishable from
- * "public". Same read as `agent-lookup-permission-order.test.ts`: a property
- * of WHERE a middleware is mounted, invisible at runtime and in a diff.
+ * cannot find resolves to nothing at all, and `operationRequirement` throws
+ * naming it. That join itself — every operation resolves, no exception — is
+ * pinned in `src/modules/mcp/test/unit/catalog-requirements.test.ts`, which
+ * the default CI job runs; this file, label-gated, holds the allowlist of
+ * operations that mount no guard and the anchors for the awkward mounts. Same
+ * read as `agent-lookup-permission-order.test.ts`: a property of WHERE a
+ * middleware is mounted, invisible at runtime and in a diff.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -97,24 +101,6 @@ function op(operationId: string): CatalogOperation {
   if (!found) throw new Error(`operation \`${operationId}\` is absent from the catalog`);
   return found;
 }
-
-describe("every catalog operation joins onto a route", () => {
-  it("resolves a requirement for every operation, with no exception", () => {
-    const unresolved: string[] = [];
-    let resolved = 0;
-    for (const operation of getCatalog().operations.values()) {
-      try {
-        operationRequirement(operation);
-        resolved += 1;
-      } catch {
-        unresolved.push(`${operation.operationId} (${key(operation)})`);
-      }
-    }
-    expect(unresolved).toEqual([]); // Names, not a count.
-    // Control: a wholesale break would catch everything and still list none.
-    expect(resolved).toBeGreaterThan(100);
-  });
-});
 
 describe("every mutating /api/ operation has a readable requirement", () => {
   it("names a permission, defers to the row, or is allowlisted", () => {

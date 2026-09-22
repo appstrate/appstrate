@@ -40,7 +40,9 @@ claude mcp add --transport http appstrate-<org> https://YOUR_INSTANCE/api/mcp/o/
 The `<orgId>` in the URL must be the key's own organization (the dashboard gives
 you the matching command).
 
-- `mcp:read` — connect, `search_operations`, `describe_operation`.
+- `mcp:read` — connect, `search_operations`, `describe_operation`, and the
+  read-only helpers `read_file`, `validate_package_file`,
+  `get_runtime_capabilities` and `get_me`.
 - `mcp:invoke` — `invoke_operation` (call an operation). Defence in depth: the
   dispatched operation still enforces its own permission, so an MCP call can
   never exceed what the key could do over REST.
