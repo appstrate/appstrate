@@ -41,7 +41,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { ArrowLeft, Boxes, Inbox, Layers, LibraryBig, Wrench } from "lucide-react";
+import { ArrowLeft, Boxes, Check, Inbox, Layers, LibraryBig, Wrench } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Alert } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
@@ -258,8 +258,14 @@ export function OrgCatalogueModal({
       const row = integrationById.get(item.id);
       if (row && integrationExecution(row) !== execution) return false;
     }
+    // Découvrir is the WHOLE catalogue, the way a store keeps showing what you
+    // already own with a tick beside it. It used to hold the complement of the
+    // other half, so a package left it the moment it was placed — and for
+    // agents and skills that emptied it, since an organisation's own packages
+    // are placed by their home. Espaces stays the matrix of what is placed.
+    if (discovering) return true;
     const placement = placementById.get(item.id);
-    return placement ? inPlacedTab(placement) !== discovering : false;
+    return placement ? inPlacedTab(placement) : false;
   });
   const stateOf = (item: CardItem): CatalogueRowState => {
     const placement = placementById.get(item.id);
@@ -394,6 +400,11 @@ export function OrgCatalogueModal({
     const placement = placementById.get(item.id);
     return total + (placement?.offeredIn.length ?? 0);
   }, 0);
+  /** The one package waiting, when there is exactly one: its sheet is the answer. */
+  const pendingOne =
+    pendingAll === 1
+      ? ofKind.find((item) => (placementById.get(item.id)?.offeredIn.length ?? 0) > 0)?.id
+      : undefined;
   const pendingHere = ofKind.reduce((total, item) => {
     const placement = placementById.get(item.id);
     return total + (placement?.offeredIn.filter((id) => visibleIds.includes(id)).length ?? 0);
@@ -466,10 +477,13 @@ export function OrgCatalogueModal({
       source: item.source as CardItem["source"],
     };
     if (view !== "cards") return row;
-    // A card carries a footer it ALWAYS has: same line, same height. Here it
-    // says where the package comes from and offers the sheet, which is where
-    // adding it to a space is done — placing something is a considered act
-    // (which space, which integrations), not a switch in a grid of empty ones.
+    // A card carries a footer it ALWAYS has: same line, same height. It says
+    // where the package comes from, and then answers the one question a
+    // browsing reader asks — does the space I am in already run this? A tick
+    // when it does, the deed when it does not. The finer question ("and in my
+    // other spaces?") is the matrix, one tab away.
+    const activeHere = placementById.get(item.id)?.here === "active";
+    const mayAddHere = maySetPackageActive(grantById.get(spaceId ?? ""), active, true);
     return {
       ...row,
       actions: (
@@ -477,9 +491,24 @@ export function OrgCatalogueModal({
           <span className="text-muted-foreground truncate text-xs">
             {item.source === "system" ? t("catalogue.sourceSystem") : orgName}
           </span>
-          <Button size="sm" variant="outline" onClick={() => preview.open(item.id)}>
-            {t("catalogue.addToSpace")}
-          </Button>
+          {activeHere ? (
+            <span className="text-success flex shrink-0 items-center gap-1.5 text-xs font-medium">
+              <Check className="size-3.5" aria-hidden />
+              {t("catalogue.activeHere")}
+            </span>
+          ) : (
+            mayAddHere &&
+            spaceId && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={activate.isPending}
+                onClick={() => void onSetActive(row, spaceId, true)}
+              >
+                {t("catalogue.addToSpace")}
+              </Button>
+            )
+          )}
         </>
       ),
     };
@@ -788,10 +817,16 @@ export function OrgCatalogueModal({
                     <Button
                       size="sm"
                       variant="outline"
-                      // Showing them means showing them ALL, in ONE write: a
-                      // table still narrowed to one space would answer this
-                      // button with an empty list.
-                      onClick={() => narrow({ spaces: [], states: ["offered"] })}
+                      // ONE share means one decision: open that package, where
+                      // the alert names the space and the button activates it.
+                      // A table would have left the reader hunting for a cell
+                      // in a column. Several shares keep the list, narrowed to
+                      // them and widened back to every space in ONE write.
+                      onClick={() =>
+                        pendingOne
+                          ? preview.open(pendingOne)
+                          : narrow({ spaces: [], states: ["offered"] })
+                      }
                     >
                       {t("catalogue.pendingShow")}
                     </Button>

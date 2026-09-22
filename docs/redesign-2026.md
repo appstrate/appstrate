@@ -1824,15 +1824,34 @@ consequence is the one that makes Découvrir honest for agents and skills: a
 built-in switched off in every space you reach is placed nowhere, so it lands
 in Découvrir, which is where you switch it back on.
 
-**What Découvrir can hold, and why it looks empty**
+**Découvrir keeps what you already have, with a tick (22 September)**
 
-For a reader who reaches the space a package is homed in, that package is
-PLACED — the matrix's off switch in another space's column is the same
-affordance the per-space "candidate" was. So Découvrir only ever holds what is
-in NONE of your spaces: a system package switched on nowhere (an integration
-the deployment does not offer, or a built-in every one of your spaces opted out
-of). An organisation's own agents and skills never appear there, and the empty
-state says so in those words.
+The two halves used to be a PARTITION: a package left Découvrir the instant it
+was placed. For an organisation's own agents and skills that emptied it, since
+they are placed by their home the moment they exist — "Rien de plus à ajouter",
+on a catalogue holding ten of them.
+
+They are two READINGS of one set now, the way a store keeps showing what you
+own beside what you do not:
+
+- **Découvrir** is the whole catalogue, in cards, answering the one question a
+  browsing reader asks: does the space I am in run this? A tick, "Actif ici",
+  when it does; the deed when it does not, which activates it HERE (and shares
+  it first when the caller holds `<type>:share` in its home — the route does
+  both, `routes/spaces.ts`).
+- **Espaces** is the matrix of what your spaces hold, where the finer question
+  ("and in my other spaces?") is answered column by column.
+
+The complement disappears from the vocabulary, and with it the last corner
+where "unplaced" leaked onto the screen.
+
+**A share opens the package, not a table**
+
+"Voir" on the share alert filtered the matrix on the offered state, and left
+the reader looking for a cell in a column of switches. With exactly one share
+waiting — the common case — it opens THAT package's sheet, where the alert
+names the space and the button activates it. Several shares keep the filtered
+list, since a list is what a choice between several needs.
 
 **The share alert and the row it names share a tint**
 
