@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New export `ConnectionCandidate` (`@appstrate/core/integration`)** — one
   connection the caller may pick from on `must_choose_connection`, carrying
   `id`, `label`, `accountId` and `ownedByActor`.
+- **New export `packageIdSchema` (`@appstrate/core/validation`)** — a Zod
+  string schema for a `@scope/name` package id (`scopedNameRegex`), for request
+  bodies and queries that name packages.
 - **New export `canComposeInline` (`@appstrate/core/permissions`)** — whether
   a caller may compose an inline agent: `agents:write` and `agents:run`. Takes a
   membership test, so a `Set` or an array both fit.
