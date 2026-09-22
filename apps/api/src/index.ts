@@ -51,17 +51,13 @@ import invitationsRouter from "./routes/invitations.ts";
 import welcomeRouter from "./routes/welcome.ts";
 import { swaggerUI } from "@hono/swagger-ui";
 import { createOpenApiSpecRouter } from "./routes/openapi-spec.ts";
-import { buildOpenApiSpec } from "./openapi/index.ts";
 import {
   getModulePublicPaths,
   getModuleAuthStrategies,
-  getModuleOpenApiPaths,
-  getModuleOpenApiComponentSchemas,
-  getModuleOpenApiTags,
   registerModuleRoutes,
 } from "./lib/modules/module-loader.ts";
 import { ApiError, notFound } from "./lib/errors.ts";
-import { registerPlatformApp } from "./lib/platform-app.ts";
+import { getPlatformOperations, registerPlatformApp } from "./lib/platform-app.ts";
 import { apiVersion } from "./middleware/api-version.ts";
 import { idempotencyGuard } from "./middleware/idempotency-guard.ts";
 import { getCachedOrgApiVersion } from "./services/organizations.ts";
@@ -122,20 +118,14 @@ app.use("*", bootGate());
 // Health check — before auth middleware (no auth required)
 app.route("/", healthRouter);
 
-// OpenAPI docs — public (before auth middleware)
-// Spec is built lazily on first request (after modules are initialized at boot).
-let _openApiSpec: ReturnType<typeof buildOpenApiSpec> | null = null;
-function getOpenApiSpec() {
-  if (!_openApiSpec)
-    _openApiSpec = buildOpenApiSpec(
-      getModuleOpenApiPaths(),
-      getModuleOpenApiComponentSchemas(),
-      getModuleOpenApiTags(),
-    );
-  return _openApiSpec;
-}
-// Serialized once + ETag/304 revalidation — see routes/openapi-spec.ts.
-app.route("/", createOpenApiSpecRouter(getOpenApiSpec));
+// OpenAPI docs — public (before auth middleware). Serves the spec
+// `registerPlatformApp()` builds at the bottom of this file; the router reads
+// it on the first request, after registration. Serialized once + ETag/304
+// revalidation — see routes/openapi-spec.ts.
+app.route(
+  "/",
+  createOpenApiSpecRouter(() => getPlatformOperations().spec),
+);
 app.get("/api/docs", swaggerUI({ url: "/api/openapi.json" }));
 
 // Public llms.txt — points AI coding agents at the CLI + OpenAPI entry
