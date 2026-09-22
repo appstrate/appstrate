@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { beforeEach, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { ErrorCode, McpError, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
-import { resetCatalog } from "../../../../src/modules/mcp/catalog.ts";
 import { buildServerInstructions } from "../../../../src/modules/mcp/router.ts";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import { buildMcpTools, type Dispatch } from "../../../../src/modules/mcp/tools.ts";
@@ -127,8 +126,6 @@ function makeRunAndWait(opts: {
 }
 
 describe("run_and_wait", () => {
-  beforeEach(() => resetCatalog());
-
   it("is registered as the single launch-and-wait tool", () => {
     const { tool } = makeRunAndWait({});
     expect(tool.descriptor.name).toBe("run_and_wait");

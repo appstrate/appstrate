@@ -46,6 +46,8 @@ import { setPrincipalPermissionsProviders } from "@appstrate/core/principal-perm
 import { initAppConfig } from "../../src/lib/app-config.ts";
 import { notFound } from "../../src/lib/errors.ts";
 import { buildOpenApiSpec } from "../../src/openapi/index.ts";
+import { createOpenApiSpecRouter } from "../../src/routes/openapi-spec.ts";
+import { swaggerUI } from "@hono/swagger-ui";
 import { createResponseValidationMiddleware } from "./response-validation.ts";
 
 // Route imports
@@ -122,7 +124,7 @@ await initAppConfig(); // initializes app config (routes like organizations.ts c
  * Mirrors the production middleware chain from index.ts:
  * CORS → error handler → request ID → Better Auth → API key auth → org context → routes
  *
- * Skips: boot(), static files, SPA fallback, shutdown gate, OpenAPI docs, ee routes.
+ * Skips: boot(), static files, SPA fallback, shutdown gate, ee routes.
  */
 export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   // Explicit module list → always return a fresh app (never touches the
@@ -184,19 +186,23 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     ...extraModules.map((m) => m.openApiComponentSchemas?.() ?? {}),
   );
   const moduleApiTags = extraModules.flatMap((m) => m.openApiTags?.() ?? []);
+  const spec = buildOpenApiSpec(moduleApiPaths, moduleApiSchemas, moduleApiTags);
   // On by default (CI enforces it). `DISABLE_RESPONSE_CONTRACT=1` is an
   // escape hatch for debugging an unrelated failing test in isolation.
   if (process.env.DISABLE_RESPONSE_CONTRACT !== "1") {
-    app.use(
-      "*",
-      createResponseValidationMiddleware(
-        buildOpenApiSpec(moduleApiPaths, moduleApiSchemas, moduleApiTags),
-      ),
-    );
+    app.use("*", createResponseValidationMiddleware(spec));
   }
 
   // Health check (no auth)
   app.route("/", healthRouter);
+
+  // Public OpenAPI document + viewer, pre-auth as in production — documented
+  // operations, so the platform-app registration requires a route for them.
+  app.route(
+    "/",
+    createOpenApiSpecRouter(() => spec),
+  );
+  app.get("/api/docs", swaggerUI({ url: "/api/openapi.json" }));
 
   // Cookie-less HTML preview — mounted BEFORE the auth pipeline (mirrors
   // production wiring in `apps/api/src/index.ts`) so no cookie/API-key/org/space

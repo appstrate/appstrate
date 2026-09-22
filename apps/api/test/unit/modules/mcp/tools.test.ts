@@ -6,14 +6,13 @@
  * request the platform would receive without booting the full app.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import type { Actor } from "@appstrate/connect";
 import {
   getCatalog,
-  resetCatalog,
   buildOperationIndex,
   operationGranted,
   type CatalogOperation,
@@ -82,8 +81,6 @@ function firstOp(predicate: (op: CatalogOperation) => boolean): CatalogOperation
 }
 
 describe("mcp catalog", () => {
-  beforeEach(() => resetCatalog());
-
   it("indexes core operations from the live spec", () => {
     const { operations } = getCatalog();
     expect(operations.size).toBeGreaterThan(50);
@@ -105,8 +102,6 @@ describe("mcp catalog", () => {
  * case here goes red the moment its gate is dropped from `buildMcpTools`.
  */
 describe("buildMcpTools declarations", () => {
-  beforeEach(() => resetCatalog());
-
   const names = (permissions: string[]): string[] => [...makeTools(permissions).byName.keys()];
 
   it("shows a read-only caller neither invoke, run nor files", () => {
@@ -144,8 +139,6 @@ describe("buildMcpTools declarations", () => {
 });
 
 describe("pre-#1177 argument vocabulary", () => {
-  beforeEach(() => resetCatalog());
-
   it("does not rename a retired document_uri argument", async () => {
     const { byName } = makeTools(["mcp:read", "mcp:invoke", "agents:write"]);
     // `validate_package_file` reads `file_uri`. A caller pinned to the old
@@ -158,8 +151,6 @@ describe("pre-#1177 argument vocabulary", () => {
 });
 
 describe("search_operations", () => {
-  beforeEach(() => resetCatalog());
-
   it("returns keyword matches with method/path/summary", async () => {
     const { byName } = makeTools(["mcp:read"]);
     const res = await byName.get("search_operations")!.handler({ query: "agent" }, noExtra);
@@ -284,8 +275,6 @@ describe("search_operations", () => {
 });
 
 describe("describe_operation", () => {
-  beforeEach(() => resetCatalog());
-
   it("returns the operation definition", async () => {
     const op = firstOp(() => true);
     const { byName } = makeTools(["mcp:read"]);
@@ -391,8 +380,6 @@ describe("describe_operation", () => {
 });
 
 describe("invoke_operation", () => {
-  beforeEach(() => resetCatalog());
-
   it("dispatches a GET operation in-process and forwards auth headers", async () => {
     const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
     const { byName, calls } = makeTools(["mcp:read", "mcp:invoke"]);
@@ -684,8 +671,6 @@ describe("invoke_operation", () => {
 });
 
 describe("buildOperationIndex", () => {
-  beforeEach(() => resetCatalog());
-
   /**
    * The ids a rendered index actually lists. Substring matching would lie
    * here: `createAgent` is a substring of `createAgentVersion`, a DIFFERENT
@@ -755,8 +740,6 @@ describe("buildOperationIndex", () => {
 });
 
 describe("buildMcpTools contextInjected", () => {
-  beforeEach(() => resetCatalog());
-
   it("exposes get_me by default (external MCP clients have no injected context)", () => {
     const { byName } = makeTools(["mcp:read"]);
     expect(byName.has("get_me")).toBe(true);

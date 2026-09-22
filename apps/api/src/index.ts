@@ -61,6 +61,7 @@ import {
   registerModuleRoutes,
 } from "./lib/modules/module-loader.ts";
 import { ApiError, notFound } from "./lib/errors.ts";
+import { registerPlatformApp } from "./lib/platform-app.ts";
 import { apiVersion } from "./middleware/api-version.ts";
 import { idempotencyGuard } from "./middleware/idempotency-guard.ts";
 import { getCachedOrgApiVersion } from "./services/organizations.ts";
@@ -424,6 +425,11 @@ app.use(
 // only place the parent-side `frame-src` containment of agent-HTML previews can
 // be attached. Definition + rationale: `routes/spa.ts`.
 app.get("/*", createSpaFallbackHandler(buildAppConfigScript));
+
+// Registered only now that every route is mounted: registration joins each
+// documented operation onto its route and throws on one no route serves, so a
+// spec/route mismatch refuses the boot. In-process dispatch reads it too.
+registerPlatformApp(app);
 
 // Start server — bind 0.0.0.0 so both IPv4 and IPv6 clients can connect
 export default {

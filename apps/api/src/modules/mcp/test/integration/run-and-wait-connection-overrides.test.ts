@@ -47,13 +47,12 @@ import {
 } from "../../../../../test/helpers/run-connection-fixtures.ts";
 import { _setOrchestratorForTesting } from "../../../../services/orchestrator/index.ts";
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
-import { resetCatalog } from "../../catalog.ts";
 import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
 
 const app = getTestApp();
 // Wire in-process dispatch to the test app — without it `run_and_wait` has no
-// platform to launch the run against (production sets this in
-// registerModuleRoutes; the test harness mounts modules inline).
+// platform to launch the run against (production registers its app in
+// `index.ts` once every route is mounted).
 await registerTestPlatformApp();
 
 const INTEGRATION = "@mcpconn/svc";
@@ -116,7 +115,6 @@ describe("mcp run_and_wait — connection_overrides", () => {
 
   beforeEach(async () => {
     await truncateAll();
-    resetCatalog();
     // A session owner: it holds mcp:read + mcp:invoke AND the `agents:run`
     // the dispatched inline route enforces, so nothing but the connection
     // ambiguity can decide the outcome.

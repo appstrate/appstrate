@@ -31,9 +31,9 @@ export function getDiscoveredModules(): readonly AppstrateModule[] {
  *
  * A file that swaps in a fake module owns the registry for its duration, but
  * the state it must return to is the preload's — not an empty map. Anything
- * derived from `_modules` (the MCP catalog's module-contributed OpenAPI paths,
- * the RBAC snapshot) reads a registry emptied by a sibling file as a smaller
- * platform, and answers for one.
+ * derived from `_modules` (the module-contributed OpenAPI paths the platform-app
+ * registration joins, the RBAC snapshot) reads a registry emptied by a sibling
+ * file as a smaller platform, and answers for one.
  */
 export async function restoreDiscoveredModules(): Promise<void> {
   resetModules();

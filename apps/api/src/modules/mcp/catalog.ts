@@ -1,30 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Operation catalog — the single source of MCP tool material, built from the
- * live OpenAPI spec (`buildOpenApiSpec()`, which also backs
- * `GET /api/openapi.json`). Each operation carries what the guards mounted on
- * its route ask of the caller, so the index and the tool surface derive from
- * the table that enforces them — never a second list. Built on first use,
- * never at boot: the module-contributed paths and the mounted route table are
- * complete only once a request arrives.
+ * Operation catalog — the single source of MCP tool material, derived from the
+ * operations the platform app registered (`lib/platform-app.ts`): the live
+ * OpenAPI spec (which also backs `GET /api/openapi.json`) joined onto what the
+ * guards mounted on each route ask of the caller. The index and the tool
+ * surface thus derive from the table that enforces them — never a second list.
  */
 
-import { buildOpenApiSpec } from "../../openapi/index.ts";
-import { getPlatformRoutes } from "../../lib/platform-app.ts";
-import {
-  deriveRouteRequirements,
-  isGranted,
-  type RouteRequirement,
-} from "../../lib/route-requirements.ts";
-import {
-  getModuleOpenApiPaths,
-  getModuleOpenApiComponentSchemas,
-  getModuleOpenApiTags,
-} from "../../lib/modules/module-loader.ts";
-
-const OPERATION_METHODS = ["get", "post", "put", "patch", "delete"] as const;
-type OperationMethod = (typeof OPERATION_METHODS)[number];
+import { getPlatformOperations, type PlatformOperations } from "../../lib/platform-app.ts";
+import { isGranted, type RouteRequirement } from "../../lib/route-requirements.ts";
 
 /** Minimal shape of an OpenAPI operation node we depend on. */
 interface OperationNode {
@@ -60,7 +45,8 @@ interface OperationCatalog {
   componentSchemas: Record<string, unknown>;
 }
 
-let cached: OperationCatalog | null = null;
+/** Keyed on the registration, so registering another app re-derives it. */
+const catalogs = new WeakMap<PlatformOperations, OperationCatalog>();
 
 const PATH_PARAM_RE = /\{([^}]+)\}/g;
 
@@ -70,10 +56,6 @@ function extractPathParams(pathTemplate: string): string[] {
     if (match[1]) names.push(match[1]);
   }
   return names;
-}
-
-function isOperationNode(value: unknown): value is OperationNode {
-  return typeof value === "object" && value !== null;
 }
 
 /**
@@ -111,61 +93,37 @@ function isExcludedPath(pathTemplate: string): boolean {
 }
 
 export function getCatalog(): OperationCatalog {
-  if (cached) return cached;
-
-  const spec = buildOpenApiSpec(
-    getModuleOpenApiPaths(),
-    getModuleOpenApiComponentSchemas(),
-    getModuleOpenApiTags(),
-  );
-
-  const paths = spec.paths as Record<string, Record<string, unknown>>;
-  const componentSchemas = (spec.components?.schemas ?? {}) as Record<string, unknown>;
-  const requirementFor = deriveRouteRequirements(getPlatformRoutes());
-
-  const operations = new Map<string, CatalogOperation>();
-  const unresolved: string[] = [];
-  for (const [pathTemplate, pathItem] of Object.entries(paths)) {
-    if (typeof pathItem !== "object" || pathItem === null) continue;
-    if (isExcludedPath(pathTemplate)) continue;
-    for (const method of OPERATION_METHODS) {
-      const node = (pathItem as Record<OperationMethod, unknown>)[method];
-      if (!isOperationNode(node) || typeof node.operationId !== "string") continue;
-      const httpMethod = method.toUpperCase();
-      // No fallback to "unfiltered": an operation the route table cannot find
-      // would be published as needing nothing, turning a mismatch into a grant.
-      const requirement = requirementFor(httpMethod, pathTemplate);
-      if (!requirement) {
-        unresolved.push(`${node.operationId} (${httpMethod} ${pathTemplate})`);
-        continue;
-      }
-      operations.set(node.operationId, {
-        operationId: node.operationId,
-        method: httpMethod,
-        pathTemplate,
-        tags: Array.isArray(node.tags) ? node.tags.filter((t) => typeof t === "string") : [],
-        summary: typeof node.summary === "string" ? node.summary : "",
-        description: typeof node.description === "string" ? node.description : "",
-        pathParams: extractPathParams(pathTemplate),
-        headerParams: extractHeaderParams(node),
-        requirement,
-        operation: node,
-      });
-    }
+  const source = getPlatformOperations();
+  let catalog = catalogs.get(source);
+  if (!catalog) {
+    catalog = buildCatalog(source);
+    catalogs.set(source, catalog);
   }
-  if (unresolved.length > 0) {
-    throw new Error(
-      `The OpenAPI document and the route table disagree — no mounted route serves: ${unresolved.join(", ")}`,
-    );
-  }
-
-  cached = { operations, componentSchemas };
-  return cached;
+  return catalog;
 }
 
-/** Drop the cached catalog so the next read rebuilds it. Tests only. */
-export function resetCatalog(): void {
-  cached = null;
+function buildCatalog(source: PlatformOperations): OperationCatalog {
+  const operations = new Map<string, CatalogOperation>();
+  for (const { operationId, method, pathTemplate, node, requirement } of source.operations) {
+    if (isExcludedPath(pathTemplate)) continue;
+    const operation = node as OperationNode;
+    operations.set(operationId, {
+      operationId,
+      method,
+      pathTemplate,
+      tags: Array.isArray(operation.tags)
+        ? operation.tags.filter((t) => typeof t === "string")
+        : [],
+      summary: typeof operation.summary === "string" ? operation.summary : "",
+      description: typeof operation.description === "string" ? operation.description : "",
+      pathParams: extractPathParams(pathTemplate),
+      headerParams: extractHeaderParams(operation),
+      requirement,
+      operation,
+    });
+  }
+  const componentSchemas = (source.spec.components?.schemas ?? {}) as Record<string, unknown>;
+  return { operations, componentSchemas };
 }
 
 export function operationGranted(op: CatalogOperation, permissions: ReadonlySet<string>): boolean {

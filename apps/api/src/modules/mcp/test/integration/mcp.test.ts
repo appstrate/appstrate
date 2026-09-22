@@ -44,7 +44,7 @@ import {
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
 import { overrideJwks } from "../../../oidc/services/enduser-token.ts";
 import { drainAudits, pendingAuditCount } from "../../../../services/audit.ts";
-import { getCatalog, resetCatalog } from "../../catalog.ts";
+import { getCatalog } from "../../catalog.ts";
 import { createMcpRouter } from "../../router.ts";
 import mcpModule from "../../index.ts";
 
@@ -80,7 +80,6 @@ async function apiKeyHeaders(scopes: string[]): Promise<Record<string, string>> 
 describe("mcp discovery + auth gate", () => {
   beforeEach(async () => {
     await truncateAll();
-    resetCatalog();
   });
 
   it("serves per-org RFC 9728 metadata at the path-inserted well-known URL", async () => {
@@ -258,7 +257,6 @@ describe("mcp discovery + auth gate", () => {
 describe("mcp tool round-trip", () => {
   beforeEach(async () => {
     await truncateAll();
-    resetCatalog();
   });
 
   it("lists the available tools with annotations after initialize", async () => {
@@ -638,7 +636,6 @@ describe("mcp audit + rate limiting", () => {
     // exactly what happened once this branch added request-making tests
     // upstream of it. 24 other suites already flush for the same reason.
     await flushRedis();
-    resetCatalog();
   });
 
   it("records an mcp.operation.invoked audit row for a successful invoke", async () => {
@@ -861,7 +858,6 @@ describe("mcp tools/list for an OIDC end-user", () => {
 
   beforeEach(async () => {
     await truncateAll();
-    resetCatalog();
   });
 
   const toolNames = async (headers: Record<string, string>): Promise<string[]> => {

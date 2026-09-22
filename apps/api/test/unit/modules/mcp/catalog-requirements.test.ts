@@ -4,21 +4,18 @@
  * The catalog's join from an operationId onto the permission its route
  * enforces: every documented operation resolves one, every mutating one is
  * readable (a permission, a row-authoritative marker, or an allowlist entry
- * that still stands for something), and an operation no route serves refuses
- * to build rather than publish as public. Reads the catalog only — no DB.
+ * that still stands for something), and an app leaving an operation unserved is
+ * refused registration rather than publishing it as public. Reads the catalog only — no DB.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import { Hono } from "hono";
+import { getTestApp } from "../../../helpers/app.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
-import { getPlatformRoutes, setPlatformApp } from "../../../../src/lib/platform-app.ts";
+import { registerPlatformApp } from "../../../../src/lib/platform-app.ts";
 import { deriveRouteRequirements } from "../../../../src/lib/route-requirements.ts";
 import { knownSpaceLevelPermissions } from "../../../../src/lib/permissions.ts";
-import {
-  getCatalog,
-  resetCatalog,
-  type CatalogOperation,
-} from "../../../../src/modules/mcp/catalog.ts";
+import { getCatalog, type CatalogOperation } from "../../../../src/modules/mcp/catalog.ts";
 import type { AppEnv } from "../../../../src/types/index.ts";
 
 await registerTestPlatformApp();
@@ -36,8 +33,6 @@ function op(operationId: string): CatalogOperation {
 }
 
 describe("getCatalog — the route join", () => {
-  beforeEach(() => resetCatalog());
-
   it("resolves a requirement for every operation, with no exception", () => {
     // Building the catalog at all is the assertion: one unjoined operation and
     // the call throws, naming it. The control is that it joined a real surface
@@ -45,29 +40,16 @@ describe("getCatalog — the route join", () => {
     expect(getCatalog().operations.size).toBeGreaterThan(100);
   });
 
-  it("refuses to build when a documented operation has no mounted route", async () => {
+  it("refuses to register an app when a documented operation has no mounted route", () => {
     // The refusal is the whole point of the join: an operation the route table
     // cannot find would otherwise be published as needing nothing.
     const bare = new Hono<AppEnv>();
     bare.get("/api/health", (c) => c.json({ ok: true }));
-    setPlatformApp(bare);
-    resetCatalog();
-    try {
-      expect(() => getCatalog()).toThrow(/no mounted route serves/);
-      // Naming the unserved operations is what makes the failure actionable.
-      const message = (() => {
-        try {
-          getCatalog();
-          return "";
-        } catch (error) {
-          return (error as Error).message;
-        }
-      })();
-      expect(message).toContain("createSpace");
-    } finally {
-      await registerTestPlatformApp();
-      resetCatalog();
-    }
+    expect(() => registerPlatformApp(bare)).toThrow(/no mounted route serves/);
+    // Naming the unserved operations is what makes the failure actionable.
+    expect(() => registerPlatformApp(bare)).toThrow("createSpace (POST /api/spaces)");
+    // A refused registration leaves the previous one answering.
+    expect(getCatalog().operations.size).toBeGreaterThan(100);
   });
 
   it("reads the guard mounted on a real operation's route", () => {
@@ -86,8 +68,8 @@ describe("getCatalog — the route join", () => {
 describe("the lookup the catalog joins on", () => {
   it("answers undefined for a template no route serves", () => {
     // What makes the join above a failure rather than a silent grant: the
-    // lookup reports "nothing serves this", and `getCatalog()` refuses to build.
-    const requirementFor = deriveRouteRequirements(getPlatformRoutes());
+    // lookup reports "nothing serves this", and registration refuses the app.
+    const requirementFor = deriveRouteRequirements(getTestApp().routes);
     expect(requirementFor("POST", "/api/nothing-mounts-this/{id}")).toBeUndefined();
   });
 });
