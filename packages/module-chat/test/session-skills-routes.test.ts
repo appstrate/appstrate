@@ -123,6 +123,34 @@ describe("chat session skills", () => {
     expect((await putSkills(id, { skill_catalogue: true, pinned_skills: atCap })).status).toBe(204);
   });
 
+  it("reads the picker's four fields off the real skills listing", async () => {
+    // `fetchChatSkills` hand-types this row; this is what keeps it honest.
+    const created = await app.request("/api/packages/skills", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        manifest: {
+          name: "@chatskills/tone",
+          version: "1.2.0",
+          type: "skill",
+          schema_version: "0.1",
+          display_name: "Tone",
+          description: "Adjusts tone.",
+        },
+        content: '---\nname: tone\ndescription: "Adjusts tone."\n---\n\nBody.',
+      }),
+    });
+    expect(created.status).toBe(201);
+    const list = await app.request("/api/packages/skills", json());
+    const rows = ((await list.json()) as { data: Record<string, unknown>[] }).data;
+    expect(rows.find((row) => row.id === "@chatskills/tone")).toMatchObject({
+      id: "@chatskills/tone",
+      name: "Tone",
+      description: "Adjusts tone.",
+      version: "1.2.0",
+    });
+  });
+
   it("carries the selection on the create, list and detail routes", async () => {
     const created = await app.request(
       "/api/chat/sessions",

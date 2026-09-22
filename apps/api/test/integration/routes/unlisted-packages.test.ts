@@ -14,12 +14,21 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
+import { apiIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { VISIBILITY_META_NAMESPACE } from "../../../src/lib/package-helpers.ts";
 
 const app = getTestApp();
 
 const LISTED = "@vis/listed-skill";
 const UNLISTED = "@vis/unlisted-skill";
+const API_KEY_AUTH = {
+  primary: {
+    type: "api_key" as const,
+    authorizedUris: ["https://api.vis.test/**"],
+    credentialFields: ["api_key"],
+    delivery: { env: { API_KEY: { value: "{$credential.api_key}", sensitive: true } } },
+  },
+};
 const UNLISTED_BODY = "---\nname: unlisted-skill\ndescription: Hidden skill.\n---\n\nSecret body.";
 
 function skillManifest(id: string, meta?: Record<string, unknown>) {
@@ -101,6 +110,40 @@ describe("unlisted package visibility", () => {
     expect(body.id).toBe(UNLISTED);
     expect(body.content).toBe(UNLISTED_BODY);
   });
+
+  // The two other listings `listedFilter` narrows. System rows are placed and
+  // active in every space, so the listing itself is the only thing that differs.
+  for (const [type, listPath] of [
+    ["agent", "/api/agents"],
+    ["integration", "/api/integrations"],
+  ] as const) {
+    it(`GET ${listPath} lists the sibling and not the unlisted ${type}`, async () => {
+      const listed = `@appstrate/vis-listed-${type}`;
+      const unlisted = `@appstrate/vis-unlisted-${type}`;
+      for (const [id, meta] of [
+        [listed, undefined],
+        [unlisted, { [VISIBILITY_META_NAMESPACE]: { level: "unlisted" } }],
+      ] as const) {
+        const base =
+          type === "integration"
+            ? apiIntegrationManifest({ name: id, auths: API_KEY_AUTH })
+            : { name: id, version: "1.0.0", type, schema_version: "0.1", display_name: id };
+        await seedPackage({
+          id,
+          orgId: null,
+          homeSpaceId: null,
+          source: "system",
+          type,
+          draftManifest: { ...base, ...(meta ? { _meta: meta } : {}) },
+        });
+      }
+      const res = await app.request(listPath, { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      const ids = ((await res.json()) as { data: { id: string }[] }).data.map((row) => row.id);
+      expect(ids).toContain(listed);
+      expect(ids).not.toContain(unlisted);
+    });
+  }
 
   it("a plain member reads an unlisted SYSTEM skill by exact id, and does not see it listed", async () => {
     const SYSTEM_UNLISTED = "@appstrate/vis-hidden-system";

@@ -6,7 +6,7 @@
  */
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { chatSkillsQueryKey, fetchChatSkills, putSessionSkills } from "../src/ui/chat-skills.ts";
+import { fetchChatSkills, putSessionSkills } from "../src/ui/chat-skills.ts";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -33,13 +33,6 @@ const json = (body: unknown) =>
     status: 200,
     headers: { "content-type": "application/json" },
   });
-
-describe("chatSkillsQueryKey", () => {
-  it("scopes the catalogue to one space", () => {
-    expect(chatSkillsQueryKey("spc_a")).toEqual(["chat", "skills", "spc_a"]);
-    expect(chatSkillsQueryKey(null)).toEqual(["chat", "skills", null]);
-  });
-});
 
 describe("fetchChatSkills", () => {
   it("GETs the space listing with the scoping headers and projects each row", async () => {

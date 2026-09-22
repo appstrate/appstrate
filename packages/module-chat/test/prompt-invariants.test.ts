@@ -11,16 +11,12 @@
 import { describe, expect, it } from "bun:test";
 import { buildSystemPrompt, formatCallerContext, normalizeChatLocale } from "../src/prompt.ts";
 import { DEFAULT_SKILL_SELECTION } from "../src/skills.ts";
+import { spacesPaths } from "../../../apps/api/src/openapi/paths/spaces.ts";
 
 const OPTS = { skills: DEFAULT_SKILL_SELECTION };
 
-/**
- * The ONE activation door's operationId (`POST /api/spaces/{spaceId}/packages`,
- * `apps/api/src/openapi/paths/spaces.ts`). Pinned here rather than imported so
- * this suite stays a pure string test: importing the API's spec tree would pull
- * the platform router into a file that otherwise needs no app and no database.
- */
-const ACTIVATION_OPERATION_ID = "activatePackage";
+/** Read from the spec, so renaming the activation door fails this suite. */
+const ACTIVATION_OPERATION_ID = spacesPaths["/api/spaces/{spaceId}/packages"].post.operationId;
 
 /** The full persona; the reduced one has its own block at the end. */
 const FULL = buildSystemPrompt({
