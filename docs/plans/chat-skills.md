@@ -118,10 +118,12 @@ catalogue }` with deterministic ordering. Unit-tested.
   (phase 2 has no pins yet: defaults only, discovery `auto`).
 - `formatCallerContext` renders `## Skills` with one entry per indexed skill
   (`- \`@scope/name\` (v1.2.0) — Display name: description`), then the
-catalogue block when discovery is `auto`, then notices. `buildSystemPrompt`gains the loading rules: load before acting when a skill clearly matches,
-one at a time, via`invoke_operation` `getSkill`with`scope`/`name`(keep the`@`); do not reload a skill whose body is already in the
-conversation; when authoring an agent, attach relevant skills under
-`dependencies.skills` (existing sentence, kept). The "attach to an agent"
+catalogue block when discovery is `auto`, then notices.
+- `buildSystemPrompt` gains the loading rules: load before acting when a skill
+  clearly matches, one at a time, via `invoke_operation` `getSkill` with
+  `scope` / `name` (keep the `@`); do not reload a skill whose body is already
+  in the conversation; when authoring an agent, attach relevant skills under
+  `dependencies.skills` (existing sentence, kept). The "attach to an agent"
   wording is author-gated as today; the load rules are not.
 - Byte-identical rendering across turns for the same inputs: test with the
   existing `opts.now` seam pattern (`caller-context.test.ts`).
