@@ -129,6 +129,6 @@
   "notifications.packageShared": "{{name}} shared {{package}} with you",
   "library.indexEmptyHint": "What is placed here but switched off, and what has been offered to you, is in the <1>catalogue</1>.",
   "library.cannotActivate": "You do not have permission to activate this package in this space",
-  "catalogue.pendingOffers": "{{count}} package offered, not switched on yet",
-  "catalogue.pendingOffers_other": "{{count}} packages offered, not switched on yet"
+  "catalogue.pendingOffers": "{{count}} item shared, not active yet",
+  "catalogue.pendingOffers_other": "{{count}} items shared, not active yet"
 }

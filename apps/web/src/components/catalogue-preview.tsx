@@ -158,6 +158,7 @@ export function CataloguePreview({
   placement,
   grantOf,
   integrations,
+  agents,
   protocol,
   busy,
   onSetActive,
@@ -172,6 +173,8 @@ export function CataloguePreview({
   grantOf: (spaceId: string, next: boolean) => boolean;
   /** The library's integrations: what an agent's switch-on would still need. */
   integrations: LibraryPackageItem[];
+  /** The library's agents: which dependents of this package the reader may be told about. */
+  agents: LibraryPackageItem[];
   /** An integration's protocol, when the catalogue knows it. */
   protocol?: string;
   busy: boolean;
@@ -251,7 +254,13 @@ export function CataloguePreview({
   // The column exists only when a space is actually missing something: a
   // column of dashes asks the reader what it would have meant.
   const missingAnywhere = rows.some((row) => missingIn(row.id).length > 0);
-  const usedBy = other?.agents ?? [];
+  /**
+   * The agents that use this package — narrowed to the ones this reader's OWN
+   * library carries. `getOrgItem` counts dependents across the organization
+   * (`findDependentPackages`, no placement predicate), so naming them all
+   * would publish agents homed in spaces this reader cannot enter.
+   */
+  const usedBy = (other?.agents ?? []).filter((entry) => agents.some((row) => row.id === entry.id));
   const agentSkills = agent?.dependencies.skills ?? [];
   const agentInputs = agent ? inputNames(agent) : [];
   const runtimeTools = Array.isArray(agent?.manifest?.runtime_tools)
@@ -293,55 +302,43 @@ export function CataloguePreview({
 
       {item.description && <p className="mt-4 text-sm">{item.description}</p>}
 
-      {/* The package's properties, in blocks each under a heading of its own —
-          the same heading "Espaces" carries below. A gap alone had to be read
-          as a grouping, and read as an accident of spacing instead. A list
-          rather than cards: these are not a content of their own, and a frame
-          around a property list draws a border that answers to nothing. */}
-      {agent && (
-        <SettingsGroup title={t("catalogue.sheet.uses")} className="mt-6 mb-6">
-          <dl className="divide-border divide-y border-t">
-            <PropertyRow
-              icon={Boxes}
-              label={t("catalogue.sheet.integrations")}
-              hint={
-                agent.dependencies.integrations.length > 0
-                  ? t("catalogue.sheet.integrationsHint")
-                  : undefined
-              }
-            >
-              {agent.dependencies.integrations.length > 0
-                ? agent.dependencies.integrations
-                    .map((entry) => integrationName(entry.id))
-                    .join(", ")
-                : t("catalogue.sheet.none")}
-            </PropertyRow>
-            {agentSkills.length > 0 && (
-              <PropertyRow
-                icon={Wrench}
-                label={t("catalogue.sheet.skills")}
-                hint={t("catalogue.sheet.skillsHint")}
-              >
-                {/* Named, never linked: a skill not shared to the reader's
-                    space opens on a 404, and it needs nothing there anyway. */}
-                {agentSkills.map((skill) => skill.name ?? skill.id).join(", ")}
-              </PropertyRow>
+      {/* The one line that asks the reader for a decision, at the TOP like
+          every other alert in the product: above the first block rather than
+          beside the table, since its button names the space it acts on. It
+          goes through the catalogue's own activation, which asks about the
+          agent's integrations before writing. */}
+      {offers.map((offer) => (
+        <Alert key={offer.id} variant="info" className="mt-4">
+          <Inbox className="h-4 w-4" />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <AlertTitle className="mb-0">
+                {offer.offeredBy
+                  ? t("catalogue.sheet.offerBy", { name: offer.offeredBy, space: offer.name })
+                  : t("catalogue.sheet.offer", { space: offer.name })}
+              </AlertTitle>
+              <p className="text-muted-foreground mt-0.5 text-xs">
+                {missingText(offer.id) ?? t("catalogue.sheet.offerCredentials")}
+              </p>
+            </div>
+            {offer.mayToggle && (
+              <Button size="sm" disabled={busy} onClick={() => onSetActive(offer.id, true)}>
+                {t("catalogue.sheet.activateIn", { space: offer.name })}
+              </Button>
             )}
-            {agentInputs.length > 0 && (
-              <PropertyRow icon={TextCursorInput} label={t("catalogue.sheet.inputs")}>
-                {agentInputs.join(", ")}
-              </PropertyRow>
-            )}
-            {runtimeTools > 0 && (
-              <PropertyRow icon={Hammer} label={t("catalogue.sheet.tools")}>
-                {t("catalogue.sheet.toolCount", { count: runtimeTools })}
-              </PropertyRow>
-            )}
-          </dl>
-        </SettingsGroup>
-      )}
+          </div>
+        </Alert>
+      ))}
 
-      <SettingsGroup title={t("catalogue.sheet.details")} className={agent ? "mb-6" : "mt-6 mb-6"}>
+      {/* The package's properties, in blocks each under a heading of its own —
+          the same heading "Espaces" carries below. A gap alone had to carry the
+          split and read as an accident of spacing instead. A list rather than
+          cards: these are not a content of their own, and a frame around a
+          property list draws a border that answers to nothing.
+          "À propos" comes FIRST, and in the same order, because every type
+          answers it: a reader moving from an agent to a skill to an integration
+          finds the same facts in the same place. What varies by type follows. */}
+      <SettingsGroup title={t("catalogue.sheet.about")} className="mt-6 mb-6">
         <dl className="divide-border divide-y border-t">
           {protocol && (
             <PropertyRow icon={Plug} label={t("catalogue.column.protocol")}>
@@ -371,35 +368,56 @@ export function CataloguePreview({
           <PropertyRow icon={Hash} label={t("catalogue.identifier")}>
             <span className="font-mono text-xs break-all">{item.id}</span>
           </PropertyRow>
+          {/* What the agent ASKS at launch, and what the runtime gives it:
+              neither is a dependency — they are facts about the package, so
+              they sit here, after the rows every type carries. */}
+          {agentInputs.length > 0 && (
+            <PropertyRow icon={TextCursorInput} label={t("catalogue.sheet.inputs")}>
+              {agentInputs.join(", ")}
+            </PropertyRow>
+          )}
+          {runtimeTools > 0 && (
+            <PropertyRow icon={Hammer} label={t("catalogue.sheet.tools")}>
+              {t("catalogue.sheet.toolCount", { count: runtimeTools })}
+            </PropertyRow>
+          )}
         </dl>
       </SettingsGroup>
 
-      {/* The one line that asks the reader for a decision: an alert, like
-          every other line in the product that names a state and its remedy.
-          It acts on THAT space alone, through the catalogue's own activation,
-          which asks about the agent's integrations before writing. */}
-      {offers.map((offer) => (
-        <Alert key={offer.id} className="mt-6">
-          <Inbox className="h-4 w-4" />
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0">
-              <AlertTitle className="mb-0">
-                {offer.offeredBy
-                  ? t("catalogue.sheet.offerBy", { name: offer.offeredBy, space: offer.name })
-                  : t("catalogue.sheet.offer", { space: offer.name })}
-              </AlertTitle>
-              <p className="text-muted-foreground mt-0.5 text-xs">
-                {missingText(offer.id) ?? t("catalogue.sheet.offerCredentials")}
-              </p>
-            </div>
-            {offer.mayToggle && (
-              <Button size="sm" disabled={busy} onClick={() => onSetActive(offer.id, true)}>
-                {t("catalogue.sheet.activateIn", { space: offer.name })}
-              </Button>
+      {/* The manifest's own word, and only what it covers: an integration or a
+          skill the agent declares. */}
+      {agent && (
+        <SettingsGroup title={t("catalogue.sheet.dependencies")} className="mb-6">
+          <dl className="divide-border divide-y border-t">
+            <PropertyRow
+              icon={Boxes}
+              label={t("catalogue.sheet.integrations")}
+              hint={
+                agent.dependencies.integrations.length > 0
+                  ? t("catalogue.sheet.integrationsHint")
+                  : undefined
+              }
+            >
+              {agent.dependencies.integrations.length > 0
+                ? agent.dependencies.integrations
+                    .map((entry) => integrationName(entry.id))
+                    .join(", ")
+                : t("catalogue.sheet.none")}
+            </PropertyRow>
+            {agentSkills.length > 0 && (
+              <PropertyRow
+                icon={Wrench}
+                label={t("catalogue.sheet.skills")}
+                hint={t("catalogue.sheet.skillsHint")}
+              >
+                {/* Named, never linked: a skill not shared to the reader's
+                    space opens on a 404, and it needs nothing there anyway. */}
+                {agentSkills.map((skill) => skill.name ?? skill.id).join(", ")}
+              </PropertyRow>
             )}
-          </div>
-        </Alert>
-      ))}
+          </dl>
+        </SettingsGroup>
+      )}
 
       <SettingsGroup title={t("catalogue.sheet.spaces")} className="mt-8 mb-0">
         {mode === "everywhere" && <p className="text-sm">{t("catalogue.sheet.everywhere")}</p>}

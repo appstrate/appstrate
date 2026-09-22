@@ -1693,14 +1693,24 @@ and what it needs.
   the package is PLACED (`fetchPackageDetail(..., spaceId)`), since the server
   answers only there and the catalogue shows packages placed elsewhere than the
   space the reader stands in.
-- **An offer is an alert**, the shape every other line naming a state and its
-  remedy has: "Julie Ferrand l'a proposé à Bac à sable", what that space would
+- **A share is an alert at the top of the sheet**, above the first block, the
+  shape and the place every other line naming a state and its remedy has, in a
+  new `info` variant (primary border and tint): a share is neither a fault nor
+  a warning, and the navigation already badges a pending one in that colour.
+  Its button names the space it acts on, so it does not have to sit beside the
+  table: "Julie Ferrand l'a proposé à Bac à sable", what that space would
   still have to switch on, and "Activer dans Bac à sable".
 - **The reference facts are property lists under headings of their own** —
-  "Ce qu'il utilise", "Détails", then "Espaces", the three of them the same
+  "Général", "Dépendances", then "Espaces", the three of them the same
   `SettingsHeading` the settings pages use. Each row is icon, label, value.
-  A wider gap alone was tried first to separate the two groups and read as an
-  accident of spacing: a grouping the reader has to infer is not a grouping. Two cards were
+  A wider gap alone was tried first to separate the groups and read as an
+  accident of spacing: a grouping the reader has to infer is not a grouping.
+  "Général" comes first and carries the same rows in the same order whatever
+  the type, so moving from an agent to a skill to an integration finds them in
+  one place; what varies follows. "Dépendances" is the manifest's own word and
+  holds only what it covers — a declared integration or skill. What the agent
+  ASKS at launch (its inputs) and what the runtime hands it (built-in tools)
+  are not dependencies, so they sit in "Général", after the recurring rows. Two cards were
   tried first and gave the values half the panel's width, wrapping an
   identifier mid-word; and a card frames a content of its own, which a list of
   properties is not. Deliberately not tabs either: the sheet is a preview
@@ -1731,6 +1741,25 @@ Not done, on purpose: listing an agent's embedded skills in the recipient
 space's Skills list. That list answers "what can I use here", and an embedded
 skill can be neither opened nor added to another agent there. If reuse is ever
 wanted, the answer is a request to share, not a read-only row.
+
+**The vocabulary is sharing, not offering (22 September)**
+
+The screen said "proposé", a word this product invented. It says **partagé**
+now, the word everyone already knows from every document tool: "Julie Ferrand a
+partagé cet élément avec Bac à sable", a space is "Partagé" or "Non partagé",
+and the navigation counts "éléments partagés, pas encore activés". The second
+half of that sentence is the one thing a document tool does not have, and it is
+exactly what the model adds: a share grants placement and read, and switching
+it on stays the recipient's own act.
+
+**One leak the sheet found**
+
+"Utilisé par", on a skill or an integration, is `getOrgItem`'s `agents` —
+`findDependentPackages` over the ORGANIZATION, with no placement predicate. On
+the package's own page that answer is as old as the page; putting it on a
+catalogue sheet a member reads would have named agents homed in spaces they
+cannot enter. The sheet narrows it to the dependents their own library carries,
+and says nothing when none of them are visible.
 
 **What is left**
 

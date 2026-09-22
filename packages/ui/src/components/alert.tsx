@@ -11,6 +11,10 @@ const alertVariants = cva(
       variant: {
         default: "bg-background text-foreground",
         destructive: "border-destructive/50 text-destructive [&>svg]:text-destructive",
+        // Neither a fault nor a warning: something happened that asks the
+        // reader for a decision — a package shared with one of their spaces,
+        // which the navigation already badges in this same colour.
+        info: "border-primary/40 bg-primary/5 text-foreground [&>svg]:text-primary",
         warning: "border-warning/50 text-warning [&>svg]:text-warning",
         success: "border-success/50 text-success [&>svg]:text-success",
       },

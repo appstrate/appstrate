@@ -667,6 +667,7 @@ export function OrgCatalogueModal({
             maySetPackageActive(grantById.get(targetSpaceId), active, next)
           }
           integrations={library?.packages.integration ?? []}
+          agents={library?.packages.agent ?? []}
           protocol={
             active === "integration" && integrationById.get(reading.id)
               ? integrationProtocol(integrationById.get(reading.id)!)
