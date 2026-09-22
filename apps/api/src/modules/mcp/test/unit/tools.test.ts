@@ -25,7 +25,7 @@ import { registerTestPlatformApp } from "../../../../../test/helpers/platform-ap
 
 // The tools read the mounted route table (what each operation's guard requires)
 // to decide what this caller is shown.
-registerTestPlatformApp();
+await registerTestPlatformApp();
 
 // The handlers ignore `extra`; supply a typed placeholder.
 const noExtra = {} as unknown as AppstrateRequestExtra;
@@ -334,7 +334,9 @@ describe("describe_operation", () => {
       // only, so the operation stays describable and reports itself denied.
       const body = await describeOp(RUNNER, "runInline");
       expect(body.required_permissions).toEqual(["agents:write", "agents:run"]);
-      expect(body.conditional).toBe(false);
+      // The other half of the split: both stamped guards sit in the caller's own space, yet the handler still judges the posted manifest's dependencies on the row — hence conditional.
+      expect(body.target_space_permissions).toEqual([]);
+      expect(body.conditional).toBe(true);
       expect(body.granted).toBe(false);
     });
 
@@ -346,14 +348,17 @@ describe("describe_operation", () => {
       expect(body.granted).toBe(true);
     });
 
-    it("names a target-space requirement without ever filtering on it", async () => {
+    it("names a target-space requirement in its own field, never filtering on it", async () => {
       // `GET /api/spaces/{id}/members` mounts `requireSpaceFromParam("id")`
       // first, which re-applies the caller's permissions in the space the PATH
       // names — so the guard behind it is asked of THAT space, not of the one
-      // this caller's set describes. Naming it is honest; denying on it would
-      // hide the route from the very caller the target space would admit.
+      // this caller's set describes. It gets a field of its own: folded into
+      // `required_permissions` it reads as a permission the caller must hold
+      // here, and a model told "an operation needing a permission outside your
+      // list is refused" pre-refuses a call the route would have allowed.
       const body = await describeOp(["mcp:read"], "listSpaceMembers");
-      expect(body.required_permissions).toContain("space-members:read");
+      expect(body.target_space_permissions).toContain("space-members:read");
+      expect(body.required_permissions).toEqual([]);
       expect(body.conditional).toBe(true);
       expect(body.granted).toBe(true);
     });

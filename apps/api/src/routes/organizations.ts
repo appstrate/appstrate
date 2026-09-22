@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
 import type { AppEnv, OrgRole } from "../types/index.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
+import { requirePermission, rowAuthority } from "../middleware/require-permission.ts";
 import { spaceAssignmentSchema } from "../lib/space-role-assignment.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
 import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
@@ -509,98 +509,112 @@ router.put(
 );
 
 // DELETE /api/orgs/:orgId/members/:userId — remove a member (admin+)
-router.delete("/:orgId/members/:userId", requirePermission("members", "remove"), async (c) => {
-  const user = c.get("user");
-  const orgId = c.req.param("orgId")!;
-  const targetUserId = c.req.param("userId")!;
+// `rowAuthority()`: the guard answers "may remove members at all"; the TARGET
+// member's own role answers "may remove THIS one" (`canRemoveMember`).
+router.delete(
+  "/:orgId/members/:userId",
+  requirePermission("members", "remove"),
+  rowAuthority(),
+  async (c) => {
+    const user = c.get("user");
+    const orgId = c.req.param("orgId")!;
+    const targetUserId = c.req.param("userId")!;
 
-  // The guard answered "may remove members at all"; the policy answers "THIS one".
-  const actorRole = actingOrgRole(c);
-  const target = await getOrgMember(orgId, targetUserId);
-  if (!target) {
-    throw notFound("Member not found");
-  }
-  if (
-    !canRemoveMember({
+    // The guard answered "may remove members at all"; the policy answers "THIS one".
+    const actorRole = actingOrgRole(c);
+    const target = await getOrgMember(orgId, targetUserId);
+    if (!target) {
+      throw notFound("Member not found");
+    }
+    if (
+      !canRemoveMember({
+        actorRole,
+        targetRole: target.role,
+        isSelf: targetUserId === user.id,
+      })
+    ) {
+      throw forbidden("You cannot remove this member");
+    }
+
+    const { orphanedSpaceIds } = await removeMember(orgId, targetUserId);
+    await recordAuditFromContext(c, {
+      action: "org.member_removed",
+      resourceType: "member",
+      resourceId: targetUserId,
+      orgIdOverride: orgId,
+      // The personal space(s) the removal put on the 30-day clock (RBAC spec
+      // §3.6). Named here because this is the event an owner comes back to when
+      // deciding whether to convert one or sweep it: the sweeper's own log line
+      // arrives 30 days later, and by then the space is gone.
+      after: { orphanedSpaceIds },
+    });
+    return c.body(null, 204);
+  },
+);
+
+// PUT /api/orgs/:orgId/members/:userId — change role (owner/admin hierarchy)
+// `rowAuthority()`: which roles are assignable is read off the TARGET
+// member's row (`assignableRolesForMember`), not off the mounted guard.
+router.put(
+  "/:orgId/members/:userId",
+  requirePermission("members", "change-role"),
+  rowAuthority(),
+  async (c) => {
+    const user = c.get("user");
+    const orgId = c.req.param("orgId")!;
+    const targetUserId = c.req.param("userId")!;
+
+    const actorRole = actingOrgRole(c);
+    const data = await readJsonBody(c, updateRoleSchema);
+
+    const target = await getOrgMember(orgId, targetUserId);
+    if (!target) {
+      throw notFound("Member not found");
+    }
+
+    const assignableRoles = assignableRolesForMember({
       actorRole,
       targetRole: target.role,
       isSelf: targetUserId === user.id,
-    })
-  ) {
-    throw forbidden("You cannot remove this member");
-  }
+    });
+    if (!assignableRoles.includes(data.role)) {
+      throw forbidden("You cannot assign this role to this member");
+    }
 
-  const { orphanedSpaceIds } = await removeMember(orgId, targetUserId);
-  await recordAuditFromContext(c, {
-    action: "org.member_removed",
-    resourceType: "member",
-    resourceId: targetUserId,
-    orgIdOverride: orgId,
-    // The personal space(s) the removal put on the 30-day clock (RBAC spec
-    // §3.6). Named here because this is the event an owner comes back to when
-    // deciding whether to convert one or sweep it: the sweeper's own log line
-    // arrives 30 days later, and by then the space is gone.
-    after: { orphanedSpaceIds },
-  });
-  return c.body(null, 204);
-});
+    // Promoting to owner/admin drops the member's explicit space grants; the audit
+    // is the only record of what a later demotion will NOT restore.
+    const revoked = await updateMemberRole(orgId, targetUserId, data.role);
+    await recordAuditFromContext(c, {
+      action: "org.member_role_updated",
+      resourceType: "member",
+      resourceId: targetUserId,
+      before: {
+        role: target.role,
+        revoked_space_assignments: revoked.map((row) => ({
+          space_id: row.spaceId,
+          preset_role: row.presetRole,
+          custom_role_id: row.customRoleId,
+        })),
+      },
+      after: { role: data.role },
+      orgIdOverride: orgId,
+    });
 
-// PUT /api/orgs/:orgId/members/:userId — change role (owner/admin hierarchy)
-router.put("/:orgId/members/:userId", requirePermission("members", "change-role"), async (c) => {
-  const user = c.get("user");
-  const orgId = c.req.param("orgId")!;
-  const targetUserId = c.req.param("userId")!;
-
-  const actorRole = actingOrgRole(c);
-  const data = await readJsonBody(c, updateRoleSchema);
-
-  const target = await getOrgMember(orgId, targetUserId);
-  if (!target) {
-    throw notFound("Member not found");
-  }
-
-  const assignableRoles = assignableRolesForMember({
-    actorRole,
-    targetRole: target.role,
-    isSelf: targetUserId === user.id,
-  });
-  if (!assignableRoles.includes(data.role)) {
-    throw forbidden("You cannot assign this role to this member");
-  }
-
-  // Promoting to owner/admin drops the member's explicit space grants; the audit
-  // is the only record of what a later demotion will NOT restore.
-  const revoked = await updateMemberRole(orgId, targetUserId, data.role);
-  await recordAuditFromContext(c, {
-    action: "org.member_role_updated",
-    resourceType: "member",
-    resourceId: targetUserId,
-    before: {
-      role: target.role,
-      revoked_space_assignments: revoked.map((row) => ({
-        space_id: row.spaceId,
-        preset_role: row.presetRole,
-        custom_role_id: row.customRoleId,
-      })),
-    },
-    after: { role: data.role },
-    orgIdOverride: orgId,
-  });
-
-  // Bare updated resource — same serializer as the members list in
-  // GET /orgs/:orgId (issue #657).
-  const updated = await getOrgMemberWithProfile(orgId, targetUserId);
-  if (!updated) {
-    throw notFound("Member not found");
-  }
-  return c.json({
-    userId: updated.userId,
-    role: updated.role,
-    joinedAt: updated.joinedAt,
-    displayName: updated.displayName,
-    email: updated.email,
-  });
-});
+    // Bare updated resource — same serializer as the members list in
+    // GET /orgs/:orgId (issue #657).
+    const updated = await getOrgMemberWithProfile(orgId, targetUserId);
+    if (!updated) {
+      throw notFound("Member not found");
+    }
+    return c.json({
+      userId: updated.userId,
+      role: updated.role,
+      joinedAt: updated.joinedAt,
+      displayName: updated.displayName,
+      email: updated.email,
+    });
+  },
+);
 
 // GET /api/orgs/:orgId/settings — get org settings (any member)
 router.get("/:orgId/settings", async (c) => {

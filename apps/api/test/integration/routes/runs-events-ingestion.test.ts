@@ -39,6 +39,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
+import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
 import {
   finalizeRun,
   getRunSinkContext,
@@ -1805,9 +1806,10 @@ describe("POST /api/runs/:runId/events/finalize — terminal broadcast params", 
     await seedPackage({ orgId: ctx.orgId, id: "@test/hook-agent", type: "agent" });
   });
 
-  afterAll(() => {
-    // Don't leak the spy module into sibling test files.
-    resetModules();
+  afterAll(async () => {
+    // Don't leak the spy module into sibling test files — and leave the
+    // registry as the preload populated it, not empty.
+    await restoreDiscoveredModules();
   });
 
   async function captureTerminalParams(): Promise<{
@@ -2017,8 +2019,9 @@ describe("remote run.started — emitted at first event, not at row insert", () 
     await seedPackage({ orgId: ctx.orgId, id: "@test/started-agent", type: "agent" });
   });
 
-  afterAll(() => {
-    resetModules();
+  afterAll(async () => {
+    // Leave the registry as the preload populated it, not empty.
+    await restoreDiscoveredModules();
   });
 
   async function captureStartedEvents(): Promise<{

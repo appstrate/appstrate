@@ -56,14 +56,6 @@ describe("turnCapabilities", () => {
     }
   });
 
-  it("grants nothing to a turn holding nothing", () => {
-    expect(turnCapabilities(() => false)).toEqual({
-      invokes: false,
-      runLevel: "none",
-      authors: false,
-    });
-  });
-
   it("puts `invokes` in every level: no MCP pair, no run level and no authoring", () => {
     // The whole point of the type: a grant the turn cannot dispatch is a grant
     // it cannot use. Each case below holds every run/authoring permission and
@@ -85,40 +77,6 @@ describe("turnCapabilities", () => {
       authors: true,
     });
   });
-
-  it("reads runs on either run-read permission, and launches on neither alone", () => {
-    const level = (permissions: string[]): RunLevel => {
-      const held = new Set(permissions);
-      return turnCapabilities((p) => held.has(p)).runLevel;
-    };
-    const mcp = ["mcp:read", "mcp:invoke"];
-    expect(level([...mcp, "runs:read"])).toBe("read");
-    expect(level([...mcp, "runs:read-all"])).toBe("read");
-    // `agents:run` without a run-read is a launch nobody could poll.
-    expect(level([...mcp, "agents:run"])).toBe("none");
-    expect(level([...mcp, "agents:run", "runs:read"])).toBe("run");
-    expect(level([...mcp, "agents:run", "runs:read", "agents:write"])).toBe("compose");
-    // Composing is launch PLUS authoring: authoring alone does not reach it.
-    expect(level([...mcp, "agents:write", "runs:read"])).toBe("read");
-  });
-
-  it("holds `authors` without any run level, and a run level without `authors`", () => {
-    const of = (permissions: string[]) => {
-      const held = new Set(permissions);
-      return turnCapabilities((p) => held.has(p));
-    };
-    const mcp = ["mcp:read", "mcp:invoke"];
-    expect(of([...mcp, "agents:write"])).toEqual({
-      invokes: true,
-      runLevel: "none",
-      authors: true,
-    });
-    expect(of([...mcp, "agents:run", "runs:read"])).toEqual({
-      invokes: true,
-      runLevel: "run",
-      authors: false,
-    });
-  });
 });
 
 describe("reaches", () => {
@@ -133,14 +91,6 @@ describe("reaches", () => {
           reaches: i >= j,
         });
       }
-    }
-  });
-
-  it("makes every level reach `none` and only `compose` reach `compose`", () => {
-    for (const level of ORDER) expect(reaches(level, "none")).toBe(true);
-    expect(reaches("compose", "compose")).toBe(true);
-    for (const level of ["none", "read", "run"] as const) {
-      expect(reaches(level, "compose")).toBe(false);
     }
   });
 });

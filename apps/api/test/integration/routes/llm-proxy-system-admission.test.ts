@@ -43,6 +43,7 @@ import {
 } from "../../../src/services/model-registry.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
+import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
 import { mintLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 
 const app = getTestApp();
@@ -184,8 +185,9 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
     globalThis.fetch = originalFetch;
   });
 
-  afterAll(() => {
-    resetModules();
+  afterAll(async () => {
+    // Leave the registry as the preload populated it, not empty.
+    await restoreDiscoveredModules();
     initSystemModelProviderKeys([]);
     seedTestModelProviders();
   });

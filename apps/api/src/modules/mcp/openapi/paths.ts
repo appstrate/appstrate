@@ -45,8 +45,9 @@ export const mcpPaths = {
         "Model Context Protocol server (Streamable HTTP, stateless) for a single organization. " +
         "Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it " +
         "declares follow the caller's permissions: the read-only set (`search_operations`, " +
-        "`describe_operation`, `read_file`, `validate_package_file`, `get_runtime_capabilities`) " +
-        "is always present, while the acting tools — `invoke_operation` (`mcp:invoke`), " +
+        "`describe_operation`, `read_file`, `validate_package_file`, `get_runtime_capabilities`, " +
+        "and `get_me` unless the client injects its own caller context) is always present, " +
+        "while the acting tools — `invoke_operation` (`mcp:invoke`), " +
         "`run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` " +
         "(whatever guards the `listFiles` operation's own route) and `import_package_file` — are " +
         "declared only to a caller whose grants make them usable, so `tools/list` differs by " +

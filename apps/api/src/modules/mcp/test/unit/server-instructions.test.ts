@@ -21,7 +21,7 @@ import { resetCatalog } from "../../catalog.ts";
 
 // The appended operation index is filtered per operation against the mounted
 // guards, so building the instructions reads the route table.
-registerTestPlatformApp();
+await registerTestPlatformApp();
 
 /**
  * Launch and read back: the connect bullet is run-readiness guidance, so it is

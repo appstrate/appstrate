@@ -343,11 +343,13 @@ describe("the persona without agent runs", () => {
     }
   });
 
-  it("enumerates no permission-gated act — the operation index is the authority", () => {
-    // The index the engine appends is filtered per operation by the route
-    // guards. A persona that names acts attributes them to a caller whose index
-    // may not carry them: an operator asked "what can you do?" answered from the
-    // prompt instead of from its tools.
+  it("enumerates no permission-gated act — the turn's permission list is the authority", () => {
+    // The permission list is the one authority always in context: the operation
+    // index is stripped for the engines whose models choke on it
+    // (`applyOperationIndexPolicy`), so a sentence pointing at the index points
+    // at nothing there. A persona that names acts attributes them to a caller
+    // whose set may not carry them: an operator asked "what can you do?"
+    // answered from the prompt instead of from its tools.
     for (const enumerated of ["manage agents", "configure or activate", "schedule"]) {
       expect(NO_RUNS).not.toContain(enumerated);
       expect(FULL).not.toContain(enumerated);
@@ -356,7 +358,8 @@ describe("the persona without agent runs", () => {
       expect(persona).toContain(
         "If the request is a pure Appstrate operation, call that operation directly with `invoke_operation`",
       );
-      expect(persona).toContain("the operation index in your instructions is the authority");
+      expect(persona).toContain("the permissions listed in your context decide what you may call");
+      expect(persona).not.toContain("the operation index in your instructions is the authority");
     }
   });
 

@@ -771,10 +771,8 @@ describe("handleChatStream", () => {
     });
 
     it("teaches no authoring without `mcp:invoke` — `createAgent` dispatches through it", async () => {
-      // `agents:write` with no way to dispatch is a grant the turn can never
-      // use: the persona used to teach skills and `dependencies.*` to it, and
-      // the context block used to list the skills, while the composer's toggle
-      // was hidden and the access chip said "create agents: denied".
+      // `agents:write` without `mcp:invoke` is a grant the turn cannot
+      // dispatch, so neither the skill teaching nor the skill list is rendered.
       const withSkill = () =>
         Response.json({
           user: { name: "Chat Tester", email: "chat-tester@test.com" },

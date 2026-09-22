@@ -16,7 +16,7 @@ import { registerTestPlatformApp } from "../../../../../test/helpers/platform-ap
 
 // `buildMcpTools` decides what this caller is shown from the guards mounted on
 // the routes, so it reads the route table.
-registerTestPlatformApp();
+await registerTestPlatformApp();
 
 const noExtra = {} as unknown as AppstrateRequestExtra;
 

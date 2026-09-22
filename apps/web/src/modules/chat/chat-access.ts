@@ -33,7 +33,8 @@ export interface ChatCapability {
   id: string;
   /** Spelled in full, not built from `id`, so the locale guard checks it. */
   labelKey: string;
-  held: (ctx: ChatAccessContext) => boolean;
+  /** `turn` is derived once per resolution and handed to every row. */
+  held: (ctx: ChatAccessContext, turn: TurnCapabilities) => boolean;
   /** A row the agent-authoring switch turns off: held, but not used this turn. */
   authoring?: true;
 }
@@ -56,14 +57,14 @@ const CHAT_CAPABILITIES: readonly ChatCapability[] = [
   {
     id: "callApi",
     labelKey: "access.capability.callApi",
-    held: (ctx) => caps(ctx).invokes,
+    held: (_ctx, turn) => turn.invokes,
   },
   {
     // `run_and_wait` is not declared without run-read; a fire-and-forget run
     // the assistant could never report on does not count.
     id: "runAgents",
     labelKey: "access.capability.runAgents",
-    held: (ctx) => reaches(caps(ctx).runLevel, "run"),
+    held: (_ctx, turn) => reaches(turn.runLevel, "run"),
   },
   {
     // Creating only: editing an existing agent is authorized by its HOME space,
@@ -76,7 +77,7 @@ const CHAT_CAPABILITIES: readonly ChatCapability[] = [
   {
     id: "readRuns",
     labelKey: "access.capability.readRuns",
-    held: (ctx) => reaches(caps(ctx).runLevel, "read"),
+    held: (_ctx, turn) => reaches(turn.runLevel, "read"),
   },
   {
     // Browsing (`list_files`), not reading: `read_file` applies the file ACL,
@@ -90,18 +91,18 @@ const CHAT_CAPABILITIES: readonly ChatCapability[] = [
     // Connecting is personal; activating (next row) is per space.
     id: "connectIntegrations",
     labelKey: "access.capability.connectIntegrations",
-    held: (ctx) => caps(ctx).invokes && ctx.can("integrations:connect"),
+    held: (ctx, turn) => turn.invokes && ctx.can("integrations:connect"),
   },
   {
     // Not the raw grant: a personal-space owner may activate without it.
     id: "activateIntegrations",
     labelKey: "access.capability.activateIntegrations",
-    held: (ctx) => caps(ctx).invokes && maySetPackageActive(ctx.spaceGrant, "integration", true),
+    held: (ctx, turn) => turn.invokes && maySetPackageActive(ctx.spaceGrant, "integration", true),
   },
   {
     id: "schedule",
     labelKey: "access.capability.schedule",
-    held: (ctx) => caps(ctx).invokes && ctx.can("schedules:write"),
+    held: (ctx, turn) => turn.invokes && ctx.can("schedules:write"),
   },
 ];
 
@@ -114,9 +115,10 @@ export interface ResolvedChatCapability extends ChatCapability {
 /** `chat:write` gates the turn itself: a `chat:read`-only caller holds no row. */
 export function resolveChatCapabilities(ctx: ChatAccessContext): ResolvedChatCapability[] {
   const converses = ctx.can("chat:write");
+  const turn = caps(ctx);
   return CHAT_CAPABILITIES.map((capability) => ({
     ...capability,
-    verdict: !(converses && capability.held(ctx))
+    verdict: !(converses && capability.held(ctx, turn))
       ? "denied"
       : capability.authoring && !ctx.authoring
         ? "off"

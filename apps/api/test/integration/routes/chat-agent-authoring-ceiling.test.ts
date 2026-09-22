@@ -23,7 +23,7 @@ import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/lo
 import { turnPermissions } from "../../../../../packages/module-chat/src/turn-permissions.ts";
 
 const app = getTestApp();
-registerTestPlatformApp();
+await registerTestPlatformApp();
 const rpc = mcpRpc(app);
 
 interface ListedSpace {

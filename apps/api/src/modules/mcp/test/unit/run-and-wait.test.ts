@@ -12,7 +12,7 @@ import { registerTestPlatformApp } from "../../../../../test/helpers/platform-ap
 
 // Both `buildMcpTools` (what this caller is shown) and the appended operation
 // index read the mounted guards off the route table.
-registerTestPlatformApp();
+await registerTestPlatformApp();
 
 const noExtra = {} as AppstrateRequestExtra;
 /** What composing an inline agent takes: authoring AND launching. */

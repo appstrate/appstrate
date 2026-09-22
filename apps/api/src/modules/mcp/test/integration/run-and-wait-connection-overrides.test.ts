@@ -54,7 +54,7 @@ const app = getTestApp();
 // Wire in-process dispatch to the test app — without it `run_and_wait` has no
 // platform to launch the run against (production sets this in
 // registerModuleRoutes; the test harness mounts modules inline).
-registerTestPlatformApp();
+await registerTestPlatformApp();
 
 const INTEGRATION = "@mcpconn/svc";
 

@@ -6,8 +6,10 @@
  * several operations have no route of their own: a prefix mount (`*`) with a
  * concrete method SERVES its subtree, bare prefix included; a wildcard `ALL`
  * mount only DECORATES, contributing its guard without making anything exist,
- * while an exact-path one serves every method; the root catch-all `/*` serves
- * nothing, since the SPA fallback answers every GET template. A guard mounted
+ * while an exact-path one serves every method; a root `/*` entry with a
+ * concrete method is the SPA fallback and is discarded outright, since reading
+ * it would answer every GET template ever spelled — an `ALL /*` is kept, since
+ * a guard mounted that way really does gate everything beneath it. A guard mounted
  * after a space re-scope (`markSpaceRescope`) is enforced in the space the
  * PATH names, so it is reported separately and never filters.
  */
@@ -98,7 +100,9 @@ export function deriveRouteRequirements(
   const entries: TableEntry[] = [];
   for (const route of routes) {
     const path = openApiPath(route.path);
-    if (path === "/*") continue;
+    // The SPA fallback only. An `ALL /*` mount decorates without serving, so
+    // dropping it would silently discard a guard covering the whole app.
+    if (path === "/*" && route.method.toUpperCase() !== "ALL") continue;
     const wildcard = path.endsWith("*");
     const required = readHandlerMarker(route.handler, PERMISSION_REQUIREMENT_MARKER);
     const requirement = typeof required === "string" && required.length > 0 ? required : null;

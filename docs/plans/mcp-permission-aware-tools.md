@@ -85,8 +85,11 @@ are read through `findTargetHandler` exactly as `hasHandlerMarker` does.
 Two mounts mean something a permission string cannot say, so the derivation
 reads both off the same table. A guard mounted behind `markSpaceRescope`
 (`requireSpaceFromParam`, `routes/spaces.ts`) is enforced in the space the PATH
-names, not the caller's: it lands in `targetSpaceRequirements`, is shown, and
-never filters. A handler that decides on the row it loads declares `rowAuthority()`
+names, not the caller's: it lands in `targetSpaceRequirements`, surfaces on
+`describe_operation` as its own field `target_space_permissions`, is shown, and
+never filters — `required_permissions` stays the caller-space half, the one
+`isGranted` and every filtering path test. A handler that decides on the row it
+loads declares `rowAuthority()`
 (`middleware/require-permission.ts`), which sets `conditional` with no string.
 Either one makes `requirements` a lower bound, which is what `conditional` means.
 
@@ -135,14 +138,17 @@ action are removed. A refusal is the route guard's own audit, once (RBAC spec
 
 ### Search, describe, invoke
 
-- `describe_operation` payload: `+ required_permissions: string[]`,
-  `+ conditional: boolean`, `+ granted: boolean`.
+- `describe_operation` payload: `+ required_permissions: string[]` (the
+  caller-space half alone — what `granted` and every filtering path test),
+  `+ target_space_permissions: string[]` (enforced in the space the path names;
+  shown, never filtered on), `+ conditional: boolean`, `+ granted: boolean`.
 - `search_operations`: `operations` holds granted matches; `denied` holds
-  `{ operation_id, required_permissions }` for the rest (ids only, no
-  summary); `best_match` only from `operations`.
+  `{ operation_id, required_permissions }` for the rest — caller-space
+  permissions, ids only, no summary; `best_match` only from `operations`.
 - `invoke_operation`: unchanged before dispatch. When the response is `403` AND
   the caller's set does not clear the operation's caller-space requirements, the
-  text result gains `required_permissions` (from the catalog) and one sentence:
+  text result gains `required_permissions` (the caller-space half, from the
+  catalog) and one sentence:
   the caller's role does not hold it; report it, do not retry, do not look for
   another operation that does the same thing. A `403` the row or the target
   space decided keeps the route's own problem+json alone — the caller holds

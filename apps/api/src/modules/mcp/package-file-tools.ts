@@ -48,20 +48,17 @@ interface PackageFileBytes {
 
 type PackageFileImportContext = Pick<PackageFileToolContext, "permissions" | "actor">;
 
-function packageFileImportAccessError(ctx: PackageFileImportContext): string | undefined {
-  if (
-    !ctx.permissions.has("mcp:invoke") ||
-    !PACKAGE_WRITE_PERMISSIONS.some((permission) => ctx.permissions.has(permission))
-  ) {
-    return "Permissions 'mcp:invoke' and a package write permission are required to import packages.";
-  }
-  if (ctx.actor.type !== "user") return "Only organization users can import packages.";
-  return undefined;
-}
-
-/** Keep tool disclosure and server guidance on the same import eligibility rule. */
+/**
+ * Keep tool disclosure and server guidance on the same import eligibility rule.
+ * The one enforcement point: `import_package_file` is declared only when this
+ * holds, so its handler re-asking would be unreachable by construction.
+ */
 export function canImportPackageFiles(ctx: PackageFileImportContext): boolean {
-  return packageFileImportAccessError(ctx) === undefined;
+  return (
+    ctx.actor.type === "user" &&
+    ctx.permissions.has("mcp:invoke") &&
+    PACKAGE_WRITE_PERMISSIONS.some((permission) => ctx.permissions.has(permission))
+  );
 }
 
 function packageSizeError(): McpError {
@@ -208,8 +205,6 @@ function buildImportPackageFileTool(ctx: PackageFileToolContext): AppstrateToolD
     inputSchema: packageFileInputSchema(),
   };
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
-    const accessError = packageFileImportAccessError(ctx);
-    if (accessError) return textResult({ error: accessError }, true);
     const uri = asString(args.file_uri);
     if (!uri) throw new McpError(ErrorCode.InvalidParams, "file_uri is required.");
     try {

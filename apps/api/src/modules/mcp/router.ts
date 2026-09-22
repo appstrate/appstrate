@@ -210,7 +210,7 @@ export function buildServerInstructions(
     : "then call describe_operation for what it does and the shape of its input";
   const packageImportGuidance = packageImportAvailable
     ? "Call `import_package_file` only when validation returns BOTH `valid: true` AND `importable: true`, and the user asked to add the package."
-    : "Package import is not available to this caller. If validation succeeds, report the result without claiming you can import it.";
+    : "";
   const inlineShortcut = inline
     ? " For an inline run, pass a PARTIAL canonical AFPS `manifest`: normally set a concise task-specific `display_name` plus the dependencies/configuration needed for the task. The platform derives `name` and defaults omitted boilerplate, `runtime_tools` (log, output, publish_file), and an open object output schema. Every provided field replaces its default exactly; arrays and nested objects are never merged, so `runtime_tools: []` stays empty. You may override every field with a complete deterministic manifest; a strict `output.schema` requires an explicit runtime tool selection containing `output`. The chat shows ONLY lines the run emits via `log`, so instruct it in the top-level `prompt` to log meaningful steps whenever that tool is selected."
     : "";
@@ -245,7 +245,7 @@ Organization → Spaces (id \`spc_…\`, one default) → Agents → Runs. End-u
 This MCP server is scoped to ONE organization — the one this endpoint serves — and every operation runs against it plus its default space; you never send those ids per call. To act in another organization, connect that organization's own MCP server (its URL carries its id). Within the org, operations use the default space unless an operation takes an explicit space id.
 
 ## Beyond the per-operation schemas
-${runBullets}- ${packageFiles} ${packageImportGuidance} If conflicts make it non-importable, report them instead of attempting a doomed mutation. Archive bytes stay server-side throughout.
+${runBullets}- ${[packageFiles, packageImportGuidance, "If conflicts make it non-importable, report them instead of attempting a doomed mutation. Archive bytes stay server-side throughout."].filter(Boolean).join(" ")}
 - Streaming/SSE operations (live logs, realtime) cannot be called through this server; fetch logs or poll instead.
 - Wire JSON is snake_case, except universal id/timestamp fields (id, createdAt…) which stay camelCase.
 - Heavy list responses — list operations paginate with \`query: { limit, offset }\`, and some (e.g. \`listIntegrations\`) also take a \`fields\` selector (comma-separated projection; describe_operation shows it when available). On heavy lists request only the fields you need — e.g. \`fields: "id,active,block_user_connections"\` on \`listIntegrations\` — and read a single row's detail operation when you need its full \`manifest\`.

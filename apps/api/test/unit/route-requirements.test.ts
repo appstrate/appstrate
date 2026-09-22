@@ -268,6 +268,18 @@ describe("lookup — prefix mounts", () => {
     expect(table("DELETE", "/api/kept")).toBeUndefined();
   });
 
+  it("keeps a guard mounted as `ALL /*`, which the SPA catch-all rule once ate", () => {
+    // `app.use("/*", …)` and the SPA fallback share a path and nothing else:
+    // discarding both dropped a guard covering the whole app.
+    const table = rootTableOf((app) => {
+      app.use("/*", requirePermission("agents", "read"));
+      app.post("/api/kept", ok);
+    });
+    expect(served(table, "POST", "/api/kept").requirements).toEqual(["agents:read"]);
+    // Still decoration: it makes nothing exist on its own.
+    expect(table("GET", "/api/never-mounted")).toBeUndefined();
+  });
+
   it("never serves anything from the root catch-all", () => {
     // `index.ts` mounts the SPA fallback as `app.get("/*")`, after the `ALL
     // /api/*` 404. Reading it as a route would answer every GET template ever
@@ -359,41 +371,34 @@ describe("readHandlerMarker", () => {
 });
 
 describe("isGranted", () => {
-  const conjunction = served(
-    tableOf((sub) =>
-      sub.post(
-        "/runs/inline",
-        requirePermission("agents", "write"),
-        requirePermission("agents", "run"),
-        ok,
-      ),
-    ),
-    "POST",
-    "/api/runs/inline",
-  );
-  const disjunction = served(
-    tableOf((sub) => sub.get("/runs", requireAnyPermission(["runs:read", "runs:read-all"]), ok)),
-    "GET",
-    "/api/runs",
-  );
-  const rowAware = served(
-    tableOf((sub) => sub.delete("/packages/:scope/:name", requirePackageInOrg("delete"), ok)),
-    "DELETE",
-    "/api/packages/{scope}/{name}",
-  );
-  const unguarded = served(
-    tableOf((sub) => sub.post("/welcome/setup", ok)),
-    "POST",
-    "/api/welcome/setup",
-  );
-  const targetSpace = served(
-    rootTableOf((app) => {
-      app.use("/api/x/:id/*", rescope());
-      app.get("/api/x/:id/members", requirePermission("members", "read"), ok);
-    }),
-    "GET",
-    "/api/x/{id}/members",
-  );
+  // `isGranted` is a pure function of a `RouteRequirement`, so these are
+  // literals: how each shape is DERIVED is pinned by the blocks above, and
+  // building five Hono apps here would only re-test that.
+  const conjunction: RouteRequirement = {
+    requirements: ["agents:write", "agents:run"],
+    targetSpaceRequirements: [],
+    conditional: false,
+  };
+  const disjunction: RouteRequirement = {
+    requirements: ["runs:read|runs:read-all"],
+    targetSpaceRequirements: [],
+    conditional: false,
+  };
+  const rowAware: RouteRequirement = {
+    requirements: [],
+    targetSpaceRequirements: [],
+    conditional: true,
+  };
+  const unguarded: RouteRequirement = {
+    requirements: [],
+    targetSpaceRequirements: [],
+    conditional: false,
+  };
+  const targetSpace: RouteRequirement = {
+    requirements: [],
+    targetSpaceRequirements: ["members:read"],
+    conditional: true,
+  };
 
   it("needs every entry — two guards mean both", () => {
     expect(isGranted(conjunction, new Set(["agents:write", "agents:run"]))).toBe(true);
@@ -419,8 +424,8 @@ describe("isGranted", () => {
 
   it("ignores target-space requirements — they are shown, never filtered", () => {
     // The caller's own permission set is the wrong set to test them against:
-    // the guard runs against the space the path names.
-    expect(targetSpace.targetSpaceRequirements).toEqual(["members:read"]);
+    // the guard runs against the space the path names, so a caller holding
+    // nothing here is still granted.
     expect(isGranted(targetSpace, new Set())).toBe(true);
   });
 });

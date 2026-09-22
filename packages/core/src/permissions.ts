@@ -154,13 +154,25 @@ export function canComposeInline(has: (permission: CorePermission) => boolean): 
 }
 
 /**
- * Whether a caller may read runs at all: `runs:read` (the runs it launched) or
- * `runs:read-all` (every run in the space), which implies it. The one place
- * that disjunction is spelled out for code holding a permission set rather
- * than a route — a route keeps asking its guard.
+ * The two permissions that open a run read surface: `runs:read` (the runs the
+ * caller launched) and `runs:read-all` (every run in the space), which implies
+ * it — requiring `read` alone would make `read-all` inert on its own.
+ *
+ * The one spelling of that disjunction: {@link canReadRuns} tests it on a
+ * permission set, and the platform's `requireRunsRead` builds its route guard
+ * from this same tuple, so the guard and the predicate cannot drift.
+ */
+export const RUNS_READ_PERMISSIONS = [
+  "runs:read",
+  "runs:read-all",
+] as const satisfies readonly CorePermission[];
+
+/**
+ * Whether a caller may read runs at all — {@link RUNS_READ_PERMISSIONS} on a
+ * permission set rather than on a route; a route keeps asking its guard.
  */
 export function canReadRuns(has: (permission: CorePermission) => boolean): boolean {
-  return has("runs:read") || has("runs:read-all");
+  return RUNS_READ_PERMISSIONS.some((permission) => has(permission));
 }
 
 /**

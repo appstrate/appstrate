@@ -293,11 +293,6 @@ function scoreOperation(op: CatalogOperation, tokens: string[]): number {
   return score;
 }
 
-/** Every permission the route's guards name, whichever space enforces it. */
-function requiredPermissions(op: CatalogOperation): string[] {
-  return [...op.requirement.requirements, ...op.requirement.targetSpaceRequirements];
-}
-
 /**
  * The full, invoke-ready definition of one operation: parameters, request body,
  * responses, and every referenced component schema inlined. This is the payload
@@ -316,10 +311,14 @@ function describePayload(
     path_params: op.pathParams,
     summary: op.summary,
     description: op.description,
-    // What the route's guards ask, and whether this caller holds it.
-    // `conditional` means a guard reads the loaded row or is enforced in the
-    // space the path names, so a grant here is a lower bound, not a promise.
-    required_permissions: requiredPermissions(op),
+    // What the route's guards ask, and whether this caller holds it. The two
+    // spaces stay apart: `required_permissions` is what `granted` tests against
+    // the caller's own set, while a target-space one is decided where the path
+    // points — flattening them together pre-refuses a cross-space call the
+    // route would have allowed. `conditional` means a guard reads the loaded
+    // row or the target space, so a grant is a lower bound, not a promise.
+    required_permissions: op.requirement.requirements,
+    target_space_permissions: op.requirement.targetSpaceRequirements,
     conditional: op.requirement.conditional,
     granted: operationGranted(op, permissions),
     parameters: op.operation.parameters ?? [],
@@ -342,8 +341,9 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
           "describe_operation needed. "
         : ", so a clear single hit needs no follow-up describe_operation call. ") +
       "Operations your role may not invoke are listed separately under `denied` with the " +
-      "permissions they need: report that to the user instead of trying them. `total` counts " +
-      "the matches you may invoke, `denied_total` the rest; both lists are capped at `limit`.",
+      "permissions they need in YOUR space: report that to the user instead of trying them. " +
+      "`total` counts the matches you may invoke, `denied_total` the rest; both lists are " +
+      "capped at `limit`.",
     annotations: {
       title: "Search API operations",
       readOnlyHint: true,
@@ -422,9 +422,10 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
         tags: op.tags,
       })),
       denied_total: denied.length,
+      // Caller-space only: a denied operation is denied on exactly those.
       denied: denied.slice(0, limit).map((op) => ({
         operation_id: op.operationId,
-        required_permissions: requiredPermissions(op),
+        required_permissions: op.requirement.requirements,
       })),
       best_match: bestMatch,
     });
@@ -442,8 +443,10 @@ function buildDescribeTool(ctx: McpToolContext, invokes: boolean): AppstrateTool
       (invokes
         ? "so you can construct a valid invoke_operation call. "
         : "so you can see exactly what it takes and what it answers with. ") +
-      "It also reports whether your role clears the route's guards (`granted`) " +
-      "and which permissions the route requires (`required_permissions`).",
+      "It also reports whether your role clears the route's guards (`granted`) and which " +
+      "permissions the route requires in YOUR space (`required_permissions`). " +
+      "`target_space_permissions` is separate on purpose: those are decided in the space the " +
+      "path names, not here, so they never make an operation unavailable to you.",
     annotations: {
       title: "Describe API operation",
       readOnlyHint: true,
@@ -826,7 +829,9 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     const denial =
       response.status === 403 && !isGranted(op.requirement, ctx.permissions)
         ? {
-            required_permissions: requiredPermissions(op),
+            // The caller-space set is the one that failed; the hint is emitted
+            // only when it does.
+            required_permissions: op.requirement.requirements,
             hint:
               "Your role does not hold this permission. Report it to the user; do not retry " +
               "and do not look for another operation that does the same thing.",

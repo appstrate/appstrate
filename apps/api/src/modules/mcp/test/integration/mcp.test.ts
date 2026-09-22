@@ -12,10 +12,12 @@
  * org guard requires to match the resolved org.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
+import * as jose from "jose";
 import { and, eq } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
-import { auditEvents } from "@appstrate/db/schema";
+import { auditEvents, endUsers, oidcEndUserProfiles } from "@appstrate/db/schema";
+import { prefixedId } from "@appstrate/db/ids";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { truncateAll, db } from "../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../test/helpers/redis.ts";
@@ -40,13 +42,14 @@ import {
   type JsonRpcEnvelope,
 } from "../../../../../test/helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
+import { overrideJwks } from "../../../oidc/services/enduser-token.ts";
 import { drainAudits, pendingAuditCount } from "../../../../services/audit.ts";
 import { getCatalog, resetCatalog } from "../../catalog.ts";
 import { createMcpRouter } from "../../router.ts";
 import mcpModule from "../../index.ts";
 
 const app = getTestApp();
-registerTestPlatformApp();
+await registerTestPlatformApp();
 
 const rpc = mcpRpc(app);
 
@@ -555,7 +558,10 @@ describe("mcp tool round-trip", () => {
 
     const described = await call(1, "describe_operation", { operation_id: "listSpaceMembers" });
     expect(described.data.conditional).toBe(true);
-    expect(described.data.required_permissions).toContain("space-members:read");
+    // The two halves are reported apart: nothing is asked in the caller's own
+    // space, `space-members:read` is asked in the one the path names.
+    expect(described.data.target_space_permissions).toContain("space-members:read");
+    expect(described.data.required_permissions).toEqual([]);
     // `operator` in A holds no `space-members:read` anywhere in A, and the
     // operation is still offered: the caller-space set is not what decides it.
     expect(described.data.granted).toBe(true);
@@ -795,5 +801,96 @@ describe("mcp audit + rate limiting", () => {
       /remaining=(\d+)/.exec(second.headers.get("RateLimit") ?? "")?.[1],
     );
     expect(secondRemaining).toBe(118);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The OIDC end-user principal, through the real transport. An end-user is not
+// an organization member: its grants come from the token's scopes, filtered by
+// the module's end-user allowlist, and its actor type closes surfaces no scope
+// can open.
+// ---------------------------------------------------------------------------
+const END_USER_KID = "mcp-enduser-key";
+let endUserSigningKey: jose.CryptoKey;
+
+/** Seed an end-user in a fresh org and mint an access token carrying `scope`. */
+async function endUserHeaders(scope: string): Promise<Record<string, string>> {
+  const ctx = await createTestContext();
+  const authUser = await createTestUser();
+  const endUserId = prefixedId("eu");
+  await db
+    .insert(endUsers)
+    .values({ id: endUserId, spaceId: ctx.defaultSpaceId, orgId: ctx.orgId, name: "Embedded" });
+  await db
+    .insert(oidcEndUserProfiles)
+    .values({ endUserId, authUserId: authUser.id, emailVerified: true, status: "active" });
+  const token = await new jose.SignJWT({
+    sub: authUser.id,
+    actor_type: "end_user",
+    end_user_id: endUserId,
+    space_id: ctx.defaultSpaceId,
+    scope,
+  })
+    .setProtectedHeader({ alg: "ES256", kid: END_USER_KID })
+    // The verifier matches Better Auth's own issuer/audience shape.
+    .setIssuer(`${process.env.APP_URL!}/api/auth`)
+    // RFC 8707: the per-org MCP resource URI must be in `aud` or the endpoint
+    // refuses the token, whatever its scopes say.
+    .setAudience([process.env.APP_URL!, `${process.env.APP_URL!}/api/mcp/o/${ctx.orgId}`])
+    .setIssuedAt()
+    .setExpirationTime("2m")
+    .sign(endUserSigningKey);
+  return {
+    Authorization: `Bearer ${token}`,
+    "X-Org-Id": ctx.orgId,
+    "X-Space-Id": ctx.defaultSpaceId,
+  };
+}
+
+describe("mcp tools/list for an OIDC end-user", () => {
+  beforeAll(async () => {
+    const { publicKey, privateKey } = await jose.generateKeyPair("ES256", { extractable: true });
+    endUserSigningKey = privateKey;
+    const jwk = await jose.exportJWK(publicKey);
+    // Serve this key as the JWKS: the Better Auth singleton the preload built
+    // signs with a different key set, so self-minted tokens verify only here.
+    overrideJwks(async () => ({ keys: [{ ...jwk, kid: END_USER_KID, alg: "ES256", use: "sig" }] }));
+  });
+
+  afterAll(() => overrideJwks(null));
+
+  beforeEach(async () => {
+    await truncateAll();
+    resetCatalog();
+  });
+
+  const toolNames = async (headers: Record<string, string>): Promise<string[]> => {
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/list",
+      params: {},
+    });
+    return (envelope.result?.tools as Array<{ name: string }>).map((tool) => tool.name);
+  };
+
+  it("offers the run and invoke tools its scopes carry, never the package import", async () => {
+    const names = await toolNames(
+      await endUserHeaders("openid mcp:read mcp:invoke agents:run runs:read"),
+    );
+    expect(names).toContain("run_and_wait");
+    expect(names).toContain("invoke_operation");
+    // Importing a package is closed to an end-user on both counts: no package
+    // write permission is in the end-user scope allowlist, and the tool refuses
+    // any actor that is not an organization user.
+    expect(names).not.toContain("import_package_file");
+  });
+
+  it("drops run_and_wait when the same token cannot read back what it would launch", async () => {
+    const names = await toolNames(await endUserHeaders("openid mcp:read mcp:invoke agents:run"));
+    expect(names).not.toContain("run_and_wait");
+    // The control: only the run pair went, so this is the `runs:read` half and
+    // not a token that stopped resolving.
+    expect(names).toContain("invoke_operation");
   });
 });

@@ -53,7 +53,7 @@ import { getDiscoveredModules } from "../../helpers/test-modules.ts";
 import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 
 const app = getTestApp();
-registerTestPlatformApp();
+await registerTestPlatformApp();
 
 /**
  * Resources the probe module in the "intersection with the real caller" block

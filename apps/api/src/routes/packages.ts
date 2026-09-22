@@ -1893,7 +1893,11 @@ export function createPackagesRouter() {
     // credential scoped without `<type>:read` still gets the manifest and, on
     // the detail route, the full `content` (SKILL.md / prompt.md).
     router.get(`/${path}`, readGuard, makeListHandler(rcfg));
-    router.post(`/${path}`, writeGuard, makeCreateHandler(rcfg));
+    // `rowAuthority()` on create: past `<type>:write` the handler judges every
+    // package the submitted manifest declares as a dependency, one by one
+    // (`assertPackageDependenciesAccessible`). The mutation routes below carry
+    // `requirePackageInOrg()`, which already says the row decides.
+    router.post(`/${path}`, writeGuard, rowAuthority(), makeCreateHandler(rcfg));
     // Version routes — must be registered before generic get to avoid conflict
     router.get(
       `/${path}/${SCOPED_PACKAGE_ROUTE}/versions`,
@@ -2156,89 +2160,97 @@ export function createPackagesRouter() {
   });
 
   // --- Fork route ---
-  router.post(`/${SCOPED_PACKAGE_ROUTE}/fork`, requireAnyPackageWrite, async (c) => {
-    const packageId = getItemId(c);
-    const orgId = c.get("orgId");
-    const orgSlug = c.get("orgSlug");
-    const user = c.get("user");
+  // `rowAuthority()`: the mounted disjunction says the caller may write SOME
+  // package type; the source row decides which one (`packagePermission(
+  // source.type, "write")`) and whether the org lets it be copied out at all.
+  router.post(
+    `/${SCOPED_PACKAGE_ROUTE}/fork`,
+    requireAnyPackageWrite,
+    rowAuthority(),
+    async (c) => {
+      const packageId = getItemId(c);
+      const orgId = c.get("orgId");
+      const orgSlug = c.get("orgSlug");
+      const user = c.get("user");
 
-    // A missing/empty body is fine (auto-name), but a present-and-invalid
-    // `name` must surface as a 400 — `allowEmpty` maps an empty body to `{}`
-    // while still 400ing on malformed JSON or a bad-shape `name`.
-    const parsed = await readJsonBody(c, forkSchema, { allowEmpty: true });
-    const customName = parsed.name;
-    const source = await assertForkSourceAccess(c, packageId);
-    await makePermissionGuard(packagePermission(source.type, "write"))(c, async () => {});
+      // A missing/empty body is fine (auto-name), but a present-and-invalid
+      // `name` must surface as a 400 — `allowEmpty` maps an empty body to `{}`
+      // while still 400ing on malformed JSON or a bad-shape `name`.
+      const parsed = await readJsonBody(c, forkSchema, { allowEmpty: true });
+      const customName = parsed.name;
+      const source = await assertForkSourceAccess(c, packageId);
+      await makePermissionGuard(packagePermission(source.type, "write"))(c, async () => {});
 
-    const result = await forkPackage(
-      orgId,
-      orgSlug,
-      packageId,
-      // The fork is a NEW package in the space the caller forked from; the
-      // source's home says nothing about who may edit the copy.
-      c.get("spaceId"),
-      user.id,
-      customName,
-    );
-
-    if ("code" in result) {
-      switch (result.code) {
-        case "ALREADY_OWNED":
-          throw invalidRequest("You already own this package");
-        case "NOT_FOUND":
-          throw notFound("Package not found");
-        case "NAME_COLLISION":
-          throw new ApiError({
-            status: 400,
-            code: "name_collision",
-            title: "Name Collision",
-            detail: "A package with this name already exists in your organization",
-          });
-        case "UNKNOWN_TYPE":
-          throw invalidRequest(`Unsupported package type: ${result.type}`);
-        case "NO_PUBLISHED_VERSION":
-          throw invalidRequest("Source package has no published version");
-      }
-    }
-
-    // The fork is homed in the current space, so its placement is this space's
-    // by construction and the activation is an upsert that cannot conflict.
-    // WARN, not debug: a fork the caller cannot find afterwards is a bug report.
-    const spaceId = c.get("spaceId");
-    if (spaceId) {
-      await activatePackage({ orgId, spaceId }, result.packageId).catch((e: unknown) =>
-        logger.warn("auto-activation skipped", {
-          packageId: result.packageId,
-          spaceId,
-          err: getErrorMessage(e),
-        }),
-      );
-    }
-
-    await recordAuditFromContext(c, {
-      action: "package.forked",
-      resourceType: "package",
-      resourceId: result.packageId,
-      after: { type: result.type, forkedFrom: packageId },
-    });
-
-    // Return the forked package resource bare — same DTO/serializer as the new
-    // package's GET detail, selected by its type (issue #657). The fork
-    // provenance is resource state: `forked_from` is part of the detail DTO.
-    const forkedRcfg = ROUTE_CONFIGS[result.type as PackageType];
-    const detail = forkedRcfg
-      ? await loadPackageDetailDto(c, forkedRcfg, result.packageId, orgId)
-      : null;
-    if (!detail) {
-      logger.error("Forked package could not be re-read", {
-        packageId: result.packageId,
-        type: result.type,
+      const result = await forkPackage(
         orgId,
+        orgSlug,
+        packageId,
+        // The fork is a NEW package in the space the caller forked from; the
+        // source's home says nothing about who may edit the copy.
+        c.get("spaceId"),
+        user.id,
+        customName,
+      );
+
+      if ("code" in result) {
+        switch (result.code) {
+          case "ALREADY_OWNED":
+            throw invalidRequest("You already own this package");
+          case "NOT_FOUND":
+            throw notFound("Package not found");
+          case "NAME_COLLISION":
+            throw new ApiError({
+              status: 400,
+              code: "name_collision",
+              title: "Name Collision",
+              detail: "A package with this name already exists in your organization",
+            });
+          case "UNKNOWN_TYPE":
+            throw invalidRequest(`Unsupported package type: ${result.type}`);
+          case "NO_PUBLISHED_VERSION":
+            throw invalidRequest("Source package has no published version");
+        }
+      }
+
+      // The fork is homed in the current space, so its placement is this space's
+      // by construction and the activation is an upsert that cannot conflict.
+      // WARN, not debug: a fork the caller cannot find afterwards is a bug report.
+      const spaceId = c.get("spaceId");
+      if (spaceId) {
+        await activatePackage({ orgId, spaceId }, result.packageId).catch((e: unknown) =>
+          logger.warn("auto-activation skipped", {
+            packageId: result.packageId,
+            spaceId,
+            err: getErrorMessage(e),
+          }),
+        );
+      }
+
+      await recordAuditFromContext(c, {
+        action: "package.forked",
+        resourceType: "package",
+        resourceId: result.packageId,
+        after: { type: result.type, forkedFrom: packageId },
       });
-      throw internalError();
-    }
-    return c.json(detail, 201);
-  });
+
+      // Return the forked package resource bare — same DTO/serializer as the new
+      // package's GET detail, selected by its type (issue #657). The fork
+      // provenance is resource state: `forked_from` is part of the detail DTO.
+      const forkedRcfg = ROUTE_CONFIGS[result.type as PackageType];
+      const detail = forkedRcfg
+        ? await loadPackageDetailDto(c, forkedRcfg, result.packageId, orgId)
+        : null;
+      if (!detail) {
+        logger.error("Forked package could not be re-read", {
+          packageId: result.packageId,
+          type: result.type,
+          orgId,
+        });
+        throw internalError();
+      }
+      return c.json(detail, 201);
+    },
+  );
 
   // --- Sharing: a package's AUDIENCE (RBAC spec §6.10) ---
   //

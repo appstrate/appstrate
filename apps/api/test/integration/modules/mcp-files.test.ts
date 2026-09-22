@@ -44,7 +44,7 @@ import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
 import { mcpRpc, type JsonRpcEnvelope } from "../../helpers/mcp.ts";
 
 const app = getTestApp();
-registerTestPlatformApp();
+await registerTestPlatformApp();
 
 const rpc = mcpRpc(app);
 

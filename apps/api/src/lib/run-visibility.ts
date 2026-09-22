@@ -27,6 +27,7 @@
 import type { Context } from "hono";
 import type { SQL } from "drizzle-orm";
 import type { Actor } from "@appstrate/connect";
+import { RUNS_READ_PERMISSIONS } from "@appstrate/core/permissions";
 import { runs } from "@appstrate/db/schema";
 import { actorFilter, getActor } from "./actor.ts";
 import { notFound } from "./errors.ts";
@@ -44,17 +45,8 @@ export function canReadEveryRun(permissions: ReadonlySet<string>): boolean {
   return permissions.has("runs:read-all");
 }
 
-/**
- * The two permissions that open a run read surface.
- *
- * `read-all` is a superset of `read`, not a companion to it: a principal
- * granted only the wide permission reads every run in the space, so it opens
- * every surface `read` opens. Requiring `read` alone would make `read-all`
- * inert on its own.
- */
-const RUNS_READ_PERMISSIONS = ["runs:read", "runs:read-all"] as const;
-
-/** The guard on every surface `runs:read` opens — see {@link RUNS_READ_PERMISSIONS}. */
+/** The guard on every surface `runs:read` opens, built from the tuple
+ *  `canReadRuns` tests — one spelling of the disjunction, not two. */
 export const requireRunsRead = requireAnyPermission(RUNS_READ_PERMISSIONS);
 
 /** The in-memory twin of `actorFilter` on a loaded run row: did this principal launch it? */

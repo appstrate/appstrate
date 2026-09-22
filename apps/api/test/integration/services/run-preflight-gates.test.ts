@@ -16,6 +16,7 @@ import { runPreflightGates } from "../../../src/services/run-preflight-gates.ts"
 import { getPlatformRunLimits } from "../../../src/services/run-limits.ts";
 import { initRunLimits } from "../../../src/services/run-limits.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
+import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
 import type { LoadedPackage } from "../../../src/types/index.ts";
 import type {
   AppstrateModule,
@@ -56,8 +57,9 @@ describe("runPreflightGates", () => {
     await seedPackage({ orgId: ctx.orgId, id: "@gates/agent", type: "agent" });
   });
 
-  afterAll(() => {
-    resetModules();
+  afterAll(async () => {
+    // Leave the registry as the preload populated it, not empty.
+    await restoreDiscoveredModules();
   });
 
   it("returns ok with an untouched agent when the manifest timeout is below the ceiling", async () => {
@@ -158,8 +160,9 @@ describe("runPreflightGates — beforeUsage execution facts", () => {
     await seedPackage({ orgId: ctx.orgId, id: "@gates/agent", type: "agent" });
   });
 
-  afterAll(() => {
-    resetModules();
+  afterAll(async () => {
+    // Leave the registry as the preload populated it, not empty.
+    await restoreDiscoveredModules();
   });
 
   it("dispatches beforeUsage (run context) for a system model and returns its 402 rejection", async () => {

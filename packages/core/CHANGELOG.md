@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   test: `canReadRuns` is the `runs:read` / `runs:read-all` disjunction,
   `canRunAgents` is `agents:run` plus that read. See
   `docs/architecture/RBAC_PERMISSIONS_SPEC.md` §13.11.
+- **New export `RUNS_READ_PERMISSIONS` (`@appstrate/core/permissions`)** — the
+  `["runs:read", "runs:read-all"]` tuple `canReadRuns` is defined from.
 - **New export `PERMISSION_REQUIREMENT_MARKER`
   (`@appstrate/core/permissions`)** — the symbol under which every guard
   `makePermissionGuard` builds now also carries the requirement it checks (one
