@@ -1696,13 +1696,17 @@ and what it needs.
 - **An offer is an alert**, the shape every other line naming a state and its
   remedy has: "Julie Ferrand l'a proposé à Bac à sable", what that space would
   still have to switch on, and "Activer dans Bac à sable".
-- **The reference facts sit in two cards with a grey head** (the agent
-  overview's own shape): "Ce qu'il utilise" and "Détails". Cards hold what is
-  CONSULTED; the page below holds what is ACTED on. Deliberately not tabs: the
-  sheet is a preview inside a panel that already has a rail, and hiding either
-  half behind a tab would make the reader click to learn whether the agent
-  needs an integration the target space lacks, which is the question the sheet
-  exists to answer.
+- **The reference facts are ONE property list under the title**, the way a page
+  of properties reads: icon, label, value, in two groups told apart by a rule
+  rather than a title — what the package uses, then what it is. Two cards were
+  tried first and gave the values half the panel's width, wrapping an
+  identifier mid-word; and a card frames a content of its own, which a list of
+  properties is not. Deliberately not tabs either: the sheet is a preview
+  inside a panel that already has a rail, and hiding either half behind a tab
+  would make the reader click to learn whether the agent needs an integration
+  the target space lacks, which is the question the sheet exists to answer. One
+  section heading remains on the page, "Espaces": everything above it is read,
+  everything below it is decided.
 - **Espaces is graded by reach** (`lib/catalogue-sheet`, tested): a table of
   every reachable space (state, what is missing there for an agent, the
   switch) when there are several; one line with its switch when there is one;

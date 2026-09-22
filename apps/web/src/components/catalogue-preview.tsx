@@ -35,10 +35,8 @@ import {
   Hash,
   House,
   Inbox,
-  Info,
   Layers,
   Plug,
-  Puzzle,
   ShieldCheck,
   TextCursorInput,
   Wrench,
@@ -128,7 +126,7 @@ function PropertyRow({
 }) {
   return (
     <div className="flex flex-col gap-0.5 py-1.5 sm:flex-row sm:gap-4">
-      <dt className="text-muted-foreground flex w-32 shrink-0 items-center gap-2 text-sm">
+      <dt className="text-muted-foreground flex w-40 shrink-0 items-center gap-2 text-sm">
         <Icon className="size-3.5 shrink-0" aria-hidden />
         {label}
       </dt>
@@ -137,31 +135,6 @@ function PropertyRow({
         {hint && <span className="text-muted-foreground block text-xs">{hint}</span>}
       </dd>
     </div>
-  );
-}
-
-/**
- * A card with a grey head, as the agent's own overview draws one: the facts a
- * reader CONSULTS sit in cards, and what they ACT on (the spaces table) stays
- * in the page below them.
- */
-function SheetCard({
-  icon: Icon,
-  title,
-  children,
-}: {
-  icon: typeof House;
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="border-border bg-muted/35 overflow-hidden rounded-lg border">
-      <div className="flex items-center gap-2 px-4 py-3">
-        <Icon className="text-muted-foreground size-4 shrink-0" aria-hidden />
-        <h3 className="text-sm font-semibold">{title}</h3>
-      </div>
-      <div className="bg-card rounded-t-lg border-t px-4 py-2">{children}</div>
-    </section>
   );
 }
 
@@ -306,12 +279,88 @@ export function CataloguePreview({
 
       {item.description && <p className="mt-4 text-sm">{item.description}</p>}
 
+      {/* The package's properties, one list rather than two cards: they are
+          not a content of their own, they are what this package IS and what it
+          USES, and a frame around a property list draws a border that answers
+          to nothing. The two groups are told apart by a rule, not by a title —
+          the labels already say which is which. */}
+      <dl className="mt-5">
+        {agent && (
+          <PropertyRow
+            icon={Boxes}
+            label={t("catalogue.sheet.integrations")}
+            hint={
+              agent.dependencies.integrations.length > 0
+                ? t("catalogue.sheet.integrationsHint")
+                : undefined
+            }
+          >
+            {agent.dependencies.integrations.length > 0
+              ? agent.dependencies.integrations.map((entry) => integrationName(entry.id)).join(", ")
+              : t("catalogue.sheet.none")}
+          </PropertyRow>
+        )}
+        {agent && agentSkills.length > 0 && (
+          <PropertyRow
+            icon={Wrench}
+            label={t("catalogue.sheet.skills")}
+            hint={t("catalogue.sheet.skillsHint")}
+          >
+            {/* Named, never linked: a skill not shared to the reader's space
+                opens on a 404, and it needs nothing there anyway. */}
+            {agentSkills.map((skill) => skill.name ?? skill.id).join(", ")}
+          </PropertyRow>
+        )}
+        {agent && agentInputs.length > 0 && (
+          <PropertyRow icon={TextCursorInput} label={t("catalogue.sheet.inputs")}>
+            {agentInputs.join(", ")}
+          </PropertyRow>
+        )}
+        {agent && runtimeTools > 0 && (
+          <PropertyRow icon={Hammer} label={t("catalogue.sheet.tools")}>
+            {t("catalogue.sheet.toolCount", { count: runtimeTools })}
+          </PropertyRow>
+        )}
+      </dl>
+      {/* What it IS, under a rule rather than a title: the labels already tell
+          the two groups apart. */}
+      <dl className={agent ? "border-border mt-3 border-t pt-3" : "mt-1"}>
+        {protocol && (
+          <PropertyRow icon={Plug} label={t("catalogue.column.protocol")}>
+            {protocol}
+          </PropertyRow>
+        )}
+        {usedBy.length > 0 && (
+          <PropertyRow icon={Layers} label={t("catalogue.sheet.usedBy")}>
+            {usedBy.map((entry) => entry.display_name || entry.id).join(", ")}
+          </PropertyRow>
+        )}
+        {home && (
+          // Where the package lives, which is where it is edited (#1437).
+          <PropertyRow
+            icon={House}
+            label={t("catalogue.homeSpace")}
+            hint={t("catalogue.sheet.homeHint")}
+          >
+            {home.name}
+          </PropertyRow>
+        )}
+        {updatedAt && (
+          <PropertyRow icon={Clock} label={t("catalogue.sheet.updated")}>
+            {formatDateField(updatedAt, "date")}
+          </PropertyRow>
+        )}
+        <PropertyRow icon={Hash} label={t("catalogue.identifier")}>
+          <span className="font-mono text-xs break-all">{item.id}</span>
+        </PropertyRow>
+      </dl>
+
       {/* The one line that asks the reader for a decision: an alert, like
           every other line in the product that names a state and its remedy.
           It acts on THAT space alone, through the catalogue's own activation,
           which asks about the agent's integrations before writing. */}
       {offers.map((offer) => (
-        <Alert key={offer.id} className="mt-5">
+        <Alert key={offer.id} className="mt-6">
           <Inbox className="h-4 w-4" />
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
@@ -332,84 +381,6 @@ export function CataloguePreview({
           </div>
         </Alert>
       ))}
-
-      <div className="mt-6 grid items-start gap-4 md:grid-cols-2">
-        {agent && (
-          <SheetCard icon={Puzzle} title={t("catalogue.sheet.uses")}>
-            <dl className="divide-border divide-y">
-              <PropertyRow
-                icon={Boxes}
-                label={t("catalogue.sheet.integrations")}
-                hint={
-                  agent.dependencies.integrations.length > 0
-                    ? t("catalogue.sheet.integrationsHint")
-                    : undefined
-                }
-              >
-                {agent.dependencies.integrations.length > 0
-                  ? agent.dependencies.integrations
-                      .map((entry) => integrationName(entry.id))
-                      .join(", ")
-                  : t("catalogue.sheet.none")}
-              </PropertyRow>
-              {agentSkills.length > 0 && (
-                <PropertyRow
-                  icon={Wrench}
-                  label={t("catalogue.sheet.skills")}
-                  hint={t("catalogue.sheet.skillsHint")}
-                >
-                  {/* Named, never linked: a skill not shared to the reader's
-                      space opens on a 404, and it needs nothing there anyway. */}
-                  {agentSkills.map((skill) => skill.name ?? skill.id).join(", ")}
-                </PropertyRow>
-              )}
-              {agentInputs.length > 0 && (
-                <PropertyRow icon={TextCursorInput} label={t("catalogue.sheet.inputs")}>
-                  {agentInputs.join(", ")}
-                </PropertyRow>
-              )}
-              {runtimeTools > 0 && (
-                <PropertyRow icon={Hammer} label={t("catalogue.sheet.tools")}>
-                  {t("catalogue.sheet.toolCount", { count: runtimeTools })}
-                </PropertyRow>
-              )}
-            </dl>
-          </SheetCard>
-        )}
-
-        <SheetCard icon={Info} title={t("catalogue.sheet.details")}>
-          <dl className="divide-border divide-y">
-            {protocol && (
-              <PropertyRow icon={Plug} label={t("catalogue.column.protocol")}>
-                {protocol}
-              </PropertyRow>
-            )}
-            {usedBy.length > 0 && (
-              <PropertyRow icon={Layers} label={t("catalogue.sheet.usedBy")}>
-                {usedBy.map((entry) => entry.display_name || entry.id).join(", ")}
-              </PropertyRow>
-            )}
-            {home && (
-              // Where the package lives, which is where it is edited (#1437).
-              <PropertyRow
-                icon={House}
-                label={t("catalogue.homeSpace")}
-                hint={t("catalogue.sheet.homeHint")}
-              >
-                {home.name}
-              </PropertyRow>
-            )}
-            {updatedAt && (
-              <PropertyRow icon={Clock} label={t("catalogue.sheet.updated")}>
-                {formatDateField(updatedAt, "date")}
-              </PropertyRow>
-            )}
-            <PropertyRow icon={Hash} label={t("catalogue.identifier")}>
-              <span className="font-mono text-xs break-all">{item.id}</span>
-            </PropertyRow>
-          </dl>
-        </SheetCard>
-      </div>
 
       <SettingsGroup title={t("catalogue.sheet.spaces")} className="mt-8 mb-0">
         {mode === "everywhere" && <p className="text-sm">{t("catalogue.sheet.everywhere")}</p>}
