@@ -94,6 +94,10 @@
   "skills.discovery.manualHint": "Only pinned or mentioned skills are loaded — platform skills are dropped too unless pinned.",
   "skills.group.platform": "Platform",
   "skills.group.space": "This space",
+  "skills.mention.label": "Skills to load",
+  "skills.mention.hint": "Type / to load a skill into the message",
+  "skills.mention.loading": "Loading…",
+  "skills.mention.empty": "No skill",
   "skills.loading": "Loading skills…",
   "skills.empty": "No skill is available in this space.",
   "skills.error": "Skills could not be loaded."

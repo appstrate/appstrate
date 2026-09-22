@@ -94,6 +94,10 @@
   "skills.discovery.manualHint": "Seules les compétences épinglées ou mentionnées sont chargées — les compétences de la plateforme aussi sont écartées si elles ne sont pas épinglées.",
   "skills.group.platform": "Plateforme",
   "skills.group.space": "Cet espace",
+  "skills.mention.label": "Compétences à charger",
+  "skills.mention.hint": "Tapez / pour charger une compétence dans le message",
+  "skills.mention.loading": "Chargement…",
+  "skills.mention.empty": "Aucune compétence",
   "skills.loading": "Chargement des compétences…",
   "skills.empty": "Aucune compétence disponible dans cet espace.",
   "skills.error": "Les compétences n'ont pas pu être chargées."

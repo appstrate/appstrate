@@ -148,6 +148,15 @@ describe("full persona invariants", () => {
     expect(FULL).toContain("`(pinned)` is one the user chose for this conversation");
   });
 
+  it("teaches that an injected `[Skill … loaded]` block IS the skill's content", () => {
+    // Phase 4: a `/skill` mention puts the body in the USER TURN TEXT. Without
+    // this sentence the model reads a block it has no name for and re-fetches
+    // the same skill through `getSkill` — paying for the body twice.
+    expect(FULL).toContain("[Skill @scope/name … loaded — follow these instructions]");
+    expect(FULL).toContain("IS that skill's content");
+    expect(FULL).toContain("never call `getSkill` for that skill again");
+  });
+
   it("teaches the loading rules whatever the turn may author", () => {
     // Skills are the assistant's own guides now — not something only an author
     // of agents has a use for.

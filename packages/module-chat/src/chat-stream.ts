@@ -29,6 +29,8 @@ import { platformMcpUrl } from "./platform-mcp.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import { materializeUserAttachments } from "./attachments.ts";
+import { mentionedSkillIds, type LoadedSkill } from "./skill-mentions.ts";
+import { loadMentionedSkills } from "./skill-loader.ts";
 import { runPiChat, type PiChatInput } from "./pi-chat/engine.ts";
 import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
 import { acquirePiChatSlot, chatCapacityResponse } from "./pi-chat/concurrency.ts";
@@ -242,6 +244,14 @@ export async function handleChatStream(
   const messages = body.messages as UIMessage[];
   logger.info("chat turn", { turns: messages.length });
 
+  // The `/skill` mentions of the WHOLE branch, not just this turn's message: a
+  // body loaded by an earlier mention has to stay in the conversation, and the
+  // projection that puts it there is rebuilt from scratch every turn
+  // (`skill-mentions.ts`). Read off the parsed body, before anything is
+  // materialized or persisted — the directive text is what the user sent and
+  // what stays stored.
+  const mentionedSkills = mentionedSkillIds(messages);
+
   const sessionId = body.id;
   let lastMessage = messages[messages.length - 1] as UIMessage | undefined;
 
@@ -364,6 +374,16 @@ export async function handleChatStream(
   // between here and the point the block is consumed (invalid generation
   // settings, a gate rejection) would otherwise leave a rejection with no
   // handler. The error is rethrown where the block is consumed.
+  // Started WITH phase B, not after it: the mention loader reads
+  // `GET /api/packages/skills/{scope}/{name}` per id and depends on nothing the
+  // session row produces, so it overlaps the caller-context read instead of
+  // queueing behind it. Like phase B it settles to a result and never rejects
+  // (`loadMentionedSkills` turns every failure into a per-skill reason), so an
+  // early return between here and the join leaves no unhandled rejection.
+  const mentionedSkillsPromise: Promise<ReadonlyMap<string, LoadedSkill>> = mentionedSkills.length
+    ? loadMentionedSkills(deps, { origin, headers, spaceId }, mentionedSkills)
+    : Promise.resolve(new Map());
+
   let phaseBMs = 0;
   const contextBlockPromise: Promise<{ ok: true; block: string } | { ok: false; error: unknown }> =
     sessionSkills
@@ -635,6 +655,12 @@ export async function handleChatStream(
     "x-org-id": orgId,
   };
   mcpHeaders["x-space-id"] = spaceId;
+  // Join the mention loader. The bodies are projected into the USER TURN TEXT
+  // by `buildStructuredPiTurn`, so they must be in hand before the engine input
+  // is built — awaiting here costs nothing the overlap above did not already
+  // buy.
+  const loadedSkills = await mentionedSkillsPromise;
+
   try {
     const response = await finalize(
       runEngine({
@@ -650,6 +676,7 @@ export async function handleChatStream(
         chatSessionId: meteringSessionId,
         messages,
         system,
+        skills: loadedSkills,
         generation: generationSettings,
         platformMcp: {
           url: platformMcpUrl(origin, orgId),

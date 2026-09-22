@@ -42,6 +42,7 @@ import {
   RunAndWaitToolUI,
 } from "./tool-uis.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
+import { SkillDirectiveText, SkillMentionPopover } from "./skill-mention.tsx";
 import { IntegrationIcon } from "./integration-icon.tsx";
 import { resolveAttachmentContent, UNNAMED_FILE } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
@@ -244,61 +245,72 @@ function Composer({ slot }: { slot?: React.ReactNode }) {
   // No focus ring on the box: the app's global `textarea:focus` ring is too
   // intense here. min-h-9 + px-0 override the global `textarea { min-h-80px }`
   // base rule (utilities beat the base layer) for a compact, Codex-like field.
+  //
+  // `Unstable_TriggerPopoverRoot` wraps the whole composer, not just the
+  // popover: it is what provides the composer-input plugin registry that
+  // `ComposerPrimitive.Input` (a plain textarea here) consults on keydown, so
+  // ↑/↓/Enter/Esc only reach the `/` popover when the Input is a descendant of
+  // it. It renders no DOM, so the layout is unchanged; `relative` on the box
+  // below is what the popover positions against.
   return (
-    <ComposerPrimitive.Root className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
-      {/* Pending attachments, above the input. `empty:hidden` collapses the row
+    <ComposerPrimitive.Unstable_TriggerPopoverRoot>
+      <ComposerPrimitive.Root className="bg-card relative flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
+        {/* Pending attachments, above the input. `empty:hidden` collapses the row
           (and its gap) when nothing is attached. */}
-      <div className="flex flex-wrap gap-1.5 empty:hidden">
-        <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
-      </div>
-      <ComposerPrimitive.Input
-        rows={1}
-        autoFocus
-        placeholder="Message Appstrate…"
-        className="placeholder:text-muted-foreground max-h-40 min-h-9 w-full resize-none border-0 bg-transparent px-0 py-1 text-sm shadow-none outline-none focus:ring-0 focus-visible:ring-0 focus-visible:outline-none"
-      />
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-1">
-          <ComposerPrimitive.AddAttachment multiple asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="text-muted-foreground size-8 shrink-0 rounded-lg"
-              aria-label="Joindre un fichier"
-            >
-              <PaperclipIcon />
-            </Button>
-          </ComposerPrimitive.AddAttachment>
-          <div className="min-w-0">{slot}</div>
+        <div className="flex flex-wrap gap-1.5 empty:hidden">
+          <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
         </div>
-        <ThreadPrimitive.If running={false}>
-          <ComposerPrimitive.Send asChild>
-            <Button
-              type="button"
-              size="icon"
-              className="size-8 shrink-0 rounded-lg"
-              aria-label="Envoyer"
-            >
-              <SendHorizontalIcon />
-            </Button>
-          </ComposerPrimitive.Send>
-        </ThreadPrimitive.If>
-        <ThreadPrimitive.If running>
-          <ComposerPrimitive.Cancel asChild>
-            <Button
-              type="button"
-              size="icon"
-              variant="secondary"
-              className="size-8 shrink-0 rounded-lg"
-              aria-label="Arrêter"
-            >
-              <SquareIcon className="size-3 fill-current" />
-            </Button>
-          </ComposerPrimitive.Cancel>
-        </ThreadPrimitive.If>
-      </div>
-    </ComposerPrimitive.Root>
+        <ComposerPrimitive.Input
+          rows={1}
+          autoFocus
+          placeholder="Message Appstrate…"
+          className="placeholder:text-muted-foreground max-h-40 min-h-9 w-full resize-none border-0 bg-transparent px-0 py-1 text-sm shadow-none outline-none focus:ring-0 focus-visible:ring-0 focus-visible:outline-none"
+        />
+        {/* Renders nothing until `/` is typed at a word start. */}
+        <SkillMentionPopover />
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1">
+            <ComposerPrimitive.AddAttachment multiple asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="text-muted-foreground size-8 shrink-0 rounded-lg"
+                aria-label="Joindre un fichier"
+              >
+                <PaperclipIcon />
+              </Button>
+            </ComposerPrimitive.AddAttachment>
+            <div className="min-w-0">{slot}</div>
+          </div>
+          <ThreadPrimitive.If running={false}>
+            <ComposerPrimitive.Send asChild>
+              <Button
+                type="button"
+                size="icon"
+                className="size-8 shrink-0 rounded-lg"
+                aria-label="Envoyer"
+              >
+                <SendHorizontalIcon />
+              </Button>
+            </ComposerPrimitive.Send>
+          </ThreadPrimitive.If>
+          <ThreadPrimitive.If running>
+            <ComposerPrimitive.Cancel asChild>
+              <Button
+                type="button"
+                size="icon"
+                variant="secondary"
+                className="size-8 shrink-0 rounded-lg"
+                aria-label="Arrêter"
+              >
+                <SquareIcon className="size-3 fill-current" />
+              </Button>
+            </ComposerPrimitive.Cancel>
+          </ThreadPrimitive.If>
+        </div>
+      </ComposerPrimitive.Root>
+    </ComposerPrimitive.Unstable_TriggerPopoverRoot>
   );
 }
 
@@ -351,10 +363,17 @@ function UserMessage() {
         </div>
       </MessagePrimitive.If>
       {/* The text bubble. Guarded on content so an attachment-only message (no
-          text part) doesn't paint an empty grey pill. */}
+          text part) doesn't paint an empty grey pill.
+
+          `Text` is overridden so a persisted `:skill[…]{name=…}` directive shows
+          as a chip instead of its raw syntax. The TEXT is what the server
+          re-resolves on every turn, so it is never rewritten here — only its
+          presentation. Still not markdown: the bubble shows what was typed. */}
       <MessagePrimitive.If hasContent>
         <div className="bg-muted text-foreground max-w-[80%] rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap">
-          <MessagePrimitive.Parts components={{ File: FileAttachmentPart }} />
+          <MessagePrimitive.Parts
+            components={{ File: FileAttachmentPart, Text: SkillDirectiveText }}
+          />
         </div>
       </MessagePrimitive.If>
     </MessagePrimitive.Root>

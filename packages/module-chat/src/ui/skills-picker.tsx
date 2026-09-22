@@ -112,6 +112,10 @@ export function SkillsPicker({ sessionId }: { sessionId: string }) {
                 {t("skills.pinned", { n: pinned.length })}
               </p>
             )}
+            {/* The `/` mention is the other half of this feature and has no
+                affordance of its own — the composer cannot advertise a
+                character. This tooltip is where a user finds out. */}
+            <p className="text-muted-foreground mt-0.5">{t("skills.mention.hint")}</p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
