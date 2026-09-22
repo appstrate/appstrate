@@ -571,10 +571,8 @@ describe("mcp file-backed package workflow", () => {
   it("places a root homed elsewhere by the same rule the REST import uses", async () => {
     // R7 says a re-import places its root the way `POST /api/spaces/{id}/packages`
     // does: the offer is written with the installation when the caller may make
-    // one. The REST import route passes `holdsPackageShareAuthority`; this tool
-    // passed NOTHING, so `mayShareRoot?.() ?? false` was the fail-closed
-    // answer for every caller and `root_active` was permanently `false`
-    // here. One act, two behaviours — decided by which door asked.
+    // one. One act, one rule — this tool asks the same `holdsPackageShareAuthority`
+    // predicate the REST import route asks, off its own request.
     //
     // The fixture homes the root in ANOTHER team space of the organization and
     // places it nowhere else, which is the reachable half of that rule: a

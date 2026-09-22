@@ -48,7 +48,6 @@ import {
   getCatalog,
   collectReferencedSchemas,
   operationGranted,
-  operationRequirement,
   type CatalogOperation,
 } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
@@ -88,9 +87,9 @@ export type McpToolName =
   | "get_me";
 
 /**
- * Outcome of an `invoke_operation` call, for audit + telemetry. There is no
- * permission-denial member: a caller without `mcp:invoke` is never DECLARED the
- * tool (`buildMcpTools`), so the SDK answers "Unknown tool" and no handler runs.
+ * Outcome of an `invoke_operation` call, for audit + telemetry. Only a caller
+ * holding `mcp:invoke` is declared the tool (`buildMcpTools`), so every outcome
+ * here is that of a call the handler actually ran.
  */
 export type McpInvokeOutcome =
   /** Client error before dispatch (unknown operationId, missing path params). */
@@ -141,14 +140,12 @@ export interface McpToolContext {
   scope: SpaceScope;
   authorizeBundle: Parameters<typeof buildPackageFileTools>[0]["authorizeBundle"];
   /**
-   * Whether the caller may OFFER a package from its home space — the
-   * predicate `import_package_file` needs to place a re-imported root the
-   * same way the REST import route places it. Optional so a non-HTTP caller
-   * (a unit test, an in-process consumer with no request) can omit it and
-   * get the fail-closed answer: the root is not activated and the result
-   * says so.
+   * Whether the caller may OFFER a package from its home space — the predicate
+   * `import_package_file` needs to place a re-imported root the same way the
+   * REST import route places it. Required: a caller who cannot be asked states
+   * the fail-closed answer explicitly rather than leaving it to be inferred.
    */
-  mayShareRoot?: Parameters<typeof buildPackageFileTools>[0]["mayShareRoot"];
+  mayShareRoot: Parameters<typeof buildPackageFileTools>[0]["mayShareRoot"];
   /** In-process dispatcher (defaults to the platform app at request time). */
   dispatch: Dispatch;
   /**
@@ -223,11 +220,6 @@ const PROTECTED_HEADERS = new Set<string>([
 // Cap the buffered response body so a large list endpoint can't dump
 // unbounded text into the model context. Truncation is flagged in the result.
 const MAX_RESPONSE_CHARS = 100_000;
-/** What a 403 from a dispatched operation means for the model, in one line. */
-const PERMISSION_DENIED_HINT =
-  "Your role does not hold this permission. Report it to the user; do not retry and do not " +
-  "look for another operation that does the same thing.";
-
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -303,6 +295,11 @@ function scoreOperation(op: CatalogOperation, tokens: string[]): number {
   return score;
 }
 
+/** Every permission the route's guards name, whichever space enforces it. */
+function requiredPermissions(op: CatalogOperation): string[] {
+  return [...op.requirement.requirements, ...op.requirement.targetSpaceRequirements];
+}
+
 /**
  * The full, invoke-ready definition of one operation: parameters, request body,
  * responses, and every referenced component schema inlined. This is the payload
@@ -314,7 +311,6 @@ function describePayload(
   componentSchemas: Record<string, unknown>,
   permissions: ReadonlySet<string>,
 ): Record<string, unknown> {
-  const requirement = operationRequirement(op);
   return {
     operation_id: op.operationId,
     method: op.method,
@@ -323,10 +319,11 @@ function describePayload(
     summary: op.summary,
     description: op.description,
     // What the route's own guards ask of the caller, and whether this caller
-    // holds it. `conditional` means a guard reads the loaded row (a file ACL,
-    // a draft's home space), so a grant here is a lower bound, not a promise.
-    required_permissions: [...requirement.requirements],
-    conditional: requirement.conditional,
+    // holds it. `conditional` means a guard reads the loaded row (a file ACL, a
+    // draft's home space) or is enforced in the space the path names, so a
+    // grant here is a lower bound, not a promise.
+    required_permissions: requiredPermissions(op),
+    conditional: op.requirement.conditional,
     granted: operationGranted(op, permissions),
     parameters: op.operation.parameters ?? [],
     request_body: op.operation.requestBody ?? null,
@@ -335,15 +332,18 @@ function describePayload(
   };
 }
 
-function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
+function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "search_operations",
     description:
       "Search the Appstrate API for operations by keyword and/or tag. Returns matching " +
       "operationIds with their HTTP method, path, and summary. Use this first to discover " +
       "which operation to call. For a keyword search, the response also includes a " +
-      "`best_match` carrying the top result's full input schema — when it matches your " +
-      "intent you can call invoke_operation directly, no describe_operation needed. " +
+      "`best_match` carrying the top result's full input schema" +
+      (invokes
+        ? " — when it matches your intent you can call invoke_operation directly, no " +
+          "describe_operation needed. "
+        : ", so a clear single hit needs no follow-up describe_operation call. ") +
       "Operations your role may not invoke are listed separately under `denied` with the " +
       "permissions they need: report that to the user instead of trying them. `total` counts " +
       "the matches you may invoke, `denied_total` the rest; both lists are capped at `limit`.",
@@ -416,7 +416,6 @@ function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
         : undefined;
 
     return textResult({
-      count: shown.length,
       total: granted.length,
       operations: shown.map((op) => ({
         operation_id: op.operationId,
@@ -428,7 +427,7 @@ function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
       denied_total: denied.length,
       denied: denied.slice(0, limit).map((op) => ({
         operation_id: op.operationId,
-        required_permissions: [...operationRequirement(op).requirements],
+        required_permissions: requiredPermissions(op),
       })),
       best_match: bestMatch,
     });
@@ -437,13 +436,16 @@ function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
-function buildDescribeTool(ctx: McpToolContext): AppstrateToolDefinition {
+function buildDescribeTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "describe_operation",
     description:
       "Return the full OpenAPI definition for one operation (parameters, request body, " +
-      "responses) with all referenced component schemas inlined, so you can construct a " +
-      "valid invoke_operation call. It also reports whether you may invoke it (`granted`) " +
+      "responses) with all referenced component schemas inlined, " +
+      (invokes
+        ? "so you can construct a valid invoke_operation call. "
+        : "so you can see exactly what it takes and what it answers with. ") +
+      "It also reports whether your role clears the route's guards (`granted`) " +
       "and which permissions the route requires (`required_permissions`).",
     annotations: {
       title: "Describe API operation",
@@ -811,7 +813,6 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
       body: sendBody ? JSON.stringify(body) : undefined,
     });
 
-    const requirement = operationRequirement(op);
     const response = await ctx.dispatch(request);
     emit(ctx, {
       tool: "invoke_operation",
@@ -827,10 +828,12 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     // does not: the caller holds every listed permission, so "your role lacks
     // it, do not retry" would be false — the problem+json already names it.
     const denial =
-      response.status === 403 && !isGranted(requirement, ctx.permissions)
+      response.status === 403 && !isGranted(op.requirement, ctx.permissions)
         ? {
-            required_permissions: [...requirement.requirements],
-            hint: PERMISSION_DENIED_HINT,
+            required_permissions: requiredPermissions(op),
+            hint:
+              "Your role does not hold this permission. Report it to the user; do not retry " +
+              "and do not look for another operation that does the same thing.",
           }
         : undefined;
     return readResponse(response, denial);
@@ -1206,18 +1209,6 @@ function projectFileRow(raw: unknown): Record<string, unknown> | null {
   };
 }
 
-/**
- * The catalog entry `list_files` dispatches to. Looked up by operationId so the
- * tool's declaration joins the same route table every other check reads; its
- * absence would mean the operation was renamed — a programming error, not a
- * runtime condition, so it throws rather than degrading to shown-or-hidden.
- */
-function listFilesOperation(): CatalogOperation {
-  const op = getCatalog().operations.get("listFiles");
-  if (!op) throw new Error("Catalog has no `listFiles` operation — list_files dispatches to it");
-  return op;
-}
-
 function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "list_files",
@@ -1513,17 +1504,24 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
 export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
   const has = (permission: CorePermission): boolean => ctx.permissions.has(permission);
   const invokes = ctx.permissions.has("mcp:invoke");
+  // `list_files` dispatches to this operation, so its declaration joins the
+  // same route table every other check reads; its absence would mean the
+  // operation was renamed — a programming error, not a runtime condition.
+  const listFiles = getCatalog().operations.get("listFiles");
+  if (!listFiles) {
+    throw new Error("Catalog has no `listFiles` operation — list_files dispatches to it");
+  }
   // What this caller's permission set makes structurally impossible is ABSENT
   // here, never declared and then refused; a row-conditional act stays visible.
   // The route decides every call, so this is context reduction, not a gate.
   return [
-    buildSearchTool(ctx),
-    buildDescribeTool(ctx),
+    buildSearchTool(ctx, invokes),
+    buildDescribeTool(ctx, invokes),
     ...(invokes ? [buildInvokeTool(ctx)] : []),
     // Both halves of `canRunAgents`: launching a run this caller could not read
     // back bills an orphan — see that predicate's doc.
     ...(invokes && canRunAgents(has) ? [buildRunAndWaitTool(ctx)] : []),
-    ...(operationGranted(listFilesOperation(), ctx.permissions) ? [buildListFilesTool(ctx)] : []),
+    ...(operationGranted(listFiles, ctx.permissions) ? [buildListFilesTool(ctx)] : []),
     buildReadFileTool(ctx),
     ...buildPackageFileTools(ctx),
     // `search_operations` stays under an injected index — `best_match` still

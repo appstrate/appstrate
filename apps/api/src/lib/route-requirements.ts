@@ -12,34 +12,50 @@
  * yet still contributes its guard beneath, and an exact-path one is
  * indistinguishable from `router.use()`, so it counts as serving
  * (`scripts/verify-openapi.ts` is what catches a documented operation whose
- * handler was removed).
+ * handler was removed). The one mount that never serves is the root catch-all
+ * `/*`: the SPA fallback answers every GET template, and reading that as a
+ * route would invent an operation for any path one can spell.
+ *
+ * Provenance matters as much as the permission: a guard mounted after a space
+ * re-scope (`markSpaceRescope`) is enforced in the space the PATH names, which
+ * is not the space a reader evaluating the caller's own permission set is
+ * talking about. Those are reported separately and never filter.
  */
 
 import { PERMISSION_REQUIREMENT_MARKER } from "@appstrate/core/permissions";
 import { readHandlerMarker } from "../middleware/handler-marker.ts";
-import { isPermissionGuard } from "../middleware/require-permission.ts";
+import {
+  isPermissionGuard,
+  isRowAuthority,
+  isSpaceRescope,
+} from "../middleware/require-permission.ts";
 
 export interface RouteRequirement {
-  /** One per guard, in mount order, all required; `"a|b"` is a disjunction. */
+  /** One per guard evaluated in the caller's own space, mount order, all required; `"a|b"` is a disjunction. Filters. */
   readonly requirements: readonly string[];
-  /** A guard stamped no requirement: the above is a lower bound, the row decides. */
+  /** Guards mounted after a space re-scope: enforced in the space the path names. Shown, never filtered. */
+  readonly targetSpaceRequirements: readonly string[];
+  /** The row, or the target space, decides: `requirements` is a lower bound. */
   readonly conditional: boolean;
 }
 
-/** A route with no guard at all — granted to anyone who reached the transport. */
-export const NO_REQUIREMENT: RouteRequirement = Object.freeze({
+/** A route no guard narrows — granted to anyone who reached the transport. */
+const UNGUARDED: RouteRequirement = Object.freeze({
   requirements: Object.freeze([]) as readonly string[],
+  targetSpaceRequirements: Object.freeze([]) as readonly string[],
   conditional: false,
 });
 
+/** Answers the requirement for `METHOD pathTemplate`; `undefined` when no route serves it. */
+export type RouteRequirementLookup = (
+  method: string,
+  pathTemplate: string,
+) => RouteRequirement | undefined;
+
 const PARAM_CHAR = /[A-Za-z0-9_]/;
 
-/** `"POST /api/agents/{scope}/{name}"` — Hono's `:param` (constrained or not) in
- *  OpenAPI form, so the join needs no second grammar. */
-export function routeRequirementKey(method: string, path: string): string {
-  return `${method.toUpperCase()} ${openApiPath(path)}`;
-}
-
+/** Hono's `:param` (constrained or not) in OpenAPI `{param}` form, so the join
+ *  between the route table and the spec needs no second grammar. */
 function openApiPath(path: string): string {
   let out = "";
   let i = 0;
@@ -74,47 +90,39 @@ function openApiPath(path: string): string {
   return out;
 }
 
-export interface RouteTable {
-  /** The route serving `METHOD pathTemplate`; `undefined` when none does. */
-  requirementFor(method: string, pathTemplate: string): RouteRequirement | undefined;
-}
-
-/** Pre-rewritten so a lookup only compares; exactly one of the two is set. */
+/** Pre-rewritten so a lookup only compares; exactly one of the two paths is set. */
 interface TableEntry {
   readonly method: string;
   readonly exact: string | null;
   readonly prefix: string | null;
   readonly requirement: string | null;
-  readonly rowAware: boolean;
+  /** The handler decides on the row it loads — a guard stamping no requirement, or `rowAuthority()`. */
+  readonly rowDecides: boolean;
+  /** Everything matched after this entry is enforced in the space the path names. */
+  readonly rescope: boolean;
 }
 
 export function deriveRouteRequirements(
   routes: ReadonlyArray<{ method: string; path: string; handler: unknown }>,
-): RouteTable {
-  const entries: TableEntry[] = routes.map((route) => {
+): RouteRequirementLookup {
+  const entries: TableEntry[] = [];
+  for (const route of routes) {
     const path = openApiPath(route.path);
+    if (path === "/*") continue;
     const wildcard = path.endsWith("*");
     const required = readHandlerMarker(route.handler, PERMISSION_REQUIREMENT_MARKER);
     const requirement = typeof required === "string" && required.length > 0 ? required : null;
-    return {
+    entries.push({
       method: route.method.toUpperCase(),
       exact: wildcard ? null : path,
       prefix: wildcard ? path.slice(0, -1) : null,
       requirement,
-      rowAware: requirement === null && isPermissionGuard(route.handler),
-    };
-  });
-
-  const answers = new Map<string, RouteRequirement | undefined>();
-  return {
-    requirementFor(method: string, pathTemplate: string): RouteRequirement | undefined {
-      const key = routeRequirementKey(method, pathTemplate);
-      if (answers.has(key)) return answers.get(key);
-      const answer = lookup(entries, method.toUpperCase(), openApiPath(pathTemplate));
-      answers.set(key, answer);
-      return answer;
-    },
-  };
+      rowDecides:
+        (requirement === null && isPermissionGuard(route.handler)) || isRowAuthority(route.handler),
+      rescope: isSpaceRescope(route.handler),
+    });
+  }
+  return (method, pathTemplate) => lookup(entries, method.toUpperCase(), openApiPath(pathTemplate));
 }
 
 function lookup(
@@ -123,22 +131,29 @@ function lookup(
   template: string,
 ): RouteRequirement | undefined {
   let served = false;
-  const requirements: string[] = [];
+  let rescoped = false;
   let conditional = false;
+  const requirements: string[] = [];
+  const targetSpaceRequirements: string[] = [];
+  // Mount order, so a guard is attributed to the space in force where it sits.
   for (const entry of entries) {
     if (entry.method !== "ALL" && entry.method !== method) continue;
     const exactHit = entry.exact !== null && entry.exact === template;
     if (!exactHit && !coversPrefix(entry.prefix, template)) continue;
     if (exactHit || entry.method !== "ALL") served = true;
-    // De-duplicated: a guard reached twice is one requirement to the model.
+    if (entry.rescope) rescoped = true;
     if (entry.requirement !== null) {
-      if (!requirements.includes(entry.requirement)) requirements.push(entry.requirement);
-    } else if (entry.rowAware) conditional = true;
+      // De-duplicated: a guard reached twice is one requirement to the model.
+      const into = rescoped ? targetSpaceRequirements : requirements;
+      if (!into.includes(entry.requirement)) into.push(entry.requirement);
+    } else if (entry.rowDecides) conditional = true;
   }
   if (!served) return undefined;
-  if (requirements.length === 0 && !conditional) return NO_REQUIREMENT;
+  if (targetSpaceRequirements.length > 0) conditional = true;
+  if (requirements.length === 0 && !conditional) return UNGUARDED;
   return Object.freeze({
     requirements: Object.freeze(requirements) as readonly string[],
+    targetSpaceRequirements: Object.freeze(targetSpaceRequirements) as readonly string[],
     conditional,
   });
 }
@@ -149,8 +164,9 @@ function coversPrefix(prefix: string | null, template: string): boolean {
   return prefix.endsWith("/") && template === prefix.slice(0, -1);
 }
 
-/** Every requirement holds, a `|` entry on any alternative; a conditional one
- *  is granted here — only the row could still refuse. */
+/** Every requirement holds, a `|` entry on any alternative. Target-space and
+ *  row-conditional requirements are granted here — only the space or the row
+ *  the call names could still refuse. */
 export function isGranted(
   requirement: RouteRequirement,
   permissions: ReadonlySet<string>,

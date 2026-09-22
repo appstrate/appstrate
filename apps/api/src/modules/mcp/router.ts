@@ -175,9 +175,10 @@ export function buildServerInstructions(
   const invokes = permissions.has("mcp:invoke");
   const runs = invokes && canRunAgents(has);
   // Building an agent — manifests, `dependencies.*`, tool selection — is
-  // `agents:write`; a caller without it is not taught how, and one who cannot
-  // launch a run is not told that configuring one leads to running it.
-  const authors = permissions.has("agents:write");
+  // `agents:write` acted on through `invoke_operation`; a caller missing either
+  // is not taught how, and one who cannot launch a run is not told that
+  // configuring one leads to running it.
+  const authors = invokes && permissions.has("agents:write");
   const runningAgents = runs ? "configuring or running" : "configuring";
   const agentUse = authors ? "building or configuring" : runningAgents;
   // A `contextInjected` caller (the chat module) already injects the get_me
@@ -453,7 +454,10 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // get_me tool — and its "call get_me first" instruction — are dropped. Only
     // the in-process chat sets it; external MCP clients omit it and keep get_me.
     const contextInjected = reqUrl.searchParams.get("context") === "injected";
-    const permissions = c.get("permissions") ?? new Set<string>();
+    // Set by the space-entry middleware mounted on this exact path; absent
+    // means the chain was rewired, not that the caller holds nothing.
+    const permissions = c.get("permissions");
+    if (!permissions) throw new Error("mcp: permissions missing on a guarded route");
     const authHeaders = forwardAuthHeaders(c.req.raw.headers);
     const dispatch: Dispatch = dispatchInProcess;
     // The caller identity + space scope for tools that call a service directly (the

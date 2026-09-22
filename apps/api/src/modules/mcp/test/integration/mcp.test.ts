@@ -19,8 +19,20 @@ import { auditEvents } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { truncateAll, db } from "../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../test/helpers/redis.ts";
-import { createTestContext, orgOnlyHeaders } from "../../../../../test/helpers/auth.ts";
-import { seedApiKey, seedPackage } from "../../../../../test/helpers/seed.ts";
+import {
+  addOrgMember,
+  createTestContext,
+  createTestUser,
+  memberContext,
+  orgOnlyHeaders,
+} from "../../../../../test/helpers/auth.ts";
+import {
+  seedApiKey,
+  seedPackage,
+  seedSpace,
+  seedSpaceMember,
+  seedSpaceRole,
+} from "../../../../../test/helpers/seed.ts";
 import {
   MCP_ACCEPT,
   mcpPath,
@@ -173,8 +185,6 @@ describe("mcp discovery + auth gate", () => {
     // A session caller is used because it takes the same `resolveMcpSpaceRow` →
     // `applySpacePermissions` path a per-org bearer does; only the credential
     // that resolved the org role differs.
-    const { createTestUser, addOrgMember } = await import("../../../../../test/helpers/auth.ts");
-    const { seedSpaceMember } = await import("../../../../../test/helpers/seed.ts");
     const owner = await createTestContext();
     const guest = await createTestUser();
     await addOrgMember(owner.orgId, guest.id, "guest");
@@ -307,8 +317,6 @@ describe("mcp tool round-trip", () => {
     // where this matters: `viewer` holds neither `agents:run` nor the mcp
     // module's `invoke` contribution, `builder` holds both. Same user shape,
     // same request — only the space row's preset differs.
-    const { createTestUser, addOrgMember } = await import("../../../../../test/helpers/auth.ts");
-    const { seedSpaceMember } = await import("../../../../../test/helpers/seed.ts");
     const owner = await createTestContext();
 
     const listFor = async (presetRole: "viewer" | "builder"): Promise<string[]> => {
@@ -347,7 +355,7 @@ describe("mcp tool round-trip", () => {
       method: "tools/call",
       params: { name: "search_operations", arguments: { query: "agent", limit: 3 } },
     });
-    expect((toolPayload(search.envelope).data.count as number) > 0).toBe(true);
+    expect((toolPayload(search.envelope).data.total as number) > 0).toBe(true);
 
     // Pick a real GET operation with no path params and invoke it. The
     // underlying route runs through the full pipeline, so the result carries
@@ -523,6 +531,96 @@ describe("mcp tool round-trip", () => {
     // this fails — re-evaluate the token cost first.
     expect(indexSection).not.toContain(" — ");
     expect(indexSection).not.toMatch(/^- \w/m);
+  });
+
+  it("reports and enforces `listSpaceMembers` in the space its PATH names", async () => {
+    // The endpoint pins ONE space (here the org default, A) but the operation
+    // acts on the space in its path. `requireSpaceFromParam` re-applies the
+    // caller's permissions there, so the requirement the tool reports is the
+    // TARGET space's — and A's set neither grants nor withholds it.
+    const owner = await createTestContext();
+    const caller = await memberContext(owner, "member", "operator");
+    const runs = await seedSpace({ orgId: owner.orgId, name: "Runs", visibility: "closed" });
+    await seedSpaceMember({ spaceId: runs.id, userId: caller.user.id, presetRole: "admin" });
+    const foreign = await seedSpace({ orgId: owner.orgId, name: "Foreign", visibility: "closed" });
+    const headers = { Cookie: caller.cookie, "X-Org-Id": owner.orgId };
+
+    const call = async (id: number, name: string, args: Record<string, unknown>) => {
+      const { envelope } = await rpc(headers, {
+        jsonrpc: "2.0",
+        id,
+        method: "tools/call",
+        params: { name, arguments: args },
+      });
+      return toolPayload(envelope);
+    };
+
+    const described = await call(1, "describe_operation", { operation_id: "listSpaceMembers" });
+    expect(described.data.conditional).toBe(true);
+    expect(described.data.required_permissions).toContain("space-members:read");
+    // `operator` in A holds no `space-members:read` anywhere in A, and the
+    // operation is still offered: the caller-space set is not what decides it.
+    expect(described.data.granted).toBe(true);
+
+    const inRuns = await call(2, "invoke_operation", {
+      operation_id: "listSpaceMembers",
+      path_params: { id: runs.id },
+    });
+    expect(inRuns.data.status).toBe(200);
+
+    // The same call one space over, where this caller has no row at all: the
+    // TARGET space refuses, and the refusal is not a permission the caller
+    // could acquire in A — so the result carries no permission advice.
+    const inForeign = await call(3, "invoke_operation", {
+      operation_id: "listSpaceMembers",
+      path_params: { id: foreign.id },
+    });
+    expect([403, 404]).toContain(inForeign.data.status as number);
+    expect(inForeign.isError).toBe(true);
+    expect(inForeign.data.required_permissions).toBeUndefined();
+    expect(inForeign.data.hint).toBeUndefined();
+
+    // A conditional operation is a listed one: searching must offer it rather
+    // than bury it under `denied`, which is where a caller-space reading of the
+    // requirement would have put it.
+    const searched = await call(4, "search_operations", { query: "members", limit: 100 });
+    const listed = (searched.data.operations as Array<{ operation_id: string }>).map(
+      (entry) => entry.operation_id,
+    );
+    const denied = (searched.data.denied as Array<{ operation_id: string }>).map(
+      (entry) => entry.operation_id,
+    );
+    expect(listed).toContain("listSpaceMembers");
+    expect(denied).not.toContain("listSpaceMembers");
+  });
+
+  it("advertises the tools a CUSTOM space role's own permission list allows", async () => {
+    // A bundle is not a preset: the surface has to follow the strings the row
+    // carries, not the nearest preset to them.
+    const owner = await createTestContext();
+    const member = await createTestUser();
+    await addOrgMember(owner.orgId, member.id, "member");
+    const role = await seedSpaceRole({
+      orgId: owner.orgId,
+      permissions: ["mcp:read", "mcp:invoke", "agents:run", "runs:read-all"],
+    });
+    await seedSpaceMember({
+      spaceId: owner.defaultSpaceId,
+      userId: member.id,
+      presetRole: null,
+      customRoleId: role.id,
+    });
+
+    const { envelope } = await rpc(
+      { Cookie: member.cookie, "X-Org-Id": owner.orgId },
+      { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
+    );
+    const names = (envelope.result?.tools as Array<{ name: string }>).map((tool) => tool.name);
+    expect(names).toContain("run_and_wait");
+    expect(names).toContain("invoke_operation");
+    // The control: the bundle names no `files:read`, so the file tool is gone
+    // while the two above stay — a narrowing, not an empty list.
+    expect(names).not.toContain("list_files");
   });
 });
 

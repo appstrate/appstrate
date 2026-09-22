@@ -8,12 +8,11 @@ import { buildServerInstructions } from "../../router.ts";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import { buildMcpTools, type Dispatch } from "../../tools.ts";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
-import { getTestApp } from "../../../../../test/helpers/app.ts";
-import { setPlatformApp } from "../../../../lib/platform-app.ts";
+import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
 
 // Both `buildMcpTools` (what this caller is shown) and the appended operation
 // index read the mounted guards off the route table.
-setPlatformApp(getTestApp());
+registerTestPlatformApp();
 
 const noExtra = {} as AppstrateRequestExtra;
 /** What composing an inline agent takes: authoring AND launching. */
@@ -120,24 +119,11 @@ function makeRunAndWait(opts: {
     actor: { type: "user", id: "user_1" },
     scope: { orgId: "org_1", spaceId: "spc_1" },
     authorizeBundle: async () => {},
+    mayShareRoot: async () => false,
   });
   const tool = tools.find((t) => t.descriptor.name === "run_and_wait");
   if (!tool) throw new Error("run_and_wait tool not built");
   return { tool, calls };
-}
-
-/** Whether the caller is SHOWN the tool at all — the gate before the handler. */
-function declaresRunAndWait(permissions: string[]): boolean {
-  const tools = buildMcpTools({
-    origin: "http://test.local",
-    authHeaders: new Headers({ "X-Org-Id": "org_1", "X-Space-Id": "spc_1" }),
-    permissions: new Set(permissions),
-    dispatch: async () => new Response("{}", { status: 200 }),
-    actor: { type: "user", id: "user_1" },
-    scope: { orgId: "org_1", spaceId: "spc_1" },
-    authorizeBundle: async () => {},
-  });
-  return tools.some((t) => t.descriptor.name === "run_and_wait");
 }
 
 describe("run_and_wait", () => {
@@ -274,8 +260,8 @@ describe("run_and_wait", () => {
   //
   // `POST /api/runs/inline` requires `agents:write` and `agents:run`, so a
   // descriptor that offered `kind:"inline"` to a caller missing either would
-  // send the model into a 403. Both halves are asserted on the same builder, so
-  // neither can pass by the text simply being gone.
+  // send the model into a 403. Whether the tool is declared at all is a
+  // separate gate, pinned in `tools.test.ts`.
 
   describe("without `agents:write` ∧ `agents:run`", () => {
     const agentOnly = () => makeRunAndWait({ permissions: [...LAUNCHES, "agents:run"] }).tool;
@@ -288,11 +274,6 @@ describe("run_and_wait", () => {
         ).kind!.enum;
       expect(kinds(["agents:run"])).toEqual(["agent"]);
       expect(kinds(COMPOSER)).toEqual(["agent", "inline"]);
-      // The other half of "both": authoring without `agents:run` no longer
-      // narrows the descriptor, it withholds the tool — there is nothing to
-      // launch with. Asserted on the same builder so neither case can pass by
-      // the enum simply being gone.
-      expect(declaresRunAndWait([...LAUNCHES, "agents:write"])).toBe(false);
     });
 
     it("declares none of the inline-only arguments", () => {
@@ -585,30 +566,13 @@ describe("run_and_wait", () => {
     expect(calls.length).toBe(0);
   });
 
-  it("validates required arguments and permissions", async () => {
+  it("validates required arguments", async () => {
     const { tool } = makeRunAndWait({});
     expect((await tool.handler({ kind: "agent", name: "b" }, noExtra)).isError).toBe(true);
     expect((await tool.handler({ kind: "inline" }, noExtra)).isError).toBe(true);
     await expect(tool.handler({ kind: "bad" }, noExtra)).rejects.toMatchObject({
       code: ErrorCode.InvalidParams,
     } satisfies Partial<McpError>);
-
-    // A caller without `mcp:invoke` is not shown the tool at all, so the
-    // refusal it used to take from the handler now precedes the declaration.
-    expect(declaresRunAndWait(["mcp:read"])).toBe(false);
-  });
-
-  it("does not show the tool to a caller that can launch but not read", () => {
-    // `agents:run` without a run-read permission is a reachable credential —
-    // both are separately requestable OIDC scopes, and it is the canonical
-    // shape of a headless CI key. The launch would dispatch in-process with
-    // the caller's own auth, and `internal-dispatch` neither elevates nor
-    // alters identity, so the poll would take a 403 on a run that is already
-    // provisioned and already spending. The tool being ABSENT is the strongest
-    // form of "the refusal precedes the side effect".
-    expect(declaresRunAndWait(["mcp:invoke", "agents:run"])).toBe(false);
-    // The control: add the read back and the same caller is shown it.
-    expect(declaresRunAndWait(["mcp:invoke", "agents:run", "runs:read"])).toBe(true);
   });
 
   it("launches for a caller whose only run-read grant is `runs:read-all`", async () => {

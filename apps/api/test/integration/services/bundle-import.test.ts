@@ -41,6 +41,8 @@ import { describeRequiresPostgres } from "../../helpers/tier.ts";
 
 /** Service-level tests exercise the import itself; route guards are tested at the HTTP layer. */
 const noAuthorize = async () => {};
+/** No sharing authority: these cases are about the import, not about placing a root elsewhere. */
+const noShare = async () => false;
 
 // `importBundle` reads the platform run limits; the HTTP harness initializes them at boot.
 initRunLimits();
@@ -312,6 +314,7 @@ describe("bundle import — upstream manifest rejection + rollback", () => {
       bundle,
       { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       ctx.user.id,
+      noShare,
     ).catch((e: unknown) => e);
 
     // `parsePackageZip` rejects the reconstructed archive before the ownership
@@ -381,7 +384,13 @@ describe("importBundle — cross-tenant ownership claim (CRIT-08)", () => {
 
   it("sequential: org B importing a package owned by org A gets a 409 — never a silent graft", async () => {
     // Org A owns the package with version 1.0.0.
-    const first = await handleImportBundle(agentAfps("1.0.0"), scopeA, ctxA.user.id, noAuthorize);
+    const first = await handleImportBundle(
+      agentAfps("1.0.0"),
+      scopeA,
+      ctxA.user.id,
+      noAuthorize,
+      noShare,
+    );
     expect(first.imported[0]!.status).toBe("inserted");
     expect(await packageOwner(PKG)).toBe(ctxA.orgId);
 
@@ -391,6 +400,7 @@ describe("importBundle — cross-tenant ownership claim (CRIT-08)", () => {
       scopeB,
       ctxB.user.id,
       noAuthorize,
+      noShare,
     ).catch((e: unknown) => e);
     expect(viaPreflight).toBeInstanceOf(ApiError);
     expect((viaPreflight as ApiError).status).toBe(409);
@@ -401,7 +411,9 @@ describe("importBundle — cross-tenant ownership claim (CRIT-08)", () => {
     // through the reuse check (no (pkg, 2.0.0) row) and grafted org B's
     // version + bytes onto org A's row. Post-fix: 409 at the atomic claim.
     const bundleV2 = await readOrBuildBundle(agentAfps("2.0.0"), scopeB);
-    const direct = await importBundle(bundleV2, scopeB, ctxB.user.id).catch((e: unknown) => e);
+    const direct = await importBundle(bundleV2, scopeB, ctxB.user.id, noShare).catch(
+      (e: unknown) => e,
+    );
     expect(direct).toBeInstanceOf(ApiError);
     expect((direct as ApiError).status).toBe(409);
     expect((direct as ApiError).code).toBe("bundle_conflict");
@@ -418,8 +430,8 @@ describe("importBundle — cross-tenant ownership claim (CRIT-08)", () => {
       const bytes = agentAfps("1.0.0");
 
       const [a, b] = await Promise.allSettled([
-        handleImportBundle(bytes, scopeA, ctxA.user.id, noAuthorize),
-        handleImportBundle(bytes, scopeB, ctxB.user.id, noAuthorize),
+        handleImportBundle(bytes, scopeA, ctxA.user.id, noAuthorize, noShare),
+        handleImportBundle(bytes, scopeB, ctxB.user.id, noAuthorize, noShare),
       ]);
 
       const settled = [
@@ -464,11 +476,10 @@ describe("importBundle — cross-tenant ownership claim (CRIT-08)", () => {
  * `root_active: false` instead of a silently half-finished import.
  *
  * The authority itself is a question about the HTTP caller, so it arrives as a
- * callback — both doors pass `holdsPackageShareAuthority` built from their own
- * request (`POST /api/packages/import-bundle` and the `import_package_file` MCP
- * tool). A caller with no request context cannot be asked and passes none,
- * which is the refusing half below: absent means `false`, so the one act keeps
- * one rule and the fail-closed answer is the one an unaskable caller gets.
+ * required callback — both doors pass `holdsPackageShareAuthority` built from
+ * their own request (`POST /api/packages/import-bundle` and the
+ * `import_package_file` MCP tool), so one act keeps one rule and no caller can
+ * reach the placement without an answer.
  */
 describe("importBundle — a root homed in another space", () => {
   let ctx: TestContext;
@@ -508,6 +519,7 @@ describe("importBundle — a root homed in another space", () => {
       rootBundle(),
       { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       ctx.user.id,
+      noShare,
     );
     expect(first.root_active).toBe(true);
     const [homed] = await db

@@ -10,12 +10,13 @@
  * enforces `code ⊆ spec`, so the catalog is a complete, trustworthy view of
  * what the API can do.
  *
- * Built lazily on first use (long after boot, so all modules have
- * contributed their paths) and cached for the process lifetime.
+ * Each operation carries what the guards mounted on its route ask of the
+ * caller, joined here once, so the index and the tool surface derive from the
+ * same table that enforces them — never a second list.
  *
- * What an operation requires of its caller is read off the guards mounted on
- * its route ({@link operationRequirement}), so the index and the tool surface
- * derive from the same table that enforces them — never a second list.
+ * Built lazily on first use and cached for the process lifetime: both halves —
+ * the module-contributed paths and the mounted route table — are complete only
+ * once the first request arrives, never at boot.
  */
 
 import { buildOpenApiSpec } from "../../openapi/index.ts";
@@ -23,9 +24,7 @@ import { getPlatformRoutes } from "../../lib/platform-app.ts";
 import {
   deriveRouteRequirements,
   isGranted,
-  routeRequirementKey,
   type RouteRequirement,
-  type RouteTable,
 } from "../../lib/route-requirements.ts";
 import {
   getModuleOpenApiPaths,
@@ -61,6 +60,8 @@ export interface CatalogOperation {
   pathParams: string[];
   /** Names of OpenAPI `in: header` parameters this operation declares. */
   headerParams: string[];
+  /** What the guards mounted on this operation's route ask of the caller. */
+  requirement: RouteRequirement;
   /** Raw OpenAPI operation node (for `describe_operation`). */
   operation: OperationNode;
 }
@@ -72,52 +73,6 @@ interface OperationCatalog {
 }
 
 let cached: OperationCatalog | null = null;
-
-/**
- * Permission-scoped operation indexes, memoised per permission SET. The MCP
- * router builds one on every `tools/call` POST (server `instructions` are
- * assembled per request), and the chat module drives every tool call through
- * that router — so without this each tool call re-sorted and re-joined ~230
- * operations. Keyed by the sorted permission list (order-independent), bounded
- * with insertion-order eviction: distinct permission sets are one per role
- * plus one per custom API-key scope combination, a small population.
- *
- * Cleared whenever the catalog is (re)built so a rebuilt catalog can never
- * serve an index derived from the previous one.
- */
-const indexByPermissions = new Map<string, string>();
-const MAX_SCOPED_INDEXES = 64;
-let scopedIndexBuilds = 0;
-
-/**
- * The mounted routes, queryable per operation — see {@link operationRequirement}.
- * A separate memo rather than a catalog field, and derived on the first call
- * (in production a request, hence after `registerModuleRoutes` finished): the
- * app registers itself with `setPlatformApp` BEFORE the module routers mount,
- * so deriving at boot would freeze a partial table. Dropped with the rest, so
- * a rebuilt catalog is never joined against a stale table.
- */
-let routeTable: RouteTable | null = null;
-
-function permissionsKey(permissions: ReadonlySet<string>): string {
-  return [...permissions].sort().join(",");
-}
-
-/**
- * Observability for the scoped-index memo: how many entries it holds and how
- * many times a scoped index was actually built (a miss). Read by the catalog
- * tests to prove a repeated permission set is served from the map — string
- * identity cannot show that (`Object.is` compares strings by value).
- */
-export function getOperationIndexCacheStats(): { entries: number; builds: number } {
-  return { entries: indexByPermissions.size, builds: scopedIndexBuilds };
-}
-
-function resetDerivedCaches(): void {
-  indexByPermissions.clear();
-  scopedIndexBuilds = 0;
-  routeTable = null;
-}
 
 const PATH_PARAM_RE = /\{([^}]+)\}/g;
 
@@ -181,8 +136,10 @@ export function getCatalog(): OperationCatalog {
 
   const paths = spec.paths as Record<string, Record<string, unknown>>;
   const componentSchemas = (spec.components?.schemas ?? {}) as Record<string, unknown>;
+  const requirementFor = deriveRouteRequirements(getPlatformRoutes());
 
   const operations = new Map<string, CatalogOperation>();
+  const unresolved: string[] = [];
   for (const [pathTemplate, pathItem] of Object.entries(paths)) {
     if (typeof pathItem !== "object" || pathItem === null) continue;
     // Exclude the MCP server's own transport + discovery endpoints so the
@@ -192,57 +149,46 @@ export function getCatalog(): OperationCatalog {
     for (const method of OPERATION_METHODS) {
       const node = (pathItem as Record<OperationMethod, unknown>)[method];
       if (!isOperationNode(node) || typeof node.operationId !== "string") continue;
+      const httpMethod = method.toUpperCase();
+      // No fallback to "unfiltered": an operation the route table cannot find
+      // would be published as needing nothing, turning a mismatch into a grant.
+      const requirement = requirementFor(httpMethod, pathTemplate);
+      if (!requirement) {
+        unresolved.push(`${node.operationId} (${httpMethod} ${pathTemplate})`);
+        continue;
+      }
       operations.set(node.operationId, {
         operationId: node.operationId,
-        method: method.toUpperCase(),
+        method: httpMethod,
         pathTemplate,
         tags: Array.isArray(node.tags) ? node.tags.filter((t) => typeof t === "string") : [],
         summary: typeof node.summary === "string" ? node.summary : "",
         description: typeof node.description === "string" ? node.description : "",
         pathParams: extractPathParams(pathTemplate),
         headerParams: extractHeaderParams(node),
+        requirement,
         operation: node,
       });
     }
   }
+  if (unresolved.length > 0) {
+    throw new Error(
+      `The OpenAPI document and the route table disagree — no mounted route serves: ${unresolved.join(", ")}`,
+    );
+  }
 
   cached = { operations, componentSchemas };
-  // A (re)built catalog invalidates every index derived from the previous
-  // one — `resetCatalog` alone is not enough, since it is the assignment
-  // above that changes what an index would be built from.
-  resetDerivedCaches();
   return cached;
 }
 
-/** Reset the cached catalog and everything derived from it. Tests only. */
+/** Drop the cached catalog so the next read rebuilds it. Tests only. */
 export function resetCatalog(): void {
   cached = null;
-  resetDerivedCaches();
-}
-
-/**
- * What the route behind this operation requires of the caller's permission set.
- *
- * Read off `getPlatformRoutes()`, where the guards actually sit. There is
- * deliberately no fallback to "unfiltered", and an operation no route serves
- * throws rather than answering `NO_REQUIREMENT`: either would turn a mismatch
- * into a grant. That mismatch is what `scripts/verify-openapi.ts` catches.
- */
-export function operationRequirement(op: CatalogOperation): RouteRequirement {
-  routeTable ??= deriveRouteRequirements(getPlatformRoutes());
-  const requirement = routeTable.requirementFor(op.method, op.pathTemplate);
-  if (!requirement) {
-    const key = routeRequirementKey(op.method, op.pathTemplate);
-    throw new Error(
-      `Operation ${op.operationId} has no mounted route for \`${key}\` — the OpenAPI document and the route table disagree`,
-    );
-  }
-  return requirement;
 }
 
 /** Whether `permissions` clears every guard mounted on this operation's route. */
 export function operationGranted(op: CatalogOperation, permissions: ReadonlySet<string>): boolean {
-  return isGranted(operationRequirement(op), permissions);
+  return isGranted(op.requirement, permissions);
 }
 
 /**
@@ -255,8 +201,8 @@ export function operationGranted(op: CatalogOperation, permissions: ReadonlySet<
  * Method/path are deliberately omitted (they come from describe_operation or
  * search_operations' best_match); this is a discovery aid that lets a client
  * pick an operationId directly, skipping a search_operations round-trip. It is
- * fully derived from the live catalog and memoized, so it grows with the API
- * surface without any hand maintenance.
+ * fully derived from the live catalog, so it grows with the API surface
+ * without any hand maintenance.
  *
  * Filtered PER OPERATION against the guards mounted on its route
  * ({@link operationGranted}), so a tag whose operations are all denied has no
@@ -266,13 +212,6 @@ export function operationGranted(op: CatalogOperation, permissions: ReadonlySet<
  * because only the loaded row can refuse it.
  */
 export function buildOperationIndex(permissions: ReadonlySet<string>): string {
-  const key = permissionsKey(permissions);
-  const hit = indexByPermissions.get(key);
-  if (hit !== undefined) return hit;
-
-  // `getCatalog()` may rebuild (and thereby clear the index map) — call it
-  // BEFORE the memo write below so the entry is stored against the catalog it
-  // was derived from.
   const { operations } = getCatalog();
   const byTag = new Map<string, string[]>();
   for (const op of operations.values()) {
@@ -291,14 +230,7 @@ export function buildOperationIndex(permissions: ReadonlySet<string>): string {
     return `## ${tag}\n${ids.join(", ")}`;
   });
 
-  const result = sections.join("\n\n");
-  scopedIndexBuilds += 1;
-  if (indexByPermissions.size >= MAX_SCOPED_INDEXES) {
-    const oldest = indexByPermissions.keys().next().value;
-    if (oldest !== undefined) indexByPermissions.delete(oldest);
-  }
-  indexByPermissions.set(key, result);
-  return result;
+  return sections.join("\n\n");
 }
 
 const SCHEMA_REF_PREFIX = "#/components/schemas/";

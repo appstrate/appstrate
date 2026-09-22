@@ -16,13 +16,12 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { buildServerInstructions } from "../../router.ts";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
-import { getTestApp } from "../../../../../test/helpers/app.ts";
-import { setPlatformApp } from "../../../../lib/platform-app.ts";
+import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
 import { resetCatalog } from "../../catalog.ts";
 
 // The appended operation index is filtered per operation against the mounted
-// guards, so building the instructions now reads the route table.
-setPlatformApp(getTestApp());
+// guards, so building the instructions reads the route table.
+registerTestPlatformApp();
 
 /**
  * Launch and read back: the connect bullet is run-readiness guidance, so it is
@@ -137,11 +136,23 @@ describe("MCP server instructions — agent authoring", () => {
   beforeEach(() => resetCatalog());
 
   it("teaches tool selection and `dependencies.*` only to a caller holding `agents:write`", () => {
-    const withWrite = buildServerInstructions(new Set(["mcp:read", "agents:write"]), true);
+    const withWrite = buildServerInstructions(
+      new Set(["mcp:read", "mcp:invoke", "agents:write"]),
+      true,
+    );
     const without = buildServerInstructions(permissions, true);
     expect(withWrite).toContain("Integration tool selection");
     expect(withWrite).toContain("building or configuring an agent");
     expect(without).not.toContain("Integration tool selection");
     expect(without).not.toContain("building or configuring an agent");
+  });
+
+  it("withholds it from a caller who may author but not invoke", () => {
+    // Authoring an agent is `createAgent` through `invoke_operation`: a
+    // discovery-only caller cannot act on manifest guidance, so it is absent
+    // rather than taught and then refused.
+    const cannotInvoke = buildServerInstructions(new Set(["mcp:read", "agents:write"]), true);
+    expect(cannotInvoke).not.toContain("Integration tool selection");
+    expect(cannotInvoke).not.toContain("building or configuring an agent");
   });
 });

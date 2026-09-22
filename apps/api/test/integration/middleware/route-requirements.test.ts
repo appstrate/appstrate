@@ -1,33 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Conformance gate: the permission the MCP surface shows for an operation is
- * the permission the route enforces. Catalog from the OpenAPI document,
- * requirement from Hono's route table; an operationId whose route the reader
- * cannot find resolves to nothing at all, and `operationRequirement` throws
- * naming it. That join itself — every operation resolves, no exception — is
- * pinned in `src/modules/mcp/test/unit/catalog-requirements.test.ts`, which
- * the default CI job runs; this file, label-gated, holds the allowlist of
- * operations that mount no guard and the anchors for the awkward mounts. Same
- * read as `agent-lookup-permission-order.test.ts`: a property of WHERE a
- * middleware is mounted, invisible at runtime and in a diff.
+ * The permission the MCP surface shows for an operation must be the permission
+ * its route enforces. A mutating operation therefore names a permission, says
+ * the row decides (`rowAuthority()`), or appears in the allowlist below with
+ * the authority that stands in for a mounted guard. Both directions are gates:
+ * an operation that fits none of the three fails, and so does an allowlist
+ * entry whose reason expired — nothing else would ever delete it.
  */
 
 import { describe, it, expect } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { setPlatformApp } from "../../../src/lib/platform-app.ts";
-import { routeRequirementKey } from "../../../src/lib/route-requirements.ts";
-import {
-  getCatalog,
-  operationRequirement,
-  type CatalogOperation,
-} from "../../../src/modules/mcp/catalog.ts";
+import { getCatalog, type CatalogOperation } from "../../../src/modules/mcp/catalog.ts";
 
 setPlatformApp(getTestApp());
 
 /** The route-table key the catalog joins on, for a failure message. */
 function key(op: CatalogOperation): string {
-  return routeRequirementKey(op.method, op.pathTemplate);
+  return `${op.method} ${op.pathTemplate}`;
 }
 
 /**
@@ -66,27 +57,15 @@ const NO_MOUNTED_GUARD: ReadonlyArray<{ path: string; why: string }> = [
   // Exact: everything under `/api/orgs/…` IS guarded.
   { path: "/api/orgs", why: "creating an org happens outside org context — no role to check" },
 
-  // ── Authority is a row, known only in the handler: not a mounted guard.
+  // ── Platform-operator authority, outside org RBAC entirely.
   {
     path: "/api/admin/storage-deletion-jobs/*",
-    why: "platform-operator surface (`requirePlatformAdmin`), outside org RBAC",
+    why: "platform-operator surface (`requirePlatformAdmin`), not a row and not a grant",
   },
-  { path: "/api/files/{id}*", why: "`files:delete` OR the file's own creator (`getFileForActor`)" },
-  {
-    path: "/api/packages/{scope}/{name}/home",
-    why: "authority is the package's home space (`assertPackageMutationAccess`)",
-  },
-  {
-    path: "/api/packages/{scope}/{name}/shares*",
-    why: "authority is the package's home space (`assertPackageShareAccess`)",
-  },
-  {
-    path: "/api/spaces/{spaceId}/packages*",
-    why: "placement reads the package's share row (`gateSpacePackageWrite`)",
-  },
-  // The collection `POST /api/webhooks` is guarded and stays out of this list.
-  { path: "/api/webhooks/{id}*", why: "per-row authority (`loadWebhookForAction`)" },
 ];
+
+/** Entries a deployment without `@appstrate/module-ee` cannot match. */
+const PRESENT_ONLY_WITH_EE: ReadonlySet<string> = new Set(["/api/billing/webhooks"]);
 
 /** True when `pathTemplate` is covered by `list`. */
 function covers(list: ReadonlyArray<{ path: string }>, pathTemplate: string): boolean {
@@ -102,18 +81,27 @@ function op(operationId: string): CatalogOperation {
   return found;
 }
 
+/**
+ * Mutating `/api/` operations whose route names no permission — in the caller's
+ * space or in the one its path re-scopes to — and does not say the row decides.
+ * Exactly what an allowlist entry has to stand for.
+ */
+function unguardedMutations(): CatalogOperation[] {
+  return [...getCatalog().operations.values()].filter(
+    (operation) =>
+      operation.method !== "GET" &&
+      operation.pathTemplate.startsWith("/api/") &&
+      operation.requirement.requirements.length === 0 &&
+      operation.requirement.targetSpaceRequirements.length === 0 &&
+      !operation.requirement.conditional,
+  );
+}
+
 describe("every mutating /api/ operation has a readable requirement", () => {
   it("names a permission, defers to the row, or is allowlisted", () => {
-    const offenders: string[] = [];
-    for (const operation of getCatalog().operations.values()) {
-      if (operation.method === "GET") continue;
-      if (!operation.pathTemplate.startsWith("/api/")) continue;
-      if (covers(NO_MOUNTED_GUARD, operation.pathTemplate)) continue;
-      const requirement = operationRequirement(operation);
-      if (requirement.requirements.length === 0 && !requirement.conditional) {
-        offenders.push(`${operation.operationId} (${key(operation)})`);
-      }
-    }
+    const offenders = unguardedMutations()
+      .filter((operation) => !covers(NO_MOUNTED_GUARD, operation.pathTemplate))
+      .map((operation) => `${operation.operationId} (${key(operation)})`);
     expect(offenders).toEqual([]);
   });
 
@@ -127,33 +115,64 @@ describe("every mutating /api/ operation has a readable requirement", () => {
     );
     expect(judged.length).toBeGreaterThan(80);
   });
+
+  it("carries no allowlist entry that has stopped standing for anything", () => {
+    // The other direction: a route that gained a guard (or a `rowAuthority()`
+    // marker) leaves its entry matching nothing, and an entry matching nothing
+    // is a permanent excuse for whatever is mounted there next.
+    const unguarded = unguardedMutations();
+    const stale = NO_MOUNTED_GUARD.filter(
+      (entry) =>
+        !PRESENT_ONLY_WITH_EE.has(entry.path) &&
+        !unguarded.some((operation) => covers([entry], operation.pathTemplate)),
+    ).map((entry) => entry.path);
+    expect(stale).toEqual([]);
+  });
 });
 
 describe("requirement anchors", () => {
-  it("reads `runInline` as agents:write AND agents:run — two entries", () => {
-    // Collapsed into one entry it would read as a disjunction and show the
-    // tool to a caller holding either half.
-    expect(operationRequirement(op("runInline")).requirements).toEqual([
-      "agents:write",
-      "agents:run",
-    ]);
+  it("reads every row-authoritative route as conditional", () => {
+    // Each of these refuses from a row its handler loads — a file's ACL, the
+    // package's home space, the webhook's own space, the placement — behind no
+    // guard that could state the string. Read as unconditional they would show
+    // in the MCP surface as granted to anyone who reached the transport.
+    const unconditional = [
+      "deleteFile",
+      "keepFile",
+      "movePackageHome",
+      "sharePackage",
+      "listPackageShares",
+      "revokePackageShare",
+      "updateWebhook",
+      "activatePackage",
+      "updateSpacePackage",
+      "deactivatePackage",
+    ].filter((operationId) => !op(operationId).requirement.conditional);
+    expect(unconditional).toEqual([]);
+
+    // The control: a route whose guard IS the whole answer stays unconditional,
+    // so the assertion above is the markers and not a flag stuck on.
+    expect(op("createSpace").requirement).toMatchObject({
+      requirements: ["spaces:write"],
+      conditional: false,
+    });
   });
 
-  it("reads `runAgent` as agents:run", () => {
-    expect(operationRequirement(op("runAgent")).requirements).toEqual(["agents:run"]);
-  });
+  it("reads `listSpaceMembers` as a requirement of the space the PATH names", () => {
+    // `requireSpaceFromParam` re-applies the caller's permissions in that space
+    // before the guard runs, so `space-members:read` is asked THERE. Reported
+    // as a caller-space requirement it would hide the operation from everyone
+    // whose current space is not the one they are asking about — which is the
+    // normal case for an org-wide client.
+    const requirement = op("listSpaceMembers").requirement;
+    expect(requirement.requirements).toEqual([]);
+    expect(requirement.targetSpaceRequirements).toContain("space-members:read");
 
-  it("reads the credential proxy's `router.all` mount as credential-proxy:call", () => {
-    // Four operations share one method-agnostic entry; a reader matching only
-    // concrete methods would leave all four looking public.
-    expect(operationRequirement(op("credentialProxyPost")).requirements).toEqual([
-      "credential-proxy:call",
-    ]);
-  });
-
-  it("reads the runs-read disjunction as ONE entry", () => {
-    // Two entries would mean "both", hiding every run listing from a principal
-    // holding only `runs:read`.
-    expect(operationRequirement(op("listRuns")).requirements).toEqual(["runs:read|runs:read-all"]);
+    // The control: the same guard mounted WITHOUT a re-scope in front of it is
+    // a caller-space requirement, so the split above is the marker's doing.
+    expect(op("listApiKeys").requirement).toMatchObject({
+      requirements: ["api-keys:read"],
+      targetSpaceRequirements: [],
+    });
   });
 });

@@ -17,7 +17,9 @@ import type { AppEnv } from "../types/index.ts";
 
 let platformApp: Hono<AppEnv> | null = null;
 
-/** Register the fully-wired root app for in-process self-dispatch. */
+/** Register the root app for in-process self-dispatch. It is registered while
+ *  still being wired — before the module routers and the SPA fallback mount —
+ *  so its readers must run at request time, never at boot. */
 export function setPlatformApp(app: Hono<AppEnv>): void {
   platformApp = app;
 }

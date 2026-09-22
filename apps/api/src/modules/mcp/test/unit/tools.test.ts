@@ -15,22 +15,17 @@ import {
   getCatalog,
   resetCatalog,
   buildOperationIndex,
-  getOperationIndexCacheStats,
   operationGranted,
   type CatalogOperation,
 } from "../../catalog.ts";
 import { buildMcpTools, type Dispatch } from "../../tools.ts";
 import { internalDispatchHeader } from "../../../../lib/internal-dispatch.ts";
 import { validateManifest } from "@appstrate/core/validation";
-import { getTestApp } from "../../../../../test/helpers/app.ts";
-import { setPlatformApp } from "../../../../lib/platform-app.ts";
+import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
 
-// The tools now read the mounted route table (what each operation's guard
-// requires) to decide what this caller is shown. Register the SHARED test app,
-// as `catalog-requirements.test.ts` does: `setPlatformApp` is module-level
-// state in a one-process runner, so a stand-in here would answer for every
-// later file too.
-setPlatformApp(getTestApp());
+// The tools read the mounted route table (what each operation's guard requires)
+// to decide what this caller is shown.
+registerTestPlatformApp();
 
 // The handlers ignore `extra`; supply a typed placeholder.
 const noExtra = {} as unknown as AppstrateRequestExtra;
@@ -73,6 +68,7 @@ function makeTools(
     actor,
     scope: { orgId: "org_1", spaceId: "spc_1" },
     authorizeBundle: async () => {},
+    mayShareRoot: async () => false,
     contextInjected,
   });
   const byName = new Map(tools.map((t) => [t.descriptor.name, t]));
@@ -134,6 +130,11 @@ describe("buildMcpTools declarations", () => {
     expect(names(["mcp:read", "mcp:invoke"])).not.toContain("run_and_wait");
     expect(names(["mcp:read", "mcp:invoke", "agents:run"])).not.toContain("run_and_wait");
     expect(names(["mcp:read", "agents:run", "runs:read-all"])).not.toContain("run_and_wait");
+    // Authoring without `agents:run` does not narrow the descriptor either —
+    // there is nothing to launch with, so the tool is withheld outright.
+    expect(names(["mcp:read", "mcp:invoke", "runs:read", "agents:write"])).not.toContain(
+      "run_and_wait",
+    );
     expect(names(["mcp:read", "mcp:invoke", "agents:run", "runs:read-all"])).toContain(
       "run_and_wait",
     );
@@ -179,8 +180,8 @@ describe("search_operations", () => {
     const { byName } = makeTools(["mcp:read"]);
     const res = await byName.get("search_operations")!.handler({ query: "agent" }, noExtra);
     const body = parseResult(res);
-    expect(body.count as number).toBeGreaterThan(0);
     const ops = body.operations as Array<Record<string, unknown>>;
+    expect(ops.length).toBeGreaterThan(0);
     expect(typeof ops[0]!.operation_id).toBe("string");
     expect(typeof ops[0]!.method).toBe("string");
   });
@@ -205,6 +206,16 @@ describe("search_operations", () => {
     expect(typeof best!.path).toBe("string");
     expect("request_body" in best!).toBe(true);
     expect("referenced_schemas" in best!).toBe(true);
+  });
+
+  it("points at invoke_operation only for a caller who may invoke", () => {
+    // An act this permission set makes impossible is ABSENT from the guidance,
+    // never contradicted: a discovery-only caller is not sent to a tool it is
+    // not shown.
+    const description = (permissions: string[]): string =>
+      makeTools(permissions).byName.get("search_operations")!.descriptor.description!;
+    expect(description(["mcp:read"])).not.toContain("invoke_operation");
+    expect(description(["mcp:read", "mcp:invoke"])).toContain("invoke_operation");
   });
 
   it("omits best_match when there is no query (plain catalog listing)", async () => {
@@ -260,12 +271,11 @@ describe("search_operations", () => {
     it("counts only granted matches and never points best_match at a denied one", async () => {
       const { operations, denied, body } = await searchAgents();
       // `limit: 100` is the tool's maximum: the granted half fitting under it
-      // is what makes `count === total` a statement about filtering rather
-      // than about truncation.
+      // is what makes `total === operations.length` a statement about
+      // filtering rather than about truncation.
       expect(operations.length).toBeLessThan(100);
-      expect(body.count).toBe(operations.length);
       expect(body.total).toBe(operations.length);
-      // The denied half is real, so `count` counting both would be caught here.
+      // The denied half is real, so a `total` counting both would be caught here.
       expect(denied.length).toBeGreaterThan(0);
       // `denied` is capped at `limit`; `denied_total` is not, so the model can
       // tell "three you may not call" from "eighty".
@@ -349,6 +359,18 @@ describe("describe_operation", () => {
       // `agents:read|agents:run` and a runner holds the alternative.
       const body = await describeOp(RUNNER, "listAgents");
       expect(body.required_permissions).toEqual(["agents:read|agents:run"]);
+      expect(body.granted).toBe(true);
+    });
+
+    it("names a target-space requirement without ever filtering on it", async () => {
+      // `GET /api/spaces/{id}/members` mounts `requireSpaceFromParam("id")`
+      // first, which re-applies the caller's permissions in the space the PATH
+      // names — so the guard behind it is asked of THAT space, not of the one
+      // this caller's set describes. Naming it is honest; denying on it would
+      // hide the route from the very caller the target space would admit.
+      const body = await describeOp(["mcp:read"], "listSpaceMembers");
+      expect(body.required_permissions).toContain("space-members:read");
+      expect(body.conditional).toBe(true);
       expect(body.granted).toBe(true);
     });
   });
@@ -528,14 +550,6 @@ describe("invoke_operation", () => {
     // Auth context stays as forwarded — the model cannot reshape it.
     expect(sent.get("authorization")).toBe("Bearer tok");
     expect(sent.get("x-org-id")).toBe("org_1");
-  });
-
-  it("is not declared at all without mcp:invoke", () => {
-    // Was "denies invocation without mcp:invoke": the refusal moved earlier —
-    // the tool is never shown, so there is no handler to refuse with. What a
-    // client that calls it anyway gets is pinned by
-    // `test/integration/mcp.test.ts`.
-    expect(makeTools(["mcp:read"]).byName.has("invoke_operation")).toBe(false);
   });
 
   it("names the permission the route refused with, and tells the model not to retry", async () => {
@@ -749,62 +763,6 @@ describe("buildOperationIndex", () => {
       }
     }
   });
-
-  it("is memoized — same string instance across calls", () => {
-    const a = buildOperationIndex(new Set(["mcp:read"]));
-    const b = buildOperationIndex(new Set(["mcp:read"]));
-    expect(b).toBe(a);
-  });
-
-  // The permission-scoped index is what the MCP router builds on EVERY
-  // `tools/call` POST (the chat module drives each tool call through it), so
-  // it is memoised per permission set. Strings compare by value under
-  // `Object.is`, so identity cannot prove a memo hit — the build counter can.
-  describe("permission-scoped memo", () => {
-    it("serves a repeated permission set from the memo, order-independently", () => {
-      const first = buildOperationIndex(new Set(["mcp:read", "agents:read"]));
-      expect(getOperationIndexCacheStats()).toEqual({ entries: 1, builds: 1 });
-
-      const second = buildOperationIndex(new Set(["agents:read", "mcp:read"]));
-      expect(second).toBe(first);
-      // Negative control: an unmemoised build would report `builds: 2` here.
-      expect(getOperationIndexCacheStats()).toEqual({ entries: 1, builds: 1 });
-    });
-
-    it("keeps distinct permission sets apart — they yield different indexes", () => {
-      const narrow = indexIds(buildOperationIndex(new Set(["mcp:read"])));
-      const wide = indexIds(buildOperationIndex(new Set(["mcp:read", "agents:read"])));
-      // Per operation, not per tag: a section survives on its row-conditional
-      // members (`updateAgent` and friends are `requirePackageInOrg()`, which
-      // only the loaded row can refuse), so the difference has to be read on a
-      // concrete id — `GET /api/packages/agents` is `agents:read`.
-      expect(narrow).not.toContain("listAgentPackages");
-      expect(wide).toContain("listAgentPackages");
-      expect(getOperationIndexCacheStats()).toEqual({ entries: 2, builds: 2 });
-    });
-
-    it("is dropped with the catalog — resetCatalog forces a rebuild", () => {
-      const before = buildOperationIndex(new Set(["mcp:read"]));
-      resetCatalog();
-      expect(getOperationIndexCacheStats()).toEqual({ entries: 0, builds: 0 });
-
-      const after = buildOperationIndex(new Set(["mcp:read"]));
-      expect(after).toEqual(before);
-      expect(getOperationIndexCacheStats()).toEqual({ entries: 1, builds: 1 });
-    });
-
-    it("is bounded — past 64 sets the oldest is evicted and rebuilt on demand", () => {
-      for (let i = 0; i < 65; i++) buildOperationIndex(new Set(["mcp:read", `x:${i}`]));
-      expect(getOperationIndexCacheStats()).toEqual({ entries: 64, builds: 65 });
-
-      // The first (oldest) set was evicted, so asking for it again is a miss…
-      buildOperationIndex(new Set(["mcp:read", "x:0"]));
-      expect(getOperationIndexCacheStats().builds).toBe(66);
-      // …while the most recent one is still a hit.
-      buildOperationIndex(new Set(["mcp:read", "x:64"]));
-      expect(getOperationIndexCacheStats().builds).toBe(66);
-    });
-  });
 });
 
 describe("buildMcpTools contextInjected", () => {
@@ -829,6 +787,7 @@ describe("buildMcpTools contextInjected", () => {
       actor: { type: "user", id: "user_1" },
       scope: { orgId: "org_1", spaceId: "spc_1" },
       authorizeBundle: async () => {},
+      mayShareRoot: async () => false,
     });
     // The whole registered surface IS the advertised surface: no retired name
     // is registered, listed or hidden — see "registers no retired name, listed

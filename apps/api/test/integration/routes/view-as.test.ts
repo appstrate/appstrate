@@ -950,6 +950,40 @@ describe("view as role", () => {
     expect(await toolNames()).toContain("run_and_wait");
   });
 
+  it("resolves the persona in the space the REQUEST names, not the one the persona names", async () => {
+    resetCatalog();
+    // Two spaces, one persona. `X-Space-Id` is what the MCP endpoint enters, so
+    // a persona whose space half points elsewhere previews nothing here — and
+    // the advertised surface must say so exactly as the REST route does.
+    const here = await space("Here", "closed");
+    const elsewhere = await space("Elsewhere", "closed");
+
+    const tools = (view: string) =>
+      request(`/api/mcp/o/${owner.orgId}`, {
+        view,
+        space: here.id,
+        headers: { Accept: "application/json, text/event-stream" },
+        body: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
+      });
+    const agents = (view: string) => request("/api/agents", { view, space: here.id });
+
+    // The persona names THIS space: the role is previewed, and both surfaces
+    // answer as that role.
+    const named = persona("member", "preset:operator", here.id);
+    const listed = await expectJson<{ result?: { tools?: Array<{ name: string }> } }>(
+      await tools(named),
+    );
+    expect((listed.result?.tools ?? []).map((tool) => tool.name)).toContain("run_and_wait");
+    expect((await agents(named)).status).toBe(200);
+
+    // The same role named in the OTHER space: a closed space admits this
+    // persona through no row, so both refuse. The persona's own space half is
+    // not what the endpoint reads.
+    const other = persona("member", "preset:operator", elsewhere.id);
+    expect((await tools(other)).status).toBe(403);
+    expect((await agents(other)).status).toBe(403);
+  });
+
   // ─── 7. The marker is present exactly when the persona validated ──
 
   it("stamps X-View-As-Active on validated requests only", async () => {

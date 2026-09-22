@@ -13,26 +13,29 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { Hono } from "hono";
+import { Hono, type Context, type Next } from "hono";
 import { PERMISSION_REQUIREMENT_MARKER } from "@appstrate/core/permissions";
 import {
-  NO_REQUIREMENT,
   deriveRouteRequirements,
   isGranted,
-  routeRequirementKey,
   type RouteRequirement,
-  type RouteTable,
+  type RouteRequirementLookup,
 } from "../../src/lib/route-requirements.ts";
 import { readHandlerMarker } from "../../src/middleware/handler-marker.ts";
 import { requirePackageInOrg } from "../../src/middleware/guards.ts";
 import {
+  markSpaceRescope,
   requireAnyPermission,
   requirePermission,
+  rowAuthority,
 } from "../../src/middleware/require-permission.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
 import type { AppEnv } from "../../src/types/index.ts";
 
 const ok = () => new Response("ok");
+
+/** A space re-scope, mounted the way `routes/spaces.ts` mounts one. */
+const rescope = () => markSpaceRescope(async (_c: Context<AppEnv>, next: Next) => next());
 
 /**
  * A root app with `sub` mounted under `/api`, the way every router in
@@ -56,45 +59,53 @@ function mounted(
 function tableOf(
   build: (sub: Hono<AppEnv>) => void,
   buildRoot?: (app: Hono<AppEnv>) => void,
-): RouteTable {
+): RouteRequirementLookup {
   return deriveRouteRequirements(mounted(build, buildRoot).routes);
 }
 
 /** For the mounts that only exist at the root: `app.on([...], "/x/*")`, `app.use`. */
-function rootTableOf(build: (app: Hono<AppEnv>) => void): RouteTable {
+function rootTableOf(build: (app: Hono<AppEnv>) => void): RouteRequirementLookup {
   const app = new Hono<AppEnv>();
   build(app);
   return deriveRouteRequirements(app.routes);
 }
 
 /** The requirement for `METHOD template`, or a failure naming it. */
-function served(table: RouteTable, method: string, template: string): RouteRequirement {
-  const derived = table.requirementFor(method, template);
+function served(table: RouteRequirementLookup, method: string, template: string): RouteRequirement {
+  const derived = table(method, template);
   if (!derived) throw new Error(`no route serves \`${method} ${template}\``);
   return derived;
 }
 
-describe("routeRequirementKey", () => {
-  it("rewrites hono's `:param` into the catalog's `{param}`", () => {
-    expect(routeRequirementKey("POST", "/api/agents/:scope/:name/run")).toBe(
-      "POST /api/agents/{scope}/{name}/run",
+describe("param spelling", () => {
+  it("finds a route whose param carries an inline regex constraint", () => {
+    const requirement = served(
+      tableOf((sub) => sub.get("/things/:id{[0-9]+}", requirePermission("agents", "read"), ok)),
+      "GET",
+      "/api/things/{id}",
     );
+    expect(requirement.requirements).toEqual(["agents:read"]);
   });
 
-  it("drops a param's inline regex constraint", () => {
-    expect(routeRequirementKey("GET", "/api/things/:id{[0-9]+}")).toBe("GET /api/things/{id}");
-  });
-
-  it("drops a constraint that itself contains a slash", () => {
+  it("finds one whose constraint itself contains a slash", () => {
     // `routes/integrations.ts` really mounts this: a package id is
     // `@scope/name`, so its constraint spans a path separator.
-    expect(
-      routeRequirementKey("PATCH", "/api/integrations/:packageId{@[^/]+/[^/]+}/settings"),
-    ).toBe("PATCH /api/integrations/{packageId}/settings");
+    const requirement = served(
+      tableOf((sub) =>
+        sub.patch(
+          "/integrations/:packageId{@[^/]+/[^/]+}/settings",
+          requirePermission("integrations", "write"),
+          ok,
+        ),
+      ),
+      "PATCH",
+      "/api/integrations/{packageId}/settings",
+    );
+    expect(requirement.requirements).toEqual(["integrations:write"]);
   });
 });
 
-describe("requirementFor — exact mounts", () => {
+describe("lookup — exact mounts", () => {
   it("matches on the MERGED path, in the catalog's param spelling", () => {
     const requirement = served(
       tableOf((sub) =>
@@ -104,6 +115,7 @@ describe("requirementFor — exact mounts", () => {
       "/api/agents/{scope}/{name}/run",
     );
     expect(requirement.requirements).toEqual(["agents:run"]);
+    expect(requirement.targetSpaceRequirements).toEqual([]);
     expect(requirement.conditional).toBe(false);
   });
 
@@ -144,6 +156,19 @@ describe("requirementFor — exact mounts", () => {
     expect(requirement.conditional).toBe(true);
   });
 
+  it("reads an explicit `rowAuthority()` the same way — the handler decides", () => {
+    // No guard runs before the handler at all: the row it loads is the only
+    // authority, and nothing static describes it.
+    const requirement = served(
+      tableOf((sub) => sub.delete("/files/:id", rowAuthority(), ok)),
+      "DELETE",
+      "/api/files/{id}",
+    );
+    expect(requirement.requirements).toEqual([]);
+    expect(requirement.targetSpaceRequirements).toEqual([]);
+    expect(requirement.conditional).toBe(true);
+  });
+
   it("serves an unguarded route with no requirement, rather than not at all", () => {
     // "No guard" is an answer; `undefined` would read as "route went missing".
     const requirement = served(
@@ -167,7 +192,7 @@ describe("requirementFor — exact mounts", () => {
   });
 });
 
-describe("requirementFor — prefix mounts", () => {
+describe("lookup — prefix mounts", () => {
   it("serves everything under a wildcard mounted with a concrete method", () => {
     // The Better Auth family: one mount answers ~12 documented operations, and
     // "served, requires nothing" is not the same answer as "no such route".
@@ -176,8 +201,8 @@ describe("requirementFor — prefix mounts", () => {
       "POST",
       "/api/auth/sign-in/email",
     );
-    expect(requirement.requirements).toEqual(NO_REQUIREMENT.requirements);
-    expect(requirement.conditional).toBe(NO_REQUIREMENT.conditional);
+    expect(requirement.requirements).toEqual([]);
+    expect(requirement.conditional).toBe(false);
   });
 
   it("folds a prefix guard into the requirement of an exact route beneath it", () => {
@@ -225,7 +250,7 @@ describe("requirementFor — prefix mounts", () => {
   it("does not serve a template covered only by `app.use` middleware", () => {
     // Treating `use` as a route would invent an operation for every spellable path.
     const table = rootTableOf((app) => app.use("/api/*", requirePermission("agents", "read")));
-    expect(table.requirementFor("POST", "/api/anything")).toBeUndefined();
+    expect(table("POST", "/api/anything")).toBeUndefined();
   });
 
   it("decorates but does not serve, for an `ALL /*` mount", () => {
@@ -234,13 +259,65 @@ describe("requirementFor — prefix mounts", () => {
       sub.get("/kept", ok);
     });
     expect(served(table, "GET", "/api/kept").conditional).toBe(true);
-    expect(table.requirementFor("GET", "/api/never-mounted")).toBeUndefined();
+    expect(table("GET", "/api/never-mounted")).toBeUndefined();
   });
 
   it("does not serve a template no entry covers", () => {
     const table = tableOf((sub) => sub.get("/kept", ok));
-    expect(table.requirementFor("GET", "/api/elsewhere")).toBeUndefined();
-    expect(table.requirementFor("DELETE", "/api/kept")).toBeUndefined();
+    expect(table("GET", "/api/elsewhere")).toBeUndefined();
+    expect(table("DELETE", "/api/kept")).toBeUndefined();
+  });
+
+  it("never serves anything from the root catch-all", () => {
+    // `index.ts` mounts the SPA fallback as `app.get("/*")`, after the `ALL
+    // /api/*` 404. Reading it as a route would answer every GET template ever
+    // spelled, publishing a ghost operation as real and unguarded.
+    const table = rootTableOf((app) => {
+      app.on(["POST", "GET"], "/api/auth/*", ok);
+      app.all("/api/*", ok);
+      app.get("/*", ok);
+    });
+    expect(table("GET", "/api/ghost")).toBeUndefined();
+    expect(table("POST", "/api/ghost")).toBeUndefined();
+    // The control: a real prefix mount beneath the same catch-all still serves.
+    expect(served(table, "POST", "/api/auth/sign-in/email").requirements).toEqual([]);
+  });
+});
+
+describe("lookup — space re-scope", () => {
+  /**
+   * `routes/spaces.ts` resolves the space named in the PATH and re-applies the
+   * caller's permissions in it, so the guards mounted after that are asked of
+   * the target space — not of the space a reader holding the caller's own set
+   * is talking about.
+   */
+  const table = rootTableOf((app) => {
+    app.use("/api/x/:id/*", rescope());
+    app.get("/api/x/:id/members", requirePermission("members", "read"), ok);
+  });
+  const requirement = served(table, "GET", "/api/x/{id}/members");
+
+  it("attributes a guard mounted after the re-scope to the target space", () => {
+    expect(requirement.targetSpaceRequirements).toEqual(["members:read"]);
+    expect(requirement.requirements).toEqual([]);
+  });
+
+  it("marks the route conditional — the target space is what decides", () => {
+    expect(requirement.conditional).toBe(true);
+  });
+
+  it("keeps a guard mounted BEFORE the re-scope in the caller's own space", () => {
+    const early = served(
+      rootTableOf((app) => {
+        app.use("/api/x/*", requirePermission("spaces", "read"));
+        app.use("/api/x/:id/*", rescope());
+        app.get("/api/x/:id/members", requirePermission("members", "read"), ok);
+      }),
+      "GET",
+      "/api/x/{id}/members",
+    );
+    expect(early.requirements).toEqual(["spaces:read"]);
+    expect(early.targetSpaceRequirements).toEqual(["members:read"]);
   });
 });
 
@@ -304,6 +381,19 @@ describe("isGranted", () => {
     "DELETE",
     "/api/packages/{scope}/{name}",
   );
+  const unguarded = served(
+    tableOf((sub) => sub.post("/welcome/setup", ok)),
+    "POST",
+    "/api/welcome/setup",
+  );
+  const targetSpace = served(
+    rootTableOf((app) => {
+      app.use("/api/x/:id/*", rescope());
+      app.get("/api/x/:id/members", requirePermission("members", "read"), ok);
+    }),
+    "GET",
+    "/api/x/{id}/members",
+  );
 
   it("needs every entry — two guards mean both", () => {
     expect(isGranted(conjunction, new Set(["agents:write", "agents:run"]))).toBe(true);
@@ -317,8 +407,8 @@ describe("isGranted", () => {
     expect(isGranted(disjunction, new Set(["runs:cancel"]))).toBe(false);
   });
 
-  it("grants NO_REQUIREMENT to a caller holding nothing", () => {
-    expect(isGranted(NO_REQUIREMENT, new Set())).toBe(true);
+  it("grants an unguarded route to a caller holding nothing", () => {
+    expect(isGranted(unguarded, new Set())).toBe(true);
   });
 
   it("grants a row-aware-only requirement — the row refuses, not the catalog", () => {
@@ -327,8 +417,10 @@ describe("isGranted", () => {
     expect(isGranted(rowAware, new Set())).toBe(true);
   });
 
-  it("denies an empty permission set wherever a requirement exists", () => {
-    expect(isGranted(conjunction, new Set())).toBe(false);
-    expect(isGranted(disjunction, new Set())).toBe(false);
+  it("ignores target-space requirements — they are shown, never filtered", () => {
+    // The caller's own permission set is the wrong set to test them against:
+    // the guard runs against the space the path names.
+    expect(targetSpace.targetSpaceRequirements).toEqual(["members:read"]);
+    expect(isGranted(targetSpace, new Set())).toBe(true);
   });
 });

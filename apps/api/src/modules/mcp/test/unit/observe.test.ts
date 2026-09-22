@@ -12,12 +12,11 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { getCatalog, resetCatalog, type CatalogOperation } from "../../catalog.ts";
 import { buildMcpTools, type Dispatch, type McpToolEvent } from "../../tools.ts";
-import { getTestApp } from "../../../../../test/helpers/app.ts";
-import { setPlatformApp } from "../../../../lib/platform-app.ts";
+import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
 
 // `buildMcpTools` decides what this caller is shown from the guards mounted on
 // the routes, so it reads the route table.
-setPlatformApp(getTestApp());
+registerTestPlatformApp();
 
 const noExtra = {} as unknown as AppstrateRequestExtra;
 
@@ -43,6 +42,7 @@ function makeTools(permissions: string[], status = 200) {
     actor: { type: "user", id: "user_1" },
     scope: { orgId: "org_1", spaceId: "spc_1" },
     authorizeBundle: async () => {},
+    mayShareRoot: async () => false,
   });
   const byName = new Map(tools.map((t) => [t.descriptor.name, t]));
   return { byName, events };
@@ -123,15 +123,6 @@ describe("observe — invoke_operation", () => {
     await byName.get("invoke_operation")!.handler({ operation_id: op.operationId }, noExtra);
     expect(events[0]!.outcome).toBe("invoked");
     expect(events[0]!.status).toBe(503);
-  });
-
-  it("emits nothing for a caller without mcp:invoke — the tool is not declared", () => {
-    // The tool is absent from what such a caller is shown, so the in-handler
-    // refusal that used to emit an outcome of its own was unreachable and is
-    // gone with it. The route's own guard is what audits a real refusal.
-    const { byName, events } = makeTools(["mcp:read"]);
-    expect(byName.has("invoke_operation")).toBe(false);
-    expect(events.length).toBe(0);
   });
 
   it("emits outcome=rejected for an unknown operationId (before the protocol error throws)", async () => {

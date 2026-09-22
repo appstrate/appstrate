@@ -69,7 +69,12 @@ import {
   packagePermission,
   spacePackagePermission,
 } from "../lib/package-access.ts";
-import { requireAnyPermission, requirePermission } from "../middleware/require-permission.ts";
+import {
+  markSpaceRescope,
+  requireAnyPermission,
+  requirePermission,
+  rowAuthority,
+} from "../middleware/require-permission.ts";
 import {
   exactlyOneRole,
   spaceRoleAssignmentShape,
@@ -239,13 +244,16 @@ export const updatePackageSchema = z
  * instead, through the same helper the middleware uses (spec §4.3).
  */
 function requireSpaceFromParam(param: "id" | "spaceId") {
-  return async (c: Context<AppEnv>, next: Next) => {
+  // Marked: every guard mounted behind this one reads the caller's set in the
+  // space the PATH names, not in the space the request entered — a reader of
+  // the route table cannot see that from the mounts alone.
+  return markSpaceRescope(async (c: Context<AppEnv>, next: Next) => {
     const spaceId = c.req.param(param)!;
     const space = await validateSpaceInOrg(spaceId, c.get("orgId"));
     if (!space) throw notFound(`Space '${spaceId}' not found in this organization`);
     await applySpacePermissions(c, space);
     return next();
-  };
+  });
 }
 
 // ─── Space packages: the permission is per PACKAGE TYPE ────────────────
@@ -783,7 +791,11 @@ export function createSpacesRouter() {
   // (`assertPackageShareAccess`: 404 unreachable, 403 reachable but not theirs
   // to hand out). Activating is therefore not a way around `share`. An API key
   // never carries it, so a key activates the already-placed and nothing else.
-  router.post("/:spaceId/packages", async (c) => {
+  //
+  // `rowAuthority()` declares what the mounts cannot show: the gate below reads
+  // the package's own rows (`gateSpacePackageWrite`, `assertPackageShareAccess`),
+  // so a caller holding every listed permission can still be refused.
+  router.post("/:spaceId/packages", rowAuthority(), async (c) => {
     const orgId = c.get("orgId");
     const spaceId = c.req.param("spaceId")!;
     const scope = { orgId, spaceId };
@@ -874,7 +886,7 @@ export function createSpacesRouter() {
   );
 
   // PUT /api/spaces/:spaceId/packages/:packageId — update config
-  router.put(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
+  router.put(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, rowAuthority(), async (c) => {
     const spaceId = c.req.param("spaceId")!;
     const orgId = c.get("orgId");
     const scope = { orgId, spaceId: spaceId };
@@ -957,7 +969,7 @@ export function createSpacesRouter() {
   // is off already and falls into the case below. 404 for anything else with no
   // row — an offer nobody has taken up is not on, and writing the row would
   // turn it into "switched off", a decision its recipient never made.
-  router.delete(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
+  router.delete(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, rowAuthority(), async (c) => {
     const spaceId = c.req.param("spaceId")!;
     const orgId = c.get("orgId");
     const scope = { orgId, spaceId: spaceId };

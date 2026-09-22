@@ -32,19 +32,11 @@ interface PackageFileToolContext {
    */
   authorizeBundle: NonNullable<Parameters<typeof preflightBundleImport>[2]>;
   /**
-   * Whether the caller may OFFER a package out of its home space — asked of a
-   * re-imported root that already lives in ANOTHER space, so this tool places
-   * it by the same rule as `POST /api/packages/import-bundle` and
-   * `POST /api/spaces/{id}/packages`: the offer is written with the placement
-   * when the caller holds `<type>:share` in the home, and the result reports
-   * `root_active: false` when they do not.
-   *
-   * Optional, and absent means `false`: a caller with no request context
-   * cannot be asked, and an import that silently offered on their behalf would
-   * be the one door that placed a package without proving the authority. One
-   * act, one rule — the fail-closed answer is the honest one here.
+   * Required. Decides whether a re-imported root homed in ANOTHER space is
+   * placed here WITH its offer, exactly as `POST /api/packages/import-bundle`
+   * decides it: no authority, no placement, and `root_active: false`.
    */
-  mayShareRoot?: (packageId: string) => Promise<boolean>;
+  mayShareRoot: (packageId: string) => Promise<boolean>;
 }
 
 interface PackageFileBytes {
