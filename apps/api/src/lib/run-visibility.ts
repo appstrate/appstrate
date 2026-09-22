@@ -57,11 +57,6 @@ const RUNS_READ_PERMISSIONS = ["runs:read", "runs:read-all"] as const;
 /** The guard on every surface `runs:read` opens — see {@link RUNS_READ_PERMISSIONS}. */
 export const requireRunsRead = requireAnyPermission(RUNS_READ_PERMISSIONS);
 
-/** The same disjunction for the SSE routes, which resolve permissions by hand. */
-export function canReadRuns(permissions: ReadonlySet<string>): boolean {
-  return RUNS_READ_PERMISSIONS.some((permission) => permissions.has(permission));
-}
-
 /** The in-memory twin of `actorFilter` on a loaded run row: did this principal launch it? */
 export function ownsRun(
   actor: Actor,

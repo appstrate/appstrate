@@ -23,15 +23,14 @@ export function setPlatformApp(app: Hono<AppEnv>): void {
 }
 
 /**
- * Resolve the root app for in-process dispatch. Throws if called before
- * `setPlatformApp()` — a programming error (dispatch can only happen after
- * routes are mounted, which is when the app is registered).
+ * Resolve the root app. Throws if called before `setPlatformApp()` — a
+ * programming error (both readers can only run after routes are mounted,
+ * which is when the app is registered); `use` names what the caller wanted so
+ * the message points at it rather than at dispatch alone.
  */
-function getPlatformApp(): Hono<AppEnv> {
+function getPlatformApp(use: string): Hono<AppEnv> {
   if (!platformApp) {
-    throw new Error(
-      "Platform app not initialized — setPlatformApp() must run before in-process dispatch",
-    );
+    throw new Error(`Platform app not initialized — setPlatformApp() must run before ${use}`);
   }
   return platformApp;
 }
@@ -42,5 +41,15 @@ function getPlatformApp(): Hono<AppEnv> {
  * `Promise<Response>` callers (the `inProcess` service, the MCP router) expect.
  */
 export function dispatchInProcess(request: Request): Promise<Response> {
-  return Promise.resolve(getPlatformApp().fetch(request));
+  return Promise.resolve(getPlatformApp("in-process dispatch").fetch(request));
+}
+
+/**
+ * The registered root app's route table — every `(method, path, handler)` Hono
+ * holds, including the middleware mounts. It is the only place that knows
+ * which guards actually sit in front of which route, which is what
+ * `lib/route-requirements.ts` reads to answer what a route requires.
+ */
+export function getPlatformRoutes(): Hono<AppEnv>["routes"] {
+  return getPlatformApp("reading the route table").routes;
 }

@@ -15,6 +15,13 @@
  */
 
 import { buildOpenApiSpec } from "../../openapi/index.ts";
+import { getPlatformRoutes } from "../../lib/platform-app.ts";
+import {
+  deriveRouteRequirements,
+  routeRequirementKey,
+  type RouteRequirement,
+  type RouteTable,
+} from "../../lib/route-requirements.ts";
 import {
   getModuleOpenApiPaths,
   getModuleOpenApiComponentSchemas,
@@ -78,6 +85,16 @@ const indexByPermissions = new Map<string, string>();
 const MAX_SCOPED_INDEXES = 64;
 let scopedIndexBuilds = 0;
 
+/**
+ * The mounted routes, queryable per operation — see {@link operationRequirement}.
+ * A separate memo rather than a catalog field, and derived on the first call
+ * (in production a request, hence after `registerModuleRoutes` finished): the
+ * app registers itself with `setPlatformApp` BEFORE the module routers mount,
+ * so deriving at boot would freeze a partial table. Dropped with the rest, so
+ * a rebuilt catalog is never joined against a stale table.
+ */
+let routeTable: RouteTable | null = null;
+
 function permissionsKey(permissions: ReadonlySet<string>): string {
   return [...permissions].sort().join(",");
 }
@@ -92,10 +109,11 @@ export function getOperationIndexCacheStats(): { entries: number; builds: number
   return { entries: indexByPermissions.size, builds: scopedIndexBuilds };
 }
 
-function resetIndexCaches(): void {
+function resetDerivedCaches(): void {
   cachedIndex = null;
   indexByPermissions.clear();
   scopedIndexBuilds = 0;
+  routeTable = null;
 }
 
 const PATH_PARAM_RE = /\{([^}]+)\}/g;
@@ -140,7 +158,11 @@ function extractHeaderParams(node: OperationNode): string[] {
 function isExcludedPath(pathTemplate: string): boolean {
   return (
     pathTemplate.startsWith("/api/mcp/o") ||
-    pathTemplate.startsWith("/.well-known/oauth-protected-resource")
+    pathTemplate.startsWith("/.well-known/oauth-protected-resource") ||
+    // The catalog's own source and its human viewer, not operations a caller
+    // acts with — `describe_operation` already serves the spec piecewise.
+    pathTemplate === "/api/openapi.json" ||
+    pathTemplate === "/api/docs"
   );
 }
 
@@ -185,14 +207,34 @@ export function getCatalog(): OperationCatalog {
   // A (re)built catalog invalidates every index derived from the previous
   // one — `resetCatalog` alone is not enough, since it is the assignment
   // above that changes what an index would be built from.
-  resetIndexCaches();
+  resetDerivedCaches();
   return cached;
 }
 
-/** Reset the cached catalog and every index derived from it. Tests only. */
+/** Reset the cached catalog and everything derived from it. Tests only. */
 export function resetCatalog(): void {
   cached = null;
-  resetIndexCaches();
+  resetDerivedCaches();
+}
+
+/**
+ * What the route behind this operation requires of the caller's permission set.
+ *
+ * Read off `getPlatformRoutes()`, where the guards actually sit. There is
+ * deliberately no fallback to "unfiltered", and an operation no route serves
+ * throws rather than answering `NO_REQUIREMENT`: either would turn a mismatch
+ * into a grant. That mismatch is what `scripts/verify-openapi.ts` catches.
+ */
+export function operationRequirement(op: CatalogOperation): RouteRequirement {
+  routeTable ??= deriveRouteRequirements(getPlatformRoutes());
+  const requirement = routeTable.requirementFor(op.method, op.pathTemplate);
+  if (!requirement) {
+    const key = routeRequirementKey(op.method, op.pathTemplate);
+    throw new Error(
+      `Operation ${op.operationId} has no mounted route for \`${key}\` — the OpenAPI document and the route table disagree`,
+    );
+  }
+  return requirement;
 }
 
 /**
@@ -211,9 +253,9 @@ export function resetCatalog(): void {
  */
 /**
  * OpenAPI tag → RBAC resource, for permission-scoped index filtering. Coarse
- * by design: the index is grouped by tag, and there is no per-operation
- * permission metadata, so we drop a whole tag section when the caller's role
- * has no permission on the mapped resource. Tags with no clear single resource
+ * by design: the index is grouped by tag and does not yet join
+ * {@link operationRequirement}, so we drop a whole tag section when the
+ * caller's role has no permission on the mapped resource. Tags with no clear single resource
  * (auth, health, profile, uploads, library, packages, proxies-as-call, …) are
  * intentionally absent and always shown — this is a context-reduction heuristic,
  * NOT a security boundary (invoke_operation re-enforces RBAC per call).

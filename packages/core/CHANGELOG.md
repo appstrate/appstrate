@@ -15,6 +15,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New export `canComposeInline` (`@appstrate/core/permissions`)** — whether
   a caller may compose an inline agent: `agents:write` and `agents:run`. Takes a
   membership test, so a `Set` or an array both fit.
+- **New exports `canReadRuns` and `canRunAgents`
+  (`@appstrate/core/permissions`)** — beside `canComposeInline`, same membership
+  test. `canReadRuns` is the one place the `runs:read` / `runs:read-all`
+  disjunction is spelled out for code holding a permission set rather than a
+  route (it moved here from the platform's `run-visibility.ts`);
+  `canRunAgents` is `agents:run` plus that read, because launching a run the
+  caller could never read back does not count.
+- **New export `PERMISSION_REQUIREMENT_MARKER`
+  (`@appstrate/core/permissions`)** — every guard `makePermissionGuard` builds
+  now also carries the requirement it checks under this symbol (a single
+  `resource:action`, or several joined with `|` for a disjunction), next to the
+  existing boolean `appstrate.permissionGuard` marker, which is unchanged. The
+  platform reads it off Hono's route table to derive per operation what a
+  caller's grants make possible; a guard with the boolean marker and no
+  requirement is row-aware.
 - **`AppstrateTurnMetadata` gains optional `modelId` and `modelLabel`
   (`@appstrate/core/chat-turn-metadata`)** — the model a chat turn ran on,
   stamped when the engine closes the turn. Additive: a turn the engine did not

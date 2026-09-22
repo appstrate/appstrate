@@ -21,7 +21,11 @@
 
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
-import { makePermissionGuard, reportPermissionDenial } from "@appstrate/core/permissions";
+import {
+  makePermissionGuard,
+  PERMISSION_REQUIREMENT_MARKER,
+  reportPermissionDenial,
+} from "@appstrate/core/permissions";
 import { forbidden } from "../lib/errors.ts";
 import type { Resource, Action } from "../lib/permissions.ts";
 import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
@@ -68,10 +72,19 @@ export function assertPermission<R extends Resource>(
  * what the caller would have needed, not an arbitrary pick from the list.
  * Handlers that resolve the disjunction only once the row is loaded invoke it
  * with a no-op `next`, the same way route-level guards are reused inline.
+ *
+ * The joined form is also stamped as the guard's requirement, so a reader of
+ * the route table gets the same string the audit records rather than having to
+ * re-derive the disjunction — `lib/route-requirements.ts` splits it back. An
+ * empty list is refused at construction: it would deny every caller while
+ * stamping `""`, which that reader takes for a row-aware guard, i.e. a grant.
  */
 export function requireAnyPermission(permissions: readonly string[]) {
+  if (permissions.length === 0) {
+    throw new Error("requireAnyPermission() needs at least one permission");
+  }
   const required = permissions.join("|");
-  return markHandler(async (c: Context<AppEnv>, next: Next) => {
+  const guard = markHandler(async (c: Context<AppEnv>, next: Next) => {
     const held = c.get("permissions");
     if (!permissions.some((permission) => held?.has(permission))) {
       reportPermissionDenial(c, required);
@@ -79,4 +92,6 @@ export function requireAnyPermission(permissions: readonly string[]) {
     }
     return next();
   }, PERMISSION_GUARD);
+  Object.defineProperty(guard, PERMISSION_REQUIREMENT_MARKER, { value: required });
+  return guard;
 }

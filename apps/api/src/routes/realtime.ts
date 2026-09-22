@@ -24,8 +24,9 @@ import {
   validateViewAs,
 } from "../lib/view-as.ts";
 import { principalGrants } from "../lib/principal-permissions.ts";
-import { canReadEveryRun, canReadRuns, ownsRun } from "../lib/run-visibility.ts";
+import { canReadEveryRun, ownsRun } from "../lib/run-visibility.ts";
 import {
+  canReadRuns,
   reportPermissionDenial,
   VIEW_AS_ACTIVE_HEADER,
   VIEW_AS_HEADER,
@@ -210,7 +211,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
       orgPermissions: grants,
       scopeCeiling: new Set(keyInfo.scopes),
     });
-    if (!canReadRuns(permissions)) {
+    if (!canReadRuns((p) => permissions.has(p))) {
       throw forbidden("API key does not have the 'runs:read' scope");
     }
 
@@ -299,7 +300,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
     });
   }
   // Same floor as the key branch; a session has no ceiling, so its effective set IS `grants`.
-  if (!canReadRuns(grants)) {
+  if (!canReadRuns((p) => grants.has(p))) {
     throw forbidden("Caller does not have the 'runs:read' permission in this space");
   }
 

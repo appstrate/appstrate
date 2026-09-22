@@ -4,11 +4,15 @@ import { describe, it, expect, afterEach } from "bun:test";
 import {
   requireModulePermission,
   requireCorePermission,
+  makePermissionGuard,
   setPermissionDenialHandler,
+  canReadRuns,
+  canRunAgents,
   CORE_RESOURCE_ACTIONS,
   CORE_RESOURCE_LEVELS,
   CORE_RESOURCE_NAMES,
   ORG_LEVEL_PERMISSIONS,
+  PERMISSION_REQUIREMENT_MARKER,
   SPACE_LEVEL_PERMISSIONS,
   type CoreResources,
 } from "../src/permissions.ts";
@@ -266,5 +270,69 @@ describe("permission levels", () => {
     expect(CORE_RESOURCE_LEVELS["api-keys"]).toBe("space");
     expect(CORE_RESOURCE_LEVELS["llm-proxy"]).toBe("org");
     expect(CORE_RESOURCE_LEVELS["credential-proxy"]).toBe("space");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The requirement stamp — read off Hono's route table to derive what an RBAC
+// set makes structurally possible. A guard that stopped carrying it would make
+// its operation look unguarded, i.e. granted to everyone.
+// ---------------------------------------------------------------------------
+
+function stampedRequirement(guard: object): unknown {
+  return Object.getOwnPropertyDescriptor(guard, PERMISSION_REQUIREMENT_MARKER)?.value;
+}
+
+function stampedMarker(guard: object): unknown {
+  return Object.getOwnPropertyDescriptor(guard, Symbol.for("appstrate.permissionGuard"))?.value;
+}
+
+describe("permission requirement stamp", () => {
+  it("carries the exact string the guard tests membership of", () => {
+    expect(stampedRequirement(requireCorePermission("agents", "write"))).toBe("agents:write");
+    expect(stampedRequirement(requireModulePermission("tasks", "read"))).toBe("tasks:read");
+  });
+
+  it("carries a disjunction verbatim — the form requireAnyPermission stamps", () => {
+    expect(stampedRequirement(makePermissionGuard("runs:read|runs:read-all"))).toBe(
+      "runs:read|runs:read-all",
+    );
+  });
+
+  it("still carries the boolean guard marker other code reads", () => {
+    expect(stampedMarker(requireCorePermission("agents", "write"))).toBe(true);
+    expect(stampedMarker(makePermissionGuard("runs:read"))).toBe(true);
+  });
+});
+
+describe("canReadRuns / canRunAgents", () => {
+  const has =
+    (...permissions: string[]) =>
+    (permission: string) =>
+      permissions.includes(permission);
+
+  it("runs:read alone opens the run read surfaces", () => {
+    expect(canReadRuns(has("runs:read"))).toBe(true);
+  });
+
+  it("runs:read-all alone opens them too — it is the wider permission", () => {
+    expect(canReadRuns(has("runs:read-all"))).toBe(true);
+  });
+
+  it("neither form means no run read at all", () => {
+    expect(canReadRuns(has("runs:cancel", "agents:run"))).toBe(false);
+  });
+
+  it("agents:run without run-read is not running agents", () => {
+    expect(canRunAgents(has("agents:run"))).toBe(false);
+  });
+
+  it("run-read without agents:run is not running agents", () => {
+    expect(canRunAgents(has("runs:read-all"))).toBe(false);
+  });
+
+  it("both together is, under either read form", () => {
+    expect(canRunAgents(has("agents:run", "runs:read"))).toBe(true);
+    expect(canRunAgents(has("agents:run", "runs:read-all"))).toBe(true);
   });
 });

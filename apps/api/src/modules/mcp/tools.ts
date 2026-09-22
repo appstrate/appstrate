@@ -46,7 +46,6 @@ import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/afps-runtime/bundle";
 import type { Actor } from "@appstrate/connect";
 import { getCatalog, collectReferencedSchemas, type CatalogOperation } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
-import { canReadRuns } from "../../lib/run-visibility.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import {
   getFileForActor,
@@ -56,7 +55,7 @@ import {
 } from "../../services/files.ts";
 import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
-import { VIEW_AS_HEADER, canComposeInline } from "@appstrate/core/permissions";
+import { VIEW_AS_HEADER, canComposeInline, canReadRuns } from "@appstrate/core/permissions";
 import { asString, textResult } from "./tool-results.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 
@@ -1007,7 +1006,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
     // is `canReadRuns`, never a literal `runs:read` test: `runs:read-all` is a
     // superset, so a principal holding only the wide permission reads the poll
     // route fine and must not be refused here.
-    if (!canReadRuns(ctx.permissions)) {
+    if (!canReadRuns((p) => ctx.permissions.has(p))) {
       emit(ctx, { tool: "run_and_wait", durationMs: performance.now() - start, outcome: "denied" });
       return textResult(
         {
