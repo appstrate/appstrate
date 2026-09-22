@@ -13,6 +13,7 @@
  *   - `appstrate org`:     manage the pinned organization (`X-Org-Id`).
  *   - `appstrate space`:   manage the pinned space (`X-Space-Id`).
  *   - `appstrate skills`:  sync the space's skills to Claude Code / Codex.
+ *   - `appstrate packages`: pull a package into a folder, push it to its draft, publish it.
  *   - `appstrate api`:     authenticated HTTP passthrough for coding agents.
  *
  * Global flags:
@@ -51,6 +52,12 @@ import {
   spaceCreateCommand,
 } from "./commands/space.ts";
 import { skillsSyncCommand } from "./commands/skills.ts";
+import {
+  packagesPublishCommand,
+  packagesPullCommand,
+  packagesPushCommand,
+  packagesStatusCommand,
+} from "./commands/packages.ts";
 import { SYNC_TARGETS, type SyncTarget } from "./lib/skills-sync/targets.ts";
 import type { SkillSource } from "./lib/skills-sync/plan.ts";
 import { modelsListCommand } from "./commands/models.ts";
@@ -571,6 +578,92 @@ skillsGroup
       });
     },
   );
+
+// ─── `appstrate packages …` — the authoring loop: pull, status, push, publish ─
+
+const packagesGroup = program
+  .command("packages")
+  .description(
+    "Edit a package (skill, agent, integration, MCP server) in a local folder: pull its draft, push it back, publish it",
+  );
+
+packagesGroup
+  .command("pull <package> [dir]")
+  .description(
+    "Bring a package into a local working folder: its draft when you may write it, else its published version (read-only). Default folder: <workDir>/<org>/packages/<type>s/<name>.",
+  )
+  .option("--version <spec>", "A published version (latest, exact, or range) instead of the draft")
+  .option("--force", "Write into a folder that already has files, replacing same-named ones")
+  .action(
+    async (pkg: string, dir: string | undefined, opts: { version?: string; force?: boolean }) => {
+      const globalOpts = program.opts<{ profile?: string }>();
+      await packagesPullCommand({
+        profile: globalOpts.profile,
+        package: pkg,
+        dir,
+        version: opts.version,
+        force: opts.force,
+      });
+    },
+  );
+
+packagesGroup
+  .command("status <dir>")
+  .description(
+    "Show what a working folder would change in the draft (folder path, or a package name in the work dir)",
+  )
+  .option("--diff", "Print a line diff for each modified text file")
+  .action(async (dir: string, opts: { diff?: boolean }) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await packagesStatusCommand({ profile: globalOpts.profile, dir, diff: opts.diff });
+  });
+
+packagesGroup
+  .command("push <dir>")
+  .description(
+    "Write a working folder to the package's draft, under the lock this machine last saw. Nobody else sees it until you publish.",
+  )
+  .option(
+    "--create",
+    "Create the package when it does not exist (this publishes its first version)",
+  )
+  .option(
+    "--space <id>",
+    "With --create: the space that becomes its home (default: the pinned space)",
+  )
+  .option("--force", "Replace the draft even if it changed since this machine last saw it")
+  .option("--dry-run", "Show what would be sent and send nothing")
+  .action(
+    async (
+      dir: string,
+      opts: { create?: boolean; space?: string; force?: boolean; dryRun?: boolean },
+    ) => {
+      const globalOpts = program.opts<{ profile?: string }>();
+      await packagesPushCommand({
+        profile: globalOpts.profile,
+        dir,
+        create: opts.create,
+        space: opts.space,
+        force: opts.force,
+        dryRun: opts.dryRun,
+      });
+    },
+  );
+
+packagesGroup
+  .command("publish <package>")
+  .description(
+    "Publish the draft as a new version. Sharing and activation stay in their own routes.",
+  )
+  .option("--version <version>", "Version to cut (default: the draft manifest's version)")
+  .action(async (pkg: string, opts: { version?: string }) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await packagesPublishCommand({
+      profile: globalOpts.profile,
+      package: pkg,
+      version: opts.version,
+    });
+  });
 
 // ─── `appstrate models …` — discover model presets on the instance ────
 

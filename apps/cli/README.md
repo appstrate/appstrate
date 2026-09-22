@@ -48,6 +48,7 @@ See [`examples/self-hosting/README.md`](../../examples/self-hosting/README.md#ve
 | `appstrate org`       | List, switch, or create organizations pinned on the active profile.                                         |
 | `appstrate space`     | List, switch, or create spaces pinned on the active profile.                                                |
 | `appstrate skills`    | Sync your spaces' skills to Claude Code and Codex as Agent Skills directories.                              |
+| `appstrate packages`  | Edit a package in a local folder: pull its draft, check what changed, push it back, publish it.             |
 | `appstrate api`       | Authenticated HTTP passthrough to the Appstrate API.                                                        |
 | `appstrate openapi`   | Explore the active profile's OpenAPI schema without flooding stdout.                                        |
 | `appstrate run`       | Execute an agent — a package id runs on the pinned instance, a `.afps`/`.afps-bundle` path runs in-process. |
@@ -551,6 +552,37 @@ Per-skill toggles survive all of this. We never write `~/.codex/config.toml`, an
 
 ---
 
+### `appstrate packages`
+
+Edit a package (skill, agent, integration, MCP server) in a local folder with any tool, then write it back to its **draft** and publish it as a separate, deliberate step. `skills sync` is the other direction: it copies what is published (or, with `--source draft`, your draft) onto your machine and never sends anything back.
+
+```sh
+appstrate packages pull my-skill                 # the draft → <workDir>/<org>/packages/skills/my-skill
+appstrate packages status my-skill --diff        # what the folder would change in the draft
+appstrate packages push my-skill                 # the folder → the draft; nobody else sees it yet
+appstrate skills sync --source draft             # test the draft on this machine
+appstrate packages publish my-skill              # the draft → a version every space resolves
+```
+
+**Authority is the package's home space.** A package lives in one space, its home, and only a caller who may write there can read its draft, push or publish. Anyone else who can read the package pulls its latest published version, read-only, and `push` refuses with a pointer to co-editing. The CLI finds the home by itself: it asks the pinned space first, then every other space you are a member of, so a package homed in your personal space is found even while a team space is pinned. Sharing and activation are not part of this loop.
+
+**The lock belongs to the folder.** `pull` of a draft records the draft's `lock_version` for that folder, and `push` sends it back: a draft edited anywhere else in between (the chat, the API, another folder or machine) is refused with `409` and nothing is written. `status` warns about it before you push. A folder that never read the draft, or that pulled a published version, can only push with `--force`, which replaces the draft.
+
+| Subcommand             | Purpose                                                                                                                                                                                  |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pull <package> [dir]` | `@scope/name` or a bare name under the org's slug. `--version <spec>` pulls a published version instead of the draft. Refuses a non-empty folder unless `--force`.                       |
+| `status <dir>`         | A folder path, or a bare name resolved in the work dir. `manifest.json` counts: a configuration-only edit is a change. `--diff` prints a line diff for each modified text file.          |
+| `push <dir>`           | Writes the changed files through `PUT /api/packages/{type}s/{scope}/{name}` file operations, 200 per request. Bytes that are not UTF-8 text travel as base64, so binary annexes survive. |
+| `publish <package>`    | Creates a version from the draft. `--version <v>` overrides the draft manifest's version.                                                                                                |
+
+`push` moves a `version` that is already published to the next patch, so push then publish works without editing the version by hand. A folder without `manifest.json` is a skill: its manifest is derived from the `SKILL.md` frontmatter.
+
+**Creating a package publishes it.** The platform cuts the first version as it creates a package, so `push` on an id that does not exist yet refuses unless you pass `--create`, and says so. `--space <id>` picks the home of the new package (default: the pinned space), for example your personal space for a skill only you should receive.
+
+**Work dir.** Default `~/Appstrate Packages`, overridable with a top-level `workDir` in `config.toml`. An Appstrate instance directory (one holding `.appstrate/project.json`) is refused: `appstrate uninstall --purge` removes it wholesale.
+
+---
+
 ### `appstrate openapi`
 
 Explore the active profile's OpenAPI 3.1 schema without dumping the whole spec to stdout. The platform exposes a few hundred endpoints — `list`, `show`, and `export` subcommands make that corpus explorable at human scale (and agent-ingestable with `--json`).
@@ -861,6 +893,7 @@ $XDG_CONFIG_HOME/appstrate/              (or ~/.config/appstrate/)
 $XDG_DATA_HOME/appstrate/                (or ~/.local/share/appstrate/)
 ├── claude-plugin/                       # generated Claude Code plugin (`appstrate skills sync`)
 ├── skills-sync/state.json               # which skill directory each target owns, and from which artifact
+├── packages/<profile>-locks.json       # working folder → package and the draft lock it last saw (`appstrate packages`)
 └── skills-sync/sync.lock                # flock(2) target serializing concurrent syncs (never removed; unlocked where flock(2) is absent)
 ```
 
@@ -872,6 +905,7 @@ Example `config.toml`:
 
 ```toml
 defaultProfile = "prod"
+workDir = "~/Appstrate Packages" # optional: root of `appstrate packages` working copies
 
 [profile.prod]
 instance = "https://app.example.com"

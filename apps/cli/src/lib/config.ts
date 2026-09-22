@@ -72,6 +72,15 @@ export function syncSpaceIds(profileName: string, profile: Profile): string[] | 
 export interface Config {
   defaultProfile: string;
   profiles: Record<string, Profile>;
+  /**
+   * Root of the working copies `packages pull` writes and `packages push`
+   * reads: `<workDir>/<org slug>/packages/<type>s/<name>`. Default
+   * `~/Appstrate Packages`, a visible folder, unlike the regenerable state under
+   * `getDataDir()`. Never `~/Appstrate`: that is `appstrate install`'s default
+   * instance directory (`~/appstrate` on a case-insensitive disk), which
+   * `uninstall --purge` removes wholesale.
+   */
+  workDir?: string;
 }
 
 /** Fresh empty config. Always return a NEW object here — callers mutate
@@ -147,6 +156,8 @@ export async function readConfig(): Promise<Config> {
   const parsed = parseToml(raw) as Record<string, unknown>;
   const defaultProfile =
     typeof parsed.defaultProfile === "string" ? parsed.defaultProfile : "default";
+  const workDir =
+    typeof parsed.workDir === "string" && parsed.workDir.length > 0 ? parsed.workDir : undefined;
   const profilesRaw = (parsed.profile ?? {}) as Record<string, unknown>;
   const profiles: Record<string, Profile> = {};
   for (const [name, value] of Object.entries(profilesRaw)) {
@@ -171,7 +182,25 @@ export async function readConfig(): Promise<Config> {
       ...(row.syncSpaces === undefined ? {} : { syncSpaces: readSyncSpaces(row.syncSpaces) }),
     };
   }
-  return { defaultProfile, profiles };
+  return workDir ? { defaultProfile, profiles, workDir } : { defaultProfile, profiles };
+}
+
+const DEFAULT_WORK_DIR_NAME = "Appstrate Packages";
+
+/** `workDir` from the config with `~` expanded, `~/Appstrate Packages` when unset. */
+export function resolveWorkDir(config: Config): string {
+  const raw = config.workDir ?? join("~", DEFAULT_WORK_DIR_NAME);
+  return raw === "~" || raw.startsWith("~/") ? join(homeDir(), raw.slice(1)) : raw;
+}
+
+/** One package's working copy: `<workDir>/<org slug>/packages/<type>s/<name>`. */
+export function packageWorkDir(
+  config: Config,
+  orgSlug: string,
+  type: "skill" | "agent" | "integration" | "mcp-server",
+  name: string,
+): string {
+  return join(resolveWorkDir(config), orgSlug, "packages", `${type}s`, name);
 }
 
 /**
@@ -206,6 +235,7 @@ export async function writeConfig(config: Config): Promise<void> {
   const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
   const payload = stringifyToml({
     defaultProfile: config.defaultProfile,
+    ...(config.workDir ? { workDir: config.workDir } : {}),
     // A malformed `syncSpaces` goes back exactly as it was read: a command that
     // rewrites some other key must not quietly drop the user's typo, because
     // dropping it widens the next sync to every space.
