@@ -6,8 +6,16 @@
  * agent-authoring switch turns off (`turnPermissions`), never more — so this is
  * the caller's RBAC translated into the assistant's acts. Not a gate — every act is re-checked
  * server-side — but a row must never claim what the route would refuse.
+ *
+ * The rows below call the SAME predicates (`@appstrate/core/permissions`) the
+ * MCP server declares its tools on (`apps/api/src/modules/mcp/tools.ts`,
+ * `buildMcpTools`) and the chat prompt is built on: one implementation, no
+ * mirror to drift. What stays local is what is not core vocabulary — the
+ * `mcp:*` module permissions and `maySetPackageActive`, which reads a
+ * `SpaceGrant`.
  */
 
+import { canReadRuns, canRunAgents } from "@appstrate/core/permissions";
 import { maySetPackageActive, type SpaceGrant } from "../../lib/package-permissions";
 import type { GateablePermission } from "../../hooks/use-permissions";
 
@@ -34,19 +42,20 @@ function reachesMcp({ can }: Pick<ChatAccessContext, "can">): boolean {
   return can("mcp:read");
 }
 
-/** Both acting tools refuse without `mcp:invoke`; the route then checks its own. */
+/** Without `mcp:invoke` both acting tools are never declared; the route then checks its own. */
 function invokes(ctx: Pick<ChatAccessContext, "can">): boolean {
   return reachesMcp(ctx) && ctx.can("mcp:invoke");
 }
 
-/** Shared by the composer's agent-authoring toggle and the `createAgents` row. */
+/**
+ * Shared by the composer's agent-authoring toggle and the `createAgents` row.
+ *
+ * Deliberately NOT core's `canComposeInline` (`agents:write` ∧ `agents:run`):
+ * that one answers "may this caller compose an inline agent", which launches
+ * what it authored. Creating a stored agent takes `agents:write` alone.
+ */
 export function canAuthorAgents(ctx: Pick<ChatAccessContext, "can">): boolean {
   return ctx.can("chat:write") && invokes(ctx) && ctx.can("agents:write");
-}
-
-/** Mirrors server-side `canReadRuns`: `read-all` implies `read`. */
-function readsRuns({ can }: ChatAccessContext): boolean {
-  return can("runs:read") || can("runs:read-all");
 }
 
 const CHAT_CAPABILITIES: readonly ChatCapability[] = [
@@ -56,11 +65,11 @@ const CHAT_CAPABILITIES: readonly ChatCapability[] = [
     held: invokes,
   },
   {
-    // `run_and_wait` refuses without run-read before launching; a fire-and-forget
-    // run the assistant could never report on does not count.
+    // `run_and_wait` is not declared without run-read; a fire-and-forget run
+    // the assistant could never report on does not count.
     id: "runAgents",
     labelKey: "access.capability.runAgents",
-    held: (ctx) => invokes(ctx) && readsRuns(ctx) && ctx.can("agents:run"),
+    held: (ctx) => invokes(ctx) && canRunAgents(ctx.can),
   },
   {
     // Creating only: editing an existing agent is authorized by its HOME space,
@@ -73,7 +82,7 @@ const CHAT_CAPABILITIES: readonly ChatCapability[] = [
   {
     id: "readRuns",
     labelKey: "access.capability.readRuns",
-    held: (ctx) => invokes(ctx) && readsRuns(ctx),
+    held: (ctx) => invokes(ctx) && canReadRuns(ctx.can),
   },
   {
     // Browsing (`list_files`), not reading: `read_file` applies the file ACL,

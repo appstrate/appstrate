@@ -128,7 +128,6 @@ export function httpStatusOf(unwrapped: unknown): number | undefined {
 function isErrorPayload(unwrapped: unknown): boolean {
   const rec = asRecord(unwrapped);
   if (!rec) return false;
-  if (rec.outcome === "denied" || rec.outcome === "rejected") return true;
   if (typeof rec.status === "number" && rec.status >= 400) return true;
   if (typeof rec.error === "string" && rec.error.length > 0) return true;
   // McpError shape: { code:number, message:string }.
@@ -138,8 +137,8 @@ function isErrorPayload(unwrapped: unknown): boolean {
 
 /**
  * Single source of truth for a tool call's phase. Combines assistant-ui status,
- * the part's `isError` flag, and the unwrapped payload (HTTP ≥ 400, `outcome`,
- * embedded `error`) so a failed call can never read as a success.
+ * the part's `isError` flag, and the unwrapped payload (HTTP ≥ 400, embedded
+ * `error`) so a failed call can never read as a success.
  */
 export function deriveToolPhase(part: ToolPhaseInput): ToolPhase {
   const type = part.status?.type;

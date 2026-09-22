@@ -11,8 +11,13 @@
 import { describe, expect, it } from "bun:test";
 import { buildSystemPrompt, formatCallerContext, normalizeChatLocale } from "../src/prompt.ts";
 
-/** The full persona; the reduced one has its own block at the end. */
-const FULL = buildSystemPrompt({ canComposeInline: true, canAuthorAgents: true });
+/** The full persona; the reduced ones have their own blocks at the end. */
+const FULL = buildSystemPrompt({
+  canReadRuns: true,
+  canRunAgents: true,
+  canComposeInline: true,
+  canAuthorAgents: true,
+});
 
 describe("full persona invariants", () => {
   it("keeps the single-sub-agent rule for chained external actions", () => {
@@ -190,9 +195,19 @@ describe("caller-context prompt hygiene", () => {
 describe("the persona without inline composition", () => {
   // What a turn without `agents:write` ∧ `agents:run` is told. The platform
   // refuses the launch either way; this block is about not teaching it.
-  const REDUCED = buildSystemPrompt({ canComposeInline: false, canAuthorAgents: false });
+  const REDUCED = buildSystemPrompt({
+    canReadRuns: true,
+    canRunAgents: true,
+    canComposeInline: false,
+    canAuthorAgents: false,
+  });
   /** `agents:write` without `agents:run`: may author agents, not compose one inline. */
-  const AUTHOR_ONLY = buildSystemPrompt({ canComposeInline: false, canAuthorAgents: true });
+  const AUTHOR_ONLY = buildSystemPrompt({
+    canReadRuns: true,
+    canRunAgents: true,
+    canComposeInline: false,
+    canAuthorAgents: true,
+  });
 
   it("teaches no way to compose one", () => {
     expect(REDUCED).not.toContain('kind:"inline"');
@@ -262,5 +277,116 @@ describe("the persona without inline composition", () => {
 
   it("is materially shorter — the point is not to pay for what is refused", () => {
     expect(FULL.length - REDUCED.length).toBeGreaterThan(3_000);
+  });
+
+  it("still teaches running an existing agent — the tool IS declared to it", () => {
+    expect(REDUCED).toContain("run_and_wait");
+    expect(REDUCED).toContain('kind:"agent"');
+    expect(REDUCED).not.toContain('kind:"inline"');
+  });
+});
+
+describe("the persona without agent runs", () => {
+  // `run_and_wait` is declared on `mcp:invoke` ∧ launch ∧ run-read; a turn
+  // missing any of the three is never shown the tool, so the persona must not
+  // teach it. Absent, not contradicted: nothing says "you cannot run agents".
+  const NO_RUNS = buildSystemPrompt({
+    canReadRuns: false,
+    canRunAgents: false,
+    canComposeInline: false,
+    canAuthorAgents: false,
+  });
+  /** May author an agent, may not launch one. */
+  const NO_RUNS_AUTHOR = buildSystemPrompt({
+    canReadRuns: false,
+    canRunAgents: false,
+    canComposeInline: false,
+    canAuthorAgents: true,
+  });
+  /** Same grants plus the launch — the control this block is measured against. */
+  const RUNNER = buildSystemPrompt({
+    canReadRuns: true,
+    canRunAgents: true,
+    canComposeInline: false,
+    canAuthorAgents: false,
+  });
+  /** `mcp:invoke` ∧ run-read without `agents:run`: may inspect runs, not launch. */
+  const READER = buildSystemPrompt({
+    canReadRuns: true,
+    canRunAgents: false,
+    canComposeInline: false,
+    canAuthorAgents: false,
+  });
+
+  it("names no way to launch a run", () => {
+    for (const taught of [
+      "run_and_wait",
+      "runAgent",
+      "runInline",
+      'kind:"agent"',
+      'kind:"inline"',
+      "listRuns",
+      "outputs/",
+      "integration_not_active",
+      "run an agent",
+    ]) {
+      expect(NO_RUNS).not.toContain(taught);
+      expect(NO_RUNS_AUTHOR).not.toContain(taught);
+    }
+  });
+
+  it("contradicts nothing — no refusal is asserted in the model's place", () => {
+    for (const contradiction of ["cannot run", "not allowed to run", "you may not run"]) {
+      expect(NO_RUNS).not.toContain(contradiction);
+    }
+  });
+
+  it("keeps every rule that is not about running", () => {
+    expect(NO_RUNS).toContain("You are Appstrate's assistant");
+    expect(NO_RUNS).toContain("call `read_file` first");
+    expect(NO_RUNS).toContain("Never invent an operationId or argument shape");
+    expect(NO_RUNS).toContain("Respect the user's role");
+  });
+
+  it("keeps skill authoring, which needs no run", () => {
+    expect(NO_RUNS_AUTHOR).toContain("Skills are not run on their own");
+    expect(NO_RUNS_AUTHOR).toContain("in `dependencies.integrations` and in `dependencies.skills`");
+    expect(NO_RUNS).not.toContain("Skills are not run on their own");
+    // Neither list is rendered, so the bullet about truncated lists is gone too.
+    expect(NO_RUNS).not.toContain("(list truncated)");
+    expect(NO_RUNS_AUTHOR).toContain("(list truncated)");
+  });
+
+  it("lists no agent as runnable in the caller-context block", () => {
+    const raw = {
+      user: { name: "Ada" },
+      org: { role: "member" },
+      agents: [{ package_id: "@acme/triage", takes_input: false }],
+    };
+    expect(formatCallerContext(raw, { canRunAgents: true })).toContain(
+      "## Existing agents you can run",
+    );
+    const off = formatCallerContext(raw, { canRunAgents: false });
+    expect(off).not.toContain("## Existing agents you can run");
+    expect(off).not.toContain("@acme/triage");
+    // The identity half survives — date and role grounding do not depend on runs.
+    expect(off).toContain("You are assisting Ada");
+  });
+
+  it("keeps the run-reading rules for a turn that may inspect runs but not launch", () => {
+    // Reading runs is its own grant (`mcp:invoke` ∧ run-read): the history
+    // bullet and the metrics rule presuppose it, not the launch.
+    expect(READER).toContain("listRuns");
+    expect(READER).toContain("Never quote run metrics");
+    expect(READER).not.toContain("run_and_wait");
+    // Re-running is the launch half — gone with it.
+    expect(READER).not.toContain("or wants to re-run something");
+    expect(RUNNER).toContain("or wants to re-run something");
+    // And a turn that may not read runs at all is told neither.
+    expect(NO_RUNS).not.toContain("Never quote run metrics");
+  });
+
+  it("is materially shorter than the persona that may run", () => {
+    expect(RUNNER.length - NO_RUNS.length).toBeGreaterThan(4_000);
   });
 });

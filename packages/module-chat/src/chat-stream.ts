@@ -41,7 +41,8 @@ import { registerStopController, unregisterStopController } from "./stop-registr
 import { setActiveStream, clearActiveStream } from "./resumable.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 import type { UsageRejection } from "@appstrate/core/module";
-import { canComposeInline } from "@appstrate/core/permissions";
+import { canComposeInline, canReadRuns, canRunAgents } from "@appstrate/core/permissions";
+import type { CorePermission } from "@appstrate/core/permissions";
 import { classifyClientTurnError, clientTurnErrorMarker } from "./turn-error.ts";
 import {
   ModelGenerationError,
@@ -320,7 +321,15 @@ export async function handleChatStream(
   // MCP `run_and_wait` descriptor on the same turn: one prompt-cache miss.
   const permissions = turnPermissions(c.get("permissions"), body.agent_authoring !== false);
   const canAuthorAgents = permissions.includes("agents:write");
-  const composeInline = canComposeInline((p) => permissions.includes(p));
+  const has = (permission: CorePermission): boolean => permissions.includes(permission);
+  // Without `mcp:invoke` no tool call reaches a route at all, so it gates both:
+  // reading a run's history, and the launch-plus-poll `run_and_wait` is DECLARED
+  // on (launching a run the turn could never read back is a billed orphan).
+  const invokes = permissions.includes("mcp:invoke");
+  const readRuns = invokes && canReadRuns(has);
+  const runAgents = invokes && canRunAgents(has);
+  // Same conjunctions as `apps/api/src/modules/mcp/router.ts` — its twin.
+  const composeInline = runAgents && canComposeInline(has);
   const phaseAStart = Date.now();
 
   // ── Preamble phase B (overlapped with A) ─────────────────────────────────
@@ -357,6 +366,7 @@ export async function handleChatStream(
       // UI language forwarded by the client; validated/defaulted in the builder.
       locale: c.req.header("X-Chat-Locale"),
       canAuthorAgents,
+      canRunAgents: runAgents,
     })
       .finally(() => {
         // Wall time of the block itself.
@@ -465,6 +475,8 @@ export async function handleChatStream(
   // could only misfire, since the context block below carries org-authored agent
   // names and would be truncated at any that happened to spell the heading.
   let system = buildSystemPrompt({
+    canReadRuns: readRuns,
+    canRunAgents: runAgents,
     canComposeInline: composeInline,
     canAuthorAgents,
   });

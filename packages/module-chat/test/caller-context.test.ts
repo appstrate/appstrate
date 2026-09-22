@@ -409,6 +409,7 @@ describe("buildCallerContextBlock", () => {
       user,
       deps,
       canAuthorAgents: true,
+      canRunAgents: true,
     });
     // Block is rendered from the dispatched payload, not from request context.
     expect(out).toContain("`@appstrate/gmail`");
@@ -420,6 +421,27 @@ describe("buildCallerContextBlock", () => {
     expect(req.headers.get("cookie")).toBe("session=abc");
   });
 
+  it("drops the runnable-agents section for a turn that cannot launch", async () => {
+    const payload = {
+      user: { name: "Ada", email: "ada@acme.com" },
+      org: { role: "member" },
+      agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+    };
+    const { deps } = fakeDeps(() => Response.json(payload));
+    const out = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
+      origin: "http://127.0.0.1:3000",
+      headers: {},
+      spaceId: "spc_1",
+      user,
+      deps,
+      canAuthorAgents: false,
+      canRunAgents: false,
+    });
+    expect(out).not.toContain("## Existing agents you can run");
+    expect(out).not.toContain("@appstrate/triage");
+    expect(out).toContain("Ada (ada@acme.com)");
+  });
+
   it("falls back to identity-only when the dispatch 400s (no app context)", async () => {
     const { deps } = fakeDeps(() => new Response(null, { status: 400 }));
     const out = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
@@ -429,6 +451,7 @@ describe("buildCallerContextBlock", () => {
       user,
       deps,
       canAuthorAgents: true,
+      canRunAgents: true,
     });
     expect(out).toContain("Ada (ada@acme.com)");
   });
@@ -442,6 +465,7 @@ describe("buildCallerContextBlock", () => {
       user,
       deps,
       canAuthorAgents: true,
+      canRunAgents: true,
     });
     expect(out).toBe("");
   });
