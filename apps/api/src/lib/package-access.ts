@@ -3,7 +3,14 @@
 import type { Context } from "hono";
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages, packageShares, spacePackages, spaces } from "@appstrate/db/schema";
+import {
+  packages,
+  packageShares,
+  spaceMembers,
+  spacePackages,
+  spaceRoles,
+  spaces,
+} from "@appstrate/db/schema";
 import { assertDependencyOverrideKeysDeclared } from "./launch-schemas.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
 import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
@@ -29,10 +36,17 @@ import { isUserPrincipal } from "./principal.ts";
 import {
   callerOrgRole,
   callerPersonalOwnerId,
-  callerSpaceMemberships,
   effectiveInSpace,
+  personaFor,
+  personaMemberships,
 } from "./view-as.ts";
-import { resolveSpaceRole } from "./space-role.ts";
+import {
+  customRoleOn,
+  MEMBERSHIP_COLUMNS,
+  memberFromJoin,
+  membershipOn,
+  resolveSpaceRole,
+} from "./space-role.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { ApiError, forbidden, notFound, invalidRequest } from "./errors.ts";
 import { placementRowJoin, placementShareJoin } from "../services/package-placement.ts";
@@ -241,41 +255,48 @@ async function resolvePackageAccessSpaces(
   orgRole: OrgRole,
 ): Promise<PackageAccessSpace[]> {
   const callerId = callerPersonalOwnerId(c, orgId);
-  const [rows, memberships] = await Promise.all([
-    db
-      .select({
+  const tokenOnly = Boolean(c.get("endUser")) && !c.get("orgRole");
+  const persona = personaFor(c, orgId);
+  // Spaces and the caller's rows in one statement (RBAC spec §4.4); none under a
+  // preview (the overlay replaces them) or for an end-user token (no org role).
+  const joined = await db
+    .select({
+      space: {
         id: spaces.id,
         name: spaces.name,
         isDefault: spaces.isDefault,
         visibility: spaces.visibility,
         defaultRole: spaces.defaultRole,
         ownerUserId: spaces.ownerUserId,
-      })
-      .from(spaces)
-      .where(
-        and(
-          eq(spaces.orgId, orgId),
-          c.get("authMethod") === "api_key" || c.get("endUser")
-            ? eq(spaces.id, c.get("spaceId"))
-            : undefined,
-          // Someone else's personal space is never even LOADED. `resolveSpaceRole`
-          // would drop it anyway, but with one personal space per member this
-          // query would otherwise grow with the organization's headcount on
-          // every catalog read (RBAC spec §3.6).
-          callerId === null
-            ? isNull(spaces.ownerUserId)
-            : or(isNull(spaces.ownerUserId), eq(spaces.ownerUserId, callerId)),
-        ),
+      },
+      ...MEMBERSHIP_COLUMNS,
+    })
+    .from(spaces)
+    .leftJoin(spaceMembers, membershipOn(tokenOnly || persona ? null : c.get("user").id))
+    .leftJoin(spaceRoles, customRoleOn)
+    .where(
+      and(
+        eq(spaces.orgId, orgId),
+        c.get("authMethod") === "api_key" || c.get("endUser")
+          ? eq(spaces.id, c.get("spaceId"))
+          : undefined,
+        // Someone else's personal space is never even LOADED. `resolveSpaceRole`
+        // would drop it anyway, but with one personal space per member this
+        // query would otherwise grow with the organization's headcount on
+        // every catalog read (RBAC spec §3.6).
+        callerId === null
+          ? isNull(spaces.ownerUserId)
+          : or(isNull(spaces.ownerUserId), eq(spaces.ownerUserId, callerId)),
       ),
-    c.get("endUser") && !c.get("orgRole")
-      ? Promise.resolve(new Map())
-      : callerSpaceMemberships(c, orgId),
-  ]);
-  return rows.flatMap((space) => {
-    if (c.get("endUser") && !c.get("orgRole")) {
+    );
+  const overlay = personaMemberships(persona);
+  return joined.flatMap((row) => {
+    const { space } = row;
+    if (tokenOnly) {
       return space.id === c.get("spaceId") ? [{ ...space, permissions: callerPermissions(c) }] : [];
     }
-    const ref = resolveSpaceRole(orgRole, space, memberships.get(space.id) ?? null, callerId);
+    const member = overlay ? (overlay.get(space.id) ?? null) : memberFromJoin(row);
+    const ref = resolveSpaceRole(orgRole, space, member, callerId);
     if (!ref) return [];
     return [
       {

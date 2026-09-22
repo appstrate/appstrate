@@ -7,10 +7,18 @@
  * import each other.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { spaces } from "@appstrate/db/schema";
+import { organizationMembers, spaceMembers, spaceRoles, spaces } from "@appstrate/db/schema";
+import type { OrgRole } from "@appstrate/core/permissions";
 import { assertSpaceId } from "./ids.ts";
+import {
+  customRoleOn,
+  MEMBERSHIP_COLUMNS,
+  memberFromJoin,
+  membershipOn,
+  type SpaceMemberRow,
+} from "./space-role.ts";
 
 /** Space row exposed as `c.get("space")`. Keep the field set tight so services can destructure it. */
 export interface SpaceContextRow {
@@ -25,7 +33,7 @@ export interface SpaceContextRow {
   orphanedAt: Date | null;
 }
 
-/** Projection behind {@link SpaceContextRow} — declared once so the two readers cannot drift. */
+/** Projection behind {@link SpaceContextRow} — declared once so its readers cannot drift. */
 const SPACE_CONTEXT_COLUMNS = {
   id: spaces.id,
   orgId: spaces.orgId,
@@ -38,11 +46,13 @@ const SPACE_CONTEXT_COLUMNS = {
 
 /**
  * The space row, or null if it is not in `orgId`. Where a CLIENT-SUPPLIED
- * space id enters (middleware, SSE auth, MCP router), hence the id-shape guard,
+ * space id enters (middleware, MCP router — SSE auth enters through
+ * {@link loadSpaceAccess}, which carries the same guard), hence the id-shape guard,
  * run BEFORE the SELECT: a retired `app_` id is un-migrated data, not a missing
  * row, and must throw rather than 404 (header, key and row would still agree).
- * Paths reading the id from a row assert the shape themselves:
- * `requireSpaceContext` / `resolveMcpSpaceRow` fallbacks, `validateSSEAuth`.
+ * Paths reading the id from a row assert the shape themselves: the three
+ * default-space fallbacks (`requireSpaceContext`, the module applier behind
+ * `enterSpaceContext`, `resolveMcpSpaceRow`).
  */
 export async function validateSpaceInOrg(
   spaceId: string,
@@ -65,4 +75,44 @@ export async function defaultSpaceForOrg(orgId: string): Promise<SpaceContextRow
     .where(and(eq(spaces.orgId, orgId), eq(spaces.isDefault, true)))
     .limit(1);
   return space ?? null;
+}
+
+/** What `resolveSpaceRole` needs about one principal in one space, read as one snapshot. */
+export interface SpaceAccessSnapshot {
+  space: SpaceContextRow;
+  member: SpaceMemberRow | null;
+  /** `null` when `userId` is not a member of the organization. */
+  orgRole: OrgRole | null;
+}
+
+/**
+ * The space, `userId`'s explicit row and org role in ONE statement (RBAC spec
+ * §4.4); `null` outside `orgId`. `userId: null` reads the space alone (a role
+ * preview). Shape-guards the id like {@link validateSpaceInOrg}.
+ */
+export async function loadSpaceAccess(
+  spaceId: string,
+  orgId: string,
+  userId: string | null,
+): Promise<SpaceAccessSnapshot | null> {
+  assertSpaceId(spaceId);
+  const [row] = await db
+    .select({
+      space: SPACE_CONTEXT_COLUMNS,
+      ...MEMBERSHIP_COLUMNS,
+      orgRole: organizationMembers.role,
+    })
+    .from(spaces)
+    .leftJoin(spaceMembers, membershipOn(userId))
+    .leftJoin(spaceRoles, customRoleOn)
+    .leftJoin(
+      organizationMembers,
+      and(
+        eq(organizationMembers.orgId, spaces.orgId),
+        userId === null ? sql`false` : eq(organizationMembers.userId, userId),
+      ),
+    )
+    .where(and(eq(spaces.id, spaceId), eq(spaces.orgId, orgId)))
+    .limit(1);
+  return row ? { space: row.space, member: memberFromJoin(row), orgRole: row.orgRole } : null;
 }

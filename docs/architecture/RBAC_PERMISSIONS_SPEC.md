@@ -270,7 +270,7 @@ Four context keys carry the answer:
 
 `makePermissionGuard` keeps reading `permissions` and nothing else. A route outside `SPACE_SCOPED_PREFIXES` sees org-level permissions only; a space-level string can therefore never be satisfied on an org route, which is the property we want (a `builder` cannot `agents:write` through a non-space path, because there is none).
 
-`requireSpaceContext` gains the membership step after `validateSpaceInOrg`: load the `space_members` row for `(spaceId, userId)` (one indexed PK lookup), run the resolver, write `permissions`, set `c.set("spaceRole", ref)`. For API-key callers the pinned space goes through the same step — the key's **creator** is the user whose membership is resolved (§7.1).
+`requireSpaceContext` gains the membership step after `validateSpaceInOrg`: re-read the space row JOINED to the `space_members` row for `(spaceId, userId)` — one statement, §4.4 — run the resolver on that pair, write `permissions`, set `c.set("spaceRole", ref)` and `c.set("space", …)` to the row that was judged. For API-key callers the pinned space goes through the same step — the key's **creator** is the user whose membership is resolved (§7.1).
 
 `principalPermissions` is a module member, not a hook — every module that declares it contributes and the answers are unioned, which is neither dispatch mode `ModuleHooks` offers:
 
@@ -292,6 +292,19 @@ The `/api/orgs/:orgId*` family is exempt from `requireOrgContext` (the org is in
 `makePermissionGuard(required)` and its three façades. Audit on denial, once. There is no `requireAdmin()`, no `requireOwner()` and no `requireOrgRole()`: the only shape is `requirePermission(resource, action)`. The `who-manages-whom` policy runs **inside** the handler after the guard.
 
 Modules keep gating their own routes with `requireModulePermission`. A module that mounts a space-level resource on a route family outside `SPACE_SCOPED_PREFIXES` must resolve the space itself (webhooks already does, from an explicit `spaceId` field) and call the same exported `applySpacePermissions(c, space)` helper so that `permissions` carries the space slice — otherwise its guard can never pass for a non-admin, which is fail-closed and therefore the right default.
+
+### 4.4 One snapshot per decision
+
+`resolveSpaceRole` takes three mutable inputs: `orgRole` (`org_members`), the space row (`visibility`, `default_role`, `owner_user_id`) and the explicit row (`space_members`). Each writer of them commits on its own, so read in separate statements they can pair states that never coexisted — and that pair can grant what no committed state did. With `open` + default `admin` and an explicit `viewer` row, an administrator who closes the space and then deletes the row expects `viewer`, then `viewer`, then nothing; a space read before the first write and a membership read after the second answer `admin`.
+
+So the rule is:
+
+- **The space row and the explicit row are always read in ONE statement** — `spaces LEFT JOIN space_members LEFT JOIN space_roles`. One statement is one snapshot under `READ COMMITTED`; a transaction around several statements is not. `loadSpaceAccess` (`lib/space-lookup.ts`) is the single-space form, and `membershipOn` / `customRoleOn` / `MEMBERSHIP_COLUMNS` (`lib/space-role.ts`) are what a multi-row reader joins (`GET /api/spaces`, `package-access`, and `GET /api/spaces/:id/members`, which pairs every org member with their own row). Under a role preview the caller's rows are not read at all: the persona's overlay is fixed for the request.
+- **`orgRole` is pinned at admission**, like every other org-level grant the request carries (`orgPermissions`, §4.2): `requireOrgContext` reads it once and the space step reuses it. Re-reading it in the space statement would make the org half and the space half of `permissions` answer two different instants. A caller with no admission — the scheduler revalidating a frozen actor at fire time — reads it in the same statement as the rest (`loadSpaceAccess` returns it).
+- **The row that authorized the request is the row the request sees.** `applySpacePermissions` owns `c.set("space")`, and sets it to the row it judged, not to the lookup that found the space. A write that decides on that row therefore decides on the state its own authorization saw. A reader resolving OTHER users' roles (`GET /api/spaces/:id/members`) is not deciding for the caller: it re-reads the space with their rows, one statement per the rule above.
+- **A write whose authority depends on the space's access columns is conditioned on them.** `PATCH /api/spaces/:id` checks the caller may grant the resulting default role against `c.get("space")`; `updateSpace` then writes `visibility` / `default_role` only `WHERE` both still hold the judged values, and answers 409 `space_access_changed` otherwise. Membership writes (§6.4) need no such guard: they are bounded by what the ACTOR may grant, which is pinned with the rest of the request, and they already serialise against org-role changes on the `org_members` row (`lockOrgMemberForSpaceGrant`).
+
+What stays open is the window every request-scoped authorization has: a request admitted with `builder` keeps `builder` until it ends. That is the contract, not a race — and nothing narrower is achievable without re-resolving authority under a lock inside every write, which §13.8 rejects.
 
 ---
 
@@ -414,7 +427,7 @@ A caller's OWN personal space is in every listing (`GET /api/spaces` provisions 
 
 Each item gains `visibility`, `default_role`, `access: "member" | "none"`, `role` (`{ kind, key, name }` or `null`) and `permissions: string[]` — the caller's effective set in that space, already ceiling-applied. The SPA reads nothing else to decide what to render (§8).
 
-`PATCH /api/spaces/:id` moves from `spaces:write` to `space-settings:write` and accepts `visibility` and `default_role`. Setting `visibility` to anything but `open` on the default space is a 400 (the DB check backs it). Changing a default preset (including on a closed/private space), or opening a space with that preset, must not grant permissions beyond the actor's effective set in that space. `POST` stays `spaces:write`; the creator is **not** given a row — they are an admin already, or they could not create.
+`PATCH /api/spaces/:id` moves from `spaces:write` to `space-settings:write` and accepts `visibility` and `default_role`. Setting `visibility` to anything but `open` on the default space is a 400 (the DB check backs it). Changing a default preset (including on a closed/private space), or opening a space with that preset, must not grant permissions beyond the actor's effective set in that space. That check reads the space row the request was authorized against, so the write is conditioned on it (§4.4): a concurrent change to `visibility` or `default_role` makes the PATCH a 409 `space_access_changed`. `POST` stays `spaces:write`; the creator is **not** given a row — they are an admin already, or they could not create.
 
 ### 6.4 Space members — `/api/spaces/:id/members`
 
@@ -833,3 +846,7 @@ Keeping the old authority was rejected for two reasons.
 A setting — "only admins write default-space packages" — was considered and rejected with it: it would reintroduce exactly the second authority, addressed by org role, that removing the NULL home deleted. **The lever is the default space's own role configuration**, which is the same answer Dust gives.
 
 Be precise about which lever, because one of them does not exist here: the default space cannot be closed. `spaces_default_is_open` (drizzle `0056`) pins it to `visibility = 'open'`, so every org `member` reaches it implicitly, through `default_role` and with no `space_members` row to remove — "remove them from the default space" is not an available act. What an organization actually turns is `default_role` (`PATCH /api/spaces/{id}`), which ships as `operator` and therefore grants no `<type>:write` at all: the widening reaches a builder of the default space, not every member, unless somebody has set that default to `builder` or written an explicit membership. The other lever is per package — `PUT /api/packages/{scope}/{name}/home` moves one to a team space, before or after the deploy.
+
+### 13.8 Locking the space row inside every membership write
+
+Take `spaces` `FOR UPDATE` in `updateSpace` and `FOR SHARE` in every transaction that writes a membership or a run on the strength of a resolved role (issue #1472, option 2). Rejected: the role those writes act on was resolved by `applySpacePermissions` before any transaction opened, so the lock serialises the write against a row the authorization never read. Making it mean something requires re-running the resolver inside each writing transaction — a second enforcement point per route, and a lock per write — to shrink a window that every request-scoped authorization has anyway. §4.4 closes what is actually wrong: torn reads (one statement), a request seeing a different space than the one that admitted it (`c.set("space")`), and the one write whose authority depends on the space's own access columns (the conditional `PATCH`).

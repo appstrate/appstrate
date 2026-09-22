@@ -17,8 +17,9 @@ describe("persona-sensitive call sites", () => {
    *
    * `.get("orgRole")` — the real role, which a preview deliberately leaves
    * untouched ({@link callerOrgRole} is the previewed one).
-   * `loadSpaceMember(` / `loadSpaceMemberships(` — the caller's own rows,
-   * which a preview replaces with its overlay (`callerSpaceMember*`).
+   * `loadSpaceMember(` / `loadSpaceAccess(` / `membershipOn(` — the caller's
+   * own rows, which a preview replaces with its overlay (`callerSpaceAccess`,
+   * `personaMemberships`).
    * `orgPermissions(` — a role's org grants, which a preview intersects
    * (`orgHalfFor`).
    */
@@ -73,15 +74,20 @@ describe("persona-sensitive call sites", () => {
       ],
     },
     {
-      what: "`loadSpaceMember(` / `loadSpaceMemberships(`",
-      pattern: /loadSpaceMember(?:ships)?\(/,
+      what: "`loadSpaceMember(` / `loadSpaceAccess(` / `membershipOn(`",
+      pattern: /(?:loadSpaceMember|loadSpaceAccess|membershipOn)\(/,
       control: "apps/api/src/lib/view-as.ts",
       allowlist: [
-        ["apps/api/src/lib/space-role.ts", "defines them"],
-        ["apps/api/src/lib/view-as.ts", "the persona-aware accessors every other site uses"],
+        ["apps/api/src/lib/space-role.ts", "defines `loadSpaceMember` and `membershipOn`"],
+        ["apps/api/src/lib/space-lookup.ts", "defines `loadSpaceAccess`"],
+        ["apps/api/src/lib/view-as.ts", "`callerSpaceAccess`, the persona-aware accessor"],
+        [
+          "apps/api/src/lib/package-access.ts",
+          "joins the caller's rows only when no persona is set; the overlay replaces them otherwise",
+        ],
         [
           "apps/api/src/routes/realtime.ts",
-          'SSE runs outside the pipeline and has no `c.get("user")`; it overlays explicitly',
+          "SSE runs outside the pipeline; it overlays explicitly",
         ],
         [
           "apps/api/src/services/scheduler.ts",
@@ -94,7 +100,7 @@ describe("persona-sensitive call sites", () => {
         ],
         [
           "apps/api/src/services/spaces.ts",
-          "the listing's own load, bypassed by the overlay `listSpacesForPrincipal` takes",
+          "the listing's own join, bypassed by the overlay `listSpacesForPrincipal` takes",
         ],
       ],
     },

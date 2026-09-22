@@ -44,7 +44,7 @@ import {
 import {
   callerOrgRole,
   callerPersonalOwnerId,
-  callerSpaceMember,
+  callerSpaceAccess,
   effectiveInSpace,
   personaFor,
   personaMemberships,
@@ -244,7 +244,6 @@ function requireSpaceFromParam(param: "id" | "spaceId") {
     const space = await validateSpaceInOrg(spaceId, c.get("orgId"));
     if (!space) throw notFound(`Space '${spaceId}' not found in this organization`);
     await applySpacePermissions(c, space);
-    c.set("space", space);
     return next();
   };
 }
@@ -454,18 +453,15 @@ export function createSpacesRouter() {
     try {
       const space = await getSpace(orgId, spaceId);
       const orgRole = callerOrgRole(c);
-      // One PK lookup, not the whole membership set: a single-space read has
-      // exactly one row to find.
-      const role = resolveSpaceRole(
-        orgRole,
-        space,
-        await callerSpaceMember(c, orgId, space.id),
-        callerPersonalOwnerId(c),
-      );
-      if (!isSpaceVisibleTo(orgRole, space, role)) {
+      // Judged on the snapshot (RBAC spec §4.4); its access columns overlay the
+      // full row in the response, so the body shows the state that was judged.
+      const access = await callerSpaceAccess(c, space);
+      if (!access) throw notFound(`Space '${spaceId}' not found in this organization`);
+      const role = resolveSpaceRole(orgRole, access.space, access.member, callerPersonalOwnerId(c));
+      if (!isSpaceVisibleTo(orgRole, access.space, role)) {
         throw notFound(`Space '${spaceId}' not found in this organization`);
       }
-      return c.json(spaceWireForCaller(c, space, role));
+      return c.json(spaceWireForCaller(c, { ...space, ...access.space }, role));
     } catch (err) {
       if (err instanceof ApiError) throw err;
       logger.error("Failed to get space", {
@@ -506,7 +502,12 @@ export function createSpacesRouter() {
 
       try {
         const { default_role, ...rest } = data;
-        const space = await updateSpace(orgId, spaceId, { ...rest, defaultRole: default_role });
+        const space = await updateSpace(
+          orgId,
+          spaceId,
+          { ...rest, defaultRole: default_role },
+          current,
+        );
         await recordAuditFromContext(c, {
           action: "space.updated",
           resourceType: "space",
@@ -652,9 +653,10 @@ export function createSpacesRouter() {
   // spec §6.4). A guest holding preset `admin` here manages the roles this
   // space granted and enumerates nothing else.
   router.get("/:id/members", requirePermission("space-members", "read"), async (c) => {
-    const space = c.get("space")!;
     const includeImplicit = c.get("permissions")?.has("members:read") ?? false;
-    return c.json(listResponse(await listSpaceMembers(c.get("orgId"), space, includeImplicit)));
+    return c.json(
+      listResponse(await listSpaceMembers(c.get("orgId"), c.get("space")!.id, includeImplicit)),
+    );
   });
 
   // POST /api/spaces/:id/members — grant an explicit role

@@ -392,9 +392,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   app.use(MCP_PATH, async (c, next) => {
     const orgId = c.get("orgId");
     if (!orgId) return next();
-    const space = await resolveMcpSpaceRow(c, orgId);
-    c.set("space", space);
-    await applySpacePermissions(c, space);
+    await applySpacePermissions(c, await resolveMcpSpaceRow(c, orgId));
     return next();
   });
   app.use(MCP_PATH, requireModulePermission("mcp", "read"));

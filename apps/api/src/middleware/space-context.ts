@@ -14,7 +14,7 @@ import { setSpaceContextApplier } from "@appstrate/core/permissions";
 import {
   callerOrgRole,
   callerPersonalOwnerId,
-  callerSpaceMember,
+  callerSpaceAccess,
   effectiveInSpace,
 } from "../lib/view-as.ts";
 import { resolveSpaceRole } from "../lib/space-role.ts";
@@ -67,13 +67,21 @@ export function isSpaceScopedPath(path: string): boolean {
  * fixed allowlist (§7.2); under API-key impersonation it carries the creator's
  * role and resolves like the key.
  *
+ * Owns `c.set("space")`: the row judged with the caller's membership (§4.4),
+ * not the lookup that found the space.
+ *
  * @throws ApiError 403 `not_a_space_member` for `open`/`closed`, 404 for
  *   `private` — a private space does not exist for someone who is not in it.
  */
 export async function applySpacePermissions(
   c: Context<AppEnv>,
-  space: SpaceContextRow,
+  found: SpaceContextRow,
 ): Promise<void> {
+  const space = await admitSpace(c, found);
+  c.set("space", space);
+}
+
+async function admitSpace(c: Context<AppEnv>, space: SpaceContextRow): Promise<SpaceContextRow> {
   // An end-user belongs to a space, never to a person (RBAC spec §3.6): a
   // personal space is a 404 for it whatever else it carries.
   if (c.get("principalKind") === "end_user" && space.ownerUserId !== null) {
@@ -88,21 +96,23 @@ export async function applySpacePermissions(
         `applySpacePermissions: ${c.get("principalKind")} principal reached a space with no org role`,
       );
     }
-    return;
+    return space;
   }
 
   // Under a preview both halves are the persona's, and so is the caller id:
   // `callerPersonalOwnerId` answers `null` under a preview — a persona owns no
   // personal space — so a previewed request reaches none (RBAC spec §3.6), and
   // `visibility = 'private'` means the refusal below is a 404.
+  const access = await callerSpaceAccess(c, space);
+  if (!access) throw notFound(`Space '${space.id}' not found in this organization`);
   const ref = resolveSpaceRole(
     callerOrgRole(c, space.orgId),
-    space,
-    await callerSpaceMember(c, space.orgId, space.id),
+    access.space,
+    access.member,
     callerPersonalOwnerId(c, space.orgId),
   );
   if (!ref) {
-    if (space.visibility === "private") {
+    if (access.space.visibility === "private") {
       throw notFound(`Space '${space.id}' not found in this organization`);
     }
     throw new ApiError({
@@ -115,6 +125,7 @@ export async function applySpacePermissions(
 
   c.set("spaceRole", ref);
   c.set("permissions", effectiveInSpace(c, ref));
+  return access.space;
 }
 
 /**
@@ -142,7 +153,7 @@ export async function applySpacePermissions(
  * silent fallback to the default space (which would weaken space isolation and is
  * exactly the contract `org-isolation` asserts).
  * Validates that the space belongs to the current org. Sets
- * c.set("spaceId") + c.set("space") on success.
+ * c.set("spaceId"), and `applySpacePermissions` sets c.set("space"), on success.
  */
 export function requireSpaceContext() {
   return async (c: Context<AppEnv>, next: Next) => {
@@ -162,7 +173,6 @@ export function requireSpaceContext() {
         throw notFound(`Space '${explicitSpace}' not found in this organization`);
       }
       c.set("spaceId", explicitSpace);
-      c.set("space", space);
       await applySpacePermissions(c, space);
       return next();
     }
@@ -173,14 +183,11 @@ export function requireSpaceContext() {
     if (isInternalDispatch(c.req.raw.headers)) {
       const active = await defaultSpaceForOrg(orgId);
       if (active) {
-        // One of the three paths that never pass through `validateSpaceInOrg`
-        // (the others: the MCP router's default-space fallback and the SSE
-        // API-key branch — see the note on `validateSpaceInOrg`). The id comes
-        // straight off the row, so this is where an un-migrated `spaces` table
-        // would otherwise slip in unnoticed.
+        // A default-space fallback never passes through `validateSpaceInOrg`
+        // (see its note): the id comes straight off the row, so this is where
+        // an un-migrated `spaces` table would otherwise slip in unnoticed.
         assertSpaceId(active.id);
         c.set("spaceId", active.id);
-        c.set("space", active);
         // The token subject's membership in the default space decides what it
         // reaches — a `guest` without a row is refused (spec §7.3).
         await applySpacePermissions(c, active);
@@ -219,9 +226,11 @@ setSpaceContextApplier(async (c, spaceId) => {
   if (!space) {
     throw notFound(`Space '${explicit ?? "(default)"}' not found in this organization`);
   }
+  // The default-space fallback reads the id off the row: same guard as the other two.
+  if (!explicit) assertSpaceId(space.id);
   // Deliberately does NOT write `spaceId`: that key is the CREDENTIAL's space
   // for an API key and a module must not be able to rewrite it (the webhooks
   // module compares the two to refuse a key reaching a sibling space).
-  ctx.set("space", space);
+  // `applySpacePermissions` writes `space` itself.
   await applySpacePermissions(ctx, space);
 });

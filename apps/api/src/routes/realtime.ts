@@ -13,8 +13,8 @@ import { ApiError, forbidden, notFound, unauthorized } from "../lib/errors.ts";
 import { validateApiKey } from "../services/api-keys.ts";
 import { getOrgMember } from "../services/organizations.ts";
 import { effectivePermissions } from "../lib/permissions.ts";
-import { loadSpaceMember, resolveSpaceRole, type SpaceMemberRow } from "../lib/space-role.ts";
-import { validateSpaceInOrg, type SpaceContextRow } from "../lib/space-lookup.ts";
+import { resolveSpaceRole, type SpaceMemberRow } from "../lib/space-role.ts";
+import { loadSpaceAccess, type SpaceContextRow } from "../lib/space-lookup.ts";
 import {
   callerPersonalOwnerId,
   effectiveInSpace,
@@ -31,7 +31,6 @@ import {
   VIEW_AS_HEADER,
   VIEW_AS_QUERY,
 } from "@appstrate/core/permissions";
-import { assertSpaceId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
 import type { AppEnv, OrgRole } from "../types/index.ts";
 
@@ -186,19 +185,18 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
     const keyInfo = await validateApiKey(token);
     if (!keyInfo) return null;
 
-    // `spaceId` comes straight off the `api_keys` row: shape-check it here. The
-    // space row decides the creator's membership (visibility + default role).
-    assertSpaceId(keyInfo.spaceId);
-    const keySpace = await validateSpaceInOrg(keyInfo.spaceId, keyInfo.orgId);
-    if (!keySpace) return null;
+    // `spaceId` comes off the `api_keys` row; `loadSpaceAccess` shape-checks it
+    // and reads it with the creator's row in one statement (RBAC spec §4.4).
+    const access = await loadSpaceAccess(keyInfo.spaceId, keyInfo.orgId, keyInfo.userId);
+    if (!access) return null;
 
     // Creator's LIVE authority in the key's space (RBAC spec §7.1).
     const grants = await resolveSpaceGrants(
       c,
       keyInfo.orgId,
       keyInfo.creatorRole,
-      keySpace,
-      await loadSpaceMember(keySpace.id, keyInfo.userId),
+      access.space,
+      access.member,
       // A key never reaches a personal space, not even its creator's: it is
       // pinned to one space and carries their authority, not their privacy
       // (RBAC spec §3.6). Passed as `null` rather than left to a context key
@@ -243,9 +241,15 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
   // Validate space belongs to org. A 404, not the `null` that becomes a 401
   // below: paired with the 404 the visibility split raises further down, a 401
   // here would tell the caller which `spc_` ids exist in the org — and the SPA
-  // puts that id in the query string (RBAC spec §3.6).
-  const space = await validateSpaceInOrg(spaceId, orgId);
-  if (!space) throw notFound(`Space '${spaceId}' not found in this organization`);
+  // puts that id in the query string (RBAC spec §3.6). One statement with the
+  // user's row (§4.4); none under a preview — any `viewAs` value yields a persona or throws.
+  const access = await loadSpaceAccess(
+    spaceId,
+    orgId,
+    viewAsRaw !== undefined ? null : session.user.id,
+  );
+  if (!access) throw notFound(`Space '${spaceId}' not found in this organization`);
+  const { space } = access;
 
   const role = member.role;
   // Set before the persona is judged: `reportPermissionDenial` names the actor from the context.
@@ -275,9 +279,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
     orgId,
     role,
     space,
-    persona
-      ? personaSpaceMember(persona, space.id)
-      : await loadSpaceMember(space.id, session.user.id),
+    persona ? personaSpaceMember(persona, space.id) : access.member,
     // The personal-space identity, not simply the session user: under a role
     // preview it is `null`, so the previewer's OWN personal space stops being
     // streamable through a persona that has none (RBAC spec §3.6). The context

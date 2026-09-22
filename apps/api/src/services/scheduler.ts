@@ -6,16 +6,10 @@ import { getCache } from "../infra/index.ts";
 import { and, eq, asc, inArray, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import {
-  schedules,
-  endUsers,
-  organizationMembers,
-  spaces,
-  runs,
-  notifications,
-} from "@appstrate/db/schema";
+import { schedules, endUsers, runs, notifications } from "@appstrate/db/schema";
 import { activeRunStatusValues } from "@appstrate/db/run-status";
-import { loadSpaceMember, resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
+import { resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
+import { loadSpaceAccess } from "../lib/space-lookup.ts";
 import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
@@ -202,25 +196,16 @@ async function isScheduleActorValid(
   spaceId: string,
 ): Promise<boolean> {
   if (actor.type === "user") {
-    const [row] = await db
-      .select({ role: organizationMembers.role })
-      .from(organizationMembers)
-      .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, actor.id)))
-      .limit(1);
-    if (!row) return false;
-    const [space] = await db
-      .select()
-      .from(spaces)
-      .where(and(eq(spaces.id, spaceId), eq(spaces.orgId, orgId)))
-      .limit(1);
-    if (!space) return false;
-    const membership = await loadSpaceMember(spaceId, actor.id);
+    // All three inputs in one statement: a fire has no admission to pin the org
+    // role at (RBAC spec §4.4).
+    const access = await loadSpaceAccess(spaceId, orgId, actor.id);
+    if (!access?.orgRole) return false;
     // The frozen actor IS the caller here: a schedule in a personal space runs
     // as its owner, and stops the moment they are no longer the owner
     // (RBAC spec §3.6).
-    return spacePermissions(resolveSpaceRole(row.role, space, membership, actor.id)).has(
-      "agents:run",
-    );
+    return spacePermissions(
+      resolveSpaceRole(access.orgRole, access.space, access.member, actor.id),
+    ).has("agents:run");
   }
   const [row] = await db
     .select({ id: endUsers.id })
