@@ -1439,7 +1439,7 @@
   "spaces.personal.orphanedBadge": "Orphaned",
   "spaces.rowActions": "More actions for {{name}}",
   "catalogue.scopeSelector": "Scope",
-  "catalogue.scopePlaced": "In your spaces",
+  "catalogue.scopePlaced": "Your spaces",
   "catalogue.scopeDiscover": "Discover",
   "catalogue.filter.state": "State",
   "catalogue.filter.active": "Active",
@@ -1466,5 +1466,9 @@
   "catalogue.closureCredentials": "An integration runs with the space's own credentials: this space will have to connect it.",
   "packages.shareIntegrationsHint_one": "This agent uses {{list}}: the recipient will have to activate it and connect their own.",
   "packages.shareIntegrationsHint_other": "This agent uses {{list}}: the recipient will have to activate them and connect their own.",
-  "catalogue.filter.space": "Space"
+  "catalogue.filter.space": "Space",
+  "catalogue.pendingLine_one": "{{count}} offered package is waiting for a decision.",
+  "catalogue.pendingLine_other": "{{count}} offered packages are waiting for a decision.",
+  "catalogue.pendingShow": "Show",
+  "catalogue.offeredByShort": "by {{name}}"
 }

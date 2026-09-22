@@ -37,6 +37,11 @@ export interface CataloguePlacement {
   inactiveIn: string[];
   /** Space ids where it was offered and nobody switched it on. */
   offeredIn: string[];
+  /**
+   * Who made each offer, by space id — `null` for an offer nobody authored (the
+   * reconciling share a home move leaves behind, `shared_by: null`).
+   */
+  offeredBy: Record<string, string | null>;
   /** The space that governs the draft, or `null` when the caller cannot reach it. */
   homeSpaceId: string | null;
   /** Placed nowhere this caller can see: the second tab's subject. */
@@ -60,7 +65,12 @@ export function cataloguePlacement(
   options: { everywhere?: boolean } = {},
 ): CataloguePlacement {
   const byState = { active: [] as string[], inactive: [] as string[], offered: [] as string[] };
-  for (const placement of pkg.placements) byState[stateOf(placement)].push(placement.space_id);
+  const offeredBy: Record<string, string | null> = {};
+  for (const placement of pkg.placements) {
+    byState[stateOf(placement)].push(placement.space_id);
+    if (placement.state === "none")
+      offeredBy[placement.space_id] = placement.shared_by?.name ?? null;
+  }
   const mine = spaceId
     ? pkg.placements.find((placement) => placement.space_id === spaceId)
     : undefined;
@@ -69,6 +79,7 @@ export function cataloguePlacement(
     activeIn: byState.active,
     inactiveIn: byState.inactive,
     offeredIn: byState.offered,
+    offeredBy,
     homeSpaceId: pkg.home_space_id,
     unplaced: pkg.placements.length === 0,
     everywhere: options.everywhere ?? false,

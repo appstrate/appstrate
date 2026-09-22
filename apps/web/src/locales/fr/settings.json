@@ -1439,7 +1439,7 @@
   "spaces.personal.orphanedBadge": "Orphelin",
   "spaces.rowActions": "Plus d’actions pour {{name}}",
   "catalogue.scopeSelector": "Portée",
-  "catalogue.scopePlaced": "Dans vos espaces",
+  "catalogue.scopePlaced": "Vos espaces",
   "catalogue.scopeDiscover": "Découvrir",
   "catalogue.filter.state": "État",
   "catalogue.filter.active": "Actif",
@@ -1466,5 +1466,9 @@
   "catalogue.closureCredentials": "Une intégration s'exécute avec les identifiants de l'espace : celui-ci devra s'y connecter.",
   "packages.shareIntegrationsHint_one": "Cet agent utilise {{list}} : le destinataire devra l'activer chez lui et s'y connecter.",
   "packages.shareIntegrationsHint_other": "Cet agent utilise {{list}} : le destinataire devra les activer chez lui et s'y connecter.",
-  "catalogue.filter.space": "Espace"
+  "catalogue.filter.space": "Espace",
+  "catalogue.pendingLine_one": "{{count}} package proposé attend une décision.",
+  "catalogue.pendingLine_other": "{{count}} packages proposés attendent une décision.",
+  "catalogue.pendingShow": "Voir",
+  "catalogue.offeredByShort": "par {{name}}"
 }

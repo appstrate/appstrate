@@ -42,6 +42,7 @@ import { toast } from "sonner";
 import { Boxes, Layers, LibraryBig, Wrench } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
+import { cn } from "@appstrate/ui/cn";
 import type { PackageType } from "@appstrate/core/validation";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { MoveHomeSpaceDialog } from "./package-detail/move-home-space-dialog";
@@ -90,7 +91,6 @@ import {
   useCatalogueSelectColumn,
   type CatalogueRowState,
 } from "./catalogue-columns";
-import { ContextSelector } from "./settings/context-selector";
 import { RailButton } from "./settings/rail-link";
 import { RailGroup, RailHeader } from "./settings/rail-shell";
 import { SettingsHeading } from "./settings/settings-heading";
@@ -316,7 +316,22 @@ export function OrgCatalogueModal({
   // placement model made expressible: a package can be here and off, or here
   // and offered to nobody's answer yet. "Where does it run" was the closest
   // this screen could say before, and it could not tell those two apart.
-  const states = list.values("state", ["active", "inactive", "offered"] as const);
+  const STATE_VALUES = ["active", "inactive", "offered"] as const;
+  const states = (searchParams.get("state") ?? "")
+    .split(",")
+    .filter((value): value is (typeof STATE_VALUES)[number] =>
+      (STATE_VALUES as readonly string[]).includes(value),
+    );
+  const setStates = (next: string[]) =>
+    setSearchParams(
+      (prev) => {
+        const out = new URLSearchParams(prev);
+        if (next.length > 0) out.set("state", next.join(","));
+        else out.delete("state");
+        return out;
+      },
+      { replace: true, state: routerLocation.state },
+    );
   const visibleIds = visibleSpaces.map((space) => space.id);
   /** Its states across the spaces on screen: the columns are the question. */
   const statesIn = (placement: CataloguePlacement): PlacementState[] => {
@@ -336,11 +351,15 @@ export function OrgCatalogueModal({
     // "what is in this space" is the question a narrowed view asks. Découvrir
     // is untouched: its rows are placed nowhere, by definition.
     if (!discovering && chosenSpaces.length > 0 && statesIn(placement).length === 0) return false;
-    if (states.length === 0) return true;
+    if (discovering || states.length === 0) return true;
     return statesIn(placement).some((state) => states.includes(state));
   });
   // Offered only when there is a choice to make: with one space, the only
   // column is already that space.
+  const pendingHere = ofKind.reduce((total, item) => {
+    const placement = placementById.get(item.id);
+    return total + (placement?.offeredIn.filter((id) => visibleIds.includes(id)).length ?? 0);
+  }, 0);
   const spaceFilter: FilterSpec | null =
     spaces.length > 1
       ? {
@@ -360,7 +379,7 @@ export function OrgCatalogueModal({
       { value: "inactive", label: t("catalogue.filter.inactive") },
       { value: "offered", label: t("catalogue.filter.offered") },
     ],
-    onChange: list.setValues("state"),
+    onChange: setStates,
   };
   // Provenance: an attribute of the package, not the question a reader asks
   // first — which is why it stopped being the rail's axis.
@@ -540,24 +559,49 @@ export function OrgCatalogueModal({
 
   // One group, never two: the kinds are the same four words under either half
   // of the axis, and a rail that lists them twice makes the reader compare two
-  // identical lists to find the difference. The scope is a SELECTOR at the head
-  // of the group, exactly where the settings rail puts the organisation and the
-  // workspace it is showing.
+  // identical lists to find the difference.
   //
-  // What it selects is POSSESSION: what is already placed in a space you reach,
-  // or what you could still place there. Provenance moved to the filters — it
-  // describes a package, it is not the question a reader opens with.
-  const scopeOptions = [
-    { id: "placed", name: t("catalogue.scopePlaced") },
-    { id: "discover", name: t("catalogue.scopeDiscover") },
+  // The axis is POSSESSION — what is already placed in a space you reach, or
+  // what you could still place there — and it is a segmented control, the way
+  // Studio / Chat head the main navigation: two values are shown at once
+  // rather than one behind a menu. Provenance stays a filter; calling the first
+  // half "Organisation" would have put it back on the axis under another name.
+  const scopeOptions: { id: CatalogueScope; label: string; count?: number }[] = [
+    { id: "placed", label: t("catalogue.scopePlaced") },
+    { id: "discover", label: t("catalogue.scopeDiscover") },
   ];
   const selector = (
-    <ContextSelector
-      value={scope}
-      label={t("catalogue.scopeSelector")}
-      options={scopeOptions}
-      onValueChange={(next) => show(catalogueScope(next), active)}
-    />
+    <div
+      role="tablist"
+      aria-label={t("catalogue.scopeSelector")}
+      className="bg-sidebar-accent/40 flex gap-0.5 rounded-lg p-0.5"
+    >
+      {scopeOptions.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          role="tab"
+          aria-selected={scope === option.id}
+          onClick={() => show(option.id, active)}
+          className={cn(
+            "flex h-7 flex-auto items-center justify-center gap-1.5 rounded-md px-1.5 text-sm font-medium whitespace-nowrap transition-colors",
+            scope === option.id
+              ? "bg-card text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <span>{option.label}</span>
+          {(option.count ?? 0) > 0 && (
+            <span
+              className="bg-primary text-primary-foreground rounded-full px-1.5 text-[10px] leading-4 font-semibold tabular-nums"
+              aria-label={t("catalogue.pendingOffers", { count: option.count, ns: "common" })}
+            >
+              {option.count}
+            </span>
+          )}
+        </button>
+      ))}
+    </div>
   );
   const kindRows = visibleKinds.map((entry) => (
     <RailButton
@@ -575,9 +619,12 @@ export function OrgCatalogueModal({
     <div className="flex h-full flex-col">
       <RailHeader icon={LibraryBig} title={t("catalogue.title")} />
       <div className="flex-1">
-        <RailGroup title={t("catalogue.scopeSelector")}>
-          {selector}
-          <nav className="mt-1.5 flex flex-col gap-0.5" aria-label={t("catalogue.kinds")}>
+        {/* The axis heads the rail the way Studio / Chat head the navigation,
+            and the kinds follow as the group they are. */}
+        {/* The rail groups' own inset, so the control lines up with the rows. */}
+        <div className="px-3 pt-3">{selector}</div>
+        <RailGroup title={t("catalogue.kinds")}>
+          <nav className="flex flex-col gap-0.5" aria-label={t("catalogue.kinds")}>
             {kindRows}
           </nav>
         </RailGroup>
@@ -649,7 +696,23 @@ export function OrgCatalogueModal({
           list={list}
           view={view}
           onViewChange={setView}
-          header={<SettingsHeading className="mb-4" title={t(kind.titleKey)} />}
+          header={
+            <>
+              <SettingsHeading className="mb-4" title={t(kind.titleKey)} />
+              {/* The offers waiting for an answer, said above the table and
+                  one click from being the only rows in it. Not a second list
+                  of them: they ARE rows of this table, and a copy above it
+                  would be two places to take one decision. */}
+              {!discovering && pendingHere > 0 && !states.includes("offered") && (
+                <div className="border-border bg-card mb-4 flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm">
+                  <span>{t("catalogue.pendingLine", { count: pendingHere })}</span>
+                  <Button size="sm" variant="outline" onClick={() => setStates(["offered"])}>
+                    {t("catalogue.pendingShow")}
+                  </Button>
+                </div>
+              )}
+            </>
+          }
           tabs={
             active === "integration" ? (
               <CollectionTabs

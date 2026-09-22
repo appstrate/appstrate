@@ -1582,7 +1582,9 @@ response only ever carries the spaces the caller can enter.
 
 **Its shape**
 
-- **The first axis is possession, not provenance.** "Dans vos espaces" against
+- **The first axis is possession, not provenance**, as a segmented control at
+  the head of the rail — the way Studio / Chat head the navigation — rather
+  than a menu hiding one of two values. "Vos espaces" against
   "Découvrir" — what is already placed in a space you reach, against what you
   could still place. Provenance (the org's packages, Appstrate's) became a
   filter, which is what it is: an attribute of a package, not the question a
@@ -1595,6 +1597,12 @@ response only ever carries the spaces the caller can enter.
 - **Three states, and the third is the one the model added.** Active, switched
   off, and OFFERED — a placement somebody made and nobody switched on. It is
   not an inbox item to accept: turning the switch on IS accepting it.
+- **Offers are one click from being the only rows.** A line above the placed
+  table ("2 packages proposés attendent une décision · Voir") applies the State
+  filter, which is in the URL like the space one; the navigation's badge opens
+  the catalogue on it directly. Not a second list above the table — the offers
+  ARE rows of it, and a copy would be two places to take one decision. Each
+  offered cell names who made it ("par Julie"), from `shared_by`.
 - **The navigation carries the offers**, because nothing else does: the share
   route notifies a PERSON and says nothing at all when the target is a team
   space (`createPackageShareNotification`, gated on `recipientUserId`). The

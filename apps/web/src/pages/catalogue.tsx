@@ -34,12 +34,18 @@ export function CataloguePage() {
     <OrgCatalogueModal
       scope={scope ?? "placed"}
       type={type ?? ""}
-      onSelect={(nextScope: CatalogueScope, nextType: PackageType) =>
-        navigate(`/catalogue/${nextScope}/${nextType}${location.search}`, {
+      onSelect={(nextScope: CatalogueScope, nextType: PackageType) => {
+        // The space filter follows the reader everywhere; the state filter
+        // follows only within the placed half — Découvrir holds nothing that
+        // has a state, and carrying it there would reapply it on the way back.
+        const query = new URLSearchParams(location.search);
+        if (nextScope !== (scope ?? "placed")) query.delete("state");
+        const search = query.toString();
+        navigate(`/catalogue/${nextScope}/${nextType}${search ? `?${search}` : ""}`, {
           replace: true,
           state: location.state,
-        })
-      }
+        });
+      }}
       onClose={close}
     />
   );

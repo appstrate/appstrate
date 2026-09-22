@@ -267,7 +267,7 @@ export function useCatalogueSpaceColumns({
         // `relative z-10`: the row link paints an overlay over every cell, and
         // anything that answers to the pointer has to sit above it or the row
         // swallows the click (see `data-table.tsx`).
-        <span className="relative z-10 flex items-center gap-1.5">
+        <span className="relative z-10 flex min-w-0 items-center gap-1.5 overflow-hidden">
           <Switch
             checked={state === "active"}
             disabled={busy || !mayWrite}
@@ -279,8 +279,17 @@ export function useCatalogueSpaceColumns({
             onCheckedChange={(next) => onSetActive(item, space.id, next === true)}
           />
           {state === "offered" && (
-            <span className="text-muted-foreground truncate text-[0.7rem]">
-              {t("catalogue.offeredHere")}
+            // Two short lines rather than one that truncates: in a 104px column
+            // "Proposé par Julie" lost the name, which is the part that matters.
+            <span className="text-muted-foreground flex min-w-0 flex-col text-[0.7rem] leading-tight">
+              <span>{t("catalogue.offeredHere")}</span>
+              {/* Who made the offer, when somebody did: a decision reads
+                  differently coming from a colleague than from nowhere. */}
+              {placement.offeredBy[space.id] && (
+                <span className="truncate">
+                  {t("catalogue.offeredByShort", { name: placement.offeredBy[space.id] })}
+                </span>
+              )}
             </span>
           )}
         </span>

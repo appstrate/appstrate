@@ -22,7 +22,7 @@ import { ProductTabs } from "@/components/product-tabs";
 import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
 import { openAsModal } from "@/lib/modal-route";
 import { useCatalogueKinds } from "@/hooks/use-catalogue-kinds";
-import { usePendingOfferCount } from "@/hooks/use-pending-offers";
+import { usePendingOfferCount, usePendingOfferKind } from "@/hooks/use-pending-offers";
 import { useSettingsSections } from "@/pages/settings/use-settings-sections";
 import { cn } from "@appstrate/ui/cn";
 import {
@@ -54,6 +54,7 @@ export function ShellSidebar({
   const settingsSections = useSettingsSections();
   const catalogueKinds = useCatalogueKinds();
   const pendingOffers = usePendingOfferCount();
+  const pendingKind = usePendingOfferKind();
   // The page route tree deliberately renders the modal's background location.
   // The address bar is therefore the source of truth for this one global
   // destination while settings are open.
@@ -94,7 +95,16 @@ export function ShellSidebar({
                   <span>{t("nav.catalogue")}</span>
                 </button>
               ) : (
-                <Link to={`/catalogue/placed/${catalogueKinds[0]}`} state={openAsModal(location)}>
+                <Link
+                  // With offers waiting, the entry opens ON them: the count is a
+                  // promise, and the first click keeps it.
+                  to={
+                    pendingOffers > 0 && pendingKind
+                      ? `/catalogue/placed/${pendingKind === "mcp-server" ? "integration" : pendingKind}?state=offered`
+                      : `/catalogue/placed/${catalogueKinds[0]}`
+                  }
+                  state={openAsModal(location)}
+                >
                   <LibraryBig />
                   <span>{t("nav.catalogue")}</span>
                 </Link>
