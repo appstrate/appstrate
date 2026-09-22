@@ -161,7 +161,7 @@ describe("applySpacePermissions judges the row it reads", () => {
     expect(out.space?.defaultRole).toBe("builder");
   });
 
-  it("404s a space that left the organization between lookup and judgement", async () => {
+  it("404s a space deleted between lookup and judgement", async () => {
     const gone = { ...space, id: prefixedId("spc") };
 
     expect((await enter(gone)).status).toBe(404);

@@ -451,7 +451,7 @@ export function personaSpaceMember(persona: ViewAsPersona, spaceId: string): Spa
 
 /**
  * `space` re-read with the caller's row as one snapshot (RBAC spec §4.4), `null`
- * if it left the org. Under a preview, `space` as passed with the persona's overlay.
+ * if it was deleted in between. Under a preview, `space` as passed with the persona's overlay.
  */
 export async function callerSpaceAccess(
   c: Context<AppEnv>,

@@ -183,11 +183,9 @@ export function requireSpaceContext() {
     if (isInternalDispatch(c.req.raw.headers)) {
       const active = await defaultSpaceForOrg(orgId);
       if (active) {
-        // One of the two paths that never pass through `validateSpaceInOrg`
-        // (the other: the MCP router's default-space fallback — see the note
-        // on `validateSpaceInOrg`). The id comes
-        // straight off the row, so this is where an un-migrated `spaces` table
-        // would otherwise slip in unnoticed.
+        // A default-space fallback never passes through `validateSpaceInOrg`
+        // (see its note): the id comes straight off the row, so this is where
+        // an un-migrated `spaces` table would otherwise slip in unnoticed.
         assertSpaceId(active.id);
         c.set("spaceId", active.id);
         // The token subject's membership in the default space decides what it
@@ -228,6 +226,8 @@ setSpaceContextApplier(async (c, spaceId) => {
   if (!space) {
     throw notFound(`Space '${explicit ?? "(default)"}' not found in this organization`);
   }
+  // The default-space fallback reads the id off the row: same guard as the other two.
+  if (!explicit) assertSpaceId(space.id);
   // Deliberately does NOT write `spaceId`: that key is the CREDENTIAL's space
   // for an API key and a module must not be able to rewrite it (the webhooks
   // module compares the two to refuse a key reaching a sibling space).

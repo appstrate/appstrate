@@ -50,8 +50,9 @@ const SPACE_CONTEXT_COLUMNS = {
  * {@link loadSpaceAccess}, which carries the same guard), hence the id-shape guard,
  * run BEFORE the SELECT: a retired `app_` id is un-migrated data, not a missing
  * row, and must throw rather than 404 (header, key and row would still agree).
- * Paths reading the id from a row assert the shape themselves: the
- * `requireSpaceContext` / `resolveMcpSpaceRow` default-space fallbacks.
+ * Paths reading the id from a row assert the shape themselves: the three
+ * default-space fallbacks (`requireSpaceContext`, the module applier behind
+ * `enterSpaceContext`, `resolveMcpSpaceRow`).
  */
 export async function validateSpaceInOrg(
   spaceId: string,
