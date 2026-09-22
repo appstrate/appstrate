@@ -644,8 +644,8 @@ if (sidecarUrl) {
         )
         .join("; ");
       await die(
-        `Integration boot failed — ${bootReport.failed.length} of ${bootReport.declared} ` +
-          `integration(s) did not start: ${summary}`,
+        `Integration boot failed — ${bootReport.failed.length} of ${bootReport.declaredConnections} ` +
+          `connection(s) did not start: ${summary}`,
         { failed: bootReport.failed },
       );
     }

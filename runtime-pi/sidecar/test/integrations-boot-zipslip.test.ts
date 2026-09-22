@@ -56,9 +56,18 @@ describe("extractBundle — per-connection directory key", () => {
       expect(basename(a)).toContain("6f1c2d3e");
       expect(basename(b)).toContain("b2c9a17f");
       expect(basename(a).replace(/-[^-]+$/, "")).not.toBe(basename(b).replace(/-[^-]+$/, ""));
-      // CONTROL — the integration half of the key is still the namespace.
+      // CONTROL — the integration half of the key is still the namespace, and
+      // a connectionless integration (one runner by construction) drops the
+      // connection segment rather than inventing one.
       expect(basename(a)).toStartWith("afps-integ-scope_ssh-");
       expect(basename(b)).toStartWith("afps-integ-scope_ssh-");
+      const none = await extractBundle(bytes, "@scope/ssh", undefined);
+      try {
+        expect(basename(none)).toStartWith("afps-integ-scope_ssh-");
+        expect(basename(none)).not.toContain("6f1c2d3e");
+      } finally {
+        await rm(none, { recursive: true, force: true });
+      }
     } finally {
       await rm(a, { recursive: true, force: true });
       await rm(b, { recursive: true, force: true });

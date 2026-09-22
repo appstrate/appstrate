@@ -123,7 +123,7 @@ describe("boot report — one entry per connection", () => {
     const { result, seen } = await boot([spec(CONN_A), spec(CONN_B)], ["conn-a", "conn-b"]);
     try {
       expect(result.report.ok).toBe(true);
-      expect(result.report.declared).toBe(2);
+      expect(result.report.declaredConnections).toBe(2);
       expect(result.failed).toEqual([]);
       expect(result.spawned.map((entry) => entry.connectionLabel)).toEqual(["work", "perso"]);
       // Same integration, same namespace — the label is the only thing that

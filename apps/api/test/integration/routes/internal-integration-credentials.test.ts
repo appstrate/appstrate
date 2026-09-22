@@ -287,15 +287,14 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     expect(body.delivery_plans.primary).toBeDefined();
   });
 
-  // NOTE — the one legitimate empty payload (the integration declares no auth
-  // at all) has no route-level test on purpose: it is currently UNREACHABLE
-  // through a stored manifest. `@afps-spec/schema` requires every integration
-  // to declare at least one auth ("integration MUST declare at least one auth
-  // method"), so a zero-auth manifest fails validation on read and this
-  // endpoint answers 500 `invalid_manifest` long before the resolver's empty
-  // return. The branch is kept in `resolveLiveIntegrationCredentials` because
-  // it is the correct category-3 answer if that spec rule ever relaxes — it
-  // just cannot be exercised from here today.
+  // NOTE — a RUN token never gets an empty payload from this endpoint. The
+  // zero-auth branch that used to produce one is gone: `@afps-spec/schema`
+  // requires every integration to declare at least one auth ("integration MUST
+  // declare at least one auth method"), so a zero-auth manifest fails
+  // validation on read and this endpoint answers 500 `invalid_manifest` long
+  // before any resolver code. The one empty payload that remains belongs to the
+  // CONNECT-run branch, which never reaches the resolver — it is covered in
+  // `internal-connect-run-grant.test.ts`.
 
   // ─── Fail-loud: the three states that used to answer 200-with-empty ───
   //

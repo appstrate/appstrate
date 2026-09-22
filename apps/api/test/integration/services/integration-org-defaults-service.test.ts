@@ -25,6 +25,7 @@ import {
 } from "../../../src/services/integration-org-defaults-service.ts";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { describeRequiresPostgres } from "../../helpers/tier.ts";
 
 const INTEGRATION_ID = "@official/gmail";
 
@@ -198,6 +199,74 @@ describe("integration-org-defaults-service", () => {
       createdBy: ctx.user.id,
     });
     expect(ok.connection_ids).toHaveLength(MAX_CONNECTIONS_PER_INTEGRATION);
+  });
+
+  it("refuses a set whose members share a label, with the resolver's wording", async () => {
+    const a = await seedSharedConnection(ctx.defaultSpaceId, "prod");
+    const bSame = await seedSharedConnection(ctx.defaultSpaceId, "prod");
+    await expect(
+      upsertOrgDefault(scope, INTEGRATION_ID, {
+        connectionIds: [a, bSame],
+        enforce: true,
+        createdBy: ctx.user.id,
+      }),
+    ).rejects.toThrow(/must have distinct labels/);
+    expect(await getOrgDefault(scope, INTEGRATION_ID)).toBeNull();
+
+    // Control: distinct labels, same two-member shape, lands.
+    const bOther = await seedSharedConnection(ctx.defaultSpaceId, "staging");
+    const ok = await upsertOrgDefault(scope, INTEGRATION_ID, {
+      connectionIds: [a, bOther],
+      enforce: true,
+      createdBy: ctx.user.id,
+    });
+    expect(ok.connection_ids).toEqual([a, bOther].sort());
+  });
+
+  /**
+   * The advisory lock in `upsertOrgDefault`, driven by hand — same reasoning
+   * as the pin one (`integration-pins-service.test.ts`), plus one failure of
+   * its own: the union would carry BOTH writers' `enforce` values across rows
+   * the resolver reads as a single governance decision.
+   */
+  describeRequiresPostgres("two writers racing on one default (needs a real PostgreSQL)", () => {
+    it("makes the second writer wait — one set, one enforce, never the union", async () => {
+      const ids: string[] = [];
+      for (let i = 0; i < 4; i += 1) {
+        ids.push(await seedSharedConnection(ctx.defaultSpaceId, `race-${i}`));
+      }
+      ids.sort();
+      const first = [ids[0]!, ids[1]!];
+      const second = [ids[2]!, ids[3]!];
+
+      let commitFirst!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        commitFirst = resolve;
+      });
+
+      const writingFirst = upsertOrgDefault(
+        scope,
+        INTEGRATION_ID,
+        { connectionIds: first, enforce: true, createdBy: ctx.user.id },
+        { onBeforeCommit: () => gate },
+      );
+      await Bun.sleep(150);
+      const writingSecond = upsertOrgDefault(scope, INTEGRATION_ID, {
+        connectionIds: second,
+        enforce: false,
+        createdBy: ctx.user.id,
+      });
+      await Bun.sleep(150);
+      commitFirst();
+      await Promise.all([writingFirst, writingSecond]);
+
+      const fetched = await getOrgDefault(scope, INTEGRATION_ID);
+      expect(fetched!.connection_ids).toEqual(second);
+      expect(fetched!.enforce).toBe(false);
+      expect(await listOrgDefaultsForResolver(ctx.defaultSpaceId)).toEqual({
+        [INTEGRATION_ID]: { connectionIds: second, enforce: false },
+      });
+    });
   });
 
   it("getOrgDefault returns null when no default is set", async () => {

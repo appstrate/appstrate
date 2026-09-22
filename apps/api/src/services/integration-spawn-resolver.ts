@@ -739,9 +739,12 @@ interface ResolvedDeliveries {
   /**
    * The connection this delivery plan was rendered from — copied verbatim onto
    * `IntegrationSpawnSpec.connection`, which is what tells N otherwise
-   * identical specs apart.
+   * identical specs apart. Always set: a delivery plan is rendered FROM a
+   * connection, so there is no shape of this type without one. (The spec field
+   * is optional only because the connect-run builder emits a spec before any
+   * connection row exists.)
    */
-  connection: IntegrationSpawnSpec["connection"];
+  connection: NonNullable<IntegrationSpawnSpec["connection"]>;
   spawnEnv: Record<string, string>;
   httpDeliveryAuths?: NonNullable<IntegrationSpawnSpec["httpDeliveryAuths"]>;
   /**
@@ -823,7 +826,7 @@ async function resolveDeliveries(
   // decrypts. The cascade snapshot carries a label too, but that copy is the
   // run's audit trail (it survives a rename or a delete); the tool surface the
   // sidecar builds must name the connection as it is NOW.
-  const connection: IntegrationSpawnSpec["connection"] = {
+  const connection: ResolvedDeliveries["connection"] = {
     id: row.id,
     label: row.label,
     accountId: row.accountId,

@@ -239,14 +239,15 @@ const runtimeToolDefs = journalRuntimeToolDefs(
 
 let integrationTools: AppstrateToolDefinition[] = [];
 const specs = readIntegrationSpecsFromEnv();
-const declaredIntegrations = specs?.length ?? 0;
+// One spec per (integration, connection) — the report counts connections.
+const declaredConnections = specs?.length ?? 0;
 
 // Boot report fetched by the agent via `GET /integrations/boot-report`. Starts
 // as a synthetic empty-OK report (covers the no-integrations run); the boot
 // `.then`/`.catch` below overwrite it with the real outcome.
 let integrationBootReport: IntegrationBootReport = {
   ok: true,
-  declared: declaredIntegrations,
+  declaredConnections,
   adapter: "none",
   spawned: [],
   failed: [],
@@ -283,7 +284,7 @@ const integrationBootPromise =
           logger.error("Integration boot raised", { error });
           integrationBootReport = {
             ok: false,
-            declared: declaredIntegrations,
+            declaredConnections,
             adapter: "unknown",
             spawned: [],
             failed: [{ integrationId: "*", error }],

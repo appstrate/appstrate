@@ -113,7 +113,7 @@ describe("@appstrate/bun-toolkit — complex bun integration (e2e)", () => {
       // trail the agent relays into the run log — the runtime-adapter line
       // plus this integration's spawn/connect breadcrumb.
       expect(boot.report.ok).toBe(true);
-      expect(boot.report.declared).toBe(1);
+      expect(boot.report.declaredConnections).toBe(1);
       expect(boot.report.adapter).toBe("process");
       const messages = boot.report.breadcrumbs.map((b) => b.message);
       expect(messages.some((m) => m.startsWith("runtime adapter: process"))).toBe(true);

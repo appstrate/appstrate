@@ -126,8 +126,7 @@ export const schedulesPaths = {
                 },
                 connection_overrides: {
                   type: "object",
-                  description:
-                    'Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..10 per integration, always an ARRAY. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire. Empty arrays and empty ids are refused here: either would be skipped in silence by the connection resolver on every fire instead of failing at this write.',
+                  description: `Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 1..${MAX_CONNECTIONS_PER_INTEGRATION} per integration, always an ARRAY. Loses to admin pins (#1), beats actor-fallback (#4). Stored on \`package_schedules.connection_overrides\` and replayed on every fire. Empty arrays and empty ids are refused here: either would be skipped in silence by the connection resolver on every fire instead of failing at this write.`,
                   additionalProperties: {
                     type: "array",
                     items: { type: "string", minLength: 1 },
@@ -325,8 +324,7 @@ export const schedulesPaths = {
                 },
                 connection_overrides: {
                   type: ["object", "null"],
-                  description:
-                    "Per-integration connection picks frozen on the schedule, one array of 1..10 connection ids per integration. Pass `null` to clear. Same array shape and same bounds as on create.",
+                  description: `Per-integration connection picks frozen on the schedule, one array of 1..${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per integration. Pass \`null\` to clear. Same array shape and same bounds as on create.`,
                   additionalProperties: {
                     type: "array",
                     items: { type: "string", minLength: 1 },

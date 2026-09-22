@@ -194,6 +194,10 @@ export interface IntegrationPin {
   auth_key: string;
   /** The whole pinned set, 1..MAX_CONNECTIONS_PER_INTEGRATION. A write replaces it. */
   connection_ids: string[];
+  /**
+   * When the CURRENT set was written, not when this (agent, integration) was
+   * first pinned: a write replaces the rows, so none survives an edit.
+   */
   createdAt: string;
   updatedAt: string;
 }
@@ -206,11 +210,12 @@ export interface IntegrationPin {
  */
 export interface IntegrationOrgDefault {
   integration_package_id: string;
-  /** The whole default set, 1..MAX_CONNECTIONS_PER_INTEGRATION. */
+  /** The whole default set, 1..MAX_CONNECTIONS_PER_INTEGRATION. A write replaces it. */
   connection_ids: string[];
   /** Denormalised from the set's first connection — display hint only. */
   auth_key: string;
   enforce: boolean;
+  /** When the CURRENT set was written — a write replaces the rows. */
   createdAt: string;
   updatedAt: string;
 }

@@ -583,10 +583,11 @@ export function createInternalRouter() {
   // spawned for. OAuth tokens are refreshed proactively if within the lead
   // window; POST .../refresh forces a refresh regardless.
   //
-  // A 2xx here always carries a usable credential surface: an EMPTY payload
-  // means the integration declares no auth, and nothing else. Every state where
-  // a credential was expected but could not be produced fails loud — 404 (no
-  // connection for the actor / the run's pinned connection is gone), 409
+  // A 2xx on the RUN path always carries a usable credential surface — the only
+  // EMPTY payload this endpoint serves belongs to the connect-run branch above.
+  // Every state where a credential was expected but could not be produced fails
+  // loud — 400 (no `connection_id`, or one this run did not bind), 404 (the
+  // named connection is no longer reachable by the actor), 409
   // `integration_auth_undeclared` (the pinned manifest version no longer
   // declares the connection's auth), 410 (dead credential, connection flagged).
   // The sidecar treats an empty payload as "no `delivery.http` auths, skip the

@@ -121,6 +121,28 @@ describe("POST /api/agents/:scope/:name/run — body validation", () => {
     await expectRejectedField(res, "connection_overrides.@acme/gmail");
   });
 
+  it("rejects a repeated connection id in a set, in either case", async () => {
+    // The same connection twice is a set whose labels cannot be distinct, so
+    // it would 412 `duplicate_connection_label` at the gate instead of 400ing
+    // here. `z.uuid()` accepts either case and Postgres folds, so the guard
+    // has to fold too.
+    await expectRejectedField(
+      await post({ input: {}, connection_overrides: { "@acme/gmail": ["conn_1", "conn_1"] } }),
+      "connection_overrides.@acme/gmail",
+    );
+    await expectRejectedField(
+      await post({ input: {}, connection_overrides: { "@acme/gmail": ["conn_a", "CONN_A"] } }),
+      "connection_overrides.@acme/gmail",
+    );
+    // Control: two genuinely different ids pass the schema and die later, at
+    // version resolution (404).
+    const distinct = await post({
+      input: {},
+      connection_overrides: { "@acme/gmail": ["conn_1", "conn_2"] },
+    });
+    expect(distinct.status).toBe(404);
+  });
+
   it("rejects a connection_overrides set over the cap, and accepts exactly the cap", async () => {
     const ids = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION + 1 }, (_, i) => `conn_${i}`);
     await expectRejectedField(

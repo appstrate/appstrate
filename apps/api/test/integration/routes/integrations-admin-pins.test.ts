@@ -333,6 +333,41 @@ describe("/api/integrations/:packageId admin surface", () => {
       expect(resolution.admin_pinned_connection_ids).toEqual([connA]);
     });
 
+    it("DENY: 400 when the pinned set's labels collide — 200 once one is renamed", async () => {
+      const put = (ids: string[]) =>
+        app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
+          method: "PUT",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({ connection_ids: ids }),
+        });
+      const a = await seedSharedConnection();
+      const b = await seedSharedConnection();
+      await app.request(`/api/integrations/${INTEGRATION}/connections/${b}`, {
+        method: "PATCH",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ label: "collision" }),
+      });
+      await app.request(`/api/integrations/${INTEGRATION}/connections/${a}`, {
+        method: "PATCH",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ label: "collision" }),
+      });
+
+      const clash = await put([a, b]);
+      expect(clash.status).toBe(400);
+      expect(((await clash.json()) as { detail: string }).detail).toMatch(
+        /must have distinct labels/,
+      );
+
+      // Control: rename one and the identical request lands.
+      await app.request(`/api/integrations/${INTEGRATION}/connections/${a}`, {
+        method: "PATCH",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ label: "distinct" }),
+      });
+      expect((await put([a, b])).status).toBe(200);
+    });
+
     it("DENY: 400 on an empty set, a repeated id, and a set over the cap", async () => {
       const connId = await seedSharedConnection();
       const put = (ids: string[]) =>

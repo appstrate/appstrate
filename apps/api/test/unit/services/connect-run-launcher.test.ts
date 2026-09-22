@@ -49,9 +49,6 @@ import {
   connectToolBlock,
 } from "../../helpers/integration-manifests.ts";
 
-/** A connect run's id — it identifies the spec's `connection`, since no row exists yet. */
-const CONNECT_ID = "connect_0123456789abcdef01234567";
-
 beforeAll(() => {
   process.env.RUN_TOKEN_SECRET = process.env.RUN_TOKEN_SECRET ?? "connect-run-test-secret";
 });
@@ -233,7 +230,7 @@ function mockOrchestrator(opts: {
 
 describe("buildConnectLoginSpec", () => {
   it("derives the connectLogin block from the manifest auth + resolved mcp-server", async () => {
-    const spec = await buildConnectLoginSpec(execution(), CONNECT_ID, fakeMcpResolver);
+    const spec = await buildConnectLoginSpec(execution(), fakeMcpResolver);
     expect(spec.integrationId).toBe("@scope/connect-it");
     expect(spec.toolAllowlist).toEqual([]);
     // The runnable server config comes from the referenced mcp-server package —
@@ -278,9 +275,7 @@ describe("buildConnectLoginSpec", () => {
     const noHttp = JSON.parse(JSON.stringify(MANIFEST)) as IntegrationManifest;
     delete (noHttp.auths!.session as { delivery?: unknown }).delivery;
     ex.manifest = noHttp;
-    await expect(buildConnectLoginSpec(ex, CONNECT_ID, fakeMcpResolver)).rejects.toThrow(
-      /no delivery.http/,
-    );
+    await expect(buildConnectLoginSpec(ex, fakeMcpResolver)).rejects.toThrow(/no delivery.http/);
   });
 
   it("throws when the integration is not a local source (no spawnable server)", async () => {
@@ -291,9 +286,7 @@ describe("buildConnectLoginSpec", () => {
       remote: { url: "https://x/mcp", transport: "streamable-http" },
     };
     ex.manifest = remote as unknown as IntegrationManifest;
-    await expect(buildConnectLoginSpec(ex, CONNECT_ID, fakeMcpResolver)).rejects.toThrow(
-      /no spawnable server/,
-    );
+    await expect(buildConnectLoginSpec(ex, fakeMcpResolver)).rejects.toThrow(/no spawnable server/);
   });
 
   it("omits server.version for a system mcp-server (byte route serves it by id alone)", async () => {
@@ -301,7 +294,7 @@ describe("buildConnectLoginSpec", () => {
       server: { type: "python", entry_point: "./server.py" },
       version: null,
     });
-    const spec = await buildConnectLoginSpec(execution(), CONNECT_ID, systemResolver);
+    const spec = await buildConnectLoginSpec(execution(), systemResolver);
     expect(spec.manifest.server).toEqual({
       type: "python",
       entry_point: "./server.py",
@@ -312,7 +305,7 @@ describe("buildConnectLoginSpec", () => {
   it("throws when the referenced mcp-server cannot be resolved", async () => {
     const ex = execution();
     const missing: McpServerResolver = async () => null;
-    await expect(buildConnectLoginSpec(ex, CONNECT_ID, missing)).rejects.toThrow(/mcp-server/);
+    await expect(buildConnectLoginSpec(ex, missing)).rejects.toThrow(/mcp-server/);
   });
 });
 

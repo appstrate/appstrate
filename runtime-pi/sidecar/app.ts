@@ -658,7 +658,7 @@ export function createApp(deps: AppDeps): Hono {
       // No integrations were wired into this sidecar — nothing to fail on.
       return c.json({
         ok: true,
-        declared: 0,
+        declaredConnections: 0,
         adapter: "none",
         spawned: [],
         failed: [],

@@ -97,7 +97,7 @@ describe("connect login spec — Appstrate runtime override", () => {
   it("carries the `_meta` runtime, not the MCPB `server.type`", async () => {
     await seedPair(ctx, "bun");
 
-    const spec = await buildConnectLoginSpec(execution(ctx), "connect_testid");
+    const spec = await buildConnectLoginSpec(execution(ctx));
 
     // Without the override the spec says "node" and the login spawns under the
     // wrong interpreter — silently, since node will happily start a bun-native
@@ -112,7 +112,7 @@ describe("connect login spec — Appstrate runtime override", () => {
   it("leaves `server.type` alone when no runtime override is declared", async () => {
     await seedPair(ctx);
 
-    const spec = await buildConnectLoginSpec(execution(ctx), "connect_testid");
+    const spec = await buildConnectLoginSpec(execution(ctx));
 
     expect(spec.manifest.server?.type).toBe("node");
   });

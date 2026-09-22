@@ -129,6 +129,11 @@ function normalizeIntegrationCredentialsWire(raw: unknown): IntegrationCredentia
   return { auths, deliveryPlans, expiresAtEpochMs };
 }
 
+/** `?connection_id=` when this source serves one — nothing when it does not. */
+function connectionQuery(connectionId: string | undefined): string {
+  return connectionId === undefined ? "" : `?connection_id=${encodeURIComponent(connectionId)}`;
+}
+
 interface CreateIntegrationCredentialsSourceOptions {
   /** Package id (e.g. `@vendor/integration`). */
   integrationId: string;
@@ -136,9 +141,13 @@ interface CreateIntegrationCredentialsSourceOptions {
    * Which of the run's bound connections this source serves. A run can bind
    * several connections of one integration, so the package id alone no longer
    * identifies a credential — every platform call carries `?connection_id=`
-   * and the platform rejects a request without it.
+   * and the run-token surface rejects a request without it.
+   *
+   * Absent only on the connect-run path, which is minting the credential that
+   * will become a connection: there is no row to name yet, and the platform's
+   * grant-authorised branch answers before it reads the query.
    */
-  connectionId: string;
+  connectionId?: string;
   /** Platform base URL (e.g. `http://appstrate-api:3000`). */
   platformApiUrl: string;
   /** Run token used as `Bearer` for both endpoints. */
@@ -404,7 +413,7 @@ export function createIntegrationCredentialsSource(
   }
 
   async function doRefresh(authKey: string): Promise<boolean> {
-    const url = `${options.platformApiUrl}/internal/integration-credentials/${options.integrationId}/refresh?connection_id=${encodeURIComponent(options.connectionId)}`;
+    const url = `${options.platformApiUrl}/internal/integration-credentials/${options.integrationId}/refresh${connectionQuery(options.connectionId)}`;
     let res: Response;
     try {
       res = await fetchFn(url, {
@@ -561,11 +570,11 @@ export function createIntegrationCredentialsSource(
  */
 export async function fetchInitialIntegrationCredentials(
   integrationId: string,
-  connectionId: string,
+  connectionId: string | undefined,
   opts: { platformApiUrl: string; runToken: string; fetchFn?: typeof fetch },
 ): Promise<IntegrationCredentialsWire> {
   const fetchFn = opts.fetchFn ?? fetch;
-  const url = `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}?connection_id=${encodeURIComponent(connectionId)}`;
+  const url = `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}${connectionQuery(connectionId)}`;
   const res = await fetchFn(url, {
     headers: { Authorization: `Bearer ${opts.runToken}` },
   });

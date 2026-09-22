@@ -202,18 +202,27 @@ interface BootIntegrationsResult {
 /**
  * The route key the McpHost dispatches on. `spec.connection.id` stays out of
  * it: the id addresses the platform's credential endpoints, the label is what
- * the agent sees and selects.
+ * the agent sees and selects. `undefined` passes straight through — an
+ * integration declaring no auth binds no connection.
  */
-function hostConnection(spec: IntegrationSpawnSpec): { label: string; accountId: string | null } {
-  return { label: spec.connection.label, accountId: spec.connection.accountId };
+function hostConnection(
+  spec: IntegrationSpawnSpec,
+): { label: string; accountId: string | null } | undefined {
+  return spec.connection;
 }
 
 /**
  * Breadcrumb / log prefix. N specs share an `integrationId`, so the label is
- * what makes a boot trail attributable to one connection.
+ * what makes a boot trail attributable to one connection. A connectionless
+ * integration has exactly one spec, so its id alone is already unambiguous.
  */
 function specTag(spec: IntegrationSpawnSpec): string {
-  return `${spec.integrationId} [${spec.connection.label}]`;
+  return spec.connection ? `${spec.integrationId} [${spec.connection.label}]` : spec.integrationId;
+}
+
+/** Report/log field, omitted rather than invented when there is no connection. */
+function connectionLabelOf(spec: IntegrationSpawnSpec): { connectionLabel?: string } {
+  return spec.connection ? { connectionLabel: spec.connection.label } : {};
 }
 
 /**
@@ -242,8 +251,6 @@ export function readIntegrationSpecsFromEnv(env = process.env): IntegrationSpawn
       s !== null &&
       typeof (s as IntegrationSpawnSpec).integrationId === "string" &&
       typeof (s as IntegrationSpawnSpec).namespace === "string" &&
-      typeof (s as { connection?: { id?: unknown } }).connection?.id === "string" &&
-      typeof (s as { connection?: { label?: unknown } }).connection?.label === "string" &&
       typeof (s as IntegrationSpawnSpec).manifest === "object"
     );
   });
@@ -298,15 +305,16 @@ async function fetchBundleBytes(
 export async function extractBundle(
   bytes: Uint8Array,
   namespace: string,
-  connectionId: string,
+  connectionId: string | undefined,
 ): Promise<string> {
   // Namespace is the integration package id (e.g. `@scope/name`). Both `@`
   // and `/` are illegal in a mkdtemp template under macOS/Linux — collapse
   // to a path-safe slug. The connection key follows it because N connections
-  // of one integration share the namespace. The directory is private to this
-  // run anyway.
+  // of one integration share the namespace; a connectionless integration has
+  // only one runner, so there is nothing to key apart. The directory is
+  // private to this run anyway.
   const safe = namespace.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
-  const root = await mkdtemp(join(tmpdir(), `afps-integ-${safe}-${connectionKey(connectionId)}-`));
+  const root = await mkdtemp(join(tmpdir(), `afps-integ-${safe}-${connectionKey(connectionId)}`));
   // Memory-bounded streaming unzip: a hostile/oversized bundle can't OOM the
   // sidecar (decompression-bomb floor). Caps chosen for a realistic mcp-server
   // bundle (multi-MB code + deps) with generous headroom: 200 MiB total across
@@ -944,7 +952,7 @@ async function spawnAndConnectLocalIntegration(params: {
     spec.manifest.server?.version,
     bundleFetchOpts,
   );
-  const root = await extractBundle(bytes, spec.namespace, spec.connection.id);
+  const root = await extractBundle(bytes, spec.namespace, spec.connection?.id);
 
   const spawnStart = performance.now();
   const spawnedIntegration = await adapter.spawn({
@@ -1088,7 +1096,7 @@ export function pushUnavailableToolBreadcrumb(
     level: "warn",
     data: {
       integrationId: spec.integrationId,
-      connectionLabel: spec.connection.label,
+      ...connectionLabelOf(spec),
       requested: requested.length,
       surviving: added,
       missing,
@@ -1178,7 +1186,7 @@ export function pushServerlessReadyBreadcrumb(
     level: "info",
     data: {
       integrationId: spec.integrationId,
-      connectionLabel: spec.connection.label,
+      ...connectionLabelOf(spec),
       kind: "serverless",
       durationMs,
       toolCount,
@@ -1352,16 +1360,24 @@ export async function bootIntegrations(
       const hasApiCall = (spec.apiCalls?.length ?? 0) > 0;
       const hasHttpDelivery =
         spec.httpDeliveryAuths !== undefined && Object.keys(spec.httpDeliveryAuths).length > 0;
-      const needsSource = hasHttpDelivery || hasApiCall || spec.sourceKind === "remote";
+      // No connection ⇒ the integration declares no auth ⇒ there is no
+      // credential to read, and the run-token credentials surface would refuse
+      // the call for want of a `connection_id`. A `remote` spec that somehow
+      // arrives connectionless still fails loud at the `!source` guard below
+      // rather than booting a hosted MCP with no credential.
+      const connectionId = spec.connection?.id;
+      const needsSource =
+        connectionId !== undefined &&
+        (hasHttpDelivery || hasApiCall || spec.sourceKind === "remote");
       const source = needsSource
         ? createIntegrationCredentialsSource({
             integrationId: spec.integrationId,
-            connectionId: spec.connection.id,
+            connectionId,
             platformApiUrl: bundleFetchOpts.platformApiUrl,
             runToken: bundleFetchOpts.runToken,
             initialPayload: await fetchInitialIntegrationCredentials(
               spec.integrationId,
-              spec.connection.id,
+              connectionId,
               bundleFetchOpts,
             ),
           })
@@ -1421,7 +1437,6 @@ export async function bootIntegrations(
           const integ: ApiCallIntegrationConfig = {
             namespace: spec.namespace, // McpHost.register normalises it
             integrationId: spec.integrationId,
-            connection: hostConnection(spec),
             toolName: apiCall.toolName,
             fetchCredentials: credAdapter.fetchCredentials,
             refreshCredentials: credAdapter.refreshCredentials,
@@ -1443,7 +1458,7 @@ export async function bootIntegrations(
           }
           const pair = await createInProcessPair(defs, {
             serverInfo: {
-              name: `appstrate-api-call-${spec.integrationId}-${spec.connection.label}-${apiCall.toolName}`,
+              name: `appstrate-api-call-${specTag(spec)}-${apiCall.toolName}`,
               version: "1",
             },
           });
@@ -1453,7 +1468,7 @@ export async function bootIntegrations(
           const allocatedNamespace = await host.register({
             namespace: spec.namespace,
             client: wrapped,
-            connection: integ.connection,
+            connection: hostConnection(spec),
             trusted: true,
             allowedTools: defs.map((d) => d.descriptor.name),
             // `hidden_tools` is a runtime boundary, not merely catalog/UI
@@ -1468,7 +1483,7 @@ export async function bootIntegrations(
           total += count;
           logger.info("integration api_call registered (in-process)", {
             integrationId: spec.integrationId,
-            connectionLabel: spec.connection.label,
+            ...connectionLabelOf(spec),
             namespace: allocatedNamespace,
             authKey: apiCall.authKey,
             toolName: apiCall.toolName,
@@ -1496,7 +1511,7 @@ export async function bootIntegrations(
         spawned.push({
           integrationId: spec.integrationId,
           namespace: spec.namespace,
-          connectionLabel: spec.connection.label,
+          ...connectionLabelOf(spec),
           toolCount: apiCallToolCount,
           // serverless integration — no `source.server`, so `vendored` is N/A.
         });
@@ -1547,13 +1562,13 @@ export async function bootIntegrations(
         spawned.push({
           integrationId: spec.integrationId,
           namespace: spec.namespace,
-          connectionLabel: spec.connection.label,
+          ...connectionLabelOf(spec),
           toolCount: added + apiCallAdded,
           // remote-source integration — no `source.server.vendored` field.
         });
         logger.info("integration registered (remote http)", {
           integrationId: spec.integrationId,
-          connectionLabel: spec.connection.label,
+          ...connectionLabelOf(spec),
           namespace: spec.namespace,
           serverUrl: server.url,
           // AFPS §7.1 — surface the actual transport the sidecar
@@ -1568,7 +1583,7 @@ export async function bootIntegrations(
           level: "info",
           data: {
             integrationId: spec.integrationId,
-            connectionLabel: spec.connection.label,
+            ...connectionLabelOf(spec),
             kind: "remote-http",
             durationMs: ms,
             toolCount: added + apiCallAdded,
@@ -1641,7 +1656,7 @@ export async function bootIntegrations(
       spawned.push({
         integrationId: spec.integrationId,
         namespace: spec.namespace,
-        connectionLabel: spec.connection.label,
+        ...connectionLabelOf(spec),
         toolCount: added + apiCallAdded,
         // AFPS §7.1 — forward the local source's `vendored` build-provenance
         // flag so the boot report surfaces it for audit/security consumers.
@@ -1651,7 +1666,7 @@ export async function bootIntegrations(
       });
       logger.info("integration registered", {
         integrationId: spec.integrationId,
-        connectionLabel: spec.connection.label,
+        ...connectionLabelOf(spec),
         namespace: spec.namespace,
         adapter: adapter.id,
         ...(diagnosticId ? { diagnosticId } : {}),
@@ -1663,7 +1678,7 @@ export async function bootIntegrations(
         level: "info",
         data: {
           integrationId: spec.integrationId,
-          connectionLabel: spec.connection.label,
+          ...connectionLabelOf(spec),
           kind: "local",
           adapter: adapter.id,
           spawnMs: Math.round(spawnMs),
@@ -1694,12 +1709,12 @@ export async function bootIntegrations(
           : "";
       failed.push({
         integrationId: spec.integrationId,
-        connectionLabel: spec.connection.label,
+        ...connectionLabelOf(spec),
         error: msg + stderrSuffix,
       });
       logger.warn("integration spawn failed", {
         integrationId: spec.integrationId,
-        connectionLabel: spec.connection.label,
+        ...connectionLabelOf(spec),
         error: msg,
         ...(stderrTail.length > 0 ? { stderrTail } : {}),
       });
@@ -1708,7 +1723,7 @@ export async function bootIntegrations(
         level: "error",
         data: {
           integrationId: spec.integrationId,
-          connectionLabel: spec.connection.label,
+          ...connectionLabelOf(spec),
           // Same `kind` the success crumbs carry — for the serverless
           // zero-tool case this is the only crumb that reports the mode.
           kind: isServerlessSpec(spec) ? "serverless" : "local",
@@ -1726,7 +1741,7 @@ export async function bootIntegrations(
   // whether to abort.
   const report: IntegrationBootReport = {
     ok: failed.length === 0,
-    declared: specs.length,
+    declaredConnections: specs.length,
     adapter: adapter.id,
     spawned,
     failed,
@@ -1857,14 +1872,16 @@ export async function runConnectOnce(
     // is mandatory here — its initial payload is a placeholder session with an
     // empty value; the real session is what `runConnectLogin` captures via
     // `setSessionOutputs` on this same source.
+    // No `connectionId`: a connect run is MINTING the credential that becomes a
+    // connection, so there is no row to name. The platform answers this call
+    // from its grant-authorised branch, which never reads the query.
     const source = createIntegrationCredentialsSource({
       integrationId: spec.integrationId,
-      connectionId: spec.connection.id,
       platformApiUrl: bundleFetchOpts.platformApiUrl,
       runToken: bundleFetchOpts.runToken,
       initialPayload: await fetchInitialIntegrationCredentials(
         spec.integrationId,
-        spec.connection.id,
+        undefined,
         bundleFetchOpts,
       ),
     });

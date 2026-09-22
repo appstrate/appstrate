@@ -18,12 +18,16 @@
  * connection.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { integrationConnections, integrationOrgDefaults } from "@appstrate/db/schema";
 import type { IntegrationOrgDefault } from "@appstrate/shared-types";
 import type { SpaceScope } from "../lib/scope.ts";
-import { canonicalConnectionSet, validatePinTarget } from "./integration-pins-service.ts";
+import {
+  assertDistinctConnectionLabels,
+  canonicalConnectionSet,
+  validatePinTarget,
+} from "./integration-pins-service.ts";
 
 /** Identical wire shape to {@link IntegrationOrgDefault}; aliased for the canonical pattern (cf. `PinSummary`). */
 type OrgDefaultSummary = IntegrationOrgDefault;
@@ -122,6 +126,8 @@ export async function upsertOrgDefault(
   scope: SpaceScope,
   integrationId: string,
   input: UpsertOrgDefaultInput,
+  /** Test-only seam — same shape and same purpose as `upsertIntegrationPin`'s. */
+  opts?: { onBeforeCommit?: () => Promise<void> },
 ): Promise<OrgDefaultSummary> {
   const connectionIds = canonicalConnectionSet(input.connectionIds, "connection_ids");
   const conns = await Promise.all(
@@ -129,9 +135,16 @@ export async function upsertOrgDefault(
       validatePinTarget(scope, integrationId, connectionId, { requireShared: true }),
     ),
   );
+  assertDistinctConnectionLabels(integrationId, conns);
 
   const now = new Date();
+  const lockKey = `iod_set:${scope.spaceId}:${integrationId}`;
   await db.transaction(async (tx) => {
+    // Serialize the whole set write per (space, integration) — see the same
+    // lock in `integration-pins-service.ts`. Without it two concurrent PUTs
+    // leave the union of their sets behind, past the cap and, worse, with the
+    // two `enforce` values mixed across rows the resolver reads as one.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
     await tx
       .delete(integrationOrgDefaults)
       .where(
@@ -151,6 +164,8 @@ export async function upsertOrgDefault(
         updatedAt: now,
       })),
     );
+    // Test-only seam — see `opts.onBeforeCommit` on the signature above.
+    if (opts?.onBeforeCommit) await opts.onBeforeCommit();
   });
 
   return {

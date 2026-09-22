@@ -12,7 +12,7 @@
  *
  * Each case carries its control: the single-connection run must still produce
  * exactly the spec it produced before the set model existed, plus the
- * `connection` field that is now always present.
+ * `connection` field, which is present whenever a connection was bound.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -167,14 +167,14 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
     // What actually differs: the credential material and the handle. Both come
     // from the LIVE rows — the snapshot's audit copies say `snapshot-*`, so an
     // implementation that read them would fail here.
-    expect(specs.map((s) => s.connection.label).sort()).toEqual(["db", "web-1"]);
-    expect(specs.map((s) => s.connection.id).sort()).toEqual([web, dbHost].sort());
-    expect(specs.map((s) => s.connection.accountId).sort()).toEqual([
+    expect(specs.map((s) => s.connection!.label).sort()).toEqual(["db", "web-1"]);
+    expect(specs.map((s) => s.connection!.id).sort()).toEqual([web, dbHost].sort());
+    expect(specs.map((s) => s.connection!.accountId).sort()).toEqual([
       "db.example.com",
       "web-1.example.com",
     ]);
 
-    const byLabel = new Map(specs.map((s) => [s.connection.label, s]));
+    const byLabel = new Map(specs.map((s) => [s.connection!.label, s]));
     expect(byLabel.get("web-1")!.spawnEnv.SSH_HOST).toBe("web-1.example.com");
     expect(byLabel.get("web-1")!.spawnEnv.SSH_PRIVATE_KEY).toBe("key-for-web-1.example.com");
     expect(byLabel.get("db")!.spawnEnv.SSH_HOST).toBe("db.example.com");
@@ -213,7 +213,7 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
     const { specs, dropped } = await resolve(snapshot([web, gone]));
 
     expect(specs).toHaveLength(1);
-    expect(specs[0]!.connection.label).toBe("web-1");
+    expect(specs[0]!.connection!.label).toBe("web-1");
     // The row is gone, so the drop is named from the snapshot's audit copy —
     // the only record of the connection the run bound that still exists.
     expect(dropped).toEqual([

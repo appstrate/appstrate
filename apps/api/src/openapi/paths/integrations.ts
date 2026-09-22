@@ -82,7 +82,12 @@ const integrationOrgDefaultSchema = {
         "Auth type of the default's FIRST connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default set per (space, integration) regardless of auth_key; a set may mix auths, and the per-connection auth is read from the connection list.",
     },
     enforce: { type: "boolean" },
-    createdAt: { type: "string", format: "date-time" },
+    createdAt: {
+      type: "string",
+      format: "date-time",
+      description:
+        "When the CURRENT set was written — a write replaces the rows, so none survives an edit to carry an older date.",
+    },
     updatedAt: { type: "string", format: "date-time" },
   },
 } as const;

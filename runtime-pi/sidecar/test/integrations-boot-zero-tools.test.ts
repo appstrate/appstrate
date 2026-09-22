@@ -144,7 +144,7 @@ describe("bootIntegrations — zero callable tools is a boot failure", () => {
     const result = await boot(zeroToolSpec());
     try {
       expect(result.report.ok).toBe(false);
-      expect(result.report.declared).toBe(1);
+      expect(result.report.declaredConnections).toBe(1);
       expect(result.spawned).toEqual([]);
       expect(result.failed).toHaveLength(1);
       expect(result.failed[0]!.integrationId).toBe(INTEGRATION_ID);

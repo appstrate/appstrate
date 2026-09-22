@@ -113,10 +113,14 @@ export const WORKSPACE_ENV_VAR = "APPSTRATE_WORKSPACE";
  * The connection id, not its label: the id is a uuid, unique by construction
  * within a run and already path- and container-name-safe. A slug of the
  * user-chosen label is neither — two labels differing past the truncation
- * point ("…-eu-1" / "…-eu-2") would collapse onto one directory.
+ * point ("…-eu-1" / "…-eu-2") would collapse onto one directory. Returns a
+ * ready-to-append `"<id8>-"` segment, or `""` when there is no connection.
  */
-export function connectionKey(connectionId: string): string {
-  return connectionId.slice(0, 8);
+export function connectionKey(connectionId: string | undefined): string {
+  // No connection (an integration declaring no auth, or a connect run) means
+  // one runner by construction — nothing to key apart, so the segment is
+  // dropped rather than filled with a synthesised stand-in.
+  return connectionId === undefined ? "" : `${connectionId.slice(0, 8)}-`;
 }
 
 export interface SpawnedIntegration {

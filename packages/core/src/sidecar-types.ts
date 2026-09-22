@@ -251,13 +251,13 @@ export interface IntegrationSpawnSpec {
   /**
    * The ONE connection this spec is spawned for. A run binding N connections
    * of the same integration emits N specs sharing `integrationId`, `namespace`
-   * and `toolAllowlist`; `connection` is what tells them apart, and the
-   * `label` is the agent-facing handle the sidecar's `connection` tool
-   * parameter selects on. Always present — a single connection is the
-   * degenerate case of a set, not a separate mode, so the sidecar never has a
-   * "which connection?" branch.
+   * and `toolAllowlist`; `connection` is what tells them apart, and `label` is
+   * the agent-facing handle the sidecar's `connection` tool parameter selects
+   * on. Absent in exactly one case — a connect run, where the connection row
+   * does not exist yet because creating it is what the run is for. Every other
+   * spec is spawned from a bound connection and carries it.
    */
-  connection: { id: string; label: string; accountId: string | null };
+  connection?: { id: string; label: string; accountId: string | null };
   /**
    * AFPS source kind — peer discriminant for the sidecar's spawn-mode
    * dispatch. Mirrors `manifest.source.kind` from the integration manifest
@@ -772,8 +772,13 @@ export interface IntegrationBootBreadcrumb {
 export interface IntegrationBootReport {
   /** False when any declared integration failed to boot — the agent aborts the run. */
   ok: boolean;
-  /** Count of integrations declared via `INTEGRATIONS_TO_SPAWN_JSON`. */
-  declared: number;
+  /**
+   * Count of spawn specs declared via `INTEGRATIONS_TO_SPAWN_JSON` — one per
+   * (integration, connection), so an integration bound to N connections
+   * contributes N. It is a count of connections, not of integrations, which is
+   * why it is not named `declared`.
+   */
+  declaredConnections: number;
   /** Runtime adapter that ran the integrations (`"process"` | `"docker"` | `"none"`). */
   adapter: string;
   /**
@@ -790,8 +795,10 @@ export interface IntegrationBootReport {
      * Which connection this entry booted: N entries can share
      * `integrationId` + `namespace`, so the label is the only thing that
      * makes a boot line — and the breadcrumb trail built from it — legible.
+     * Absent only on a connect run, the one case where the spec bound no
+     * connection ({@link IntegrationSpawnSpec.connection}).
      */
-    connectionLabel: string;
+    connectionLabel?: string;
     toolCount: number;
     vendored?: boolean;
   }>;

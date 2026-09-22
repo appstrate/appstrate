@@ -1,45 +1,23 @@
--- 0018 — connections become SETS: the labels that address them, and the three
--- jsonb columns that hold them.
+-- 0018 — the three connection jsonb columns hold SETS, not single picks.
 --
--- TWO SECTIONS, TWO MOMENTS. Run each at its own; do NOT feed the whole file
--- to psql in one go. Order is the plan's Déploiement section
+-- Run BEFORE the drizzle batch, with the platform STOPPED. The window is:
+-- stop → run this file → deploy the new image (`0069` applies at boot) →
+-- reopen. Order is the plan's Déploiement section
 -- (`docs/plans/multi-connection-per-integration.md` §9).
 --
---   SECTION A — BEFORE the drizzle batch, platform STOPPED, and only when the
---               pre-flight below counts a row. `0069` promotes
---               `integration_connections.label` to NOT NULL; a single NULL
---               raises 23502 and rolls the WHOLE pending batch back, which is
---               a failed deploy discovered at boot. This is the `0009`/`0013`
---               shape: a guard whose precondition most deployments already
---               meet.
---   SECTION B — AFTER the batch has applied at boot, i.e. once the new image
---               is up, because it writes the shape only the new readers
---               accept.
+-- WHY that moment and not after the batch. It depends on nothing `0069` does —
+-- the columns are jsonb and neither their type nor any constraint on them
+-- moves — while the new readers raise on the old shape rather than degrade.
+-- Rewriting with the platform down means no request ever meets an unrewritten
+-- row. The order is safe in both directions: an array is what only the new code
+-- reads, but the rows this file rewrites are not read again by the OLD code
+-- either, since the old image is stopped the moment the rewrite starts.
 --
--- ═══ WHAT SECTION A REPAIRS ═══
+-- (The `integration_connections.label` backfill that `0069`'s `SET NOT NULL`
+-- preconditions is NOT here: it lives in `0069` itself, licensed by
+-- `docs/NO_TRANSITIONAL_CODE.md` §2, "the precondition of a constraint".)
 --
--- `label` is written on every insert — the extracted identity, else
--- "Connexion N" (`services/integration-connections.ts`, "no render-time
--- fallback, the label is always set") — so the column has held a value on
--- every row minted since that path existed. NOT NULL makes the invariant the
--- database's rather than the service's, because the sidecar's `connection`
--- tool parameter is a REQUIRED string enum keyed on the label: a nameless
--- connection is unaddressable, not merely unnamed.
---
--- The backfill mints exactly what the service would have: "Connexion N", N
--- being the row's 1-based rank by `created_at` inside its
--- `(space_id, integration_package_id, owner)` group — `owner` being
--- `user_id` or `end_user_id`, whichever the row carries. One statement, one
--- window function. Idempotent: `WHERE label IS NULL` is exactly the condition
--- it removes.
---
--- Numbering is over the NULL rows only, so it can collide with a "Connexion 2"
--- an existing sibling already holds. Deliberate: labels are not unique, the
--- collision is visible and user-editable, and the alternative — renumbering
--- rows a user may have named — would overwrite a decision this file has no
--- business overwriting.
---
--- ═══ WHAT SECTION B REWRITES ═══
+-- ═══ WHAT IT REWRITES ═══
 --
 -- An integration now binds 1..N connections per run, so three snapshot columns
 -- change SHAPE (not type — all three stay jsonb):
@@ -61,57 +39,16 @@
 -- leaves `{}` alone — `jsonb_object_agg` over zero pairs returns NULL, and an
 -- empty map must stay an empty map rather than become NULL.
 --
--- Each section is one transaction, fenced. Four `UPDATE`s in total, no
--- `INSERT`, no `DELETE`.
+-- One transaction, fenced. Three `UPDATE`s, no `INSERT`, no `DELETE`.
 --
 -- Rows: UNMEASURED — rehearse against a restored dump (README, "Writing one",
--- requirement 4) and record what the before/after counts print. Every "after"
--- count must read 0.
+-- requirement 4) and record what the before/after counts print. The "after"
+-- counts must all read 0.
 --
--- ROLLBACK: none is offered for either section, and none is wanted. A minted
--- label is indistinguishable from one the service would have written, and
--- collapsing an array back to its first element is lossy the moment a run has
--- bound more than one connection — it would restore a shape no deployed reader
--- accepts. Recover from the pre-run `pg_dump` instead.
-
--- ╔═══════════════════════════════════════════════════════════════════════════╗
--- ║ SECTION A — BEFORE the drizzle batch, platform STOPPED.                   ║
--- ║ Run this section ALONE, and only when the pre-flight counts a row.        ║
--- ╚═══════════════════════════════════════════════════════════════════════════╝
-
-BEGIN;
-SET LOCAL lock_timeout = '5s';
-SET LOCAL statement_timeout = '60s';
-
--- ═══ VERIFY (before) — nameless connections, i.e. what would break 0069 ═══
-SELECT count(*) AS unlabelled_connections_before
-FROM integration_connections
-WHERE label IS NULL;
-
-UPDATE integration_connections c
-SET label = 'Connexion ' || r.rank
-FROM (
-  SELECT id,
-         row_number() OVER (
-           PARTITION BY space_id, integration_package_id, coalesce(user_id, end_user_id)
-           ORDER BY created_at, id
-         ) AS rank
-  FROM integration_connections
-  WHERE label IS NULL
-) r
-WHERE c.id = r.id
-  AND c.label IS NULL;
-
--- ═══ VERIFY (after) — must print 0, or 0069 will raise 23502 at boot ═══
-SELECT count(*) AS unlabelled_connections_after
-FROM integration_connections
-WHERE label IS NULL;
-
-COMMIT;
-
--- ╔═══════════════════════════════════════════════════════════════════════════╗
--- ║ SECTION B — AFTER the drizzle batch has applied at boot.                  ║
--- ╚═══════════════════════════════════════════════════════════════════════════╝
+-- ROLLBACK: none is offered, and none is wanted. Collapsing an array back to
+-- its first element is lossy the moment a run has bound more than one
+-- connection, and it would restore a shape no deployed reader accepts. Recover
+-- from the pre-run `pg_dump` instead.
 
 BEGIN;
 SET LOCAL lock_timeout = '5s';
@@ -178,19 +115,11 @@ COMMIT;
 
 -- ═══ Standalone counts — run read-only, before the window and after the fact ═══
 --
--- Section A's count decides whether section A runs at all. Anything above 0
--- means the drizzle batch would raise 23502 on `0069`, so run section A first,
--- with the platform stopped:
---
---   SELECT count(*) AS unlabelled_connections
---     FROM integration_connections
---    WHERE label IS NULL;
---
--- Section B's three counts, outside any transaction. Before the deploy they
--- size the work; after the run they must all read 0. A total of 0 BEFORE is not
--- by itself proof the section is unnecessary — pair it with the control below,
--- which counts every row that HAS a value, so "nothing to rewrite" and "nothing
--- at all" read differently.
+-- The same three counts, outside any transaction. Before the window they size
+-- the work; after the run they must all read 0. A total of 0 BEFORE is not by
+-- itself proof the file is unnecessary — pair it with the control below, which
+-- counts every row that HAS a value, so "nothing to rewrite" and "nothing at
+-- all" read differently.
 --
 --   SELECT
 --     (SELECT count(*) FROM runs r

@@ -141,6 +141,29 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
     await expectRejectedField(res, "connection_overrides.@acme/gmail");
   });
 
+  it("rejects a repeated connection id in a set, in either case", async () => {
+    await expectRejectedField(
+      await post({
+        cron_expression: "0 9 * * 1-5",
+        connection_overrides: { "@acme/gmail": ["conn_1", "conn_1"] },
+      }),
+      "connection_overrides.@acme/gmail",
+    );
+    await expectRejectedField(
+      await post({
+        cron_expression: "0 9 * * 1-5",
+        connection_overrides: { "@acme/gmail": ["conn_a", "CONN_A"] },
+      }),
+      "connection_overrides.@acme/gmail",
+    );
+    // Control: two different ids freeze onto the row.
+    const distinct = await post({
+      cron_expression: "0 9 * * 1-5",
+      connection_overrides: { "@acme/gmail": ["conn_1", "conn_2"] },
+    });
+    expect(distinct.status).toBe(201);
+  });
+
   it("rejects a connection_overrides set over the cap", async () => {
     const res = await post({
       cron_expression: "0 9 * * 1-5",

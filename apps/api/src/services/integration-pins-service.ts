@@ -67,6 +67,8 @@ import {
   resolveConnectionsForRun,
   translateResolutionError,
   isUserConnectionCreationBlocked,
+  rowsSharingALabel,
+  duplicateLabelMessage,
 } from "./integration-connection-resolver.ts";
 import type { ConnectionResolutionResult } from "@appstrate/core/integration";
 import type { IntegrationManifestCache } from "./integration-service.ts";
@@ -148,10 +150,12 @@ export async function setBlockUserConnections(
  * would answer a raw 500, and rather than deduplicated silently: the same
  * connection twice is a set whose labels cannot be distinct.
  *
- * Canonical order is ascending id. A pin is a SET — its rows are written in
- * one transaction under one timestamp, so nothing but the id can order a read
- * of them, and a writer echoing the caller's order would give the same set two
- * representations.
+ * Canonical order is ascending LOWERCASE id. A pin is a SET — its rows are
+ * written in one transaction under one timestamp, so nothing but the id can
+ * order a read of them, and a writer echoing the caller's order would give the
+ * same set two representations. The case fold is the other half of that: Zod's
+ * `z.uuid()` accepts `A1B2…`, Postgres stores and returns `a1b2…`, so an
+ * unfolded echo would disagree with the very next read on both case AND order.
  */
 export function canonicalConnectionSet(ids: string[], field: string): string[] {
   if (ids.length === 0 || ids.length > MAX_CONNECTIONS_PER_INTEGRATION) {
@@ -159,10 +163,27 @@ export function canonicalConnectionSet(ids: string[], field: string): string[] {
       `\`${field}\` must hold between 1 and ${MAX_CONNECTIONS_PER_INTEGRATION} connection ids`,
     );
   }
-  if (new Set(ids).size !== ids.length) {
+  const folded = ids.map((id) => id.toLowerCase());
+  if (new Set(folded).size !== folded.length) {
     throw invalidRequest(`\`${field}\` must not repeat a connection id`);
   }
-  return [...ids].sort();
+  return folded.sort();
+}
+
+/**
+ * Refuse a set whose rows collide on a label, with the resolver's own wording
+ * and code. Both checks are needed and neither subsumes the other: this one
+ * stops an unaddressable set being CREATED, the resolver's re-checks at every
+ * run because a connection can be renamed after the set was written.
+ */
+export function assertDistinctConnectionLabels(
+  integrationId: string,
+  rows: readonly ConnectionRow[],
+): void {
+  const colliding = rowsSharingALabel(rows);
+  if (colliding.length > 0) {
+    throw invalidRequest(duplicateLabelMessage(integrationId, colliding));
+  }
 }
 
 interface PinJoinRow {
@@ -175,6 +196,10 @@ interface PinJoinRow {
  * rows of a set share a scope and a write timestamp by construction, so the
  * first row carries the summary's metadata, and callers order the SELECT by
  * `connection_id` — see {@link canonicalConnectionSet}.
+ *
+ * `createdAt` is therefore when the CURRENT set was written, not when the
+ * (agent, integration) was first pinned: a write replaces the rows, so no
+ * row survives an edit to carry an older birth date.
  */
 function toPinSummaries(rows: PinJoinRow[]): PinSummary[] {
   const byPin = new Map<string, PinJoinRow[]>();
@@ -283,6 +308,15 @@ export async function upsertIntegrationPin(
   scope: SpaceScope,
   integrationId: string,
   input: SetPinInput,
+  /**
+   * Optional TEST seam, the shape `revokePackageShare` already uses
+   * (`services/package-shares.ts`). `onBeforeCommit` runs INSIDE this
+   * transaction, after the delete and the insert and before it commits, so a
+   * test can hold one writer open and observe what a CONCURRENT writer does
+   * against uncommitted rows — the one way the advisory lock below is
+   * observable from outside. Production never passes it.
+   */
+  opts?: { onBeforeCommit?: () => Promise<void> },
 ): Promise<PinSummary> {
   return upsertPin({
     scope,
@@ -292,6 +326,7 @@ export async function upsertIntegrationPin(
     userIdValue: null,
     validateOpts: { requireShared: true },
     createdBy: input.createdBy,
+    ...(opts?.onBeforeCommit ? { onBeforeCommit: opts.onBeforeCommit } : {}),
   });
 }
 
@@ -320,19 +355,31 @@ async function upsertPin(args: {
   userIdValue: string | null;
   validateOpts: { requireShared?: boolean; allowOwnedBy?: string };
   createdBy: string | null;
+  /** Test-only seam — see {@link upsertIntegrationPin}. */
+  onBeforeCommit?: () => Promise<void>;
 }): Promise<PinSummary> {
   const { scope, agentPackageId, integrationId, userIdValue, createdBy } = args;
   const connectionIds = canonicalConnectionSet(args.connectionIds, "connection_ids");
   const conns = await Promise.all(
     connectionIds.map((id) => validatePinTarget(scope, integrationId, id, args.validateOpts)),
   );
+  assertDistinctConnectionLabels(integrationId, conns);
   await assertAgentActiveHere(scope, agentPackageId);
 
   const now = new Date();
   const userPredicate =
     userIdValue === null ? isNull(integrationPins.userId) : eq(integrationPins.userId, userIdValue);
+  const lockKey = `ip_set:${scope.spaceId}:${agentPackageId}:${integrationId}:${userIdValue ?? ""}`;
 
   await db.transaction(async (tx) => {
+    // Serialize the whole set write per (space, agent, integration, scope).
+    // Delete-then-insert is not atomic under READ COMMITTED: two concurrent
+    // PUTs each delete what they can see, then both insert, and the table ends
+    // up holding the UNION of two sets — past the cap, and matching neither
+    // caller's intent. Under the lock the second waits and its delete sees the
+    // first's committed rows, so the last writer wins whole. Same primitive,
+    // same reasoning as the label numbering in `integration-connections.ts`.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
     await tx
       .delete(integrationPins)
       .where(
@@ -355,6 +402,8 @@ async function upsertPin(args: {
         updatedAt: now,
       })),
     );
+    // Test-only seam — see `opts.onBeforeCommit` on `upsertIntegrationPin`.
+    if (args.onBeforeCommit) await args.onBeforeCommit();
   });
 
   return {

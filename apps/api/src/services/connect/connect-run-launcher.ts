@@ -212,7 +212,6 @@ const defaultMcpServerResolver: McpServerResolver = async (packageId, orgId, pin
 
 export async function buildConnectLoginSpec(
   execution: ConnectToolExecution,
-  connectId: string,
   resolveMcpServer: McpServerResolver = defaultMcpServerResolver,
 ): Promise<IntegrationSpawnSpec> {
   const auths = (execution.manifest.auths ?? {}) as Record<string, AfpsManifestAuth>;
@@ -262,11 +261,6 @@ export async function buildConnectLoginSpec(
     // McpHost.normaliseNamespace slugs/caps this — the package id is the same
     // namespace the spawn resolver uses for the agent-run path.
     namespace: execution.integrationId,
-    // A connect run exists to MINT a connection, so there is no row to name
-    // one after: the run's own id identifies it, and a namespace holding a
-    // single upstream never surfaces the label to the agent (the sidecar
-    // injects the `connection` parameter only past one).
-    connection: { id: connectId, label: "connect", accountId: null },
     // connect-run only spawns local mcp-server bundles (the connect-login
     // tool can't run against a remote managed MCP — `runConnectOnce`
     // hard-rejects `sourceKind === "remote"`).
@@ -474,7 +468,7 @@ class ConnectRunExecutor implements ConnectToolExecutor {
     // stack frame; never logged, serialized, or persisted.
     const resultKey = randomBytes(32);
 
-    const spec = await buildConnectLoginSpec(execution, connectId, this.resolveMcpServer);
+    const spec = await buildConnectLoginSpec(execution, this.resolveMcpServer);
     // `buildConnectLoginSpec` always names the referenced mcp-server for a
     // local source (and rejects every other source kind), so this is an
     // invariant check, not a fallback. It is here rather than folded into the

@@ -73,12 +73,14 @@ interface ResolveLiveCredentialsOptions {
 }
 
 /**
- * An EMPTY payload from this function means exactly one thing: the integration
- * declares no auth at all. Every state in which a credential was expected but
- * could not be produced throws — because the sidecar reads an empty payload as
- * "no `delivery.http` auths, skip the MITM listener entirely" and boots the run
- * anyway, so a silent empty return turns a broken connection into an agent
- * reporting "the API is unavailable" against a fleet of uncredentialed 401s.
+ * This function NEVER returns an empty payload: every state in which a
+ * credential was expected but could not be produced throws. The sidecar reads
+ * an empty payload as "no `delivery.http` auths, skip the MITM listener
+ * entirely" and boots the run anyway, so a silent empty return would turn a
+ * broken connection into an agent reporting "the API is unavailable" against a
+ * fleet of uncredentialed 401s. (The connect-run branch in `routes/internal.ts`
+ * answers its own empty payload without reaching here: it has a grant, not a
+ * connection, and exists to MINT the credential.)
  *
  * Throws ApiError on:
  *   - 404: integration not declared by the agent, not active, or the named
@@ -149,15 +151,6 @@ export async function resolveLiveIntegrationCredentials(
   await assertIntegrationActive(integrationId, context.spaceId);
 
   const auths = (manifest.auths ?? {}) as Record<string, AfpsManifestAuth>;
-  if (Object.keys(auths).length === 0) {
-    // The ONLY legitimate empty payload on this endpoint: the integration
-    // genuinely declares no auth, so there is nothing to inject and nothing
-    // has failed. Every other empty-looking state below is a broken one and
-    // throws — an empty payload tells the sidecar "no `delivery.http` auths,
-    // skip the MITM listener", which for a broken state means the run boots
-    // and every upstream call goes out uncredentialed.
-    return { auths: [], deliveryPlans: {}, expiresAtEpochMs: {} };
-  }
 
   const out: MutableCredentialsWire = {
     auths: [],
@@ -180,10 +173,9 @@ export async function resolveLiveIntegrationCredentials(
     // reachable by the run's actor (deleted, unshared, moved to another
     // space). 404: there is no row to flag `needsReconnection` on, and 410
     // would lie about one having been flagged. Answering the empty payload
-    // here (the old behaviour) was indistinguishable from "declares no auth" —
-    // the sidecar skipped the MITM listener, every upstream call left
-    // uncredentialed, and the agent reported a generic "the API is
-    // unavailable". A run binding N connections loses only this one; the
+    // here (the old behaviour) made the sidecar skip the MITM listener: every
+    // upstream call left uncredentialed and the agent reported a generic "the
+    // API is unavailable". A run binding N connections loses only this one; the
     // sidecar's other runners on the same integration keep theirs.
     logger.warn("Integration credentials unavailable — no accessible connection", {
       runId: context.runId,

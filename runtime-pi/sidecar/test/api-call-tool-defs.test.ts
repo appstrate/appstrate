@@ -34,7 +34,6 @@ function integ(overrides: Partial<ApiCallIntegrationConfig> = {}): ApiCallIntegr
   return {
     namespace: "drive",
     integrationId: "@appstrate/google-drive",
-    connection: { label: "work", accountId: null },
     fetchCredentials: unreachable as unknown as ApiCallIntegrationConfig["fetchCredentials"],
     refreshCredentials: unreachable as unknown as ApiCallIntegrationConfig["refreshCredentials"],
     ...overrides,

@@ -1265,8 +1265,7 @@ export const schemas = {
       },
       connection_overrides: {
         type: ["object", "null"],
-        description:
-          'Per-integration connection picks for this run (flat-connections mechanism #2). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration; each chosen connection carries its own authKey. Loses to admin pins (#1).',
+        description: `Per-integration connection picks for this run (flat-connections mechanism #2). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 1..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration; each chosen connection carries its own authKey. Loses to admin pins (#1).`,
         additionalProperties: {
           type: "array",
           items: { type: "string" },
@@ -1381,8 +1380,7 @@ export const schemas = {
       version_override: { type: ["string", "null"] },
       connection_overrides: {
         type: ["object", "null"],
-        description:
-          'Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..10 per integration. Replayed on every fire; loses to admin pins (#1), beats actor-fallback (#4).',
+        description: `Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 1..${MAX_CONNECTIONS_PER_INTEGRATION} per integration. Replayed on every fire; loses to admin pins (#1), beats actor-fallback (#4).`,
         additionalProperties: {
           type: "array",
           items: { type: "string" },
@@ -2008,8 +2006,14 @@ export const schemas = {
         items: { type: "string", format: "uuid" },
         minItems: 1,
         maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+        description: "The whole pinned set. A write replaces it; there is no add/remove call.",
       },
-      createdAt: { type: "string", format: "date-time" },
+      createdAt: {
+        type: "string",
+        format: "date-time",
+        description:
+          "When the CURRENT set was written — not when this (agent, integration) was first pinned: a write replaces the rows, so none survives an edit to carry an older date.",
+      },
       updatedAt: { type: "string", format: "date-time" },
     },
   },

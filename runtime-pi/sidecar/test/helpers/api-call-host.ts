@@ -37,7 +37,7 @@ export async function buildApiCallHost(
     const allocated = await host.register({
       namespace: integ.namespace,
       client: wrapClient(pair.client, { close: () => pair.close() }),
-      connection: integ.connection,
+      // Single-connection hosts: no selector, so the upstream binds none.
       trusted: true,
       allowedTools: defs.map((d) => d.descriptor.name),
       ...(sharedNamespace !== undefined ? { intoNamespace: sharedNamespace } : {}),

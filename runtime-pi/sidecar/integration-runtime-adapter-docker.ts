@@ -797,8 +797,8 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
       const safeNs = spec.namespace.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
       // The connection key is what keeps the N runners of one integration
       // apart — `namespace` is shared by every connection of it.
-      const safeConn = connectionKey(spec.connection.id);
-      const containerName = `appstrate-integ-${safeNs}-${safeConn}-${runId.slice(0, 8)}-${Date.now()}`;
+      const safeConn = connectionKey(spec.connection?.id);
+      const containerName = `appstrate-integ-${safeNs}-${safeConn}${runId.slice(0, 8)}-${Date.now()}`;
 
       // Only NON-secret routing env rides `-e` on the command line. The
       // integration credentials (`spec.spawnEnv`) are delivered via a 0600

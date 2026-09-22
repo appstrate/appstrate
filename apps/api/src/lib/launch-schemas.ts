@@ -61,6 +61,11 @@ import { isValidDependencyOverride } from "../services/input-parser.ts";
  *  - `.max(MAX_CONNECTIONS_PER_INTEGRATION)`: the cap is a write-time rule
  *    everywhere (pins, org defaults, overrides) — the resolver only echoes a
  *    set a write already validated.
+ *  - no repeated id (case-insensitively — `z.uuid()` accepts either case and
+ *    Postgres folds): the same connection twice is a set whose labels cannot
+ *    be distinct, so it would 412 `duplicate_connection_label` at every fire.
+ *    The same rule, same message, as `canonicalConnectionSet` applies at the
+ *    pin and org-default writes.
  *
  * It is also owned here rather than delegated to `parseRequestInput`:
  * `POST /api/runs/inline/validate` never calls the parser, so the guard would
@@ -69,7 +74,13 @@ import { isValidDependencyOverride } from "../services/input-parser.ts";
  */
 export const connectionOverridesSchema = z.record(
   z.string(),
-  z.array(z.string().min(1)).min(1).max(MAX_CONNECTIONS_PER_INTEGRATION),
+  z
+    .array(z.string().min(1))
+    .min(1)
+    .max(MAX_CONNECTIONS_PER_INTEGRATION)
+    .refine((ids) => new Set(ids.map((id) => id.toLowerCase())).size === ids.length, {
+      message: "`connection_overrides` must not repeat a connection id",
+    }),
 );
 
 /**

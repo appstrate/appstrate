@@ -500,6 +500,22 @@ describe("fetchInitialIntegrationCredentials", () => {
     expect(out.auths[0]!.fields.apiKey).toBe("tok-x");
   });
 
+  it("CONTROL — omits the query entirely when there is no connection (connect run)", async () => {
+    // A connect run is minting the credential that becomes a connection, so
+    // there is no id to send; the platform answers it from the grant branch.
+    const seen: { url?: string } = {};
+    const fetchFn = (async (url: string) => {
+      seen.url = url;
+      return new Response(JSON.stringify(makeWireJson("tok-x")), { status: 200 });
+    }) as unknown as typeof fetch;
+    await fetchInitialIntegrationCredentials("@scope/name", undefined, {
+      platformApiUrl: "http://api",
+      runToken: "tok",
+      fetchFn,
+    });
+    expect(seen.url).toBe("http://api/internal/integration-credentials/@scope/name");
+  });
+
   it("surfaces the platform's `detail` on HTTP failure", async () => {
     const fetchFn = (async () =>
       new Response(JSON.stringify({ detail: "Integration not installed" }), {

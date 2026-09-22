@@ -36,13 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ResolvedConnectionMap` is `Record<string, ResolvedConnection[]>` (was
     `Record<string, ResolvedConnection>`); `ResolvedConnection` itself is
     unchanged;
-  - `IntegrationSpawnSpec` gains a REQUIRED
+  - `IntegrationSpawnSpec` gains an optional
     `connection: { id, label, accountId }`. N connections of one integration
     emit N specs sharing `integrationId`, `namespace` and `toolAllowlist`;
-    `connection` is what tells them apart. Always present — a single connection
-    is the degenerate case of a set, not a separate mode;
-  - `IntegrationBootReport.spawned[]` gains a required `connectionLabel` and
-    `failed[]` an optional one (a failure can precede connection binding), since
+    `connection` is what tells them apart. Absent in exactly one case, a connect
+    run, whose connection row does not exist yet;
+  - `IntegrationBootReport.spawned[]` and `failed[]` each gain an optional
+    `connectionLabel` (same reason, plus: a failure can precede binding), since
     entries no longer differ by `integrationId` + `namespace` alone.
 
   There is deliberately no `string | string[]` union and no "fall back to the

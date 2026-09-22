@@ -64,6 +64,7 @@ import {
   type ResolvedConnectionMap,
 } from "@appstrate/core/integration";
 import type { ResolutionFieldError } from "../lib/errors.ts";
+import { logger } from "../lib/logger.ts";
 import type { Actor } from "../lib/actor.ts";
 import { actorOrSharedFilter } from "../lib/actor.ts";
 import type { SpaceScope } from "../lib/scope.ts";
@@ -406,9 +407,7 @@ function bindSet(
   if (colliding.length > 0) {
     return errorOf(args, {
       code: "duplicate_connection_label",
-      message: `Connections bound to ${args.integrationId} must have distinct labels — rename one of: ${colliding
-        .map((c) => c.label)
-        .join(", ")}.`,
+      message: duplicateLabelMessage(args.integrationId, colliding),
       candidateConnections: colliding.map((c) => candidateOf(args, c)),
     });
   }
@@ -416,8 +415,15 @@ function bindSet(
   return { kind: "resolved", value };
 }
 
-/** Every row whose label is shared, VERBATIM, with another row of the set. */
-function rowsSharingALabel(rows: ConnectionRow[]): ConnectionRow[] {
+/**
+ * Every row whose label is shared, VERBATIM, with another row of the set.
+ *
+ * Exported because the WRITES (pins, org defaults) refuse a colliding set too
+ * — one rule, one definition. Neither check subsumes the other: the write
+ * stops the collision being created, and the resolver re-checks because a
+ * connection can be renamed after the set was pinned.
+ */
+export function rowsSharingALabel(rows: readonly ConnectionRow[]): ConnectionRow[] {
   const byLabel = new Map<string, ConnectionRow[]>();
   for (const conn of rows) {
     const bucket = byLabel.get(conn.label);
@@ -425,6 +431,15 @@ function rowsSharingALabel(rows: ConnectionRow[]): ConnectionRow[] {
     else byLabel.set(conn.label, [conn]);
   }
   return [...byLabel.values()].filter((group) => group.length > 1).flat();
+}
+
+/** The one wording for a colliding set, shared by the resolver and the writes. */
+export function duplicateLabelMessage(
+  integrationId: string,
+  colliding: readonly ConnectionRow[],
+): string {
+  const labels = [...new Set(colliding.map((c) => c.label))].join(", ");
+  return `Connections bound to ${integrationId} must have distinct labels — rename one of: ${labels}.`;
 }
 
 function resolveOne(args: ResolveOneArgs): ResolveOneResult {
@@ -490,11 +505,17 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   }
 
   // 6. Org default SOFT — org-wide baseline, just above the fallback. A
-  // missing member (deleted/unshared) silently falls through to the
-  // fallback rather than erroring, since the default is non-binding.
+  // missing member (deleted/unshared) falls through to the fallback rather
+  // than erroring, since the default is non-binding — but it is logged: an
+  // admin who set a default and sees runs resolve some other way has no other
+  // signal that the set stopped being reachable.
   if (args.orgDefault) {
     const owned = ownedConns(args, args.orgDefault.connectionIds);
     if (!("missingId" in owned)) return bindSet(args, owned.rows, "org_default");
+    logger.warn("Soft org default skipped — a member connection is not accessible", {
+      integrationId: args.integrationId,
+      missingConnectionId: owned.missingId,
+    });
   }
 
   // 7. Fallback — actor's accessible connections on this integration,
