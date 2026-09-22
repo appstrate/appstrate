@@ -14,23 +14,13 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { buildServerInstructions } from "../../../../src/modules/mcp/router.ts";
-import { deriveMcpSurface } from "../../../../src/modules/mcp/tools.ts";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
+import { instructionsFor } from "./helpers.ts";
 
 // The appended operation index is filtered per operation against the mounted
 // guards, so building the instructions reads the route table.
 await registerTestPlatformApp();
-
-/** The instructions the router serves a user holding `permissions`. */
-function instructionsFor(permissions: ReadonlySet<string>, contextInjected = false): string {
-  return buildServerInstructions(
-    permissions,
-    deriveMcpSurface(permissions, { type: "user", id: "user_1" }),
-    contextInjected,
-  );
-}
 
 /**
  * Launch and read back: the connect bullet is run-readiness guidance, so it is

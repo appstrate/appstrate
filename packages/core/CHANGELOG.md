@@ -30,12 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New export `RUNS_READ_PERMISSIONS` (`@appstrate/core/permissions`)** — the
   `["runs:read", "runs:read-all"]` tuple `canReadRuns` is defined from.
 - **New export `PERMISSION_REQUIREMENT_MARKER`
-  (`@appstrate/core/permissions`)** — the symbol under which a guard carries
-  the requirement it checks, beside the unchanged boolean
-  `appstrate.permissionGuard` marker. Every guard `makePermissionGuard` builds
-  stamps the single `resource:action` it tests; the platform's
-  `requireAnyPermission` stamps its disjunction as `a|b`. Read back off the
-  route table by `apps/api/src/lib/route-requirements.ts`.
+  (`@appstrate/core/permissions`)** — the symbol under which every guard
+  `makePermissionGuard` builds now also carries the requirement it checks (one
+  `resource:action`; the platform's `requireAnyPermission` stamps its
+  disjunction as `a|b`), beside the unchanged boolean
+  `appstrate.permissionGuard` marker; a guard carrying the boolean alone is
+  row-aware. See `apps/api/src/middleware/handler-marker.ts`.
 - **`AppstrateTurnMetadata` gains optional `modelId` and `modelLabel`
   (`@appstrate/core/chat-turn-metadata`)** — the model a chat turn ran on,
   stamped when the engine closes the turn. Additive: a turn the engine did not

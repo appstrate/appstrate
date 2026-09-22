@@ -18,15 +18,12 @@ import {
   operationIdGranted,
   type CatalogOperation,
 } from "../../../../src/modules/mcp/catalog.ts";
-import {
-  buildMcpTools,
-  deriveMcpSurface,
-  type Dispatch,
-  type McpToolContext,
-} from "../../../../src/modules/mcp/tools.ts";
+import type { Dispatch } from "../../../../src/modules/mcp/tools.ts";
 import { internalDispatchHeader } from "../../../../src/lib/internal-dispatch.ts";
 import { validateManifest } from "@appstrate/core/validation";
+import { orgPermissions, presetPermissions } from "../../../../src/lib/permissions.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
+import { toolsFor } from "./helpers.ts";
 
 // The tools read the mounted route table (what each operation's guard requires)
 // to decide what this caller is shown.
@@ -65,7 +62,7 @@ function makeTools(
     calls.push(req);
     return respond();
   };
-  const tools = buildTools({
+  const tools = toolsFor({
     origin: "https://test.local",
     authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
     permissions: new Set(permissions),
@@ -78,11 +75,6 @@ function makeTools(
   });
   const byName = new Map(tools.map((t) => [t.descriptor.name, t]));
   return { byName, calls };
-}
-
-/** What the router does: one surface per request, derived from the same caller. */
-function buildTools(ctx: McpToolContext) {
-  return buildMcpTools(ctx, deriveMcpSurface(ctx.permissions, ctx.actor));
 }
 
 function firstOp(predicate: (op: CatalogOperation) => boolean): CatalogOperation {
@@ -214,6 +206,35 @@ describe("buildMcpTools declarations", () => {
       expect(properties?.kind?.enum ?? null).toEqual(kinds);
     });
   }
+});
+
+/**
+ * `import_package_file` calls the import service directly. The service re-checks
+ * each package's `write`, but nothing after the declaration checks `mcp:invoke`
+ * or that the caller is a user — so each of those, dropped from the gate, lets
+ * a caller import who could not over REST.
+ */
+describe("import_package_file declaration", () => {
+  const imports = (permissions: Iterable<string>, actor?: Actor): boolean =>
+    makeTools([...permissions], false, actor).byName.has("import_package_file");
+
+  it("withholds it from a package writer without `mcp:invoke`", () => {
+    expect(imports(["mcp:read", "agents:write"])).toBe(false);
+    // The control: the same writer with `mcp:invoke` is offered it.
+    expect(imports(["mcp:read", "mcp:invoke", "agents:write"])).toBe(true);
+  });
+
+  it("withholds it from an end-user whatever it holds", () => {
+    const everything = new Set([
+      ...orgPermissions("owner"),
+      ...presetPermissions("admin"),
+      "mcp:read",
+      "mcp:invoke",
+    ]);
+    expect(imports(everything, { type: "end_user", id: "eu_1" })).toBe(false);
+    // The control: the same grants on a user are enough.
+    expect(imports(everything)).toBe(true);
+  });
 });
 
 describe("operationIdGranted", () => {
@@ -835,7 +856,7 @@ describe("buildMcpTools contextInjected", () => {
   it("drops get_me when the caller already injected its context, keeping the rest", () => {
     const dispatch: Dispatch = async () =>
       new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
-    const tools = buildTools({
+    const tools = toolsFor({
       origin: "https://test.local",
       authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
       // The full surface, so this asserts on get_me's absence and nothing
@@ -864,19 +885,6 @@ describe("buildMcpTools contextInjected", () => {
       "search_operations",
       "validate_package_file",
     ]);
-  });
-
-  it("exposes package import only to authorized organization users", () => {
-    expect(makeTools(["mcp:read", "mcp:invoke"]).byName.has("import_package_file")).toBe(false);
-    expect(
-      makeTools(["mcp:read", "mcp:invoke", "agents:write"]).byName.has("import_package_file"),
-    ).toBe(true);
-    expect(
-      makeTools(["mcp:read", "mcp:invoke", "agents:write"], false, {
-        type: "end_user",
-        id: "eu_1",
-      }).byName.has("import_package_file"),
-    ).toBe(false);
   });
 
   it("exposes the runtime registry used by package authoring and adapters", async () => {

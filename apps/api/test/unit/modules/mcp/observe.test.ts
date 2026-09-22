@@ -12,13 +12,12 @@ import { describe, it, expect } from "bun:test";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { getCatalog, type CatalogOperation } from "../../../../src/modules/mcp/catalog.ts";
 import {
-  buildMcpTools,
-  deriveMcpSurface,
   type Dispatch,
   type McpToolContext,
   type McpToolEvent,
 } from "../../../../src/modules/mcp/tools.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
+import { toolsFor } from "./helpers.ts";
 
 // `buildMcpTools` decides what this caller is shown from the guards mounted on
 // the routes, so it reads the route table.
@@ -50,7 +49,7 @@ function makeTools(permissions: string[], status = 200) {
     authorizeBundle: async () => {},
     mayShareRoot: async () => false,
   };
-  const tools = buildMcpTools(ctx, deriveMcpSurface(ctx.permissions, ctx.actor));
+  const tools = toolsFor(ctx);
   const byName = new Map(tools.map((t) => [t.descriptor.name, t]));
   return { byName, events };
 }

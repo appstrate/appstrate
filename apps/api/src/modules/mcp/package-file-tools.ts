@@ -286,7 +286,8 @@ function buildRuntimeCapabilitiesTool(): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
-/** `imports` is `McpSurface.importsPackages` — the import tool's only gate. */
+/** `imports` is `McpSurface.importsPackages` — the only check on `mcp:invoke` and on
+ *  the actor being a user; the import service re-checks each package's `write`. */
 export function buildPackageFileTools(
   ctx: PackageFileToolContext,
   imports: boolean,

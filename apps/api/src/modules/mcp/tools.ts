@@ -1488,8 +1488,9 @@ export function deriveMcpSurface(permissions: ReadonlySet<string>, actor: Actor)
     composes: runs && granted("runInline"),
     authors: invokes && granted("createAgent"),
     listsFiles: granted("listFiles"),
-    // `import_package_file` calls the import service directly, so this is its
-    // only gate; the service records the import under a user id.
+    // `import_package_file` calls the import service directly: it re-checks
+    // each package's `write`, but `mcp:invoke` and the user actor (the import
+    // is recorded under a user id) are checked here and nowhere else.
     importsPackages: invokes && actor.type === "user" && granted("importBundle"),
   };
 }

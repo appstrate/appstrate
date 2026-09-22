@@ -505,6 +505,8 @@ Applications embedding Appstrate headlessly that want an "admin dashboard" view 
 
 Modules that expose HTTP routes should also provide `openApiPaths()` (path items) and, if they use shared response/request shapes, `openApiComponentSchemas()` (component schemas) plus `openApiSchemas()` (Zod → OpenAPI registry entries for request-body validation). The loader merges contributions from every loaded module into the final spec; `scripts/verify-openapi.ts` replays the same merge at check time and flags any mismatch between declared paths and the baseline.
 
+Every operation `openApiPaths()` documents must be served by a terminal handler on a route your router mounts — a middleware alone does not serve, while an `ALL` prefix proxy (`router.all("/x/*", handler)`) serves everything beneath it. `registerPlatformApp()` (`apps/api/src/lib/platform-app.ts`) joins each documented operation onto its route's guards at boot and refuses to boot on one no route serves, since it would otherwise be published as needing no permission.
+
 Because discovery is filesystem-based, adding a new endpoint only requires touching the module's own `openapi/` directory — no central list to update.
 
 ## Idempotency — built-in dir modules can opt in, package modules cannot
