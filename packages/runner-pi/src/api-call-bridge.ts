@@ -15,6 +15,7 @@
 import { Type, type ExtensionAPI, type ExtensionFactory } from "./pi-sdk.ts";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import type { RuntimeEventEmitter } from "./runtime-tools/mcp-forward.ts";
+import { piToolResultOrThrow } from "./pi-tool-result.ts";
 import {
   apiCallRequestJsonSchema,
   readIntegrationRefs,
@@ -128,8 +129,9 @@ function makeApiCallExtension(
             opts.emitEvent(event as { type: string; [k: string]: unknown });
           },
         };
+        let result: Awaited<ReturnType<AfpsTool["execute"]>>;
         try {
-          const result = await tool.execute(args, ctx);
+          result = await tool.execute(args, ctx);
           opts.emitEvent({
             type: "api_call.completed",
             runId: opts.runId,
@@ -139,14 +141,6 @@ function makeApiCallExtension(
             isError: result.isError === true,
             timestamp: Date.now(),
           });
-          // Pi's AgentToolResult only supports text + image content.
-          // AFPS resource entries are coerced into a text stub.
-          const content = result.content.map((c) =>
-            c.type === "text" || c.type === "image"
-              ? c
-              : ({ type: "text", text: `[resource ${c.uri}]` } as const),
-          );
-          return { content, details: undefined, isError: result.isError };
         } catch (err) {
           opts.emitEvent({
             type: "api_call.failed",
@@ -159,6 +153,18 @@ function makeApiCallExtension(
           });
           throw err;
         }
+        // Outside the try: a tool-level `isError` result throws here (Pi's
+        // failure signal) and is not an `api_call.failed` execution error.
+        // Pi's AgentToolResult only supports text + image content; AFPS
+        // resource entries are coerced into a text stub.
+        return piToolResultOrThrow({
+          content: result.content.map((c) =>
+            c.type === "text" || c.type === "image"
+              ? c
+              : ({ type: "text", text: `[resource ${c.uri}]` } as const),
+          ),
+          isError: result.isError === true,
+        });
       },
     });
   };

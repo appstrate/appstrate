@@ -284,6 +284,89 @@ describe("buildMcpDirectFactories — integration tools", () => {
     }
   });
 
+  it("throws an MCP `isError` result as a Pi tool error after reporting it (#1490)", async () => {
+    const pair = await createInProcessPair([
+      { descriptor: { name: "run_history", inputSchema: { type: "object" } }, handler: echo },
+      { descriptor: { name: "recall_memory", inputSchema: { type: "object" } }, handler: echo },
+      {
+        descriptor: { name: "ssh__ssh_read", inputSchema: { type: "object" } },
+        handler: async () => ({
+          content: [{ type: "text" as const, text: '{ "error": "sftp failed (exit 1)" }' }],
+          isError: true,
+        }),
+      },
+    ]);
+    const emitted: Array<Record<string, unknown>> = [];
+    try {
+      const factories = await buildMcpDirectFactories({
+        mcp: wrapClient(pair.client, { close: () => Promise.resolve() }),
+        runId: "run-1",
+        emit: (event) => emitted.push(event),
+        workspace: "/tmp",
+      });
+      const captured: CapturedTool[] = [];
+      const api = makeMockExtensionApi(captured);
+      for (const f of factories) f(api);
+      const read = captured.find((c) => c.name === "ssh__ssh_read");
+
+      await expect(read!.execute("call-1", {})).rejects.toThrow(
+        '{ "error": "sftp failed (exit 1)" }',
+      );
+      expect(emitted.find((e) => e.type === "integration_tool.completed")).toMatchObject({
+        toolCallId: "call-1",
+        isError: true,
+      });
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("throws an upstream api_call error with its own text, not as a response-write failure", async () => {
+    const host = new McpHost();
+    let gateway: Awaited<ReturnType<typeof createInProcessPair>> | undefined;
+    try {
+      await registerApiSurface(host, apiIntegration("gh", "@appstrate/github"), async () => ({
+        ...upstreamResult(404, {}, '{"message":"Not Found"}'),
+        isError: true,
+      }));
+      gateway = await createInProcessPair([
+        { descriptor: { name: "run_history", inputSchema: { type: "object" } }, handler: echo },
+        { descriptor: { name: "recall_memory", inputSchema: { type: "object" } }, handler: echo },
+        ...host.buildTools(),
+      ]);
+      const factories = await buildMcpDirectFactories({
+        mcp: wrapClient(gateway.client, { close: () => Promise.resolve() }),
+        runId: "run-1",
+        emit: () => {},
+        workspace: "/tmp",
+      });
+      const captured: CapturedTool[] = [];
+      const api = makeMockExtensionApi(captured);
+      for (const f of factories) f(api);
+      const apiCall = captured.find((c) => c.name === "gh__api_call");
+
+      const failure = (await apiCall!
+        .execute("call-1", { target: "https://api.github.com/repos/x/y" })
+        .catch((err: Error) => err)) as Error;
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure.message).toContain("[api_call status=404]");
+      expect(failure.message).toContain('{"message":"Not Found"}');
+      expect(failure.message).not.toContain("could not write response");
+
+      // A `{ fromFile }` body that cannot be read fails before the call.
+      await expect(
+        apiCall!.execute("call-2", {
+          target: "https://api.github.com/repos/x/y",
+          method: "POST",
+          body: { fromFile: "missing.bin" },
+        }),
+      ).rejects.toThrow('api_call: cannot read body file "missing.bin"');
+    } finally {
+      await gateway?.close();
+      await host.dispose();
+    }
+  });
+
   it("pairs Drive api_upload with Drive api_call when Slack advertises the same marker key", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "mcp-direct-upload-"));
     writeFileSync(join(workspace, "payload.txt"), "hello");
@@ -362,9 +445,9 @@ describe("buildMcpDirectFactories — integration tools", () => {
         fromFile: "payload.txt",
         uploadProtocol: "google-resumable",
         metadata: { name: "payload.txt" },
-      })) as { isError?: boolean };
+      })) as { content: Array<{ text: string }> };
 
-      expect(result.isError).toBe(false);
+      expect(JSON.parse(result.content[0]!.text).ok).toBe(true);
       expect(routedCalls).toEqual(["drive__api_call", "drive__api_call"]);
     } finally {
       await gateway?.close();
@@ -422,9 +505,9 @@ describe("buildMcpDirectFactories — integration tools", () => {
         fromFile: "payload.txt",
         uploadProtocol: "google-resumable",
         metadata: { name: "payload.txt" },
-      })) as { isError?: boolean };
+      })) as { content: Array<{ text: string }> };
 
-      expect(result.isError).toBe(false);
+      expect(JSON.parse(result.content[0]!.text).ok).toBe(true);
       expect(routedCalls).toEqual(["drive__api_call__primary", "drive__api_call__primary"]);
     } finally {
       await gateway?.close();
