@@ -84,7 +84,9 @@
   "access.capability.schedule": "Schedule runs",
   "skills.label": "Skills",
   "skills.title": "Conversation skills",
+  "skills.labelCount": "Skills ({{n}})",
   "skills.pinned": "Pinned: {{n}}",
+  "skills.pinnedMax": "Limit reached: {{max}} pinned skills.",
   "skills.discovery.label": "Discovery",
   "skills.discovery.auto": "Automatic",
   "skills.discovery.autoHint": "The assistant sees the space catalogue and loads a skill when it is relevant. Platform skills stay indexed.",
@@ -98,6 +100,7 @@
   "skills.mention.hint": "Type / to load a skill into the message",
   "skills.mention.loading": "Loading…",
   "skills.mention.empty": "No skill",
+  "skills.mention.chip": "Skill {{id}}",
   "skills.loading": "Loading skills…",
   "skills.empty": "No skill is available in this space.",
   "skills.error": "Skills could not be loaded."

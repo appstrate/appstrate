@@ -143,22 +143,25 @@ describe("messagesWithSkillsAsText", () => {
   });
 
   it("caps an oversized body on a character boundary and marks the cut", () => {
-    // A 3-byte character repeated past the cap, so a naive byte slice would
-    // split one in half.
-    const body = "é".repeat(MAX_SKILL_BODY_BYTES);
+    // A 3-byte character (U+3042), so the cap — which is not a multiple of 3 —
+    // lands MID-SEQUENCE and the decoder's replacement char has to be dropped.
+    // A 2-byte character would divide the cap evenly and never exercise that.
+    const body = "あ".repeat(MAX_SKILL_BODY_BYTES);
     const out = messagesWithSkillsAsText(
       [user("u1", directive("/a", "@acme/a"))],
       loadedMap({ package_id: "@acme/a", version: null, body }),
     );
     const text = (out[0]!.parts[0] as { text: string }).text;
     expect(text.endsWith(SKILL_TRUNCATION_MARKER)).toBe(true);
+    // No U+FFFD: the half character the byte cut produced was removed, not
+    // decoded into the prompt.
     expect(text).not.toContain("�");
     const injected = text.slice(
       "[Skill @acme/a loaded — follow these instructions]\n".length,
       -SKILL_TRUNCATION_MARKER.length,
     );
     expect(new TextEncoder().encode(injected).length).toBeLessThanOrEqual(MAX_SKILL_BODY_BYTES);
-    expect(injected).toBe("é".repeat(MAX_SKILL_BODY_BYTES / 2));
+    expect(injected).toBe("あ".repeat(Math.floor(MAX_SKILL_BODY_BYTES / 3)));
   });
 
   it("leaves a body under the cap untouched", () => {

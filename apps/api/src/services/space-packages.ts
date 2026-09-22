@@ -719,27 +719,6 @@ interface HintOptions {
 }
 
 /**
- * List the packages of one `type` an actor in this space could use, as a
- * bounded hint for the get_me / chat-prompt caller context. "Could use" is
- * {@link activePackagesFilter}, the run gate's own predicate: a system package,
- * or a placement row that says `enabled`. The list is capped (`limit`) so a
- * large catalog doesn't bloat the system prompt — the long tail stays reachable
- * via `search_operations`.
- *
- * Bounded IN SQL. This runs twice per chat turn (agents, then skills) on the
- * TTFT path: the activation filter and the LIMIT sit in the query, so only the
- * returned rows' manifests (`draft_manifest` JSONB) cross the wire, and
- * `total` rides along as a window count over the filtered set (evaluated
- * before the LIMIT, so it is the size of the whole catalog, not of the page).
- * The ordering is `packageListingOrder` — a total order, which is what
- * makes the cap deterministic.
- *
- * The base hint (id/name/description/source) is uniform across package types;
- * `project` layers on the type-specific extras from the manifest. Access gating
- * is NOT enforced here — the caller decides whether to surface the hint, and the
- * run / inline-run route re-validates at invoke time.
- */
-/**
  * Columns every hint read projects from. Shared so the capped LISTING and the
  * exact-id resolution below cannot select different halves of the same row and
  * hand the model two different descriptions of one package.
@@ -800,6 +779,27 @@ function latestDistTagJoin() {
   return and(eq(packageDistTags.packageId, packages.id), eq(packageDistTags.tag, "latest"));
 }
 
+/**
+ * List the packages of one `type` an actor in this space could use, as a
+ * bounded hint for the get_me / chat-prompt caller context. "Could use" is
+ * {@link activePackagesFilter}, the run gate's own predicate: a system package,
+ * or a placement row that says `enabled`. The list is capped (`limit`) so a
+ * large catalog doesn't bloat the system prompt — the long tail stays reachable
+ * via `search_operations`.
+ *
+ * Bounded IN SQL. This runs twice per chat turn (agents, then skills) on the
+ * TTFT path: the activation filter and the LIMIT sit in the query, so only the
+ * returned rows' manifests (`draft_manifest` JSONB) cross the wire, and
+ * `total` rides along as a window count over the filtered set (evaluated
+ * before the LIMIT, so it is the size of the whole catalog, not of the page).
+ * The ordering is `packageListingOrder` — a total order, which is what
+ * makes the cap deterministic.
+ *
+ * The base hint (id/name/description/source) is uniform across package types;
+ * `project` layers on the type-specific extras from the manifest. Access gating
+ * is NOT enforced here — the caller decides whether to surface the hint, and the
+ * run / inline-run route re-validates at invoke time.
+ */
 async function listActivePackageHints<T extends PackageHint>(
   scope: SpaceScope,
   type: PackageType,

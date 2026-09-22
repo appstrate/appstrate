@@ -18,11 +18,12 @@
  * after it. Injecting into the history instead costs the body once, at the
  * position it was mentioned, exactly like Claude Code's own skill loading.
  *
- * Which means the projection below runs on EVERY turn, over the whole history,
- * and must be a pure function of (messages, loaded bodies): the same
- * conversation state has to produce byte-identical text every time, or the
- * cached prefix behind the injected block is invalidated on each turn. No
- * clocks, no counters, no iteration over a Map's insertion order.
+ * Which means the projection below runs on EVERY turn, over the whole history.
+ * It is pure GIVEN `(messages, loaded)`: no clocks, no counters, no iteration
+ * over a Map's insertion order. The LOADER is what may change between turns —
+ * bodies are re-read every turn BY DESIGN, so a mention follows the skill's
+ * current definition and a revoked skill stops loading — and the cache miss
+ * that a rare edit costs is the accepted price of that.
  */
 
 import type { UIMessage } from "ai";

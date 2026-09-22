@@ -29,6 +29,7 @@ import {
   type TestContext,
 } from "../../../apps/api/test/helpers/auth.ts";
 import { VISIBILITY_META_NAMESPACE } from "../../../apps/api/src/lib/package-helpers.ts";
+import { seedPackage } from "../../../apps/api/test/helpers/seed.ts";
 import { setPlatformApp } from "../../../apps/api/src/lib/platform-app.ts";
 import { mintSessionId } from "../src/session-id.ts";
 import { PLATFORM_DEFAULT_SKILLS } from "../src/skills.ts";
@@ -43,6 +44,8 @@ setPlatformApp(app);
 
 const LISTED_SKILL = "@chatpick/listed";
 const UNLISTED_SKILL = "@chatpick/hidden";
+/** One of the platform defaults, seeded as the SYSTEM package it ships as. */
+const PLATFORM_SKILL = "@appstrate/copilot";
 
 interface SessionDto {
   id: string;
@@ -200,7 +203,39 @@ describe("GET /api/chat/skills", () => {
     ctx = await createTestContext({ orgSlug: "chatpicker" });
     await createSkill(ctx, LISTED_SKILL, false);
     await createSkill(ctx, UNLISTED_SKILL, true);
+    await seedPlatformSkill();
   });
+
+  /**
+   * The platform defaults ship as `unlisted` SYSTEM packages, which `boot()`
+   * imports from `system-packages/*.afps` — and `getTestApp()` never boots. So
+   * the row is written straight to the table, in the shape the archive would
+   * produce: no org, no home space, `source: "system"`, and the visibility
+   * marker that keeps it off every catalogue.
+   *
+   * Without this the platform half of the picker is empty for harness reasons
+   * alone, and the route's whole exact-id path — the one that must offer a
+   * default the catalogue deliberately hides — goes unasserted.
+   */
+  async function seedPlatformSkill(): Promise<void> {
+    await seedPackage({
+      id: PLATFORM_SKILL,
+      orgId: null,
+      homeSpaceId: null,
+      source: "system",
+      type: "skill",
+      draftManifest: {
+        name: PLATFORM_SKILL,
+        version: "1.4.2",
+        type: "skill",
+        schema_version: "0.1",
+        display_name: "Copilote",
+        description: "Aide à composer un agent.",
+        _meta: { [VISIBILITY_META_NAMESPACE]: { level: "unlisted" } },
+      },
+      draftContent: '---\nname: copilot\ndescription: "Aide."\n---\n\nCorps.',
+    });
+  }
 
   async function createSkill(c: TestContext, id: string, unlisted: boolean): Promise<void> {
     const res = await app.request("/api/packages/skills", {
@@ -238,18 +273,27 @@ describe("GET /api/chat/skills", () => {
     // Unlisted is discoverability: off the catalogue, still resolvable by id.
     expect(skills.map((s) => s.package_id)).not.toContain(UNLISTED_SKILL);
 
-    // The PLATFORM half is empty here, and that is the harness, not the route:
-    // `getTestApp()` builds the app WITHOUT boot(), so the three unlisted
-    // system skills `PLATFORM_DEFAULT_SKILLS` names are never imported into the
-    // database. What this asserts is that their absence degrades to "nothing to
-    // offer" rather than to a 500 — the same path a deployment missing a system
-    // package takes. Their presence in a booted instance is covered by
-    // `apps/api/test/integration/routes/me-context-skills.test.ts`, which
-    // exercises the exact-id read this half projects.
-    expect(skills.filter((s) => s.source === "platform")).toEqual([]);
-    for (const id of PLATFORM_DEFAULT_SKILLS) {
+    // The seeded default comes back on the PLATFORM half — unlisted, i.e. off
+    // the catalogue the space half reads, which is exactly the case the
+    // exact-id read exists for.
+    expect(skills.filter((s) => s.source === "platform")).toEqual([
+      {
+        package_id: PLATFORM_SKILL,
+        display_name: "Copilote",
+        description: "Aide à composer un agent.",
+        version: "1.4.2",
+        source: "platform",
+      },
+    ]);
+    // …and on that half ONLY: the space catalogue never shows it.
+    expect(skills.filter((s) => s.package_id === PLATFORM_SKILL)).toHaveLength(1);
+    // The two defaults with no row degrade to "nothing to offer" rather than
+    // to a 500 — the path a deployment missing a system package takes.
+    for (const id of PLATFORM_DEFAULT_SKILLS.filter((s) => s !== PLATFORM_SKILL)) {
       expect(skills.map((s) => s.package_id)).not.toContain(id);
     }
+    // A listed space skill is listed once, and on the space half.
+    expect(skills.filter((s) => s.package_id === LISTED_SKILL)).toHaveLength(1);
   });
 
   it("sorts by package id within each half", async () => {

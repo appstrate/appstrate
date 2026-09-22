@@ -11,7 +11,10 @@
 -- the database as well as in the Zod enum, so an unknown mode cannot be stored
 -- and then silently degrade to `auto` at render time.
 --
--- `chat_session_skills` is the pin set: (session, package id), no more. There is
+-- `chat_session_skills` is the pin set: (session, package id), no more — the
+-- composite primary key IS the whole row. No `created_at`: `setSessionSkills`
+-- rewrites the set wholesale, so such a column would date the last write of the
+-- set rather than the pin, and nothing reads it. There is
 -- deliberately NO foreign key on `package_id` — a pin is a user's stated intent
 -- about a conversation, not a reference the database must keep satisfiable. The
 -- package it names can be deleted, unshared, deactivated in this space or out of
@@ -31,7 +34,6 @@
 CREATE TABLE "chat_session_skills" (
 	"session_id" text NOT NULL,
 	"package_id" text NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "chat_session_skills_session_id_package_id_pk" PRIMARY KEY("session_id","package_id")
 );
 --> statement-breakpoint

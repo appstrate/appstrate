@@ -10,7 +10,7 @@ import {
   spacePackages,
   user,
 } from "@appstrate/db/schema";
-import { orgOrSystemFilter, listedFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
+import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import {
   homeWireForCaller,
@@ -151,7 +151,14 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
           inArray(spacePackages.spaceId, accessibleIds),
         ),
       )
-      .where(and(orgOrSystemFilter(orgId), notEphemeralFilter(), listedFilter()))
+      // Deliberately WITHOUT `listedFilter`. The library is the MANAGEMENT map,
+      // not a catalogue: it is the only surface that shows WHERE a package sits
+      // and whether the space runs it, and it is owner/admin-only. Dropping an
+      // org's own unlisted package from it would leave no listing anywhere that
+      // shows the thing its authors have to place, activate or delete.
+      // Visibility is discoverability — the catalogue surfaces (the per-type
+      // index, the caller-context hints) are where it applies.
+      .where(and(orgOrSystemFilter(orgId), notEphemeralFilter()))
       .orderBy(packages.id),
     // The sharer is named only while they are still a MEMBER of this
     // organization. `package_shares.shared_by` is `ON DELETE SET NULL` on

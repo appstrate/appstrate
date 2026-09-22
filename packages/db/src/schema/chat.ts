@@ -110,6 +110,12 @@ export const chatSessions = pgTable(
  *
  * The session half IS a foreign key with `ON DELETE CASCADE`: a pin outside its
  * conversation means nothing.
+ *
+ * The composite primary key is the WHOLE row: there is no `created_at`, because
+ * a pin has no history to read. `setSessionSkills` replaces the set wholesale
+ * in one transaction, so every row of a session carries the timestamp of the
+ * last write whatever the user pinned when — a column that looks like a fact
+ * and is not one.
  */
 export const chatSessionSkills = pgTable(
   "chat_session_skills",
@@ -119,7 +125,6 @@ export const chatSessionSkills = pgTable(
       .references(() => chatSessions.id, { onDelete: "cascade" }),
     /** `@scope/name` package id, as `packages.id` spells it. */
     packageId: text("package_id").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [primaryKey({ columns: [table.sessionId, table.packageId] })],
 );

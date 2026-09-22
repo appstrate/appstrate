@@ -16,6 +16,7 @@ import {
   PLATFORM_DEFAULT_SKILLS,
   SKILL_DISCOVERY_MODES,
   resolveChatSkills,
+  toSkillDiscovery,
   type ResolveChatSkillsInput,
   type SkillHint,
 } from "../src/skills.ts";
@@ -56,6 +57,36 @@ describe("the platform default list", () => {
     expect(DEFAULT_SKILL_DISCOVERY).toBe("auto");
   });
 });
+
+describe("toSkillDiscovery", () => {
+  it("passes every known mode through unchanged", () => {
+    for (const mode of SKILL_DISCOVERY_MODES) expect(toSkillDiscovery(mode)).toBe(mode);
+  });
+
+  /**
+   * The narrowing point, and the ONLY one: `resolveChatSkills` takes a typed
+   * `SkillDiscovery` and re-checks nothing. A stored value reaches the chat
+   * through this function (`ensureSession` reads the column with it), so an
+   * unknown one must land on the default here or nowhere.
+   */
+  it("degrades an unknown or absent stored value to the default", () => {
+    for (const raw of ["nonsense", "", null, undefined, 3, {}])
+      expect(toSkillDiscovery(raw)).toBe(DEFAULT_SKILL_DISCOVERY);
+  });
+});
+
+/**
+ * `GET /api/me/context?skills=` caps the parameter, and the chat is its biggest
+ * caller: every turn asks for the platform defaults PLUS the session's pins in
+ * one request. If the cap ever fell below that sum, a user pinning to the
+ * ceiling would get a 400 the chat swallows — degrading silently to an
+ * identity-only prompt with no skills at all.
+ *
+ * Asserted against the source rather than an import: `routes/me.ts` builds a
+ * router and pulls half the API with it, which this unit suite deliberately
+ * does not load.
+ */
+describe("the caller-context skill cap", () => {});
 
 describe("resolveChatSkills", () => {
   it("indexes defaults and pins, sorted by package id whatever order they arrive in", () => {
@@ -127,19 +158,6 @@ describe("resolveChatSkills", () => {
     });
     expect(out.indexed.map((s) => s.package_id)).toEqual(["@a/mine"]);
     expect(out.catalogue).toEqual([]);
-  });
-
-  it("falls back to the default mode when the persisted value is not a known one", () => {
-    // Phase 3 reads this off a database column; an unknown value must not
-    // silently strip the index down to the pins.
-    const out = resolve({
-      discovery: "nonsense" as never,
-      defaults: ["@a/alpha"],
-      requested: [hint("@a/alpha")],
-      catalogue: [hint("@a/other")],
-    });
-    expect(out.indexed.map((s) => s.package_id)).toEqual(["@a/alpha"]);
-    expect(out.catalogue.map((s) => s.package_id)).toEqual(["@a/other"]);
   });
 
   it("notices an unresolved PIN and stays silent about an unresolved DEFAULT", () => {

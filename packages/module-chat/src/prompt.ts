@@ -105,7 +105,7 @@ export function buildSystemPrompt(options: {
     on_demand:
       "No catalogue of other skills is shown to you. Call `listSkills` only when the user asks for a skill you do not see listed.",
     manual:
-      "Load only the skills listed under `## Skills`. Do not browse for others, and do not call `listSkills` on your own initiative.",
+      "Load only the skills listed under `## Skills`; when that section lists none, load no skill at all. Do not browse for others, and do not call `listSkills` on your own initiative.",
   }[discovery];
   return `You are Appstrate's assistant. You help the user operate their Appstrate instance through the available tools.
 
@@ -543,6 +543,7 @@ export async function buildCallerContextBlock(
       { locale },
     );
 
+  const requestedSkills = [...PLATFORM_DEFAULT_SKILLS, ...args.skills.pinned];
   try {
     // Ask for the skills this turn will index BY EXACT ID, in one round trip
     // with the rest of the context.
@@ -550,7 +551,7 @@ export async function buildCallerContextBlock(
       origin,
       headers,
       spaceId,
-      skills: [...PLATFORM_DEFAULT_SKILLS, ...args.skills.pinned],
+      skills: requestedSkills,
     });
     if (res.ok) {
       const payload = (await res.json()) as CallerContext;
@@ -559,7 +560,20 @@ export async function buildCallerContextBlock(
     }
     // No space context (e.g. requireSpaceContext rejected) — keep the
     // identity/role block rather than dropping context entirely.
-    if (res.status === 400) return identityOnly();
+    if (res.status === 400) {
+      // …unless the turn itself carried `?skills=`, in which case the 400 may
+      // be that parameter being refused (too many ids, a malformed one) rather
+      // than a lost space — a request the CHAT composed, so a bug on this side,
+      // and one whose only visible effect is a prompt that silently lost every
+      // skill. The read degrades either way; the operator gets told.
+      if (requestedSkills.length > 0) {
+        logger.warn("me/context refused the chat's request — degrading to identity-only", {
+          status: res.status,
+          requestedSkills: requestedSkills.length,
+        });
+      }
+      return identityOnly();
+    }
     return "";
   } catch (err) {
     logger.warn("me/context unavailable — chat degrades without caller context", {

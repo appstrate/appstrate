@@ -24,11 +24,10 @@ import type { UIMessage } from "ai";
 import {
   DEFAULT_SKILL_DISCOVERY,
   MAX_PINNED_SKILLS,
-  SKILL_DISCOVERY_MODES,
+  toSkillDiscovery,
   type SkillDiscovery,
 } from "../skills.ts";
-
-export { MAX_PINNED_SKILLS };
+import { requestHeaders } from "./request-headers.ts";
 import type { GetHeaders } from "./runtime-context.ts";
 
 /**
@@ -73,21 +72,21 @@ export function chatSkillsQueryKey(spaceId: string | null): readonly unknown[] {
   return [...CHAT_SKILLS_QUERY_KEY, spaceId];
 }
 
+/** The catalogue changes when a package is published or activated — rarely. */
+export const SKILLS_STALE_MS = 60_000;
+
 /** What a session with no row yet reads: index everything, pin nothing. */
 export function defaultSkillSelection(): SessionSkillSelection {
   return { discovery: DEFAULT_SKILL_DISCOVERY, pinned: [] };
 }
 
 /**
- * A discovery mode off the wire or out of an optimistic patch. Checked rather
- * than trusted — an unknown mode degrades to the default, the same rule the
- * server-side resolver applies (`../skills.ts`).
+ * A discovery mode off the wire or out of an optimistic patch. The SERVER's own
+ * narrowing function, re-exported under the name the UI uses: an unknown mode
+ * must degrade to the default here exactly as it does in the resolver, and two
+ * implementations of "exactly as" drift.
  */
-export function normalizeDiscovery(value: unknown): SkillDiscovery {
-  return SKILL_DISCOVERY_MODES.includes(value as SkillDiscovery)
-    ? (value as SkillDiscovery)
-    : DEFAULT_SKILL_DISCOVERY;
-}
+export const normalizeDiscovery = toSkillDiscovery;
 
 /**
  * The pin set as the UI and the wire both want it: strings only, deduped,
@@ -138,12 +137,14 @@ export interface SkillGroup {
 /**
  * Group by source, platform first. The server already sorts within each group
  * (by package id), so this partitions and never re-sorts — a second ordering
- * rule here could only disagree with the one the prompt's index uses.
+ * rule here could only disagree with the one the prompt's index uses. A source
+ * this build does not know falls in with `space`: an unrenderable row is worse
+ * than a mis-grouped one, since the pin still works from either group.
  */
 export function groupSkillsBySource(skills: readonly ChatSkillEntry[]): SkillGroup[] {
   const groups: SkillGroup[] = [
     { source: "platform", skills: skills.filter((s) => s.source === "platform") },
-    { source: "space", skills: skills.filter((s) => s.source === "space") },
+    { source: "space", skills: skills.filter((s) => s.source !== "platform") },
   ];
   return groups.filter((g) => g.skills.length > 0);
 }
@@ -192,17 +193,13 @@ export function createSkillsWriter(
   };
 }
 
-function headers(getHeaders: GetHeaders | null | undefined, json = false): Record<string, string> {
-  return { ...(json ? { "Content-Type": "application/json" } : {}), ...getHeaders?.() };
-}
-
 /** The skills this caller may pin in the current space — platform, then space. */
 export async function fetchChatSkills(
   getHeaders: GetHeaders | null | undefined,
 ): Promise<ChatSkillEntry[]> {
   const res = await fetch("/api/chat/skills", {
     credentials: "include",
-    headers: headers(getHeaders),
+    headers: requestHeaders(getHeaders),
   });
   if (!res.ok) throw new Error(`Failed to load chat skills (HTTP ${res.status})`);
   return ((await res.json()) as { skills?: ChatSkillEntry[] }).skills ?? [];
@@ -221,7 +218,7 @@ export async function putSessionSkills(
   const res = await fetch(`/api/chat/sessions/${sessionId}/skills`, {
     method: "PUT",
     credentials: "include",
-    headers: headers(getHeaders, true),
+    headers: requestHeaders(getHeaders, true),
     body: JSON.stringify({
       skill_discovery: selection.discovery,
       pinned_skills: normalizePinned(selection.pinned),

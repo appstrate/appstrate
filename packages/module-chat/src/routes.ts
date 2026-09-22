@@ -46,6 +46,7 @@ import { ensureSession, loadSessionPins, setSessionSkills } from "./persistence.
 import {
   MAX_PINNED_SKILLS,
   PLATFORM_DEFAULT_SKILLS,
+  byPackageId,
   skillDiscoverySchema,
   type SkillHint,
 } from "./skills.ts";
@@ -83,10 +84,13 @@ export const sessionSkillsSchema = z.object({
 });
 
 /**
- * How many rows of the space's skill catalogue the picker gets. The listing
- * route is uncapped, so the cap is applied here — the picker is a popover, not
- * a browser, and a space with thousands of skills must not turn one keystroke
- * into a thousand-row payload.
+ * How many rows of the space's skill catalogue the picker is HANDED. It bounds
+ * the response, not the work: `GET /api/packages/skills` is unpaginated, so the
+ * whole catalogue is read and this slice is what crosses the wire. Worth having
+ * anyway — the picker is a popover, not a browser, and a space with thousands
+ * of skills must not turn one keystroke into a thousand-row payload. A real
+ * bound on the read would be a `limit` on that listing route, which does not
+ * have one.
  */
 const SKILL_PICKER_LIMIT = 100;
 
@@ -253,7 +257,6 @@ async function listChatSkills(
     ),
   ]);
 
-  const byId = (a: ChatSkillEntry, b: ChatSkillEntry) => (a.package_id < b.package_id ? -1 : 1);
   const platform: ChatSkillEntry[] = (platformRes?.requested_skills ?? [])
     .map((hint) => ({
       package_id: hint.package_id,
@@ -262,7 +265,7 @@ async function listChatSkills(
       version: hint.version ?? null,
       source: "platform" as const,
     }))
-    .sort(byId);
+    .sort(byPackageId);
 
   // A default that is ALSO in the space catalogue stays on the platform half:
   // the chat indexes it whatever the space does, so offering it twice would let
@@ -277,7 +280,7 @@ async function listChatSkills(
       version: item.version ?? null,
       source: "space" as const,
     }))
-    .sort(byId)
+    .sort(byPackageId)
     .slice(0, SKILL_PICKER_LIMIT);
 
   return [...platform, ...space];
@@ -402,10 +405,17 @@ export function createChatRouter(deps: ChatPlatformDeps) {
 
   // GET /api/chat/skills — what the skill picker and the `/` popover offer.
   // A read of two catalogues, so `chat:read` plus whatever the two dispatched
-  // reads ask for on their own (`skills:read`); see `listChatSkills`.
-  router.get("/api/chat/skills", requireModulePermission("chat", "read"), async (c) => {
-    return c.json({ skills: await listChatSkills(c, deps) });
-  });
+  // reads ask for on their own (`skills:read`); see `listChatSkills`. Rate
+  // limited like the PUT next to it: one call fans out into two unpaginated
+  // platform reads, and the `/` popover can fire it on a keystroke.
+  router.get(
+    "/api/chat/skills",
+    rateLimited(60),
+    requireModulePermission("chat", "read"),
+    async (c) => {
+      return c.json({ skills: await listChatSkills(c, deps) });
+    },
+  );
 
   // PUT /api/chat/sessions/:id/skills — replace the conversation's skill
   // selection (discovery mode + pins).

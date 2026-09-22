@@ -13,6 +13,7 @@ import {
   normalizePinned,
   type SessionHistory,
 } from "./chat-skills.ts";
+import { requestHeaders } from "./request-headers.ts";
 import type { GetHeaders } from "./runtime-context.ts";
 
 /** Fresh session id, minted client-side (`chs_` shape) — re-exported from the shared module. */
@@ -61,16 +62,12 @@ export function spaceIdFromHeaders(getHeaders: GetHeaders | null | undefined): s
   return getHeaders?.()["X-Space-Id"] ?? null;
 }
 
-function headers(getHeaders: GetHeaders | null | undefined, json = false): Record<string, string> {
-  return { ...(json ? { "Content-Type": "application/json" } : {}), ...getHeaders?.() };
-}
-
 export async function fetchSessions(
   getHeaders: GetHeaders | null | undefined,
 ): Promise<SessionSummary[]> {
   const res = await fetch("/api/chat/sessions", {
     credentials: "include",
-    headers: headers(getHeaders),
+    headers: requestHeaders(getHeaders),
   });
   if (!res.ok) throw new Error(`Failed to load sessions (HTTP ${res.status})`);
   return ((await res.json()) as { data?: SessionSummary[] }).data ?? [];
@@ -84,7 +81,7 @@ export async function renameSession(
   const res = await fetch(`/api/chat/sessions/${id}`, {
     method: "PATCH",
     credentials: "include",
-    headers: headers(getHeaders, true),
+    headers: requestHeaders(getHeaders, true),
     body: JSON.stringify({ title }),
   });
   if (!res.ok) throw new Error(`Failed to rename session (HTTP ${res.status})`);
@@ -97,7 +94,7 @@ export async function deleteSession(
   const res = await fetch(`/api/chat/sessions/${id}`, {
     method: "DELETE",
     credentials: "include",
-    headers: headers(getHeaders),
+    headers: requestHeaders(getHeaders),
   });
   if (!res.ok) throw new Error(`Failed to delete session (HTTP ${res.status})`);
 }
@@ -110,7 +107,7 @@ export async function markSessionRead(
   const res = await fetch(`/api/chat/sessions/${id}/read`, {
     method: "PUT",
     credentials: "include",
-    headers: headers(getHeaders),
+    headers: requestHeaders(getHeaders),
   });
   if (!res.ok) throw new Error(`Failed to mark session read (HTTP ${res.status})`);
 }
@@ -123,7 +120,7 @@ export async function stopSession(
   const res = await fetch(`/api/chat/sessions/${id}/stop`, {
     method: "POST",
     credentials: "include",
-    headers: headers(getHeaders),
+    headers: requestHeaders(getHeaders),
   });
   if (!res.ok) throw new Error(`Failed to stop session (HTTP ${res.status})`);
 }
@@ -155,7 +152,7 @@ export async function loadHistory(
 ): Promise<SessionHistory> {
   const res = await fetch(`/api/chat/sessions/${id}`, {
     credentials: "include",
-    headers: headers(getHeaders),
+    headers: requestHeaders(getHeaders),
   });
   if (res.status === 404) return { messages: [], skills: defaultSkillSelection() };
   if (!res.ok) throw new Error(`Failed to load session (HTTP ${res.status})`);

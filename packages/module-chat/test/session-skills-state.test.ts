@@ -11,11 +11,11 @@
  */
 
 import { describe, expect, it } from "bun:test";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import {
   createSkillsWriter,
   defaultSkillSelection,
   groupSkillsBySource,
-  MAX_PINNED_SKILLS,
   normalizeDiscovery,
   normalizePinned,
   togglePinned,
@@ -24,6 +24,8 @@ import {
   type SessionHistory,
   type SessionSkillSelection,
 } from "../src/ui/chat-skills.ts";
+import { MAX_PINNED_SKILLS, toSkillDiscovery } from "../src/skills.ts";
+import { sessionQueryKey } from "../src/ui/sessions.ts";
 
 const entry = (id: string, source: ChatSkillEntry["source"]): ChatSkillEntry => ({
   package_id: id,
@@ -34,6 +36,12 @@ const entry = (id: string, source: ChatSkillEntry["source"]): ChatSkillEntry => 
 });
 
 describe("normalizeDiscovery", () => {
+  it("IS the server's own narrowing function, not a second copy of it", () => {
+    // Two implementations of "an unknown mode falls back to the default" drift;
+    // the picker and the resolver must disagree only if this identity breaks.
+    expect(normalizeDiscovery).toBe(toSkillDiscovery);
+  });
+
   it("keeps every known mode", () => {
     expect(normalizeDiscovery("auto")).toBe("auto");
     expect(normalizeDiscovery("on_demand")).toBe("on_demand");
@@ -112,6 +120,17 @@ describe("groupSkillsBySource", () => {
       "@appstrate/copilot",
       "@appstrate/web-search",
     ]);
+  });
+
+  it("buckets a source this build does not know with the space ones", () => {
+    // A newer server could grow a third source. A row that renders in no group
+    // is a skill the user cannot pin; a mis-grouped row still pins.
+    const groups = groupSkillsBySource([
+      entry("@acme/tone", "org" as ChatSkillEntry["source"]),
+      entry("@appstrate/copilot", "platform"),
+    ]);
+    expect(groups.map((g) => g.source)).toEqual(["platform", "space"]);
+    expect(groups[1]!.skills.map((s) => s.package_id)).toEqual(["@acme/tone"]);
   });
 
   it("drops an empty group instead of rendering a bare heading", () => {
@@ -193,5 +212,105 @@ describe("createSkillsWriter", () => {
 describe("defaultSkillSelection", () => {
   it("is what a session with no row resolves to", () => {
     expect(defaultSkillSelection()).toEqual({ discovery: "auto", pinned: [] });
+  });
+});
+
+/**
+ * The picker's hook is a SECOND OBSERVER of the session-history entry that
+ * `<Conversation>` owns, and React Query merges options across observers rather
+ * than scoping them. Two of the owner's options are load-bearing and neither is
+ * visible in a screenshot:
+ *
+ * - `gcTime` takes the MAX, so an observer that accepts the 5 min default keeps
+ *   a conversation's history cached long past unmount — a returning user is
+ *   re-seeded with a history that is missing every turn sent in between.
+ * - the queryFn left on the Query is the last-rendering observer's, so a
+ *   `skipToken` here makes the failure path's `invalidateQueries` reject with
+ *   "Missing queryFn".
+ *
+ * These run against a real `QueryClient` — no React needed, the observer is the
+ * thing under test. Construction order matters and mirrors the app: the OWNER
+ * builds the query (with its options), the picker's observer joins afterwards,
+ * and `updateGcTime` can then only raise the ceiling, never lower it.
+ */
+const OWNER_OPTIONS = {
+  queryFn: () => Promise.resolve(HISTORY),
+  enabled: true,
+  staleTime: Infinity,
+  gcTime: 0,
+} as const;
+const HISTORY: SessionHistory = { messages: [], skills: { discovery: "auto", pinned: [] } };
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** The owner builds the query; the picker's observer joins a seeded one. */
+function seededClient(queryKey: readonly unknown[]) {
+  const client = new QueryClient();
+  const owner = new QueryObserver(client, { queryKey, ...OWNER_OPTIONS });
+  client.setQueryData(queryKey, HISTORY);
+  return { client, owner };
+}
+
+describe("session-history observers", () => {
+  it("collects the entry as soon as both observers unmount", async () => {
+    const queryKey = sessionQueryKey("spc_a", "chs_1");
+    const { client, owner } = seededClient(queryKey);
+    const picker = new QueryObserver(client, {
+      queryKey,
+      queryFn: () => Promise.resolve(HISTORY),
+      enabled: false,
+      staleTime: Infinity,
+      gcTime: 0,
+    });
+
+    const unsubOwner = owner.subscribe(() => {});
+    const unsubPicker = picker.subscribe(() => {});
+    unsubOwner();
+    unsubPicker();
+    await tick();
+
+    expect(client.getQueryCache().find({ queryKey })).toBeUndefined();
+  });
+
+  it("would NOT collect it if the picker accepted the default gcTime", async () => {
+    // The control: without this case the assertion above passes for a hook that
+    // never had the bug and for one that still does.
+    const queryKey = sessionQueryKey("spc_a", "chs_1");
+    const { client, owner } = seededClient(queryKey);
+    const picker = new QueryObserver(client, { queryKey, queryFn: () => Promise.resolve(HISTORY) });
+
+    const unsubOwner = owner.subscribe(() => {});
+    const unsubPicker = picker.subscribe(() => {});
+    unsubOwner();
+    unsubPicker();
+    await tick();
+
+    expect(client.getQueryCache().find({ queryKey })).toBeDefined();
+  });
+
+  it("leaves a callable queryFn behind, so the failure path can invalidate", async () => {
+    const queryKey = sessionQueryKey("spc_a", "chs_1");
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    let fetches = 0;
+    const load = () => {
+      fetches++;
+      return Promise.resolve(HISTORY);
+    };
+    const owner = new QueryObserver(client, { queryKey, ...OWNER_OPTIONS, queryFn: load });
+    client.setQueryData(queryKey, HISTORY);
+    const picker = new QueryObserver(client, {
+      queryKey,
+      queryFn: load,
+      enabled: false,
+      staleTime: Infinity,
+      gcTime: 0,
+    });
+
+    const unsubOwner = owner.subscribe(() => {});
+    const unsubPicker = picker.subscribe(() => {});
+    await client.invalidateQueries({ queryKey });
+    expect(fetches).toBeGreaterThan(0);
+
+    unsubPicker();
+    unsubOwner();
   });
 });

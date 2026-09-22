@@ -19,6 +19,7 @@ import { describe, it, expect } from "bun:test";
 import { unstable_defaultDirectiveFormatter } from "@assistant-ui/react";
 import { parseSkillMentions } from "../src/skill-mentions.ts";
 import { skillMentionItems } from "../src/ui/skill-directive.ts";
+import { createSkillTriggerMatcher } from "../src/ui/skill-trigger.ts";
 import type { ChatSkillEntry } from "../src/ui/chat-skills.ts";
 
 function entry(packageId: string, over: Partial<ChatSkillEntry> = {}): ChatSkillEntry {
@@ -112,5 +113,53 @@ describe("directive round-trip", () => {
       ["@acme/copilot", "/copilot (@acme)"],
       ["@appstrate/web-search", "/web-search"],
     ]);
+  });
+});
+
+/**
+ * When the `/` popover may open at all.
+ *
+ * The composer's Enter is swallowed by an OPEN trigger even when it matches
+ * nothing, so `regarde /outputs` + Enter would send no message — the feature
+ * breaking a composer that has nothing to do with skills. The matcher is the
+ * fix: it narrows DETECTION, not the item list, so an unmatchable `/word` never
+ * opens the trigger and Enter stays the composer's own send.
+ */
+describe("createSkillTriggerMatcher", () => {
+  const items = skillMentionItems([
+    entry("@appstrate/copilot", { source: "platform" }),
+    entry("@acme/web-search"),
+  ]);
+  const matcher = createSkillTriggerMatcher(items);
+  const at = (text: string) => matcher(text, "/", text.length);
+
+  it("opens on a bare `/` so the popover can list everything", () => {
+    expect(at("/")).toEqual({ query: "", offset: 0, endOffset: 1 });
+    expect(at("regarde /")).toEqual({ query: "", offset: 8, endOffset: 9 });
+  });
+
+  it("opens while the query is still a prefix of a skill", () => {
+    expect(at("/cop")).toEqual({ query: "cop", offset: 0, endOffset: 4 });
+    expect(at("/COP")?.query).toBe("COP");
+    expect(at("regarde /web")?.query).toBe("web");
+  });
+
+  it("opens on a package id typed in full", () => {
+    expect(at("/@appstrate")?.query).toBe("@appstrate");
+  });
+
+  it("stays closed on a word that no skill can grow into", () => {
+    expect(at("regarde /outputs")).toBeNull();
+    expect(at("/zzz")).toBeNull();
+  });
+
+  it("stays closed on a `/` that does not start a word — a path, not a mention", () => {
+    expect(at("src/copilot")).toBeNull();
+  });
+
+  it("never opens on a query with an empty catalogue, but still opens on a bare `/`", () => {
+    const empty = createSkillTriggerMatcher([]);
+    expect(empty("/", "/", 1)).toEqual({ query: "", offset: 0, endOffset: 1 });
+    expect(empty("/cop", "/", 4)).toBeNull();
   });
 });

@@ -10189,6 +10189,13 @@ export interface operations {
                 };
             };
             403: components["responses"]["Forbidden"];
+            /** @description Rate limited (60/min per caller) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     credentialProxyGet: {
@@ -12882,7 +12889,7 @@ export interface operations {
                             name: string;
                             isDefault: boolean;
                         }[];
-                        /** @description Packages grouped by type. Every group is always present (possibly empty). Unlisted packages (`_meta["dev.appstrate/visibility"].level = "unlisted"`) are not on it and stay reachable by exact id. */
+                        /** @description Packages grouped by type. Every group is always present (possibly empty). Unlisted packages (`_meta["dev.appstrate/visibility"].level = "unlisted"`) ARE on this map: it is the placement/management view, not a catalogue, so the surfaces visibility hides a package from are the per-type indexes and the caller-context hints, never this one. */
                         packages: {
                             agent: components["schemas"]["LibraryPackageList"];
                             skill: components["schemas"]["LibraryPackageList"];
@@ -13479,7 +13486,7 @@ export interface operations {
                         agents_truncated: boolean;
                         /** @description Total runnable agents before the cap. */
                         agents_total: number;
-                        /** @description Skills the caller could attach to an agent in the current space (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the full list is reachable via the `listSkills` operation. Unlisted packages (`_meta["dev.appstrate/visibility"].level = "unlisted"`) are off this list and out of the total, and stay resolvable by exact id. */
+                        /** @description Skills the caller could attach to an agent in the current space (capped). A catalogue read, not a runnable hint: only present when the caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the full list is reachable via the `listSkills` operation. Unlisted packages (`_meta["dev.appstrate/visibility"].level = "unlisted"`) are off this list and out of the total, and stay resolvable by exact id. */
                         skills: {
                             /** @description Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills. */
                             package_id: string;
@@ -22188,7 +22195,7 @@ export interface operations {
                             name: string;
                             isDefault: boolean;
                         }[];
-                        /** @description Packages grouped by type. Every group is always present (possibly empty). Unlisted packages (`_meta["dev.appstrate/visibility"].level = "unlisted"`) are not on it and stay reachable by exact id. */
+                        /** @description Packages grouped by type. Every group is always present (possibly empty). Unlisted packages (`_meta["dev.appstrate/visibility"].level = "unlisted"`) ARE on this map: it is the placement/management view, not a catalogue, so the surfaces visibility hides a package from are the per-type indexes and the caller-context hints, never this one. */
                         packages: {
                             agent: components["schemas"]["LibraryPackageList"];
                             skill: components["schemas"]["LibraryPackageList"];

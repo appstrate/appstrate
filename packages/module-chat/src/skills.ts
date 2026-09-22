@@ -80,7 +80,7 @@ export const skillDiscoverySchema = z.enum(SKILL_DISCOVERY_MODES);
  * and what keeps a hand-edited row from rendering a prompt that promises a
  * catalogue the block never rendered.
  */
-export function toSkillDiscovery(raw: string | null | undefined): SkillDiscovery {
+export function toSkillDiscovery(raw: unknown): SkillDiscovery {
   return SKILL_DISCOVERY_MODES.includes(raw as SkillDiscovery)
     ? (raw as SkillDiscovery)
     : DEFAULT_SKILL_DISCOVERY;
@@ -122,15 +122,15 @@ export interface ResolvedChatSkills {
 }
 
 /** Total order on package ids — the index's only ranking. */
-function byPackageId(a: { package_id: string }, b: { package_id: string }): number {
+export function byPackageId(a: { package_id: string }, b: { package_id: string }): number {
   return a.package_id < b.package_id ? -1 : a.package_id > b.package_id ? 1 : 0;
 }
 
 export function resolveChatSkills(input: ResolveChatSkillsInput): ResolvedChatSkills {
-  // `discovery` reaches this resolver from persisted per-session state, so it
-  // is checked rather than trusted: an unknown mode degrades to the default
-  // instead of silently indexing nothing.
-  const discovery = toSkillDiscovery(input.discovery);
+  // Typed, not re-checked: the persisted column is narrowed ONCE, by
+  // `toSkillDiscovery` where the row is read (`ensureSession`). A second
+  // coercion here would be a fallback whose absence nothing can fail on.
+  const discovery = input.discovery;
 
   const pinned = new Set(input.pinned);
   // `manual` indexes the user's pins and nothing else — not even the platform

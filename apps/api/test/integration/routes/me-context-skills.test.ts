@@ -18,6 +18,10 @@ import { truncateAll } from "../../helpers/db.ts";
 import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
 import { VISIBILITY_META_NAMESPACE } from "../../../src/lib/package-helpers.ts";
+import {
+  MAX_PINNED_SKILLS,
+  PLATFORM_DEFAULT_SKILLS,
+} from "../../../../../packages/module-chat/src/skills.ts";
 
 const app = getTestApp();
 
@@ -130,6 +134,22 @@ describe("GET /api/me/context?skills=", () => {
     expect(body.requested_skills).toEqual([]);
     expect(body.unresolved_skills).toEqual([LISTED, UNLISTED]);
     expect(body.skills).toEqual([]);
+  });
+
+  it("accepts the largest request the chat can build: every default plus a full pin set", async () => {
+    // The chat asks for `defaults ∪ pins` in one parameter; a cap below that
+    // sum would 400 a legitimate turn, which `buildCallerContextBlock` then
+    // degrades to an identity-only prompt. The ids need not resolve.
+    const ids = [
+      ...PLATFORM_DEFAULT_SKILLS,
+      ...Array.from({ length: MAX_PINNED_SKILLS }, (_, i) => `@ctxskill/pin-${i}`),
+    ];
+    const res = await app.request(`/api/me/context?skills=${encodeURIComponent(ids.join(","))}`, {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ContextBody;
+    expect(body.unresolved_skills).toHaveLength(ids.length);
   });
 
   it("rejects the whole parameter when an id is not @scope/name", async () => {

@@ -5,7 +5,14 @@
  * at boot (absent when the module is disabled). Because these are normal
  * documented operations, the `mcp` module's meta-tools expose them to MCP
  * clients automatically (search/describe/invoke_operation).
+ *
+ * The skill-selection constants are IMPORTED from `./skills.ts`, not
+ * transcribed: the discovery enum and the pin cap are already the Zod schema's
+ * and the CHECK constraint's, and a hand-copied third spelling is what lets a
+ * documented contract drift from the one the route enforces.
  */
+
+import { MAX_PINNED_SKILLS, SKILL_DISCOVERY_MODES } from "./skills.ts";
 
 const stdHeaders = {
   "Request-Id": { $ref: "#/components/headers/RequestId" },
@@ -31,7 +38,7 @@ export const chatComponentSchemas = {
       },
       skill_discovery: {
         type: "string",
-        enum: ["auto", "on_demand", "manual"],
+        enum: [...SKILL_DISCOVERY_MODES],
         description:
           "How much of the space's skill catalogue this conversation indexes: `auto` (platform defaults + pins + catalogue), `on_demand` (defaults + pins), `manual` (pins only). A context-budget control, never an authorization boundary. Set via PUT /api/chat/sessions/{id}/skills.",
       },
@@ -266,6 +273,7 @@ export const chatPaths = {
           },
         },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "429": { description: "Rate limited (60/min per caller)" },
       },
     },
   },
@@ -274,8 +282,7 @@ export const chatPaths = {
       operationId: "setChatSessionSkills",
       tags: ["Chat"],
       summary: "Set a chat session's skill selection",
-      description:
-        "Replaces the conversation's discovery mode and its pinned skills in one call (the body is the state you want, not a patch). Duplicate ids are deduped server-side; at most 20 pins are stored. The session row is created if the client-minted id has none yet — exactly as the first turn would.",
+      description: `Replaces the conversation's discovery mode and its pinned skills in one call (the body is the state you want, not a patch). Duplicate ids are deduped server-side; at most ${MAX_PINNED_SKILLS} pins are stored. The session row is created if the client-minted id has none yet — exactly as the first turn would.`,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -289,10 +296,10 @@ export const chatPaths = {
               type: "object",
               required: ["skill_discovery", "pinned_skills"],
               properties: {
-                skill_discovery: { type: "string", enum: ["auto", "on_demand", "manual"] },
+                skill_discovery: { type: "string", enum: [...SKILL_DISCOVERY_MODES] },
                 pinned_skills: {
                   type: "array",
-                  maxItems: 20,
+                  maxItems: MAX_PINNED_SKILLS,
                   items: { type: "string", description: "`@scope/name` package id" },
                   description:
                     "Package ids to pin. Deduped server-side; the cap applies to the array as sent.",

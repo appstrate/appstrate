@@ -26,6 +26,7 @@ import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions, chatSessionSkills } from "@appstrate/db/schema";
 import { notFound } from "@appstrate/core/api-errors";
 import { uiMessageText } from "./message-text.ts";
+import { parseSkillMentions } from "./skill-mentions.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import { toSkillDiscovery, type ChatSkillSelection, type SkillDiscovery } from "./skills.ts";
 import type { UIMessage } from "ai";
@@ -472,10 +473,29 @@ function titleCandidate(message: UIMessage): string | null {
   return titleFromText(uiMessageText(message.parts));
 }
 
-/** A message's text as a title: trimmed to 60 chars (57 + ellipsis); null when empty. */
+/**
+ * A message's text as a title, trimmed to 60 chars (57 + ellipsis); null when
+ * empty. `/skill` directives collapse to the label the composer chip showed —
+ * the stored text keeps the raw directive, only this projection of it does not.
+ * The ONE title helper: `titleCandidate` and `deriveTitle` both go through it.
+ */
 function titleFromText(text: string): string | null {
-  if (!text) return null;
-  return text.length > 60 ? `${text.slice(0, 57)}…` : text;
+  const plain = withoutSkillDirectives(text);
+  if (!plain) return null;
+  return plain.length > 60 ? `${plain.slice(0, 57)}…` : plain;
+}
+
+/** Each `skill` directive replaced by its label, in source order. */
+function withoutSkillDirectives(text: string): string {
+  const mentions = parseSkillMentions(text);
+  if (mentions.length === 0) return text;
+  let out = "";
+  let cursor = 0;
+  for (const mention of mentions) {
+    out += text.slice(cursor, mention.index) + mention.label;
+    cursor = mention.index + mention.raw.length;
+  }
+  return out + text.slice(cursor);
 }
 
 /**

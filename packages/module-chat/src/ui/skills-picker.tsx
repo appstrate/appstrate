@@ -17,7 +17,6 @@
 
 import { useState } from "react";
 import { BookOpenIcon } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
@@ -29,15 +28,10 @@ import {
   TooltipTrigger,
 } from "@appstrate/ui/components/tooltip";
 import { cn } from "@appstrate/ui/cn";
-import { SKILL_DISCOVERY_MODES, type SkillDiscovery } from "../skills.ts";
-import {
-  chatSkillsQueryKey,
-  fetchChatSkills,
-  groupSkillsBySource,
-  type ChatSkillEntry,
-} from "./chat-skills.ts";
+import { MAX_PINNED_SKILLS, SKILL_DISCOVERY_MODES, type SkillDiscovery } from "../skills.ts";
+import { groupSkillsBySource, type ChatSkillEntry } from "./chat-skills.ts";
 import { useChatHeaders, useChatHost } from "./runtime-context.ts";
-import { spaceIdFromHeaders } from "./sessions.ts";
+import { useChatSkillsCatalog } from "./use-chat-skills.ts";
 import { useSessionSkills } from "./use-session-skills.ts";
 
 /**
@@ -56,25 +50,16 @@ const GROUP_KEYS: Record<ChatSkillEntry["source"], string> = {
   space: "skills.group.space",
 };
 
-/** The catalogue changes when a package is published or activated — rarely. */
-const SKILLS_STALE_MS = 60_000;
-
 export function SkillsPicker({ sessionId }: { sessionId: string }) {
   const { t } = useChatHost();
   const getHeaders = useChatHeaders();
-  const spaceId = spaceIdFromHeaders(getHeaders);
   const [open, setOpen] = useState(false);
-  const { discovery, pinned, setDiscovery, togglePin } = useSessionSkills(sessionId, getHeaders);
-
-  // Fetched on first open, not on chat mount: the composer becomes usable
-  // without this list, and most conversations never open the picker.
-  const skills = useQuery({
-    queryKey: chatSkillsQueryKey(spaceId),
-    queryFn: () => fetchChatSkills(getHeaders),
-    enabled: open && !!spaceId,
-    staleTime: SKILLS_STALE_MS,
-  });
-  const groups = groupSkillsBySource(skills.data ?? []);
+  const { discovery, pinned, setDiscovery, togglePin, atPinCap } = useSessionSkills(
+    sessionId,
+    getHeaders,
+  );
+  const { skills, loading, failed } = useChatSkillsCatalog();
+  const groups = groupSkillsBySource(skills);
   const pinnedSet = new Set(pinned);
 
   return (
@@ -87,7 +72,13 @@ export function SkillsPicker({ sessionId }: { sessionId: string }) {
                 type="button"
                 variant="ghost"
                 size="icon"
-                aria-label={t("skills.label")}
+                // The count is painted as a badge; a screen reader gets it here
+                // or not at all.
+                aria-label={
+                  pinned.length > 0
+                    ? t("skills.labelCount", { n: pinned.length })
+                    : t("skills.label")
+                }
                 className={cn(
                   "relative size-8 shrink-0 rounded-lg",
                   pinned.length > 0 ? "text-primary hover:text-primary" : "text-muted-foreground",
@@ -160,12 +151,20 @@ export function SkillsPicker({ sessionId }: { sessionId: string }) {
           </RadioGroup>
         </div>
 
+        {/* The cap is the server's (`MAX_PINNED_SKILLS`); a refused 21st pin is
+            otherwise a checkbox that simply does not tick. */}
+        {atPinCap && (
+          <p className="text-muted-foreground mt-2 shrink-0 px-1 text-[0.7rem] leading-snug">
+            {t("skills.pinnedMax", { max: MAX_PINNED_SKILLS })}
+          </p>
+        )}
+
         <div className="mt-3 min-h-0 flex-1 overflow-y-auto border-t pt-2">
-          {skills.isPending ? (
+          {loading ? (
             <p className="text-muted-foreground px-1 py-3 text-center text-xs">
               {t("skills.loading")}
             </p>
-          ) : skills.isError ? (
+          ) : failed ? (
             <p className="text-destructive px-1 py-3 text-center text-xs">{t("skills.error")}</p>
           ) : groups.length === 0 ? (
             <p className="text-muted-foreground px-1 py-3 text-center text-xs">
@@ -179,15 +178,23 @@ export function SkillsPicker({ sessionId }: { sessionId: string }) {
                 </div>
                 {group.skills.map((skill) => {
                   const id = `skills-pin-${skill.package_id}`;
+                  const checked = pinnedSet.has(skill.package_id);
                   return (
                     <div key={skill.package_id} className="flex items-start gap-2 rounded-md p-1">
                       <Checkbox
                         id={id}
-                        checked={pinnedSet.has(skill.package_id)}
+                        checked={checked}
+                        disabled={!checked && atPinCap}
                         onCheckedChange={() => togglePin(skill.package_id)}
                         className="mt-0.5 shrink-0"
                       />
-                      <label htmlFor={id} className="min-w-0 flex-1 cursor-pointer">
+                      <label
+                        htmlFor={id}
+                        className={cn(
+                          "min-w-0 flex-1 cursor-pointer",
+                          !checked && atPinCap && "opacity-50",
+                        )}
+                      >
                         <span className="flex items-baseline gap-1.5">
                           <span className="truncate text-xs font-medium">
                             {skill.display_name || skill.package_id}

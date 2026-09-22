@@ -4,10 +4,11 @@
  * `unlisted` visibility — the AFPS §10.1 vendor extension
  * `_meta["dev.appstrate/visibility"].level = "unlisted"`.
  *
- * Discoverability, never authorization: the package is off every catalogue
- * surface — the per-type index, the library map, the caller-context hints the
- * chat renders — and still readable by exact id. Each assertion carries a
- * LISTED sibling created the same way, so a listing that simply came back
+ * Discoverability, never authorization: the package is off every CATALOGUE
+ * surface — the per-type index, the caller-context hints the chat renders — and
+ * still readable by exact id. The library map is deliberately NOT one of them:
+ * it is the placement/management view its owner acts on. Each assertion carries
+ * a LISTED sibling created the same way, so a listing that simply came back
  * empty cannot pass for a listing that excluded the right row.
  */
 
@@ -69,13 +70,19 @@ describe("unlisted package visibility", () => {
     expect(ids).not.toContain(UNLISTED);
   });
 
-  it("GET /api/library maps the sibling and not the unlisted skill", async () => {
+  /**
+   * The library is the MANAGEMENT map (placement state, owner/admin only), not
+   * a catalogue — so it is the one listing an unlisted package stays on. If it
+   * hid one too, an org's own unlisted package would appear on NO listing at
+   * all, leaving nothing to place, activate or delete it from.
+   */
+  it("GET /api/library maps the unlisted skill alongside its sibling", async () => {
     const res = await app.request("/api/library", { headers: authHeaders(ctx) });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { packages: { skill: { id: string }[] } };
     const ids = body.packages.skill.map((row) => row.id);
     expect(ids).toContain(LISTED);
-    expect(ids).not.toContain(UNLISTED);
+    expect(ids).toContain(UNLISTED);
   });
 
   it("GET /api/me/context hints the sibling, and does not count the unlisted skill", async () => {

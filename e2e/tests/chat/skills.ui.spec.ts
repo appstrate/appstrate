@@ -74,3 +74,28 @@ test("pins a skill before the first message, then mentions it with /", async ({
   // the directive is still there and the popover did not reopen.
   await expect(page.getByRole("option")).toHaveCount(0);
 });
+
+test("leaves a `/word` that matches no skill alone", async ({ authedPage: page }) => {
+  // The trigger's matcher, from the outside. An OPEN trigger swallows Enter
+  // even with zero matching items, so a popover that opened here would make
+  // `regarde /outputs` unsendable — the feature breaking a message that has
+  // nothing to do with skills.
+  await page.goto("/chat");
+  const composer = page.locator(COMPOSER);
+  await expect(composer).toBeVisible();
+
+  // The popover element itself, not its rows: with no matcher it OPENS on any
+  // word-initial `/` and renders its empty state, which has no `option` in it —
+  // so counting rows would pass either way.
+  const popover = page.locator('[aria-label="Compétences à charger"]');
+
+  await composer.click();
+  await composer.pressSequentially("regarde /outputs");
+  await expect(popover).toHaveCount(0);
+  await expect(page.getByRole("option")).toHaveCount(0);
+  await expect(composer).toHaveValue("regarde /outputs");
+
+  await page.keyboard.press("Enter");
+  // Still closed: Enter went to the composer, not to a trigger selection.
+  await expect(popover).toHaveCount(0);
+});

@@ -90,9 +90,10 @@ Une erreur `integration_not_active` sur `integrations.<id>` ne se répare pas en
 connectant davantage : connecter est personnel, activer est organisationnel.
 Active l'intégration dans l'espace avec `activatePackage`
 (`body: { packageId: "@appstrate/<id>" }` ; lis son schéma avec
-`describe_operation`, l'espace se retrouve par `listSpaces`), puis relance une
-fois. L'activation est réservée aux administrateurs : sur un 403, dis
-simplement qu'un administrateur doit activer cette intégration, et arrête-toi.
+`describe_operation`, et reprends l'id d'espace de la ligne `Current space:`
+de ton contexte), puis relance une fois. L'activation est réservée aux
+administrateurs : sur un 403, dis simplement qu'un administrateur doit activer
+cette intégration, et arrête-toi.
 
 ## 6. Quand rien ne convient
 

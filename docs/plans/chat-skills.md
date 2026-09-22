@@ -58,6 +58,15 @@ Discovery mode (per session, persisted, default `auto`):
 This is a context-budget control, not a security boundary: `invoke_operation`
 stays generic and RBAC-gated.
 
+Trust model. A skill body is org-authored content the caller may already read
+(`skills:read`, re-checked at turn time), injected as USER-TURN text — the same
+trust a run already extends to everything under `dependencies.skills`. The
+`[Skill … loaded]` marker is a legibility affordance, not a security fence: a
+user can type any instruction into their own chat, so the marker claims nothing
+the surrounding text could not. And a directive pasted from elsewhere is not an
+escalation — it names an id, and the loader resolves it with the caller's own
+permissions, so it loads only what that caller may read, or nothing.
+
 Decisions taken (with alternatives rejected):
 
 - No `_meta` "assistant skill" marker (#1165): a platform default is a constant
@@ -83,17 +92,23 @@ vendor extension; `_meta` already validated and preserved by core).
 - One SQL predicate `listedFilter()` next to `orgOrSystemFilter` /
   `notEphemeralFilter` (`apps/api/src/services/package-filters.ts` or wherever
   those live): `draft_manifest #>> '{_meta,dev.appstrate/visibility,level}' IS DISTINCT FROM 'unlisted'`.
-  Applied in every listing query that feeds a catalogue: `listOrgItems`
-  (`package-items/crud.ts`), `getPackageLibrary` (`package-library.ts`),
-  `listActivePackageHints` (`space-packages.ts`). In SQL, not in JS, so the
-  hint cap and `total` stay honest.
+  Applied in every listing query that feeds a CATALOGUE, and there are two:
+  `listOrgItems` (`package-items/crud.ts`, the per-type index pages) and
+  `listActivePackageHints` (`space-packages.ts`, the caller-context hints). In
+  SQL, not in JS, so the hint cap and `total` stay honest.
+- NOT in `getPackageLibrary` (`package-library.ts`). The library is the
+  placement/management map — owner/admin only, one row per package with where it
+  sits and whether the space runs it — so hiding a package there would leave an
+  org's own unlisted package on no listing at all, with nothing to place,
+  activate or delete it from.
 - A TS twin `isUnlisted(manifest)` in `apps/api/src/lib/package-visibility.ts`
   only if a JS-side reader needs it; otherwise do not add it.
 - Exact-id reads (`getSkill`, `getAgent`, dependency resolution, version
   resolution) are untouched.
 - Tests: unit for the predicate; integration proving an unlisted skill is
-  absent from `GET /api/packages/skills`, `GET /api/library`, `/api/me/context`
-  `skills`, and readable by `GET /api/packages/skills/{scope}/{name}`.
+  absent from `GET /api/packages/skills` and `/api/me/context` `skills`, PRESENT
+  on `GET /api/library`, and readable by
+  `GET /api/packages/skills/{scope}/{name}`.
 
 ## Phase 2 — resolver, index, loading, platform default skills
 

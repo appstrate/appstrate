@@ -191,6 +191,10 @@ describe("full persona invariants", () => {
     expect(onDemand).toContain("No catalogue of other skills is shown to you");
     expect(onDemand).not.toContain("is a catalogue you have not loaded");
     expect(manual).toContain("Load only the skills listed under `## Skills`");
+    // The empty case is NAMED: `manual` with no pins renders a `## Skills`
+    // section with nothing under it, and a rule that only says "load only what
+    // is listed" leaves the model to guess what an empty list licenses.
+    expect(manual).toContain("when that section lists none, load no skill at all");
     expect(manual).not.toContain("No catalogue of other skills is shown");
     // A mode that shows no catalogue must not send the model browsing.
     expect(manual).not.toContain("call `listSkills` to see the rest");
