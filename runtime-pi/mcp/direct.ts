@@ -286,8 +286,9 @@ function buildIntegrationToolFactories(
           // descriptor. With no `toFile`, large bodies still auto-spill to
           // `resources/<file>` and the status line is prepended.
           if (apiCall) {
+            let shaped: Awaited<ReturnType<typeof shapeApiCallResponse>>;
             try {
-              const shaped = await shapeApiCallResponse(result, {
+              shaped = await shapeApiCallResponse(result, {
                 workspace: opts.workspace,
                 ...(responseToFile !== undefined ? { toFile: responseToFile } : {}),
                 toolCallId,
@@ -295,7 +296,6 @@ function buildIntegrationToolFactories(
                 emit: opts.emit,
                 readResource: (uri) => opts.mcp.readResource({ uri }),
               });
-              return callToolResultToPi(shaped as Parameters<typeof callToolResultToPi>[0]);
             } catch (err) {
               // A bad responseMode.toFile path (escape/symlink) or a resource
               // read failure is a tool-level error, not a run abort.
@@ -309,6 +309,9 @@ function buildIntegrationToolFactories(
                 isError: true,
               });
             }
+            // Outside the try: an upstream `isError` result throws here (Pi's
+            // failure signal) and must not be re-worded as a write failure.
+            return callToolResultToPi(shaped as Parameters<typeof callToolResultToPi>[0]);
           }
           // Materialise MCP resources to workspace files before the adapter
           // flattens them, keeping file bytes out of the LLM context:

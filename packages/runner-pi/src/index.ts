@@ -85,6 +85,8 @@ export { startSinkHeartbeat, type SinkHeartbeatHandle } from "./sink-heartbeat.t
 // `PI_SDK_VERSION` above.
 export { RUNTIME_INJECTED_TOOLS } from "./runtime-tools/index.ts";
 
+export { toPiToolResult } from "./pi-tool-result.ts";
+
 export {
   buildRuntimeToolFactories,
   callToolResultToPi,

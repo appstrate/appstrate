@@ -32,6 +32,7 @@ import {
   type RuntimeToolDef,
   type RuntimeToolEvent,
 } from "@appstrate/core/runtime-tool-defs";
+import { toPiToolResult } from "../pi-tool-result.ts";
 
 export interface BuildRuntimeToolExtensionsOptions {
   /** Agent-selected runtime tools (`manifest.runtime_tools`). */
@@ -57,7 +58,9 @@ function defaultStdoutEmit(event: RuntimeToolEvent): void {
 /**
  * Build one Pi {@link ExtensionFactory} per selected runtime tool. Each
  * registers a Pi tool whose `execute` runs the shared core handler, re-emits
- * the resulting canonical events, and adapts the text result to Pi's shape.
+ * the resulting canonical events, and adapts the text result to Pi's shape
+ * (a handler error — e.g. `output` failing its schema — throws as a Pi tool
+ * error, so the terminal-tool early stop never fires on it).
  */
 export function buildRuntimeToolExtensions(
   opts: BuildRuntimeToolExtensionsOptions,
@@ -84,11 +87,10 @@ function runtimeToolExtension(
       async execute(_toolCallId, params) {
         const result = await def.handler(params ?? {});
         reEmitRuntimeToolEvents(result._meta, emit);
-        return {
+        return toPiToolResult({
           content: result.content.map((c) => ({ type: "text" as const, text: c.text })),
-          details: undefined,
-          ...(result.isError ? { isError: true } : {}),
-        };
+          isError: result.isError === true,
+        });
       },
     });
   };

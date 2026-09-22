@@ -37,7 +37,7 @@ describe("buildRuntimeToolExtensions", () => {
     ]);
   });
 
-  it("surfaces output validation errors without emitting", async () => {
+  it("throws output validation errors (Pi's tool-error signal) without emitting", async () => {
     const emitted: unknown[] = [];
     const [factory] = buildRuntimeToolExtensions({
       runtimeTools: ["output"],
@@ -45,8 +45,7 @@ describe("buildRuntimeToolExtensions", () => {
       emit: (e) => emitted.push(e),
     });
     const tool = registerOne(factory!);
-    const result = await tool.execute("call-1", { data: {} });
-    expect(result.isError).toBe(true);
+    await expect(tool.execute("call-1", { data: {} })).rejects.toThrow("validation failed");
     expect(emitted).toHaveLength(0);
   });
 });
