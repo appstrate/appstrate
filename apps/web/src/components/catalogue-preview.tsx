@@ -84,7 +84,7 @@ function readingSpace(
   spaces: readonly LibrarySpace[],
   current: string | null,
 ): string | undefined {
-  if (placement.everywhere || placement.here) return current ?? undefined;
+  if (placement.here) return current ?? undefined;
   const reachable = (id: string | null) =>
     id && spaces.some((space) => space.id === id) ? id : undefined;
   return (
@@ -196,7 +196,7 @@ export function CataloguePreview({
   const other = type !== "agent" ? (detail as OrgPackageItemDetail | undefined) : undefined;
 
   const rows = sheetSpaceRows(placement, spaces, grantOf);
-  const mode = sheetSpaceMode(placement, rows);
+  const mode = sheetSpaceMode(rows);
   const offers = sheetOffers(rows);
   const home = spaces.find((space) => space.id === placement.homeSpaceId);
   const integrationName = (id: string) => integrations.find((row) => row.id === id)?.name || id;
@@ -412,7 +412,6 @@ export function CataloguePreview({
       )}
 
       <SettingsGroup title={t("catalogue.sheet.spaces")} className="mt-8 mb-0">
-        {mode === "everywhere" && <p className="text-sm">{t("catalogue.sheet.everywhere")}</p>}
         {mode === "readonly" && (
           <p className="text-sm">
             {placement.activeIn.length > 0

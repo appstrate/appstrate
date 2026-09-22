@@ -9,8 +9,6 @@
  * each space with the switch on the same line. How much of that the reader gets
  * depends on their reach, and the grading is the rule this file pins:
  *
- * - **everywhere** — a system agent, skill or MCP server is readable in every
- *   space without being switched on. No switch exists, so none is drawn.
  * - **readonly** — the reader may switch it on or off nowhere. A line saying
  *   where it runs, and nothing to press.
  * - **single** — one space within reach. One line with its switch: a table of
@@ -37,7 +35,7 @@ export interface SheetSpaceRow {
   mayToggle: boolean;
 }
 
-export type SheetSpaceMode = "everywhere" | "readonly" | "single" | "table";
+export type SheetSpaceMode = "readonly" | "single" | "table";
 
 export function sheetSpaceRows(
   placement: CataloguePlacement,
@@ -64,11 +62,7 @@ export function sheetSpaceRows(
   });
 }
 
-export function sheetSpaceMode(
-  placement: CataloguePlacement,
-  rows: readonly SheetSpaceRow[],
-): SheetSpaceMode {
-  if (placement.everywhere) return "everywhere";
+export function sheetSpaceMode(rows: readonly SheetSpaceRow[]): SheetSpaceMode {
   if (!rows.some((row) => row.mayToggle)) return "readonly";
   return rows.length === 1 ? "single" : "table";
 }

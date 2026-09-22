@@ -122,7 +122,6 @@ const SETS = {
       }),
       useCatalogueActionsColumn({
         isPending: false,
-        placementOf: () => undefined,
         writableOf: () => true,
         shareableOf: () => true,
         sharedSpacesOf: () => [],

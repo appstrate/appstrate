@@ -112,14 +112,14 @@ export function PanelDialog({
             className={cn(
               // Room under the band: the page below it starts with a title,
               // and a heading pinned to a bar reads as a label of that bar.
-              "sticky top-0 z-20 -mx-6 mb-8 px-6 py-3 pr-14 transition-colors duration-200",
+              "sticky top-0 z-20 -mx-6 mb-12 px-6 py-3 pr-14 transition-colors duration-200",
               stuck && "bg-background border-b",
             )}
           >
             {contentHeader(stuck)}
           </div>
           {/* Only a handle on the scrolling pane. */}
-          <div ref={attach} aria-hidden className="-mt-8 h-px" />
+          <div ref={attach} aria-hidden className="-mt-12 h-px" />
         </>
       )}
       {mobileNav && <div className="mb-4 pr-10 md:hidden">{mobileNav}</div>}

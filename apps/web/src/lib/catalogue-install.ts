@@ -5,5 +5,5 @@ import type { CardItem } from "../pages/package-list";
 
 /** Whether the row has anything to install here. */
 export function canInstall(_item: CardItem, state: CatalogueRowState): boolean {
-  return !state.everywhere && !state.activeHere;
+  return !state.activeHere;
 }

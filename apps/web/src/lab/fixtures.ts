@@ -3879,9 +3879,9 @@ export const library: Json200<"/api/library", "get"> = {
         ],
       },
       {
-        // Shipped with the instance: readable in every space without being
-        // switched on anywhere, which is what "Partout" means and why no
-        // switch is drawn for it.
+        // Shipped with the instance, and with no row of its own in any space:
+        // the wire answers `active` there (`placementState` / `isActiveHere`),
+        // and a space switches it OFF by materialising the row that says so.
         id: "@appstrate/assistant-reunion",
         name: "Assistant de réunion",
         description: "Prépare l'ordre du jour et résume la réunion.",
@@ -3893,7 +3893,7 @@ export const library: Json200<"/api/library", "get"> = {
         placements: ["app_lab_default", APP_ID, "app_lab_sandbox"].map((space_id) => ({
           space_id,
           via: "system" as const,
-          state: "none" as const,
+          state: "active" as const,
           shared_by: null,
         })),
       },
@@ -4006,7 +4006,9 @@ export const library: Json200<"/api/library", "get"> = {
         ],
       },
       {
-        // A system skill, like the system agent above: readable everywhere.
+        // A system skill every space has switched OFF: the opt-out row wins
+        // over the deployment's default, so nothing runs it and Découvrir is
+        // where one switches it back on.
         id: "@appstrate/redaction-claire",
         name: "redaction-claire",
         description: "Règles de rédaction claire pour les sorties d'agents.",
@@ -4018,7 +4020,7 @@ export const library: Json200<"/api/library", "get"> = {
         placements: ["app_lab_default", APP_ID, "app_lab_sandbox"].map((space_id) => ({
           space_id,
           via: "system" as const,
-          state: "none" as const,
+          state: "inactive" as const,
           shared_by: null,
         })),
       },

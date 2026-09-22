@@ -18,6 +18,14 @@
  * A package with no placement at all is not in this vocabulary: it is not
  * placed, which is what the catalogue's second tab is for.
  *
+ * A SYSTEM package has a placement in every space by construction and, with no
+ * row of its own, the wire already answers `active` there
+ * (`placementState` / `isActiveHere`, `services/package-activation.ts`). It is
+ * not a fourth state and it is not switch-less: a space switches it OFF by
+ * materialising the row that says so — the sticky opt-out — and back on the
+ * same way. The screen treats it like any other row, which is what the server
+ * does.
+ *
  * A pure function with its own test because it is the rule the whole screen
  * reads from, and because the wire says `none` where the interface says
  * "offered" — a word swap nobody should have to make twice.
@@ -46,12 +54,6 @@ export interface CataloguePlacement {
   homeSpaceId: string | null;
   /** Placed nowhere this caller can see: the second tab's subject. */
   unplaced: boolean;
-  /**
-   * Readable everywhere without being switched on — what a system agent, skill
-   * or MCP server is. An integration is NOT: it has a real switch, and the
-   * caller passes `false` for it.
-   */
-  everywhere: boolean;
 }
 
 /**
@@ -75,7 +77,6 @@ function isPendingOffer(placement: LibraryPlacement): boolean {
 export function cataloguePlacement(
   pkg: Pick<LibraryPackageItem, "placements" | "home_space_id" | "source">,
   spaceId: string | null | undefined,
-  options: { everywhere?: boolean } = {},
 ): CataloguePlacement {
   const byState = { active: [] as string[], inactive: [] as string[], offered: [] as string[] };
   const offeredBy: Record<string, string | null> = {};
@@ -101,13 +102,12 @@ export function cataloguePlacement(
     unplaced: !pkg.placements.some(
       (placement) => placement.via !== "system" || placement.state === "active",
     ),
-    everywhere: options.everywhere ?? false,
   };
 }
 
 /** Is this row one of the two tabs' subject? */
 export function inPlacedTab(placement: CataloguePlacement): boolean {
-  return !placement.unplaced || placement.everywhere;
+  return !placement.unplaced;
 }
 
 /**

@@ -61,12 +61,26 @@ describe("cataloguePlacement", () => {
     expect(inPlacedTab(placement)).toBe(false);
   });
 
-  it("keeps a system package in the placed tab although it is placed nowhere", () => {
-    // A system agent, skill or MCP server is readable in every space without a
-    // row: "not placed" would send it to Découvrir, where it cannot be added.
-    const placement = cataloguePlacement(pkg([], null), "spc_a", { everywhere: true });
-    expect(placement.unplaced).toBe(true);
+  it("keeps a system package in the placed tab: the wire says it is active there", () => {
+    // A system package has a placement in every space and, with no row of its
+    // own, the server answers `active` — so it is placed, like any other row,
+    // and its switch is the sticky opt-out.
+    const placement = cataloguePlacement(
+      pkg([{ space_id: "spc_a", via: "system", state: "active" }], null),
+      "spc_a",
+    );
+    expect(placement.unplaced).toBe(false);
     expect(inPlacedTab(placement)).toBe(true);
+  });
+
+  it("sends a system package switched off in every space to Découvrir", () => {
+    // Every space opted out: nothing runs it, and the second tab is where one
+    // switches it back on.
+    const placement = cataloguePlacement(
+      pkg([{ space_id: "spc_a", via: "system", state: "inactive" }], null),
+      "spc_a",
+    );
+    expect(inPlacedTab(placement)).toBe(false);
   });
 });
 

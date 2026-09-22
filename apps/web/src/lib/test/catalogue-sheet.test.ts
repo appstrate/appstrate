@@ -13,7 +13,6 @@ function placement(overrides: Partial<CataloguePlacement> = {}): CataloguePlacem
     offeredBy: {},
     homeSpaceId: null,
     unplaced: false,
-    everywhere: false,
     ...overrides,
   };
 }
@@ -69,44 +68,19 @@ describe("sheetSpaceRows", () => {
 });
 
 describe("sheetSpaceMode", () => {
-  it("draws no switch for a package readable everywhere", () => {
-    const p = placement({ everywhere: true });
-    expect(
-      sheetSpaceMode(
-        p,
-        sheetSpaceRows(p, spaces, () => true),
-      ),
-    ).toBe("everywhere");
-  });
-
   it("is read-only when the reader may switch it nowhere", () => {
     const p = placement({ activeIn: ["spc_a"] });
-    expect(
-      sheetSpaceMode(
-        p,
-        sheetSpaceRows(p, spaces, () => false),
-      ),
-    ).toBe("readonly");
+    expect(sheetSpaceMode(sheetSpaceRows(p, spaces, () => false))).toBe("readonly");
   });
 
   it("is one line, not a table, with one space within reach", () => {
     const p = placement();
-    expect(
-      sheetSpaceMode(
-        p,
-        sheetSpaceRows(p, spaces.slice(0, 1), () => true),
-      ),
-    ).toBe("single");
+    expect(sheetSpaceMode(sheetSpaceRows(p, spaces.slice(0, 1), () => true))).toBe("single");
   });
 
   it("is a table as soon as there are two spaces to compare", () => {
     const p = placement();
-    expect(
-      sheetSpaceMode(
-        p,
-        sheetSpaceRows(p, spaces, (id) => id === "spc_b"),
-      ),
-    ).toBe("table");
+    expect(sheetSpaceMode(sheetSpaceRows(p, spaces, (id) => id === "spc_b"))).toBe("table");
   });
 });
 

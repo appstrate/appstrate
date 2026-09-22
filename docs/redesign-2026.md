@@ -1806,22 +1806,33 @@ Three defects that came with those controls, all fixed and each worth knowing:
   sheet — the decision is not something a reader should meet after the heading
   of the thing it concerns.
 
-**"Partout" is said once, not once per column**
+**A system package has a real switch, and the screen was hiding it**
 
-A system agent read "Partout · Partout · Partout" across the space columns,
-with no switch anywhere: three repetitions of one fact, in the place where
-every other row offers a control. The fact moved to the origin column, under
-the provider, and the space cells are a quiet dash.
+"Partout", drawn across every space column with no control anywhere, was not
+just noisy: it was WRONG. The server's rule (`isActiveHere`,
+`services/package-activation.ts`) says a system package with no row of its own
+is on by the deployment's default, and that an explicit row outvotes that
+default — the sticky opt-out `deactivatePackage` materialises on purpose. The
+library projects exactly that: `placementState` answers `active` for a system
+package nobody touched, `inactive` for one a space switched off.
 
-**Découvrir is structurally empty for agents and skills, and that is correct**
+So a space CAN switch a built-in agent off, and back on, and the catalogue was
+refusing a capability the API offers. The client's `everywhere` flag is gone
+with every branch that read it: a system row is a row like any other, its
+switch is on by default, and turning it off writes the opt-out. Its second
+consequence is the one that makes Découvrir honest for agents and skills: a
+built-in switched off in every space you reach is placed nowhere, so it lands
+in Découvrir, which is where you switch it back on.
 
-A catalogue-wide finding, written down because it looks like a bug: for a
-reader who reaches the space a package is homed in, that package is PLACED —
-the matrix's off switch in another space's column is the same affordance the
-per-space "candidate" was. So Découvrir only ever holds what is in none of your
-spaces: system packages switched on nowhere, which in practice means
-integrations, since a system agent or skill is readable everywhere and says so.
-The empty state already says exactly that.
+**What Découvrir can hold, and why it looks empty**
+
+For a reader who reaches the space a package is homed in, that package is
+PLACED — the matrix's off switch in another space's column is the same
+affordance the per-space "candidate" was. So Découvrir only ever holds what is
+in NONE of your spaces: a system package switched on nowhere (an integration
+the deployment does not offer, or a built-in every one of your spaces opted out
+of). An organisation's own agents and skills never appear there, and the empty
+state says so in those words.
 
 **The share alert and the row it names share a tint**
 

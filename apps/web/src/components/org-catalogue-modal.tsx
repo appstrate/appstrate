@@ -20,15 +20,17 @@
  * active could not answer "activate where?", which is the only question its
  * button raises. Two of those states are not a row anyone can act on:
  *
- * - A system agent, skill or MCP server is readable in every space without
- *   being switched on at all (`listOrgItems` unions `source = 'system'` with
- *   what is installed), so it says "always available" and offers no button.
- * - A system INTEGRATION is different: it has a real switch, and when the
- *   deployment lists it in `SYSTEM_INTEGRATIONS` it is ON in a space that has
- *   no `space_packages` row at all (`resolveIntegrationActivations`). The
- *   library cannot see that — it reports row presence — so the integrations
- *   view reads `/api/integrations`, which resolves it, and only that answer is
- *   trusted for "active here".
+ * - A SYSTEM package is placed in every space by construction, and with no
+ *   `space_packages` row of its own the deployment's default decides: on for a
+ *   system agent, skill or MCP server, on for an integration the deployment
+ *   offers (`isActiveHere`, `services/package-activation.ts`). It is not
+ *   switch-less — an explicit row outvotes that default, which is the sticky
+ *   opt-out `deactivatePackage` writes — so its switch is drawn like any
+ *   other, on by default.
+ * - A system INTEGRATION is the one kind the library cannot answer for: the
+ *   offered set is a boot-time env constant, so the integrations view reads
+ *   `/api/integrations`, which resolves it, and only that answer is trusted
+ *   for "active here".
  *
  * A row opens HERE, not on the package's page: that page would throw away the
  * panel and the list, and its breadcrumb would claim the current space for a
@@ -236,11 +238,7 @@ export function OrgCatalogueModal({
    * `/api/integrations` for "active here" and the library for the rest.
    */
   const placementOf = (item: LibraryPackageItem): CataloguePlacement => {
-    const base = cataloguePlacement(item, spaceId, {
-      // A system agent, skill or MCP server is readable in every space without
-      // being switched on; a system integration has a real switch.
-      everywhere: item.source === "system" && active !== "integration",
-    });
+    const base = cataloguePlacement(item, spaceId);
     if (active !== "integration") return base;
     const activeHere = Boolean(integrationById.get(item.id)?.active);
     if (!activeHere || !spaceId || base.here === "active") return base;
@@ -265,13 +263,12 @@ export function OrgCatalogueModal({
   });
   const stateOf = (item: CardItem): CatalogueRowState => {
     const placement = placementById.get(item.id);
-    if (!placement) return { activeIn: [], activeHere: false, everywhere: false };
+    if (!placement) return { activeIn: [], activeHere: false };
     return {
       activeIn: placement.activeIn.map(spaceNameOf),
       activeHere: placement.here === "active",
       placedHere: placement.here === "inactive",
       offeredHere: placement.here === "offered",
-      everywhere: placement.everywhere,
     };
   };
   const canActivate = (item: CardItem) => canInstall(item, stateOf(item));
@@ -371,9 +368,6 @@ export function OrgCatalogueModal({
   const onlyHere = chosenSpaces.length === 1 && chosenSpaces[0] === spaceId;
   /** Its states across the spaces on screen: the columns are the question. */
   const statesIn = (placement: CataloguePlacement): PlacementState[] => {
-    // A system package is readable everywhere without a row: it is active in
-    // every sense the reader cares about.
-    if (placement.everywhere) return ["active"];
     const out: PlacementState[] = [];
     if (placement.activeIn.some((id) => visibleIds.includes(id))) out.push("active");
     if (placement.inactiveIn.some((id) => visibleIds.includes(id))) out.push("inactive");
@@ -509,16 +503,12 @@ export function OrgCatalogueModal({
       }),
     onToggleAll: () => setSelected(allSelected ? new Set() : new Set(activatable)),
   });
-  const originColumn = useCatalogueOriginColumn(
-    orgName,
-    (item) => {
-      const home = placementById.get(item.id)?.homeSpaceId;
-      // `null` when the caller does not reach the home: the server withholds
-      // the id rather than naming a space they cannot enter (RBAC spec §6.9).
-      return home ? spaceNameOf(home) : null;
-    },
-    (item) => placementById.get(item.id)?.everywhere === true,
-  );
+  const originColumn = useCatalogueOriginColumn(orgName, (item) => {
+    const home = placementById.get(item.id)?.homeSpaceId;
+    // `null` when the caller does not reach the home: the server withholds the
+    // id rather than naming a space they cannot enter (RBAC spec §6.9).
+    return home ? spaceNameOf(home) : null;
+  });
   const setActive = (item: CardItem, targetSpaceId: string, next: boolean) =>
     activate.mutate(
       { spaceId: targetSpaceId, packageId: item.id, active: next },
@@ -575,7 +565,6 @@ export function OrgCatalogueModal({
   });
   const actionsColumn = useCatalogueActionsColumn({
     isPending: activate.isPending || revoke.isPending,
-    placementOf: (item) => placementById.get(item.id),
     writableOf,
     shareableOf,
     sharedSpacesOf,
