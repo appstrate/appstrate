@@ -20,6 +20,14 @@ import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/core/naming";
 import type { PrincipalKind } from "@appstrate/core/module";
 import { logger } from "./logger.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
+import {
+  DEFAULT_SKILL_DISCOVERY,
+  PLATFORM_DEFAULT_SKILLS,
+  resolveChatSkills,
+  type ChatSkillSelection,
+  type SkillDiscovery,
+  type SkillHint,
+} from "./skills.ts";
 
 /**
  * Minimal Hono Env mirroring what the platform auth pipeline sets on the chat
@@ -72,13 +80,27 @@ export type ChatEnv = {
  * adds `agents:run`. Instructions for an act the token lacks are absent rather
  * than contradicted, so the persona agrees with the `run_and_wait` schema that
  * same token is shown; the platform, not this text, refuses the act.
+ *
+ * `skillDiscovery` is the ONE other dial: it decides which sentence about the
+ * catalogue the model reads, and it must agree with what the context block
+ * actually renders — telling a `manual` session to browse a catalogue it was
+ * not shown is how a prompt teaches a dead end.
  */
 export function buildSystemPrompt(options: {
   canComposeInline: boolean;
   canAuthorAgents: boolean;
+  skillDiscovery?: SkillDiscovery;
 }): string {
   const inline = (yes: string, no = "") => (options.canComposeInline ? yes : no);
   const author = (yes: string, no = "") => (options.canAuthorAgents ? yes : no);
+  const discovery = options.skillDiscovery ?? DEFAULT_SKILL_DISCOVERY;
+  const discoveryRule = {
+    auto: "The list under `### Other skills in this space` is a catalogue you have not loaded: read those descriptions the same way and load one when it clearly matches. When that catalogue is marked `(list truncated)`, call `listSkills` to see the rest.",
+    on_demand:
+      "No catalogue of other skills is shown to you. Call `listSkills` only when the user asks for a skill you do not see listed.",
+    manual:
+      "Load only the skills listed under `## Skills`. Do not browse for others, and do not call `listSkills` on your own initiative.",
+  }[discovery];
   return `You are Appstrate's assistant. You help the user operate their Appstrate instance through the available tools.
 
 **You have no ability of your own to act on the outside world.** You cannot browse the web, read email, call third-party APIs, or use any integration or MCP directly. Your only power is invoking Appstrate operations. You are the brain/orchestrator; your hands are Appstrate agents. Any request that needs an integration, an MCP, or any action external to Appstrate MUST be carried out by running an agent and reading its result back — never by you claiming to have done it yourself.
@@ -133,18 +155,21 @@ After a successful \`run_and_wait\`, deliver the result directly and briefly: pr
 
 Never quote run metrics — duration, cost, token usage — in your replies, even when a run resource you read carries them: the chat UI already displays them on the run card. Report only what the run produced (its result) or why it failed (its error).
 
-When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error. One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error on \`integrations.<id>\` means the integration is connected but not activated for this space — do NOT re-run and do NOT restart the connect flow (connecting is personal, activating is organization-wide). Activate it instead: call \`activateIntegration\` on that package id, then re-run once. Activation is admin-only, so that call is refused (403) when the user is not an administrator — in that case say plainly that an administrator must activate that integration, and stop.
+When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error. One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error on \`integrations.<id>\` means the integration is connected but not activated for this space — do NOT re-run and do NOT restart the connect flow (connecting is personal, activating is organization-wide). Activate it instead: call \`invoke_operation\` with \`operation_id: "activatePackage"\`, \`path_params: { "spaceId": "<the space id from your context block>" }\` and \`body: { "packageId": "<the integration's @scope/name id>" }\`, then re-run once. Activation is admin-only, so that call is refused (403) when the user is not an administrator — in that case say plainly that an administrator must activate that integration, and stop.
 
 Files the user attaches to the conversation are shown to you as \`[Attached file: <name> — appfile://file_… — <mime>, <size>]\` lines. Follow the direct-reading rule above before considering a run. When a run is justified, pass that \`appfile://\` URI verbatim into an agent input file field (a field typed as \`format: uri\` with a \`contentMediaType\`) — the run resolves it directly, no download or re-upload. \`upload://\` URIs work the same way. A published agent's input schema is a versioned contract the platform never rewrites, so a \`kind:"agent"\` run takes a file only through \`run_and_wait\`'s \`input\`, under one of the agent's DECLARED file fields.${inline(` For an INLINE run, declare nothing: list the \`appfile://\` URIs in \`run_and_wait\`'s top-level \`context_files\` and the platform mounts them read-only under \`files/\` and announces them in the run's prompt — that is the cheap path, use it. Declaring the file field yourself in the manifest's \`input.schema\` (\`{"type":"string","format":"uri","contentMediaType":"<mime>"}\`) plus a top-level \`input\` also works. \`upload://\` URIs need that declared field either way — \`context_files\` takes \`appfile://\` only. Naming a URI in the \`prompt\` text is never what mounts a file — the run cannot fetch \`appfile://\` itself, and the launch is REFUSED (400) when the prompt names a file the input does not mount, so put the URI in \`context_files\` (or a declared file field) and name it in the prompt only to refer to it.`)} Never invent an \`appfile://\` URI.
 
 Everything a run writes under \`outputs/\` is published when it ends: the files appear on the run's page, come back in the \`run_and_wait\` result's \`files\` list, and render as downloadable chips in this chat. Content merely returned through the \`output\` tool is plain data for YOU — it never becomes a file the user can open or download.${inline(` So when the user asks for a file or downloadable deliverable (a report, a CSV, an image, a PDF…), instruct the sub-agent, in its \`prompt\`, to WRITE it as a file into the \`outputs/\` directory of its workspace (creating it if needed). Do both when useful: the file in \`outputs/\` for the user, a short \`output\` payload for your own summary. Give every deliverable a concise, descriptive, task-specific kebab-case filename in the user's language, including enough subject or scope to remain understandable after it is downloaded outside this run (for example, \`analyse-concurrents-restaurants-lyon.md\`). NEVER use context-free names such as ${CONTEXT_FREE_FILENAMES_PHRASE}. When the user asks for a report or summary without naming a format, default to markdown with such a descriptive filename; only reach for another format (PDF, HTML…) when the user explicitly asks for it.`)}
 
-Your context block below is DATA — the user's identity and role, the current date, the integrations they have connected, the agents they can run${author(", and the skills available")}. How to act on it:
+Your context block below is DATA — the user's identity and role, the space they are working in, the current date, the integrations they have connected, the agents they can run, and the skills available to you. How to act on it:
 - Use the current date to resolve relative dates and schedules.
+- Use the space id shown on the \`Current space:\` line verbatim wherever an operation takes a \`spaceId\`; never invent one and never reuse an id from an earlier conversation.
 - Use every \`@scope/name\` id verbatim: ${author("in `dependencies.integrations`, in `run_and_wait`'s `scope`/`name`, and in `dependencies.skills`", "in `run_and_wait`'s `scope`/`name`")}.
 - ${inline("Prefer running an existing agent over doing the work inline when one fits the task", "Run an existing agent whenever one fits the task")}. Run it with \`run_and_wait\` using \`kind:"agent"\`, then answer from the returned result.
+- The skills listed under \`## Skills\` are guides for YOU — procedures you follow yourself, not packages you run. When one of them clearly matches the request, LOAD IT BEFORE acting: call \`invoke_operation\` with \`operation_id: "getSkill"\` and the path params \`scope\` (KEEP the leading \`@\`, e.g. \`@appstrate\`) and \`name\`, then follow the \`content\` it returns. Load ONE at a time, and load none when none clearly matches — an unread line in the list is not a reason to read it. Never reload a skill whose \`content\` already appears in this conversation. A skill marked \`(pinned)\` is one the user chose for this conversation: prefer it.
+- ${discoveryRule}
 ${author(`- Skills are not run on their own. When you build or configure an agent and one of the listed skills fits the task, declare it under the agent manifest's \`dependencies.skills\` keyed by its id (e.g. \`"@appstrate/web-research": "^1.2.0"\`) — use the version shown, or \`"*"\` if none. The run route validates that declared skills exist.
-`)}- A list marked \`(list truncated)\` is partial: call \`invoke_operation\` with \`operation_id: "listAgents"\` or \`"listSkills"\` for the full one.
+`)}- A list marked \`(list truncated)\` names some of what exists, never all of it: call \`invoke_operation\` with \`operation_id: "listAgents"\` or \`"listSkills"\` for the whole one.
 - The context carries NO run history. When the user asks about a recent or failed run, or wants to re-run something, without naming it, call \`listRuns\` (newest first) before answering, then fetch full details with the run get operation when needed.
 
 Respect the user's role: actions beyond it will be refused by the platform — don't attempt them.`;
@@ -154,6 +179,12 @@ Respect the user's role: actions beyond it will be refused by the platform — d
 interface CallerContext {
   user?: { name?: string | null; email?: string | null } | null;
   org?: { role?: string | null; name?: string | null; slug?: string | null } | null;
+  /**
+   * The space the context was resolved in. Rendered because operations taking
+   * a `spaceId` path param (the activation door) are otherwise unreachable —
+   * the model has no other way to learn where it is.
+   */
+  space?: { id?: string | null; name?: string | null } | null;
   connections?:
     | {
         integration_id: string;
@@ -181,15 +212,13 @@ interface CallerContext {
       }[]
     | null;
   agents_truncated?: boolean | null;
-  skills?:
-    | {
-        package_id: string;
-        display_name?: string | null;
-        description?: string | null;
-        version?: string | null;
-      }[]
-    | null;
+  /** The space's capped, listed-only skill catalogue. */
+  skills?: SkillHint[] | null;
   skills_truncated?: boolean | null;
+  /** `?skills=` resolved by exact id — unlisted included, uncapped. */
+  requested_skills?: SkillHint[] | null;
+  /** Requested ids no package answered (unknown, inactive, or out of reach). */
+  unresolved_skills?: string[] | null;
 }
 
 /**
@@ -216,15 +245,52 @@ export function normalizeChatLocale(raw: string | undefined): string {
 }
 
 /**
+ * One skill index line: `` - `@scope/name` (v1.2.0) (pinned) — Label: desc ``.
+ * The version and the label are dropped when they say nothing (no version
+ * declared; a display name that just repeats the id), so the line carries
+ * information rather than a fixed shape.
+ */
+function skillLine(skill: SkillHint, pinned: boolean): string {
+  const description = skill.description?.trim();
+  const label = skill.display_name?.trim() || skill.package_id;
+  const head =
+    `- \`${skill.package_id}\`` +
+    (skill.version ? ` (v${skill.version})` : "") +
+    (pinned ? " (pinned)" : "");
+  if (label === skill.package_id) return description ? `${head} — ${description}` : head;
+  return `${head} — ${label}${description ? `: ${description}` : ""}`;
+}
+
+/**
  * Render the caller context into a system-prompt block. Returns "" when the
  * payload is unusable so the caller can skip injection.
  */
 export function formatCallerContext(
   raw: unknown,
-  opts?: { locale?: string; now?: Date; canAuthorAgents?: boolean },
+  opts?: {
+    locale?: string;
+    now?: Date;
+    canAuthorAgents?: boolean;
+    /** The session's skill choice; defaults to "no pins, full catalogue". */
+    skills?: ChatSkillSelection;
+  },
 ): string {
   const author = opts?.canAuthorAgents ?? true;
   const ctx = (raw ?? {}) as CallerContext;
+  // Resolved before the emptiness check below: a payload carrying nothing but
+  // skills is still worth a block (the index is what makes them loadable).
+  const selection = opts?.skills ?? { discovery: DEFAULT_SKILL_DISCOVERY, pinned: [] };
+  const skills = resolveChatSkills({
+    discovery: selection.discovery,
+    pinned: selection.pinned,
+    defaults: PLATFORM_DEFAULT_SKILLS,
+    requested: ctx.requested_skills ?? [],
+    unresolved: ctx.unresolved_skills ?? [],
+    catalogue: ctx.skills ?? [],
+    catalogueTruncated: ctx.skills_truncated ?? false,
+  });
+  const hasSkillSection =
+    skills.indexed.length > 0 || skills.catalogue.length > 0 || skills.notices.length > 0;
   const name = ctx.user?.name?.trim();
   const email = ctx.user?.email?.trim();
   const role = ctx.org?.role?.trim();
@@ -237,7 +303,7 @@ export function formatCallerContext(
     !orgName &&
     !ctx.connections?.length &&
     !ctx.agents?.length &&
-    !ctx.skills?.length
+    !hasSkillSection
   )
     return "";
 
@@ -249,6 +315,18 @@ export function formatCallerContext(
     "## Your context",
     `You are assisting ${who}${role ? `, whose role is "${role}"` : ""}${orgLabel}.`,
   ];
+  // The space id, verbatim, because it is a PATH PARAMETER the model has to
+  // reproduce (`POST /api/spaces/{spaceId}/packages`). Stable for the whole
+  // session, so it costs the prompt cache nothing.
+  const spaceId = ctx.space?.id?.trim();
+  if (spaceId) {
+    const spaceName = ctx.space?.name?.trim();
+    lines.push(
+      spaceName
+        ? `Current space: "${spaceName}" (\`${spaceId}\`).`
+        : `Current space: \`${spaceId}\`.`,
+    );
+  }
   // Ground "today" from the server clock. The chat carries no browser-supplied
   // clock/timezone (none is persisted server-side), so this is always UTC.
   //
@@ -322,23 +400,46 @@ export function formatCallerContext(
     }
     if (ctx.agents_truncated) lines.push("(list truncated)");
   }
-  // Skills attach to an agent the turn may author; otherwise they are noise.
-  if (ctx.skills?.length && author) {
-    lines.push("", "## Skills you can attach to an agent");
-    for (const s of ctx.skills) {
-      const desc = s.description?.trim();
-      const label = s.display_name?.trim() || s.package_id;
-      lines.push(
-        `- \`${s.package_id}\`${s.version ? ` (v${s.version})` : ""} — ${label}` +
-          (desc ? `: ${desc}` : ""),
-      );
+  // ONE skills section, rendered whatever the turn's authoring grant: the chat
+  // loads skills for ITSELF now, so they are no longer "things to attach to an
+  // agent you may not write". The author-gated half is the `dependencies.skills`
+  // sentence, and it lives in the persona (`buildSystemPrompt`), not here.
+  if (hasSkillSection) {
+    lines.push("", "## Skills");
+    for (const skill of skills.indexed) lines.push(skillLine(skill, skill.origin === "pinned"));
+    if (skills.catalogue.length) {
+      lines.push("", "### Other skills in this space");
+      for (const skill of skills.catalogue) lines.push(skillLine(skill, false));
+      if (skills.catalogueTruncated) lines.push("(list truncated)");
     }
-    if (ctx.skills_truncated) lines.push("(list truncated)");
+    if (skills.notices.length) lines.push("", ...skills.notices);
   }
   // `/api/me/context` also carries `recent_runs`, deliberately neither read nor rendered here: it
   // rewrites itself on every launch, busting the system prompt's single cache breakpoint.
   // `buildSystemPrompt` tells the model to call `listRuns` instead.
   return lines.join("\n");
+}
+
+/** Ids already warned about in this process — the condition is boot-stable. */
+const warnedUnresolvedDefaults = new Set<string>();
+
+/**
+ * A platform default that does not resolve is a DEPLOYMENT fault — the system
+ * package is missing, deactivated, or was never imported — so it goes to the
+ * operator and never into the prompt: telling the model about a skill it cannot
+ * load teaches it a dead end. An unresolved PIN is the opposite (the user's own
+ * act) and `resolveChatSkills` renders a notice for it instead.
+ *
+ * Deduped per id per process: the fault is identical on every turn of every
+ * session, so warning each time buries the signal in its own repetitions.
+ */
+function warnUnresolvedDefaults(unresolved: readonly string[] | null | undefined): void {
+  const missing = (unresolved ?? []).filter(
+    (id) => PLATFORM_DEFAULT_SKILLS.includes(id) && !warnedUnresolvedDefaults.has(id),
+  );
+  if (missing.length === 0) return;
+  for (const id of missing) warnedUnresolvedDefaults.add(id);
+  logger.warn("Platform default skills did not resolve in this space", { skills: missing });
 }
 
 /**
@@ -366,6 +467,8 @@ export async function buildCallerContextBlock(
     locale?: string;
     /** Whether the turn's token holds `agents:write` (see `turnPermissions`). */
     canAuthorAgents: boolean;
+    /** The session's skill choice — what to ask the platform to resolve. */
+    skills: ChatSkillSelection;
   },
 ): Promise<string> {
   const { origin, headers, spaceId, user, deps, locale, canAuthorAgents } = args;
@@ -390,11 +493,17 @@ export async function buildCallerContextBlock(
     const ctxHeaders = new Headers();
     for (const [k, v] of Object.entries(headers)) ctxHeaders.set(k, v);
     ctxHeaders.set("x-space-id", spaceId);
-    const res = await deps.dispatch(
-      new Request(new URL("/api/me/context", origin).toString(), { headers: ctxHeaders }),
-    );
+    // Ask for the skills this turn will index BY EXACT ID, in one round trip
+    // with the rest of the context. Sorted and deduped so the same session
+    // state always produces the same request (and the same rendered block).
+    const url = new URL("/api/me/context", origin);
+    const wanted = [...new Set([...PLATFORM_DEFAULT_SKILLS, ...args.skills.pinned])].sort();
+    if (wanted.length) url.searchParams.set("skills", wanted.join(","));
+    const res = await deps.dispatch(new Request(url.toString(), { headers: ctxHeaders }));
     if (res.ok) {
-      return formatCallerContext((await res.json()) as CallerContext, { locale, canAuthorAgents });
+      const payload = (await res.json()) as CallerContext;
+      warnUnresolvedDefaults(payload.unresolved_skills);
+      return formatCallerContext(payload, { locale, canAuthorAgents, skills: args.skills });
     }
     // No space context (e.g. requireSpaceContext rejected) — keep the
     // identity/role block rather than dropping context entirely.

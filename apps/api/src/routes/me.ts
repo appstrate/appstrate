@@ -63,7 +63,12 @@ import {
 } from "../services/integration-connections.ts";
 import { handoffStepsFor } from "../services/connect/provisioning.ts";
 import { logger } from "../lib/logger.ts";
-import { listRunnableAgents, listActiveSkills } from "../services/space-packages.ts";
+import {
+  listRunnableAgents,
+  listActiveSkills,
+  resolveSkillsByIds,
+} from "../services/space-packages.ts";
+import { scopedNameRegex } from "@appstrate/core/validation";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { listRecentForActor } from "../services/state/runs.ts";
 import { canReadRuns } from "../lib/run-visibility.ts";
@@ -440,6 +445,41 @@ router.get("/connections/:connectionId/handoff", async (c) => {
 });
 
 /**
+ * Cap on `?skills=`. The parameter names skills the caller ALREADY knows it
+ * wants (a chat's platform defaults plus the session's pins), so it is short by
+ * construction; the cap only bounds what a hostile caller can make one query
+ * fetch. Well above the pin ceiling the chat enforces.
+ */
+const MAX_REQUESTED_SKILLS = 30;
+
+/**
+ * `?skills=@scope/a,@scope/b` — exact package ids to resolve alongside the
+ * catalogue. Deduped, order-preserving (the response's `unresolved_skills`
+ * answers in request order), and validated on SHAPE only: an id that is not
+ * `@scope/name` cannot name a package, so the whole parameter is a 400, while
+ * an id that is merely unknown or inaccessible comes back under
+ * `unresolved_skills`. A caller must never have to guess which of the two a
+ * 4xx meant.
+ */
+const requestedSkillsSchema = z
+  .string()
+  .transform((raw) => [
+    ...new Set(
+      raw
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean),
+    ),
+  ])
+  .pipe(
+    z
+      .array(
+        z.string().regex(scopedNameRegex, { error: "Each skill id must be in @scope/name form" }),
+      )
+      .max(MAX_REQUESTED_SKILLS, { error: `At most ${MAX_REQUESTED_SKILLS} skill ids` }),
+  );
+
+/**
  * GET /api/me/context — the caller's working context for an AI agent.
  *
  * One payload, three consumers: the chat module injects it into the system
@@ -482,6 +522,18 @@ router.get("/context", requireSpaceContext(), async (c) => {
   const permissions = callerPermissions(c);
   const canRun = permissions.has("agents:run");
   const canReadSkills = permissions.has("skills:read");
+  // Named skills (`?skills=`) answer to the SAME permission as the catalogue —
+  // visibility (`unlisted`) is discoverability, never authorization, so the
+  // exact-id read below deliberately skips `listedFilter` and nothing else.
+  const rawRequestedSkills = c.req.query("skills");
+  let requestedSkillIds: string[] = [];
+  if (rawRequestedSkills !== undefined) {
+    const parsed = requestedSkillsSchema.safeParse(rawRequestedSkills);
+    if (!parsed.success) {
+      throw invalidRequest(parsed.error.issues[0]?.message ?? "Invalid skills parameter", "skills");
+    }
+    requestedSkillIds = parsed.data;
+  }
   // Runs and connections are enrichments like the two above, and they carry
   // more than a hint: `recent_runs` names packages, statuses and error strings,
   // and `connections` names the accounts attached in this space. A credential
@@ -496,22 +548,36 @@ router.get("/context", requireSpaceContext(), async (c) => {
   const accessible = await packageAccessSpaces(c);
   const homeWritable = (pkg: Parameters<typeof homeWireForCaller>[0]) =>
     homeWireForCaller(pkg, accessible).home_writable;
-  const [connections, runnable, activeSkills, recentRuns] = await Promise.all([
-    mayReadIntegrations
-      ? listUsableIntegrationsForActor(scope, actor)
-      : Promise.resolve([] as Awaited<ReturnType<typeof listUsableIntegrationsForActor>>),
-    canRun
-      ? listRunnableAgents(scope, { homeWritable })
-      : Promise.resolve({ agents: [], truncated: false, total: 0 }),
-    canReadSkills
-      ? listActiveSkills(scope, { homeWritable })
-      : Promise.resolve({ skills: [], truncated: false, total: 0 }),
-    // Actor-scoped, but still a runs read: the same permission `GET /api/runs`
-    // asks for (`runs:read` ∨ `runs:read-all`, `canReadRuns`).
-    mayReadRuns
-      ? listRecentForActor(scope, actor)
-      : Promise.resolve([] as Awaited<ReturnType<typeof listRecentForActor>>),
-  ]);
+  const [spaceRow, connections, runnable, activeSkills, requestedSkills, recentRuns] =
+    await Promise.all([
+      // The space the caller is acting in. Named, not just identified: an
+      // operation that takes a `spaceId` path param (the activation door) is
+      // otherwise unreachable for a model whose context never states which
+      // space it is in. One indexed single-row read, issued in parallel with
+      // the listings below, so it never extends the critical path.
+      db.select({ name: spaces.name }).from(spaces).where(eq(spaces.id, scope.spaceId)).limit(1),
+      mayReadIntegrations
+        ? listUsableIntegrationsForActor(scope, actor)
+        : Promise.resolve([] as Awaited<ReturnType<typeof listUsableIntegrationsForActor>>),
+      canRun
+        ? listRunnableAgents(scope, { homeWritable })
+        : Promise.resolve({ agents: [], truncated: false, total: 0 }),
+      canReadSkills
+        ? listActiveSkills(scope, { homeWritable })
+        : Promise.resolve({ skills: [], truncated: false, total: 0 }),
+      // Same gate, no cap: the caller named these ids, so the answer is exactly
+      // as long as the question. Without `skills:read` every requested id is
+      // reported unresolved rather than silently dropped — the caller then knows
+      // its request was refused, not that the skills are gone.
+      canReadSkills
+        ? resolveSkillsByIds(scope, requestedSkillIds, { homeWritable })
+        : Promise.resolve({ resolved: [], unresolved: requestedSkillIds }),
+      // Actor-scoped, but still a runs read: the same permission `GET /api/runs`
+      // asks for (`runs:read` ∨ `runs:read-all`, `canReadRuns`).
+      mayReadRuns
+        ? listRecentForActor(scope, actor)
+        : Promise.resolve([] as Awaited<ReturnType<typeof listRecentForActor>>),
+    ]);
 
   return c.json({
     user: identity,
@@ -521,6 +587,7 @@ router.get("/context", requireSpaceContext(), async (c) => {
       name: (c.get("orgName") as string | undefined) ?? null,
       slug: (c.get("orgSlug") as string | undefined) ?? null,
     },
+    space: { id: scope.spaceId, name: spaceRow[0]?.name ?? null },
     connections,
     recent_runs: recentRuns,
     agents: runnable.agents,
@@ -529,6 +596,8 @@ router.get("/context", requireSpaceContext(), async (c) => {
     skills: activeSkills.skills,
     skills_truncated: activeSkills.truncated,
     skills_total: activeSkills.total,
+    requested_skills: requestedSkills.resolved,
+    unresolved_skills: requestedSkills.unresolved,
   });
 });
 

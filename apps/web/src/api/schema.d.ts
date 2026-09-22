@@ -13179,7 +13179,13 @@ export interface operations {
     };
     getMyContext: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description Comma-separated `@scope/name` skill ids to resolve by EXACT id, in addition to the capped `skills` catalogue. Unlike the catalogue this read ignores visibility, so an `unlisted` skill (`_meta["dev.appstrate/visibility"].level = "unlisted"`) resolves here — visibility is discoverability, never authorization. Ids are deduped and capped at 30; a malformed id (not `@scope/name`) rejects the whole parameter with 400, while an unknown or inaccessible id comes back under `unresolved_skills`. Requires `skills:read` like the catalogue; without it every requested id is reported unresolved.
+                 * @example @appstrate/copilot,@appstrate/web-search
+                 */
+                skills?: string;
+            };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
@@ -13211,6 +13217,10 @@ export interface operations {
                      *         "role": "member",
                      *         "name": "Acme",
                      *         "slug": "acme"
+                     *       },
+                     *       "space": {
+                     *         "id": "spc_abc123",
+                     *         "name": "Growth"
                      *       },
                      *       "connections": [
                      *         {
@@ -13258,7 +13268,21 @@ export interface operations {
                      *         }
                      *       ],
                      *       "skills_truncated": false,
-                     *       "skills_total": 1
+                     *       "skills_total": 1,
+                     *       "requested_skills": [
+                     *         {
+                     *           "package_id": "@appstrate/copilot",
+                     *           "display_name": "Agent Copilot",
+                     *           "description": "Interviews the user, then assembles an agent.",
+                     *           "version": "1.0.0",
+                     *           "published": true,
+                     *           "home_writable": false,
+                     *           "source": "system"
+                     *         }
+                     *       ],
+                     *       "unresolved_skills": [
+                     *         "@acme/retired"
+                     *       ]
                      *     }
                      */
                     "application/json": {
@@ -13275,6 +13299,12 @@ export interface operations {
                             name?: string | null;
                             /** @description Organization slug. */
                             slug?: string | null;
+                        };
+                        /** @description The space this context was resolved in (`X-Space-Id`, the API key's space, or the org default). Every space-scoped operation that takes a `spaceId` path parameter — the activation door `POST /api/spaces/{spaceId}/packages` in particular — reads it from here. */
+                        space: {
+                            /** @description Space id, e.g. "spc_abc123". */
+                            id: string;
+                            name: string | null;
                         };
                         /** @description The caller's own most recent runs (actor-scoped), newest first — lets an agent reference a recent or failed run without a discovery round-trip. */
                         recent_runs: {
@@ -13335,6 +13365,23 @@ export interface operations {
                         skills_truncated: boolean;
                         /** @description Total active skills before the cap. */
                         skills_total: number;
+                        /** @description The skills named by the `skills` query parameter that resolved in this space, sorted by `package_id`. Unlike `skills` this is an exact-id read: it is neither capped nor filtered by visibility, so an `unlisted` skill appears here and not in the catalogue. Empty when the parameter is absent or the caller lacks `skills:read`. */
+                        requested_skills: {
+                            /** @description Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills. */
+                            package_id: string;
+                            display_name: string;
+                            description: string;
+                            /** @description The skill package's own manifest version, when known. Use it to pin a satisfiable dependencies.skills range. */
+                            version: string | null;
+                            /** @description True when the skill has a published version (or is a system skill). False means draft-only: a manifest range can select nothing, and only `dependency_overrides` with `draft` reaches its working copy. */
+                            published: boolean;
+                            /** @description Whether THIS caller may write the skill, i.e. whether its draft is theirs to run — `dependency_overrides` with `draft` answers 403 `draft_not_writable` otherwise. */
+                            home_writable: boolean;
+                            /** @enum {string} */
+                            source: "system" | "local";
+                        }[];
+                        /** @description Requested ids no skill answered — unknown, not active in this space, or refused for lack of `skills:read` — in request order. Never an error: a caller's stale pin is data, not a failure. */
+                        unresolved_skills: string[];
                     };
                 };
             };

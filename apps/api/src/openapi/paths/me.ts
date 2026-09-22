@@ -13,6 +13,53 @@ import { STD_RESPONSE_HEADERS } from "../headers.ts";
  * The other routes in this namespace run inside org (or space) context.
  */
 
+/**
+ * One skill hint in `GET /api/me/context`. Declared once because the catalogue
+ * (`skills`) and the exact-id resolution (`requested_skills`) are the SAME
+ * projection over the same rows — two spellings of it would let the two drift.
+ */
+const skillHintSchema = {
+  type: "object",
+  required: [
+    "package_id",
+    "display_name",
+    "description",
+    "version",
+    "published",
+    "home_writable",
+    "source",
+  ],
+  properties: {
+    package_id: {
+      type: "string",
+      description:
+        'Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills.',
+    },
+    display_name: { type: "string" },
+    description: { type: "string" },
+    version: {
+      type: ["string", "null"],
+      description:
+        "The skill package's own manifest version, when known. Use it to pin a satisfiable dependencies.skills range.",
+    },
+    published: {
+      type: "boolean",
+      description:
+        "True when the skill has a published version (or is a system skill). " +
+        "False means draft-only: a manifest range can select nothing, and only " +
+        "`dependency_overrides` with `draft` reaches its working copy.",
+    },
+    home_writable: {
+      type: "boolean",
+      description:
+        "Whether THIS caller may write the skill, i.e. whether its draft is " +
+        "theirs to run — `dependency_overrides` with `draft` answers 403 " +
+        "`draft_not_writable` otherwise.",
+    },
+    source: { type: "string", enum: ["system", "local"] },
+  },
+} as const;
+
 export const mePaths = {
   "/api/me/orgs": {
     get: {
@@ -422,6 +469,22 @@ export const mePaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
+        {
+          name: "skills",
+          in: "query",
+          required: false,
+          description:
+            "Comma-separated `@scope/name` skill ids to resolve by EXACT id, in addition to the " +
+            "capped `skills` catalogue. Unlike the catalogue this read ignores visibility, so an " +
+            '`unlisted` skill (`_meta["dev.appstrate/visibility"].level = "unlisted"`) resolves ' +
+            "here — visibility is discoverability, never authorization. Ids are deduped and " +
+            "capped at 30; a malformed id (not `@scope/name`) rejects the whole parameter with " +
+            "400, while an unknown or inaccessible id comes back under `unresolved_skills`. " +
+            "Requires `skills:read` like the catalogue; without it every requested id is " +
+            "reported unresolved.",
+          schema: { type: "string" },
+          example: "@appstrate/copilot,@appstrate/web-search",
+        },
       ],
       responses: {
         "200": {
@@ -434,6 +497,7 @@ export const mePaths = {
                 required: [
                   "user",
                   "org",
+                  "space",
                   "connections",
                   "recent_runs",
                   "agents",
@@ -442,6 +506,8 @@ export const mePaths = {
                   "skills",
                   "skills_truncated",
                   "skills_total",
+                  "requested_skills",
+                  "unresolved_skills",
                 ],
                 properties: {
                   user: {
@@ -467,6 +533,19 @@ export const mePaths = {
                         description: "Human-readable organization name.",
                       },
                       slug: { type: ["string", "null"], description: "Organization slug." },
+                    },
+                  },
+                  space: {
+                    type: "object",
+                    description:
+                      "The space this context was resolved in (`X-Space-Id`, the API key's " +
+                      "space, or the org default). Every space-scoped operation that takes a " +
+                      "`spaceId` path parameter — the activation door " +
+                      "`POST /api/spaces/{spaceId}/packages` in particular — reads it from here.",
+                    required: ["id", "name"],
+                    properties: {
+                      id: { type: "string", description: 'Space id, e.g. "spc_abc123".' },
+                      name: { type: ["string", "null"] },
                     },
                   },
                   recent_runs: {
@@ -591,47 +670,7 @@ export const mePaths = {
                       "full list is reachable via the `listSkills` operation. Unlisted packages " +
                       '(`_meta["dev.appstrate/visibility"].level = "unlisted"`) are off this list ' +
                       "and out of the total, and stay resolvable by exact id.",
-                    items: {
-                      type: "object",
-                      required: [
-                        "package_id",
-                        "display_name",
-                        "description",
-                        "version",
-                        "published",
-                        "home_writable",
-                        "source",
-                      ],
-                      properties: {
-                        package_id: {
-                          type: "string",
-                          description:
-                            'Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills.',
-                        },
-                        display_name: { type: "string" },
-                        description: { type: "string" },
-                        version: {
-                          type: ["string", "null"],
-                          description:
-                            "The skill package's own manifest version, when known. Use it to pin a satisfiable dependencies.skills range.",
-                        },
-                        published: {
-                          type: "boolean",
-                          description:
-                            "True when the skill has a published version (or is a system skill). " +
-                            "False means draft-only: a manifest range can select nothing, and only " +
-                            "`dependency_overrides` with `draft` reaches its working copy.",
-                        },
-                        home_writable: {
-                          type: "boolean",
-                          description:
-                            "Whether THIS caller may write the skill, i.e. whether its draft is " +
-                            "theirs to run — `dependency_overrides` with `draft` answers 403 " +
-                            "`draft_not_writable` otherwise.",
-                        },
-                        source: { type: "string", enum: ["system", "local"] },
-                      },
-                    },
+                    items: skillHintSchema,
                   },
                   skills_truncated: {
                     type: "boolean",
@@ -642,11 +681,30 @@ export const mePaths = {
                     type: "integer",
                     description: "Total active skills before the cap.",
                   },
+                  requested_skills: {
+                    type: "array",
+                    description:
+                      "The skills named by the `skills` query parameter that resolved in this " +
+                      "space, sorted by `package_id`. Unlike `skills` this is an exact-id read: " +
+                      "it is neither capped nor filtered by visibility, so an `unlisted` skill " +
+                      "appears here and not in the catalogue. Empty when the parameter is absent " +
+                      "or the caller lacks `skills:read`.",
+                    items: skillHintSchema,
+                  },
+                  unresolved_skills: {
+                    type: "array",
+                    description:
+                      "Requested ids no skill answered — unknown, not active in this space, or " +
+                      "refused for lack of `skills:read` — in request order. Never an error: a " +
+                      "caller's stale pin is data, not a failure.",
+                    items: { type: "string" },
+                  },
                 },
               },
               example: {
                 user: { id: "user_abc", name: "Ada Lovelace", email: "ada@acme.com" },
                 org: { id: "org_abc123", role: "member", name: "Acme", slug: "acme" },
+                space: { id: "spc_abc123", name: "Growth" },
                 connections: [
                   { integration_id: "@appstrate/gmail", name: "Gmail", source: "own" },
                   { integration_id: "@appstrate/clickup", name: "ClickUp", source: "shared" },
@@ -686,6 +744,18 @@ export const mePaths = {
                 ],
                 skills_truncated: false,
                 skills_total: 1,
+                requested_skills: [
+                  {
+                    package_id: "@appstrate/copilot",
+                    display_name: "Agent Copilot",
+                    description: "Interviews the user, then assembles an agent.",
+                    version: "1.0.0",
+                    published: true,
+                    home_writable: false,
+                    source: "system",
+                  },
+                ],
+                unresolved_skills: ["@acme/retired"],
               },
             },
           },

@@ -11,6 +11,13 @@
 import { describe, expect, it } from "bun:test";
 import { buildSystemPrompt, formatCallerContext, normalizeChatLocale } from "../src/prompt.ts";
 
+/**
+ * The ONE activation door's operationId (`POST /api/spaces/{spaceId}/packages`,
+ * `apps/api/src/openapi/paths/spaces.ts`). Pinned here rather than imported:
+ * `verify:module-isolation` forbids a module reaching into the API workspace.
+ */
+const ACTIVATION_OPERATION_ID = "activatePackage";
+
 /** The full persona; the reduced one has its own block at the end. */
 const FULL = buildSystemPrompt({ canComposeInline: true, canAuthorAgents: true });
 
@@ -101,15 +108,85 @@ describe("full persona invariants", () => {
   it("routes integration_not_active to activation, never to a retry", () => {
     // Retrying the run or re-running the connect flow can never clear a 412:
     // connecting is personal, activating is space-wide. Activation IS
-    // reachable (`activateIntegration` is in the platform's operation surface),
-    // and RBAC decides who may call it — an admin fixes it in one step, a member
-    // gets a 403 and is told to ask one. Nothing in the chat pre-computes that
-    // right: quoting the operation instead of asserting the outcome is what
-    // keeps this honest for both roles.
+    // reachable, and RBAC decides who may call it — an admin fixes it in one
+    // step, a member gets a 403 and is told to ask one. Nothing in the chat
+    // pre-computes that right: quoting the operation instead of asserting the
+    // outcome is what keeps this honest for both roles.
     expect(FULL).toContain("integration_not_active");
     expect(FULL).toMatch(/do NOT re-run and do NOT restart the connect flow/);
-    expect(FULL).toContain("activateIntegration");
+    expect(FULL).toContain(`operation_id: "${ACTIVATION_OPERATION_ID}"`);
     expect(FULL).toMatch(/administrator must activate/);
+    // The remedy names a `spaceId` path param, which is only answerable
+    // because the context block renders the current space.
+    expect(FULL).toContain('path_params: { "spaceId"');
+    expect(FULL).toContain('body: { "packageId"');
+  });
+
+  it("names an activation operation the platform actually registers", () => {
+    // The persona used to name `activateIntegration`, which has never existed:
+    // a model following it burned a turn on `search_operations` and guessed.
+    // The real door is `activatePackage`, `POST /api/spaces/{spaceId}/packages`
+    // (apps/api/src/openapi/paths/spaces.ts). A module test cannot import the
+    // API workspace (`verify:module-isolation`), so the id is pinned as a
+    // constant here and the negative below catches the name that never was.
+    expect(FULL).not.toContain("activateIntegration");
+  });
+
+  it("teaches loading a skill through getSkill, one at a time, before acting", () => {
+    // The whole point of phase 2: the chat could NAME skills and never use one.
+    expect(FULL).toContain("guides for YOU");
+    expect(FULL).toContain('`operation_id: "getSkill"`');
+    expect(FULL).toContain("LOAD IT BEFORE acting");
+    expect(FULL).toContain("KEEP the leading `@`");
+    expect(FULL).toContain("Load ONE at a time");
+    expect(FULL).toContain("Never reload a skill whose `content` already appears");
+    expect(FULL).toContain("`(pinned)` is one the user chose for this conversation");
+  });
+
+  it("teaches the loading rules whatever the turn may author", () => {
+    // Skills are the assistant's own guides now — not something only an author
+    // of agents has a use for.
+    const REDUCED = buildSystemPrompt({ canComposeInline: false, canAuthorAgents: false });
+    expect(REDUCED).toContain('`operation_id: "getSkill"`');
+    expect(REDUCED).toContain("guides for YOU");
+  });
+
+  it("flips the catalogue sentence with the discovery mode", () => {
+    const auto = buildSystemPrompt({
+      canComposeInline: true,
+      canAuthorAgents: true,
+      skillDiscovery: "auto",
+    });
+    const onDemand = buildSystemPrompt({
+      canComposeInline: true,
+      canAuthorAgents: true,
+      skillDiscovery: "on_demand",
+    });
+    const manual = buildSystemPrompt({
+      canComposeInline: true,
+      canAuthorAgents: true,
+      skillDiscovery: "manual",
+    });
+    // `auto` is the default, so the unparameterised persona reads like it.
+    expect(auto).toBe(FULL);
+    expect(auto).toContain("### Other skills in this space` is a catalogue");
+    expect(onDemand).toContain("No catalogue of other skills is shown to you");
+    expect(onDemand).not.toContain("is a catalogue you have not loaded");
+    expect(manual).toContain("Load only the skills listed under `## Skills`");
+    expect(manual).not.toContain("No catalogue of other skills is shown");
+    // A mode that shows no catalogue must not send the model browsing.
+    expect(manual).not.toContain("call `listSkills` to see the rest");
+  });
+
+  it("carries no trace of the retired attach-to-an-agent skills heading", () => {
+    expect(FULL).not.toContain("Skills you can attach to an agent");
+    expect(
+      formatCallerContext({
+        user: { name: "Ada" },
+        org: { role: "member" },
+        skills: [{ package_id: "@acme/pdf", display_name: "PDF" }],
+      }),
+    ).not.toContain("Skills you can attach to an agent");
   });
 
   it("drops the stale claim that a prompt-pasted appfile:// URI gives no access", () => {

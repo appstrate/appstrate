@@ -34,6 +34,7 @@ import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
 import { acquirePiChatSlot, chatCapacityResponse } from "./pi-chat/concurrency.ts";
 import { turnPermissions } from "./turn-permissions.ts";
 import { buildSystemPrompt, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
+import { DEFAULT_SKILL_DISCOVERY } from "./skills.ts";
 export type { ChatEnv } from "./prompt.ts";
 import { finalizeChatStream } from "./finalize-stream.ts";
 import { ensureSession, persistUserMessage, persistAssistantMessage } from "./persistence.ts";
@@ -357,6 +358,9 @@ export async function handleChatStream(
       // UI language forwarded by the client; validated/defaulted in the builder.
       locale: c.req.header("X-Chat-Locale"),
       canAuthorAgents,
+      // Phase 3 reads the session's own mode and pins here; until then every
+      // turn indexes the platform defaults with the catalogue shown.
+      skills: { discovery: DEFAULT_SKILL_DISCOVERY, pinned: [] },
     })
       .finally(() => {
         // Wall time of the block itself.
@@ -467,6 +471,8 @@ export async function handleChatStream(
   let system = buildSystemPrompt({
     canComposeInline: composeInline,
     canAuthorAgents,
+    // Must agree with what `buildCallerContextBlock` above rendered.
+    skillDiscovery: DEFAULT_SKILL_DISCOVERY,
   });
   if (contextBlock) system += `\n\n${contextBlock}`;
 

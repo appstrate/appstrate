@@ -163,7 +163,7 @@ The finding that defines the shape:
 
 > **Auto-activation on connect** — 278 prod lines / 8 files / +1 signed token claim.
 > **Buys**: one saved API call for an admin.
-> **Already covered by**: `activateIntegration`, already in the MCP operation surface; the platform's own RBAC decides who may call it.
+> **Already covered by**: `activatePackage`, already in the MCP operation surface; the platform's own RBAC decides who may call it.
 > **Evidence**: env-backed SYSTEM integrations were already active without an install row, so it only ever reached org-installed ones. It shipped with a privilege escalation (`integrations:connect` is a member right; install is admin-only).
 > **Breaks if removed**: the user sees a 412 once and clicks Activer. The obvious alternative — refuse the connection until active — is NOT viable: it would block member self-connect until an admin acted first.
 > **Verdict**: remove — **intrinsic**. The decision point is authenticated, the action point (OAuth callback, hosted portal) is not, so any auto-activation must thread the capability, and re-deriving it there _was_ the escalation.

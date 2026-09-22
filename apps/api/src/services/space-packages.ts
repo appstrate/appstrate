@@ -19,7 +19,7 @@
  * too, but only UPDATES a column in place on a row already placed.
  */
 
-import { eq, and, exists, sql } from "drizzle-orm";
+import { eq, and, exists, inArray, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { spacePackages, packages, packageShares, packageDistTags } from "@appstrate/db/schema";
 import { notFound, parseBody } from "../lib/errors.ts";
@@ -739,6 +739,67 @@ interface HintOptions {
  * is NOT enforced here — the caller decides whether to surface the hint, and the
  * run / inline-run route re-validates at invoke time.
  */
+/**
+ * Columns every hint read projects from. Shared so the capped LISTING and the
+ * exact-id resolution below cannot select different halves of the same row and
+ * hand the model two different descriptions of one package.
+ */
+const hintColumns = {
+  id: packages.id,
+  type: packages.type,
+  source: packages.source,
+  homeSpaceId: packages.homeSpaceId,
+  draftManifest: packages.draftManifest,
+  // `latest` dist-tag version id — non-null iff the package has a published
+  // version. Lets `published` below be answered without an N+1 (a draft-only
+  // agent must be run with `version=draft`).
+  latestVersionId: packageDistTags.versionId,
+} as const;
+
+/** One row as {@link hintColumns} selects it. */
+type HintRow = {
+  id: string;
+  type: PackageType;
+  source: string;
+  homeSpaceId: string | null;
+  draftManifest: unknown;
+  latestVersionId: number | null;
+};
+
+/**
+ * Row → hint, the ONE projection both hint reads use. It is where
+ * `package_id` / `published` / `home_writable` are decided, so extracting it
+ * is what keeps the capped listing and the exact-id resolution honest about
+ * the same row.
+ */
+function projectPackageHint<T extends PackageHint>(
+  row: HintRow,
+  project: (base: PackageHint, manifest: Record<string, unknown>) => T,
+  homeWritable: HintOptions["homeWritable"],
+): T {
+  const manifest = asRecord(row.draftManifest) as Record<string, unknown>;
+  const base: PackageHint = {
+    package_id: typeof manifest.name === "string" ? manifest.name : row.id,
+    display_name: typeof manifest.display_name === "string" ? manifest.display_name : "",
+    description: typeof manifest.description === "string" ? manifest.description : "",
+    source: row.source ?? "local",
+    published: row.source === "system" || row.latestVersionId != null,
+    // Decided by the CALLER's authority over the package's home, which this
+    // service has no context to read — the route resolves it and hands the
+    // verdict down. Absent resolver (no HTTP caller) ⇒ nobody authors here.
+    home_writable: homeWritable?.(row) ?? false,
+  };
+  return project(base, manifest);
+}
+
+/**
+ * Join condition for the `latest` dist-tag row {@link hintColumns} reads
+ * `latestVersionId` from. Named so both hint reads join it identically.
+ */
+function latestDistTagJoin() {
+  return and(eq(packageDistTags.packageId, packages.id), eq(packageDistTags.tag, "latest"));
+}
+
 async function listActivePackageHints<T extends PackageHint>(
   scope: SpaceScope,
   type: PackageType,
@@ -747,46 +808,18 @@ async function listActivePackageHints<T extends PackageHint>(
 ): Promise<{ items: T[]; truncated: boolean; total: number }> {
   const limit = opts?.limit ?? DEFAULT_PACKAGE_HINT_LIMIT;
   const rows = await db
-    .select({
-      id: packages.id,
-      type: packages.type,
-      source: packages.source,
-      homeSpaceId: packages.homeSpaceId,
-      draftManifest: packages.draftManifest,
-      // `latest` dist-tag version id — non-null iff the package has a published
-      // version. Lets `published` below be answered without an N+1 (a draft-only
-      // agent must be run with `version=draft`).
-      latestVersionId: packageDistTags.versionId,
-      total: sql<number>`count(*) over ()`.mapWith(Number),
-    })
+    .select({ ...hintColumns, total: sql<number>`count(*) over ()`.mapWith(Number) })
     .from(packages)
     .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
     .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
-    .leftJoin(
-      packageDistTags,
-      and(eq(packageDistTags.packageId, packages.id), eq(packageDistTags.tag, "latest")),
-    )
+    .leftJoin(packageDistTags, latestDistTagJoin())
     .where(and(activePackagesFilter(scope, type), listedFilter()))
     .orderBy(...packageListingOrder())
     .limit(limit);
 
   const total = rows[0]?.total ?? 0;
 
-  const items = rows.map((row) => {
-    const manifest = asRecord(row.draftManifest) as Record<string, unknown>;
-    const base: PackageHint = {
-      package_id: typeof manifest.name === "string" ? manifest.name : row.id,
-      display_name: typeof manifest.display_name === "string" ? manifest.display_name : "",
-      description: typeof manifest.description === "string" ? manifest.description : "",
-      source: row.source ?? "local",
-      published: row.source === "system" || row.latestVersionId != null,
-      // Decided by the CALLER's authority over the package's home, which this
-      // service has no context to read — the route resolves it and hands the
-      // verdict down. Absent resolver (no HTTP caller) ⇒ nobody authors here.
-      home_writable: opts?.homeWritable?.(row) ?? false,
-    };
-    return project(base, manifest);
-  });
+  const items = rows.map((row) => projectPackageHint(row, project, opts?.homeWritable));
 
   return { items, truncated: total > items.length, total };
 }
@@ -841,6 +874,11 @@ interface ActiveSkillsResult {
   total: number;
 }
 
+/** The skill-specific half of the hint projection, shared by both reads below. */
+function projectActiveSkill(base: PackageHint, manifest: Record<string, unknown>): ActiveSkill {
+  return { ...base, version: typeof manifest.version === "string" ? manifest.version : null };
+}
+
 /**
  * Active-skill hint for the caller context. Skills are not run directly: the
  * model declares them under an agent manifest's `dependencies.skills`, and the
@@ -854,13 +892,50 @@ export async function listActiveSkills(
   const { items, truncated, total } = await listActivePackageHints(
     scope,
     "skill",
-    (base, manifest) => ({
-      ...base,
-      version: typeof manifest.version === "string" ? manifest.version : null,
-    }),
+    projectActiveSkill,
     opts,
   );
   return { skills: items, truncated, total };
+}
+
+/**
+ * Resolve named skills by EXACT id for this space — the chat's index read,
+ * where the caller already knows which skills it wants (platform defaults, a
+ * session's pins) rather than browsing a catalogue.
+ *
+ * Deliberately WITHOUT {@link listedFilter}. Visibility is discoverability, not
+ * authorization: an `unlisted` skill is off every catalogue and stays fully
+ * resolvable by exact id, which is the entire point of the marker — the chat's
+ * platform defaults ship unlisted precisely so they serve the assistant without
+ * cluttering the user's skill catalogue. Everything else holds:
+ * {@link activePackagesFilter} is the same org/placement/activation gate the run
+ * path uses, and the caller re-checks `skills:read` before asking at all.
+ *
+ * One query, `ORDER BY package_id` so the rendered index is byte-stable across
+ * turns (the chat's system prompt is a single prompt-cache block). `unresolved`
+ * carries the ids no row answered, in REQUEST order — an unknown id is data for
+ * the caller to report, never an error.
+ */
+export async function resolveSkillsByIds(
+  scope: SpaceScope,
+  ids: readonly string[],
+  opts?: HintOptions,
+): Promise<{ resolved: ActiveSkill[]; unresolved: string[] }> {
+  if (ids.length === 0) return { resolved: [], unresolved: [] };
+  const rows = await db
+    .select(hintColumns)
+    .from(packages)
+    .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
+    .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
+    .leftJoin(packageDistTags, latestDistTagJoin())
+    .where(and(activePackagesFilter(scope, "skill"), inArray(packages.id, [...ids])))
+    .orderBy(packages.id);
+
+  const found = new Set(rows.map((row) => row.id));
+  return {
+    resolved: rows.map((row) => projectPackageHint(row, projectActiveSkill, opts?.homeWritable)),
+    unresolved: ids.filter((id) => !found.has(id)),
+  };
 }
 
 /**
