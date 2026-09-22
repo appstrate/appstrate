@@ -363,6 +363,50 @@ export const mePaths = {
       },
     },
   },
+  "/api/me/connections/{connectionId}/handoff": {
+    get: {
+      operationId: "getMyConnectionHandoff",
+      tags: ["Profile"],
+      summary: "What is due on the target when this connection is deleted",
+      description:
+        "For a connection whose credentials the platform minted, the steps to run on the " +
+        "target when deleting it (e.g. removing the installed key) — deleting the connection " +
+        "cannot reach the target. Creation-time steps come only from `submitIntegrationConnect`. " +
+        "`deferred` is omitted: every step here is deletion-time. Empty for an auth that mints " +
+        "nothing, and for an unknown, malformed or not-owned id.",
+      parameters: [
+        {
+          name: "connectionId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Handoff steps due at deletion (possibly empty)",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  hasMore: { type: "boolean" },
+                  data: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/HandoffCommandStep" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+      },
+    },
+  },
   "/api/me/context": {
     get: {
       operationId: "getMyContext",

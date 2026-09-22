@@ -84,6 +84,7 @@ import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps"
 import { VersionHistory } from "../components/version-history";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
+import { ConnectionTeardownSteps } from "../components/integration-connect/connection-teardown-steps";
 import { Modal } from "../components/modal";
 import { SourceBadge } from "../components/source-badge";
 import { DefaultCell } from "../components/default-cell";
@@ -1435,7 +1436,9 @@ function ConnectionTableRow({
             { onSuccess: () => setConfirmDelete(false) },
           )
         }
-      />
+      >
+        {confirmDelete && <ConnectionTeardownSteps connectionId={connection.id} />}
+      </ConfirmModal>
     </>
   );
 }

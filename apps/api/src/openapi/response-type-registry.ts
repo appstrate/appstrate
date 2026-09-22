@@ -233,6 +233,10 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   SpaceMemberRemoval:
     "single-field acknowledgement of DELETE /spaces/{id}/members/{userId}; the page re-reads SpaceMemberObject, which IS registered",
   ResolutionFieldError: "ProblemDetail.errors[] item; never read through a shared-type",
+  // Canonical TS shape: `HandoffStep` in services/connect/provisioning.ts.
+  HandoffCommandStep: "handoff command step; derived from a credential bundle, no shared-type",
+  HandoffValueStep: "handoff value step; derived from a credential bundle, no shared-type",
+  HandoffStep: "handoff step union; derived from a credential bundle, no shared-type",
   ModelGenerationSettings:
     "embedded request/response value object; canonical runtime type lives in @appstrate/core",
   ModelGenerationCapabilities:

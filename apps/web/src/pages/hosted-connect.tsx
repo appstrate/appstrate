@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "../components/spinner";
 import { CredentialFields } from "../components/integration-connect/credential-fields";
+import { initialCredentialValues } from "../components/integration-connect/credential-schema";
+import { HandoffSteps, type HandoffStep } from "../components/integration-connect/handoff-steps";
 import { IntegrationIcon } from "../components/integration-icon";
 import { client, type paths } from "../api/client";
 import { publishConnectCompletion } from "../lib/connect-completion";
@@ -39,11 +41,22 @@ type ConnectContext = Omit<
 
 type Phase = "loading" | "form" | "submitting" | "done" | "error";
 
+const closeWindow = () => {
+  try {
+    window.close();
+  } catch {
+    /* not a popup — the confirmation stays visible */
+  }
+};
+
 export function HostedConnectPage() {
   const { t } = useTranslation("settings");
   const [phase, setPhase] = useState<Phase>("loading");
   const [context, setContext] = useState<ConnectContext | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
+  // What the user must still do on the target host for a minted credential.
+  // Nothing here is secret — the private half never leaves the server.
+  const [handoffSteps, setHandoffSteps] = useState<HandoffStep[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Technical reason behind a context-load failure (HTTP status or network
   // error). Shown under the generic body so an invalid/expired link, a removed
@@ -57,7 +70,11 @@ export function HostedConnectPage() {
         // Non-2xx throws via the client middleware, so `data` is defined here.
         const { data } = await client.GET("/api/integrations/connect/context");
         if (cancelled) return;
-        setContext(data as ConnectContext);
+        const ctx = data as ConnectContext;
+        setContext(ctx);
+        // Seed the defaults the manifest declares, so a value the user can see
+        // in the form is a value the form will actually submit.
+        setValues(initialCredentialValues(ctx.auth));
         setPhase("form");
       } catch (err) {
         if (cancelled) return;
@@ -82,24 +99,21 @@ export function HostedConnectPage() {
     setError(null);
     try {
       // Non-2xx throws `ApiError` (RFC 9457 `detail`) via the client middleware.
-      await client.POST("/api/integrations/connect/submit", {
+      const { data } = await client.POST("/api/integrations/connect/submit", {
         params: { header: { "x-connect-csrf": context.csrf } },
         body: { credentials: values },
       });
+      // The connection exists: announce it now. The popup opener does not close
+      // this window, so an install block below stays up until the user is done.
       publishConnectCompletion(
         { ok: true, packageId: context.package_id },
         window.opener as Window | null,
         window.location.origin,
       );
+      const minted = data?.handoff_steps;
+      if (minted && minted.length > 0) setHandoffSteps(minted);
+      else setTimeout(closeWindow, 1200);
       setPhase("done");
-      // Close the popup/tab after a short confirmation, mirroring the OAuth page.
-      setTimeout(() => {
-        try {
-          window.close();
-        } catch {
-          /* not a popup — the confirmation stays visible */
-        }
-      }, 1200);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setPhase("form");
@@ -108,7 +122,9 @@ export function HostedConnectPage() {
 
   return (
     <div className="bg-background text-foreground flex min-h-screen items-center justify-center p-4">
-      <div className="w-full max-w-md space-y-6">
+      {/* The install block is a shell script — wrapping it into a 28rem column
+          would make it unreadable, so that one phase gets a wider page. */}
+      <div className={`w-full space-y-6 ${handoffSteps ? "max-w-2xl" : "max-w-md"}`}>
         {phase === "loading" && (
           <div className="flex justify-center py-12">
             <Spinner />
@@ -127,7 +143,35 @@ export function HostedConnectPage() {
           </div>
         )}
 
-        {phase === "done" && (
+        {phase === "done" && handoffSteps && (
+          <div className="space-y-5" data-testid="connect-handoff">
+            <div>
+              <h1 className="text-lg font-semibold">
+                {t("integration.connect.handoffPanel.title")}
+              </h1>
+              <p className="text-muted-foreground mt-1 text-sm">
+                {t("integration.connect.handoffPanel.body")}
+              </p>
+            </div>
+
+            <HandoffSteps steps={handoffSteps} />
+
+            <Button
+              type="button"
+              className="w-full"
+              data-testid="handoff-done"
+              onClick={() => {
+                // In a full tab `close()` is a no-op: fall back to the done message.
+                setHandoffSteps(null);
+                closeWindow();
+              }}
+            >
+              {t("integration.connect.handoffPanel.doneBtn")}
+            </Button>
+          </div>
+        )}
+
+        {phase === "done" && !handoffSteps && (
           <div className="space-y-2 text-center">
             <h1 className="text-lg font-semibold text-green-400">
               {t("integration.connect.hosted.doneTitle")}

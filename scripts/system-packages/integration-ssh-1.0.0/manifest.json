@@ -1,0 +1,103 @@
+{
+  "name": "@appstrate/ssh",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "SSH",
+  "icon": "mdi:console-network",
+  "description": "Reach a host over SSH from an agent — a VPS, a NAS, a build box, anything with sshd and no HTTP API. One connection is one key on one Unix account: THAT ACCOUNT is the boundary. What the agent can do is exactly what the account can do, so grant root only if you mean it, and otherwise create a dedicated user and restrict it with the tools the system already gives you (sudoers, groups, a restricted shell). Appstrate does not narrow it further. A read-only agent is expressed by the TOOLS it is granted: give it ssh_probe and ssh_read, and withhold ssh_exec, ssh_write_file and ssh_edit_file. Such an agent reads files up to 8 MiB and cannot search; for log analysis, grant ssh_exec on a dedicated, restricted account instead. The private key lives in the platform keyring and is delivered to the @appstrate/ssh-mcp runner as a file; it never reaches the agent container.",
+  "license": "Apache-2.0",
+  "keywords": ["ssh", "sftp", "remote", "server", "ops"],
+  "source": {
+    "kind": "local",
+    "server": {
+      "name": "@appstrate/ssh-mcp",
+      "version": "^1.0.0"
+    }
+  },
+  "auths": {
+    "primary": {
+      "type": "custom",
+      "authorized_uris": ["ssh://**"],
+      "identity_claims": {
+        "account_id": "$.host"
+      },
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "required": ["private_key", "host", "user", "host_key"],
+          "properties": {
+            "private_key": {
+              "type": "string",
+              "title": "Clé privée Appstrate",
+              "description": "Générée par la plateforme, jamais saisie ni affichée. Livrée au seul runner @appstrate/ssh-mcp, en fichier 0600 ; elle n'entre jamais dans le conteneur de l'agent.",
+              "pattern": "^-----BEGIN OPENSSH PRIVATE KEY-----"
+            },
+            "host": {
+              "type": "string",
+              "title": "Hôte",
+              "description": "Nom DNS ou adresse IP publique du serveur. Une adresse privée est refusée : l'egress du runner ne la laisse pas passer.",
+              "pattern": "^[A-Za-z0-9]([A-Za-z0-9.:-]{0,253}[A-Za-z0-9])?$"
+            },
+            "port": {
+              "type": "string",
+              "title": "Port SSH",
+              "default": "22",
+              "pattern": "^[0-9]{1,5}$"
+            },
+            "user": {
+              "type": "string",
+              "title": "Compte Unix sur la cible",
+              "description": "Le compte qui portera la clé : c'est LUI la frontière. Ce que l'agent peut faire, c'est exactement ce que ce compte peut faire. Un compte dédié et restreint par défaut (sudoers, groupes, shell restreint) ; root seulement en connaissance de cause. Il lui faut un shell POSIX : SSH passe toute commande par le shell de login, un compte en nologin n'exécuterait rien. Appstrate génère la paire de clés et vous donne ensuite le bloc qui l'installe sur ce compte.",
+              "pattern": "^[a-z_][a-z0-9_-]{0,31}$"
+            },
+            "host_key": {
+              "type": "string",
+              "title": "Clé publique de l'hôte",
+              "description": "L'identité du SERVEUR, pas la vôtre. Relevez-la sur la machine elle-même : awk '{print $1\" \"$2}' /etc/ssh/ssh_host_ed25519_key.pub — ed25519 de préférence, ssh_host_rsa_key.pub seulement si le serveur n'a pas de clé ed25519. La cible doit faire tourner OpenSSH 7.2 ou plus récent. Un relevé à distance passerait par une connexion non authentifiée, exactement ce qu'un intercepteur sait falsifier. Elle est épinglée : tout changement refuse la connexion, il n'y a pas d'acceptation à la première connexion.",
+              "pattern": "^(ssh-ed25519|ssh-rsa) [A-Za-z0-9+/]+=*$"
+            }
+          }
+        }
+      },
+      "delivery": {
+        "files": {
+          "/run/secrets/ssh_key": {
+            "value": "{$credential.private_key}",
+            "mode": "0600"
+          }
+        },
+        "env": {
+          "SSH_PRIVATE_KEY_PATH": {
+            "value": "/run/secrets/ssh_key"
+          },
+          "SSH_HOST": {
+            "value": "{$credential.host}"
+          },
+          "SSH_PORT": {
+            "value": "{$credential.port}"
+          },
+          "SSH_USER": {
+            "value": "{$credential.user}"
+          },
+          "SSH_HOST_KEY": {
+            "value": "{$credential.host_key}"
+          }
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        },
+        "dev.appstrate/provisioning": {
+          "kind": "ssh_keypair"
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}

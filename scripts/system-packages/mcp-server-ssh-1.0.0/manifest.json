@@ -1,0 +1,50 @@
+{
+  "$schema": "https://schemas.afps.dev/v0/mcp-server.schema.json",
+  "name": "@appstrate/ssh-mcp",
+  "version": "1.0.0",
+  "type": "mcp-server",
+  "schema_version": "0.1",
+  "manifest_version": "0.3",
+  "display_name": "SSH (MCP server)",
+  "description": "MCP server backing @appstrate/ssh: shells out to the ssh/sftp clients baked into the bun runner image. The connection's Unix account is the security boundary — this server adds no allowlist of its own. Which of these tools an agent may call is granted per agent by the platform, and that is where 'read-only' lives: an agent without ssh_exec, ssh_write_file and ssh_edit_file cannot change the target.",
+  "author": "Appstrate",
+  "license": "Apache-2.0",
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.ts",
+    "mcp_config": {
+      "command": "bun",
+      "args": ["server/index.ts"]
+    }
+  },
+  "tools": [
+    {
+      "name": "ssh_probe",
+      "description": "Connect, verify the pinned host key and authenticate, then report how the host was reached. Executes nothing on the target and returns no remote data. Read-only."
+    },
+    {
+      "name": "ssh_exec",
+      "description": "Run a command on the remote host, as the connection's Unix account. WRITES — this tool can do anything that account can do; withhold it from an agent that must not change the target. The string is handed to the account's login shell, so shell syntax works and quoting is yours to get right. After `timeout_seconds` (default 120, max 600) the call returns with `timed_out: true` and `exit_code: null`, and the connection is dropped, but the remote process may keep running — wrap long commands in `timeout` on the target. Longer work can be started detached — `nohup cmd > log 2>&1 < /dev/null &`; without the redirections the call waits for it — and followed with ssh_read on the log. The server handles one call at a time: a running ssh_exec holds up every other ssh tool until it returns. Exit status 255 is reserved by ssh itself: a command exiting 255 is reported as an ssh failure. stdout and stderr over 64 KiB each keep their head and tail around an omission marker."
+    },
+    {
+      "name": "ssh_read",
+      "description": "Read a remote path over SFTP. A directory returns its entries, dotfiles included, sorted by name, cut at 256 KiB with a note saying so; `offset`/`limit` are refused on a directory. A UTF-8 text file returns its lines numbered like `cat -n`, from `offset` (1-based) for `limit` lines, at most 256 KiB per call; when more remains, the reply ends with the offset to read next. Binary or non-UTF-8 files and files over 8 MiB are refused — use ssh_exec for those. Symlinks are followed. Relative paths start at the account's home directory; `~` is not expanded. Read-only."
+    },
+    {
+      "name": "ssh_write_file",
+      "description": "Write a remote file over SFTP, creating or overwriting it (8 MiB at most; a directory is refused). An existing file keeps its mode; a new file is created 0600 — chmod it with ssh_exec if needed. A symlink is followed: its target is written. Relative paths start at the account's home directory; `~` is not expanded. WRITES — withhold it from an agent that must not change the target."
+    },
+    {
+      "name": "ssh_edit_file",
+      "description": "Replace an exact string in a remote UTF-8 text file over SFTP, rewriting it in place so its mode, owner and links are kept; a symlink is followed and its target edited. `old_str` must occur exactly once unless `replace_all` is set; copy it from ssh_read output without the line-number prefix, whitespace included. Relative paths start at the account's home directory; `~` is not expanded. WRITES — withhold it from an agent that must not change the target."
+    }
+  ],
+  "_meta": {
+    "dev.appstrate/mcp-server": {
+      "runtime": "bun"
+    },
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}

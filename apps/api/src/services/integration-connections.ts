@@ -2316,9 +2316,12 @@ export async function persistCredentialBundle(
  */
 /**
  * Read and decrypt the stored credential fields for one connection by id.
- * Returns `null` when the row is gone. Used by the re-auth (acquisition) path
- * to preserve a still-valid `refresh_token` when the IdP omits one on
- * re-consent — the refresh path already does the equivalent inline.
+ * Returns `null` when the row is gone.
+ *
+ * Keyed by id alone — it carries NO ownership, org or space predicate, so it
+ * hands back plaintext for any connection in the deployment. Every caller must
+ * therefore have established that the actor owns this connection BEFORE
+ * calling it.
  */
 export async function getIntegrationConnectionCredentialFields(
   connectionId: string,

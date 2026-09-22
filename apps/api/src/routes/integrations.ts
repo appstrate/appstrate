@@ -81,6 +81,7 @@ import {
   createIntegrationOAuthClient,
   deleteIntegrationOAuthClient,
   getIntegrationAuthStatuses,
+  getIntegrationConnectionCredentialFields,
   listIntegrationClients,
   listIntegrationConnections,
   readIntegrationAuth,
@@ -92,6 +93,12 @@ import {
   usesAutoProvisionedClient,
 } from "../services/integration-connections.ts";
 import { resolveStrategy } from "../services/connect/registry.ts";
+import {
+  authWithoutMintedCredentials,
+  handoffStepsFor,
+  provisionCredentials,
+  readProvisioning,
+} from "../services/connect/provisioning.ts";
 import { createConnectRunExecutor } from "../services/connect/connect-run-launcher.ts";
 import { getCurrentScopesGranted } from "../services/integration-scope-resolver.ts";
 import { isUserConnectionCreationBlocked } from "../services/integration-connection-resolver.ts";
@@ -697,6 +704,13 @@ export function createIntegrationsRouter() {
   // credential it already holds; the connection is created directly. No hosted
   // form, no end-user interaction. The interactive path is the Connect portal
   // (`connect/session`) — use that whenever a human/agent supplies the secret.
+  //
+  // No provisioner runs here, so an auth that declares provisioning
+  // (`@appstrate/ssh`) never connects through this door: a platform-minted
+  // name is refused below (see `services/connect/provisioning.ts`), and
+  // omitting it fails `required`. Runtime invariants therefore live in the
+  // auth's `credentials.schema`, validated on both doors — not in the
+  // provisioner.
   router.post(
     "/:packageId{@[^/]+/[^/]+}/auths/:authKey/connect/fields",
     requirePermission("integrations", "connect"),
@@ -718,6 +732,15 @@ export function createIntegrationsRouter() {
         if (auth.type === "oauth2") {
           throw invalidRequest(
             `Auth '${authKey}' is type '${auth.type}' — use the OAuth flow, not the fields flow`,
+          );
+        }
+        const minted = readProvisioning(packageId, auth)?.provides.find(
+          (name) => name in body.credentials,
+        );
+        if (minted) {
+          throw invalidRequest(
+            `\`${minted}\` is minted by the platform, not submitted — create this connection ` +
+              "through the connect portal (`connect/session`)",
           );
         }
         // A `custom` + `connect.tool` (runAt:"link") auth resolves to the
@@ -1045,7 +1068,7 @@ export function createIntegrationsRouter() {
       auth_key: claims.auth_key,
       display_name: manifest.display_name ?? claims.package_id,
       icon: manifest.icon ?? null,
-      auth,
+      auth: authWithoutMintedCredentials(claims.package_id, auth),
       connection_id: claims.connection_id ?? null,
       csrf: claims.csrf ?? null,
     });
@@ -1070,6 +1093,25 @@ export function createIntegrationsRouter() {
       if (auth.type === "oauth2") {
         throw invalidRequest("This integration uses OAuth — open the connect link instead");
       }
+      const provisioning = readProvisioning(claims.package_id, auth);
+      // On a reconnect, the stored bundle, so the provisioner can reuse the key
+      // already installed on the target. Decrypted only for a provisioning
+      // auth; safe because `connection_id` rides SIGNED claims minted after
+      // `assertConnectionBelongsToActor` (`connect/session` above).
+      const existing =
+        provisioning && claims.connection_id
+          ? await getIntegrationConnectionCredentialFields(claims.connection_id)
+          : null;
+      // Before `complete`, so minted values share the envelope and a
+      // provisioning failure is a 400 on the form, not an unusable connection.
+      const provisioned = await provisionCredentials(
+        claims.package_id,
+        auth,
+        body.credentials,
+        existing,
+      );
+      const credentials = provisioned ? { ...body.credentials, ...provisioned } : body.credentials;
+
       const conn = await resolveStrategy(auth, {
         connectToolExecutor: createConnectRunExecutor(),
       }).complete(
@@ -1080,10 +1122,18 @@ export function createIntegrationsRouter() {
           authKey: claims.auth_key,
           ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
         },
-        { kind: "fields", credentials: body.credentials },
+        { kind: "fields", credentials },
       );
       clearConnectPageCookie(c);
-      return c.json({ ok: true, connection: conn });
+      // Carried on the response, not fetched: the page cookie that authenticates
+      // the portal was just cleared, and the end-user may hold no session.
+      return c.json({
+        ok: true,
+        connection: conn,
+        ...(provisioning
+          ? { handoff_steps: handoffStepsFor(claims.package_id, auth, credentials) }
+          : {}),
+      });
     } catch (err) {
       if (err instanceof ApiError) throw err;
       logger.error("Hosted connect submit failed", { err: String(err) });

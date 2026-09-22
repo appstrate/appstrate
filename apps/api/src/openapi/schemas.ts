@@ -1898,6 +1898,61 @@ export const schemas = {
       },
     },
   },
+  // A block to run on the target.
+  HandoffCommandStep: {
+    type: "object",
+    required: ["kind", "id", "label", "shell"],
+    properties: {
+      kind: { type: "string", enum: ["command"] },
+      id: {
+        type: "string",
+        description:
+          "Stable identifier a client can key a translation on; `label`/`note` are the English default.",
+      },
+      label: { type: "string" },
+      shell: {
+        type: "string",
+        description: "Shell to run on the target. The platform never runs it.",
+      },
+      note: { type: "string" },
+      deferred: {
+        type: "boolean",
+        description:
+          "Due when the connection is deleted, not now. Only on `submitIntegrationConnect`; `getMyConnectionHandoff` omits it.",
+      },
+    },
+  },
+  // A value to read or compare — a fingerprint, an identifier.
+  HandoffValueStep: {
+    type: "object",
+    required: ["kind", "id", "label", "value"],
+    properties: {
+      kind: { type: "string", enum: ["value"] },
+      id: {
+        type: "string",
+        description:
+          "Stable identifier a client can key a translation on; `label`/`note` are the English default.",
+      },
+      label: { type: "string" },
+      value: { type: "string" },
+      note: { type: "string" },
+    },
+  },
+  // One step a user runs or checks on their own machine for a minted credential.
+  HandoffStep: {
+    oneOf: [
+      { $ref: "#/components/schemas/HandoffCommandStep" },
+      { $ref: "#/components/schemas/HandoffValueStep" },
+    ],
+    discriminator: {
+      propertyName: "kind",
+      mapping: {
+        command: "#/components/schemas/HandoffCommandStep",
+        value: "#/components/schemas/HandoffValueStep",
+      },
+    },
+  },
+
   IntegrationPin: {
     type: "object",
     required: [

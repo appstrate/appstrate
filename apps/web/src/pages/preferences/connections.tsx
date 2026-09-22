@@ -16,6 +16,7 @@ import { formatDateField } from "../../lib/format-date";
 import { LoadingState, EmptyState } from "../../components/page-states";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { ConnectionStatusBadge } from "../../components/integration-connect/connection-status-badge";
+import { ConnectionTeardownSteps } from "../../components/integration-connect/connection-teardown-steps";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 
 // ─────────────────────────────────────────────
@@ -439,7 +440,9 @@ export function PreferencesConnectionsPage() {
             { onSuccess: () => setConfirmState(null) },
           );
         }}
-      />
+      >
+        {confirmState && <ConnectionTeardownSteps connectionId={confirmState.connectionId} />}
+      </ConfirmModal>
     </>
   );
 }

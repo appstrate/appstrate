@@ -1527,6 +1527,8 @@ export interface paths {
         /**
          * Import a connection by submitting credentials directly (programmatic)
          * @description Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).
+         *
+         *     A credential the platform mints (auth declaring `_meta["dev.appstrate/provisioning"]`) is refused with a 400 naming the field; such an auth connects through the Connect portal (`initiateIntegrationConnect`). An auth that declares provisioning on a non-system package, or names an unknown provisioning kind, is refused with a 400 whatever the body carries.
          */
         post: operations["importIntegrationConnection"];
         delete?: never;
@@ -1922,6 +1924,26 @@ export interface paths {
          * @description Removes the `integration_connections` row globally. ON DELETE CASCADE vacates every reference (admin pins, member pins, run snapshots, schedule overrides). Intent is destructive: 'I never want to use this credential anywhere again'. Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins`). With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) can be deleted (204 with no effect otherwise).
          */
         delete: operations["deleteMyConnection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/connections/{connectionId}/handoff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What is due on the target when this connection is deleted
+         * @description For a connection whose credentials the platform minted, the steps to run on the target when deleting it (e.g. removing the installed key) — deleting the connection cannot reach the target. Creation-time steps come only from `submitIntegrationConnect`. `deferred` is omitted: every step here is deletion-time. Empty for an auth that mints nothing, and for an unknown, malformed or not-owned id.
+         */
+        get: operations["getMyConnectionHandoff"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -5364,6 +5386,34 @@ export interface components {
                 /** @description Maximum file size in bytes */
                 max_size?: number;
             };
+        };
+        HandoffCommandStep: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "command";
+            /** @description Stable identifier a client can key a translation on; `label`/`note` are the English default. */
+            id: string;
+            label: string;
+            /** @description Shell to run on the target. The platform never runs it. */
+            shell: string;
+            note?: string;
+            /** @description Due when the connection is deleted, not now. Only on `submitIntegrationConnect`; `getMyConnectionHandoff` omits it. */
+            deferred?: boolean;
+        };
+        HandoffStep: components["schemas"]["HandoffCommandStep"] | components["schemas"]["HandoffValueStep"];
+        HandoffValueStep: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "value";
+            /** @description Stable identifier a client can key a translation on; `label`/`note` are the English default. */
+            id: string;
+            label: string;
+            value: string;
+            note?: string;
         };
         /** @description Per-integration connection verdict for an agent: which connection the next run uses (admin pin → run/schedule override → member pin → fallback + scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses. */
         IntegrationAgentResolution: {
@@ -11277,6 +11327,7 @@ export interface operations {
                         auth_key: string;
                         display_name: string;
                         icon?: string | null;
+                        /** @description The auth declaration the form renders. Credentials the platform mints (`_meta["dev.appstrate/provisioning"]`, AFPS §10) are removed from `credentials.schema` — display only; submissions are validated against the full schema. */
                         auth: {
                             [key: string]: unknown;
                         };
@@ -11285,6 +11336,8 @@ export interface operations {
                     };
                 };
             };
+            /** @description The auth declares credential provisioning (`_meta["dev.appstrate/provisioning"]`, AFPS §10) on a non-system package, or names an unknown provisioning kind. */
+            400: components["responses"]["ValidationError"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -11402,6 +11455,8 @@ export interface operations {
                             /** Format: date-time */
                             updatedAt: string;
                         };
+                        /** @description Present when the auth declares `_meta["dev.appstrate/provisioning"]`: what the user must do with the material the platform minted, in order. Never contains a secret. Steps flagged `deferred` are due at deletion and are served again by `getMyConnectionHandoff`. */
+                        handoff_steps?: components["schemas"]["HandoffStep"][];
                     };
                 };
             };
@@ -13088,6 +13143,36 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getMyConnectionHandoff: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Handoff steps due at deletion (possibly empty) */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        hasMore: boolean;
+                        data: components["schemas"]["HandoffCommandStep"][];
+                    };
+                };
             };
             401: components["responses"]["Unauthorized"];
         };

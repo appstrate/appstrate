@@ -377,6 +377,12 @@ const config: KnipConfig = {
         // System-package sources: `build:system-packages` reads them off disk
         // and bundles them, so nothing imports them.
         "scripts/system-packages/**/server/index.ts",
+        // The SSH server's ProxyCommand helper. `index.ts` imports one function
+        // from it, but the file is ALSO a program in its own right: OpenSSH
+        // execs `bun …/proxy-connect.ts %h %p` from an option string, which is
+        // a string literal and not an import edge. Listed as an entry so its
+        // subprocess surface is judged as reachable, which is what it is.
+        "scripts/system-packages/**/server/proxy-connect.ts",
         // Documentation examples, compiled by their own README instructions.
         "examples/**/*.ts",
       ],

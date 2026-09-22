@@ -345,6 +345,21 @@ const CASES: Record<string, Case> = {
     accountId: "user@example.com",
     source_doc: "login.salesforce.com/.well-known/openid-configuration — claims_supported",
   },
+  // The one mapping whose source is not a third-party payload: an SSH identity
+  // is read off the credential bag the platform itself assembled. The account
+  // key is the HOST, not the Unix user — one dedicated account is reused, so
+  // the host is the field that tells two connections apart.
+  "@appstrate/ssh": {
+    authKey: "primary",
+    source: {
+      host: "vps.example.com",
+      port: "22",
+      user: "appstrate",
+      host_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5",
+    },
+    accountId: "vps.example.com",
+    source_doc: "the platform's own credential bag — services/connect/provisioning.ts",
+  },
   // Slack has no usable userinfo endpoint: every Web API method answers HTTP
   // 200 with `{"ok": false}` on a bad token, so the manifest declares none and
   // identity is read straight off the `oauth.v2.access` token response — the
@@ -416,6 +431,13 @@ const CASES: Record<string, Case> = {
   },
 };
 
+/** The `identity_claims` map one auth declares, or `{}`. */
+function identityClaimsOf(manifest: IntegrationManifest, authKey: string): Record<string, string> {
+  const auths = (manifest as { auths?: Record<string, { identity_claims?: unknown }> }).auths;
+  const claims = auths?.[authKey]?.identity_claims;
+  return claims && typeof claims === "object" ? (claims as Record<string, string>) : {};
+}
+
 /** Every shipped package that declares `identity_claims`, keyed by packageId. */
 async function loadDeclaring(): Promise<
   Map<string, { manifest: IntegrationManifest; authKeys: string[] }>
@@ -475,16 +497,20 @@ describe("system-package identity_claims → accountId", () => {
     expect(fellBack).toEqual([]);
   });
 
-  it("populates the declared side-claims, not just the account key", async () => {
+  /**
+   * `sub` is the claim `required_identity_claims` most often names, so an empty
+   * one makes that gate reject the connection outright. Checked where the
+   * mapping DECLARES it: not every identity has a subject — an SSH identity is
+   * a Unix account on a host, with no IdP behind it.
+   */
+  it("populates a declared `sub`, not just the account key", async () => {
     const declaring = await loadDeclaring();
     const empty: string[] = [];
     for (const [packageId, testCase] of Object.entries(CASES)) {
       const pkg = declaring.get(packageId);
       if (!pkg) continue;
+      if (!("sub" in identityClaimsOf(pkg.manifest, testCase.authKey))) continue;
       const { identityClaims } = extractIdentity(pkg.manifest, testCase.authKey, testCase.source);
-      // `sub` is declared by every mapping in this repo and is the claim
-      // `required_identity_claims` most often names, so an empty one would
-      // make that gate reject the connection outright.
       if (identityClaims.sub === undefined || identityClaims.sub === "") empty.push(packageId);
     }
     expect(empty).toEqual([]);

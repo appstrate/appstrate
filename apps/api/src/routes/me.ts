@@ -40,10 +40,10 @@ import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { getOrgById, getUserOrganizations } from "../services/organizations.ts";
 import { db } from "@appstrate/db/client";
-import { integrationConnections } from "@appstrate/db/schema";
-import { eq } from "drizzle-orm";
+import { integrationConnections, spaces } from "@appstrate/db/schema";
+import { and, eq } from "drizzle-orm";
 import { listMeConnections, type MeConnectionAuthority } from "../services/me-connections.ts";
-import { getActor } from "../lib/actor.ts";
+import { actorFilter, getActor } from "../lib/actor.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
 import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
 import { callerPermissions } from "../lib/permissions.ts";
@@ -57,8 +57,12 @@ import {
 } from "../services/integration-pins-service.ts";
 import {
   deleteIntegrationConnection,
+  getIntegrationConnectionCredentialFields,
   listUsableIntegrationsForActor,
+  readIntegrationAuth,
 } from "../services/integration-connections.ts";
+import { handoffStepsFor } from "../services/connect/provisioning.ts";
+import { logger } from "../lib/logger.ts";
 import { listRunnableAgents, listActiveSkills } from "../services/space-packages.ts";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { listRecentForActor } from "../services/state/runs.ts";
@@ -371,6 +375,68 @@ router.delete("/connections/:connectionId", async (c) => {
     resourceId: connectionId,
   });
   return c.body(null, 204);
+});
+
+/**
+ * `GET /api/me/connections/:connectionId/handoff` — the steps due on the user's
+ * own machine when this connection is deleted (the `deferred` ones, flag
+ * dropped), re-derived by {@link handoffStepsFor}. Not on the connection list:
+ * it costs a decryption per row. An unknown, malformed or not-owned id answers
+ * an empty list, the same non-disclosure as the DELETE beside it.
+ */
+router.get("/connections/:connectionId/handoff", async (c) => {
+  const connectionId = c.req.param("connectionId")!;
+  const actor = getActor(c);
+  const authority = getMeConnectionAuthority(c);
+  const empty = () => c.json(listResponse([]));
+
+  if (!z.uuid().safeParse(connectionId).success) return empty();
+
+  // The org comes from the space (connections are space-scoped). Ownership
+  // rides the WHERE via `actorFilter`, so a row this actor does not own never
+  // loads and nothing below can decrypt it.
+  const [row] = await db
+    .select({
+      spaceId: integrationConnections.spaceId,
+      orgId: spaces.orgId,
+      integrationId: integrationConnections.integrationId,
+      authKey: integrationConnections.authKey,
+    })
+    .from(integrationConnections)
+    .innerJoin(spaces, eq(spaces.id, integrationConnections.spaceId))
+    .where(
+      and(eq(integrationConnections.id, connectionId), actorFilter(actor, integrationConnections)),
+    )
+    .limit(1);
+  if (!row) return empty();
+
+  // A BOUND credential is held to its org and pinned space, as on the list
+  // and the delete.
+  if (authority.kind === "bound") {
+    if (row.orgId !== authority.orgId) return empty();
+    if (authority.spaceId && row.spaceId !== authority.spaceId) return empty();
+  }
+
+  try {
+    const { auth } = await readIntegrationAuth(
+      { orgId: row.orgId, spaceId: row.spaceId },
+      row.integrationId,
+      row.authKey,
+    );
+    const credentials = await getIntegrationConnectionCredentialFields(connectionId);
+    if (!credentials) return empty();
+    const removal = handoffStepsFor(row.integrationId, auth, credentials)
+      .flatMap((step) => (step.kind === "command" && step.deferred ? [step] : []))
+      .map(({ deferred: _deferred, ...step }) => step);
+    return c.json(listResponse(removal));
+  } catch (err) {
+    // No steps rather than a 500 on the way to deleting.
+    logger.warn("Could not derive connection handoff steps", {
+      err: String(err),
+      connectionId,
+    });
+    return empty();
+  }
 });
 
 /**

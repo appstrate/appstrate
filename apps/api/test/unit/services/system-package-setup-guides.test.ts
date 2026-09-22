@@ -95,6 +95,17 @@ describe("system-package setup guides", () => {
     expect(spurious).toEqual([]);
   });
 
+  it("keeps a guide off integrations with no OAuth app to register", async () => {
+    // The guide is admin setup, rendered on the Configuration tab only. What a
+    // user needs while connecting belongs in the credential field descriptions,
+    // which the connect form renders next to each input.
+    const spurious = (await loadPackages())
+      .filter((p) => p.oauthAuthKeys.length === 0 && p.steps && p.steps.length > 0)
+      .map((p) => p.packageId)
+      .sort();
+    expect(spurious).toEqual([]);
+  });
+
   it("gives every step a non-empty label", async () => {
     const bad: string[] = [];
     for (const pkg of await loadPackages()) {

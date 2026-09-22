@@ -6,6 +6,75 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Agents can reach a host over SSH.** Two new system packages: the
+  `@appstrate/ssh` integration and the `@appstrate/ssh-mcp` local mcp-server it
+  backs. One connection is one key on one Unix account, and **that account is
+  the boundary** — `ssh_exec` hands its string to the account's login shell, so
+  what the agent can do is exactly what the account can do. Grant root only if
+  you mean it; otherwise use a dedicated user, restricted with sudoers or a
+  restricted shell. The private key reaches the runner as a file
+  (`/run/secrets/ssh_key`, `0600`) and never enters the agent container.
+  **Read-only is a property of the agent, not of the connection**: an agent that
+  must not change the target is granted `ssh_probe` and `ssh_read` and not
+  `ssh_exec`, `ssh_write_file` or `ssh_edit_file`, so one connection serves a
+  reader and a writer at once; every tool also carries the MCP
+  `readOnlyHint`/`destructiveHint` annotations. `ssh_read` lists a directory or
+  returns a file's lines numbered like `cat -n`, windowed by `offset`/`limit`;
+  `ssh_edit_file` replaces one exact string (or every occurrence) in place,
+  keeping the file's mode and owner (a failed write puts the original back);
+  `ssh_write_file` creates new files `0600` and refuses a directory. `ssh_exec`
+  takes a `timeout_seconds` (120 s by default, 600 s at most): when it expires
+  the call returns `timed_out: true`, `exit_code: null` and the output so far,
+  and drops the connection, but
+  **the remote process may keep running** — wrap long commands in `timeout` on
+  the target. Oversized output keeps its head and tail; every SFTP transfer is
+  bounded at 120 s and a dead connection is dropped by SSH keepalives. Exit
+  status 255 belongs to ssh itself, so a command exiting 255 reads as an ssh
+  failure. Paths are relative to the account's home; `~` is not expanded. The host key is pinned
+  (`StrictHostKeyChecking=yes`) with no trust-on-first-use — in an autonomous
+  run nobody is there to accept one. A target on a private address is refused by
+  the SSRF floor on the runner's egress path: a public VPS works, a LAN box does
+  not (#1228; per-connection host scoping of that listener is #1458).
+
+- **Connecting an SSH host never asks for a private key.** The platform mints
+  the ed25519 pair itself into the credential envelope: never displayed, never
+  readable again. Reconnecting the same host, port and account reuses the
+  existing pair, so the key already authorised on the target keeps working; a
+  changed target gets a fresh one. The form asks only what the user can answer —
+  host, port, account, and the target's own host key, read off the machine from
+  a session they already authenticated; the platform opens no SSH socket at any
+  point. After creation the connect page shows the block to paste on the target:
+  it authorises the public key on the named account with `restrict` (no port
+  forwarding, agent forwarding, X11 or pty), performs every file operation as
+  that account, and prints the host's own fingerprint to compare against the one
+  submitted. The target must run **OpenSSH 7.2 or later**: an older sshd
+  rejects the whole `restrict` line, so the block reads the target's sshd
+  version first and refuses, writing nothing, below 7.2 (an unreadable version
+  — no sshd found, or not OpenSSH — is only warned on). Pin the host's ed25519
+  key; `ssh-rsa` only when the server has none. On a locked account password
+  the block warns unless `sshd -T` reports `usepam yes`, since only an sshd
+  without PAM refuses such an account. The same screen carries the block that REMOVES the key, and
+  `GET /api/me/connections/{id}/handoff` hands that one back when the connection
+  is deleted months later — neither block is stored, both are derived on demand.
+  An auth opts into platform-minted credentials with
+  `_meta["dev.appstrate/provisioning"]` (AFPS §10), honoured for system
+  packages only: any other package declaring it is refused by the hosted connect
+  form (served and submitted) and by `POST …/connect/fields` rather than asking
+  the user for the key, and its handoff carries no block. No door lets a caller
+  bring its own key: the hosted form is served a schema with the minted names
+  removed and the platform overwrites them on submit whatever the body carried,
+  and `POST …/connect/fields` rejects a submission naming one.
+
+### Fixed
+
+- **The hosted connect form showed raw field names.** It derived inputs from the
+  credential property NAMES only, so `title`, `description` and `default`
+  declared in a manifest reached nobody, and a declared default was neither
+  shown nor submitted. The form renders all three and seeds the defaults it
+  displays.
+
 ### Security
 
 - **Removing a space member judges BOTH of its bounds under the membership
