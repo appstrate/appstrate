@@ -17,6 +17,8 @@
  * a clock, a counter or an insertion order.
  */
 
+import { z } from "zod";
+
 /**
  * One skill as `GET /api/me/context` projects it — the `skills` catalogue and
  * the `requested_skills` exact-id resolution share this shape by construction
@@ -54,6 +56,35 @@ export type SkillDiscovery = (typeof SKILL_DISCOVERY_MODES)[number];
 
 /** What a session that never chose gets: defaults + pins + the catalogue. */
 export const DEFAULT_SKILL_DISCOVERY: SkillDiscovery = "auto";
+
+/**
+ * Ceiling on the pin set, enforced by the route (400 past it) and by the picker
+ * (refuses the 21st click). Pins are outside the catalogue cap and every one is
+ * rendered into the system prompt on EVERY turn, so this is a context-budget
+ * bound, not an anti-abuse one — 20 index lines is already more than a
+ * conversation can plausibly act on.
+ */
+export const MAX_PINNED_SKILLS = 20;
+
+/**
+ * The wire schema for the mode — `PUT /api/chat/sessions/{id}/skills` validates
+ * with it, and it is the same closed set the `chat_sessions_skill_discovery`
+ * CHECK constraint holds in the database.
+ */
+export const skillDiscoverySchema = z.enum(SKILL_DISCOVERY_MODES);
+
+/**
+ * Narrow a stored mode to the enum. The CHECK constraint makes an out-of-set
+ * value unreachable through this platform, so this is not a repair path — it is
+ * what lets a `text` column be READ as a {@link SkillDiscovery} without a cast,
+ * and what keeps a hand-edited row from rendering a prompt that promises a
+ * catalogue the block never rendered.
+ */
+export function toSkillDiscovery(raw: string | null | undefined): SkillDiscovery {
+  return SKILL_DISCOVERY_MODES.includes(raw as SkillDiscovery)
+    ? (raw as SkillDiscovery)
+    : DEFAULT_SKILL_DISCOVERY;
+}
 
 /** The per-session skill choice a turn resolves against. */
 export interface ChatSkillSelection {
@@ -99,9 +130,7 @@ export function resolveChatSkills(input: ResolveChatSkillsInput): ResolvedChatSk
   // `discovery` reaches this resolver from persisted per-session state, so it
   // is checked rather than trusted: an unknown mode degrades to the default
   // instead of silently indexing nothing.
-  const discovery: SkillDiscovery = SKILL_DISCOVERY_MODES.includes(input.discovery)
-    ? input.discovery
-    : DEFAULT_SKILL_DISCOVERY;
+  const discovery = toSkillDiscovery(input.discovery);
 
   const pinned = new Set(input.pinned);
   // `manual` indexes the user's pins and nothing else — not even the platform

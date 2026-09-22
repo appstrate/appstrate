@@ -215,6 +215,29 @@ describe("formatCallerContext", () => {
     expect(out).not.toContain("(list truncated)");
   });
 
+  it("indexes the pins and NOTHING else under `manual`", () => {
+    // The difference between `manual` and `on_demand` is the defaults: both
+    // hide the catalogue, only `manual` also drops the platform skills the chat
+    // would otherwise always index. A session set to `manual` and pinning one
+    // skill must therefore render exactly that one line.
+    const out = formatCallerContext(
+      {
+        user: { name: "Ada" },
+        org: { role: "member" },
+        requested_skills: [
+          { package_id: "@appstrate/copilot", display_name: "Agent Copilot" },
+          { package_id: "@acme/mine", display_name: "Mine", description: "Pinned." },
+        ],
+        skills: [{ package_id: "@acme/pdf", display_name: "PDF" }],
+      },
+      { skills: { discovery: "manual", pinned: ["@acme/mine"] } },
+    );
+    expect(out).toContain("- `@acme/mine` (pinned) — Mine: Pinned.");
+    expect(out).not.toContain("@appstrate/copilot");
+    expect(out).not.toContain("### Other skills in this space");
+    expect(out).not.toContain("@acme/pdf");
+  });
+
   it("says a pinned skill could not be resolved, and nothing about a missing default", () => {
     const out = formatCallerContext(
       {

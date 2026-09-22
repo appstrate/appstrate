@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   text,
   timestamp,
   jsonb,
   uuid,
+  check,
   index,
   integer,
+  primaryKey,
   serial,
   unique,
   uniqueIndex,
@@ -60,6 +63,18 @@ export const chatSessions = pgTable(
     // DTO so only a boolean crosses the wire.
     lastAssistantSeq: integer("last_assistant_seq"),
     lastReadSeq: integer("last_read_seq"),
+    // How much of the space's skill catalogue this conversation indexes:
+    // `auto` (defaults + pins + catalogue), `on_demand` (defaults + pins) or
+    // `manual` (pins only). A context-budget dial, never a security boundary —
+    // `getSkill` stays RBAC-gated whatever is indexed.
+    //
+    // It lives on the SESSION ROW rather than in a settings table because it is
+    // one value per conversation that every turn reads: the turn already fetches
+    // this row (`ensureSession` returns it), so the mode costs no extra query on
+    // the pre-inference path. The CHECK is what keeps the three values a closed
+    // set in the database as well as in the Zod enum — an unknown mode reaching
+    // the resolver would silently degrade to `auto` and nobody would learn why.
+    skillDiscovery: text("skill_discovery").notNull().default("auto"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -71,7 +86,42 @@ export const chatSessions = pgTable(
     // covering exactly these columns for the FK to attach. Trivially valid —
     // `id` alone is the PK, so `(id, org_id)` can never collide.
     uniqueIndex("uq_chat_sessions_id_org_id").on(table.id, table.orgId),
+    check(
+      "chat_sessions_skill_discovery",
+      sql`${table.skillDiscovery} in ('auto', 'on_demand', 'manual')`,
+    ),
   ],
+);
+
+/**
+ * Skills the user PINNED to a conversation — the `pinned` half of the chat's
+ * skill index (`packages/module-chat/src/skills.ts`).
+ *
+ * `package_id` carries the `@scope/name` id and deliberately has NO foreign key
+ * to `packages`. A pin is a user's stated intent about a conversation, not a
+ * reference the database has to keep satisfiable: the package it names can be
+ * deleted, unshared, deactivated here, or simply out of the caller's reach on
+ * one turn and back the next. With an FK, any of those would either destroy the
+ * pin (cascade) or block the package's deletion (restrict); without one, the
+ * turn re-resolves every pin against `skills:read` and the space's active set
+ * and skips what does not answer, with one deterministic notice line in the
+ * prompt. Authorization is re-checked at turn time in every case, so the row
+ * grants nothing on its own.
+ *
+ * The session half IS a foreign key with `ON DELETE CASCADE`: a pin outside its
+ * conversation means nothing.
+ */
+export const chatSessionSkills = pgTable(
+  "chat_session_skills",
+  {
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => chatSessions.id, { onDelete: "cascade" }),
+    /** `@scope/name` package id, as `packages.id` spells it. */
+    packageId: text("package_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.sessionId, table.packageId] })],
 );
 
 /**

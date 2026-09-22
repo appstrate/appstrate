@@ -34,10 +34,15 @@ import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
 import { acquirePiChatSlot, chatCapacityResponse } from "./pi-chat/concurrency.ts";
 import { turnPermissions } from "./turn-permissions.ts";
 import { buildSystemPrompt, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
-import { DEFAULT_SKILL_DISCOVERY } from "./skills.ts";
+import { DEFAULT_SKILL_DISCOVERY, type ChatSkillSelection } from "./skills.ts";
 export type { ChatEnv } from "./prompt.ts";
 import { finalizeChatStream } from "./finalize-stream.ts";
-import { ensureSession, persistUserMessage, persistAssistantMessage } from "./persistence.ts";
+import {
+  ensureSession,
+  loadSessionPins,
+  persistUserMessage,
+  persistAssistantMessage,
+} from "./persistence.ts";
 import { registerStopController, unregisterStopController } from "./stop-registry.ts";
 import { setActiveStream, clearActiveStream } from "./resumable.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
@@ -265,10 +270,20 @@ export async function handleChatStream(
   // `Promise.all` — a foreign-tenant 404 still surfaces before anything is
   // materialized into the session, and attaching the join in the same tick is
   // what keeps a rejection from ever going unhandled.
-  const sessionReady: Promise<void> =
+  //
+  // It also carries the turn's SKILL SELECTION back. The upsert returns the
+  // session's `skill_discovery` (no extra query), and the pin set is read
+  // alongside it rather than after it: `chat_session_skills` is keyed by the
+  // session id alone, so the SELECT needs nothing the upsert produces and the
+  // two go out together. An ephemeral turn (no session id, or a message with no
+  // id) has no row to read and takes the defaults.
+  const sessionSkills: Promise<ChatSkillSelection> =
     sessionId && lastMessage?.id
-      ? ensureSession(sessionId, orgId, user.id, spaceId)
-      : Promise.resolve();
+      ? Promise.all([
+          ensureSession(sessionId, orgId, user.id, spaceId),
+          loadSessionPins(sessionId),
+        ]).then(([session, pinned]) => ({ discovery: session.skillDiscovery, pinned }))
+      : Promise.resolve({ discovery: DEFAULT_SKILL_DISCOVERY, pinned: [] });
 
   const origin = selfOrigin();
   const headers = forwardedHeaders(c);
@@ -325,15 +340,18 @@ export async function handleChatStream(
   const phaseAStart = Date.now();
 
   // ── Preamble phase B (overlapped with A) ─────────────────────────────────
-  // Only the caller-context block. It depends on the space id and the caller's
-  // headers — never on the chosen model or the admission gate — so it is chained
-  // on the space id and starts the moment that resolves (immediately when
-  // pinned), overlapping the model list, the attachment materialization, the
-  // credential resolution and the gate rather than waiting behind them. It is a
-  // READ (`/api/me/context`); a turn the gate rejects has dispatched it for
-  // nothing, which is acceptable — what a rejected turn must not do is persist
-  // a user message, open an MCP session or record usage, none of which happen
-  // before the gate.
+  // Only the caller-context block. It depends on the space id, the caller's
+  // headers and the session's skill selection — never on the chosen model or
+  // the admission gate — so it is chained on `sessionSkills` above and starts
+  // the moment that one round trip resolves, still overlapping the model list,
+  // the attachment materialization, the credential resolution and the gate
+  // rather than waiting behind them. Chained rather than issued in parallel
+  // because the block RENDERS the selection: asking `/api/me/context` to
+  // resolve the session's pins requires knowing them. It is a READ
+  // (`/api/me/context`); a turn the gate rejects has dispatched it for nothing,
+  // which is acceptable — what a rejected turn must not do is persist a user
+  // message, open an MCP session or record usage, none of which happen before
+  // the gate.
   //
   // There is NO platform-MCP probe here: the Pi engine opens its OWN MCP
   // connection from `platformMcp.url`, and the MCP server's instructions reach
@@ -346,34 +364,36 @@ export async function handleChatStream(
   // between here and the point the block is consumed (invalid generation
   // settings, a gate rejection) would otherwise leave a rejection with no
   // handler. The error is rethrown where the block is consumed.
-  const phaseBStart = Date.now();
   let phaseBMs = 0;
   const contextBlockPromise: Promise<{ ok: true; block: string } | { ok: false; error: unknown }> =
-    buildCallerContextBlock(c, {
-      origin,
-      headers,
-      spaceId,
-      user,
-      deps,
-      // UI language forwarded by the client; validated/defaulted in the builder.
-      locale: c.req.header("X-Chat-Locale"),
-      canAuthorAgents,
-      // Phase 3 reads the session's own mode and pins here; until then every
-      // turn indexes the platform defaults with the catalogue shown.
-      skills: { discovery: DEFAULT_SKILL_DISCOVERY, pinned: [] },
-    })
-      .finally(() => {
-        // Wall time of the block itself.
-        phaseBMs = Date.now() - phaseBStart;
+    sessionSkills
+      .then((skills) => {
+        const phaseBStart = Date.now();
+        return buildCallerContextBlock(c, {
+          origin,
+          headers,
+          spaceId,
+          user,
+          deps,
+          // UI language forwarded by the client; validated/defaulted in the builder.
+          locale: c.req.header("X-Chat-Locale"),
+          canAuthorAgents,
+          // The session's own mode and pins — the same pair `buildSystemPrompt`
+          // is given below, so the persona and the block agree by construction.
+          skills,
+        }).finally(() => {
+          // Wall time of the block itself.
+          phaseBMs = Date.now() - phaseBStart;
+        });
       })
       .then(
         (block) => ({ ok: true as const, block }),
         (error: unknown) => ({ ok: false as const, error }),
       );
 
-  const [models] = await Promise.all([
+  const [models, skillSelection] = await Promise.all([
     listModels(origin, inferenceHeaders, platformFetch),
-    sessionReady,
+    sessionSkills,
   ]);
   const chosen = pickModel(models, modelId);
   let generationSettings;
@@ -471,8 +491,9 @@ export async function handleChatStream(
   let system = buildSystemPrompt({
     canComposeInline: composeInline,
     canAuthorAgents,
-    // Must agree with what `buildCallerContextBlock` above rendered.
-    skillDiscovery: DEFAULT_SKILL_DISCOVERY,
+    // Must agree with what `buildCallerContextBlock` above rendered — same
+    // value, read once from the session row.
+    skillDiscovery: skillSelection.discovery,
   });
   if (contextBlock) system += `\n\n${contextBlock}`;
 

@@ -28,7 +28,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { Hono } from "hono";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { chatMessages, chatSessions } from "@appstrate/db/schema";
+import { chatMessages, chatSessions, chatSessionSkills } from "@appstrate/db/schema";
 import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../../apps/api/test/helpers/auth.ts";
 import { createUIMessageStreamResponse, type UIMessageChunk } from "ai";
@@ -441,6 +441,69 @@ describe("handleChatStream", () => {
     }
   });
 
+  it("carries the session's own discovery mode and pins into the system prompt", async () => {
+    // The mode is PERSISTED per conversation, and two independent consumers
+    // have to agree on it within one turn: `buildSystemPrompt` (which sentence
+    // the model reads about browsing) and `buildCallerContextBlock` (which
+    // skills the block actually renders). They are wired from ONE read of the
+    // session row, and this is the test that the read reaches both — the unit
+    // suites can only prove each half in isolation.
+    const sessionId = mintSessionId();
+    const PIN = "@acme/pinned-skill";
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      spaceId: ctx.defaultSpaceId,
+      title: null,
+      skillDiscovery: "manual",
+    });
+    await db.insert(chatSessionSkills).values({ sessionId, packageId: PIN });
+
+    // Echo back whatever `?skills=` asked for, so the rendered index is a
+    // function of what the handler requested.
+    const requested: string[][] = [];
+    const dispatch = async (req: Request): Promise<Response> => {
+      const url = new URL(req.url);
+      if (url.pathname !== "/api/me/context") return scriptedDispatch()(req);
+      const ids = (url.searchParams.get("skills") ?? "").split(",").filter(Boolean);
+      requested.push(ids);
+      return Response.json({
+        user: { name: "Chat Tester", email: "chat-tester@test.com" },
+        org: { role: "owner", name: CONTEXT_ORG_MARKER, slug: "chat-handler-test" },
+        connections: [],
+        agents: [],
+        // The catalogue is non-empty on purpose: `manual` must drop it.
+        skills: [{ package_id: "@acme/catalogued", display_name: "Catalogued" }],
+        requested_skills: ids.map((id) => ({
+          package_id: id,
+          display_name: id,
+          description: "fixture",
+          version: null,
+        })),
+        unresolved_skills: [],
+      });
+    };
+
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, { dispatch });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+
+    // The pin was asked for by exact id, alongside the platform defaults.
+    expect(requested[0]).toContain(PIN);
+
+    const system = calls[0]!.system;
+    // The persona's `manual` sentence — not the `auto` one.
+    expect(system).toContain("Load only the skills listed under `## Skills`");
+    expect(system).not.toContain("is a catalogue you have not loaded");
+    // …and the block agrees: the pin is indexed, the catalogue is not rendered.
+    expect(system).toContain(`\`${PIN}\` (pinned)`);
+    expect(system).not.toContain("### Other skills in this space");
+
+    await waitForAssistantPersist(sessionId);
+  });
+
   it("streams start → text → finish, hands the engine a proxy binding, and persists the turn", async () => {
     const sessionId = mintSessionId();
     const { engine, calls } = scriptedEngine();
@@ -487,7 +550,11 @@ describe("handleChatStream", () => {
     // inline MCP instructions on this path: the engine's own handshake delivers
     // them, and it is handed the org-scoped URL to open it with.
     expect(input.system).toContain(
-      buildSystemPrompt({ canComposeInline: false, canAuthorAgents: false }).slice(0, 64),
+      buildSystemPrompt({
+        canComposeInline: false,
+        canAuthorAgents: false,
+        skillDiscovery: "auto",
+      }).slice(0, 64),
     );
     expect(input.system).toContain(CONTEXT_ORG_MARKER);
     expect(input.platformMcp.url).toContain(`/api/mcp/o/${encodeURIComponent(ctx.orgId)}`);

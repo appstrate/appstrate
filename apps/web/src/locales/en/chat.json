@@ -81,5 +81,20 @@
   "access.capability.browseFiles": "Browse your files",
   "access.capability.connectIntegrations": "Connect your accounts",
   "access.capability.activateIntegrations": "Activate an integration for the space",
-  "access.capability.schedule": "Schedule runs"
+  "access.capability.schedule": "Schedule runs",
+  "skills.label": "Skills",
+  "skills.title": "Conversation skills",
+  "skills.pinned": "Pinned: {{n}}",
+  "skills.discovery.label": "Discovery",
+  "skills.discovery.auto": "Automatic",
+  "skills.discovery.autoHint": "The assistant sees the space catalogue and loads a skill when it is relevant. Platform skills stay indexed.",
+  "skills.discovery.onDemand": "On demand",
+  "skills.discovery.onDemandHint": "No catalogue: the assistant only looks for a skill when you ask it to. Platform skills stay indexed.",
+  "skills.discovery.manual": "Manual",
+  "skills.discovery.manualHint": "Only pinned or mentioned skills are loaded — platform skills are dropped too unless pinned.",
+  "skills.group.platform": "Platform",
+  "skills.group.space": "This space",
+  "skills.loading": "Loading skills…",
+  "skills.empty": "No skill is available in this space.",
+  "skills.error": "Skills could not be loaded."
 }

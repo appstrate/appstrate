@@ -80,6 +80,7 @@ import {
 import { getAgentAuthoringEnabled } from "./agent-authoring-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
 import { AgentAuthoringToggle } from "./agent-authoring-toggle.tsx";
+import { SkillsPicker } from "./skills-picker.tsx";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
 
@@ -282,6 +283,9 @@ export function ChatPage({
     () => (
       <div className="flex items-center gap-2">
         {canAuthorAgents ? <AgentAuthoringToggle /> : null}
+        {/* Reads its headers from context (the provider is above `Conversation`),
+            so the only new dependency here is the conversation it writes to. */}
+        <SkillsPicker sessionId={activeId} />
         <ModelSelect
           models={models}
           selectedId={selectedModel}
@@ -292,7 +296,7 @@ export function ChatPage({
         {composerActions}
       </div>
     ),
-    [canAuthorAgents, models, selectedModel, generation, composerActions],
+    [canAuthorAgents, activeId, models, selectedModel, generation, composerActions],
   );
 
   // The server's view of the ACTIVE conversation, reduced to two primitives so
@@ -428,7 +432,7 @@ const Conversation = memo(function Conversation({
   });
 
   // Stable identity: `ConversationInner` keys its store-attach effect on it.
-  const initialMessages = useMemo(() => history.data ?? [], [history.data]);
+  const initialMessages = useMemo(() => history.data?.messages ?? [], [history.data]);
 
   if (persistedAtMount && history.isPending) {
     return (
@@ -574,8 +578,8 @@ function ConversationInner({
         staleTime: 0,
       })
       .then((fetched) => {
-        if (cancelled || fetched.length <= chatMessages.length) return;
-        setMessages(fetched);
+        if (cancelled || fetched.messages.length <= chatMessages.length) return;
+        setMessages(fetched.messages);
       })
       .catch(() => {
         // Best-effort: the next server change re-arms the rule.

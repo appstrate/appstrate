@@ -1111,6 +1111,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/chat/sessions/{id}/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set a chat session's skill selection
+         * @description Replaces the conversation's discovery mode and its pinned skills in one call (the body is the state you want, not a patch). Duplicate ids are deduped server-side; at most 20 pins are stored. The session row is created if the client-minted id has none yet — exactly as the first turn would.
+         */
+        put: operations["setChatSessionSkills"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/chat/sessions/{id}/stop": {
         parameters: {
             query?: never;
@@ -1143,6 +1163,26 @@ export interface paths {
          * @description Reconnect to the session's in-flight generation (the client's native AI-SDK `useChat({ resume: true })` calls this on mount). Returns the live UIMessage stream when a turn is generating, otherwise `204`. Lets a mid-inference page reload continue tokens exactly where they were.
          */
         get: operations["resumeChatStream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chat/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the skills the chat can use
+         * @description The platform default skills every chat turn indexes (`source: "platform"`), followed by the skills active in the current space (`source: "space"`), each sorted by package id. Feeds the composer's skill picker. Both halves are read with the caller's own permissions: without `skills:read` the list is empty rather than refused.
+         */
+        get: operations["listChatSkills"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5280,10 +5320,29 @@ export interface components {
             generating: boolean;
             /** @description Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/chat/sessions/{id}/read. */
             unread: boolean;
+            /**
+             * @description How much of the space's skill catalogue this conversation indexes: `auto` (platform defaults + pins + catalogue), `on_demand` (defaults + pins), `manual` (pins only). A context-budget control, never an authorization boundary. Set via PUT /api/chat/sessions/{id}/skills.
+             * @enum {string}
+             */
+            skill_discovery: "auto" | "on_demand" | "manual";
+            /** @description Package ids (`@scope/name`) pinned to this conversation, sorted. Returned by `GET /api/chat/sessions/{id}` and by the `201` of `POST /api/chat/sessions` (empty there); OMITTED from `GET /api/chat/sessions`, whose page would otherwise cost one query per row. */
+            pinned_skills?: string[];
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+        };
+        ChatSkillEntry: {
+            /** @description `@scope/name` package id */
+            package_id: string;
+            /** @description Falls back to the package id. */
+            display_name: string;
+            /** @description Empty string when the manifest declares none. */
+            description: string;
+            /** @description Manifest version (semver), when known. */
+            version: string | null;
+            /** @enum {string} */
+            source: "platform" | "space";
         };
         EeBillingAccount: {
             plan: {
@@ -9980,6 +10039,50 @@ export interface operations {
             };
         };
     };
+    setChatSessionSkills: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    skill_discovery: "auto" | "on_demand" | "manual";
+                    /** @description Package ids to pin. Deduped server-side; the cap applies to the array as sent. */
+                    pinned_skills: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Selection replaced */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Rate limited (60/min per caller) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     stopChatStream: {
         parameters: {
             query?: never;
@@ -10056,6 +10159,36 @@ export interface operations {
                 };
                 content?: never;
             };
+        };
+    };
+    listChatSkills: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Skills the chat can index */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        skills: components["schemas"]["ChatSkillEntry"][];
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
         };
     };
     credentialProxyGet: {

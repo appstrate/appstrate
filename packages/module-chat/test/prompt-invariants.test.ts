@@ -10,6 +10,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { buildSystemPrompt, formatCallerContext, normalizeChatLocale } from "../src/prompt.ts";
+import { DEFAULT_SKILL_DISCOVERY } from "../src/skills.ts";
 
 /**
  * The ONE activation door's operationId (`POST /api/spaces/{spaceId}/packages`,
@@ -19,7 +20,11 @@ import { buildSystemPrompt, formatCallerContext, normalizeChatLocale } from "../
 const ACTIVATION_OPERATION_ID = "activatePackage";
 
 /** The full persona; the reduced one has its own block at the end. */
-const FULL = buildSystemPrompt({ canComposeInline: true, canAuthorAgents: true });
+const FULL = buildSystemPrompt({
+  canComposeInline: true,
+  canAuthorAgents: true,
+  skillDiscovery: DEFAULT_SKILL_DISCOVERY,
+});
 
 describe("full persona invariants", () => {
   it("keeps the single-sub-agent rule for chained external actions", () => {
@@ -146,7 +151,11 @@ describe("full persona invariants", () => {
   it("teaches the loading rules whatever the turn may author", () => {
     // Skills are the assistant's own guides now — not something only an author
     // of agents has a use for.
-    const REDUCED = buildSystemPrompt({ canComposeInline: false, canAuthorAgents: false });
+    const REDUCED = buildSystemPrompt({
+      canComposeInline: false,
+      canAuthorAgents: false,
+      skillDiscovery: DEFAULT_SKILL_DISCOVERY,
+    });
     expect(REDUCED).toContain('`operation_id: "getSkill"`');
     expect(REDUCED).toContain("guides for YOU");
   });
@@ -167,7 +176,7 @@ describe("full persona invariants", () => {
       canAuthorAgents: true,
       skillDiscovery: "manual",
     });
-    // `auto` is the default, so the unparameterised persona reads like it.
+    // `auto` IS the default mode, so it reads like the persona built with it.
     expect(auto).toBe(FULL);
     expect(auto).toContain("### Other skills in this space` is a catalogue");
     expect(onDemand).toContain("No catalogue of other skills is shown to you");
@@ -267,9 +276,17 @@ describe("caller-context prompt hygiene", () => {
 describe("the persona without inline composition", () => {
   // What a turn without `agents:write` ∧ `agents:run` is told. The platform
   // refuses the launch either way; this block is about not teaching it.
-  const REDUCED = buildSystemPrompt({ canComposeInline: false, canAuthorAgents: false });
+  const REDUCED = buildSystemPrompt({
+    canComposeInline: false,
+    canAuthorAgents: false,
+    skillDiscovery: DEFAULT_SKILL_DISCOVERY,
+  });
   /** `agents:write` without `agents:run`: may author agents, not compose one inline. */
-  const AUTHOR_ONLY = buildSystemPrompt({ canComposeInline: false, canAuthorAgents: true });
+  const AUTHOR_ONLY = buildSystemPrompt({
+    canComposeInline: false,
+    canAuthorAgents: true,
+    skillDiscovery: DEFAULT_SKILL_DISCOVERY,
+  });
 
   it("teaches no way to compose one", () => {
     expect(REDUCED).not.toContain('kind:"inline"');

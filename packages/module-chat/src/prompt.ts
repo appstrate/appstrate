@@ -89,11 +89,17 @@ export type ChatEnv = {
 export function buildSystemPrompt(options: {
   canComposeInline: boolean;
   canAuthorAgents: boolean;
-  skillDiscovery?: SkillDiscovery;
+  /**
+   * The session's persisted mode. REQUIRED, with no default: a caller that
+   * forgets it would silently promise the model a catalogue the context block
+   * did not render, which is the one disagreement this argument exists to
+   * prevent. An ephemeral turn passes {@link DEFAULT_SKILL_DISCOVERY} itself.
+   */
+  skillDiscovery: SkillDiscovery;
 }): string {
   const inline = (yes: string, no = "") => (options.canComposeInline ? yes : no);
   const author = (yes: string, no = "") => (options.canAuthorAgents ? yes : no);
-  const discovery = options.skillDiscovery ?? DEFAULT_SKILL_DISCOVERY;
+  const discovery = options.skillDiscovery;
   const discoveryRule = {
     auto: "The list under `### Other skills in this space` is a catalogue you have not loaded: read those descriptions the same way and load one when it clearly matches. When that catalogue is marked `(list truncated)`, call `listSkills` to see the rest.",
     on_demand:
@@ -443,6 +449,54 @@ function warnUnresolvedDefaults(unresolved: readonly string[] | null | undefined
 }
 
 /**
+ * The caller's auth/scoping headers, re-pointed at ONE space.
+ *
+ * Every in-process platform read the chat makes on behalf of a turn or of the
+ * skill picker must answer for the space the router entered, not for whatever
+ * `X-Space-Id` the client happened to send — the two are the same on a normal
+ * request and differ on a pinned-space credential, and only the entered one is
+ * what the caller's `chat:*` was checked against.
+ */
+export function spaceScopedHeaders(headers: Record<string, string>, spaceId: string): Headers {
+  const out = new Headers();
+  for (const [k, v] of Object.entries(headers)) out.set(k, v);
+  out.set("x-space-id", spaceId);
+  return out;
+}
+
+/**
+ * Dispatch `GET /api/me/context` in-process for this caller, in this space,
+ * optionally resolving named skills by exact id.
+ *
+ * ONE definition of that call, shared by the turn (which renders the payload
+ * into the system prompt) and by `GET /api/chat/skills` (which projects its
+ * `requested_skills` into the picker's platform half). The two must ask the
+ * platform the same question, or the picker would offer a default the prompt
+ * never indexes.
+ *
+ * `skills` is sorted and deduped here rather than by the callers: the same
+ * session state must always produce the same request — and therefore the same
+ * rendered block — because that block sits inside a single prompt-cache
+ * breakpoint.
+ */
+export function dispatchCallerContext(
+  deps: ChatPlatformDeps,
+  args: {
+    origin: string;
+    headers: Record<string, string>;
+    spaceId: string;
+    skills?: readonly string[];
+  },
+): Promise<Response> {
+  const url = new URL("/api/me/context", args.origin);
+  const wanted = [...new Set(args.skills ?? [])].sort();
+  if (wanted.length) url.searchParams.set("skills", wanted.join(","));
+  return deps.dispatch(
+    new Request(url.toString(), { headers: spaceScopedHeaders(args.headers, args.spaceId) }),
+  );
+}
+
+/**
  * Build the caller-context system-prompt block from `GET /api/me/context` — the
  * canonical assembler the platform MCP `get_me` tool also uses, so the chat
  * prompt and the MCP surface can never drift. Dispatched IN-PROCESS through the
@@ -490,16 +544,14 @@ export async function buildCallerContextBlock(
     );
 
   try {
-    const ctxHeaders = new Headers();
-    for (const [k, v] of Object.entries(headers)) ctxHeaders.set(k, v);
-    ctxHeaders.set("x-space-id", spaceId);
     // Ask for the skills this turn will index BY EXACT ID, in one round trip
-    // with the rest of the context. Sorted and deduped so the same session
-    // state always produces the same request (and the same rendered block).
-    const url = new URL("/api/me/context", origin);
-    const wanted = [...new Set([...PLATFORM_DEFAULT_SKILLS, ...args.skills.pinned])].sort();
-    if (wanted.length) url.searchParams.set("skills", wanted.join(","));
-    const res = await deps.dispatch(new Request(url.toString(), { headers: ctxHeaders }));
+    // with the rest of the context.
+    const res = await dispatchCallerContext(deps, {
+      origin,
+      headers,
+      spaceId,
+      skills: [...PLATFORM_DEFAULT_SKILLS, ...args.skills.pinned],
+    });
     if (res.ok) {
       const payload = (await res.json()) as CallerContext;
       warnUnresolvedDefaults(payload.unresolved_skills);

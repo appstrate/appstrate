@@ -81,5 +81,20 @@
   "access.capability.browseFiles": "Parcourir vos fichiers",
   "access.capability.connectIntegrations": "Connecter vos comptes",
   "access.capability.activateIntegrations": "Activer une intégration pour l'espace",
-  "access.capability.schedule": "Planifier des exécutions"
+  "access.capability.schedule": "Planifier des exécutions",
+  "skills.label": "Compétences",
+  "skills.title": "Compétences de la conversation",
+  "skills.pinned": "Épinglées : {{n}}",
+  "skills.discovery.label": "Découverte",
+  "skills.discovery.auto": "Automatique",
+  "skills.discovery.autoHint": "L'assistant voit le catalogue de l'espace et charge une compétence quand elle est pertinente. Les compétences de la plateforme restent indexées.",
+  "skills.discovery.onDemand": "À la demande",
+  "skills.discovery.onDemandHint": "Pas de catalogue : l'assistant ne cherche une compétence que si vous le lui demandez. Les compétences de la plateforme restent indexées.",
+  "skills.discovery.manual": "Manuelle",
+  "skills.discovery.manualHint": "Seules les compétences épinglées ou mentionnées sont chargées — les compétences de la plateforme aussi sont écartées si elles ne sont pas épinglées.",
+  "skills.group.platform": "Plateforme",
+  "skills.group.space": "Cet espace",
+  "skills.loading": "Chargement des compétences…",
+  "skills.empty": "Aucune compétence disponible dans cet espace.",
+  "skills.error": "Les compétences n'ont pas pu être chargées."
 }

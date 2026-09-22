@@ -21,12 +21,13 @@
  * here, because `deterministicMessageId` hashes it.
  */
 
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { chatMessages, chatSessions } from "@appstrate/db/schema";
+import { chatMessages, chatSessions, chatSessionSkills } from "@appstrate/db/schema";
 import { notFound } from "@appstrate/core/api-errors";
 import { uiMessageText } from "./message-text.ts";
 import { notifySessionUpdate } from "./realtime.ts";
+import { toSkillDiscovery, type ChatSkillSelection, type SkillDiscovery } from "./skills.ts";
 import type { UIMessage } from "ai";
 
 /**
@@ -48,13 +49,19 @@ function toContent(message: UIMessage): Record<string, unknown> {
  * creates sessions up front, but a lazy ensure here closes the orphan-session
  * window (a row with zero messages) and lets the stream route be the single
  * writer of record.
+ *
+ * Returns the row's `skillDiscovery`, which a turn needs before it can render
+ * its prompt: the upsert below already reads (or writes) that row, so the mode
+ * rides back on the SAME round trip rather than costing a second query on the
+ * pre-inference path. A row created here answers with the column default
+ * (`auto`).
  */
 export async function ensureSession(
   id: string,
   orgId: string,
   userId: string,
   spaceId: string,
-): Promise<void> {
+): Promise<{ skillDiscovery: SkillDiscovery }> {
   // The id is client-minted, so a caller could send an id that already belongs
   // to another tenant; a plain `DO NOTHING` would leave that row intact and we'd
   // then persist a message into it. `DO UPDATE … SET id = id` is a no-op write
@@ -91,10 +98,64 @@ export async function ensureSession(
       orgId: chatSessions.orgId,
       userId: chatSessions.userId,
       spaceId: chatSessions.spaceId,
+      skillDiscovery: chatSessions.skillDiscovery,
     });
   if (!row || row.orgId !== orgId || row.userId !== userId || row.spaceId !== spaceId) {
     throw notFound("Chat session not found");
   }
+  return { skillDiscovery: toSkillDiscovery(row.skillDiscovery) };
+}
+
+/**
+ * The package ids pinned to a conversation, sorted.
+ *
+ * SORTED HERE, once, because both readers need the same order for the same
+ * reason: the turn renders them into the system prompt's single
+ * `cache_control` block, and the session DTO must not hand the UI a list whose
+ * order depends on insertion. `ORDER BY package_id` is the primary key's own
+ * order, so the index answers it.
+ *
+ * A session with no row yet (a client-minted id on its first turn) answers `[]`
+ * — this read deliberately does not join `chat_sessions`, so it can run
+ * CONCURRENTLY with the {@link ensureSession} that creates it.
+ */
+export async function loadSessionPins(sessionId: string): Promise<string[]> {
+  const rows = await db
+    .select({ packageId: chatSessionSkills.packageId })
+    .from(chatSessionSkills)
+    .where(eq(chatSessionSkills.sessionId, sessionId))
+    .orderBy(asc(chatSessionSkills.packageId));
+  return rows.map((row) => row.packageId);
+}
+
+/**
+ * Replace a conversation's whole skill selection — the mode and the pin set —
+ * in ONE transaction.
+ *
+ * Replace, not merge: the picker sends the state it wants, so a concurrent
+ * write from another tab loses entirely rather than half-applying. The delete
+ * and the insert must commit together, or a failure between them would leave a
+ * conversation with no pins at all and no way for the client to know.
+ *
+ * The caller has already run {@link ensureSession}, so the FK below is
+ * satisfiable and ownership is settled before anything is written here.
+ */
+export async function setSessionSkills(
+  sessionId: string,
+  selection: ChatSkillSelection,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx
+      .update(chatSessions)
+      .set({ skillDiscovery: selection.discovery, updatedAt: new Date() })
+      .where(eq(chatSessions.id, sessionId));
+    await tx.delete(chatSessionSkills).where(eq(chatSessionSkills.sessionId, sessionId));
+    if (selection.pinned.length > 0) {
+      await tx
+        .insert(chatSessionSkills)
+        .values(selection.pinned.map((packageId) => ({ sessionId, packageId })));
+    }
+  });
 }
 
 /** Most recent message id in a session — the one a new message follows, or null. */

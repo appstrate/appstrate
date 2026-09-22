@@ -32,6 +32,7 @@ import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { enterSpaceContext, requireModulePermission } from "@appstrate/core/permissions";
 import { notFound, parseBody } from "@appstrate/core/api-errors";
+import { scopedNameRegex } from "@appstrate/core/validation";
 import { UI_MESSAGE_STREAM_HEADERS } from "ai";
 import { handleChatStream, type ChatEnv } from "./chat-stream.ts";
 import { stopStream } from "./stop-registry.ts";
@@ -39,6 +40,15 @@ import { clearActiveStream, getResumableContext, STALE_MARKER_MIN_AGE_MS } from 
 import { mintSessionId } from "./session-id.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import { logger } from "./logger.ts";
+import { dispatchCallerContext, spaceScopedHeaders } from "./prompt.ts";
+import { selfOrigin, forwardedHeaders } from "./self.ts";
+import { ensureSession, loadSessionPins, setSessionSkills } from "./persistence.ts";
+import {
+  MAX_PINNED_SKILLS,
+  PLATFORM_DEFAULT_SKILLS,
+  skillDiscoverySchema,
+  type SkillHint,
+} from "./skills.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 
 /** Page size for the session list — one row past this is fetched to derive `hasMore`. */
@@ -52,10 +62,54 @@ export const renameSessionSchema = z.object({
   title: z.string().min(1).max(200),
 });
 
+/**
+ * `PUT /api/chat/sessions/{id}/skills` — the whole selection, replaced.
+ *
+ * SHAPE is refused, REPETITION is not. An id that is not `@scope/name` cannot
+ * name a package, so it is a bug on the sender's side and a 400; a duplicate is
+ * two clicks on the same row and is deduped server-side (below, after parsing);
+ * an id that is merely unknown is a pin the turn reports as unresolved, never a
+ * 4xx. The cap is applied by Zod to the array AS SENT rather than to the
+ * deduped set, so it is the JSON Schema the OpenAPI spec publishes — a sender
+ * over the ceiling learns it from the contract instead of from a silent trim.
+ */
+export const sessionSkillsSchema = z.object({
+  skill_discovery: skillDiscoverySchema,
+  pinned_skills: z
+    .array(
+      z.string().regex(scopedNameRegex, { error: "Each skill id must be in @scope/name form" }),
+    )
+    .max(MAX_PINNED_SKILLS, { error: `At most ${MAX_PINNED_SKILLS} pinned skills` }),
+});
+
+/**
+ * How many rows of the space's skill catalogue the picker gets. The listing
+ * route is uncapped, so the cap is applied here — the picker is a popover, not
+ * a browser, and a space with thousands of skills must not turn one keystroke
+ * into a thousand-row payload.
+ */
+const SKILL_PICKER_LIMIT = 100;
+
+/** One row of `GET /api/chat/skills` — the picker's and the `/` popover's source. */
+interface ChatSkillEntry {
+  package_id: string;
+  display_name: string;
+  description: string;
+  version: string | null;
+  /** `platform` = indexed by every turn whatever the space holds; `space` = catalogue. */
+  source: "platform" | "space";
+}
+
 type SessionRow = typeof chatSessions.$inferSelect;
 type MessageRow = typeof chatMessages.$inferSelect;
 
-function toSessionDto(row: SessionRow) {
+/**
+ * `pinnedSkills` is passed by the two routes that answer for ONE session (the
+ * detail read and the create); the list route omits it deliberately, so a page
+ * of 100 conversations stays one query instead of 101. The OpenAPI schema says
+ * the same.
+ */
+function toSessionDto(row: SessionRow, pinnedSkills?: readonly string[]) {
   return {
     object: "chat_session" as const,
     id: row.id,
@@ -70,6 +124,10 @@ function toSessionDto(row: SessionRow) {
     unread:
       row.lastAssistantSeq != null &&
       (row.lastReadSeq == null || row.lastReadSeq < row.lastAssistantSeq),
+    // How much of the space's skill catalogue this conversation indexes. Always
+    // present: the picker renders the current mode, and there is no "unset".
+    skill_discovery: row.skillDiscovery,
+    ...(pinnedSkills ? { pinned_skills: [...pinnedSkills] } : {}),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -127,6 +185,104 @@ async function loadMessages(sessionId: string): Promise<MessageRow[]> {
     .orderBy(asc(chatMessages.seq));
 }
 
+/** The fields the picker reads off one `GET /api/packages/skills` row. */
+interface SpaceSkillRow {
+  id: string;
+  name?: string;
+  description?: string | null;
+  version?: string | null;
+}
+
+/**
+ * The JSON body of a dispatched platform read, or `null` for every way it can
+ * fail to produce one — a refusal (403 without `skills:read`), an error status,
+ * an unparseable body, or a dispatch that throws outright.
+ *
+ * One `null` for all of them ON PURPOSE. The caller is building an affordance,
+ * not answering a question about authorization: a picker that shows fewer rows
+ * is usable, a picker that 500s is not, and the refusal the user actually needs
+ * to see is the one the turn reports when it tries to USE a skill.
+ */
+async function readJson<T>(send: () => Promise<Response>): Promise<T | null> {
+  try {
+    const res = await send();
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Every skill the picker may offer, in the order it shows them: the platform
+ * defaults first, then the space's catalogue, each sorted by package id.
+ *
+ * TWO reads, because the two halves answer different questions and no single
+ * platform endpoint answers both. The defaults are `unlisted` system packages —
+ * off every catalogue by construction — so they are resolved BY EXACT ID
+ * through `/api/me/context?skills=`, the same call the turn makes, which is why
+ * the picker can never offer a default the prompt does not index. The space
+ * half is the ordinary catalogue (`GET /api/packages/skills`), i.e. what is
+ * ACTIVE here and listed.
+ *
+ * Both are dispatched in-process, so the caller's own RBAC decides: a caller
+ * without `skills:read` gets an empty half from each (the context read answers
+ * with empty skill fields, the listing 403s) and therefore `{ skills: [] }` —
+ * never a 500 and never someone else's catalogue. A non-OK response is treated
+ * as "nothing to offer" for the same reason: the picker is an affordance, and
+ * degrading it to empty is strictly better than failing the whole popover.
+ */
+async function listChatSkills(
+  c: Context<ChatEnv>,
+  deps: ChatPlatformDeps,
+): Promise<ChatSkillEntry[]> {
+  const origin = selfOrigin();
+  const headers = forwardedHeaders(c);
+  const spaceId = c.get("space").id;
+
+  const [platformRes, spaceRes] = await Promise.all([
+    readJson<{ requested_skills?: SkillHint[] }>(() =>
+      dispatchCallerContext(deps, { origin, headers, spaceId, skills: PLATFORM_DEFAULT_SKILLS }),
+    ),
+    readJson<{ data?: SpaceSkillRow[] }>(() =>
+      deps.dispatch(
+        new Request(new URL("/api/packages/skills", origin).toString(), {
+          headers: spaceScopedHeaders(headers, spaceId),
+        }),
+      ),
+    ),
+  ]);
+
+  const byId = (a: ChatSkillEntry, b: ChatSkillEntry) => (a.package_id < b.package_id ? -1 : 1);
+  const platform: ChatSkillEntry[] = (platformRes?.requested_skills ?? [])
+    .map((hint) => ({
+      package_id: hint.package_id,
+      display_name: hint.display_name?.trim() || hint.package_id,
+      description: hint.description?.trim() ?? "",
+      version: hint.version ?? null,
+      source: "platform" as const,
+    }))
+    .sort(byId);
+
+  // A default that is ALSO in the space catalogue stays on the platform half:
+  // the chat indexes it whatever the space does, so offering it twice would let
+  // the user "unpin" a row the turn keeps indexing.
+  const platformIds = new Set(platform.map((entry) => entry.package_id));
+  const space: ChatSkillEntry[] = (spaceRes?.data ?? [])
+    .filter((item) => !platformIds.has(item.id))
+    .map((item) => ({
+      package_id: item.id,
+      display_name: item.name?.trim() || item.id,
+      description: item.description?.trim() ?? "",
+      version: item.version ?? null,
+      source: "space" as const,
+    }))
+    .sort(byId)
+    .slice(0, SKILL_PICKER_LIMIT);
+
+  return [...platform, ...space];
+}
+
 // ---------------------------------------------------------------------------
 // Router — built once at module init with the platform deps captured from
 // `ctx.services` (rate limiter + in-process dispatch + subscription-model resolution).
@@ -171,7 +327,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
       .limit(SESSIONS_PAGE_SIZE + 1);
     const hasMore = rows.length > SESSIONS_PAGE_SIZE;
     const page = hasMore ? rows.slice(0, SESSIONS_PAGE_SIZE) : rows;
-    return c.json({ object: "list", data: page.map(toSessionDto), hasMore });
+    return c.json({ object: "list", data: page.map((row) => toSessionDto(row)), hasMore });
   });
 
   // POST /api/chat/sessions — start a new conversation
@@ -193,15 +349,20 @@ export function createChatRouter(deps: ChatPlatformDeps) {
         })
         .returning();
       notifySessionUpdate(row!.id, row!.orgId, row!.userId);
-      return c.json(toSessionDto(row!), 201);
+      // A brand-new conversation has no pins; the field is present so the
+      // client never has to distinguish "none" from "not loaded".
+      return c.json(toSessionDto(row!, []), 201);
     },
   );
 
   // GET /api/chat/sessions/:id — the conversation's messages, in seq order (history load)
   router.get("/api/chat/sessions/:id", requireModulePermission("chat", "read"), async (c) => {
     const session = await getOwnedSession(c.req.param("id"), sessionScope(c));
-    const messages = await loadMessages(session.id);
-    return c.json({ ...toSessionDto(session), messages: messages.map(toMessageDto) });
+    const [messages, pins] = await Promise.all([
+      loadMessages(session.id),
+      loadSessionPins(session.id),
+    ]);
+    return c.json({ ...toSessionDto(session, pins), messages: messages.map(toMessageDto) });
   });
 
   // PATCH /api/chat/sessions/:id — rename
@@ -235,6 +396,41 @@ export function createChatRouter(deps: ChatPlatformDeps) {
         })
         .where(eq(chatSessions.id, session.id));
       notifySessionUpdate(session.id, session.orgId, session.userId);
+      return c.body(null, 204);
+    },
+  );
+
+  // GET /api/chat/skills — what the skill picker and the `/` popover offer.
+  // A read of two catalogues, so `chat:read` plus whatever the two dispatched
+  // reads ask for on their own (`skills:read`); see `listChatSkills`.
+  router.get("/api/chat/skills", requireModulePermission("chat", "read"), async (c) => {
+    return c.json({ skills: await listChatSkills(c, deps) });
+  });
+
+  // PUT /api/chat/sessions/:id/skills — replace the conversation's skill
+  // selection (discovery mode + pins).
+  //
+  // `ensureSession` FIRST, and that is the whole reason this is a PUT on a
+  // possibly-nonexistent id: the client mints the session id and creates the
+  // conversation lazily, so pinning a skill before sending the first message is
+  // the normal case. Creating the row here is exactly what the first turn would
+  // have done — same ownership check, same 404 on a foreign-tenant id.
+  router.put(
+    "/api/chat/sessions/:id/skills",
+    rateLimited(60),
+    requireModulePermission("chat", "write"),
+    async (c) => {
+      const scope = sessionScope(c);
+      const id = c.req.param("id");
+      const data = parseBody(sessionSkillsSchema, await c.req.json().catch(() => null));
+      await ensureSession(id, scope.orgId, scope.userId, scope.spaceId);
+      await setSessionSkills(id, {
+        discovery: data.skill_discovery,
+        // Deduped and sorted here, so the stored set is the one the prompt
+        // renders and `loadSessionPins` reads back unchanged.
+        pinned: [...new Set(data.pinned_skills)].sort(),
+      });
+      notifySessionUpdate(id, scope.orgId, scope.userId);
       return c.body(null, 204);
     },
   );

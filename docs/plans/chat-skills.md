@@ -193,19 +193,21 @@ UI (module-chat `ui/`):
 
 ## Phase 4 — `/skill` mention
 
-Directive syntax in the user text (assistant-ui directive shape, one per
-mention): `:skill[/name]{id=@scope/name}`. The label is what the chip shows;
-`id` is what the server resolves. Regex on the server is strict
-(`@[a-z0-9-]+/[a-z0-9-]+`), anything else stays prose.
+Directive syntax in the user text: the assistant-ui default formatter
+(`unstable_defaultDirectiveFormatter`, `@assistant-ui/core`), one directive
+per mention: `:skill[/name]{name=@scope/name}`. The label is what the chip
+shows; `name` carries the package id. No custom formatter. The server regex
+is strict (type `skill`, id `@[a-z0-9-]+/[a-z0-9-]+`); anything else stays
+prose.
 
 Server (module-chat):
 
-- `src/skill-mentions.ts`: `parseSkillMentions(text)`, and
-  `messagesWithSkillsAsText(messages, bodies)` mirroring
-  `attachments.ts`: replaces each directive with
-  `[Skill @scope/name (v…) loaded]\n<body>` the first time an id appears in
-  the history, and `[Skill @scope/name already loaded above]` afterwards.
-  Unresolved → `[Skill @scope/name could not be loaded: <reason>]`.
+- `src/skill-mentions.ts`: `parseSkillMentions(text)` and
+  `messagesWithSkillsAsText(messages, bodies)` mirroring `attachments.ts`:
+  replaces each directive with `[Skill @scope/name (v…) loaded]\n<body>` the
+  first time an id appears in the history, and `[Skill @scope/name already
+loaded above]` afterwards. Unresolved → `[Skill @scope/name could not be
+loaded: <reason>]`.
 - Resolution: the union of mentioned ids across ALL user messages, fetched
   through in-process dispatch of `getSkill` in parallel with phase B of the
   preamble (`chat-stream.ts`), `skills:read` re-checked by the route itself.
@@ -215,11 +217,11 @@ Server (module-chat):
 
 UI:
 
-- `ComposerPrimitive.Unstable_TriggerPopover` char `/` with
-  `unstable_useMentionAdapter` over `GET /api/chat/skills` (shared hook with
-  the picker), `.Directive` formatter producing the syntax above. Wrap the
-  `unstable_*` API in ONE component (`skill-mention.tsx`) so a library change
-  touches one file.
+- `ComposerPrimitive.Unstable_TriggerPopoverRoot` + `Unstable_TriggerPopover`
+  char `/` with `unstable_useMentionAdapter({ items })` over
+  `GET /api/chat/skills` (shared hook with the picker), `.Directive` with the
+  default formatter. Wrap the `unstable_*` API in ONE component
+  (`skill-mention.tsx`) so a library change touches one file.
 - User bubble: render `:skill[…]{…}` directives as chips (parse in
   `thread.tsx` `UserMessage`, reuse the parser from `skill-mentions.ts`).
 

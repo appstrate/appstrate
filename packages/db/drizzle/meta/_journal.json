@@ -484,6 +484,13 @@
       "when": 1789728489303,
       "tag": "0068_packages_org_home_validate",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1790072717157,
+      "tag": "0069_chat_session_skills",
+      "breakpoints": true
     }
   ]
 }

@@ -15,7 +15,7 @@ const stdHeaders = {
 export const chatComponentSchemas = {
   ChatSession: {
     type: "object",
-    required: ["object", "id", "generating", "unread", "createdAt", "updatedAt"],
+    required: ["object", "id", "generating", "unread", "skill_discovery", "createdAt", "updatedAt"],
     properties: {
       object: { type: "string", enum: ["chat_session"] },
       id: { type: "string", description: "Session ID (chs_ prefix)" },
@@ -29,8 +29,35 @@ export const chatComponentSchemas = {
         description:
           "Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/chat/sessions/{id}/read.",
       },
+      skill_discovery: {
+        type: "string",
+        enum: ["auto", "on_demand", "manual"],
+        description:
+          "How much of the space's skill catalogue this conversation indexes: `auto` (platform defaults + pins + catalogue), `on_demand` (defaults + pins), `manual` (pins only). A context-budget control, never an authorization boundary. Set via PUT /api/chat/sessions/{id}/skills.",
+      },
+      pinned_skills: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Package ids (`@scope/name`) pinned to this conversation, sorted. Returned by `GET /api/chat/sessions/{id}` and by the `201` of `POST /api/chat/sessions` (empty there); OMITTED from `GET /api/chat/sessions`, whose page would otherwise cost one query per row.",
+      },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
+    },
+  },
+  // One row of the chat's skill picker: the platform defaults every turn
+  // indexes, then the space's own catalogue. `source` says which half a row
+  // came from — a `platform` row is indexed whatever the space holds and is
+  // therefore not pinnable, a `space` row is.
+  ChatSkillEntry: {
+    type: "object",
+    required: ["package_id", "display_name", "description", "version", "source"],
+    properties: {
+      package_id: { type: "string", description: "`@scope/name` package id" },
+      display_name: { type: "string", description: "Falls back to the package id." },
+      description: { type: "string", description: "Empty string when the manifest declares none." },
+      version: { type: ["string", "null"], description: "Manifest version (semver), when known." },
+      source: { type: "string", enum: ["platform", "space"] },
     },
   },
   // One stored conversation message returned by `GET /sessions/{id}` so the
@@ -205,6 +232,83 @@ export const chatPaths = {
         "204": { description: "Session deleted (messages cascade)" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/chat/skills": {
+    get: {
+      operationId: "listChatSkills",
+      tags: ["Chat"],
+      summary: "List the skills the chat can use",
+      description:
+        'The platform default skills every chat turn indexes (`source: "platform"`), followed by the skills active in the current space (`source: "space"`), each sorted by package id. Feeds the composer\'s skill picker. Both halves are read with the caller\'s own permissions: without `skills:read` the list is empty rather than refused.',
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+      ],
+      responses: {
+        "200": {
+          description: "Skills the chat can index",
+          headers: stdHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["skills"],
+                properties: {
+                  skills: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/ChatSkillEntry" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/chat/sessions/{id}/skills": {
+    put: {
+      operationId: "setChatSessionSkills",
+      tags: ["Chat"],
+      summary: "Set a chat session's skill selection",
+      description:
+        "Replaces the conversation's discovery mode and its pinned skills in one call (the body is the state you want, not a patch). Duplicate ids are deduped server-side; at most 20 pins are stored. The session row is created if the client-minted id has none yet — exactly as the first turn would.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["skill_discovery", "pinned_skills"],
+              properties: {
+                skill_discovery: { type: "string", enum: ["auto", "on_demand", "manual"] },
+                pinned_skills: {
+                  type: "array",
+                  maxItems: 20,
+                  items: { type: "string", description: "`@scope/name` package id" },
+                  description:
+                    "Package ids to pin. Deduped server-side; the cap applies to the array as sent.",
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      responses: {
+        "204": { description: "Selection replaced" },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "429": { description: "Rate limited (60/min per caller)" },
       },
     },
   },
