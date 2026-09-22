@@ -1589,7 +1589,15 @@ response only ever carries the spaces the caller can enter.
   could still place. Provenance (the org's packages, Appstrate's) became a
   filter, which is what it is: an attribute of a package, not the question a
   reader opens with. The old `/catalogue/org/...` links still resolve.
-- **A column per space, a switch per cell.** "Actif ici" named no space while
+- **Each half has one form, and the reader does not choose it.** Découvrir is
+  BROWSING — a name, what it does, where it comes from — so it is cards, and
+  adding is done on the package's sheet: "Ajouter à [espace]", listing only
+  the spaces this caller may activate it in, through the same activation that
+  asks about missing integrations first. A switch per space was noise there:
+  every row of that half is placed nowhere, so every cell read "off". Vos
+  espaces is MANAGING — states compared down a column — so it is a table. No
+  view toggle on either: it would offer each half the other's wrong shape.
+- **A column per space, a switch per cell** (Vos espaces). "Actif ici" named no space while
   the column beside it listed the others: two ways of speaking about one
   subject, one of them mute. Now each column is a space and each cell says and
   CHANGES the state there. A caller with one space keeps the table they had,

@@ -14,7 +14,15 @@
  * to the package's page, one link away, and most of it says nothing at all
  * about a package this space has not activated yet.
  */
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@appstrate/ui/components/select";
 import { ArrowLeft, ExternalLink, ShieldCheck } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
@@ -30,21 +38,36 @@ export function CataloguePreview({
   type,
   spaces,
   isActivating,
-  canActivate,
-  onActivate,
+  targets,
+  defaultTarget,
+  onAdd,
   onBack,
 }: {
   item: LibraryPackageItem;
   type: PackageType;
   spaces: LibrarySpace[];
   isActivating: boolean;
-  /** False when it already runs here, or runs everywhere by being a system one. */
-  canActivate: boolean;
-  onActivate: () => void;
+  /**
+   * The spaces this package could be added to BY THIS CALLER: not already
+   * running it, and granting them the activation there. Empty when there is
+   * nowhere left — a system agent is readable everywhere, and a package on in
+   * every reachable space has no target.
+   */
+  targets: { id: string; name: string }[];
+  /** The space to propose first: the one the reader narrowed to, or stands in. */
+  defaultTarget: string | null;
+  /** Goes through the catalogue's own activation, which asks about integrations first. */
+  onAdd: (spaceId: string) => void;
   onBack: () => void;
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const { currentOrg } = useOrg();
+  const [target, setTarget] = useState<string>(
+    defaultTarget && targets.some((space) => space.id === defaultTarget)
+      ? defaultTarget
+      : (targets[0]?.id ?? ""),
+  );
+  const home = spaces.find((space) => space.id === item.home_space_id);
   // Placed AND switched on: a placement that exists but is off does not run
   // here, and this line answers "where does it run".
   const installedIn = spaces.filter((space) =>
@@ -62,14 +85,34 @@ export function CataloguePreview({
 
       <div className="flex min-h-9 items-start justify-between gap-4">
         <SettingsHeading className="mb-0" title={item.name || item.id} />
-        <div className="flex shrink-0 items-center gap-2">
-          {canActivate && (
-            <Button type="button" disabled={isActivating} onClick={onActivate}>
+        {/* Adding is done HERE, on the sheet, and says which space: it is a
+            considered act — the space, and what the package needs there — not
+            a switch in a grid of empty ones. With one possible space the
+            choice is shown, not asked. */}
+        {targets.length > 0 && (
+          <div className="flex shrink-0 items-center gap-2">
+            {targets.length > 1 ? (
+              <Select value={target} onValueChange={setTarget}>
+                <SelectTrigger className="h-9 w-44" aria-label={t("catalogue.addTarget")}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {targets.map((space) => (
+                    <SelectItem key={space.id} value={space.id}>
+                      {space.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
+            <Button type="button" disabled={isActivating || !target} onClick={() => onAdd(target)}>
               {isActivating && <Spinner />}
-              {t("catalogue.activate")}
+              {targets.length > 1
+                ? t("catalogue.add")
+                : t("catalogue.addTo", { space: targets[0]!.name })}
             </Button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {item.description && <p className="text-muted-foreground mt-2 text-sm">{item.description}</p>}
@@ -90,12 +133,19 @@ export function CataloguePreview({
             )}
           </dd>
         </div>
+        {home && (
+          <div>
+            <dt className="text-muted-foreground text-xs tracking-wide uppercase">
+              {t("catalogue.homeSpace")}
+            </dt>
+            {/* Where the package lives, which is where it is edited (#1437). */}
+            <dd className="mt-1">{home.name}</dd>
+          </div>
+        )}
         <div>
           <dt className="text-muted-foreground text-xs tracking-wide uppercase">
             {t("catalogue.activeIn")}
           </dt>
-          {/* The honest answer to "which space is this package's home": there is
-              no single one, so the panel names them all rather than picking. */}
           <dd className="mt-1">
             {installedIn.length > 0
               ? installedIn.map((space) => space.name).join(" · ")

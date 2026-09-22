@@ -76,10 +76,8 @@ import {
   type IntegrationExecution,
 } from "../lib/integration-collection";
 import { CollectionTabs } from "./collection-tabs";
-import { usePackageViewStore } from "../stores/list-view-store";
 import type { CardItem } from "../pages/package-list";
 import { CataloguePreview } from "./catalogue-preview";
-import { CatalogueRowMenu, CatalogueStatusBadge } from "./catalogue-row";
 import { PanelDialog } from "./panel-dialog";
 import { PackageCollection } from "./package-collection";
 import type { FilterSpec } from "./list-toolbar";
@@ -152,8 +150,11 @@ export function OrgCatalogueModal({
   const { data: library, isLoading, error } = useLibrary();
   const activate = useSetPackageActive();
   const list = useLocalListParams();
-  const view = usePackageViewStore((s) => s.view);
-  const setView = usePackageViewStore((s) => s.setView);
+  // Each half has the form its job needs, and the reader does not choose it.
+  // Découvrir is BROWSING — a name, what it does, where it comes from — which
+  // is what a card carries and a table row crushes. Vos espaces is MANAGING —
+  // the state in each space, compared down a column — which only a table can
+  // lay out. A toggle would offer each half the other's wrong shape.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // The read has an address of its own: reload lands on it, Back leaves it.
   const preview = useModalParam("package");
@@ -161,6 +162,7 @@ export function OrgCatalogueModal({
 
   const scope = catalogueScope(rawScope);
   const discovering = scope === "discover";
+  const view: "cards" | "table" = discovering ? "cards" : "table";
   const visibleKinds = KINDS.filter((kind) => allowed.includes(kind.type));
   const active =
     (isPackageType(type) && visibleKinds.some((k) => k.type === type)
@@ -426,36 +428,20 @@ export function OrgCatalogueModal({
       source: item.source as CardItem["source"],
     };
     if (view !== "cards") return row;
-    // What the table puts in its last two columns, a card carries in a footer
-    // it ALWAYS has: same line, same height, whatever the row's state — a card
-    // that grows a footer only when it can be activated made every grid a
-    // ragged one.
-    const state = stateOf(row);
+    // A card carries a footer it ALWAYS has: same line, same height. Here it
+    // says where the package comes from and offers the sheet, which is where
+    // adding it to a space is done — placing something is a considered act
+    // (which space, which integrations), not a switch in a grid of empty ones.
     return {
       ...row,
       actions: (
         <>
           <span className="text-muted-foreground truncate text-xs">
-            {state.everywhere
-              ? t("catalogue.allSpaces")
-              : state.activeIn.length > 0
-                ? state.activeIn.join(" · ")
-                : t("catalogue.activeNowhere")}
+            {item.source === "system" ? t("catalogue.sourceSystem") : orgName}
           </span>
-          <span className="flex shrink-0 items-center gap-1">
-            <CatalogueStatusBadge state={state} />
-            <CatalogueRowMenu
-              item={row}
-              homeWritable={writableOf(row) && !state.everywhere}
-              homeShareable={shareableOf(row) && !state.everywhere}
-              sharedSpaces={sharedSpacesOf(row)}
-              isPending={activate.isPending || revoke.isPending}
-              onOpen={(item) => preview.open(item.id)}
-              onMoveHome={setMoveHome}
-              onShare={setSharing}
-              onRevoke={revokeFrom}
-            />
-          </span>
+          <Button size="sm" variant="outline" onClick={() => preview.open(item.id)}>
+            {t("catalogue.addToSpace")}
+          </Button>
         </>
       ),
     };
@@ -584,7 +570,7 @@ export function OrgCatalogueModal({
           aria-selected={scope === option.id}
           onClick={() => show(option.id, active)}
           className={cn(
-            "flex h-7 flex-auto items-center justify-center gap-1.5 rounded-md px-1.5 text-sm font-medium whitespace-nowrap transition-colors",
+            "focus-visible:ring-ring flex h-7 flex-auto items-center justify-center gap-1.5 rounded-md px-1.5 text-sm font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-2",
             scope === option.id
               ? "bg-card text-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground",
@@ -673,13 +659,27 @@ export function OrgCatalogueModal({
           type={active}
           spaces={library?.spaces ?? []}
           isActivating={activate.isPending}
-          canActivate={canActivate({
-            id: reading.id,
-            displayName: reading.name,
-            type: active,
-          })}
-          onActivate={() =>
-            activateOne({ id: reading.id, displayName: reading.name || reading.id })
+          // Every space it could still be added to by this caller: not running
+          // it, and granting the activation there. A system agent, skill or
+          // MCP server is readable everywhere already — nowhere to add it.
+          targets={
+            placementById.get(reading.id)?.everywhere
+              ? []
+              : spaces
+                  .filter(
+                    (space) =>
+                      !placementById.get(reading.id)?.activeIn.includes(space.id) &&
+                      maySetPackageActive(grantById.get(space.id), active, true),
+                  )
+                  .map((space) => ({ id: space.id, name: space.name }))
+          }
+          defaultTarget={chosenSpaces[0] ?? spaceId ?? null}
+          onAdd={(targetSpaceId) =>
+            void onSetActive(
+              { id: reading.id, displayName: reading.name || reading.id, type: active },
+              targetSpaceId,
+              true,
+            )
           }
           onBack={preview.close}
         />
@@ -695,7 +695,6 @@ export function OrgCatalogueModal({
           emptyIcon={kind.icon}
           list={list}
           view={view}
-          onViewChange={setView}
           header={
             <>
               <SettingsHeading className="mb-4" title={t(kind.titleKey)} />

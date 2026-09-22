@@ -60,7 +60,8 @@ export interface PackageCollectionProps {
   emptyIcon: LucideIcon;
   list: ListState;
   view: ListView;
-  onViewChange: (view: ListView) => void;
+  /** Absent when the view is the surface's decision, not the reader's. */
+  onViewChange?: (view: ListView) => void;
   placement?: "page" | "panel";
   /**
    * Whether the list can say what is running or what uses this package. The
