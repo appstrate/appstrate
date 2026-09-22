@@ -1484,7 +1484,7 @@
   "catalogue.sheet.absent": "Absent",
   "catalogue.sheet.atHome": "{{state}} · home",
   "catalogue.sheet.missing": "To activate in this space: {{names}}",
-  "catalogue.sheet.missingColumn": "To activate",
+  "catalogue.sheet.missingColumn": "Integrations to activate",
   "catalogue.sheet.uses": "What it uses",
   "catalogue.sheet.integrations": "Integrations",
   "catalogue.sheet.integrationsHint": "Activated and connected in each space.",

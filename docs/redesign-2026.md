@@ -1687,13 +1687,22 @@ and what it needs.
   leaving for that page is an action like any other and a discreet link read as
   decoration. The sections below are `SettingsGroup`/`SettingsHeading`, like
   every settings page, and the facts are property rows (icon, label, value)
-  rather than a bare description list. The detail is read from a space where
+  rather than a bare description list. The "Intégrations à activer" column
+  appears only when a space is actually missing one: a column of dashes asks
+  the reader what it would have meant. The detail is read from a space where
   the package is PLACED (`fetchPackageDetail(..., spaceId)`), since the server
   answers only there and the catalogue shows packages placed elsewhere than the
   space the reader stands in.
-- **An offer heads the sheet**: "Julie Ferrand l'a proposé à Bac à sable", with
-  what that space would still have to switch on, and "Activer dans Bac à
-  sable". It is the one line asking the reader for a decision.
+- **An offer is an alert**, the shape every other line naming a state and its
+  remedy has: "Julie Ferrand l'a proposé à Bac à sable", what that space would
+  still have to switch on, and "Activer dans Bac à sable".
+- **The reference facts sit in two cards with a grey head** (the agent
+  overview's own shape): "Ce qu'il utilise" and "Détails". Cards hold what is
+  CONSULTED; the page below holds what is ACTED on. Deliberately not tabs: the
+  sheet is a preview inside a panel that already has a rail, and hiding either
+  half behind a tab would make the reader click to learn whether the agent
+  needs an integration the target space lacks, which is the question the sheet
+  exists to answer.
 - **Espaces is graded by reach** (`lib/catalogue-sheet`, tested): a table of
   every reachable space (state, what is missing there for an agent, the
   switch) when there are several; one line with its switch when there is one;
