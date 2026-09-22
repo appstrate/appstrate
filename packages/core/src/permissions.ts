@@ -184,6 +184,41 @@ export function canRunAgents(has: (permission: CorePermission) => boolean): bool
   return has("agents:run") && canReadRuns(has);
 }
 
+/** How far a caller gets with runs. Ordered: each level implies the previous one. */
+export type RunLevel = "none" | "read" | "run" | "compose";
+
+const RUN_LEVELS: readonly RunLevel[] = ["none", "read", "run", "compose"];
+
+/** Whether `level` reaches at least `floor` on the ordered scale. */
+export function reaches(level: RunLevel, floor: RunLevel): boolean {
+  return RUN_LEVELS.indexOf(level) >= RUN_LEVELS.indexOf(floor);
+}
+
+/**
+ * Run level and authoring for a caller, given whether it can dispatch at all
+ * (`invokes` is the transport/module half core does not know). The MCP server's
+ * tool set, its `instructions`, the chat persona and the web access chip all
+ * read this one derivation, so "authors" cannot mean a different conjunction in
+ * each of the four.
+ */
+export function agentCapabilities(
+  has: (permission: CorePermission) => boolean,
+  invokes: boolean,
+): { runLevel: RunLevel; authors: boolean } {
+  // `invokes` is a conjunct of every level: a grant the caller cannot dispatch
+  // is a grant it cannot use, and claiming it buys a refusal nobody can explain.
+  const runLevel: RunLevel = !invokes
+    ? "none"
+    : canRunAgents(has)
+      ? canComposeInline(has)
+        ? "compose"
+        : "run"
+      : canReadRuns(has)
+        ? "read"
+        : "none";
+  return { runLevel, authors: invokes && has("agents:write") };
+}
+
 /**
  * Runtime mirror of `CoreResources`: `satisfies` catches a missing resource,
  * `packages/core/test/permissions.test.ts` a missing action. Needed at runtime because

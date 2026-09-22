@@ -39,18 +39,13 @@ export interface ChatCapability {
   authoring?: true;
 }
 
-/** What the turn may do — the derivation the chat's system prompt is built from. */
-function caps(ctx: Pick<ChatAccessContext, "can">): TurnCapabilities {
-  return turnCapabilities(ctx.can);
-}
-
 /**
  * Shared by the composer's agent-authoring toggle and the `createAgents` row.
  * `chat:write` is this surface's own conjunct: it gates the composer, not the
  * turn's capabilities.
  */
 export function canAuthorAgents(ctx: Pick<ChatAccessContext, "can">): boolean {
-  return ctx.can("chat:write") && caps(ctx).authors;
+  return ctx.can("chat:write") && turnCapabilities(ctx.can).authors;
 }
 
 const CHAT_CAPABILITIES: readonly ChatCapability[] = [
@@ -118,7 +113,7 @@ export interface ResolvedChatCapability extends ChatCapability {
 /** `chat:write` gates the turn itself: a `chat:read`-only caller holds no row. */
 export function resolveChatCapabilities(ctx: ChatAccessContext): ResolvedChatCapability[] {
   const converses = ctx.can("chat:write");
-  const turn = caps(ctx);
+  const turn = turnCapabilities(ctx.can);
   return CHAT_CAPABILITIES.map((capability) => ({
     ...capability,
     verdict: !(converses && capability.held(ctx, turn))

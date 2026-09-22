@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New exports `RunLevel`, `reaches`, `agentCapabilities`
+  (`@appstrate/core/permissions`)** — the one derivation of how far a caller
+  gets with runs (`none` → `read` → `run` → `compose`) and whether it may author
+  agents, from its permission set plus whether it can dispatch at all;
+  `reaches` compares two levels on that ordered scale.
 - **New export `ConnectionCandidate` (`@appstrate/core/integration`)** — one
   connection the caller may pick from on `must_choose_connection`, carrying
   `id`, `label`, `accountId` and `ownedByActor`.

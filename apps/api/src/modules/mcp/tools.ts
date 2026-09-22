@@ -51,7 +51,6 @@ import {
   type CatalogOperation,
 } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
-import { isGranted } from "../../lib/route-requirements.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import {
   getFileForActor,
@@ -63,8 +62,8 @@ import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
 import {
   VIEW_AS_HEADER,
-  canComposeInline,
-  canRunAgents,
+  agentCapabilities,
+  reaches,
   type CorePermission,
 } from "@appstrate/core/permissions";
 import { asString, textResult } from "./tool-results.ts";
@@ -830,7 +829,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     // the ROW decided (a file ACL, `draft_not_writable`) does not: the caller
     // holds every listed permission, and the problem+json already names it.
     const denial =
-      response.status === 403 && !isGranted(op.requirement, ctx.permissions)
+      response.status === 403 && !operationGranted(op, ctx.permissions)
         ? {
             // The caller-space set is the one that failed; the hint is emitted
             // only when it does.
@@ -855,7 +854,7 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 
 /**
  * `run_and_wait` arguments that exist only for `kind:"inline"`. Declared only
- * to a caller who may compose inline (`canComposeInline`). The launch allowlist
+ * to a caller whose `agentCapabilities` run level reaches `compose`. The launch allowlist
  * (`RUN_AND_WAIT_ARGUMENT_NAMES`) still knows them either way: an agent-only
  * caller that sends `kind:"inline"` anyway reaches the route and takes its 403,
  * the one refusal that owns the rule.
@@ -935,9 +934,11 @@ const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
   },
 };
 
-function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
-  // The route is the gate; this only decides what the model is told.
-  const inline = canComposeInline((p) => ctx.permissions.has(p));
+/**
+ * `inline`: the caller's run level reaches `compose`. The route is the gate;
+ * this only decides what the model is told.
+ */
+function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToolDefinition {
   // Inline-only descriptor spans are absent, not contradicted, for a caller
   // who cannot launch one.
   const descriptor: Tool = {
@@ -1504,6 +1505,7 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
 export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
   const has = (permission: CorePermission): boolean => ctx.permissions.has(permission);
   const invokes = ctx.permissions.has("mcp:invoke");
+  const { runLevel } = agentCapabilities(has, invokes);
   // `list_files` dispatches to this operation, so its declaration reads the
   // same route table; its absence would mean a rename — a programming error.
   const listFiles = getCatalog().operations.get("listFiles");
@@ -1517,9 +1519,9 @@ export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
     buildSearchTool(ctx, invokes),
     buildDescribeTool(ctx, invokes),
     ...(invokes ? [buildInvokeTool(ctx)] : []),
-    // Both halves of `canRunAgents`: launching a run this caller could not read
-    // back bills an orphan — see that predicate's doc.
-    ...(invokes && canRunAgents(has) ? [buildRunAndWaitTool(ctx)] : []),
+    // The `run` level is both halves of `canRunAgents`: launching a run this
+    // caller could not read back bills an orphan — see that predicate's doc.
+    ...(reaches(runLevel, "run") ? [buildRunAndWaitTool(ctx, reaches(runLevel, "compose"))] : []),
     ...(operationGranted(listFiles, ctx.permissions) ? [buildListFilesTool(ctx)] : []),
     buildReadFileTool(ctx),
     ...buildPackageFileTools(ctx),

@@ -90,7 +90,7 @@ export function buildSystemPrompt(capabilities: TurnCapabilities): string {
   const { invokes, authors } = capabilities;
   const mayRun = reaches(capabilities.runLevel, "run");
   const mayRead = reaches(capabilities.runLevel, "read");
-  const mayCompose = capabilities.runLevel === "compose";
+  const mayCompose = reaches(capabilities.runLevel, "compose");
   const runs = (yes: string, no = "") => (mayRun ? yes : no);
   const reads = (yes: string, no = "") => (mayRead ? yes : no);
   const inline = (yes: string, no = "") => (mayCompose ? yes : no);

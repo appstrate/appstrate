@@ -6,8 +6,10 @@ import {
   requireCorePermission,
   makePermissionGuard,
   setPermissionDenialHandler,
+  agentCapabilities,
   canReadRuns,
   canRunAgents,
+  reaches,
   CORE_RESOURCE_ACTIONS,
   CORE_RESOURCE_LEVELS,
   CORE_RESOURCE_NAMES,
@@ -15,6 +17,7 @@ import {
   PERMISSION_REQUIREMENT_MARKER,
   SPACE_LEVEL_PERMISSIONS,
   type CoreResources,
+  type RunLevel,
 } from "../src/permissions.ts";
 
 // Augment the resource catalog with a test resource so the helper can be
@@ -328,5 +331,83 @@ describe("canReadRuns / canRunAgents", () => {
   it("both together is, under either read form", () => {
     expect(canRunAgents(has("agents:run", "runs:read"))).toBe(true);
     expect(canRunAgents(has("agents:run", "runs:read-all"))).toBe(true);
+  });
+});
+
+/**
+ * `agentCapabilities` is the one place "how far does this caller get with runs"
+ * is decided — the MCP tool set, the server `instructions`, the chat persona and
+ * the web access chip all read its answer. So it is pinned exhaustively, against
+ * a spec written out longhand below rather than against the predicates it calls:
+ * re-spelling them here is what makes a dropped conjunct show up as a
+ * disagreement instead of as two copies of the same mistake.
+ */
+describe("agentCapabilities", () => {
+  /** Every permission the derivation reads. */
+  const UNIVERSE = ["agents:run", "agents:write", "runs:read", "runs:read-all"] as const;
+
+  /** The rules, spelled out: no helper, no shared subexpression with the source. */
+  function spec(
+    held: ReadonlySet<string>,
+    invokes: boolean,
+  ): { runLevel: RunLevel; authors: boolean } {
+    const readsRuns = held.has("runs:read") || held.has("runs:read-all");
+    const launches = held.has("agents:run") && readsRuns;
+    const composes = launches && held.has("agents:write");
+    const runLevel: RunLevel = !invokes
+      ? "none"
+      : composes
+        ? "compose"
+        : launches
+          ? "run"
+          : readsRuns
+            ? "read"
+            : "none";
+    return { runLevel, authors: invokes && held.has("agents:write") };
+  }
+
+  it("agrees with the spec on every subset it reads, dispatching or not", () => {
+    for (const invokes of [true, false]) {
+      for (let mask = 0; mask < 1 << UNIVERSE.length; mask++) {
+        const permissions = UNIVERSE.filter((_, i) => mask & (1 << i));
+        const held = new Set<string>(permissions);
+        expect({
+          invokes,
+          permissions,
+          ...agentCapabilities((p) => held.has(p), invokes),
+        }).toEqual({ invokes, permissions, ...spec(held, invokes) });
+      }
+    }
+  });
+
+  it("puts `invokes` in every level: no dispatch, no run level and no authoring", () => {
+    // A grant the caller cannot dispatch is a grant it cannot use. This case
+    // holds every run/authoring permission and still reaches nothing.
+    const held = new Set(["agents:run", "agents:write", "runs:read-all"]);
+    expect(agentCapabilities((p) => held.has(p), false)).toEqual({
+      runLevel: "none",
+      authors: false,
+    });
+    // Control: dispatching, the same grants reach the top level.
+    expect(agentCapabilities((p) => held.has(p), true)).toEqual({
+      runLevel: "compose",
+      authors: true,
+    });
+  });
+});
+
+describe("reaches", () => {
+  const ORDER: readonly RunLevel[] = ["none", "read", "run", "compose"];
+
+  it("is true exactly when the level is at or above the floor", () => {
+    for (const [i, level] of ORDER.entries()) {
+      for (const [j, floor] of ORDER.entries()) {
+        expect({ level, floor, reaches: reaches(level, floor) }).toEqual({
+          level,
+          floor,
+          reaches: i >= j,
+        });
+      }
+    }
   });
 });

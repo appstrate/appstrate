@@ -56,8 +56,8 @@ import { APIError } from "better-auth/api";
 import { createMcpServer } from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import {
-  canComposeInline,
-  canRunAgents,
+  agentCapabilities,
+  reaches,
   requireModulePermission,
   type CorePermission,
 } from "@appstrate/core/permissions";
@@ -169,16 +169,16 @@ export function buildServerInstructions(
   packageImportAvailable = false,
 ): string {
   const has = (permission: CorePermission): boolean => permissions.has(permission);
-  // Every conditional below mirrors a `buildMcpTools` declaration, so the
-  // instructions never teach a tool that is not there — and teach it by
-  // ABSENCE: nothing here says "you cannot invoke" or "you cannot run agents".
+  // Every conditional below reads the same `agentCapabilities` derivation
+  // `buildMcpTools` declares its tools from, so the instructions never teach a
+  // tool that is not there — and teach it by ABSENCE: nothing here says "you
+  // cannot invoke" or "you cannot run agents". `authors` is `agents:write`
+  // acted on through `invoke_operation` (manifests, `dependencies.*`, tool
+  // selection): a caller missing either half is not taught how, and one who
+  // cannot launch a run is not told that configuring one leads to running it.
   const invokes = permissions.has("mcp:invoke");
-  const runs = invokes && canRunAgents(has);
-  // Building an agent — manifests, `dependencies.*`, tool selection — is
-  // `agents:write` acted on through `invoke_operation`; a caller missing either
-  // is not taught how, and one who cannot launch a run is not told that
-  // configuring one leads to running it.
-  const authors = invokes && permissions.has("agents:write");
+  const { runLevel, authors } = agentCapabilities(has, invokes);
+  const runs = reaches(runLevel, "run");
   const runningAgents = runs ? "configuring or running" : "configuring";
   const agentUse = authors ? "building or configuring" : runningAgents;
   // A `contextInjected` caller (the chat module) already injects the get_me
@@ -198,9 +198,7 @@ export function buildServerInstructions(
     : "Give the caller that `connect_url` to open, in one short sentence, and end your turn — do NOT poll, loop, wait, or run in the same turn.";
   // Every inline-run span below follows `run_and_wait`'s own descriptor: a
   // caller who cannot compose is not told about a kind the route refuses.
-  // Composing inline is running plus authoring, so it implies `runs` — written
-  // as a conjunction rather than asserted, so the two can never disagree.
-  const inline = runs && canComposeInline(has);
+  const inline = reaches(runLevel, "compose");
   const runOps = inline ? "`runAgent`/`runInline`" : "`runAgent`";
   // Discovery-only (`mcp:read` alone): the index and describe_operation are the
   // whole surface, so the sentences that hand an operationId onwards stop there.

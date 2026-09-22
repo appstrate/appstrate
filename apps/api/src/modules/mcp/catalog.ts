@@ -168,7 +168,6 @@ export function resetCatalog(): void {
   cached = null;
 }
 
-/** Whether `permissions` clears every guard mounted on this operation's route. */
 export function operationGranted(op: CatalogOperation, permissions: ReadonlySet<string>): boolean {
   return isGranted(op.requirement, permissions);
 }
