@@ -15,7 +15,7 @@
 import { Type, type ExtensionAPI, type ExtensionFactory } from "./pi-sdk.ts";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import type { RuntimeEventEmitter } from "./runtime-tools/mcp-forward.ts";
-import { toPiToolResult } from "./pi-tool-result.ts";
+import { piToolResultOrThrow } from "./pi-tool-result.ts";
 import {
   apiCallRequestJsonSchema,
   readIntegrationRefs,
@@ -157,7 +157,7 @@ function makeApiCallExtension(
         // failure signal) and is not an `api_call.failed` execution error.
         // Pi's AgentToolResult only supports text + image content; AFPS
         // resource entries are coerced into a text stub.
-        return toPiToolResult({
+        return piToolResultOrThrow({
           content: result.content.map((c) =>
             c.type === "text" || c.type === "image"
               ? c

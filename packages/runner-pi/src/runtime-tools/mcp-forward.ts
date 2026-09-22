@@ -18,7 +18,7 @@
  *   2. forward verbatim via `mcp.callTool`,
  *   3. emit `<tool>.completed` with duration + isError,
  *   4. adapt the MCP `CallToolResult` to Pi's `AgentToolResult` shape
- *      (throwing an `isError` result, Pi's only failure signal).
+ *      (an `isError` result throws — see {@link piToolResultOrThrow}).
  *
  * Re-encoding that recipe per tool is pure copy-paste. {@link
  * buildRuntimeToolFactories} produces one extension factory per
@@ -30,7 +30,7 @@
 import { Type, type ExtensionAPI, type ExtensionFactory } from "../pi-sdk.ts";
 import type { AppstrateMcpClient, CallToolResult } from "@appstrate/mcp-transport";
 import { RUNTIME_INJECTED_TOOLS, type RuntimeInjectedTool } from "./index.ts";
-import { toPiToolResult, type PiToolContent, type PiToolResult } from "../pi-tool-result.ts";
+import { piToolResultOrThrow, type PiToolContent, type PiToolResult } from "../pi-tool-result.ts";
 
 /**
  * Adapt an MCP `CallToolResult` into Pi's `AgentToolResult` shape. Pi
@@ -49,8 +49,8 @@ import { toPiToolResult, type PiToolContent, type PiToolResult } from "../pi-too
  * by the caller — that is why the api_call response shaper keeps its
  * `[api_call status=…]` prefix and JSON-descriptor text block.
  *
- * Failure: an `isError: true` result is thrown through {@link toPiToolResult}
- * — the only way Pi records a tool error.
+ * Failure: an `isError: true` result throws through
+ * {@link piToolResultOrThrow}, so Pi flags the call as failed.
  */
 export function callToolResultToPi(result: CallToolResult): PiToolResult {
   const content: PiToolContent[] = result.content.map((c) => {
@@ -74,7 +74,7 @@ export function callToolResultToPi(result: CallToolResult): PiToolResult {
       text: `[unknown content type: ${(c as { type: string }).type}]`,
     };
   });
-  return toPiToolResult({
+  return piToolResultOrThrow({
     content,
     details: result.structuredContent,
     isError: result.isError === true,

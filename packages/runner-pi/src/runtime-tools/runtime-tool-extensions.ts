@@ -32,7 +32,7 @@ import {
   type RuntimeToolDef,
   type RuntimeToolEvent,
 } from "@appstrate/core/runtime-tool-defs";
-import { toPiToolResult } from "../pi-tool-result.ts";
+import { piToolResultOrThrow } from "../pi-tool-result.ts";
 
 export interface BuildRuntimeToolExtensionsOptions {
   /** Agent-selected runtime tools (`manifest.runtime_tools`). */
@@ -87,7 +87,7 @@ function runtimeToolExtension(
       async execute(_toolCallId, params) {
         const result = await def.handler(params ?? {});
         reEmitRuntimeToolEvents(result._meta, emit);
-        return toPiToolResult({
+        return piToolResultOrThrow({
           content: result.content.map((c) => ({ type: "text" as const, text: c.text })),
           isError: result.isError === true,
         });

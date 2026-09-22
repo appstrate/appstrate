@@ -345,15 +345,22 @@ describe("buildMcpDirectFactories — integration tools", () => {
       for (const f of factories) f(api);
       const apiCall = captured.find((c) => c.name === "gh__api_call");
 
-      const failure = await apiCall!
+      const failure = (await apiCall!
         .execute("call-1", { target: "https://api.github.com/repos/x/y" })
-        .then(
-          () => undefined,
-          (err: unknown) => err as Error,
-        );
-      expect(failure?.message).toContain("[api_call status=404]");
-      expect(failure?.message).toContain('{"message":"Not Found"}');
-      expect(failure?.message).not.toContain("could not write response");
+        .catch((err: Error) => err)) as Error;
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure.message).toContain("[api_call status=404]");
+      expect(failure.message).toContain('{"message":"Not Found"}');
+      expect(failure.message).not.toContain("could not write response");
+
+      // A `{ fromFile }` body that cannot be read fails before the call.
+      await expect(
+        apiCall!.execute("call-2", {
+          target: "https://api.github.com/repos/x/y",
+          method: "POST",
+          body: { fromFile: "missing.bin" },
+        }),
+      ).rejects.toThrow('api_call: cannot read body file "missing.bin"');
     } finally {
       await gateway?.close();
       await host.dispose();
