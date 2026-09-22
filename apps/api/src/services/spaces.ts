@@ -50,7 +50,7 @@ type SpaceSettings = z.infer<typeof spaceSettingsSchema>;
 
 /**
  * Every space of `orgId` the caller reaches, with their role in each (RBAC spec
- * §6.3): spaces and the caller's rows in ONE statement (§4.4), then
+ * §6.3): spaces and the caller's rows in one statement (§4.4), then
  * `isSpaceVisibleTo` filters. `overlay` replaces the caller's own rows (role
  * preview, `lib/view-as.ts`).
  */
@@ -62,7 +62,12 @@ export async function listSpacesForPrincipal(
   overlay?: ReadonlyMap<string, SpaceMemberRow>,
 ): Promise<Array<{ space: SpaceRow; role: SpaceRoleRef | null }>> {
   const administersOrg = orgRole === "owner" || orgRole === "admin";
-  const rows = await listVisibleSpaces(orgId, personalOwnerId, administersOrg, userId);
+  const rows = await listVisibleSpaces(
+    orgId,
+    personalOwnerId,
+    administersOrg,
+    overlay ? null : userId,
+  );
   const out: Array<{ space: SpaceRow; role: SpaceRoleRef | null }> = [];
   for (const { space, ...membership } of rows) {
     const member = overlay ? (overlay.get(space.id) ?? null) : memberFromJoin(membership);
@@ -160,7 +165,8 @@ async function listVisibleSpaces(
   orgId: string,
   personalOwnerId: string | null,
   administersOrg: boolean,
-  userId: string,
+  /** `null` joins no row: a preview's overlay replaces them. */
+  userId: string | null,
 ) {
   return db
     .select({ space: spaces, ...MEMBERSHIP_COLUMNS })
@@ -216,14 +222,10 @@ export async function assertSpaceInScope(scope: SpaceScope): Promise<void> {
 }
 
 /**
- * Update a space. Throws 404 if not found.
- *
- * `judged` is the row the request was authorized against — `c.get("space")`,
- * the snapshot `applySpacePermissions` read with the caller's membership (RBAC
- * spec §4.4). A change to `visibility` or `default_role` is written only if the
- * row still holds the two values that authorization was judged on: a concurrent
- * PATCH that moved either makes this one a 409 `space_access_changed` instead of
- * an edit whose grant check compared against a state that is already gone.
+ * Update a space. Throws 404 if not found. `judged` is the row the request was
+ * authorized on (`c.get("space")`): a `visibility` / `default_role` change is
+ * written only while the row still holds both, else 409 `space_access_changed`
+ * (RBAC spec §4.4).
  */
 export async function updateSpace(
   orgId: string,

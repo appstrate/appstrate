@@ -257,9 +257,8 @@ async function resolvePackageAccessSpaces(
   const callerId = callerPersonalOwnerId(c, orgId);
   const tokenOnly = Boolean(c.get("endUser")) && !c.get("orgRole");
   const persona = personaFor(c, orgId);
-  // Spaces and the caller's rows in ONE statement (RBAC spec §4.4). A preview
-  // joins none of the caller's rows — its overlay replaces them — and neither
-  // does an end-user token, which has no org role to resolve against.
+  // Spaces and the caller's rows in one statement (RBAC spec §4.4); none under a
+  // preview (the overlay replaces them) or for an end-user token (no org role).
   const joined = await db
     .select({
       space: {

@@ -67,10 +67,8 @@ export function isSpaceScopedPath(path: string): boolean {
  * fixed allowlist (§7.2); under API-key impersonation it carries the creator's
  * role and resolves like the key.
  *
- * Owns `c.set("space")`: the row that lands there is the one read in the same
- * statement as the caller's membership and judged with it (§4.4), not the
- * lookup that found the space — so everything downstream of `requirePermission`
- * sees the space that authorized the request.
+ * Owns `c.set("space")`: the row judged with the caller's membership (§4.4),
+ * not the lookup that found the space.
  *
  * @throws ApiError 403 `not_a_space_member` for `open`/`closed`, 404 for
  *   `private` — a private space does not exist for someone who is not in it.
@@ -185,9 +183,9 @@ export function requireSpaceContext() {
     if (isInternalDispatch(c.req.raw.headers)) {
       const active = await defaultSpaceForOrg(orgId);
       if (active) {
-        // One of the three paths that never pass through `validateSpaceInOrg`
-        // (the others: the MCP router's default-space fallback and the SSE
-        // API-key branch — see the note on `validateSpaceInOrg`). The id comes
+        // One of the two paths that never pass through `validateSpaceInOrg`
+        // (the other: the MCP router's default-space fallback — see the note
+        // on `validateSpaceInOrg`). The id comes
         // straight off the row, so this is where an un-migrated `spaces` table
         // would otherwise slip in unnoticed.
         assertSpaceId(active.id);

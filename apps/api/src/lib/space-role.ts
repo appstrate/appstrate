@@ -47,14 +47,9 @@ export interface SpaceMemberRow {
  * private drafts are not its business) or an end-user. Every caller passes it
  * explicitly — a default would silently hand a key its creator's personal space.
  *
- * `space` and `memberRow` MUST come from ONE statement (RBAC spec §4.4). Read
- * apart, they can pair a space row from before an admin's change with a
- * membership row from after the next one, and that pair can grant what no
- * committed state ever did: `open`+`admin` default read before the space was
- * closed, no row read after the viewer row was deleted → `admin`. `orgRole` is
- * pinned once per request at admission, like every other org-level grant the
- * request carries; only a caller with no admission reads it in that same
- * statement (the scheduler, via `loadSpaceAccess`).
+ * `space` and `memberRow` MUST come from ONE statement, `orgRole` from the
+ * request's admission (RBAC spec §4.4): read apart, they can pair states that
+ * never coexisted and grant what neither did.
  */
 export function resolveSpaceRole(
   orgRole: OrgRole,
@@ -107,12 +102,7 @@ export function spacePermissions(ref: SpaceRoleRef | null): Set<Permission> {
   return partitionSpacePermissions(ref.role.permissions).granted;
 }
 
-/**
- * The columns every explicit-membership read projects, custom role joined in.
- * Readers that also need the SPACE join them onto `spaces` with
- * {@link membershipOn} and {@link customRoleOn} rather than reading the two
- * tables in two statements (RBAC spec §4.4).
- */
+/** Explicit-membership projection; joined onto `spaces` via {@link membershipOn} (RBAC spec §4.4). */
 export const MEMBERSHIP_COLUMNS = {
   presetRole: spaceMembers.presetRole,
   customRoleId: spaceMembers.customRoleId,
@@ -162,7 +152,7 @@ export interface MembershipColumns {
 }
 
 /** The `num_nonnulls` CHECK and the FK are what the assertions rest on. */
-export function toRef(row: MembershipColumns): SpaceRoleRef {
+function toRef(row: MembershipColumns): SpaceRoleRef {
   if (row.presetRole) return { kind: "preset", preset: row.presetRole };
   return {
     kind: "custom",
@@ -175,10 +165,7 @@ export function toRef(row: MembershipColumns): SpaceRoleRef {
   };
 }
 
-/**
- * The explicit row a `LEFT JOIN` found, or `null`: the `num_nonnulls` CHECK
- * makes exactly one of the two role columns non-null on a real row.
- */
+/** The row a `LEFT JOIN` found, or `null` — the `num_nonnulls` CHECK sets one role column on a real row. */
 export function memberFromJoin(row: MembershipColumns): SpaceMemberRow | null {
   return row.presetRole !== null || row.customRoleId !== null ? { ref: toRef(row) } : null;
 }

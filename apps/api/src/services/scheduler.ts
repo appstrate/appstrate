@@ -196,8 +196,8 @@ async function isScheduleActorValid(
   spaceId: string,
 ): Promise<boolean> {
   if (actor.type === "user") {
-    // All three inputs in ONE statement (RBAC spec §4.4): a fire has no
-    // request admission to pin the org role at, so it is read with the rest.
+    // All three inputs in one statement: a fire has no admission to pin the org
+    // role at (RBAC spec §4.4).
     const access = await loadSpaceAccess(spaceId, orgId, actor.id);
     if (!access?.orgRole) return false;
     // The frozen actor IS the caller here: a schedule in a personal space runs

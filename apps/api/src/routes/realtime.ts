@@ -31,7 +31,6 @@ import {
   VIEW_AS_HEADER,
   VIEW_AS_QUERY,
 } from "@appstrate/core/permissions";
-import { assertSpaceId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
 import type { AppEnv, OrgRole } from "../types/index.ts";
 
@@ -186,10 +185,8 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
     const keyInfo = await validateApiKey(token);
     if (!keyInfo) return null;
 
-    // `spaceId` comes straight off the `api_keys` row: shape-check it here. The
-    // space row decides the creator's membership (visibility + default role).
-    assertSpaceId(keyInfo.spaceId);
-    // Space and creator's row in one statement (RBAC spec §4.4).
+    // `spaceId` comes off the `api_keys` row; `loadSpaceAccess` shape-checks it
+    // and reads it with the creator's row in one statement (RBAC spec §4.4).
     const access = await loadSpaceAccess(keyInfo.spaceId, keyInfo.orgId, keyInfo.userId);
     if (!access) return null;
 
@@ -244,9 +241,13 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
   // Validate space belongs to org. A 404, not the `null` that becomes a 401
   // below: paired with the 404 the visibility split raises further down, a 401
   // here would tell the caller which `spc_` ids exist in the org — and the SPA
-  // puts that id in the query string (RBAC spec §3.6).
-  // Space and the session user's row in one statement (RBAC spec §4.4).
-  const access = await loadSpaceAccess(spaceId, orgId, session.user.id);
+  // puts that id in the query string (RBAC spec §3.6). One statement with the
+  // user's row (§4.4); none under a preview — any `viewAs` value yields a persona or throws.
+  const access = await loadSpaceAccess(
+    spaceId,
+    orgId,
+    viewAsRaw !== undefined ? null : session.user.id,
+  );
   if (!access) throw notFound(`Space '${spaceId}' not found in this organization`);
   const { space } = access;
 

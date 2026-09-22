@@ -450,12 +450,8 @@ export function personaSpaceMember(persona: ViewAsPersona, spaceId: string): Spa
 }
 
 /**
- * The space row and the caller's explicit row in it, as the one snapshot
- * `resolveSpaceRole` must be fed (RBAC spec §4.4) — the space RE-READ with the
- * membership, so the row that authorizes is the row returned. `null` when the
- * space left the organization in between. A preview reads no row of the
- * caller's: the persona's overlay is fixed for the request, so the row passed
- * in is the whole snapshot.
+ * `space` re-read with the caller's row as one snapshot (RBAC spec §4.4), `null`
+ * if it left the org. Under a preview, `space` as passed with the persona's overlay.
  */
 export async function callerSpaceAccess(
   c: Context<AppEnv>,

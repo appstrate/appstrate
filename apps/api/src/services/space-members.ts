@@ -9,7 +9,7 @@
  *    org column, so the org tier is enforced here, in the service.
  */
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   organizationMembers,
@@ -23,9 +23,11 @@ import type { SpaceRolePreset } from "@appstrate/core/permissions";
 import type { SpaceMember } from "@appstrate/shared-types";
 import { conflict, notFound } from "../lib/errors.ts";
 import {
+  customRoleOn,
   loadSpaceMember,
+  MEMBERSHIP_COLUMNS,
+  memberFromJoin,
   resolveSpaceRole,
-  toRef,
   toSpaceRoleWire,
   type SpaceAccessRow,
   type SpaceRoleRef,
@@ -61,93 +63,65 @@ export async function resolveOrgMemberEmail(orgId: string, email: string): Promi
  */
 export async function listSpaceMembers(
   orgId: string,
-  space: {
-    id: string;
-    visibility: string;
-    defaultRole: SpaceRolePreset;
-    ownerUserId: string | null;
-  },
+  spaceId: string,
   includeImplicit: boolean,
 ): Promise<SpaceMember[]> {
-  const explicitRows = await db
+  // The space, the org members and their explicit rows in ONE statement (RBAC
+  // spec §4.4). Without `includeImplicit` the answer is confined to explicit rows.
+  const rows = await db
     .select({
-      userId: spaceMembers.userId,
-      presetRole: spaceMembers.presetRole,
-      customRoleId: spaceMembers.customRoleId,
-      customKey: spaceRoles.key,
-      customName: spaceRoles.name,
-      customPermissions: spaceRoles.permissions,
+      space: {
+        id: spaces.id,
+        visibility: spaces.visibility,
+        defaultRole: spaces.defaultRole,
+        ownerUserId: spaces.ownerUserId,
+      },
+      userId: organizationMembers.userId,
+      orgRole: organizationMembers.role,
+      name: userTable.name,
+      email: userTable.email,
+      displayName: profiles.displayName,
       createdAt: spaceMembers.createdAt,
+      ...MEMBERSHIP_COLUMNS,
     })
-    .from(spaceMembers)
-    .leftJoin(spaceRoles, eq(spaceRoles.id, spaceMembers.customRoleId))
-    .where(eq(spaceMembers.spaceId, space.id));
+    .from(spaces)
+    .innerJoin(organizationMembers, eq(organizationMembers.orgId, spaces.orgId))
+    .innerJoin(userTable, eq(userTable.id, organizationMembers.userId))
+    .leftJoin(profiles, eq(profiles.id, organizationMembers.userId))
+    .leftJoin(
+      spaceMembers,
+      and(eq(spaceMembers.spaceId, spaces.id), eq(spaceMembers.userId, organizationMembers.userId)),
+    )
+    .leftJoin(spaceRoles, customRoleOn)
+    .where(
+      and(
+        eq(spaces.id, spaceId),
+        eq(spaces.orgId, orgId),
+        includeImplicit ? undefined : isNotNull(spaceMembers.userId),
+      ),
+    );
 
-  // Without `includeImplicit` the answer is confined to the explicit rows, so
-  // the directory read is narrowed to those users instead of being fetched
-  // whole and discarded row by row.
-  const explicitIds = explicitRows.map((row) => row.userId);
-  const orgRows =
-    !includeImplicit && explicitIds.length === 0
-      ? []
-      : await db
-          .select({
-            userId: organizationMembers.userId,
-            role: organizationMembers.role,
-            name: userTable.name,
-            email: userTable.email,
-            displayName: profiles.displayName,
-          })
-          .from(organizationMembers)
-          .innerJoin(userTable, eq(userTable.id, organizationMembers.userId))
-          .leftJoin(profiles, eq(profiles.id, organizationMembers.userId))
-          .where(
-            and(
-              eq(organizationMembers.orgId, orgId),
-              includeImplicit ? undefined : inArray(organizationMembers.userId, explicitIds),
-            ),
-          );
-
-  const explicit = new Map(explicitRows.map((r) => [r.userId, r]));
   const out: SpaceMember[] = [];
-  for (const row of orgRows) {
-    const found = explicit.get(row.userId);
-    const orgRole = row.role;
+  for (const row of rows) {
+    const member = memberFromJoin(row);
     // The fourth argument is the user THIS row is about, not the request's
     // caller: the question asked of the resolver is "what would this person
     // hold here". On a personal space that answers `admin` for its owner and
     // `null` for everyone else, so the list is the owner alone (decision 10).
-    const effective = resolveSpaceRole(
-      orgRole,
-      { id: space.id, ...spaceAccess(space) },
-      found ? { ref: toRef(found) } : null,
-      row.userId,
-    );
+    const effective = resolveSpaceRole(row.orgRole, row.space, member, row.userId);
     if (!effective) continue;
     out.push({
       object: "space_member",
       userId: row.userId,
       name: row.displayName ?? row.name ?? null,
       email: row.email ?? null,
-      org_role: orgRole,
-      source: found ? "explicit" : orgRole === "member" ? "open_space" : "org_role",
+      org_role: row.orgRole,
+      source: member ? "explicit" : row.orgRole === "member" ? "open_space" : "org_role",
       role: toSpaceRoleWire(effective),
-      createdAt: found?.createdAt?.toISOString() ?? null,
+      createdAt: row.createdAt?.toISOString() ?? null,
     });
   }
   return out;
-}
-
-function spaceAccess(space: {
-  visibility: string;
-  defaultRole: SpaceRolePreset;
-  ownerUserId: string | null;
-}) {
-  return {
-    visibility: space.visibility as "open" | "closed" | "private",
-    defaultRole: space.defaultRole,
-    ownerUserId: space.ownerUserId,
-  };
 }
 
 /** Hold the membership lock until the caller's grant transaction commits. */
@@ -296,8 +270,8 @@ export interface SpaceMemberRemoval {
  * so re-reading it here would judge the bound against a space the permission
  * that admitted the request was never checked against. A concurrent
  * `PATCH /api/spaces/{id}` widening `default_role` is therefore NOT serialized
- * against this removal — a property of every space-scoped write in the
- * platform, not of this one.
+ * against this removal: the request-scoped window RBAC spec §4.4 states and
+ * §13.8 declines to lock.
  *
  * @throws 403 when the caller could not have granted the standing left behind,
  *   or the one being dropped.

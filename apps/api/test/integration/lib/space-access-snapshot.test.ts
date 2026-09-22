@@ -5,11 +5,12 @@
  * row and the caller's explicit row, and the request carries the row it was
  * judged on (#1472).
  *
- * A race cannot be staged deterministically, so these pin the three properties
- * that close it instead: `loadSpaceAccess` returns the inputs together,
+ * A race cannot be staged deterministically, so these pin the properties that
+ * close it instead: `loadSpaceAccess` returns the inputs together,
  * `applySpacePermissions` judges the row IT reads rather than the one it was
- * handed, and `updateSpace` refuses to write access columns that moved since the
- * request was authorized.
+ * handed, `updateSpace` refuses to write access columns that moved since the
+ * request was authorized, and the multi-row readers pair each space or member
+ * with that user's own row.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -22,7 +23,8 @@ import type { AppEnv } from "../../../src/types/index.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
 import { loadSpaceAccess, type SpaceContextRow } from "../../../src/lib/space-lookup.ts";
 import { applySpacePermissions } from "../../../src/middleware/space-context.ts";
-import { updateSpace } from "../../../src/services/spaces.ts";
+import { listSpacesForPrincipal, updateSpace } from "../../../src/services/spaces.ts";
+import { listSpaceMembers } from "../../../src/services/space-members.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
   addOrgMember,
@@ -216,5 +218,68 @@ describe("updateSpace writes access columns only against the judged state", () =
     ).catch((e: unknown) => e);
 
     expect((err as ApiError).status).toBe(404);
+  });
+});
+
+describe("multi-row readers join the caller's rows, never someone else's", () => {
+  let ctx: TestContext;
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext();
+  });
+
+  it("the space listing resolves each space on the caller's own row", async () => {
+    const caller = await createTestUser();
+    const other = await createTestUser();
+    await addOrgMember(ctx.orgId, caller.id, "member");
+    await addOrgMember(ctx.orgId, other.id, "member");
+    const space = await seedSpace({ orgId: ctx.orgId, name: "Closed" });
+    await setAccess(space.id, { visibility: "closed", defaultRole: "viewer" });
+    await db
+      .insert(spaceMembers)
+      .values({ spaceId: space.id, userId: other.id, presetRole: "admin" });
+
+    const mine = await listSpacesForPrincipal(ctx.orgId, "member", caller.id, caller.id);
+    const theirs = await listSpacesForPrincipal(ctx.orgId, "member", other.id, other.id);
+
+    expect(mine.find((e) => e.space.id === space.id)?.role).toBeNull();
+    expect(theirs.find((e) => e.space.id === space.id)?.role).toEqual({
+      kind: "preset",
+      preset: "admin",
+    });
+  });
+
+  it("the member list pairs every org member with their own row, custom bundles included", async () => {
+    const explicit = await createTestUser();
+    const bundled = await createTestUser();
+    const implicit = await createTestUser();
+    const stranger = await createTestUser();
+    for (const u of [explicit, bundled, implicit]) await addOrgMember(ctx.orgId, u.id, "member");
+    const space = await seedSpace({ orgId: ctx.orgId, name: "Open" });
+    await setAccess(space.id, { visibility: "open", defaultRole: "builder" });
+    const role = await seedSpaceRole({ orgId: ctx.orgId, permissions: ["agents:read"] });
+    await db.insert(spaceMembers).values([
+      { spaceId: space.id, userId: explicit.id, presetRole: "viewer" },
+      { spaceId: space.id, userId: bundled.id, customRoleId: role.id },
+    ]);
+
+    const all = await listSpaceMembers(ctx.orgId, space.id, true);
+    const byId = new Map(all.map((m) => [m.userId, m]));
+
+    expect(byId.get(explicit.id)).toMatchObject({ source: "explicit", role: { key: "viewer" } });
+    expect(byId.get(bundled.id)).toMatchObject({ source: "explicit", role: { key: role.key } });
+    expect(byId.get(implicit.id)).toMatchObject({ source: "open_space", role: { key: "builder" } });
+    expect(byId.get(ctx.user.id)).toMatchObject({ source: "org_role", role: { key: "admin" } });
+    expect(byId.has(stranger.id)).toBe(false);
+
+    const explicitOnly = await listSpaceMembers(ctx.orgId, space.id, false);
+    expect(explicitOnly.map((m) => m.userId).sort()).toEqual([explicit.id, bundled.id].sort());
+  });
+
+  it("the member list is empty for a space of another organization", async () => {
+    const other = await createTestContext();
+    const space = await seedSpace({ orgId: other.orgId, name: "Elsewhere" });
+
+    expect(await listSpaceMembers(ctx.orgId, space.id, true)).toEqual([]);
   });
 });
