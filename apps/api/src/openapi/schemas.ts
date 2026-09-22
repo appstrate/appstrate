@@ -1882,7 +1882,11 @@ export const schemas = {
             id: { type: "string", format: "uuid" },
             auth_key: { type: "string" },
             account_id: { type: "string" },
-            label: { type: ["string", "null"] },
+            label: {
+              type: "string",
+              description:
+                "User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label.",
+            },
             owner_user_id: { type: ["string", "null"] },
             owner_end_user_id: { type: ["string", "null"] },
             owner_name: { type: ["string", "null"] },

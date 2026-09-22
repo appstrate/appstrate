@@ -429,7 +429,8 @@ export function useUpsertIntegrationPin() {
   return useMutation({
     mutationFn: async (vars: {
       params: { path: { packageId: string; agentPackageId: string } };
-      body: { connection_id: string };
+      /** The WHOLE pinned set — this write replaces it. */
+      body: { connection_ids: string[] };
     }) => {
       const { data } = await client.PUT("/api/integrations/{packageId}/pins/{agentPackageId}", {
         ...vars,
@@ -486,7 +487,8 @@ export function useUpsertIntegrationOrgDefault() {
   return useMutation({
     mutationFn: async (vars: {
       params: { path: { packageId: string } };
-      body: { connection_id: string; enforce: boolean };
+      /** The WHOLE default set — this write replaces it. */
+      body: { connection_ids: string[]; enforce: boolean };
     }) => {
       const { data } = await client.PUT("/api/integrations/{packageId}/default", {
         ...vars,
@@ -526,7 +528,9 @@ export function useUpdateIntegrationConnection() {
     // connections list.
     mutationFn: async (vars: {
       params: { path: { packageId: string; connectionId: string } };
-      body: { label?: string | null; shared_with_org?: boolean };
+      // A rename only: the label is NOT NULL on the wire — a run binding
+      // several connections of one integration addresses each by its label.
+      body: { label?: string; shared_with_org?: boolean };
     }) => {
       const { data } = await client.PATCH(
         "/api/integrations/{packageId}/connections/{connectionId}",

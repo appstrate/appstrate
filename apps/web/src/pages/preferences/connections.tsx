@@ -46,7 +46,7 @@ function LabelEditor({
 }: {
   current: string | null;
   saving: boolean;
-  onSave: (next: string | null) => void;
+  onSave: (next: string) => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const [editing, setEditing] = useState(false);
@@ -69,9 +69,12 @@ function LabelEditor({
     );
   }
 
+  // The label is NOT NULL on the wire — a run binding several connections of
+  // one integration addresses each by its label — so an empty field cancels
+  // the edit rather than clearing the name.
   const commit = () => {
     const trimmed = value.trim();
-    onSave(trimmed.length === 0 ? null : trimmed);
+    if (trimmed.length > 0) onSave(trimmed);
     setEditing(false);
   };
 
@@ -119,7 +122,7 @@ function ConnectionRow({
 }: {
   conn: MeConnectionEntry;
   onDisconnect: () => void;
-  onUpdateLabel?: (label: string | null) => void;
+  onUpdateLabel?: (label: string) => void;
   onToggleShare?: (next: boolean) => void;
   disconnecting: boolean;
   updating: boolean;

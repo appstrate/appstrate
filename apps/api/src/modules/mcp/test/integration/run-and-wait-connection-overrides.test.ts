@@ -29,7 +29,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
-import { runs, integrationConnections } from "@appstrate/db/schema";
+import { runs } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { truncateAll, db } from "../../../../../test/helpers/db.ts";
 import {
@@ -100,13 +100,6 @@ interface ProblemDetails {
   code?: string;
   detail?: string;
   errors?: ValidationFieldError[];
-}
-
-/** A connection carrying a label — what tells two bound connections apart. */
-async function seedLabelledConnection(ctx: TestContext, label: string): Promise<string> {
-  const id = await seedIntegrationConnection(ctx, INTEGRATION);
-  await db.update(integrationConnections).set({ label }).where(eq(integrationConnections.id, id));
-  return id;
 }
 
 describe("mcp run_and_wait — connection_overrides", () => {
@@ -216,11 +209,8 @@ describe("mcp run_and_wait — connection_overrides", () => {
   it("binds every connection the override names, in the run's snapshot", async () => {
     await seedConnectionTestIntegration(ctx, INTEGRATION);
     await seedDefaultOrgModel(ctx);
-    // Distinct labels: two connections bound to one integration collide on
-    // `duplicate_connection_label` otherwise, which is a different test's
-    // subject (the resolver's) and would hide this one's.
-    const first = await seedLabelledConnection(ctx, "compte-a");
-    const second = await seedLabelledConnection(ctx, "compte-b");
+    const first = await seedIntegrationConnection(ctx, INTEGRATION, { label: "compte-a" });
+    const second = await seedIntegrationConnection(ctx, INTEGRATION, { label: "compte-b" });
 
     const result = await callTool(headers, "run_and_wait", {
       kind: "inline",

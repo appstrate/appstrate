@@ -84,7 +84,8 @@ export function useUpdateMeIntegrationConnection() {
     }: OrgSpaceHeaders & {
       packageId: string;
       connectionId: string;
-      label?: string | null;
+      /** A rename. NOT NULL on the wire — the label is how a bound connection is addressed. */
+      label?: string;
       sharedWithOrg?: boolean;
     }) => {
       const { data } = await client.PATCH(

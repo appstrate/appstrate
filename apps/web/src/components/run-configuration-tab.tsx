@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { FileCode2 } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
+import { Badge } from "@appstrate/ui/components/badge";
 import { JsonView } from "./json-view";
 import { SectionCard } from "./section-card";
 import { InfoCard } from "./run-info-card";
@@ -22,6 +23,19 @@ import { EmptyState } from "./page-states";
 import { RunTrigger } from "./run-trigger";
 import { inlineRunDisplayName } from "../lib/run-title";
 import type { EnrichedRun } from "@appstrate/shared-types";
+
+type ConnectionUsed = NonNullable<EnrichedRun["connections_used"]>[number];
+
+/** Preserves first-seen integration order; each group keeps the snapshot order. */
+function groupByIntegration(used: ConnectionUsed[]): [string, ConnectionUsed[]][] {
+  const groups = new Map<string, ConnectionUsed[]>();
+  for (const c of used) {
+    const bucket = groups.get(c.integration_id);
+    if (bucket) bucket.push(c);
+    else groups.set(c.integration_id, [c]);
+  }
+  return [...groups.entries()];
+}
 
 interface RunConfigurationTabProps {
   run: EnrichedRun;
@@ -78,19 +92,28 @@ export function RunConfigurationTab({ run, agentName }: RunConfigurationTabProps
       {connectionsUsed && connectionsUsed.length > 0 && (
         <SectionCard title={t("run.infoConnections")}>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {connectionsUsed.map((c) => (
+            {/* One entry per BOUND connection — an integration bound to
+                several contributes several — so the cards group by
+                integration and list every connection under it. */}
+            {groupByIntegration(connectionsUsed).map(([integrationId, bound]) => (
               <InfoCard
-                key={c.integration_id}
-                label={c.integration_id}
+                key={integrationId}
+                label={integrationId}
                 value={
-                  <span className="flex flex-col">
-                    <span>{c.label ?? c.account_id ?? "—"}</span>
-                    {c.label && c.account_id && (
-                      <span className="text-muted-foreground text-xs">{c.account_id}</span>
-                    )}
-                    <span className="text-muted-foreground text-xs">
-                      {t(`run.connSource.${c.source}`, { defaultValue: c.source })}
-                    </span>
+                  <span className="flex flex-col gap-1.5">
+                    {bound.map((c, i) => (
+                      <span key={`${c.label ?? c.account_id ?? ""}-${i}`} className="flex flex-col">
+                        <span className="flex items-center gap-1.5">
+                          <span>{c.label ?? c.account_id ?? "—"}</span>
+                          <Badge variant="secondary" className="text-[0.6rem]">
+                            {t(`run.connSource.${c.source}`, { defaultValue: c.source })}
+                          </Badge>
+                        </span>
+                        {c.label && c.account_id && (
+                          <span className="text-muted-foreground text-xs">{c.account_id}</span>
+                        )}
+                      </span>
+                    ))}
                   </span>
                 }
               />

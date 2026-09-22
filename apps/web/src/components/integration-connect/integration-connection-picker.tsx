@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
@@ -16,6 +17,7 @@ import {
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
+import { Checkbox } from "@appstrate/ui/components/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,7 +41,10 @@ import {
 import { useHostedConnectPopup } from "./use-integration-oauth-popup";
 import { connectionDisplayLabel } from "./connection-label";
 import { connectableAuthKeys } from "./connectable-auth-keys";
-import { requiredScopesForAgent } from "@appstrate/core/integration";
+import {
+  requiredScopesForAgent,
+  MAX_CONNECTIONS_PER_INTEGRATION,
+} from "@appstrate/core/integration";
 import { client } from "../../api/client";
 import { packageDetailPath, splitPackageRef } from "../../lib/package-paths";
 import { isVersioned } from "../../lib/version-selector";
@@ -47,23 +52,26 @@ import { isVersioned } from "../../lib/version-selector";
 /**
  * How the picker persists the actor's pick:
  *
- *  - `pin`      — writes a member `integration_pin` immediately on select
- *                 (agent page). Becomes the agent-wide default for this
- *                 member across every run. The trigger reflects the
- *                 server-resolved connection.
- *  - `override` — controlled form value (schedule editor). Selecting sets
+ *  - `pin`      — writes a member `integration_pin` (agent page). Becomes the
+ *                 agent-wide default for this member across every run. The
+ *                 trigger reflects the server-resolved set.
+ *  - `override` — controlled form value (schedule editor). Validating sets
  *                 `value` via `onChange`; nothing is persisted until the
  *                 schedule is saved, and the pick is scoped to THAT schedule
  *                 (`schedules.connection_overrides`, cascade layer 4 — below
- *                 admin pins, above member pins). Empty string = inherit.
+ *                 admin pins, above member pins). Empty array = inherit.
+ *
+ * Either way the written value is the WHOLE set: a pin write replaces the
+ * previous set, never merges into it.
  *
  * Locks (admin pin, enforced org default) apply identically in both modes:
  * they sit above the schedule override in the resolver cascade, so a locked
- * connection would beat a schedule pick anyway — surfacing the lock here is
+ * set would beat a schedule pick anyway — surfacing the lock here is
  * the honest signal that the override would be ignored.
  */
 type ConnectionPickerPersistence =
-  { mode: "pin" } | { mode: "override"; value: string; onChange: (connectionId: string) => void };
+  | { mode: "pin" }
+  | { mode: "override"; value: string[]; onChange: (connectionIds: string[]) => void };
 
 /**
  * Per-integration connection picker, rendered as a rich dropdown. Lists every
@@ -72,7 +80,13 @@ type ConnectionPickerPersistence =
  * connection" entries (one per declared auth) that launch the connect flow
  * inline.
  *
- * Single source of truth for "which connection?" UX — shared by the agent
+ * A run binds 1..{@link MAX_CONNECTIONS_PER_INTEGRATION} connections per
+ * integration, so the rows are checkboxes accumulating into a draft set that
+ * the "Valider" entry writes in one go. The degenerate case is deliberately
+ * frictionless: with a single accessible connection, clicking its row binds it
+ * straight away, exactly as before.
+ *
+ * Single source of truth for "which connections?" UX — shared by the agent
  * page (member pins) and the schedule editor (per-schedule overrides) via the
  * `persistence` prop. The candidate list, scope/lock verdicts and the connect
  * orchestration (hosted connect portal popup) are identical across both; only
@@ -82,6 +96,16 @@ type ConnectionPickerPersistence =
 // renders (a `{ mode: "pin" }` literal default would be a new object each
 // render — react/no-object-type-as-default-prop).
 const DEFAULT_PERSISTENCE: ConnectionPickerPersistence = { mode: "pin" };
+
+/** Labels bound more than once — the set is then unaddressable by the LLM. */
+function duplicateLabels(connections: IntegrationCandidate[]): string[] {
+  const seen = new Map<string, number>();
+  for (const c of connections) {
+    const label = connectionDisplayLabel(c);
+    seen.set(label, (seen.get(label) ?? 0) + 1);
+  }
+  return [...seen.entries()].filter(([, n]) => n > 1).map(([label]) => label);
+}
 
 export function IntegrationConnectionPicker({
   integrationId,
@@ -121,6 +145,9 @@ export function IntegrationConnectionPicker({
   const { openPopup, isPending: oauthPending } = useHostedConnectPopup();
   const qc = useQueryClient();
   const navigate = useNavigate();
+  // Uncommitted checkbox state. `null` = untouched since the last write, so
+  // the draft reads the bound set; toggling forks it, "Valider" writes it.
+  const [draft, setDraft] = useState<string[] | null>(null);
 
   const overrideMode = persistence.mode === "override";
   const auths = manifest.auths ?? {};
@@ -150,15 +177,16 @@ export function IntegrationConnectionPicker({
   const {
     candidates,
     status,
-    resolved_connection_id: resolvedConnectionId,
-    resolved_missing_scopes: resolvedMissingScopes,
-    admin_pinned_connection_id: adminPinnedConnectionId,
-    member_pinned_connection_id: memberPinnedConnectionId,
-    org_default_connection_id: orgDefaultConnectionId,
+    resolved_connection_ids: resolvedConnectionIds,
+    admin_pinned_connection_ids: adminPinnedConnectionIds,
+    member_pinned_connection_ids: memberPinnedConnectionIds,
+    org_default_connection_ids: orgDefaultConnectionIds,
     org_default_enforced: orgDefaultEnforced,
     can_add_connection: canAddConnection,
   } = resolution;
 
+  const byId = (id: string): IntegrationCandidate | undefined =>
+    candidates.find((c) => c.id === id);
   const ownerLabel = (c: IntegrationCandidate): string =>
     c.is_own
       ? t("detail.integrationMemberPicker.byYou")
@@ -168,11 +196,18 @@ export function IntegrationConnectionPicker({
   // a per-agent admin pin OR an enforced org default. Either way we render
   // the read-only lock instead of the editable dropdown. (A schedule override
   // would lose to either at run time, so locking it here is correct too.)
-  const lockedConnectionId =
-    adminPinnedConnectionId ?? (orgDefaultEnforced ? orgDefaultConnectionId : null);
-  if (lockedConnectionId) {
-    const pinned = candidates.find((c) => c.id === lockedConnectionId);
-    const label = pinned ? connectionDisplayLabel(pinned) : lockedConnectionId;
+  const lockedConnectionIds = adminPinnedConnectionIds.length
+    ? adminPinnedConnectionIds
+    : orgDefaultEnforced
+      ? orgDefaultConnectionIds
+      : [];
+  if (lockedConnectionIds.length > 0) {
+    const label = lockedConnectionIds
+      .map((id) => {
+        const pinned = byId(id);
+        return pinned ? connectionDisplayLabel(pinned) : id;
+      })
+      .join(" · ");
     return (
       <div data-testid={`member-picker-${integrationId}`}>
         <Button
@@ -193,39 +228,52 @@ export function IntegrationConnectionPicker({
   }
 
   // The actor's explicit pick: their member pin (pin mode) or the controlled
-  // override value (override mode). Empty/absent = "defer to the cascade".
-  const explicitId = overrideMode ? persistence.value || null : memberPinnedConnectionId;
-  const selectedConn = explicitId ? (candidates.find((c) => c.id === explicitId) ?? null) : null;
-  const resolvedConn = candidates.find((c) => c.id === resolvedConnectionId) ?? null;
-  // The connection the trigger should reflect: the override pick in override
-  // mode (falling back to the agent-resolved one as the "what inherit uses"
-  // hint), else the server-resolved one.
-  const displayConn = overrideMode ? selectedConn : resolvedConn;
-  const displayMissingScopes = overrideMode
-    ? (selectedConn?.missing_scopes ?? [])
-    : resolvedMissingScopes;
-  const displayOwnedByActor = overrideMode
-    ? (selectedConn?.is_own ?? false)
-    : resolution.resolved_owned_by_actor;
-  // Which row carries the ✓: the explicit pick when set, else the
-  // agent-resolved connection (the default that inherit/auto lands on).
-  const checkId = overrideMode ? (explicitId ?? resolvedConnectionId) : resolvedConnectionId;
-  const hasCandidates = candidates.length > 0;
-  const underScoped = displayMissingScopes.length > 0;
+  // override value (override mode). Empty = "defer to the cascade".
+  const explicitIds = overrideMode ? persistence.value : memberPinnedConnectionIds;
+  // What the checkboxes show: the uncommitted draft when the user has touched
+  // one, else the set the next run would bind (explicit pick, or the cascade's
+  // resolution — the default "Valider" would make explicit).
+  const boundIds = explicitIds.length > 0 ? explicitIds : resolvedConnectionIds;
+  const checkedIds = draft ?? boundIds;
+  const checked = new Set(checkedIds);
+  const dirty = draft !== null;
+  const atCap = checked.size >= MAX_CONNECTIONS_PER_INTEGRATION;
+  // Single accessible connection = no set to compose. Clicking the row binds
+  // it outright, which is the pre-multi-connection interaction verbatim.
+  const oneClick = candidates.length === 1;
 
-  // Route a pick to its persistence: a member pin (agent page) or the
-  // controlled override value (schedule). Both refresh the resolution so the
-  // candidate list / scope diff re-render (a freshly connected account shows
-  // up, the ✓ moves).
-  const applyPick = async (connectionId: string) => {
-    if (overrideMode) persistence.onChange(connectionId);
-    else await upsertPin.mutateAsync({ agentPackageId, integrationId, connectionId });
+  const displayConns = checkedIds.map(byId).filter((c): c is IntegrationCandidate => !!c);
+  const underScopedConns = displayConns.filter((c) => c.missing_scopes.length > 0);
+  const underScoped = underScopedConns.length > 0;
+  // Two connections sharing a label are unaddressable (the LLM picks by
+  // label), so the run 412s `duplicate_connection_label`. Detected on the
+  // displayed set so an override composed here warns before the run, and
+  // mirrored from the server verdict for the resolved set.
+  const collidingLabels = duplicateLabels(displayConns);
+  const hasCandidates = candidates.length > 0;
+
+  // Route the composed set to its persistence: a member pin (agent page) or
+  // the controlled override value (schedule). Both refresh the resolution so
+  // the candidate list / scope diff re-render (a freshly connected account
+  // shows up, the ✓ moves). A write REPLACES the set.
+  const commit = async (connectionIds: string[]) => {
+    if (overrideMode) persistence.onChange(connectionIds);
+    else await upsertPin.mutateAsync({ agentPackageId, integrationId, connectionIds });
+    setDraft(null);
     await refresh();
   };
 
+  const toggle = (connectionId: string) => {
+    const next = new Set(checkedIds);
+    if (next.has(connectionId)) next.delete(connectionId);
+    else if (next.size < MAX_CONNECTIONS_PER_INTEGRATION) next.add(connectionId);
+    setDraft([...next]);
+  };
+
   const clearPick = async () => {
-    if (overrideMode) persistence.onChange("");
+    if (overrideMode) persistence.onChange([]);
     else await deletePin.mutateAsync({ agentPackageId, integrationId });
+    setDraft(null);
     await refresh();
   };
 
@@ -239,7 +287,7 @@ export function IntegrationConnectionPicker({
     // prior resolution intact). On a renew (connectionId supplied) the backend
     // UPDATEs in place and the snapshot diff is empty — we skip the select step.
     const before = new Set(candidates.map((c) => c.id));
-    const hadExplicit = !!explicitId;
+    const hadExplicit = explicitIds.length > 0;
     const isRenew = !!opts?.connectionId;
     // Forward the agent's per-tool inferred scopes so consent asks for what THIS
     // agent needs — not just the integration's manifest defaults (the
@@ -269,22 +317,25 @@ export function IntegrationConnectionPicker({
     const freshCandidates = fresh?.integrations.find((i) => i.integration_id === integrationId)
       ?.resolution.candidates;
     const added = freshCandidates?.find((c) => !before.has(c.id));
-    if (added) await applyPick(added.id);
+    if (added) await commit([added.id]);
     else await refresh();
   };
 
-  const triggerLabel = displayConn
-    ? connectionDisplayLabel(displayConn)
-    : overrideMode
-      ? t("detail.integrationMemberPicker.inherit")
-      : status === "must_choose"
-        ? t("detail.integrationMemberPicker.chooseLabel")
-        : status === "stale"
-          ? t("detail.integrationMemberPicker.reconfigureLabel")
-          : t("detail.integrationMemberPicker.connectLabel");
-  // Warning visuals when there's no usable connection OR the displayed one is
-  // under-scoped (run would be blocked). In override mode "no pick" is a valid
-  // inherit state, so only the under-scoped case warns.
+  const triggerLabel =
+    displayConns.length === 1
+      ? connectionDisplayLabel(displayConns[0]!)
+      : displayConns.length > 1
+        ? t("detail.integrationMemberPicker.selectedCount", { count: displayConns.length })
+        : overrideMode
+          ? t("detail.integrationMemberPicker.inherit")
+          : status === "must_choose"
+            ? t("detail.integrationMemberPicker.chooseLabel")
+            : status === "stale"
+              ? t("detail.integrationMemberPicker.reconfigureLabel")
+              : t("detail.integrationMemberPicker.connectLabel");
+  // Warning visuals when there's no usable connection OR the displayed set is
+  // under-scoped / label-colliding (run would be blocked). In override mode
+  // "no pick" is a valid inherit state, so only those two cases warn.
   //
   // The trigger paints amber on exactly the states that gate a run. In pin mode
   // it reads the server's authoritative `run_blocking` flag (the same bulk
@@ -293,9 +344,11 @@ export function IntegrationConnectionPicker({
   // integrations), so the picker can never disagree with the badge.
   //
   // Override mode (schedule editor) keeps its own rule: "no pick" = inherit is
-  // valid, so only the SELECTED override connection being under-scoped warns.
-  const triggerWarn = overrideMode ? underScoped : (runBlocking ?? false);
-  const TriggerIcon = triggerWarn ? AlertTriangle : displayConn ? Users : Plus;
+  // valid, so only the SELECTED override set warns.
+  const triggerWarn = overrideMode
+    ? underScoped || collidingLabels.length > 0
+    : (runBlocking ?? false);
+  const TriggerIcon = triggerWarn ? AlertTriangle : displayConns.length > 0 ? Users : Plus;
 
   // Blocked for this member AND nothing to pick → dead end. Show a
   // disabled, explanatory button instead of an empty dropdown.
@@ -345,7 +398,7 @@ export function IntegrationConnectionPicker({
 
   return (
     <div data-testid={`member-picker-${integrationId}`}>
-      <DropdownMenu>
+      <DropdownMenu onOpenChange={(open) => !open && setDraft(null)}>
         <DropdownMenuTrigger asChild>
           <Button
             variant="outline"
@@ -369,7 +422,8 @@ export function IntegrationConnectionPicker({
           </DropdownMenuLabel>
           {candidates.map((c) => {
             const tl = typeLabel(c.auth_key);
-            const isDefault = !explicitId && resolvedConnectionId === c.id;
+            const isChecked = checked.has(c.id);
+            const isDefault = explicitIds.length === 0 && resolvedConnectionIds.includes(c.id);
             // Only the connection owner can renew via OAuth — a foreign
             // shared connection's tokens belong to someone else. We still
             // let the actor pin a foreign needs_reconnection row (their
@@ -379,10 +433,31 @@ export function IntegrationConnectionPicker({
             return (
               <DropdownMenuItem
                 key={c.id}
-                onSelect={() => void applyPick(c.id)}
+                // Toggling must not close the menu: the set is composed over
+                // several clicks and written by "Valider".
+                onSelect={(e) => {
+                  if (oneClick) {
+                    void commit([c.id]);
+                    return;
+                  }
+                  e.preventDefault();
+                  toggle(c.id);
+                }}
                 data-testid={`member-pick-option-${c.id}`}
               >
-                <Check className={`size-3.5 ${checkId === c.id ? "" : "opacity-0"}`} />
+                {oneClick ? (
+                  <Check className={`size-3.5 ${isChecked ? "" : "opacity-0"}`} />
+                ) : (
+                  <Checkbox
+                    checked={isChecked}
+                    disabled={atCap && !isChecked}
+                    // The row's `onSelect` owns the toggle; the box is the
+                    // visual state, not a second event source.
+                    tabIndex={-1}
+                    className="pointer-events-none"
+                    aria-label={connectionDisplayLabel(c)}
+                  />
+                )}
                 <div className="flex min-w-0 flex-1 flex-col">
                   <div className="flex items-center gap-1.5">
                     <span className="truncate font-medium">{connectionDisplayLabel(c)}</span>
@@ -421,7 +496,7 @@ export function IntegrationConnectionPicker({
                     disabled={oauthPending}
                     onClick={(e) => {
                       // Block the DropdownMenuItem's onSelect so the renew
-                      // click doesn't also pick the dead row.
+                      // click doesn't also toggle the dead row.
                       e.preventDefault();
                       e.stopPropagation();
                       void triggerConnect(c.auth_key, { connectionId: c.id });
@@ -436,7 +511,26 @@ export function IntegrationConnectionPicker({
               </DropdownMenuItem>
             );
           })}
-          {explicitId && (
+          {!oneClick && hasCandidates && (
+            <DropdownMenuItem
+              disabled={checked.size === 0 || (!dirty && explicitIds.length > 0)}
+              onSelect={() => void commit(checkedIds)}
+              data-testid={`member-pick-apply-${integrationId}`}
+            >
+              <Check className="size-3.5" />
+              <span className="font-medium">
+                {t("detail.integrationMemberPicker.apply", { count: checked.size })}
+              </span>
+            </DropdownMenuItem>
+          )}
+          {atCap && (
+            <DropdownMenuLabel className="text-muted-foreground text-[0.65rem] font-normal">
+              {t("detail.integrationMemberPicker.maxReached", {
+                max: MAX_CONNECTIONS_PER_INTEGRATION,
+              })}
+            </DropdownMenuLabel>
+          )}
+          {explicitIds.length > 0 && (
             <DropdownMenuItem
               onSelect={() => void clearPick()}
               data-testid={`member-pick-reset-${integrationId}`}
@@ -480,28 +574,53 @@ export function IntegrationConnectionPicker({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      {/* Displayed connection is under-scoped → the run is blocked
-          server-side (insufficient_scopes). Owner can upgrade via
-          incremental consent; a foreign owner can only be flagged. */}
-      {underScoped && displayConn && (
+      {/* Two bound connections answering to the same name: the agent addresses
+          each by its label, so the run is refused until one is renamed. */}
+      {collidingLabels.length > 0 && (
         <div
           className="mt-1.5 flex flex-col gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
-          data-testid={`member-pick-scope-warning-${integrationId}`}
+          data-testid={`member-pick-duplicate-label-${integrationId}`}
         >
           <div className="flex items-center gap-1.5">
             <AlertTriangle className="size-3 shrink-0" />
             <span>
-              {displayOwnedByActor
+              {t("detail.integrationMemberPicker.duplicateLabel", {
+                labels: collidingLabels.join(", "),
+              })}
+            </span>
+          </div>
+          <Link
+            to={`/integrations/${integrationId}`}
+            className="underline underline-offset-2"
+            data-testid={`member-pick-rename-link-${integrationId}`}
+          >
+            {t("detail.integrationMemberPicker.duplicateLabelRename")}
+          </Link>
+        </div>
+      )}
+      {/* A displayed connection is under-scoped → the run is blocked
+          server-side (insufficient_scopes). Owner can upgrade via
+          incremental consent; a foreign owner can only be flagged. */}
+      {underScopedConns.map((conn) => (
+        <div
+          key={conn.id}
+          className="mt-1.5 flex flex-col gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
+          data-testid={`member-pick-scope-warning-${conn.id}`}
+        >
+          <div className="flex items-center gap-1.5">
+            <AlertTriangle className="size-3 shrink-0" />
+            <span>
+              {conn.is_own
                 ? t("detail.integrationMemberPicker.missingScopesOwn")
                 : t("detail.integrationMemberPicker.missingScopesForeign", {
-                    owner: ownerLabel(displayConn),
+                    owner: ownerLabel(conn),
                   })}
             </span>
           </div>
           <span className="text-foreground/80 font-mono text-[0.65rem] break-words">
-            {displayMissingScopes.join(" ")}
+            {conn.missing_scopes.join(" ")}
           </span>
-          {displayOwnedByActor && auths[displayConn.auth_key]?.type === "oauth2" && (
+          {conn.is_own && auths[conn.auth_key]?.type === "oauth2" && (
             <div>
               <Button
                 size="sm"
@@ -509,16 +628,16 @@ export function IntegrationConnectionPicker({
                 onClick={async () => {
                   await openPopup({
                     packageId: integrationId,
-                    authKey: displayConn.auth_key,
-                    scopes: displayMissingScopes,
-                    connectionId: displayConn.id,
+                    authKey: conn.auth_key,
+                    scopes: conn.missing_scopes,
+                    connectionId: conn.id,
                   });
                   // The OAuth callback updated the connection's granted
                   // scopes server-side; refetch so the badge clears
                   // instead of waiting for a window-focus refetch.
                   await refresh();
                 }}
-                data-testid={`member-pick-upgrade-${integrationId}`}
+                data-testid={`member-pick-upgrade-${conn.id}`}
               >
                 <RefreshCw className="mr-1 size-3" />
                 {t("detail.integrationMemberPicker.upgradeButton")}
@@ -526,7 +645,7 @@ export function IntegrationConnectionPicker({
             </div>
           )}
         </div>
-      )}
+      ))}
     </div>
   );
 }

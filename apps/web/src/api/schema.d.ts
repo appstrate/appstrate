@@ -5432,7 +5432,8 @@ export interface components {
                 id: string;
                 auth_key: string;
                 account_id: string;
-                label: string | null;
+                /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
+                label: string;
                 owner_user_id: string | null;
                 owner_end_user_id: string | null;
                 owner_name: string | null;
@@ -11445,7 +11446,8 @@ export interface operations {
                             owner_id: string;
                             /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
                             owner_name?: string | null;
-                            label?: string | null;
+                            /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
+                            label?: string;
                             shared_with_org?: boolean;
                             /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                             client_ref: string | null;
@@ -11559,7 +11561,8 @@ export interface operations {
                                 owner_id: string;
                                 /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
                                 owner_name?: string | null;
-                                label?: string | null;
+                                /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
+                                label?: string;
                                 shared_with_org?: boolean;
                                 /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                                 client_ref: string | null;
@@ -11719,7 +11722,8 @@ export interface operations {
                         owner_id: string;
                         /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
                         owner_name?: string | null;
-                        label?: string | null;
+                        /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
+                        label?: string;
                         shared_with_org?: boolean;
                         /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                         client_ref: string | null;
@@ -12057,7 +12061,8 @@ export interface operations {
                             owner_id: string;
                             /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
                             owner_name?: string | null;
-                            label?: string | null;
+                            /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
+                            label?: string;
                             shared_with_org?: boolean;
                             /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                             client_ref: string | null;
@@ -12126,7 +12131,8 @@ export interface operations {
                         owner_id: string;
                         /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
                         owner_name?: string | null;
-                        label?: string | null;
+                        /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
+                        label?: string;
                         shared_with_org?: boolean;
                         /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                         client_ref: string | null;
@@ -12599,7 +12605,8 @@ export interface operations {
                                 owner_id: string;
                                 /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
                                 owner_name?: string | null;
-                                label?: string | null;
+                                /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
+                                label?: string;
                                 shared_with_org?: boolean;
                                 /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                                 client_ref: string | null;

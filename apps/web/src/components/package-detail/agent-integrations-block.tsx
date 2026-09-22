@@ -206,15 +206,17 @@ function ManagedIntegrationCard({
   const { data: resolution } = useIntegrationAgentResolution(packageId, agentPackageId);
   const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
 
-  // R5 — reuse hint: the resolved connection is shared across every agent in
+  // R5 — reuse hint: the resolved connections are shared across every agent in
   // the space that consumes this integration, killing the "do I need one
   // connection per agent?" confusion. Only when resolved AND not blocking — a
   // blocking state is the picker's warning foreground, not a reassuring line.
-  const resolvedConnection =
-    resolution?.candidates.find((c) => c.id === resolution.resolved_connection_id) ?? null;
+  const resolvedConnections =
+    resolution?.resolved_connection_ids
+      .map((id) => resolution.candidates.find((c) => c.id === id))
+      .filter((c): c is IntegrationCandidate => !!c) ?? [];
   const reuseInfo =
-    resolution && resolvedConnection && !resolutionBlocksRun(resolution)
-      ? buildReuseInfo(resolvedConnection, consumingAgents?.length ?? 0, t)
+    resolution && resolvedConnections.length > 0 && !resolutionBlocksRun(resolution)
+      ? buildReuseInfo(resolvedConnections, consumingAgents?.length ?? 0, t)
       : null;
 
   return (
@@ -232,13 +234,13 @@ function ManagedIntegrationCard({
 }
 
 function buildReuseInfo(
-  connection: IntegrationCandidate,
+  connections: IntegrationCandidate[],
   agentCount: number,
   t: (k: string, opts?: Record<string, unknown>) => string,
 ): string {
   // `label` is the connection's display name (identity or "Connexion N"),
-  // always set at creation.
-  const account = connectionDisplayLabel(connection);
+  // always set at creation. A run may bind several — name them all.
+  const account = connections.map(connectionDisplayLabel).join(" · ");
   if (agentCount <= 1) {
     return t("detail.integrationReuseSingle", { account });
   }

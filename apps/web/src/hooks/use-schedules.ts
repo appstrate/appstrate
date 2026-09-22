@@ -95,7 +95,7 @@ export function useCreateSchedule(packageId: string) {
       generation_config_override?: ModelGenerationSettings | null;
       proxy_id_override?: string | null;
       version_override?: string | null;
-      connection_overrides?: Record<string, string> | null;
+      connection_overrides?: Record<string, string[]> | null;
       actor?: { user_id?: string; end_user_id?: string };
     }): Promise<ScheduleWireDto> => {
       const { scope, name } = splitPackageRef(packageId);
@@ -128,7 +128,7 @@ export function useUpdateSchedule() {
       generation_config_override?: ModelGenerationSettings | null;
       proxy_id_override?: string | null;
       version_override?: string | null;
-      connection_overrides?: Record<string, string> | null;
+      connection_overrides?: Record<string, string[]> | null;
       actor?: { user_id?: string; end_user_id?: string };
     }): Promise<ScheduleWireDto> => {
       const { data: updated } = await client.PUT("/api/schedules/{id}", {
