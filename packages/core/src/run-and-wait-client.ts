@@ -210,8 +210,9 @@ function materializeInlineManifest(manifest: Record<string, unknown>): {
  * never had. That failure mode has no other place to be caught.
  *
  * Kept in step with the descriptor's `inputSchema.properties` by
- * `run-and-wait-argument-parity.test.ts`, which reads both and compares them —
- * a name added to one side and not the other is a silent drop again.
+ * `apps/api/src/modules/mcp/test/unit/run-and-wait.test.ts`, which walks every
+ * declared name through the handler and refuses an undeclared one — a name
+ * added to one side and not the other is a silent drop again.
  */
 const RUN_AND_WAIT_ARGUMENT_NAMES: ReadonlySet<string> = new Set([
   "kind",
@@ -315,44 +316,60 @@ function contextFilesArgument(args: Record<string, unknown>): {
   return value.length > 0 ? { uris: value } : {};
 }
 
+/** The one shape, quoted in every message below so they cannot drift apart. */
+const CONNECTION_OVERRIDES_SHAPE = '`{"@scope/integration": ["<connection_id>", ...]}`';
+
 /**
  * The tool's `connection_overrides` argument — the documented remedy for a
- * `412 must_choose_connection`, where the model must name one connection per
- * ambiguous integration and retry.
+ * `412 must_choose_connection`, where the model must name the connections to
+ * bind on each ambiguous integration and retry.
  *
  * Refused before dispatch whenever it is present but does not resolve to a
- * plain object. The MCP transport does not validate tool arguments, so a
- * wrong-typed value is otherwise dropped on the floor: the launch answers the
- * IDENTICAL 412, with nothing in it saying the argument was ignored, and the
- * retry loop has no exit. This is the only place that signal can exist. A
+ * plain object of arrays. The MCP transport does not validate tool arguments,
+ * so a wrong-typed value is otherwise dropped on the floor: the launch answers
+ * the IDENTICAL 412, with nothing in it saying the argument was ignored, and
+ * the retry loop has no exit. This is the only place that signal can exist. A
  * string gets its own message because it names the real mistake (a JSON-encoded
- * map); an array / number / boolean / `null` gets the generic one. Validating
- * the map's VALUES stays server-side — the route answers those with a
- * field-precise 400.
+ * map); an array / number / boolean / `null` gets the generic one.
+ *
+ * A bare connection id as a VALUE is refused for the same reason and never
+ * wrapped: it is the retired single-connection shape, and a model that keeps
+ * emitting it has to read what changed rather than be silently accommodated.
+ * How many ids a key may carry, and whether each names a live connection, stays
+ * server-side — the route answers those with a field-precise 400.
  */
 function connectionOverridesArgument(args: Record<string, unknown>): {
-  overrides?: Record<string, unknown>;
+  overrides?: Record<string, unknown[]>;
   error?: string;
 } {
   const present = args.connection_overrides !== undefined;
   if (typeof args.connection_overrides === "string") {
     return {
       error:
-        "`connection_overrides` must be a JSON object mapping each integration id to a " +
-        'connection id (`{"@scope/integration": "<connection_id>"}`), not a string. Pass the ' +
+        "`connection_overrides` must be a JSON object mapping each integration id to an array " +
+        `of connection ids (${CONNECTION_OVERRIDES_SHAPE}), not a string. Pass the ` +
         "object itself — do not JSON-encode it.",
     };
   }
   const overrides = asRecordOrUndefined(args.connection_overrides);
-  if (!overrides && present) {
+  if (!overrides) {
+    if (!present) return {};
     return {
       error:
-        "`connection_overrides` must be a JSON object mapping each integration id to a " +
-        'connection id (`{"@scope/integration": "<connection_id>"}`). Omit the argument ' +
+        "`connection_overrides` must be a JSON object mapping each integration id to an array " +
+        `of connection ids (${CONNECTION_OVERRIDES_SHAPE}). Omit the argument ` +
         "entirely when you have no connection to pin.",
     };
   }
-  return { overrides };
+  const scalarKeys = Object.keys(overrides).filter((key) => !Array.isArray(overrides[key]));
+  if (scalarKeys.length > 0) {
+    return {
+      error:
+        `Every \`connection_overrides\` value must be an ARRAY of connection ids (${CONNECTION_OVERRIDES_SHAPE}), ` +
+        `even for a single one. Wrong for: ${scalarKeys.map((k) => `\`${k}\``).join(", ")}.`,
+    };
+  }
+  return { overrides: overrides as Record<string, unknown[]> };
 }
 
 export function isRunAndWaitTerminalStatus(status: unknown): boolean {

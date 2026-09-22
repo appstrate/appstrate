@@ -727,7 +727,7 @@ describe("launchRunAndWait launch body", () => {
         kind: "inline",
         manifest: { name: "tmp" },
         prompt: "do it",
-        connection_overrides: { "@appstrate/gmail": "conn_abc" },
+        connection_overrides: { "@appstrate/gmail": ["conn_abc"] },
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -735,7 +735,7 @@ describe("launchRunAndWait launch body", () => {
     expect(captured()).toMatchObject({
       url: "https://test.local/api/runs/inline",
       method: "POST",
-      body: { connection_overrides: { "@appstrate/gmail": "conn_abc" } },
+      body: { connection_overrides: { "@appstrate/gmail": ["conn_abc"] } },
     });
   });
 
@@ -747,7 +747,7 @@ describe("launchRunAndWait launch body", () => {
         kind: "agent",
         scope: "@acme",
         name: "writer",
-        connection_overrides: { "@appstrate/gmail": "conn_abc" },
+        connection_overrides: { "@appstrate/gmail": ["conn_abc"] },
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -755,7 +755,7 @@ describe("launchRunAndWait launch body", () => {
     expect(captured()).toMatchObject({
       url: "https://test.local/api/agents/@acme/writer/run",
       method: "POST",
-      body: { connection_overrides: { "@appstrate/gmail": "conn_abc" } },
+      body: { connection_overrides: { "@appstrate/gmail": ["conn_abc"] } },
     });
   });
 
@@ -794,7 +794,7 @@ describe("launchRunAndWait launch body", () => {
         kind: "inline",
         manifest: { name: "tmp" },
         prompt: "do it",
-        connection_overrides: JSON.stringify({ "@appstrate/gmail": "conn_abc" }),
+        connection_overrides: JSON.stringify({ "@appstrate/gmail": ["conn_abc"] }),
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -809,7 +809,7 @@ describe("launchRunAndWait launch body", () => {
   // Presence is what is refused, not one enumerated mistake: every non-object
   // shape reaches the same dead end as the JSON-encoded string above.
   it.each([
-    ["an array", [{ "@appstrate/gmail": "conn_abc" }]],
+    ["an array", [{ "@appstrate/gmail": ["conn_abc"] }]],
     ["a number", 42],
     ["a boolean", true],
     ["explicit null", null],
@@ -833,9 +833,59 @@ describe("launchRunAndWait launch body", () => {
     expect(captured()).toBeUndefined();
   });
 
+  // Several ids under one key is the whole point of the array shape — binding
+  // two connections of one integration in a single run. Asserted as an exact
+  // body so a client that kept only the first id (the retired
+  // one-connection-per-integration behaviour) fails here.
+  it("forwards several connection ids under one integration verbatim", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "do it",
+        connection_overrides: { "@appstrate/ssh": ["conn_web1", "conn_db"] },
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(captured()?.body).toMatchObject({
+      connection_overrides: { "@appstrate/ssh": ["conn_web1", "conn_db"] },
+    });
+  });
+
+  // A bare id as a value is the RETIRED shape. Not coerced into a one-element
+  // array: a wrapped value would launch a run the model never described, and
+  // the model would keep emitting the dead shape forever. The control is the
+  // one-element array above ("kind:inline forwards connection_overrides"),
+  // which must keep launching — otherwise this test would pass on a client that
+  // simply refuses the argument outright.
+  it("rejects a bare connection id as a value, naming the key", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "do it",
+        connection_overrides: { "@appstrate/gmail": "conn_abc" },
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(false);
+    const error = String((result as { step: { payload: { error?: string } } }).step.payload.error);
+    expect(error).toMatch(/must be an ARRAY/);
+    expect(error).toContain("@appstrate/gmail");
+    expect(captured()).toBeUndefined();
+  });
+
   // The name inside `input` belongs to the AGENT, not to us: an agent whose own
   // input schema declares a `connection_overrides` property must stay launchable
-  // and get that property through untouched, whatever the top-level argument says.
+  // and get that property through untouched, whatever the top-level argument
+  // says — including the bare-string value the test above refuses at top level.
   it("forwards the top-level connection_overrides and leaves input's own property alone", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
@@ -844,7 +894,7 @@ describe("launchRunAndWait launch body", () => {
         kind: "inline",
         manifest: { name: "tmp" },
         prompt: "do it",
-        connection_overrides: { "@appstrate/gmail": "conn_top" },
+        connection_overrides: { "@appstrate/gmail": ["conn_top"] },
         // An agent whose input schema happens to declare a property with this
         // name: it is data for the run, never a source for the top-level field.
         input: { connection_overrides: { "@appstrate/gmail": "conn_nested" } },
@@ -854,7 +904,7 @@ describe("launchRunAndWait launch body", () => {
 
     expect(result.ok).toBe(true);
     expect(captured()?.body).toMatchObject({
-      connection_overrides: { "@appstrate/gmail": "conn_top" },
+      connection_overrides: { "@appstrate/gmail": ["conn_top"] },
       input: { connection_overrides: { "@appstrate/gmail": "conn_nested" } },
     });
   });

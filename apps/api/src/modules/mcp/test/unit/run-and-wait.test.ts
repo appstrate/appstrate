@@ -8,6 +8,7 @@ import { buildServerInstructions } from "../../router.ts";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import { buildMcpTools, type Dispatch } from "../../tools.ts";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 
 const noExtra = {} as AppstrateRequestExtra;
 /** What composing an inline agent takes: authoring AND launching. */
@@ -394,21 +395,28 @@ describe("run_and_wait", () => {
   });
 
   // `connection_overrides` is the ONLY remedy for a `412 must_choose_connection`
-  // launch, and the model can only use an argument the tool DECLARES. The
+  // launch AND the only way to bind several connections of one integration, and
+  // the model can only use an argument the tool DECLARES. The
   // forwarding itself is unit-tested on `launchRunAndWait` (core); what is
   // proven here is the composition — descriptor + handler — because either half
   // could be dropped without the other suite noticing.
   describe("connection_overrides", () => {
-    it("declares connection_overrides as an object of string values", () => {
+    it("declares connection_overrides as an object of bounded string arrays", () => {
       const { tool } = makeRunAndWait({});
       const property = (
         tool.descriptor.inputSchema.properties as Record<string, Record<string, unknown>>
       ).connection_overrides;
       expect(property).toBeDefined();
       expect(property!.type).toBe("object");
-      // One connection id per integration — a non-string value map would let the
-      // model send a shape the route rejects with a 400.
-      expect(property!.additionalProperties).toEqual({ type: "string" });
+      // 1..MAX connection ids per integration, always an array. A `{ type:
+      // "string" }` value map is the retired shape: it would advertise to the
+      // model exactly the argument the launch client now refuses.
+      expect(property!.additionalProperties).toEqual({
+        type: "array",
+        items: { type: "string" },
+        minItems: 1,
+        maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+      });
       // Not required: the argument only exists for the retry after the 412, so
       // demanding it would break every ordinary launch. Pinned as an exact set
       // rather than a `not.toContain` — `kind` is the ONE required argument,
@@ -427,7 +435,7 @@ describe("run_and_wait", () => {
           kind: "inline",
           manifest: { name: "tmp" },
           prompt: "do it",
-          connection_overrides: { "@acme/gmail": "conn_abc" },
+          connection_overrides: { "@acme/gmail": ["conn_abc"] },
         },
         noExtra,
       );
@@ -437,8 +445,55 @@ describe("run_and_wait", () => {
       expect(post?.body).toEqual({
         manifest: defaultInlineManifest({ name: "tmp" }),
         prompt: expect.stringContaining("do it"),
-        connection_overrides: { "@acme/gmail": "conn_abc" },
+        connection_overrides: { "@acme/gmail": ["conn_abc"] },
       });
+    });
+
+    // Two ids under one key is what the array shape exists for. The one-element
+    // launch above is the control: it must keep going through untouched, so a
+    // handler that simply refused every multi-id map could not pass both.
+    it("forwards two connection ids for one integration verbatim", async () => {
+      const { tool, calls } = makeRunAndWait({
+        launch: () => jsonResponse({ id: "run_multi", status: "pending" }),
+        getRun: [jsonResponse({ id: "run_multi", status: "success" })],
+      });
+
+      await tool.handler(
+        {
+          kind: "inline",
+          manifest: { name: "tmp" },
+          prompt: "do it",
+          connection_overrides: { "@acme/ssh": ["conn_web1", "conn_db"] },
+        },
+        noExtra,
+      );
+
+      const post = calls.find((c) => c.method === "POST");
+      expect(post?.body).toMatchObject({
+        connection_overrides: { "@acme/ssh": ["conn_web1", "conn_db"] },
+      });
+    });
+
+    // The retired one-id-per-integration shape. Refused before the launch and
+    // never wrapped into a one-element array: a coerced launch would 201 on a
+    // binding the model never asked for, and nothing downstream would say the
+    // argument had been rewritten.
+    it("refuses a bare connection id instead of launching on a coerced one", async () => {
+      const { tool, calls } = makeRunAndWait({});
+
+      const res = await tool.handler(
+        {
+          kind: "inline",
+          manifest: { name: "tmp" },
+          prompt: "do it",
+          connection_overrides: { "@acme/gmail": "conn_abc" },
+        },
+        noExtra,
+      );
+
+      expect(res.isError).toBe(true);
+      expect(String(parseResult(res).error)).toContain("@acme/gmail");
+      expect(calls.find((c) => c.method === "POST")).toBeUndefined();
     });
 
     it("forwards connection_overrides verbatim on an agent launch", async () => {
@@ -452,14 +507,14 @@ describe("run_and_wait", () => {
           kind: "agent",
           scope: "@acme",
           name: "writer",
-          connection_overrides: { "@acme/gmail": "conn_abc" },
+          connection_overrides: { "@acme/gmail": ["conn_abc"] },
         },
         noExtra,
       );
 
       const post = calls.find((c) => c.method === "POST");
       expect(post?.path).toBe("/api/agents/@acme/writer/run");
-      expect(post?.body).toEqual({ connection_overrides: { "@acme/gmail": "conn_abc" } });
+      expect(post?.body).toEqual({ connection_overrides: { "@acme/gmail": ["conn_abc"] } });
     });
   });
 
