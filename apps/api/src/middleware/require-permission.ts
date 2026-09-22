@@ -99,11 +99,10 @@ export function assertPermission<R extends Resource>(
  * Handlers that resolve the disjunction only once the row is loaded invoke it
  * with a no-op `next`, the same way route-level guards are reused inline.
  *
- * The joined form is also stamped as the guard's requirement, so a reader of
- * the route table gets the same string the audit records rather than having to
- * re-derive the disjunction — `lib/route-requirements.ts` splits it back. An
- * empty list is refused at construction: it would deny every caller while
- * stamping `""`, which that reader takes for a row-aware guard, i.e. a grant.
+ * The joined form is also stamped as the guard's requirement, so a route-table
+ * reader sees the same string the audit records (`lib/route-requirements.ts`
+ * splits it back). An empty list is refused at construction: it would stamp
+ * `""`, which that reader takes for a row-aware guard, i.e. a grant.
  */
 export function requireAnyPermission(permissions: readonly string[]) {
   if (permissions.length === 0) {

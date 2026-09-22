@@ -2,24 +2,14 @@
 
 /**
  * What a route requires, read off Hono's route table — the same mounts that
- * decide it, never a second list beside them (`middleware/handler-marker.ts`).
- *
- * The lookup follows Hono's matching, not an exact `(method, path)` key, since
- * several operations have no route of their own. A prefix mount (path ending
- * in `*`) with a concrete method SERVES its subtree, bare prefix path
- * included: `app.on(["POST"], "/api/auth/*")` is every auth operation. An
- * `ALL` mount only DECORATES — `app.use("/api/*", cors)` makes nothing exist —
- * yet still contributes its guard beneath, and an exact-path one is
- * indistinguishable from `router.use()`, so it counts as serving
- * (`scripts/verify-openapi.ts` is what catches a documented operation whose
- * handler was removed). The one mount that never serves is the root catch-all
- * `/*`: the SPA fallback answers every GET template, and reading that as a
- * route would invent an operation for any path one can spell.
- *
- * Provenance matters as much as the permission: a guard mounted after a space
- * re-scope (`markSpaceRescope`) is enforced in the space the PATH names, which
- * is not the space a reader evaluating the caller's own permission set is
- * talking about. Those are reported separately and never filter.
+ * decide it (`middleware/handler-marker.ts`). Matching follows Hono's, since
+ * several operations have no route of their own: a prefix mount (`*`) with a
+ * concrete method SERVES its subtree, bare prefix included; a wildcard `ALL`
+ * mount only DECORATES, contributing its guard without making anything exist,
+ * while an exact-path one serves every method; the root catch-all `/*` serves
+ * nothing, since the SPA fallback answers every GET template. A guard mounted
+ * after a space re-scope (`markSpaceRescope`) is enforced in the space the
+ * PATH names, so it is reported separately and never filters.
  */
 
 import { PERMISSION_REQUIREMENT_MARKER } from "@appstrate/core/permissions";

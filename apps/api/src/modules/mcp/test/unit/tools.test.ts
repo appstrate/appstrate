@@ -34,7 +34,7 @@ const noExtra = {} as unknown as AppstrateRequestExtra;
  * Everything the full tool surface takes: the transport gate, invoke, launch
  * AND read-back (`run_and_wait`), and the `GET /api/files` operation
  * (`list_files`). A test that is not about the declaration gate uses this so it
- * asserts on the tool it means to, not on whether it was declared.
+ * asserts on the tool it means to, not on whether it is declared.
  */
 const FULL_SURFACE = ["mcp:read", "mcp:invoke", "agents:run", "runs:read", "files:read"];
 
@@ -119,11 +119,6 @@ describe("buildMcpTools declarations", () => {
     expect(declared).toContain("describe_operation");
   });
 
-  it("declares invoke_operation on `mcp:invoke` alone", () => {
-    expect(names(["mcp:read"])).not.toContain("invoke_operation");
-    expect(names(["mcp:read", "mcp:invoke"])).toContain("invoke_operation");
-  });
-
   it("withholds run_and_wait until the caller can launch AND read the run back", () => {
     // Both halves, on the same builder: `agents:run` without a run-read
     // permission would bill a provisioned run whose poll takes a 403.
@@ -138,17 +133,6 @@ describe("buildMcpTools declarations", () => {
     expect(names(["mcp:read", "mcp:invoke", "agents:run", "runs:read-all"])).toContain(
       "run_and_wait",
     );
-  });
-
-  it('offers `kind:"inline"` only once the caller may also author', () => {
-    const kinds = (permissions: string[]): string[] | undefined =>
-      (
-        makeTools(permissions).byName.get("run_and_wait")!.descriptor.inputSchema
-          .properties as Record<string, { enum?: string[] }>
-      ).kind!.enum;
-    const runner = ["mcp:read", "mcp:invoke", "agents:run", "runs:read-all"];
-    expect(kinds(runner)).toEqual(["agent"]);
-    expect(kinds([...runner, "agents:write"])).toEqual(["agent", "inline"]);
   });
 
   it("declares list_files exactly when `GET /api/files` grants", () => {

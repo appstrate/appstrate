@@ -46,7 +46,7 @@ import {
   waitForRunPipelineSettled,
 } from "../../../../../test/helpers/run-connection-fixtures.ts";
 import { _setOrchestratorForTesting } from "../../../../services/orchestrator/index.ts";
-import { setPlatformApp } from "../../../../lib/platform-app.ts";
+import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
 import { resetCatalog } from "../../catalog.ts";
 import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
 
@@ -54,7 +54,7 @@ const app = getTestApp();
 // Wire in-process dispatch to the test app — without it `run_and_wait` has no
 // platform to launch the run against (production sets this in
 // registerModuleRoutes; the test harness mounts modules inline).
-setPlatformApp(app);
+registerTestPlatformApp();
 
 const INTEGRATION = "@mcpconn/svc";
 

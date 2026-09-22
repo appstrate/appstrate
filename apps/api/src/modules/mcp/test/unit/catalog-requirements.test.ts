@@ -2,13 +2,11 @@
 
 /**
  * The catalog's join from an operationId onto the permission its route
- * enforces. An operation the route table does not describe must FAIL naming
- * itself, since "no requirement" reads as "public" — so `getCatalog()` resolves
- * every operation up front and throws rather than shipping one unjoined.
- *
- * The whole-catalog join lives HERE rather than beside the allowlist in
- * `test/integration/middleware/route-requirements.test.ts`: that file is label
- * gated, and a spec-without-route PR would merge green and 500 in production.
+ * enforces. "No requirement" reads as "public", so `getCatalog()` throws,
+ * naming the operation, rather than ship one unjoined. It lives here and not
+ * beside the allowlist in the label-gated
+ * `test/integration/middleware/route-requirements.test.ts`, where a
+ * spec-without-route PR would merge green and 500 in production.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";

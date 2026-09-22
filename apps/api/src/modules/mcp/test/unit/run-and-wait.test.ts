@@ -578,8 +578,8 @@ describe("run_and_wait", () => {
   it("launches for a caller whose only run-read grant is `runs:read-all`", async () => {
     // `read-all` is a superset of `read`, not a companion to it
     // (`lib/run-visibility.ts`), and `runs:read-all` is separately grantable to
-    // an API key. A literal `runs:read` test refused this principal before the
-    // launch even though the poll route it gates reads every run in the space.
+    // an API key. A literal `runs:read` test would refuse this principal even
+    // though the poll route it gates reads every run in the space.
     const { tool, calls } = makeRunAndWait({
       permissions: ["mcp:invoke", "agents:run", "runs:read-all"],
     });

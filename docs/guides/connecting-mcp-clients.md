@@ -48,8 +48,7 @@ you the matching command).
   never exceed what the key could do over REST.
 
 Grant the key the permissions the work needs on top of those two: what the
-server declares follows the key's scopes (see "The tool surface"), so a key
-holding `mcp:*` alone is shown discovery and nothing else.
+server declares follows the key's scopes (see "The tool surface").
 
 This is the recommended onboarding until you have HTTPS + the OAuth flow set up.
 
@@ -159,7 +158,7 @@ grants hold**.
 | `get_runtime_capabilities` | `mcp:read`                                                   | The MCP-server runtimes and manifest templates package authoring works from.                                                                                                |
 | `invoke_operation`         | `mcp:invoke`                                                 | Execute one operation (validated + authorized exactly as the equivalent REST call).                                                                                         |
 | `run_and_wait`             | `mcp:invoke` + `agents:run` + `runs:read` or `runs:read-all` | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and returns when it reaches a terminal status.                                 |
-| `list_files`               | `files:read`                                                 | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                                                  |
+| `list_files`               | the `listFiles` operation's own guard (`files:read` today)   | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                                                  |
 | `import_package_file`      | `mcp:invoke` + a package write permission (org users only)   | Import a validated archive as a package.                                                                                                                                    |
 
 `run_and_wait` needs both halves because it launches AND polls the run back
@@ -174,10 +173,15 @@ actually mount: the tool list, the operation index in the server instructions,
 their `required_permissions`, never mixed into `operations`) and
 `describe_operation` (`granted`, `required_permissions`, `conditional`). What
 your role makes impossible is **not shown** rather than shown and refused — but
-an operation only the loaded row can refuse (a file ACL, a draft's home space)
-stays listed and is marked `conditional`. Enforcement itself never moves:
-`invoke_operation` always dispatches, and on a `403` the result carries the
-permissions the route required plus a hint to report it rather than retry.
+an operation your permission set alone cannot decide stays listed and is marked
+`conditional`: either the loaded row decides it (a file ACL, a draft's home
+space), or a guard on it is enforced in the space the path names rather than the
+one you are calling from. `required_permissions` carries both — the guards read
+in your own space and those read in the target space. Enforcement itself never
+moves: `invoke_operation` always dispatches. A `403` attributable to a permission
+missing from your own space comes back with `required_permissions` and a hint to
+report it rather than retry; a refusal decided by the row, or by the space the
+path names, keeps the route's own error.
 
 This server advertises `tools: { listChanged: false }`, so a client that listed
 its tools before an upgrade — or before its role changed — is never told the set

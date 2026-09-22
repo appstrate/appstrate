@@ -155,25 +155,18 @@ export function canComposeInline(has: (permission: CorePermission) => boolean): 
 
 /**
  * Whether a caller may read runs at all: `runs:read` (the runs it launched) or
- * `runs:read-all` (every run in the space), which implies it — see the comment
- * on `CoreResources.runs`.
- *
- * The one place that disjunction is spelled out for code holding a permission
- * set rather than a route: the SSE routes that resolve permissions by hand, the
- * MCP tool declarations, the chat prompt, the web access chip. A route keeps
- * asking its guard.
+ * `runs:read-all` (every run in the space), which implies it. The one place
+ * that disjunction is spelled out for code holding a permission set rather
+ * than a route — a route keeps asking its guard.
  */
 export function canReadRuns(has: (permission: CorePermission) => boolean): boolean {
   return has("runs:read") || has("runs:read-all");
 }
 
 /**
- * Whether a caller may launch an agent AND read the run back. Launching a run
- * the caller could never read does not count — it would provision a container
- * and bill the spend for a status nobody can poll. The MCP server declares its
- * `run_and_wait` tool on this predicate (plus `mcp:invoke`) rather than
- * refusing inside it, and the chat access chip's "run your agents" row asks the
- * same question.
+ * Whether a caller may launch an agent AND read the run back: a launch nobody
+ * can poll still provisions a container and bills the spend. The MCP
+ * `run_and_wait` declaration and the chat access chip both ask this.
  */
 export function canRunAgents(has: (permission: CorePermission) => boolean): boolean {
   return has("agents:run") && canReadRuns(has);
@@ -716,18 +709,10 @@ export function setPermissionDenialHandler(handler: PermissionDenialHandler | nu
 }
 
 /**
- * Registry symbol stamped by `makePermissionGuard` on the guard it returns,
- * carrying the requirement that guard checks: a single `resource:action`
- * string, or several joined with `|` for a disjunction (the platform's
- * `requireAnyPermission` stamps that form itself). A guard carrying the boolean
- * `appstrate.permissionGuard` marker but no requirement is a row-aware guard:
- * its decision depends on the row it loads, so no static string describes it.
- *
- * It exists so the platform can read, per operation, what the caller's grants
- * make structurally possible straight off Hono's route table, and show the MCP
- * surface nothing more (`docs/plans/mcp-permission-aware-tools.md`). Derived
- * from the mounts, it cannot drift away from them the way a hand-kept list of
- * operation-to-permission pairs does.
+ * Registry symbol carrying the requirement a guard checks: one
+ * `resource:action`, or several joined with `|` for a disjunction. A row-aware
+ * guard carries none — only the row it loads decides. Read back off Hono's
+ * route table via `apps/api/src/middleware/handler-marker.ts`.
  */
 export const PERMISSION_REQUIREMENT_MARKER = Symbol.for("appstrate.permissionRequirement");
 
@@ -764,8 +749,7 @@ export function makePermissionGuard(
   // it resolves a row (`apps/api/src/middleware/handler-marker.ts`). A registry
   // symbol, so neither side imports the other.
   Object.defineProperty(guard, Symbol.for("appstrate.permissionGuard"), { value: true });
-  // The requirement itself, read by the same route-table walk to derive what a
-  // caller may be shown — see PERMISSION_REQUIREMENT_MARKER.
+  // Read by the same route-table walk — see PERMISSION_REQUIREMENT_MARKER.
   Object.defineProperty(guard, PERMISSION_REQUIREMENT_MARKER, { value: required });
   return guard;
 }

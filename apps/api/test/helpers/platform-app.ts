@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { setPlatformApp } from "../../src/lib/platform-app.ts";
+import { resetCatalog } from "../../src/modules/mcp/catalog.ts";
 import { getTestApp } from "./app.ts";
 
 /**
@@ -11,4 +12,8 @@ import { getTestApp } from "./app.ts";
  */
 export function registerTestPlatformApp(): void {
   setPlatformApp(getTestApp());
+  // The catalog is derived from the registered app and the module registry, both
+  // mutated by other test files in the same process, so a cached one would answer
+  // for a state that no longer exists.
+  resetCatalog();
 }

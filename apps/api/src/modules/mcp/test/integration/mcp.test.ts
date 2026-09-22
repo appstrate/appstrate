@@ -39,16 +39,14 @@ import {
   mcpRpc,
   type JsonRpcEnvelope,
 } from "../../../../../test/helpers/mcp.ts";
-import { setPlatformApp } from "../../../../lib/platform-app.ts";
+import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
 import { drainAudits, pendingAuditCount } from "../../../../services/audit.ts";
 import { getCatalog, resetCatalog } from "../../catalog.ts";
 import { createMcpRouter } from "../../router.ts";
 import mcpModule from "../../index.ts";
 
 const app = getTestApp();
-// Wire in-process dispatch to the test app (production sets this in
-// registerModuleRoutes; the test harness mounts modules inline).
-setPlatformApp(app);
+registerTestPlatformApp();
 
 const rpc = mcpRpc(app);
 
@@ -380,7 +378,7 @@ describe("mcp tool round-trip", () => {
     expect(names).not.toContain("invoke_operation");
 
     // And calling it anyway is refused by the SDK before any handler runs:
-    // tools are registered per session, so a tool that was not declared is
+    // tools are registered per session, so a tool that is not declared is
     // simply not there.
     const op = [...getCatalog().operations.values()][0]!;
     const { envelope } = await rpc(headers, {
@@ -670,7 +668,7 @@ describe("mcp audit + rate limiting", () => {
     // RBAC spec §4.3 audits a denial once, at the guard that fires it. With
     // `invoke_operation` absent from what this caller is shown, no tool ran and
     // there is nothing for the MCP layer to record; a row here would mean the
-    // declaration gate was dropped and the handler refused instead.
+    // declaration gate is gone and the handler refuses inside the tool.
     const headers = await apiKeyHeaders(["mcp:read"]);
     const op = [...getCatalog().operations.values()][0]!;
     await rpc(headers, {

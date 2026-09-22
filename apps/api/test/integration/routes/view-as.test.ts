@@ -41,7 +41,7 @@ import {
 } from "../../helpers/seed.ts";
 import { collectSSEEvents, pgNotify } from "../../helpers/sse.ts";
 import { initRealtime } from "../../../src/services/realtime.ts";
-import { setPlatformApp } from "../../../src/lib/platform-app.ts";
+import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
 import { resetCatalog } from "../../../src/modules/mcp/catalog.ts";
 import { collectModulePermissions } from "../../../src/lib/modules/module-loader.ts";
 import { getDiscoveredModules } from "../../helpers/test-modules.ts";
@@ -53,7 +53,7 @@ import { getDiscoveredModules } from "../../helpers/test-modules.ts";
 import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 
 const app = getTestApp();
-setPlatformApp(app);
+registerTestPlatformApp();
 
 /**
  * Resources the probe module in the "intersection with the real caller" block

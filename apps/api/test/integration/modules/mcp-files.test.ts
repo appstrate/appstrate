@@ -35,7 +35,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedApiKey, seedPackage, seedSpacePackage, seedSpace } from "../../helpers/seed.ts";
-import { setPlatformApp } from "../../../src/lib/platform-app.ts";
+import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
 import { resetCatalog } from "../../../src/modules/mcp/catalog.ts";
 import { createUpload } from "../../../src/services/uploads.ts";
 import { createFileFromStream, createFileFromUpload } from "../../../src/services/files.ts";
@@ -44,7 +44,7 @@ import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
 import { mcpRpc, type JsonRpcEnvelope } from "../../helpers/mcp.ts";
 
 const app = getTestApp();
-setPlatformApp(app);
+registerTestPlatformApp();
 
 const rpc = mcpRpc(app);
 

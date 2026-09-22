@@ -219,8 +219,8 @@ describe("lookup — prefix mounts", () => {
 
   it("folds a prefix guard onto the prefix's own template", () => {
     // Hono runs `app.use("/api/x/*")` for `/api/x` itself, so a guard mounted
-    // that way gates the collection route too — `spaces.ts` mounts both forms
-    // side by side precisely because the `/*` form alone used to miss it.
+    // that way gates the collection route too — which is why `spaces.ts`
+    // mounts both forms side by side.
     const requirement = served(
       tableOf(
         (sub) => sub.get("/x", ok),

@@ -55,61 +55,74 @@ other row-aware guard keep the boolean marker only: they mean "conditional".
 Core bump: `11.1.0` (additive, published before the consumer-facing PR; the
 lockstep gate reads `connect-helper` only).
 
-### The route table becomes a requirement map
+### The route table answers what a route requires
 
 New `apps/api/src/lib/route-requirements.ts`:
 
 ```ts
 export interface RouteRequirement {
   /** Each entry is one guard: `"agents:write"` or a disjunction `"runs:read|runs:read-all"`. All must hold. */
-  requirements: string[];
-  /** A row-aware guard is mounted: the requirements above are a lower bound, the row decides the rest. */
+  requirements: readonly string[];
+  /** Guards mounted after a space re-scope: enforced in the space the path names. Shown, never filtered. */
+  targetSpaceRequirements: readonly string[];
+  /** The row, or the target space, decides: `requirements` is a lower bound. */
   conditional: boolean;
 }
-export function deriveRouteRequirements(routes: Hono["routes"]): Map<string, RouteRequirement>;
+export function deriveRouteRequirements(routes: Hono["routes"]): RouteRequirementLookup;
 export function isGranted(requirement: RouteRequirement, permissions: ReadonlySet<string>): boolean;
 ```
 
-Key: `METHOD /api/agents/{scope}/{name}` — Hono's `:param` rewritten to the
-OpenAPI `{param}` form so the join with the catalog needs no second grammar.
-Handlers are read through `findTargetHandler` exactly as `hasHandlerMarker`
-does. `isGranted` is `every(requirement => requirement.split("|").some(has))`.
+`deriveRouteRequirements` answers a lookup function, not a map:
+`(method, pathTemplate)` follows Hono's own matching — a prefix mount serves its
+subtree — because several operations have no route of their own, and it answers
+`undefined` when nothing serves. Hono's `:param` is rewritten to the OpenAPI
+`{param}` form so the join with the catalog needs no second grammar. Handlers
+are read through `findTargetHandler` exactly as `hasHandlerMarker` does.
+`isGranted` tests `requirements` only — `every(r => r.split("|").some(has))`.
+
+### Provenance, not just the permission
+
+Two mounts mean something a permission string cannot say, so the derivation
+reads both off the same table. A guard mounted behind `markSpaceRescope`
+(`requireSpaceFromParam`, `routes/spaces.ts`) is enforced in the space the PATH
+names, not the caller's: it lands in `targetSpaceRequirements`, is shown, and
+never filters. A handler that decides on the row it loads declares `rowAuthority()`
+(`middleware/require-permission.ts`), which sets `conditional` with no string.
+Either one makes `requirements` a lower bound, which is what `conditional` means.
 
 ### The catalog joins on it
 
-`CatalogOperation` gains **no field**. `operationRequirement(op)` is a function
-with a memo of its own, deriving the table on its first call rather than at
-`getCatalog()` time: the app registers itself with `setPlatformApp` BEFORE the
-module routers mount, so a boot-time derivation would freeze a partial table.
-It reads the route table from `lib/platform-app.ts` (a `getPlatformRoutes()`
-beside `dispatchInProcess`, throwing before `setPlatformApp` like dispatch
-does — no fallback to "unfiltered"), and the lookup follows Hono's matching
-(prefix mounts included) rather than an exact `(method, path)` key, since
-several operations have no route of their own. An operation with no guard on
-its route (health, `/api/me/*`, uploads) has `requirements: []`, granted to
-everyone who reached the transport. `/api/openapi.json` and `/api/docs` left
-the catalog: the spec's own source and its human viewer are not operations a
-caller acts with.
+`CatalogOperation` gains one field, `requirement`. The join happens once, inside
+`getCatalog()`: the catalog is itself built lazily on first use, after the module
+routers have mounted, so the table it reads is complete (a boot-time derivation
+would freeze a partial one). It reads the route table from `lib/platform-app.ts`
+(a `getPlatformRoutes()` beside `dispatchInProcess`, throwing before
+`setPlatformApp` like dispatch does — no fallback to "unfiltered"). An operation
+the lookup cannot resolve does not become unfiltered: the build **fails**, naming
+every offender. An operation with no guard on its route (health, `/api/me/*`,
+uploads) has `requirements: []`, granted to everyone who reached the transport.
+`/api/openapi.json` and `/api/docs` left the catalog: the spec's own source and
+its human viewer are not operations a caller acts with.
 
 `buildOperationIndex(permissions)` takes the permission set as a **required**
 argument and filters **per operation** (`operationGranted`); a tag whose
 operations are all denied has no section. `TAG_TO_RESOURCE` and `tagVisible`
 are deleted in the same commit, and with them the unfiltered index and its
-cache. Memoisation per permission set stays.
+cache.
 
 ### Meta-tools declare what the caller may reach
 
 `buildMcpTools` builds one table of what this caller is SHOWN, each row a
 predicate over the same grants:
 
-| Tool                                                   | Declared when                                                       |
-| ------------------------------------------------------ | ------------------------------------------------------------------- |
-| `search_operations`, `describe_operation`, `read_file` | always (read-only, transport gate `mcp:read`; `read_file` is a row) |
-| `get_me`                                               | not `contextInjected` (unchanged)                                   |
-| `invoke_operation`                                     | `mcp:invoke`                                                        |
-| `run_and_wait`                                         | `mcp:invoke` ∧ `canRunAgents`; the inline half as today             |
-| `list_files`                                           | the `GET /api/files` operation granted (`files:read`)               |
-| `validate_package_file`, `import_package_file`         | unchanged (`canImportPackageFiles` already conditional)             |
+| Tool                                                                                                        | Declared when                                                                        |
+| ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `search_operations`, `describe_operation`, `read_file`, `validate_package_file`, `get_runtime_capabilities` | always (read-only, transport gate `mcp:read`; `read_file` is a row)                  |
+| `get_me`                                                                                                    | not `contextInjected` (unchanged)                                                    |
+| `invoke_operation`                                                                                          | `mcp:invoke`                                                                         |
+| `run_and_wait`                                                                                              | `mcp:invoke` ∧ `canRunAgents`; the inline half as today                              |
+| `list_files`                                                                                                | the `listFiles` operation (`GET /api/files`) granted — its own guard, not a constant |
+| `import_package_file`                                                                                       | unchanged (`canImportPackageFiles`)                                                  |
 
 The in-handler checks (`mcp:invoke` in `invoke_operation`, `mcp:invoke` and
 `canReadRuns` in `run_and_wait`) are **deleted**, not kept as defence in depth:
@@ -127,10 +140,13 @@ action are removed. A refusal is the route guard's own audit, once (RBAC spec
 - `search_operations`: `operations` holds granted matches; `denied` holds
   `{ operation_id, required_permissions }` for the rest (ids only, no
   summary); `best_match` only from `operations`.
-- `invoke_operation`: unchanged before dispatch. When the response is `403`,
-  the text result gains `required_permissions` (from the catalog) and one
-  sentence: the caller's role does not hold it; report it, do not retry, do not
-  look for another operation that does the same thing. Telemetry keeps
+- `invoke_operation`: unchanged before dispatch. When the response is `403` AND
+  the caller's set does not clear the operation's caller-space requirements, the
+  text result gains `required_permissions` (from the catalog) and one sentence:
+  the caller's role does not hold it; report it, do not retry, do not look for
+  another operation that does the same thing. A `403` the row or the target
+  space decided keeps the route's own problem+json alone — the caller holds
+  every listed permission, so that sentence would be false. Telemetry keeps
   `outcome: "invoked", status: 403` (already filterable; no taxonomy change).
 
 ### Predicates in core
@@ -160,12 +176,16 @@ comment "mirrors server-side" goes away because there is no mirror.
 
 ### Chat prompt and server instructions
 
-`buildSystemPrompt` gains `canRunAgents`. When false, every `run_and_wait`
-paragraph is absent, the decision tree has no "run an agent" branch, and the
-caller-context block lists no agent as runnable. `buildServerInstructions`
-does the same for the run bullets (`runOps`, the shortcut, the readiness
-guidance). `chat-stream.ts` computes all three flags from the turn's
-permission set, as it does for two today.
+`turnCapabilities(has)` (`packages/module-chat/src/capabilities.ts`) derives the
+turn's answer ONCE from its permission set — `{ invokes, runLevel, authors }`,
+`runLevel` being `none | read | run | compose` — and `buildSystemPrompt` takes
+that `TurnCapabilities` rather than a flag per question. Below `run`, every
+`run_and_wait` paragraph is absent, the decision tree has no "run an agent"
+branch, and the caller-context block lists no agent as runnable.
+`buildServerInstructions` does the same for the run bullets (`runOps`, the
+shortcut, the readiness guidance). The chat stream and the web chip read the
+same derivation, so core keeps the predicates and no `mcp:*` vocabulary leaks
+into them.
 
 The caller-context block carries the caller's role in the current space and
 the turn's permission set as DATA, in the same `resource:action` vocabulary as
@@ -174,51 +194,6 @@ instead of inferring what it may call.
 
 Flipping the authoring toggle already re-mints the token per turn, so the
 declarations follow without `listChanged`.
-
-## Delivery
-
-Three pull requests, each green on its own, no behaviour change in the first.
-
-### PR A — guards say what they require (no behaviour change)
-
-- core: requirement stamp on `makePermissionGuard`; `requireAnyPermission`
-  stamps the disjunction; `canReadRuns` / `canRunAgents` added; version
-  `11.1.0`, tag `core@11.1.0` before PR B merges.
-- api: `lib/route-requirements.ts`; `getPlatformRoutes()`; catalog
-  `operationRequirement()` (derived, unread by the tools yet).
-- Conformance test (`test/integration/middleware/route-requirements.test.ts`):
-  every non-`GET` operation in the catalog under `/api/` has ≥ 1 requirement
-  or is conditional, with an explicit allowlist (auth, `/api/me/*`, welcome,
-  uploads, MCP transport). A route whose requirement the test cannot read fails
-  the build.
-- Unit tests: `:param` → `{param}` rewrite; disjunction; conditional;
-  `findTargetHandler` unwrapping through a sub-router with `onError()`.
-
-### PR B — the MCP surface follows the guards
-
-- Index per operation; `TAG_TO_RESOURCE` + `tagVisible` deleted.
-- `search_operations` / `describe_operation` / `invoke_operation` as above.
-- `buildMcpTools` declares by grant: `invoke_operation` on `mcp:invoke`,
-  `run_and_wait` on `mcp:invoke` ∧ `canRunAgents`, `list_files` when
-  `GET /api/files` is granted.
-- Server instructions: run bullets conditional on `canRunAgents`.
-- Tests, each mutation-checked (remove the gate → a test goes red):
-  - `viewer` (no `agents:run`): no `run_and_wait`, no `invoke_operation`
-    without `mcp:invoke`, index without `Runs`/`Packages` mutations.
-  - `runner`: `run_and_wait` with `kind:["agent"]`, `createAgent` in
-    `denied` with `agents:write`.
-  - `X-View-As` persona: same answers as the real role would get.
-  - OIDC end-user token holding `agents:run` only.
-  - `invoke_operation` on a denied op: `403`, result names the permission.
-  - Tag with no granted op has no section.
-
-### PR C — chat and chip on the same predicates
-
-- `chat-access.ts` on core predicates; `run-visibility.ts` callers moved.
-- `buildSystemPrompt` / `chat-stream.ts` with `canRunAgents`;
-  `prompt-invariants.test.ts` extended (no `run_and_wait` mention without
-  `agents:run`).
-- Browser check of the chip for `viewer`, `runner`, `operator`, `builder`.
 
 ## Non-goals
 

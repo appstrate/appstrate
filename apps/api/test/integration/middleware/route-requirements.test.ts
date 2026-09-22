@@ -10,11 +10,10 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { getTestApp } from "../../helpers/app.ts";
-import { setPlatformApp } from "../../../src/lib/platform-app.ts";
+import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
 import { getCatalog, type CatalogOperation } from "../../../src/modules/mcp/catalog.ts";
 
-setPlatformApp(getTestApp());
+registerTestPlatformApp();
 
 /** The route-table key the catalog joins on, for a failure message. */
 function key(op: CatalogOperation): string {

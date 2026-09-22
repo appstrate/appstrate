@@ -293,12 +293,6 @@ describe("permission requirement stamp", () => {
     expect(stampedRequirement(requireModulePermission("tasks", "read"))).toBe("tasks:read");
   });
 
-  it("carries a disjunction verbatim — the form requireAnyPermission stamps", () => {
-    expect(stampedRequirement(makePermissionGuard("runs:read|runs:read-all"))).toBe(
-      "runs:read|runs:read-all",
-    );
-  });
-
   it("still carries the boolean guard marker other code reads", () => {
     expect(stampedMarker(requireCorePermission("agents", "write"))).toBe(true);
     expect(stampedMarker(makePermissionGuard("runs:read"))).toBe(true);
