@@ -2,7 +2,6 @@
 
 /** File-backed package validation/import and MCP runtime discovery tools. */
 
-import { PACKAGE_WRITE_PERMISSIONS } from "../../lib/package-access.ts";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
@@ -44,21 +43,6 @@ interface PackageFileBytes {
   fileId: string;
   name: string;
   mime: string;
-}
-
-type PackageFileImportContext = Pick<PackageFileToolContext, "permissions" | "actor">;
-
-/**
- * Keep tool disclosure and server guidance on the same import eligibility rule.
- * The one enforcement point: `import_package_file` is declared only when this
- * holds, so its handler re-asking would be unreachable by construction.
- */
-export function canImportPackageFiles(ctx: PackageFileImportContext): boolean {
-  return (
-    ctx.actor.type === "user" &&
-    ctx.permissions.has("mcp:invoke") &&
-    PACKAGE_WRITE_PERMISSIONS.some((permission) => ctx.permissions.has(permission))
-  );
 }
 
 function packageSizeError(): McpError {
@@ -303,10 +287,15 @@ function buildRuntimeCapabilitiesTool(): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
-export function buildPackageFileTools(ctx: PackageFileToolContext): AppstrateToolDefinition[] {
+/** `imports` (`McpSurface.importsPackages`) is the import tool's only gate:
+ *  its handler calls the service directly, no route re-checks it. */
+export function buildPackageFileTools(
+  ctx: PackageFileToolContext,
+  imports: boolean,
+): AppstrateToolDefinition[] {
   return [
     buildValidatePackageFileTool(ctx),
-    ...(canImportPackageFiles(ctx) ? [buildImportPackageFileTool(ctx)] : []),
+    ...(imports ? [buildImportPackageFileTool(ctx)] : []),
     buildRuntimeCapabilitiesTool(),
   ];
 }

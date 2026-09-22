@@ -55,12 +55,7 @@ import { createInsufficientScopeError } from "better-auth/oauth2";
 import { APIError } from "better-auth/api";
 import { createMcpServer } from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
-import {
-  agentCapabilities,
-  reaches,
-  requireModulePermission,
-  type CorePermission,
-} from "@appstrate/core/permissions";
+import { requireModulePermission } from "@appstrate/core/permissions";
 import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib/errors.ts";
 import { getActor } from "../../lib/actor.ts";
 import { assertSpaceId } from "../../lib/ids.ts";
@@ -83,12 +78,13 @@ import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "../../lib/audiences.
 import {
   buildMcpTools,
   buildFileResourceProvider,
+  deriveMcpSurface,
   FORWARDED_AUTH_HEADERS,
   type Dispatch,
   type McpObserver,
+  type McpSurface,
 } from "./tools.ts";
-import { buildOperationIndex, getCatalog, operationGranted } from "./catalog.ts";
-import { canImportPackageFiles } from "./package-file-tools.ts";
+import { buildOperationIndex, operationIdGranted } from "./catalog.ts";
 
 const MCP_SERVER_VERSION = "1.0.0";
 /** Path prefix owning the per-org sub-tree. `:org` is the organization id. */
@@ -165,30 +161,18 @@ const MCP_RATE_LIMIT_PER_MIN = 120;
  */
 export function buildServerInstructions(
   permissions: ReadonlySet<string>,
+  surface: McpSurface,
   contextInjected = false,
-  packageImportAvailable = false,
 ): string {
-  const has = (permission: CorePermission): boolean => permissions.has(permission);
-  // Every conditional below reads the same `agentCapabilities` derivation
-  // `buildMcpTools` declares its tools from, so the instructions never teach a
-  // tool that is not there — and teach it by ABSENCE: nothing here says "you
-  // cannot invoke" or "you cannot run agents". `authors` is `agents:write`
-  // acted on through `invoke_operation` (manifests, `dependencies.*`, tool
-  // selection): a caller missing either half is not taught how, and one who
-  // cannot launch a run is not told that configuring one leads to running it.
-  const invokes = permissions.has("mcp:invoke");
-  const { runLevel, authors } = agentCapabilities(has, invokes);
-  const runs = reaches(runLevel, "run");
+  // The conditionals read the `surface` `buildMcpTools` declares its tools
+  // from, so no tool is taught that is not there — and a missing act is taught
+  // by ABSENCE: nothing here says "you cannot invoke" or "you cannot run
+  // agents". A caller who cannot launch a run is not told that configuring one
+  // leads to running it.
+  const { invokes, runs, composes: inline, authors, importsPackages } = surface;
   // A sentence naming an operation renders only for a caller its route grants,
-  // unless the gate it sits under already implies that grant. A missing id is
-  // a rename — a programming error, not a caller without the grant.
-  const granted = (operationId: string): boolean => {
-    const operation = getCatalog().operations.get(operationId);
-    if (!operation) {
-      throw new Error(`Catalog has no \`${operationId}\` operation — the instructions name it`);
-    }
-    return operationGranted(operation, permissions);
-  };
+  // unless the gate it sits under already implies that grant.
+  const granted = (operationId: string): boolean => operationIdGranted(operationId, permissions);
   const listsIntegrations = invokes && granted("listIntegrations");
   const connects = runs && granted("initiateIntegrationConnect");
   const runningAgents = runs ? "configuring or running" : "configuring";
@@ -210,15 +194,14 @@ export function buildServerInstructions(
     : "Give the caller that `connect_url` to open, in one short sentence, and end your turn — do NOT poll, loop, wait, or run in the same turn.";
   // Every inline-run span below follows `run_and_wait`'s own descriptor: a
   // caller who cannot compose is not told about a kind the route refuses.
-  const inline = reaches(runLevel, "compose");
   const runOps = inline ? "`runAgent`/`runInline`" : "`runAgent`";
   // Discovery-only (`mcp:read` alone): the index and describe_operation are the
   // whole surface, so the sentences that hand an operationId onwards stop there.
-  const surface = invokes ? "discover and call" : "discover and inspect";
+  const verbs = invokes ? "discover and call" : "discover and inspect";
   const pickOperation = invokes
     ? "then call describe_operation for its input schema and invoke_operation to run it"
     : "then call describe_operation for what it does and the shape of its input";
-  const packageImportGuidance = packageImportAvailable
+  const packageImportGuidance = importsPackages
     ? " Call `import_package_file` only when validation returns BOTH `valid: true` AND `importable: true`, and the user asked to add the package. If conflicts make it non-importable, report them instead of attempting a doomed mutation."
     : "";
   const inlineShortcut = inline
@@ -268,7 +251,7 @@ export function buildServerInstructions(
 - Connecting or reconnecting an integration before a run — an integration may be unconnected, expired, needs-reconnection, under-scoped, or otherwise unusable. Do NOT pre-validate just to launch a "do it now" ${inline ? "inline run" : "run"}: \`run_and_wait\` already runs the same readiness preflight and returns a 412 without consuming credits when the ${inline ? "manifest" : "agent"} cannot run. If \`run_and_wait\` fails with field errors whose \`field\` is \`integrations.<id>\`${inline ? " (or if you intentionally call `validateInlineRun` only to iterate/check readiness without launching)" : ""}, that integration is not ready — whatever the \`code\` (\`not_connected\`, \`needs_reconnection\`, \`insufficient_scopes\`, \`auth_key_mismatch\`, …), with ONE exception below. Handle each such error item by looking ${connects ? "FIRST " : ""}for a \`connect_url\` on the item. When it HAS one, the connect session is already minted and this tool result already carries it: do NOT call ${connects ? "`initiateIntegrationConnect`, do NOT call any other tool" : "any tool"}, do not restate the connection request.${connectFlow} ${connectDelivery} On a later turn, call \`run_and_wait\` again${inline ? " (or `validateInlineRun` if you are only checking readiness)" : ""}; when readiness passes, proceed with the run.
 - The exception — code \`must_choose_connection\` on \`integrations.<id>\` is NOT a connect problem: the integration is connected more than once and the platform needs you to say which connection to use. Do NOT start a connect flow for it (another connection makes the ambiguity worse). Retry the SAME \`run_and_wait\` call with the top-level \`connection_overrides\` argument, mapping that integration id to one candidate's \`id\`: \`connection_overrides: { "<id>": "<candidate_connection_id>" }\`. The key is the integration id itself — not the error's \`field\` path. The error's \`candidate_connections\` carry a \`label\`, an \`account_id\` and \`owned_by_actor\`: read those to choose — if the user named an account, match it there rather than listing connections in a separate call. Pick the candidate yourself when nothing distinguishes them; ask the user only if the choice visibly matters.`
     : "";
-  return `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you ${surface} any operation of the Appstrate REST API — their own descriptions tell you how. ${grounding} The operation index at the end of these instructions lists the operations available to your role by tag; it is your primary way to find an operation. Default to picking an operationId straight from that index, ${pickOperation}. Reach for search_operations only when the index is genuinely ambiguous or a capability you expect isn't listed — not as a routine first step. Never guess an operationId or body shape: describe_operation (or search_operations' best_match) is the source of truth for the input schema.${runIntro}
+  return `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you ${verbs} any operation of the Appstrate REST API — their own descriptions tell you how. ${grounding} The operation index at the end of these instructions lists the operations available to your role by tag; it is your primary way to find an operation. Default to picking an operationId straight from that index, ${pickOperation}. Reach for search_operations only when the index is genuinely ambiguous or a capability you expect isn't listed — not as a routine first step. Never guess an operationId or body shape: describe_operation (or search_operations' best_match) is the source of truth for the input schema.${runIntro}
 
 ## Core model
 Organization → Spaces (id \`spc_…\`, one default) → Agents → Runs. End-users (\`eu_…\`) are external identities for embedded use. Packages (agents, integrations, skills…) are identified as \`@scope/name\` (e.g. \`@appstrate/my-agent\`). Depending on the operation this is passed either as a single \`packageId\` param or split into separate \`scope\` and \`name\` params — describe_operation shows which; always keep the \`@\`, and the \`/\` when it's a single param.
@@ -570,7 +553,8 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       actor,
       scope,
     };
-    const tools = buildMcpTools(toolCtx);
+    const surface = deriveMcpSurface(permissions, actor);
+    const tools = buildMcpTools(toolCtx, surface);
     // `resources/read` for `appfile://file_xxx` — resolves through the same
     // forwarded-auth in-process dispatch as the tools (files are NOT listed
     // under `resources/list`; they surface only via `resource_link`).
@@ -579,11 +563,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       tools,
       { name: "appstrate", version: MCP_SERVER_VERSION },
       {
-        instructions: buildServerInstructions(
-          permissions,
-          contextInjected,
-          canImportPackageFiles({ permissions, actor }),
-        ),
+        instructions: buildServerInstructions(permissions, surface, contextInjected),
         resources,
       },
     );

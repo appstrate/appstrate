@@ -15,9 +15,15 @@ import {
   getCatalog,
   buildOperationIndex,
   operationGranted,
+  operationIdGranted,
   type CatalogOperation,
 } from "../../../../src/modules/mcp/catalog.ts";
-import { buildMcpTools, type Dispatch } from "../../../../src/modules/mcp/tools.ts";
+import {
+  buildMcpTools,
+  deriveMcpSurface,
+  type Dispatch,
+  type McpToolContext,
+} from "../../../../src/modules/mcp/tools.ts";
 import { internalDispatchHeader } from "../../../../src/lib/internal-dispatch.ts";
 import { validateManifest } from "@appstrate/core/validation";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
@@ -59,7 +65,7 @@ function makeTools(
     calls.push(req);
     return respond();
   };
-  const tools = buildMcpTools({
+  const tools = buildTools({
     origin: "https://test.local",
     authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
     permissions: new Set(permissions),
@@ -72,6 +78,11 @@ function makeTools(
   });
   const byName = new Map(tools.map((t) => [t.descriptor.name, t]));
   return { byName, calls };
+}
+
+/** What the router does: one surface per request, derived from the same caller. */
+function buildTools(ctx: McpToolContext) {
+  return buildMcpTools(ctx, deriveMcpSurface(ctx.permissions, ctx.actor));
 }
 
 function firstOp(predicate: (op: CatalogOperation) => boolean): CatalogOperation {
@@ -135,6 +146,82 @@ describe("buildMcpTools declarations", () => {
     // `files:read`; without it the tool could only ever return a 403.
     expect(names(["mcp:read"])).not.toContain("list_files");
     expect(names(["mcp:read", "files:read"])).toContain("list_files");
+  });
+
+  // The whole surface, per preset-shaped set: each flag is read off the guard of
+  // the route its tool dispatches to (`runAgent`+`getRun`, `runInline`,
+  // `listFiles`, `importBundle`), so any drift between the two is a diff here.
+  const ALWAYS = [
+    "describe_operation",
+    "get_me",
+    "get_runtime_capabilities",
+    "read_file",
+    "search_operations",
+    "validate_package_file",
+  ];
+  const cases: Array<{
+    who: string;
+    permissions: string[];
+    extra: string[];
+    kinds: string[] | null;
+  }> = [
+    {
+      who: "an admin-like caller",
+      permissions: [
+        "mcp:read",
+        "mcp:invoke",
+        "agents:read",
+        "agents:write",
+        "agents:run",
+        "runs:read-all",
+        "files:read",
+      ],
+      extra: ["import_package_file", "invoke_operation", "list_files", "run_and_wait"],
+      kinds: ["agent", "inline"],
+    },
+    {
+      who: "a runner that cannot read runs back",
+      permissions: ["mcp:read", "mcp:invoke", "agents:read", "agents:run"],
+      extra: ["invoke_operation"],
+      kinds: null,
+    },
+    {
+      who: "a viewer holding `mcp:read` only",
+      permissions: ["mcp:read"],
+      extra: [],
+      kinds: null,
+    },
+    {
+      who: "a launcher that may not author",
+      permissions: ["mcp:read", "mcp:invoke", "agents:run", "runs:read"],
+      extra: ["invoke_operation", "run_and_wait"],
+      kinds: ["agent"],
+    },
+    {
+      // Any package type's `write` opens `POST /api/packages/import-bundle`.
+      who: "a skill author who launches nothing",
+      permissions: ["mcp:read", "mcp:invoke", "skills:write"],
+      extra: ["import_package_file", "invoke_operation"],
+      kinds: null,
+    },
+  ];
+  for (const { who, permissions, extra, kinds } of cases) {
+    it(`declares exactly what the routes grant ${who}`, () => {
+      const { byName } = makeTools(permissions);
+      expect([...byName.keys()].sort()).toEqual([...ALWAYS, ...extra].sort());
+      const properties = byName.get("run_and_wait")?.descriptor.inputSchema.properties as
+        Record<string, { enum?: string[] }> | undefined;
+      expect(properties?.kind?.enum ?? null).toEqual(kinds);
+    });
+  }
+});
+
+describe("operationIdGranted", () => {
+  it("answers from the route table and refuses an id the catalog does not know", () => {
+    expect(operationIdGranted("runInline", new Set(["agents:run"]))).toBe(false);
+    expect(operationIdGranted("runInline", new Set(["agents:run", "agents:write"]))).toBe(true);
+    // A rename, not a denial: `false` here would silently hide a tool.
+    expect(() => operationIdGranted("noSuchOperation", new Set())).toThrow(/noSuchOperation/);
   });
 });
 
@@ -748,7 +835,7 @@ describe("buildMcpTools contextInjected", () => {
   it("drops get_me when the caller already injected its context, keeping the rest", () => {
     const dispatch: Dispatch = async () =>
       new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
-    const tools = buildMcpTools({
+    const tools = buildTools({
       origin: "https://test.local",
       authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
       // The full surface, so this asserts on get_me's absence and nothing

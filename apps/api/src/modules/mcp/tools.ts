@@ -48,6 +48,7 @@ import {
   getCatalog,
   collectReferencedSchemas,
   operationGranted,
+  operationIdGranted,
   type CatalogOperation,
 } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
@@ -60,12 +61,7 @@ import {
 } from "../../services/files.ts";
 import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
-import {
-  VIEW_AS_HEADER,
-  agentCapabilities,
-  reaches,
-  type CorePermission,
-} from "@appstrate/core/permissions";
+import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
 import { asString, textResult } from "./tool-results.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 
@@ -854,7 +850,7 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 
 /**
  * `run_and_wait` arguments that exist only for `kind:"inline"`. Declared only
- * to a caller whose `agentCapabilities` run level reaches `compose`. The launch allowlist
+ * to a caller whose surface `composes`. The launch allowlist
  * (`RUN_AND_WAIT_ARGUMENT_NAMES`) still knows them either way: an agent-only
  * caller that sends `kind:"inline"` anyway reaches the route and takes its 403,
  * the one refusal that owns the rule.
@@ -934,10 +930,8 @@ const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
   },
 };
 
-/**
- * `inline`: the caller's run level reaches `compose`. The route is the gate;
- * this only decides what the model is told.
- */
+/** `inline`: the caller's surface `composes`. The route is the gate; this only
+ *  decides what the model is told. */
 function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToolDefinition {
   // Inline-only descriptor spans are absent, not contradicted, for a caller
   // who cannot launch one.
@@ -1493,8 +1487,46 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
 }
 
 /**
+ * What the MCP server offers one caller: tools declared and acts taught by the
+ * instructions. Each act is read off the guards of the route it dispatches to
+ * — or, for `import_package_file`, the route it stands in for — so the surface
+ * cannot claim what the route table does not grant. Row-conditional routes
+ * count as granted: only the row they load can still refuse.
+ */
+export interface McpSurface {
+  /** `invoke_operation`; the transport already required `mcp:read`. */
+  invokes: boolean;
+  /** `run_and_wait`: launch AND read back — a run nobody can poll still bills. */
+  runs: boolean;
+  /** `run_and_wait` with `kind:"inline"`. */
+  composes: boolean;
+  /** Creating an agent through `invoke_operation`. */
+  authors: boolean;
+  listsFiles: boolean;
+  importsPackages: boolean;
+}
+
+/** Computed once per request; the tools and the instructions both read it. */
+export function deriveMcpSurface(permissions: ReadonlySet<string>, actor: Actor): McpSurface {
+  const granted = (operationId: string): boolean => operationIdGranted(operationId, permissions);
+  const invokes = permissions.has("mcp:invoke");
+  const runs = invokes && granted("runAgent") && granted("getRun");
+  return {
+    invokes,
+    runs,
+    composes: runs && granted("runInline"),
+    authors: invokes && granted("createAgent"),
+    listsFiles: granted("listFiles"),
+    // `import_package_file` calls the import service directly, so this is its
+    // only gate; the service records the import under a user id.
+    importsPackages: invokes && actor.type === "user" && granted("importBundle"),
+  };
+}
+
+/**
  * Build the per-request tool set. Handlers close over the caller's auth
- * context.
+ * context. What `surface` withholds is ABSENT, not declared then refused, and
+ * an undeclared tool is `Unknown tool` before any handler runs.
  *
  * There are no aliases for retired tool names or arguments. The server
  * advertises `tools: { listChanged: false }`, so a client holding a stale list
@@ -1502,29 +1534,15 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
  * and re-lists — bounded and transient, where an alias would be a permanent
  * second dispatch path.
  */
-export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
-  const has = (permission: CorePermission): boolean => ctx.permissions.has(permission);
-  const invokes = ctx.permissions.has("mcp:invoke");
-  const { runLevel } = agentCapabilities(has, invokes);
-  // `list_files` dispatches to this operation, so its declaration reads the
-  // same route table; its absence would mean a rename — a programming error.
-  const listFiles = getCatalog().operations.get("listFiles");
-  if (!listFiles) {
-    throw new Error("Catalog has no `listFiles` operation — list_files dispatches to it");
-  }
-  // What this caller's permissions make structurally impossible is ABSENT, not
-  // declared then refused; a row-conditional act stays visible. The route
-  // decides every call, so this is context reduction, not a gate.
+export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition[] {
   return [
-    buildSearchTool(ctx, invokes),
-    buildDescribeTool(ctx, invokes),
-    ...(invokes ? [buildInvokeTool(ctx)] : []),
-    // The `run` level is both halves of `canRunAgents`: launching a run this
-    // caller could not read back bills an orphan — see that predicate's doc.
-    ...(reaches(runLevel, "run") ? [buildRunAndWaitTool(ctx, reaches(runLevel, "compose"))] : []),
-    ...(operationGranted(listFiles, ctx.permissions) ? [buildListFilesTool(ctx)] : []),
+    buildSearchTool(ctx, surface.invokes),
+    buildDescribeTool(ctx, surface.invokes),
+    ...(surface.invokes ? [buildInvokeTool(ctx)] : []),
+    ...(surface.runs ? [buildRunAndWaitTool(ctx, surface.composes)] : []),
+    ...(surface.listsFiles ? [buildListFilesTool(ctx)] : []),
     buildReadFileTool(ctx),
-    ...buildPackageFileTools(ctx),
+    ...buildPackageFileTools(ctx, surface.importsPackages),
     // Dropped for a caller that injects the get_me payload into its own prompt;
     // `search_operations` stays either way, for `best_match`'s inline schema.
     ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx)]),

@@ -13,7 +13,9 @@ import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { getCatalog, type CatalogOperation } from "../../../../src/modules/mcp/catalog.ts";
 import {
   buildMcpTools,
+  deriveMcpSurface,
   type Dispatch,
+  type McpToolContext,
   type McpToolEvent,
 } from "../../../../src/modules/mcp/tools.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
@@ -37,7 +39,7 @@ function makeTools(permissions: string[], status = 200) {
       status,
       headers: { "content-type": "application/json" },
     });
-  const tools = buildMcpTools({
+  const ctx: McpToolContext = {
     origin: "https://test.local",
     authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
     permissions: new Set(permissions),
@@ -47,7 +49,8 @@ function makeTools(permissions: string[], status = 200) {
     scope: { orgId: "org_1", spaceId: "spc_1" },
     authorizeBundle: async () => {},
     mayShareRoot: async () => false,
-  });
+  };
+  const tools = buildMcpTools(ctx, deriveMcpSurface(ctx.permissions, ctx.actor));
   const byName = new Map(tools.map((t) => [t.descriptor.name, t]));
   return { byName, events };
 }

@@ -131,6 +131,16 @@ export function operationGranted(op: CatalogOperation, permissions: ReadonlySet<
 }
 
 /**
+ * {@link operationGranted} for an operation the code names. An unknown id is a
+ * rename this code did not follow — a programming error, never a denial.
+ */
+export function operationIdGranted(operationId: string, permissions: ReadonlySet<string>): boolean {
+  const op = getCatalog().operations.get(operationId);
+  if (!op) throw new Error(`Catalog has no \`${operationId}\` operation`);
+  return operationGranted(op, permissions);
+}
+
+/**
  * A compact index of the operations this caller may invoke, grouped by tag —
  * one comma-separated line of operationIds per tag, so a client picks an id
  * straight from it instead of searching. Method/path are omitted;
