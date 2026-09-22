@@ -705,12 +705,12 @@ export function createIntegrationsRouter() {
   // form, no end-user interaction. The interactive path is the Connect portal
   // (`connect/session`) — use that whenever a human/agent supplies the secret.
   //
-  // No provisioner runs here, so a platform-minted name is refused (see
-  // `services/connect/provisioning.ts`). Runtime invariants therefore live in
-  // the auth's `credentials.schema`, validated on both doors — not in the
+  // No provisioner runs here, so an auth that declares provisioning
+  // (`@appstrate/ssh`) never connects through this door: a platform-minted
+  // name is refused below (see `services/connect/provisioning.ts`), and
+  // omitting it fails `required`. Runtime invariants therefore live in the
+  // auth's `credentials.schema`, validated on both doors — not in the
   // provisioner.
-  // An auth that declares provisioning (`@appstrate/ssh`) never connects here:
-  // submitting a minted name is refused below, and omitting it fails `required`.
   router.post(
     "/:packageId{@[^/]+/[^/]+}/auths/:authKey/connect/fields",
     requirePermission("integrations", "connect"),

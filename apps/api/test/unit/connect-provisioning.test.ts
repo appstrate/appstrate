@@ -695,7 +695,7 @@ describe("the install block refuses an sshd older than OpenSSH 7.2", () => {
     ["a version with no minor", "OpenSSH_7"],
   ])("warns and installs anyway under %s", async (_label, version) => {
     const { run, keys } = await installUnder(version);
-    expectWarnedAndInstalled(run, keys);
+    await expectWarnedAndInstalled(run, keys);
   });
 
   function expectWarnedAndInstalled(run: ShellRun, keys: string) {
