@@ -26,6 +26,7 @@ import { RailLink } from "../../components/settings/rail-link";
 import { RailGroup, RailHeader } from "../../components/settings/rail-shell";
 import { ContextSelector } from "../../components/settings/context-selector";
 import { NavigateKeepingState } from "../../components/navigate-keeping-state";
+import { cn } from "@appstrate/ui/cn";
 import { PanelDialog } from "../../components/panel-dialog";
 import { useSpaces } from "../../hooks/use-spaces";
 import { useSpaceSwitcher, useCurrentSpaceId } from "../../hooks/use-current-space";
@@ -366,6 +367,21 @@ export function UnifiedSettingsLayout() {
       closeLabel={t("btn.close", { ns: "common" })}
       reserveCloseArea
       mobileAsSurface
+      // The same band as the catalogue: invisible at rest, the section's name
+      // once the page has scrolled past its own heading — and an opaque surface
+      // under the close control, which the page used to scroll beneath.
+      contentHeader={(stuck) =>
+        activeItem ? (
+          <span
+            className={cn(
+              "truncate text-sm font-semibold transition-opacity duration-200",
+              stuck ? "opacity-100" : "opacity-0",
+            )}
+          >
+            {label(activeItem.labelKey)}
+          </span>
+        ) : null
+      }
       onClose={closeSettings}
     >
       {activeSection && activeItem && (

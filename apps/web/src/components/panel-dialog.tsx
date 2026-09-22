@@ -116,7 +116,9 @@ export function PanelDialog({
               stuck && "bg-background border-b",
             )}
           >
-            {contentHeader(stuck)}
+            {/* One height for every caller, whether it draws a button or a
+                title, so two panels leave the same room above their page. */}
+            <div className="flex min-h-8 items-center">{contentHeader(stuck)}</div>
           </div>
           {/* Only a handle on the scrolling pane. */}
           <div ref={attach} aria-hidden className="-mt-12 h-px" />

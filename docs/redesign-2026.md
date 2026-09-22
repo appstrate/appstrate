@@ -1853,6 +1853,24 @@ waiting — the common case — it opens THAT package's sheet, where the alert
 names the space and the button activates it. Several shares keep the filtered
 list, since a list is what a choice between several needs.
 
+**The settings panel takes the same band, and the system-switch belief was the catalogue's alone**
+
+The unified settings panel had the defect the catalogue had: its content
+scrolled under the floating close control. It passes a `contentHeader` now,
+invisible at rest and carrying the section's name once scrolled. The band's
+content sits in a fixed `min-h-8` row inside `PanelDialog`, so a panel that
+draws a title and one that draws a back button leave the same room above
+their page.
+
+After the catalogue was found hiding a system package's switch, every other
+screen that reads activation was checked for the same belief. None holds it:
+the agent page says so in its own words ("a SYSTEM agent is not exempt … the
+sticky opt-out the run gate then honours", `agent-actions.tsx`), and the skill,
+MCP-server and integration pages read `placement.state` off the space library,
+which already answers `active` for a system package nobody touched. The
+`isBuiltIn` guards that remain gate writing, sharing and deleting, which a
+system package genuinely refuses.
+
 **The share alert and the row it names share a tint**
 
 An alert saying "partagé avec Bac à sable" sat above a table where nothing

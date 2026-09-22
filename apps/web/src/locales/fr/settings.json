@@ -1471,7 +1471,7 @@
   "catalogue.pendingElsewhere_one": "Dont {{count}} dans vos autres espaces.",
   "catalogue.pendingElsewhere_other": "Dont {{count}} dans vos autres espaces.",
   "catalogue.offeredByShort": "par {{name}}",
-  "catalogue.addToSpace": "Ajouter…",
+  "catalogue.addToSpace": "Ajouter",
   "catalogue.homeSpace": "Espace d'origine",
   "catalogue.sheet.type.agent": "Agent",
   "catalogue.sheet.type.skill": "Skill",

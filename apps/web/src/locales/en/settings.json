@@ -1471,7 +1471,7 @@
   "catalogue.pendingElsewhere_one": "{{count}} of them in your other spaces.",
   "catalogue.pendingElsewhere_other": "{{count}} of them in your other spaces.",
   "catalogue.offeredByShort": "by {{name}}",
-  "catalogue.addToSpace": "Add…",
+  "catalogue.addToSpace": "Add",
   "catalogue.homeSpace": "Home space",
   "catalogue.sheet.type.agent": "Agent",
   "catalogue.sheet.type.skill": "Skill",
