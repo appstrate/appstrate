@@ -63,8 +63,8 @@ describe("NotificationContent", () => {
     ]);
 
     expect(html).toContain(`Alice Martin vous a partagé ${PACKAGE_ID}`);
-    // The current space view has the acceptance action, regardless of type.
-    expect(html).toContain('href="/catalogue/placed/agent"');
+    // One share, one decision: the link opens THAT package's sheet.
+    expect(html).toContain('href="/catalogue/discover/agent?package=%40acme%2Fworker"');
     // Not a run: no run-scoped link, and nothing that reads as a dead agent.
     expect(html).not.toContain("Agent supprimé");
     expect(html).not.toContain('href="/runs/');
@@ -81,8 +81,8 @@ describe("NotificationContent", () => {
       },
     ]);
 
-    // A shared SKILL opens the catalogue on its own kind, where the offer is.
-    expect(html).toContain('href="/catalogue/placed/skill"');
+    // A shared SKILL opens on its own kind, on the package itself.
+    expect(html).toContain('href="/catalogue/discover/skill?package=%40acme%2Fhelper"');
   });
 
   it("still renders a run notification as the agent and its status", () => {

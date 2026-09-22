@@ -28,10 +28,19 @@ export function usePendingOfferCount(): number {
   return data ? pendingOfferCount(Object.values(data.packages).flat()) : 0;
 }
 
-/** The first kind holding an offer, so a link lands on a tab that shows one. */
-export function usePendingOfferKind(): PackageType | null {
+/**
+ * Where the navigation's entry should land while offers wait: the first kind
+ * holding one, and — when exactly ONE package waits — that package, so the
+ * first click opens the decision itself rather than a list to search.
+ */
+export function usePendingOfferTarget(): { kind: PackageType; packageId: string | null } | null {
   const { data } = useCatalogueLibrary();
   if (!data) return null;
   const kinds = ["agent", "skill", "integration", "mcp-server"] as const;
-  return kinds.find((kind) => pendingOfferCount(data.packages[kind] ?? []) > 0) ?? null;
+  const kind = kinds.find((candidate) => pendingOfferCount(data.packages[candidate] ?? []) > 0);
+  if (!kind) return null;
+  const waiting = Object.values(data.packages)
+    .flat()
+    .filter((pkg) => pendingOfferCount([pkg]) > 0);
+  return { kind, packageId: waiting.length === 1 ? waiting[0]!.id : null };
 }

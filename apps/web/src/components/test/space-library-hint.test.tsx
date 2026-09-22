@@ -107,10 +107,7 @@ function hintFor(permissions: string[], type: "agent" | "integration" | "skill")
 
 /** The library link the hint wraps, when it renders one at all. */
 function libraryLink(html: string): string | null {
-  return (
-    html.match(/<a[^>]*href="\/catalogue\/placed\/[a-z-]+(\?space=[^"]*)?"[^>]*>[^<]*<\/a>/)?.[0] ??
-    null
-  );
+  return html.match(/<a[^>]*href="\/catalogue\/discover\/[a-z-]+"[^>]*>[^<]*<\/a>/)?.[0] ?? null;
 }
 
 describe("SpaceLibraryHint", () => {

@@ -1580,53 +1580,45 @@ So the catalogue absorbed them and they are deleted. It is one screen, graded
 by what the caller may do, which is also how the server answers: the library
 response only ever carries the spaces the caller can enter.
 
-**Its shape**
+**Its shape (as of 22 September, evening)**
 
-- **The first axis is possession, not provenance**, as a segmented control at
-  the head of the rail — the way Studio / Chat head the navigation — rather
-  than a menu hiding one of two values. "Espaces" against
-  "Découvrir" — what is already placed in a space you reach, against what you
-  could still place. Provenance (the org's packages, Appstrate's) became a
-  filter, which is what it is: an attribute of a package, not the question a
-  reader opens with. The old `/catalogue/org/...` links still resolve.
-- **Each half has one form, and the reader does not choose it.** Découvrir is
-  BROWSING — a name, what it does, where it comes from — so it is cards, and
-  adding is done on the package's sheet (below), through the same activation
-  that asks about missing integrations first. A switch per space was noise there:
-  every row of that half is placed nowhere, so every cell read "off". Vos
-  espaces is MANAGING — states compared down a column — so it is a table. No
-  view toggle on either: it would offer each half the other's wrong shape.
-- **A column per space, a switch per cell** (Vos espaces). "Actif ici" named no space while
-  the column beside it listed the others: two ways of speaking about one
-  subject, one of them mute. Now each column is a space and each cell says and
-  CHANGES the state there. A caller with one space keeps the table they had,
-  with the space named instead of implied.
-- **Three states, and the third is the one the model added.** Active, switched
-  off, and OFFERED — a placement somebody made and nobody switched on. It is
-  not an inbox item to accept: turning the switch on IS accepting it.
-- **Offers are one click from being the only rows.** A line above the placed
-  table ("2 packages proposés attendent une décision · Voir") applies the State
-  filter, which is in the URL like the space one; the navigation's badge opens
-  the catalogue on it directly. Not a second list above the table — the offers
-  ARE rows of it, and a copy would be two places to take one decision. Each
-  offered cell names who made it ("par Julie"), from `shared_by`.
-- **The navigation carries the offers**, because nothing else does: the share
-  route notifies a PERSON and says nothing at all when the target is a team
-  space (`createPackageShareNotification`, gated on `recipientUserId`). The
-  count is placements, not packages — one package offered to three spaces is
-  three decisions.
-- **A space filter narrows both axes at once**: the columns to the chosen
-  spaces, and — in the placed half — the rows to what is placed in them. It is
-  in the URL (`?space=`), so a link opens the catalogue already narrowed and
-  moving from Agents to Skills keeps it. "Parcourir le catalogue" from a
-  space's own page opens narrowed to that space; the navigation's entry opens
-  the whole map; the bell opens on the space an offer was made to. The context
-  the catalogue once IMPLIED ("ici") is now a chip, written on the screen and
-  removed in one click. The State filter reads the spaces on screen.
-- **The row's menu holds what acts on the PACKAGE**: move its home, offer it,
-  withdraw an offer. Activating is deliberately not there — it is the switch in
-  a named column, and a menu item could only ever mean "the space the app
-  happens to be in".
+- **Two readings of one set, in the bar's corner**: "Découvrir" (the default)
+  and "Par espace". They used to be the rail's first axis, which made them
+  read as two places holding different things; they are one catalogue seen two
+  ways, so they sit with the other ways of seeing the list (search, filters,
+  columns). The rail keeps the one axis that IS a partition: the kinds, each
+  with how many it holds. The URL still says `discover` and `placed`.
+- **Découvrir** is the whole catalogue in cards. Each card answers the question
+  a browsing reader asks — does the space I am in run this? — with "✓ Actif
+  ici" or an "Ajouter" that activates it there (sharing it first when the
+  caller may, `routes/spaces.ts`). A share waiting on one of the reader's spaces
+  is a pill on the card ("Partagé par Julie Ferrand"). It opens by default:
+  it is the reading everybody needs.
+- **Par espace** is the matrix, for whoever manages several spaces: a column
+  per space, a switch per cell, the reader's own space first ("ici", tier 2,
+  wider), every reachable space always shown. Hiding one is the column menu's
+  job; there is no space filter and no "espace actif" mode any more — both
+  answered, in a heavier way, the question Découvrir's tick answers.
+- **The State filter speaks each reading's words**: here / not here / shared
+  in Découvrir, active / switched off / shared in Par espace. One URL key,
+  dropped when the reading changes.
+- **Three placement states**, the third being the one the model added: active,
+  switched off, and SHARED — a placement somebody made and nobody switched on.
+  Turning the switch on IS accepting it; there is nothing else to accept.
+- **A share is one click from its decision.** The alert above the list, the
+  navigation's badge and the bell all open THE package's sheet when exactly one
+  share waits, and the list filtered on shares when several do.
+- **The navigation carries the shares**, because nothing else does: the share
+  route notifies a PERSON and says nothing when the target is a team space
+  (`createPackageShareNotification`, gated on `recipientUserId`). The count is
+  placements — one package shared with three spaces is three decisions.
+- **One menu of deeds, drawn twice** (`CatalogueMenuItems`): the matrix row's
+  "…" and the sheet's "Actions" — open, move its home, share, withdraw a share.
+  Activating is not in it: it is a switch that names its space, a column in
+  the matrix, "Actif ici" on the sheet's title line.
+- **"Parcourir le catalogue"** from any page opens Découvrir on that kind; it
+  no longer narrows to the space the reader came from, since that space leads
+  every table and ticks every card.
 
 **There is no organization-wide share, and what that leaves for Découvrir**
 
@@ -1768,43 +1760,28 @@ column head of that space, and its row on a sheet, carry a small "ici" pill.
 Not the implicit "ici" the catalogue used to have, which claimed a context
 without naming it: this names the space and changes nothing else.
 
-**The reader's own space leads the table, and has a one-click shortcut**
+**The reader's own space leads the table**
 
-Two more things made the default view hard to read, both fixed:
+The columns opened on the organization's default space, because that is the
+order the server answers in. The space the app is STANDING in leads now,
+whatever its rank, and it is the tier-2 column — the one that survives a
+narrow table — so the reader's anchor never moves and never drops. It is also
+the wider column, since it carries the "ici" pill beside the name.
 
-- **The columns opened on the organization's default space**, because that is
-  the order the server answers in. The space the app is STANDING in leads now,
-  whatever its rank, and it is the tier-2 column — the one that survives a
-  narrow table — so the reader's anchor never moves and never drops. It is also
-  the wider column, since it carries the "ici" pill beside the name.
-- **A switcher where the view switch used to be**: "Espace actif" against
-  "Tous les espaces", in the shape the rail's Espaces / Découvrir already has —
-  one of two states SHOWN rather than a button whose pressed state had to be
-  deduced. It WRITES the space filter (`?space=`) rather than holding a state
-  of its own, so the chip and the switcher cannot disagree; a hand-picked pair
-  of spaces lights neither half, which is the truth. Découvrir drops both the
-  switcher and the space filter: its rows are placed in no space, so narrowing
-  by space there would filter on nothing.
-
-Narrowing must not hide a decision: the alert above the table counts shares
-waiting in EVERY space the caller reaches, adds "Dont N dans vos autres
-espaces" when the table shows fewer, and its "Voir" widens the table back
-before filtering on the offered state.
-
-Three defects that came with those controls, all fixed and each worth knowing:
+Two defects met on the way, both worth knowing:
 
 - **Two `setSearchParams` in one handler lose the first.** Each builds its own
   `URLSearchParams` from the params it was RENDERED with, so the second
-  overwrites the first: "Voir" widened the table and filtered on offers, and
-  only the filter survived — an empty list, from a button that promised the
-  opposite. The two URL dimensions are written by one function now.
-- **"Réinitialiser" could not see them.** The bar resets the dimensions
-  `list.reset` owns, and the catalogue's space and state live in the URL, so
-  both chips stayed. `PackageCollection` takes an `onResetFilters` the caller
-  owns, called alongside.
-- **An alert belongs above the title**, both on the list and on a package's
-  sheet — the decision is not something a reader should meet after the heading
-  of the thing it concerns.
+  overwrites the first. It bit when one button had to widen the table AND
+  filter it; there is one URL-backed dimension left (the state), written by one
+  setter, so the trap is closed by construction rather than by care.
+- **"Réinitialiser" could not see URL-backed filters.** The bar resets the
+  dimensions `list.reset` owns. `PackageCollection` takes an `onResetFilters`
+  the caller owns, called alongside.
+
+An alert belongs ABOVE the title, both on the list and on a package's sheet:
+a decision is not something a reader should meet after the heading of the
+thing it concerns.
 
 **A system package has a real switch, and the screen was hiding it**
 
@@ -1824,34 +1801,14 @@ consequence is the one that makes Découvrir honest for agents and skills: a
 built-in switched off in every space you reach is placed nowhere, so it lands
 in Découvrir, which is where you switch it back on.
 
-**Découvrir keeps what you already have, with a tick (22 September)**
+**Why Découvrir stopped being the complement of the other half**
 
 The two halves used to be a PARTITION: a package left Découvrir the instant it
 was placed. For an organisation's own agents and skills that emptied it, since
 they are placed by their home the moment they exist — "Rien de plus à ajouter",
-on a catalogue holding ten of them.
-
-They are two READINGS of one set now, the way a store keeps showing what you
-own beside what you do not:
-
-- **Découvrir** is the whole catalogue, in cards, answering the one question a
-  browsing reader asks: does the space I am in run this? A tick, "Actif ici",
-  when it does; the deed when it does not, which activates it HERE (and shares
-  it first when the caller holds `<type>:share` in its home — the route does
-  both, `routes/spaces.ts`).
-- **Espaces** is the matrix of what your spaces hold, where the finer question
-  ("and in my other spaces?") is answered column by column.
-
-The complement disappears from the vocabulary, and with it the last corner
-where "unplaced" leaked onto the screen.
-
-**A share opens the package, not a table**
-
-"Voir" on the share alert filtered the matrix on the offered state, and left
-the reader looking for a cell in a column of switches. With exactly one share
-waiting — the common case — it opens THAT package's sheet, where the alert
-names the space and the button activates it. Several shares keep the filtered
-list, since a list is what a choice between several needs.
+on a catalogue holding ten of them. Two readings of one set, the way a store
+keeps showing what you own beside what you do not, is what "Its shape" above
+describes.
 
 **The settings panel takes the same band, and the system-switch belief was the catalogue's alone**
 

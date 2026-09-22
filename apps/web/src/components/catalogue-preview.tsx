@@ -29,7 +29,6 @@ import { useTranslation } from "react-i18next";
 import {
   Boxes,
   Clock,
-  ExternalLink,
   Hammer,
   Hash,
   House,
@@ -40,7 +39,6 @@ import {
   TextCursorInput,
   Wrench,
 } from "lucide-react";
-import { Link } from "react-router-dom";
 import { cn } from "@appstrate/ui/cn";
 import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
 import { Alert, AlertTitle } from "@appstrate/ui/components/alert";
@@ -69,7 +67,6 @@ import {
   type SheetSpaceRow,
 } from "../lib/catalogue-sheet";
 import { formatDateField } from "../lib/format-date";
-import { packageDetailPath } from "../lib/package-paths";
 import { packageKeys } from "../lib/query-keys";
 import { SettingsGroup } from "./settings/setting-row";
 import { SettingsHeading } from "./settings/settings-heading";
@@ -160,6 +157,7 @@ export function CataloguePreview({
   integrations,
   agents,
   protocol,
+  actionsMenu,
   busy,
   onSetActive,
 }: {
@@ -176,6 +174,8 @@ export function CataloguePreview({
   agents: LibraryPackageItem[];
   /** An integration's protocol, when the catalogue knows it. */
   protocol?: string;
+  /** The package's Actions menu, built by the catalogue that owns its dialogs. */
+  actionsMenu?: ReactNode;
   busy: boolean;
   /** Goes through the catalogue's own activation, which asks about integrations first. */
   onSetActive: (spaceId: string, next: boolean) => void;
@@ -196,6 +196,8 @@ export function CataloguePreview({
   const other = type !== "agent" ? (detail as OrgPackageItemDetail | undefined) : undefined;
 
   const rows = sheetSpaceRows(placement, spaces, grantOf);
+  /** The reader's own space, when the sheet lists it: the title's switch. */
+  const hereRow = rows.find((row) => row.id === currentSpaceId);
   const mode = sheetSpaceMode(rows);
   const offers = sheetOffers(rows);
   const home = spaces.find((space) => space.id === placement.homeSpaceId);
@@ -295,17 +297,21 @@ export function CataloguePreview({
         </Alert>
       ))}
 
-      {/* The action sits on the TITLE's line, not on the back link's: leaving
-          for the package's own page acts on the package, while Back is the
-          panel's own navigation. */}
+      {/* The title's line carries what acts on the package: the switch for
+          the space the reader is in — the deed a Découvrir card offers, in one
+          click — and the one Actions menu, the same items as the matrix row's
+          "…" (`CatalogueMenuItems`), opening with the package's own page. */}
       <div className="flex items-start justify-between gap-4">
         <SettingsHeading className="mb-2" title={item.name || item.id} />
-        <Button asChild variant="outline" size="sm" className="shrink-0 gap-1.5">
-          <Link to={packageDetailPath(type, item.id)}>
-            <ExternalLink className="size-3.5" />
-            {t("catalogue.openFullPage")}
-          </Link>
-        </Button>
+        <div className="flex shrink-0 items-center gap-3">
+          {hereRow && (
+            <label className="flex items-center gap-2 text-sm">
+              <span className="text-muted-foreground">{t("catalogue.activeHere")}</span>
+              {switchFor(hereRow)}
+            </label>
+          )}
+          {actionsMenu}
+        </div>
       </div>
       {/* What the package IS, in the badges the package's own header uses. */}
       <div className="flex flex-wrap items-center gap-1.5">

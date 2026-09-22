@@ -38,10 +38,19 @@
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useLocation, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { ArrowLeft, Boxes, Check, Inbox, Layers, LibraryBig, Wrench } from "lucide-react";
+import {
+  ArrowLeft,
+  Boxes,
+  Check,
+  ExternalLink,
+  Inbox,
+  Layers,
+  LibraryBig,
+  Wrench,
+} from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Alert } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
@@ -51,7 +60,7 @@ import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { MoveHomeSpaceDialog } from "./package-detail/move-home-space-dialog";
 import { SharePackageDialog } from "./package-detail/share-package-dialog";
 import { ActivationClosureDialog } from "./catalogue-activation-dialog";
-import { splitPackageRef } from "../lib/package-paths";
+import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
 import { useOrg } from "../hooks/use-org";
 import { useSpaces } from "../hooks/use-spaces";
 import { fetchPackageDetail } from "../hooks/use-packages";
@@ -85,6 +94,8 @@ import {
 import { CollectionTabs } from "./collection-tabs";
 import type { CardItem } from "../pages/package-list";
 import { CataloguePreview } from "./catalogue-preview";
+import { CatalogueMenuItems } from "./catalogue-row";
+import { PageActionsMenu } from "./page-actions-menu";
 import { PanelDialog } from "./panel-dialog";
 import { PackageCollection } from "./package-collection";
 import type { FilterSpec } from "./list-toolbar";
@@ -102,8 +113,10 @@ import { SettingsHeading } from "./settings/settings-heading";
 import { Spinner } from "./spinner";
 
 /**
- * The catalogue's first axis: what is already PLACED in a space this caller
- * reaches, and what is not.
+ * The catalogue's two READINGS of one set: `discover` browses every package in
+ * cards, `placed` manages what the reader's spaces hold, space by space.
+ *
+ * The URL still says `placed` for the second, which is what it shows.
  *
  * It used to be provenance (the org's packages versus Appstrate's), which
  * answered a question nobody asks first: a reader wants to know what they
@@ -202,28 +215,13 @@ export function OrgCatalogueModal({
   // grant in each, which is the verdict a switch in that column answers to.
   const { data: reachable } = useSpaces();
   const grantById = new Map((reachable ?? []).map((space) => [space.id, space] as const));
-  /**
-   * The spaces the reader narrowed to, from the URL.
-   *
-   * In the URL rather than in the bar's local state for two reasons: a link can
-   * open the catalogue already narrowed (a package page's "Parcourir le
-   * catalogue" opens on the space you were in), and moving from Agents to
-   * Skills keeps it, because switching kinds keeps the query.
-   *
-   * Narrowing shows the space in a chip, so the context is written on the
-   * screen and removed in one click — the difference between this and the
-   * implicit "ici" the catalogue used to have.
-   */
   const routerLocation = useLocation();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const knownSpaceIds = spaces.map((space) => space.id);
-  const chosenSpaces = (searchParams.get("space") ?? "")
-    .split(",")
-    .filter((id) => knownSpaceIds.includes(id));
-  const visibleSpaces =
-    chosenSpaces.length > 0 ? spaces.filter((space) => chosenSpaces.includes(space.id)) : spaces;
-  const setChosenSpaces = (next: string[]) => narrow({ spaces: next });
-  const spaceColumnsInput = visibleSpaces.map((space) => ({
+  // Every space the reader reaches is a column, theirs first. Narrowing to one
+  // used to be a mode and a filter of its own; hiding a column is what the
+  // column menu is for, and "what does my space run" is Découvrir's question.
+  const spaceColumnsInput = spaces.map((space) => ({
     id: space.id,
     name: space.name,
     grant: grantById.get(space.id),
@@ -324,78 +322,54 @@ export function OrgCatalogueModal({
       },
     );
 
-  // The dimension worth narrowing is the STATE a row is in, which is what the
-  // placement model made expressible: a package can be here and off, or here
-  // and offered to nobody's answer yet. "Where does it run" was the closest
-  // this screen could say before, and it could not tell those two apart.
-  const STATE_VALUES = ["active", "inactive", "offered"] as const;
+  /**
+   * The STATE filter, in each reading's own words.
+   *
+   * Par espace compares spaces, so its states are the placement's — active,
+   * switched off, shared and waiting — anywhere on screen. Découvrir asks about
+   * the space the reader is in, so its states say so: here, not here, shared
+   * with one of your spaces. Same URL key, and `pages/catalogue.tsx` drops it
+   * when the reading changes, so one reading's value never lands in the other.
+   */
+  const STATE_VALUES = discovering
+    ? (["here", "elsewhere", "offered"] as const)
+    : (["active", "inactive", "offered"] as const);
   const states = (searchParams.get("state") ?? "")
     .split(",")
-    .filter((value): value is (typeof STATE_VALUES)[number] =>
-      (STATE_VALUES as readonly string[]).includes(value),
-    );
-  const setStates = (next: string[]) => narrow({ states: next });
-  /**
-   * The two URL-backed dimensions, written TOGETHER.
-   *
-   * They used to have a setter each, and two `setSearchParams` in one handler
-   * lost the first: each builds its own `URLSearchParams` from the params it
-   * was rendered with, so the second overwrote the first. "Voir les partages"
-   * widened the table and filtered on offers, and only the filter survived —
-   * an empty list, on a button that promised the opposite.
-   */
-  function narrow({
-    spaces: nextSpaces,
-    states: nextStates,
-  }: {
-    spaces?: string[];
-    states?: string[];
-  }) {
+    .filter((value) => (STATE_VALUES as readonly string[]).includes(value));
+  const setStates = (next: string[]) =>
     setSearchParams(
       (prev) => {
         const out = new URLSearchParams(prev);
-        if (nextSpaces !== undefined) {
-          if (nextSpaces.length > 0) out.set("space", nextSpaces.join(","));
-          else out.delete("space");
-        }
-        if (nextStates !== undefined) {
-          if (nextStates.length > 0) out.set("state", nextStates.join(","));
-          else out.delete("state");
-        }
+        if (next.length > 0) out.set("state", next.join(","));
+        else out.delete("state");
         return out;
       },
       // The overlay's background travels in the state; dropping it would
       // close the catalogue under the reader's hand.
       { replace: true, state: routerLocation.state },
     );
-  }
-  const visibleIds = visibleSpaces.map((space) => space.id);
-  /** Narrowed to the reader's own space, which is what the bar's shortcut writes. */
-  const onlyHere = chosenSpaces.length === 1 && chosenSpaces[0] === spaceId;
-  /** Its states across the spaces on screen: the columns are the question. */
-  const statesIn = (placement: CataloguePlacement): PlacementState[] => {
+  /** Its states across every space: the columns are the question. */
+  const statesIn = (placement: CataloguePlacement): string[] => {
+    if (discovering) {
+      return [
+        placement.here === "active" ? "here" : "elsewhere",
+        ...(placement.offeredIn.length > 0 ? ["offered"] : []),
+      ];
+    }
     const out: PlacementState[] = [];
-    if (placement.activeIn.some((id) => visibleIds.includes(id))) out.push("active");
-    if (placement.inactiveIn.some((id) => visibleIds.includes(id))) out.push("inactive");
-    if (placement.offeredIn.some((id) => visibleIds.includes(id))) out.push("offered");
+    if (placement.activeIn.length > 0) out.push("active");
+    if (placement.inactiveIn.length > 0) out.push("inactive");
+    if (placement.offeredIn.length > 0) out.push("offered");
     return out;
   };
   const rows = all.filter((item) => {
     const placement = placementById.get(item.id);
     if (!placement) return false;
-    // Narrowed to some spaces, the placed half shows what is placed IN them —
-    // "what is in this space" is the question a narrowed view asks. Découvrir
-    // is untouched: its rows are placed nowhere, by definition.
-    if (!discovering && chosenSpaces.length > 0 && statesIn(placement).length === 0) return false;
-    if (discovering || states.length === 0) return true;
+    if (states.length === 0) return true;
     return statesIn(placement).some((state) => states.includes(state));
   });
-  /**
-   * Shares waiting for a decision, counted on EVERY space this caller reaches
-   * rather than on the columns on screen: narrowing the table must not make an
-   * offer disappear from the count while the navigation's badge still carries
-   * it. What narrowing hides is said in its own words below.
-   */
+  /** Shares waiting for a decision, in every space this caller reaches. */
   const pendingAll = ofKind.reduce((total, item) => {
     const placement = placementById.get(item.id);
     return total + (placement?.offeredIn.length ?? 0);
@@ -405,31 +379,21 @@ export function OrgCatalogueModal({
     pendingAll === 1
       ? ofKind.find((item) => (placementById.get(item.id)?.offeredIn.length ?? 0) > 0)?.id
       : undefined;
-  const pendingHere = ofKind.reduce((total, item) => {
-    const placement = placementById.get(item.id);
-    return total + (placement?.offeredIn.filter((id) => visibleIds.includes(id)).length ?? 0);
-  }, 0);
-  // Découvrir's rows are placed in no space at all, so narrowing by space
-  // there filters on nothing: the control is dropped rather than offered dead.
-  const spaceFilter: FilterSpec | null =
-    !discovering && spaces.length > 1
-      ? {
-          id: "space",
-          label: t("catalogue.filter.space"),
-          values: chosenSpaces,
-          options: spaces.map((space) => ({ value: space.id, label: space.name })),
-          onChange: setChosenSpaces,
-        }
-      : null;
   const stateFilter: FilterSpec = {
     id: "state",
     label: t("catalogue.filter.state"),
     values: states,
-    options: [
-      { value: "active", label: t("catalogue.filter.active") },
-      { value: "inactive", label: t("catalogue.filter.inactive") },
-      { value: "offered", label: t("catalogue.filter.offered") },
-    ],
+    options: discovering
+      ? [
+          { value: "here", label: t("catalogue.activeHere") },
+          { value: "elsewhere", label: t("catalogue.filter.notHere") },
+          { value: "offered", label: t("catalogue.filter.offered") },
+        ]
+      : [
+          { value: "active", label: t("catalogue.filter.active") },
+          { value: "inactive", label: t("catalogue.filter.inactive") },
+          { value: "offered", label: t("catalogue.filter.offered") },
+        ],
     onChange: setStates,
   };
   // Provenance: an attribute of the package, not the question a reader asks
@@ -482,14 +446,28 @@ export function OrgCatalogueModal({
     // browsing reader asks — does the space I am in already run this? A tick
     // when it does, the deed when it does not. The finer question ("and in my
     // other spaces?") is the matrix, one tab away.
-    const activeHere = placementById.get(item.id)?.here === "active";
+    const placement = placementById.get(item.id);
+    const activeHere = placement?.here === "active";
     const mayAddHere = maySetPackageActive(grantById.get(spaceId ?? ""), active, true);
+    // A share waiting on one of the reader's spaces is said on the card too:
+    // browsing must not be the one reading where a decision stays invisible.
+    const sharer = placement ? Object.values(placement.offeredBy).find(Boolean) : undefined;
+    const shared = (placement?.offeredIn.length ?? 0) > 0;
     return {
       ...row,
       actions: (
         <>
-          <span className="text-muted-foreground truncate text-xs">
-            {item.source === "system" ? t("catalogue.sourceSystem") : orgName}
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="text-muted-foreground truncate text-xs">
+              {item.source === "system" ? t("catalogue.sourceSystem") : orgName}
+            </span>
+            {shared && (
+              <span className="bg-primary/10 text-primary shrink-0 truncate rounded px-1.5 text-[11px] leading-5 font-medium">
+                {sharer
+                  ? t("catalogue.sheet.offeredBy", { name: sharer })
+                  : t("catalogue.offeredHere")}
+              </span>
+            )}
           </span>
           {activeHere ? (
             <span className="text-success flex shrink-0 items-center gap-1.5 text-xs font-medium">
@@ -518,6 +496,15 @@ export function OrgCatalogueModal({
   const allSelected = activatable.length > 0 && activatable.every((id) => selected.has(id));
   const picked = offered.filter((item) => selected.has(item.id));
   const reading = preview.value ? rows.find((item) => item.id === preview.value) : undefined;
+  const readingItem: CardItem | undefined = reading
+    ? {
+        id: reading.id,
+        displayName: reading.name || reading.id,
+        description: reading.description,
+        type: active,
+        source: reading.source as CardItem["source"],
+      }
+    : undefined;
 
   const selectColumn = useCatalogueSelectColumn({
     selected,
@@ -610,26 +597,27 @@ export function OrgCatalogueModal({
     onSelect(nextScope, nextType);
   };
 
-  // One group, never two: the kinds are the same four words under either half
-  // of the axis, and a rail that lists them twice makes the reader compare two
-  // identical lists to find the difference.
-  //
-  // The axis is POSSESSION — what is already placed in a space you reach, or
-  // what you could still place there — and it is a segmented control, the way
-  // Studio / Chat head the main navigation: two values are shown at once
-  // rather than one behind a menu. Provenance stays a filter; calling the first
-  // half "Organisation" would have put it back on the axis under another name.
-  const scopeOptions: { id: CatalogueScope; label: string; count?: number }[] = [
-    { id: "placed", label: t("catalogue.scopePlaced") },
+  /**
+   * The two READINGS of one catalogue, in the bar's corner rather than the
+   * rail's head.
+   *
+   * They used to be the rail's first axis, which made them read as two places
+   * holding different things. They are one set seen two ways — browsing in
+   * cards, managing in a matrix — so they sit with the other ways of seeing
+   * the list (search, filters, columns), and the rail is left with the one
+   * axis that IS a partition: the kinds.
+   */
+  const readings: { id: CatalogueScope; label: string }[] = [
     { id: "discover", label: t("catalogue.scopeDiscover") },
+    { id: "placed", label: t("catalogue.scopePlaced") },
   ];
-  const selector = (
+  const readingSwitcher = (
     <div
       role="tablist"
       aria-label={t("catalogue.scopeSelector")}
-      className="bg-sidebar-accent/40 flex gap-0.5 rounded-lg p-0.5"
+      className="bg-sidebar-accent/40 flex h-8 shrink-0 gap-0.5 rounded-lg p-0.5"
     >
-      {scopeOptions.map((option) => (
+      {readings.map((option) => (
         <button
           key={option.id}
           type="button"
@@ -637,21 +625,13 @@ export function OrgCatalogueModal({
           aria-selected={scope === option.id}
           onClick={() => show(option.id, active)}
           className={cn(
-            "focus-visible:ring-ring flex h-7 flex-auto items-center justify-center gap-1.5 rounded-md px-1.5 text-sm font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-2",
+            "focus-visible:ring-ring flex items-center rounded-md px-2.5 text-xs font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-2",
             scope === option.id
               ? "bg-card text-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground",
           )}
         >
-          <span>{option.label}</span>
-          {(option.count ?? 0) > 0 && (
-            <span
-              className="bg-primary text-primary-foreground rounded-full px-1.5 text-[10px] leading-4 font-semibold tabular-nums"
-              aria-label={t("catalogue.pendingOffers", { count: option.count, ns: "common" })}
-            >
-              {option.count}
-            </span>
-          )}
+          {option.label}
         </button>
       ))}
     </div>
@@ -661,21 +641,18 @@ export function OrgCatalogueModal({
       key={entry.type}
       icon={entry.icon}
       label={t(entry.titleKey)}
+      count={library?.packages[entry.type]?.length}
       active={entry.type === active}
       onClick={() => show(scope, entry.type)}
     />
   ));
 
-  // The settings rail, to the pixel: same header, same titled group, same
-  // selector at its head, same rows.
+  // The settings rail, to the pixel: same header, same titled group, same rows.
+  // The two readings left it for the bar; the kinds are its only axis.
   const rail = (
     <div className="flex h-full flex-col">
       <RailHeader icon={LibraryBig} title={t("catalogue.title")} />
       <div className="flex-1">
-        {/* The axis heads the rail the way Studio / Chat head the navigation,
-            and the kinds follow as the group they are. */}
-        {/* The rail groups' own inset, so the control lines up with the rows. */}
-        <div className="px-3 pt-3">{selector}</div>
         <RailGroup title={t("catalogue.kinds")}>
           <nav className="flex flex-col gap-0.5" aria-label={t("catalogue.kinds")}>
             {kindRows}
@@ -687,11 +664,7 @@ export function OrgCatalogueModal({
 
   const mobileNav = (
     <div>
-      {selector}
-      <nav
-        aria-label={t("catalogue.kinds")}
-        className="-mx-1 mt-2 flex gap-1 overflow-x-auto px-1 pb-1"
-      >
+      <nav aria-label={t("catalogue.kinds")} className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1">
         {visibleKinds.map((entry) => (
           <Button
             key={entry.type}
@@ -772,6 +745,24 @@ export function OrgCatalogueModal({
               ? integrationProtocol(integrationById.get(reading.id)!)
               : undefined
           }
+          actionsMenu={
+            <PageActionsMenu>
+              <CatalogueMenuItems
+                item={readingItem!}
+                homeWritable={writableOf(readingItem!)}
+                homeShareable={shareableOf(readingItem!)}
+                sharedSpaces={sharedSpacesOf(readingItem!)}
+                open={{
+                  label: t("catalogue.openFullPage"),
+                  icon: ExternalLink,
+                  onSelect: () => navigate(packageDetailPath(active, reading.id)),
+                }}
+                onMoveHome={setMoveHome}
+                onShare={setSharing}
+                onRevoke={revokeFrom}
+              />
+            </PageActionsMenu>
+          }
           busy={activate.isPending}
           onSetActive={(targetSpaceId, next) =>
             void onSetActive(
@@ -794,38 +785,27 @@ export function OrgCatalogueModal({
           list={list}
           // The space and the state live in the URL, so the bar's own reset
           // could not see them: "Réinitialiser" left both chips standing.
-          onResetFilters={() => narrow({ spaces: [], states: [] })}
+          onResetFilters={() => setStates([])}
           view={view}
           header={
             <>
               {/* Above the title, where every alert in the product sits: it is
                   the one line asking the reader for a decision, and it must not
                   wait behind the heading of the list it concerns. */}
-              {!discovering && pendingAll > 0 && !states.includes("offered") && (
+              {pendingAll > 0 && !states.includes("offered") && (
                 <Alert variant="info" className="mb-4">
                   <Inbox className="h-4 w-4" />
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <span>
-                      {t("catalogue.pendingLine", { count: pendingAll })}
-                      {pendingAll > pendingHere && (
-                        <span className="text-muted-foreground">
-                          {" "}
-                          {t("catalogue.pendingElsewhere", { count: pendingAll - pendingHere })}
-                        </span>
-                      )}
-                    </span>
+                    <span>{t("catalogue.pendingLine", { count: pendingAll })}</span>
                     <Button
                       size="sm"
                       variant="outline"
                       // ONE share means one decision: open that package, where
                       // the alert names the space and the button activates it.
-                      // A table would have left the reader hunting for a cell
-                      // in a column. Several shares keep the list, narrowed to
-                      // them and widened back to every space in ONE write.
+                      // Several keep the list, narrowed to them — in either
+                      // reading, since both know the "offered" state.
                       onClick={() =>
-                        pendingOne
-                          ? preview.open(pendingOne)
-                          : narrow({ spaces: [], states: ["offered"] })
+                        pendingOne ? preview.open(pendingOne) : setStates(["offered"])
                       }
                     >
                       {t("catalogue.pendingShow")}
@@ -861,11 +841,7 @@ export function OrgCatalogueModal({
           // filter here has, rather than the collection's built-in one.
           activityFilter={false}
           originFilter={false}
-          extraFilters={[
-            ...(spaceFilter ? [spaceFilter] : []),
-            ...(discovering ? [] : [stateFilter]),
-            originFilter,
-          ]}
+          extraFilters={[stateFilter, originFilter]}
           // A package this space has not activated cannot be run from here.
           cardRun={false}
           // A tick is a table affordance; in cards, each card carries its own
@@ -881,48 +857,7 @@ export function OrgCatalogueModal({
           rowAction={(item) => preview.open(item.id)}
           actions={
             <>
-              {/* The space filter's two-value form, in the bar's own corner and
-                  in the shape the rail's Espaces / Découvrir already has: one
-                  of two states is SHOWN rather than pressed. It writes the
-                  filter rather than holding a state of its own, so the chip
-                  below and this control can never disagree; a hand-picked pair
-                  of spaces lights neither half, which is the truth. Découvrir
-                  has no space columns at all, so it has no use for it. */}
-              {!discovering &&
-                spaceId &&
-                spaces.length > 1 &&
-                spaces.some((space) => space.id === spaceId) && (
-                  <div
-                    role="tablist"
-                    aria-label={t("catalogue.filter.space")}
-                    className="bg-sidebar-accent/40 flex h-8 shrink-0 gap-0.5 rounded-lg p-0.5"
-                  >
-                    {[
-                      { id: "here", label: t("catalogue.onlyHere"), on: onlyHere },
-                      {
-                        id: "all",
-                        label: t("catalogue.allSpaces"),
-                        on: chosenSpaces.length === 0,
-                      },
-                    ].map((option) => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        role="tab"
-                        aria-selected={option.on}
-                        className={cn(
-                          "focus-visible:ring-ring flex items-center rounded-md px-2.5 text-xs font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-2",
-                          option.on
-                            ? "bg-card text-foreground shadow-sm"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                        onClick={() => setChosenSpaces(option.id === "here" ? [spaceId] : [])}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
+              {readingSwitcher}
               {view === "table" && picked.length > 0 ? (
                 <Button
                   type="button"

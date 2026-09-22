@@ -20,7 +20,6 @@ import { useAgents } from "../hooks/use-packages";
 import { useIsMobile } from "@appstrate/ui/use-mobile";
 import { formatDateField } from "../lib/format-date";
 import { catalogueHref } from "../lib/catalogue-link";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
 import type { PackageType } from "@appstrate/core/validation";
 
 const SHARED_KINDS: readonly PackageType[] = ["agent", "skill", "integration", "mcp-server"];
@@ -67,7 +66,6 @@ export function NotificationContent({
   markAllRead: () => void;
 }) {
   const { t } = useTranslation(["common", "agents"]);
-  const currentSpaceId = useCurrentSpaceId();
 
   return (
     <>
@@ -123,13 +121,12 @@ export function NotificationContent({
             // Source agent gone → fall back to the run-scoped route. Marking
             // it read still flows through `onItemClick`.
             const linkTarget = shared
-              ? // The bell reads the CURRENT space's notifications, so an offer
-                // it shows was made to this space: open the catalogue on it,
-                // where the offer is the row reading "Proposé".
-                catalogueHref(
-                  sharedKind(payloadString(notification.payload, "package_type")),
-                  currentSpaceId,
-                )
+              ? // One share, one decision: open THAT package's sheet, where
+                // the alert names the space it was shared with and activates
+                // it there — not a list the reader has to search.
+                catalogueHref(sharedKind(payloadString(notification.payload, "package_type")), {
+                  packageId: packageId ?? undefined,
+                })
               : agentId && notification.run_id
                 ? `/agents/${agentId}/runs/${notification.run_id}`
                 : notification.run_id

@@ -32,14 +32,17 @@ export function CataloguePage() {
 
   return (
     <OrgCatalogueModal
-      scope={scope ?? "placed"}
+      // Découvrir by default: it is the reading everybody needs — what exists,
+      // and whether the space I am in runs it — while the matrix serves the
+      // reader who manages several spaces.
+      scope={scope ?? "discover"}
       type={type ?? ""}
       onSelect={(nextScope: CatalogueScope, nextType: PackageType) => {
-        // The space filter follows the reader everywhere; the state filter
-        // follows only within the placed half — Découvrir holds nothing that
-        // has a state, and carrying it there would reapply it on the way back.
+        // The state filter speaks each reading's own words (here / elsewhere
+        // against active / inactive), so it does not survive a change of
+        // reading; the rest of the query does.
         const query = new URLSearchParams(location.search);
-        if (nextScope !== (scope ?? "placed")) query.delete("state");
+        if (nextScope !== (scope ?? "discover")) query.delete("state");
         const search = query.toString();
         navigate(`/catalogue/${nextScope}/${nextType}${search ? `?${search}` : ""}`, {
           replace: true,

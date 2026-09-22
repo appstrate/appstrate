@@ -4,7 +4,6 @@ import { Trans, useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import type { PackageType } from "@appstrate/core/validation";
 import { usePermissions } from "../hooks/use-permissions";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { catalogueHref } from "../lib/catalogue-link";
 import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
 
@@ -32,16 +31,13 @@ import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
 export function SpaceLibraryHint({ type }: { type: PackageType }) {
   const { t } = useTranslation("common");
   const { can } = usePermissions();
-  const currentSpaceId = useCurrentSpaceId();
   if (!can(`${PACKAGE_PERMISSIONS[type].resource}:read`)) return null;
   return (
     <Trans
       t={t}
       i18nKey="library.indexEmptyHint"
       components={{
-        1: (
-          <Link to={catalogueHref(type, currentSpaceId)} className="text-primary hover:underline" />
-        ),
+        1: <Link to={catalogueHref(type)} className="text-primary hover:underline" />,
       }}
     />
   );

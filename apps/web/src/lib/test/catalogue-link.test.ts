@@ -4,16 +4,17 @@ import { describe, it, expect } from "bun:test";
 import { catalogueHref } from "../catalogue-link.ts";
 
 describe("catalogueHref", () => {
-  it("narrows to the space the reader came from", () => {
-    expect(catalogueHref("agent", "spc_a")).toBe("/catalogue/placed/agent?space=spc_a");
+  it("opens Découvrir on the kind", () => {
+    expect(catalogueHref("skill")).toBe("/catalogue/discover/skill");
   });
 
-  it("opens the whole map when no space named the way in", () => {
-    expect(catalogueHref("skill")).toBe("/catalogue/placed/skill");
-    expect(catalogueHref("skill", null)).toBe("/catalogue/placed/skill");
+  it("opens one package's sheet when it names one", () => {
+    expect(catalogueHref("agent", { packageId: "@tractr/radar-ia" })).toBe(
+      "/catalogue/discover/agent?package=%40tractr%2Fradar-ia",
+    );
   });
 
   it("sends an MCP server to the integrations tab, where local servers live", () => {
-    expect(catalogueHref("mcp-server", "spc_a")).toBe("/catalogue/placed/integration?space=spc_a");
+    expect(catalogueHref("mcp-server")).toBe("/catalogue/discover/integration");
   });
 });

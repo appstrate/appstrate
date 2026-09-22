@@ -3,21 +3,20 @@
 /**
  * Where "Parcourir le catalogue" goes, from wherever it is offered.
  *
- * From a page that belongs to a space — its agents, skills or integrations —
- * the catalogue opens NARROWED to that space: that is what the reader was
- * looking at, and "what else is in here" is the question they bring. From the
- * navigation's own entry it opens on the whole map, because nothing on the
- * way in named a space.
+ * It opens on Découvrir, the reading that answers "what else exists, and does
+ * my space run it" — which is what a page belonging to a space asks. It used to
+ * narrow to that space; the catalogue no longer narrows, since the reader's own
+ * space leads every table and ticks every card.
  *
- * The narrowing is a chip the catalogue shows and removes in one click, so a
- * link never traps the reader in a view they cannot widen.
+ * Given a package, it opens that package's sheet: a notification about ONE
+ * share is answered on that package, not in a list the reader has to search.
  */
 
 import type { PackageType } from "@appstrate/core/validation";
 
-export function catalogueHref(type: PackageType, spaceId?: string | null): string {
+export function catalogueHref(type: PackageType, options: { packageId?: string } = {}): string {
   // MCP servers have no tab of their own: they are integrations run locally.
   const kind = type === "mcp-server" ? "integration" : type;
-  const base = `/catalogue/placed/${kind}`;
-  return spaceId ? `${base}?space=${encodeURIComponent(spaceId)}` : base;
+  const base = `/catalogue/discover/${kind}`;
+  return options.packageId ? `${base}?package=${encodeURIComponent(options.packageId)}` : base;
 }
