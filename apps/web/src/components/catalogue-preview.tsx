@@ -23,11 +23,27 @@
  * Runs, versions, files and settings stay on the package's own page, one link
  * away.
  */
+import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, ExternalLink, Inbox, ShieldCheck } from "lucide-react";
+import {
+  ArrowLeft,
+  Boxes,
+  Clock,
+  ExternalLink,
+  Hammer,
+  Hash,
+  House,
+  Inbox,
+  Layers,
+  Plug,
+  ShieldCheck,
+  TextCursorInput,
+  Wrench,
+} from "lucide-react";
 import { Link } from "react-router-dom";
 import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
+import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Switch } from "@appstrate/ui/components/switch";
 import {
@@ -54,6 +70,7 @@ import {
 import { formatDateField } from "../lib/format-date";
 import { packageDetailPath } from "../lib/package-paths";
 import { packageKeys } from "../lib/query-keys";
+import { SettingsGroup } from "./settings/setting-row";
 import { SettingsHeading } from "./settings/settings-heading";
 
 /**
@@ -86,6 +103,38 @@ function inputNames(detail: AgentDetail): string[] {
   const properties = schema?.properties ?? {};
   const order = detail.input?.property_order ?? Object.keys(properties);
   return order.map((key) => properties[key]?.title ?? key);
+}
+
+/**
+ * One fact about the package: its icon and label on the left, its value on the
+ * right, the way a page of properties reads. The same row serves what the
+ * package USES and what it IS, so the sheet speaks one vocabulary below the
+ * title.
+ */
+function PropertyRow({
+  icon: Icon,
+  label,
+  hint,
+  children,
+}: {
+  icon: typeof House;
+  label: string;
+  /** The rule behind the value, when it is not obvious from the value itself. */
+  hint?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5 py-1.5 sm:flex-row sm:gap-4">
+      <dt className="text-muted-foreground flex w-44 shrink-0 items-center gap-2 text-sm">
+        <Icon className="size-3.5 shrink-0" aria-hidden />
+        {label}
+      </dt>
+      <dd className="min-w-0 text-sm">
+        {children}
+        {hint && <span className="text-muted-foreground block text-xs">{hint}</span>}
+      </dd>
+    </div>
+  );
 }
 
 export function CataloguePreview({
@@ -194,37 +243,37 @@ export function CataloguePreview({
 
   return (
     <div>
-      <div className="mb-3 flex items-center justify-between gap-3">
+      <div className="mb-4 flex items-center justify-between gap-3">
         <Button variant="ghost" size="sm" className="-ml-2 gap-1.5" onClick={onBack}>
           <ArrowLeft />
           {t("catalogue.back")}
         </Button>
-        <Link
-          to={packageDetailPath(type, item.id)}
-          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-sm underline-offset-4 hover:underline"
-        >
-          <ExternalLink className="size-3.5" />
-          {t("catalogue.openFullPage")}
-        </Link>
+        {/* An action, in the shape every other action has: leaving for the
+            package's own page is one, and a discreet link read as decoration. */}
+        <Button asChild variant="outline" size="sm" className="gap-1.5">
+          <Link to={packageDetailPath(type, item.id)}>
+            <ExternalLink className="size-3.5" />
+            {t("catalogue.openFullPage")}
+          </Link>
+        </Button>
       </div>
 
-      <div className="flex items-start justify-between gap-4">
-        <SettingsHeading className="mb-0" title={item.name || item.id} />
-        <span className="text-muted-foreground shrink-0 pt-1 text-sm">
-          {[typeLabel[type], version ? `v${version}` : null].filter(Boolean).join(" · ")}
-        </span>
+      <SettingsHeading className="mb-2" title={item.name || item.id} />
+      {/* What the package IS, in the badges the package's own header uses. */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge variant="secondary">{typeLabel[type]}</Badge>
+        {version && (
+          <Badge variant="secondary" className="font-mono">
+            v{version}
+          </Badge>
+        )}
+        <Badge variant="secondary" className="gap-1.5">
+          {item.source === "system" && <ShieldCheck className="size-3" aria-hidden />}
+          {provenance}
+        </Badge>
       </div>
-      <p className="text-muted-foreground mt-1 flex flex-wrap items-center gap-x-1.5 text-xs">
-        {item.source === "system" && <ShieldCheck className="size-3.5 shrink-0" />}
-        {[
-          provenance,
-          updatedAt
-            ? t("catalogue.sheet.updatedAt", { date: formatDateField(updatedAt, "date") })
-            : null,
-        ]
-          .filter(Boolean)
-          .join(" · ")}
-      </p>
+
+      {item.description && <p className="mt-4 text-sm">{item.description}</p>}
 
       {/* The one line that asks the reader for a decision heads the sheet.
           It acts on THAT space alone, through the catalogue's own activation,
@@ -234,7 +283,7 @@ export function CataloguePreview({
         return (
           <div
             key={offer.id}
-            className="border-border bg-card mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm"
+            className="border-border bg-card mt-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm"
           >
             <div className="flex min-w-0 items-start gap-2.5">
               <Inbox className="text-muted-foreground mt-0.5 size-4 shrink-0" />
@@ -258,12 +307,7 @@ export function CataloguePreview({
         );
       })}
 
-      {item.description && <p className="mt-4 text-sm">{item.description}</p>}
-
-      <section className="mt-6">
-        <h3 className="text-muted-foreground mb-2 text-xs tracking-wide uppercase">
-          {t("catalogue.sheet.spaces")}
-        </h3>
+      <SettingsGroup title={t("catalogue.sheet.spaces")} className="mt-8">
         {mode === "everywhere" && <p className="text-sm">{t("catalogue.sheet.everywhere")}</p>}
         {mode === "readonly" && (
           <p className="text-sm">
@@ -320,86 +364,83 @@ export function CataloguePreview({
             </Table>
           </div>
         )}
-      </section>
+      </SettingsGroup>
 
       {agent && (
-        <section className="mt-6">
-          <h3 className="text-muted-foreground mb-2 text-xs tracking-wide uppercase">
-            {t("catalogue.sheet.uses")}
-          </h3>
-          <dl className="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-3 text-sm">
-            <dt className="text-muted-foreground">{t("catalogue.sheet.integrations")}</dt>
-            <dd>
-              {agent.dependencies.integrations.length > 0 ? (
-                <>
-                  {agent.dependencies.integrations
+        <SettingsGroup title={t("catalogue.sheet.uses")}>
+          <dl className="divide-border divide-y">
+            <PropertyRow
+              icon={Boxes}
+              label={t("catalogue.sheet.integrations")}
+              hint={
+                agent.dependencies.integrations.length > 0
+                  ? t("catalogue.sheet.integrationsHint")
+                  : undefined
+              }
+            >
+              {agent.dependencies.integrations.length > 0
+                ? agent.dependencies.integrations
                     .map((entry) => integrationName(entry.id))
-                    .join(", ")}
-                  <span className="text-muted-foreground block text-xs">
-                    {t("catalogue.sheet.integrationsHint")}
-                  </span>
-                </>
-              ) : (
-                t("catalogue.sheet.none")
-              )}
-            </dd>
+                    .join(", ")
+                : t("catalogue.sheet.none")}
+            </PropertyRow>
             {agentSkills.length > 0 && (
-              <>
-                <dt className="text-muted-foreground">{t("catalogue.sheet.skills")}</dt>
-                <dd>
-                  {/* Named, never linked: a skill not shared to the reader's
-                      space opens on a 404, and it needs nothing there anyway. */}
-                  {agentSkills.map((skill) => skill.name ?? skill.id).join(", ")}
-                  <span className="text-muted-foreground block text-xs">
-                    {t("catalogue.sheet.skillsHint")}
-                  </span>
-                </dd>
-              </>
+              <PropertyRow
+                icon={Wrench}
+                label={t("catalogue.sheet.skills")}
+                hint={t("catalogue.sheet.skillsHint")}
+              >
+                {/* Named, never linked: a skill not shared to the reader's
+                    space opens on a 404, and it needs nothing there anyway. */}
+                {agentSkills.map((skill) => skill.name ?? skill.id).join(", ")}
+              </PropertyRow>
             )}
             {agentInputs.length > 0 && (
-              <>
-                <dt className="text-muted-foreground">{t("catalogue.sheet.inputs")}</dt>
-                <dd>{agentInputs.join(", ")}</dd>
-              </>
+              <PropertyRow icon={TextCursorInput} label={t("catalogue.sheet.inputs")}>
+                {agentInputs.join(", ")}
+              </PropertyRow>
             )}
             {runtimeTools > 0 && (
-              <>
-                <dt className="text-muted-foreground">{t("catalogue.sheet.tools")}</dt>
-                <dd>{t("catalogue.sheet.toolCount", { count: runtimeTools })}</dd>
-              </>
+              <PropertyRow icon={Hammer} label={t("catalogue.sheet.tools")}>
+                {t("catalogue.sheet.toolCount", { count: runtimeTools })}
+              </PropertyRow>
             )}
           </dl>
-        </section>
+        </SettingsGroup>
       )}
 
-      <section className="mt-6">
-        <h3 className="text-muted-foreground mb-2 text-xs tracking-wide uppercase">
-          {t("catalogue.sheet.details")}
-        </h3>
-        <dl className="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-3 text-sm">
+      <SettingsGroup title={t("catalogue.sheet.details")} className="mb-0">
+        <dl className="divide-border divide-y">
           {protocol && (
-            <>
-              <dt className="text-muted-foreground">{t("catalogue.column.protocol")}</dt>
-              <dd>{protocol}</dd>
-            </>
+            <PropertyRow icon={Plug} label={t("catalogue.column.protocol")}>
+              {protocol}
+            </PropertyRow>
           )}
           {usedBy.length > 0 && (
-            <>
-              <dt className="text-muted-foreground">{t("catalogue.sheet.usedBy")}</dt>
-              <dd>{usedBy.map((entry) => entry.display_name || entry.id).join(", ")}</dd>
-            </>
+            <PropertyRow icon={Layers} label={t("catalogue.sheet.usedBy")}>
+              {usedBy.map((entry) => entry.display_name || entry.id).join(", ")}
+            </PropertyRow>
           )}
           {home && (
-            <>
-              <dt className="text-muted-foreground">{t("catalogue.homeSpace")}</dt>
-              {/* Where the package lives, which is where it is edited (#1437). */}
-              <dd>{t("catalogue.sheet.homeHint", { space: home.name })}</dd>
-            </>
+            // Where the package lives, which is where it is edited (#1437).
+            <PropertyRow
+              icon={House}
+              label={t("catalogue.homeSpace")}
+              hint={t("catalogue.sheet.homeHint")}
+            >
+              {home.name}
+            </PropertyRow>
           )}
-          <dt className="text-muted-foreground">{t("catalogue.identifier")}</dt>
-          <dd className="font-mono text-xs break-all">{item.id}</dd>
+          {updatedAt && (
+            <PropertyRow icon={Clock} label={t("catalogue.sheet.updated")}>
+              {formatDateField(updatedAt, "date")}
+            </PropertyRow>
+          )}
+          <PropertyRow icon={Hash} label={t("catalogue.identifier")}>
+            <span className="font-mono text-xs break-all">{item.id}</span>
+          </PropertyRow>
         </dl>
-      </section>
+      </SettingsGroup>
     </div>
   );
 }

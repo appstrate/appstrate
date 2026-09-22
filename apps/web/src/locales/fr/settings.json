@@ -1472,7 +1472,7 @@
   "catalogue.sheet.type.skill": "Skill",
   "catalogue.sheet.type.integration": "Intégration",
   "catalogue.sheet.type.mcp-server": "Serveur MCP",
-  "catalogue.sheet.updatedAt": "mis à jour le {{date}}",
+  "catalogue.sheet.updated": "Mis à jour",
   "catalogue.sheet.offerBy": "{{name}} l'a proposé à {{space}}.",
   "catalogue.sheet.offer": "Proposé à {{space}}.",
   "catalogue.sheet.offerCredentials": "Il s'y exécutera avec les identifiants de cet espace.",
@@ -1497,5 +1497,5 @@
   "catalogue.sheet.none": "Aucune",
   "catalogue.sheet.details": "Détails",
   "catalogue.sheet.usedBy": "Utilisé par",
-  "catalogue.sheet.homeHint": "{{space}} (c'est là qu'on le modifie)"
+  "catalogue.sheet.homeHint": "C'est là qu'on le modifie."
 }

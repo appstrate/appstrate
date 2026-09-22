@@ -1681,10 +1681,16 @@ gestures for a question whose answer reads better at a glance. It now answers,
 in order, what the package is, where it is and what the reader may do there,
 and what it needs.
 
-- **Header**: type and version, provenance, last update. The detail is read
-  from a space where the package is PLACED (`fetchPackageDetail(..., spaceId)`),
-  since the server answers only there and the catalogue shows packages placed
-  elsewhere than the space the reader stands in.
+- **Header**, in the grammar the rest of the product already speaks: the title,
+  then badges for type, version and provenance — the package page's own header
+  vocabulary — and "Ouvrir la fiche complète" as an outline BUTTON, since
+  leaving for that page is an action like any other and a discreet link read as
+  decoration. The sections below are `SettingsGroup`/`SettingsHeading`, like
+  every settings page, and the facts are property rows (icon, label, value)
+  rather than a bare description list. The detail is read from a space where
+  the package is PLACED (`fetchPackageDetail(..., spaceId)`), since the server
+  answers only there and the catalogue shows packages placed elsewhere than the
+  space the reader stands in.
 - **An offer heads the sheet**: "Julie Ferrand l'a proposé à Bac à sable", with
   what that space would still have to switch on, and "Activer dans Bac à
   sable". It is the one line asking the reader for a decision.
