@@ -44,9 +44,13 @@ import {
 import { parseFileUri, fileUri } from "@appstrate/core/file-uri";
 import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/afps-runtime/bundle";
 import type { Actor } from "@appstrate/connect";
-import { getCatalog, collectReferencedSchemas, type CatalogOperation } from "./catalog.ts";
+import {
+  getCatalog,
+  collectReferencedSchemas,
+  operationGranted,
+  type CatalogOperation,
+} from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
-import { canReadRuns } from "../../lib/run-visibility.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import {
   getFileForActor,
@@ -56,7 +60,12 @@ import {
 } from "../../services/files.ts";
 import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
-import { VIEW_AS_HEADER, canComposeInline } from "@appstrate/core/permissions";
+import {
+  VIEW_AS_HEADER,
+  agentCapabilities,
+  reaches,
+  type CorePermission,
+} from "@appstrate/core/permissions";
 import { asString, textResult } from "./tool-results.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 
@@ -76,10 +85,10 @@ export type McpToolName =
   | "get_runtime_capabilities"
   | "get_me";
 
-/** Outcome of an `invoke_operation` call, for audit + telemetry. */
+/** Outcome of an `invoke_operation` call, for audit + telemetry. `buildMcpTools`
+ *  declares the tool only to a caller holding `mcp:invoke`, so every outcome
+ *  here belongs to a call the handler ran. */
 export type McpInvokeOutcome =
-  /** Caller lacks `mcp:invoke` — no dispatch happened (security-relevant). */
-  | "denied"
   /** Client error before dispatch (unknown operationId, missing path params). */
   | "rejected"
   /** Dispatched in-process; `status` carries the operation's HTTP status. */
@@ -95,8 +104,13 @@ export interface McpToolEvent {
   tool: McpToolName;
   /** Wall-clock duration of the handler, milliseconds. */
   durationMs: number;
-  /** `search_operations`: number of matches returned. */
-  resultCount?: number;
+  /**
+   * Rows the caller is SHOWN: `search_operations` granted matches after
+   * `limit`, `list_files` projected rows. Not how many matched.
+   */
+  shownCount?: number;
+  /** `search_operations`: matches withheld for lack of permission. */
+  deniedCount?: number;
   /** `invoke_operation`: which operation, its method/path, and the outcome. */
   operationId?: string;
   method?: string;
@@ -126,14 +140,12 @@ export interface McpToolContext {
   scope: SpaceScope;
   authorizeBundle: Parameters<typeof buildPackageFileTools>[0]["authorizeBundle"];
   /**
-   * Whether the caller may OFFER a package from its home space — the
-   * predicate `import_package_file` needs to place a re-imported root the
-   * same way the REST import route places it. Optional so a non-HTTP caller
-   * (a unit test, an in-process consumer with no request) can omit it and
-   * get the fail-closed answer: the root is not activated and the result
-   * says so.
+   * Whether the caller may OFFER a package from its home space — the predicate
+   * `import_package_file` needs to place a re-imported root the way the REST
+   * import route places it. Required: a caller who cannot be asked states the
+   * fail-closed answer itself.
    */
-  mayShareRoot?: Parameters<typeof buildPackageFileTools>[0]["mayShareRoot"];
+  mayShareRoot: Parameters<typeof buildPackageFileTools>[0]["mayShareRoot"];
   /** In-process dispatcher (defaults to the platform app at request time). */
   dispatch: Dispatch;
   /**
@@ -208,7 +220,6 @@ const PROTECTED_HEADERS = new Set<string>([
 // Cap the buffered response body so a large list endpoint can't dump
 // unbounded text into the model context. Truncation is flagged in the result.
 const MAX_RESPONSE_CHARS = 100_000;
-
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -293,6 +304,7 @@ function scoreOperation(op: CatalogOperation, tokens: string[]): number {
 function describePayload(
   op: CatalogOperation,
   componentSchemas: Record<string, unknown>,
+  permissions: ReadonlySet<string>,
 ): Record<string, unknown> {
   return {
     operation_id: op.operationId,
@@ -301,6 +313,16 @@ function describePayload(
     path_params: op.pathParams,
     summary: op.summary,
     description: op.description,
+    // What the route's guards ask, and whether this caller holds it. The two
+    // spaces stay apart: `required_permissions` is what `granted` tests against
+    // the caller's own set, while a target-space one is decided where the path
+    // points — flattening them together pre-refuses a cross-space call the
+    // route would have allowed. `conditional` means a guard reads the loaded
+    // row or the target space, so a grant is a lower bound, not a promise.
+    required_permissions: op.requirement.requirements,
+    target_space_permissions: op.requirement.targetSpaceRequirements,
+    conditional: op.requirement.conditional,
+    granted: operationGranted(op, permissions),
     parameters: op.operation.parameters ?? [],
     request_body: op.operation.requestBody ?? null,
     responses: op.operation.responses ?? {},
@@ -308,15 +330,22 @@ function describePayload(
   };
 }
 
-function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
+function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "search_operations",
     description:
       "Search the Appstrate API for operations by keyword and/or tag. Returns matching " +
       "operationIds with their HTTP method, path, and summary. Use this first to discover " +
       "which operation to call. For a keyword search, the response also includes a " +
-      "`best_match` carrying the top result's full input schema — when it matches your " +
-      "intent you can call invoke_operation directly, no describe_operation needed.",
+      "`best_match` carrying the top result's full input schema" +
+      (invokes
+        ? " — when it matches your intent you can call invoke_operation directly, no " +
+          "describe_operation needed. "
+        : ", so a clear single hit needs no follow-up describe_operation call. ") +
+      "Operations your role may not invoke are listed separately under `denied` with the " +
+      "permissions they need in YOUR space: report that to the user instead of trying them. " +
+      "`total` counts the matches you may invoke, `denied_total` the rest; both lists are " +
+      "capped at `limit`.",
     annotations: {
       title: "Search API operations",
       readOnlyHint: true,
@@ -356,32 +385,49 @@ function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
     const scored = matches
       .map((op) => ({ op, score: scoreOperation(op, tokens) }))
       .filter(({ score }) => tokens.length === 0 || score > 0)
-      .sort((a, b) => b.score - a.score || a.op.operationId.localeCompare(b.op.operationId))
-      .slice(0, limit);
+      .sort((a, b) => b.score - a.score || a.op.operationId.localeCompare(b.op.operationId));
+
+    // A match the caller may not invoke is answered, not hidden: the id and
+    // what it needs, no summary and no schema. Both halves keep score order
+    // and are capped at `limit`.
+    const granted: CatalogOperation[] = [];
+    const denied: CatalogOperation[] = [];
+    for (const { op } of scored) {
+      (operationGranted(op, ctx.permissions) ? granted : denied).push(op);
+    }
+    const shown = granted.slice(0, limit);
 
     emit(ctx, {
       tool: "search_operations",
       durationMs: performance.now() - start,
-      resultCount: scored.length,
+      shownCount: shown.length,
+      deniedCount: denied.length,
     });
 
-    // For a keyword search with at least one hit, embed the top match's full
-    // invoke-ready definition so the common single-target case needs no
+    // For a keyword search with at least one GRANTED hit, embed the top match's
+    // full invoke-ready definition so the common single-target case needs no
     // follow-up describe_operation call. Only the top result carries the
     // schema, to keep the response bounded; the rest stay compact.
-    const top = scored[0];
+    const top = shown[0];
     const bestMatch =
-      tokens.length > 0 && top ? describePayload(top.op, componentSchemas) : undefined;
+      tokens.length > 0 && top
+        ? describePayload(top, componentSchemas, ctx.permissions)
+        : undefined;
 
     return textResult({
-      count: scored.length,
-      total: matches.length,
-      operations: scored.map(({ op }) => ({
+      total: granted.length,
+      operations: shown.map((op) => ({
         operation_id: op.operationId,
         method: op.method,
         path: op.pathTemplate,
         summary: op.summary,
         tags: op.tags,
+      })),
+      denied_total: denied.length,
+      // Caller-space only: a denied operation is denied on exactly those.
+      denied: denied.slice(0, limit).map((op) => ({
+        operation_id: op.operationId,
+        required_permissions: op.requirement.requirements,
       })),
       best_match: bestMatch,
     });
@@ -390,13 +436,19 @@ function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
-function buildDescribeTool(ctx: McpToolContext): AppstrateToolDefinition {
+function buildDescribeTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "describe_operation",
     description:
       "Return the full OpenAPI definition for one operation (parameters, request body, " +
-      "responses) with all referenced component schemas inlined, so you can construct a " +
-      "valid invoke_operation call.",
+      "responses) with all referenced component schemas inlined, " +
+      (invokes
+        ? "so you can construct a valid invoke_operation call. "
+        : "so you can see exactly what it takes and what it answers with. ") +
+      "It also reports whether your role clears the route's guards (`granted`) and which " +
+      "permissions the route requires in YOUR space (`required_permissions`). " +
+      "`target_space_permissions` is separate on purpose: those are decided in the space the " +
+      "path names, not here, so they never make an operation unavailable to you.",
     annotations: {
       title: "Describe API operation",
       readOnlyHint: true,
@@ -441,7 +493,7 @@ function buildDescribeTool(ctx: McpToolContext): AppstrateToolDefinition {
       operationId,
     });
 
-    return textResult(describePayload(op, componentSchemas));
+    return textResult(describePayload(op, componentSchemas, ctx.permissions));
   };
 
   return { descriptor, handler };
@@ -511,8 +563,14 @@ function interpolatePath(op: CatalogOperation, pathParams: Record<string, unknow
  *    server promise (the platform exposes SSE GET operations).
  *  - Non-text bodies (downloads, tarballs) are summarised, not decoded.
  *  - Text bodies are capped to bound context size.
+ *
+ * `extra` is merged into the payload by the caller that knows something about
+ * the response the reader does not — today, what a 403 required.
  */
-export async function readResponse(response: Response): Promise<CallToolResult> {
+export async function readResponse(
+  response: Response,
+  extra?: Record<string, unknown>,
+): Promise<CallToolResult> {
   const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
   const isError = response.status >= 400;
 
@@ -522,6 +580,7 @@ export async function readResponse(response: Response): Promise<CallToolResult> 
         status: response.status,
         error:
           "This operation streams (text/event-stream) and is not supported via invoke_operation. Consume the realtime/SSE endpoint directly.",
+        ...extra,
       },
       true,
     );
@@ -542,6 +601,7 @@ export async function readResponse(response: Response): Promise<CallToolResult> 
         note: "Non-text response body omitted.",
         content_type: contentType,
         bytes: len ? Number(len) : null,
+        ...extra,
       },
       isError,
     );
@@ -564,7 +624,7 @@ export async function readResponse(response: Response): Promise<CallToolResult> 
   }
 
   return textResult(
-    { status: response.status, ...(truncated ? { truncated: true } : {}), body },
+    { status: response.status, ...(truncated ? { truncated: true } : {}), body, ...extra },
     isError,
   );
 }
@@ -633,19 +693,6 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const start = performance.now();
     const operationId = asString(args.operation_id);
-
-    if (!ctx.permissions.has("mcp:invoke")) {
-      emit(ctx, {
-        tool: "invoke_operation",
-        durationMs: performance.now() - start,
-        operationId,
-        outcome: "denied",
-      });
-      return textResult(
-        { error: "Permission 'mcp:invoke' is required to invoke operations." },
-        true,
-      );
-    }
 
     // Structural protocol errors (-32602 InvalidParams): missing required
     // argument / unknown operationId — the call itself is malformed, per the
@@ -778,7 +825,21 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
       status: response.status,
       outcome: "invoked",
     });
-    return readResponse(response);
+    // Only a 403 the permission set explains gets the permission answer. A 403
+    // the ROW decided (a file ACL, `draft_not_writable`) does not: the caller
+    // holds every listed permission, and the problem+json already names it.
+    const denial =
+      response.status === 403 && !operationGranted(op, ctx.permissions)
+        ? {
+            // The caller-space set is the one that failed; the hint is emitted
+            // only when it does.
+            required_permissions: op.requirement.requirements,
+            hint:
+              "Your role does not hold this permission. Report it to the user; do not retry " +
+              "and do not look for another operation that does the same thing.",
+          }
+        : undefined;
+    return readResponse(response, denial);
   };
 
   return { descriptor, handler };
@@ -793,7 +854,7 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 
 /**
  * `run_and_wait` arguments that exist only for `kind:"inline"`. Declared only
- * to a caller who may compose inline (`canComposeInline`). The launch allowlist
+ * to a caller whose `agentCapabilities` run level reaches `compose`. The launch allowlist
  * (`RUN_AND_WAIT_ARGUMENT_NAMES`) still knows them either way: an agent-only
  * caller that sends `kind:"inline"` anyway reaches the route and takes its 403,
  * the one refusal that owns the rule.
@@ -873,9 +934,11 @@ const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
   },
 };
 
-function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
-  // The route is the gate; this only decides what the model is told.
-  const inline = canComposeInline((p) => ctx.permissions.has(p));
+/**
+ * `inline`: the caller's run level reaches `compose`. The route is the gate;
+ * this only decides what the model is told.
+ */
+function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToolDefinition {
   // Inline-only descriptor spans are absent, not contradicted, for a caller
   // who cannot launch one.
   const descriptor: Tool = {
@@ -991,34 +1054,6 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
     const start = performance.now();
     const signal = extra.signal;
     throwIfAborted(signal);
-    if (!ctx.permissions.has("mcp:invoke")) {
-      emit(ctx, { tool: "run_and_wait", durationMs: performance.now() - start, outcome: "denied" });
-      return textResult({ error: "Permission 'mcp:invoke' is required to launch runs." }, true);
-    }
-    // Checked HERE, before the launch, because this tool's second half polls
-    // `GET /api/runs/{id}` through the same in-process dispatch — and
-    // `internal-dispatch.ts` is explicit that the marker "does not
-    // authenticate, elevate, or alter identity", so the caller's own scopes
-    // gate the poll. Without this, a credential holding `agents:run` but no
-    // run-read permission provisions the container, incurs the LLM spend, and
-    // only THEN takes a 403 on the first poll: a billed orphan instead of a
-    // refusal. The description above also tells the model not to fall back to
-    // `getRun`, so there is no recovery path once the run is away. The predicate
-    // is `canReadRuns`, never a literal `runs:read` test: `runs:read-all` is a
-    // superset, so a principal holding only the wide permission reads the poll
-    // route fine and must not be refused here.
-    if (!canReadRuns(ctx.permissions)) {
-      emit(ctx, { tool: "run_and_wait", durationMs: performance.now() - start, outcome: "denied" });
-      return textResult(
-        {
-          error:
-            "Permission 'runs:read' or 'runs:read-all' is required to wait for a run. Launching " +
-            "without one would start the run and then fail to read its status.",
-        },
-        true,
-      );
-    }
-
     const kind = asString(args.kind);
     if (kind !== "agent" && kind !== "inline") {
       emit(ctx, {
@@ -1249,7 +1284,7 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
     emit(ctx, {
       tool: "list_files",
       durationMs: performance.now() - start,
-      resultCount: files.length,
+      shownCount: files.length,
     });
     return textResult({ files, has_more: body?.hasMore === true });
   };
@@ -1461,31 +1496,37 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
  * Build the per-request tool set. Handlers close over the caller's auth
  * context.
  *
- * There are no hidden aliases for the pre-#1177 tool names (`list_documents`,
- * `read_document`, `validate_package_document`, `import_package_document`) or
- * the `document_uri` argument. They were kept callable-but-unlisted because
- * the server advertises `tools: { listChanged: false }`, so a client that
- * listed before an upgrade and calls an old name after it is behaving
- * correctly. The cost of removing them is bounded and transient: such a client
- * gets `-32602 Unknown tool` and re-lists, rather than being forwarded
- * silently. The cost of keeping them was a permanent second dispatch path
- * whose only proof of life was its own test.
+ * There are no aliases for retired tool names or arguments. The server
+ * advertises `tools: { listChanged: false }`, so a client holding a stale list
+ * and calling an old name is behaving correctly; it gets `-32602 Unknown tool`
+ * and re-lists — bounded and transient, where an alias would be a permanent
+ * second dispatch path.
  */
 export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
-  const tools = [
-    buildSearchTool(ctx),
-    buildDescribeTool(ctx),
-    buildInvokeTool(ctx),
-    buildRunAndWaitTool(ctx),
-    buildListFilesTool(ctx),
+  const has = (permission: CorePermission): boolean => ctx.permissions.has(permission);
+  const invokes = ctx.permissions.has("mcp:invoke");
+  const { runLevel } = agentCapabilities(has, invokes);
+  // `list_files` dispatches to this operation, so its declaration reads the
+  // same route table; its absence would mean a rename — a programming error.
+  const listFiles = getCatalog().operations.get("listFiles");
+  if (!listFiles) {
+    throw new Error("Catalog has no `listFiles` operation — list_files dispatches to it");
+  }
+  // What this caller's permissions make structurally impossible is ABSENT, not
+  // declared then refused; a row-conditional act stays visible. The route
+  // decides every call, so this is context reduction, not a gate.
+  return [
+    buildSearchTool(ctx, invokes),
+    buildDescribeTool(ctx, invokes),
+    ...(invokes ? [buildInvokeTool(ctx)] : []),
+    // The `run` level is both halves of `canRunAgents`: launching a run this
+    // caller could not read back bills an orphan — see that predicate's doc.
+    ...(reaches(runLevel, "run") ? [buildRunAndWaitTool(ctx, reaches(runLevel, "compose"))] : []),
+    ...(operationGranted(listFiles, ctx.permissions) ? [buildListFilesTool(ctx)] : []),
     buildReadFileTool(ctx),
     ...buildPackageFileTools(ctx),
+    // Dropped for a caller that injects the get_me payload into its own prompt;
+    // `search_operations` stays either way, for `best_match`'s inline schema.
+    ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx)]),
   ];
-  // get_me dispatches to GET /api/me/context. A consumer that already injects
-  // that payload into its own system prompt (the chat module) drops the tool —
-  // it would only re-fetch what the model already has. search_operations is
-  // kept either way: the operation index is injected too, but its `best_match`
-  // schema still saves a describe_operation round-trip, so it is not redundant.
-  if (!ctx.contextInjected) tools.push(buildGetMeTool(ctx));
-  return tools;
 }

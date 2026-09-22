@@ -10,8 +10,21 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
-import { getCatalog, resetCatalog, type CatalogOperation } from "../../catalog.ts";
-import { buildMcpTools, type Dispatch, type McpToolEvent } from "../../tools.ts";
+import {
+  getCatalog,
+  resetCatalog,
+  type CatalogOperation,
+} from "../../../../src/modules/mcp/catalog.ts";
+import {
+  buildMcpTools,
+  type Dispatch,
+  type McpToolEvent,
+} from "../../../../src/modules/mcp/tools.ts";
+import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
+
+// `buildMcpTools` decides what this caller is shown from the guards mounted on
+// the routes, so it reads the route table.
+await registerTestPlatformApp();
 
 const noExtra = {} as unknown as AppstrateRequestExtra;
 
@@ -37,6 +50,7 @@ function makeTools(permissions: string[], status = 200) {
     actor: { type: "user", id: "user_1" },
     scope: { orgId: "org_1", spaceId: "spc_1" },
     authorizeBundle: async () => {},
+    mayShareRoot: async () => false,
   });
   const byName = new Map(tools.map((t) => [t.descriptor.name, t]));
   return { byName, events };
@@ -45,22 +59,29 @@ function makeTools(permissions: string[], status = 200) {
 describe("observe — search_operations", () => {
   beforeEach(() => resetCatalog());
 
-  it("emits a search event carrying the result count and a duration", async () => {
+  it("emits a search event carrying the shown count and a duration", async () => {
     const { byName, events } = makeTools(["mcp:read"]);
     await byName.get("search_operations")!.handler({ query: "agent", limit: 3 }, noExtra);
     expect(events.length).toBe(1);
     const e = events[0]!;
     expect(e.tool).toBe("search_operations");
-    expect(typeof e.resultCount).toBe("number");
-    expect(e.resultCount).toBeLessThanOrEqual(3);
+    expect(typeof e.shownCount).toBe("number");
+    expect(e.shownCount).toBeLessThanOrEqual(3);
     expect(typeof e.durationMs).toBe("number");
     expect(e.durationMs).toBeGreaterThanOrEqual(0);
+    // How often a caller's role is what stood between it and a match — the
+    // signal that says "this role is mis-scoped", not "the search is bad".
+    // An `mcp:read`-only caller is denied `runAgent`, `createAgent` and more.
+    expect(e.deniedCount).toBeGreaterThan(0);
   });
 
-  it("reports a zero result count for a no-match query (search hit-rate signal)", async () => {
+  it("reports a zero shown count for a no-match query (search hit-rate signal)", async () => {
     const { byName, events } = makeTools(["mcp:read"]);
     await byName.get("search_operations")!.handler({ query: "zzznotarealthing_xyzzy" }, noExtra);
-    expect(events[0]!.resultCount).toBe(0);
+    expect(events[0]!.shownCount).toBe(0);
+    // Nothing matched, so nothing was denied either — the two counters move
+    // independently.
+    expect(events[0]!.deniedCount).toBe(0);
   });
 });
 
@@ -110,15 +131,6 @@ describe("observe — invoke_operation", () => {
     await byName.get("invoke_operation")!.handler({ operation_id: op.operationId }, noExtra);
     expect(events[0]!.outcome).toBe("invoked");
     expect(events[0]!.status).toBe(503);
-  });
-
-  it("emits outcome=denied (no dispatch) when the caller lacks mcp:invoke", async () => {
-    const op = firstOp(() => true);
-    const { byName, events } = makeTools(["mcp:read"]);
-    await byName.get("invoke_operation")!.handler({ operation_id: op.operationId }, noExtra);
-    expect(events.length).toBe(1);
-    expect(events[0]!.outcome).toBe("denied");
-    expect(events[0]!.status).toBeUndefined();
   });
 
   it("emits outcome=rejected for an unknown operationId (before the protocol error throws)", async () => {

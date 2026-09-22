@@ -14,7 +14,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, memberContext } from "../../helpers/auth.ts";
 import { mcpRpc } from "../../helpers/mcp.ts";
-import { setPlatformApp } from "../../../src/lib/platform-app.ts";
+import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
 import { resetCatalog } from "../../../src/modules/mcp/catalog.ts";
 // By path, as `view-as.test.ts` does: the minting secret is process-local to
 // that file, and this is the module instance the chat module registered its
@@ -23,7 +23,7 @@ import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/lo
 import { turnPermissions } from "../../../../../packages/module-chat/src/turn-permissions.ts";
 
 const app = getTestApp();
-setPlatformApp(app);
+await registerTestPlatformApp();
 const rpc = mcpRpc(app);
 
 interface ListedSpace {

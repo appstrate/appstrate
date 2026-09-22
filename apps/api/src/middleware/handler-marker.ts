@@ -36,7 +36,20 @@ export function markHandler<T extends object>(handler: T, marker: symbol): T {
  * instead of guessing at it.
  */
 export function hasHandlerMarker(handler: unknown, marker: symbol): boolean {
-  if (typeof handler !== "function") return false;
+  return readHandlerMarker(handler, marker) === true;
+}
+
+/**
+ * The value stamped under `marker`, or `undefined` when absent.
+ *
+ * A marker may carry more than "present": a permission guard stamps the
+ * requirement string it will test, so the route table answers *which*
+ * permission a route needs and not merely *that* it needs one. Read through
+ * the same unwrapping as {@link hasHandlerMarker} — see its note on Hono's
+ * `route()` re-wrapping.
+ */
+export function readHandlerMarker(handler: unknown, marker: symbol): unknown {
+  if (typeof handler !== "function") return undefined;
   const target = findTargetHandler(handler as (...args: never[]) => unknown);
-  return (target as unknown as Record<symbol, unknown>)[marker] === true;
+  return (target as unknown as Record<symbol, unknown>)[marker];
 }

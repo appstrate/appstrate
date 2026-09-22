@@ -235,6 +235,7 @@ describeRequiresS3("files storage parity — S3 presigned posture", () => {
       scope,
       // Never reached: this test drives `resources/read`, not the bundle tools.
       authorizeBundle: async () => {},
+      mayShareRoot: async () => false,
       dispatch: async () => new Response(null),
     };
     const read = await buildFileResourceProvider(mcpCtx).read(

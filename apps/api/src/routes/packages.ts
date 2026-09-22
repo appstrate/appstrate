@@ -90,7 +90,11 @@ import {
   requireAgentRead,
 } from "../lib/package-access.ts";
 import { requirePackageInOrg } from "../middleware/guards.ts";
-import { requireAnyPermission, requirePermission } from "../middleware/require-permission.ts";
+import {
+  requireAnyPermission,
+  requirePermission,
+  rowAuthority,
+} from "../middleware/require-permission.ts";
 import { getRunningRunsForPackage } from "../services/state/runs.ts";
 import { logger } from "../lib/logger.ts";
 import { asRecord } from "@appstrate/core/safe-json";
@@ -1889,7 +1893,11 @@ export function createPackagesRouter() {
     // credential scoped without `<type>:read` still gets the manifest and, on
     // the detail route, the full `content` (SKILL.md / prompt.md).
     router.get(`/${path}`, readGuard, makeListHandler(rcfg));
-    router.post(`/${path}`, writeGuard, makeCreateHandler(rcfg));
+    // `rowAuthority()` on create: past `<type>:write` the handler judges every
+    // package the submitted manifest declares as a dependency, one by one
+    // (`assertPackageDependenciesAccessible`). The mutation routes below carry
+    // `requirePackageInOrg()`, which already says the row decides.
+    router.post(`/${path}`, writeGuard, rowAuthority(), makeCreateHandler(rcfg));
     // Version routes — must be registered before generic get to avoid conflict
     router.get(
       `/${path}/${SCOPED_PACKAGE_ROUTE}/versions`,
@@ -1980,7 +1988,9 @@ export function createPackagesRouter() {
   // package, the authority is the home space, which `assertPackageMutationAccess`
   // is the one reader of. It runs before the body is parsed so a caller who may
   // not touch this package learns nothing about the body's shape.
-  router.put(`/${SCOPED_PACKAGE_ROUTE}/home`, async (c) => {
+  // `rowAuthority()` here and on every route below whose refusal comes from the
+  // package's own row: the mounts alone would read as "granted to anyone".
+  router.put(`/${SCOPED_PACKAGE_ROUTE}/home`, rowAuthority(), async (c) => {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
 
@@ -2150,89 +2160,97 @@ export function createPackagesRouter() {
   });
 
   // --- Fork route ---
-  router.post(`/${SCOPED_PACKAGE_ROUTE}/fork`, requireAnyPackageWrite, async (c) => {
-    const packageId = getItemId(c);
-    const orgId = c.get("orgId");
-    const orgSlug = c.get("orgSlug");
-    const user = c.get("user");
+  // `rowAuthority()`: the mounted disjunction says the caller may write SOME
+  // package type; the source row decides which one (`packagePermission(
+  // source.type, "write")`) and whether the org lets it be copied out at all.
+  router.post(
+    `/${SCOPED_PACKAGE_ROUTE}/fork`,
+    requireAnyPackageWrite,
+    rowAuthority(),
+    async (c) => {
+      const packageId = getItemId(c);
+      const orgId = c.get("orgId");
+      const orgSlug = c.get("orgSlug");
+      const user = c.get("user");
 
-    // A missing/empty body is fine (auto-name), but a present-and-invalid
-    // `name` must surface as a 400 — `allowEmpty` maps an empty body to `{}`
-    // while still 400ing on malformed JSON or a bad-shape `name`.
-    const parsed = await readJsonBody(c, forkSchema, { allowEmpty: true });
-    const customName = parsed.name;
-    const source = await assertForkSourceAccess(c, packageId);
-    await makePermissionGuard(packagePermission(source.type, "write"))(c, async () => {});
+      // A missing/empty body is fine (auto-name), but a present-and-invalid
+      // `name` must surface as a 400 — `allowEmpty` maps an empty body to `{}`
+      // while still 400ing on malformed JSON or a bad-shape `name`.
+      const parsed = await readJsonBody(c, forkSchema, { allowEmpty: true });
+      const customName = parsed.name;
+      const source = await assertForkSourceAccess(c, packageId);
+      await makePermissionGuard(packagePermission(source.type, "write"))(c, async () => {});
 
-    const result = await forkPackage(
-      orgId,
-      orgSlug,
-      packageId,
-      // The fork is a NEW package in the space the caller forked from; the
-      // source's home says nothing about who may edit the copy.
-      c.get("spaceId"),
-      user.id,
-      customName,
-    );
-
-    if ("code" in result) {
-      switch (result.code) {
-        case "ALREADY_OWNED":
-          throw invalidRequest("You already own this package");
-        case "NOT_FOUND":
-          throw notFound("Package not found");
-        case "NAME_COLLISION":
-          throw new ApiError({
-            status: 400,
-            code: "name_collision",
-            title: "Name Collision",
-            detail: "A package with this name already exists in your organization",
-          });
-        case "UNKNOWN_TYPE":
-          throw invalidRequest(`Unsupported package type: ${result.type}`);
-        case "NO_PUBLISHED_VERSION":
-          throw invalidRequest("Source package has no published version");
-      }
-    }
-
-    // The fork is homed in the current space, so its placement is this space's
-    // by construction and the activation is an upsert that cannot conflict.
-    // WARN, not debug: a fork the caller cannot find afterwards is a bug report.
-    const spaceId = c.get("spaceId");
-    if (spaceId) {
-      await activatePackage({ orgId, spaceId }, result.packageId).catch((e: unknown) =>
-        logger.warn("auto-activation skipped", {
-          packageId: result.packageId,
-          spaceId,
-          err: getErrorMessage(e),
-        }),
-      );
-    }
-
-    await recordAuditFromContext(c, {
-      action: "package.forked",
-      resourceType: "package",
-      resourceId: result.packageId,
-      after: { type: result.type, forkedFrom: packageId },
-    });
-
-    // Return the forked package resource bare — same DTO/serializer as the new
-    // package's GET detail, selected by its type (issue #657). The fork
-    // provenance is resource state: `forked_from` is part of the detail DTO.
-    const forkedRcfg = ROUTE_CONFIGS[result.type as PackageType];
-    const detail = forkedRcfg
-      ? await loadPackageDetailDto(c, forkedRcfg, result.packageId, orgId)
-      : null;
-    if (!detail) {
-      logger.error("Forked package could not be re-read", {
-        packageId: result.packageId,
-        type: result.type,
+      const result = await forkPackage(
         orgId,
+        orgSlug,
+        packageId,
+        // The fork is a NEW package in the space the caller forked from; the
+        // source's home says nothing about who may edit the copy.
+        c.get("spaceId"),
+        user.id,
+        customName,
+      );
+
+      if ("code" in result) {
+        switch (result.code) {
+          case "ALREADY_OWNED":
+            throw invalidRequest("You already own this package");
+          case "NOT_FOUND":
+            throw notFound("Package not found");
+          case "NAME_COLLISION":
+            throw new ApiError({
+              status: 400,
+              code: "name_collision",
+              title: "Name Collision",
+              detail: "A package with this name already exists in your organization",
+            });
+          case "UNKNOWN_TYPE":
+            throw invalidRequest(`Unsupported package type: ${result.type}`);
+          case "NO_PUBLISHED_VERSION":
+            throw invalidRequest("Source package has no published version");
+        }
+      }
+
+      // The fork is homed in the current space, so its placement is this space's
+      // by construction and the activation is an upsert that cannot conflict.
+      // WARN, not debug: a fork the caller cannot find afterwards is a bug report.
+      const spaceId = c.get("spaceId");
+      if (spaceId) {
+        await activatePackage({ orgId, spaceId }, result.packageId).catch((e: unknown) =>
+          logger.warn("auto-activation skipped", {
+            packageId: result.packageId,
+            spaceId,
+            err: getErrorMessage(e),
+          }),
+        );
+      }
+
+      await recordAuditFromContext(c, {
+        action: "package.forked",
+        resourceType: "package",
+        resourceId: result.packageId,
+        after: { type: result.type, forkedFrom: packageId },
       });
-      throw internalError();
-    }
-    return c.json(detail, 201);
-  });
+
+      // Return the forked package resource bare — same DTO/serializer as the new
+      // package's GET detail, selected by its type (issue #657). The fork
+      // provenance is resource state: `forked_from` is part of the detail DTO.
+      const forkedRcfg = ROUTE_CONFIGS[result.type as PackageType];
+      const detail = forkedRcfg
+        ? await loadPackageDetailDto(c, forkedRcfg, result.packageId, orgId)
+        : null;
+      if (!detail) {
+        logger.error("Forked package could not be re-read", {
+          packageId: result.packageId,
+          type: result.type,
+          orgId,
+        });
+        throw internalError();
+      }
+      return c.json(detail, 201);
+    },
+  );
 
   // --- Sharing: a package's AUDIENCE (RBAC spec §6.10) ---
   //
@@ -2248,7 +2266,7 @@ export function createPackagesRouter() {
   // there (§3.6).
   //
 
-  router.post(`/${SCOPED_PACKAGE_ROUTE}/shares`, async (c) => {
+  router.post(`/${SCOPED_PACKAGE_ROUTE}/shares`, rowAuthority(), async (c) => {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
     const accessible = await packageAccessSpaces(c);
@@ -2363,7 +2381,7 @@ export function createPackagesRouter() {
     return c.json({ object: "package_share", ...view });
   });
 
-  router.get(`/${SCOPED_PACKAGE_ROUTE}/shares`, async (c) => {
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/shares`, rowAuthority(), async (c) => {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
     await assertPackageShareAccess(c, packageId);
@@ -2375,7 +2393,7 @@ export function createPackagesRouter() {
   // a space share, a member's user id for a share made to a person. There is
   // deliberately no third spelling — the id of somebody else's personal space
   // is never on the wire (plan decision 5b), so it cannot be the handle here.
-  router.delete(`/${SCOPED_PACKAGE_ROUTE}/shares/:target`, async (c) => {
+  router.delete(`/${SCOPED_PACKAGE_ROUTE}/shares/:target`, rowAuthority(), async (c) => {
     const packageId = getItemId(c);
     const target = c.req.param("target")!;
     const orgId = c.get("orgId");
@@ -2720,67 +2738,73 @@ export function createPackagesRouter() {
 
   // POST /api/packages/import-bundle — import a multi-package .afps-bundle
   // (or a raw .afps, promoted to a bundle-of-one via the catalog).
-  router.post("/import-bundle", rateLimit(10), requireAnyPackageWrite, async (c) => {
-    let formData: FormData;
-    try {
-      formData = await c.req.formData();
-    } catch {
-      throw invalidRequest("Request must be multipart/form-data with a file field", "file");
-    }
-    const file = formData.get("file");
-    if (!file || !(file instanceof File)) {
-      throw invalidRequest("File is required", "file");
-    }
-    const ext = file.name.toLowerCase();
-    if (!ext.endsWith(".afps-bundle") && !ext.endsWith(".afps") && !ext.endsWith(".zip")) {
-      throw invalidRequest("Only .afps-bundle, .afps, and .zip files are accepted", "file");
-    }
+  router.post(
+    "/import-bundle",
+    rateLimit(10),
+    requireAnyPackageWrite,
+    rowAuthority(),
+    async (c) => {
+      let formData: FormData;
+      try {
+        formData = await c.req.formData();
+      } catch {
+        throw invalidRequest("Request must be multipart/form-data with a file field", "file");
+      }
+      const file = formData.get("file");
+      if (!file || !(file instanceof File)) {
+        throw invalidRequest("File is required", "file");
+      }
+      const ext = file.name.toLowerCase();
+      if (!ext.endsWith(".afps-bundle") && !ext.endsWith(".afps") && !ext.endsWith(".zip")) {
+        throw invalidRequest("Only .afps-bundle, .afps, and .zip files are accepted", "file");
+      }
 
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const orgId = c.get("orgId");
-    const spaceId = c.get("spaceId");
-    const userId = c.get("user").id;
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const orgId = c.get("orgId");
+      const spaceId = c.get("spaceId");
+      const userId = c.get("user").id;
 
-    let result: Awaited<ReturnType<typeof handleImportBundle>>;
-    try {
-      result = await handleImportBundle(
-        bytes,
-        { orgId, spaceId },
-        userId,
-        (bundle) => authorizeBundlePackages(c, bundle),
-        // A root that already lives in another space is placed here by the same
-        // rule as any activation: the offer, when this caller may make one.
-        (packageId) => holdsPackageShareAuthority(c, packageId),
-      );
-    } catch (err) {
-      // Typed errors (ApiError — conflicts, invalid request) propagate as-is.
-      // A raw post-install/version-creation failure becomes the same clean 4xx
-      // as the single-import route rather than a 500.
-      if (err instanceof ApiError) throw err;
-      const message = getErrorMessage(err);
-      logger.error("Bundle import post-install failed", { orgId, error: message });
-      throw new ApiError({
-        status: 400,
-        code: "post_install_failed",
-        title: "Post-Install Failed",
-        detail: message,
-      });
-    }
-    // One audit event per package version actually written — "reused"
-    // entries changed no state. `recordAudit*` never throws.
-    for (const audit of bundleImportAuditRecords(result, { via: "import:bundle" })) {
-      await recordAuditFromContext(c, {
-        action: "package.version_created",
-        resourceType: "package",
-        resourceId: audit.resourceId,
-        after: audit.after,
-      });
-    }
-    return c.json(result, 201);
-  });
+      let result: Awaited<ReturnType<typeof handleImportBundle>>;
+      try {
+        result = await handleImportBundle(
+          bytes,
+          { orgId, spaceId },
+          userId,
+          (bundle) => authorizeBundlePackages(c, bundle),
+          // A root that already lives in another space is placed here by the same
+          // rule as any activation: the offer, when this caller may make one.
+          (packageId) => holdsPackageShareAuthority(c, packageId),
+        );
+      } catch (err) {
+        // Typed errors (ApiError — conflicts, invalid request) propagate as-is.
+        // A raw post-install/version-creation failure becomes the same clean 4xx
+        // as the single-import route rather than a 500.
+        if (err instanceof ApiError) throw err;
+        const message = getErrorMessage(err);
+        logger.error("Bundle import post-install failed", { orgId, error: message });
+        throw new ApiError({
+          status: 400,
+          code: "post_install_failed",
+          title: "Post-Install Failed",
+          detail: message,
+        });
+      }
+      // One audit event per package version actually written — "reused"
+      // entries changed no state. `recordAudit*` never throws.
+      for (const audit of bundleImportAuditRecords(result, { via: "import:bundle" })) {
+        await recordAuditFromContext(c, {
+          action: "package.version_created",
+          resourceType: "package",
+          resourceId: audit.resourceId,
+          after: audit.after,
+        });
+      }
+      return c.json(result, 201);
+    },
+  );
 
   // POST /api/packages/import — import any package type from ZIP
-  router.post("/import", rateLimit(10), requireAnyPackageWrite, async (c) => {
+  router.post("/import", rateLimit(10), requireAnyPackageWrite, rowAuthority(), async (c) => {
     let formData: FormData;
     try {
       formData = await c.req.formData();
@@ -2803,31 +2827,37 @@ export function createPackagesRouter() {
   });
 
   // POST /api/packages/import-github — import a package from a GitHub URL
-  router.post("/import-github", rateLimit(10), requireAnyPackageWrite, async (c) => {
-    const data = await readJsonBody(c, githubImportSchema, { param: "url" });
+  router.post(
+    "/import-github",
+    rateLimit(10),
+    requireAnyPackageWrite,
+    rowAuthority(),
+    async (c) => {
+      const data = await readJsonBody(c, githubImportSchema, { param: "url" });
 
-    let zipBytes: Uint8Array;
-    try {
-      zipBytes = await fetchGithubDirectory(data.url);
-    } catch (err) {
-      if (err instanceof GithubImportError) {
-        throw new ApiError({
-          status: 400,
-          code: err.code,
-          title: "Import Failed",
-          detail: err.message,
-        });
+      let zipBytes: Uint8Array;
+      try {
+        zipBytes = await fetchGithubDirectory(data.url);
+      } catch (err) {
+        if (err instanceof GithubImportError) {
+          throw new ApiError({
+            status: 400,
+            code: err.code,
+            title: "Import Failed",
+            detail: err.message,
+          });
+        }
+        throw err;
       }
-      throw err;
-    }
 
-    const { parsed, artifact } = await parseZipWithSkillFallback(
-      Buffer.from(zipBytes),
-      c.get("orgSlug"),
-    );
+      const { parsed, artifact } = await parseZipWithSkillFallback(
+        Buffer.from(zipBytes),
+        c.get("orgSlug"),
+      );
 
-    return handleImport(c, parsed, artifact, false, "github");
-  });
+      return handleImport(c, parsed, artifact, false, "github");
+    },
+  );
 
   // --- File explorer (read-only) ---
   // (see the ordering note at the head of this family)
@@ -2835,7 +2865,7 @@ export function createPackagesRouter() {
   // never be captured as a version spec.
 
   // GET /api/packages/:scope/:name/files — flat index of the artifact's files
-  router.get(`/${SCOPED_PACKAGE_ROUTE}/files`, rateLimit(50), async (c) => {
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/files`, rateLimit(50), rowAuthority(), async (c) => {
     const { version: requested } = parseFileQuery(c, fileIndexQuerySchema);
     // Visibility + `<type>:read` are both settled inside this call, BEFORE any
     // validator is resolved — nothing below can answer an unauthorized caller.
@@ -2873,7 +2903,7 @@ export function createPackagesRouter() {
   // GET /api/packages/:scope/:name/files/content — raw bytes of ONE file.
   // Serves preview AND download: a small text file that fell past the index's
   // inline budget stays previewable through here.
-  router.get(`/${SCOPED_PACKAGE_ROUTE}/files/content`, rateLimit(50), async (c) => {
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/files/content`, rateLimit(50), rowAuthority(), async (c) => {
     const { version: requested, path } = parseFileQuery(c, fileContentQuerySchema);
     // Must stay ABOVE the validator: the 304 short-circuit below answers
     // without reading the artifact, so a permission check placed after it
@@ -2936,75 +2966,80 @@ export function createPackagesRouter() {
   });
 
   // GET /api/packages/:scope/:name/:version/download — download a versioned package ZIP
-  router.get(`/${SCOPED_PACKAGE_ROUTE}/:version/download`, rateLimit(50), async (c) => {
-    const packageId = getItemId(c);
-    const orgId = c.get("orgId");
-    const spaceId = c.get("spaceId");
-    const versionSpec = c.req.param("version")!;
+  router.get(
+    `/${SCOPED_PACKAGE_ROUTE}/:version/download`,
+    rateLimit(50),
+    rowAuthority(),
+    async (c) => {
+      const packageId = getItemId(c);
+      const orgId = c.get("orgId");
+      const spaceId = c.get("spaceId");
+      const versionSpec = c.req.param("version")!;
 
-    // Visibility first — "system package, offered to THIS space, or homed
-    // here", the same gate the rest of the package read surface applies.
-    // Without it this route served the artifact bytes of packages that are
-    // merely owned by the org and placed nowhere the caller can reach.
-    if (!(await isPackageReadableInSpace(spaceId, packageId))) {
-      throw notFound("Package not found");
-    }
+      // Visibility first — "system package, offered to THIS space, or homed
+      // here", the same gate the rest of the package read surface applies.
+      // Without it this route served the artifact bytes of packages that are
+      // merely owned by the org and placed nowhere the caller can reach.
+      if (!(await isPackageReadableInSpace(spaceId, packageId))) {
+        throw notFound("Package not found");
+      }
 
-    // Verify org ownership (or system package). Ephemeral shadows are hidden.
-    const [pkg] = await db
-      .select({
-        id: packages.id,
-        type: packages.type,
-        source: packages.source,
-        homeSpaceId: packages.homeSpaceId,
-      })
-      .from(packages)
-      .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
-      .limit(1);
-    if (!pkg) {
-      throw notFound("Package not found");
-    }
+      // Verify org ownership (or system package). Ephemeral shadows are hidden.
+      const [pkg] = await db
+        .select({
+          id: packages.id,
+          type: packages.type,
+          source: packages.source,
+          homeSpaceId: packages.homeSpaceId,
+        })
+        .from(packages)
+        .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
+        .limit(1);
+      if (!pkg) {
+        throw notFound("Package not found");
+      }
 
-    // The ZIP carries the manifest and every authored file, so it is at least
-    // as sensitive as the detail route — it needs the same `<type>:read`.
-    await requirePackageReadPermission(c, pkg.type);
+      // The ZIP carries the manifest and every authored file, so it is at least
+      // as sensitive as the detail route — it needs the same `<type>:read`.
+      await requirePackageReadPermission(c, pkg.type);
 
-    // …and, when the organization restricts copying (plan decision 12), the
-    // source's `<type>:share`. This is the route the archive leaves through,
-    // so reading it and taking it away are two different permissions there.
-    // Skills and system packages are exempt inside the helper: the CLI's
-    // skills sync is this route's other consumer and its copies are local by
-    // design, and a shipped system package has no owning space to protect.
-    await assertPackageCopyAllowed(
-      c,
-      { ...pkg, type: pkg.type as PackageType },
-      { orgId, accessible: await packageAccessSpaces(c) },
-    );
+      // …and, when the organization restricts copying (plan decision 12), the
+      // source's `<type>:share`. This is the route the archive leaves through,
+      // so reading it and taking it away are two different permissions there.
+      // Skills and system packages are exempt inside the helper: the CLI's
+      // skills sync is this route's other consumer and its copies are local by
+      // design, and a shipped system package has no owning space to protect.
+      await assertPackageCopyAllowed(
+        c,
+        { ...pkg, type: pkg.type as PackageType },
+        { orgId, accessible: await packageAccessSpaces(c) },
+      );
 
-    const ver = await getVersionForDownload(packageId, versionSpec);
-    if (!ver) {
-      throw notFound("Version not found");
-    }
+      const ver = await getVersionForDownload(packageId, versionSpec);
+      if (!ver) {
+        throw notFound("Version not found");
+      }
 
-    let data: Buffer | null;
-    try {
-      data = await downloadVersionZip(packageId, ver.version, ver.integrity);
-    } catch {
-      throw internalError();
-    }
-    if (!data) {
-      throw notFound("Artifact not found in storage");
-    }
+      let data: Buffer | null;
+      try {
+        data = await downloadVersionZip(packageId, ver.version, ver.integrity);
+      } catch {
+        throw internalError();
+      }
+      if (!data) {
+        throw notFound("Artifact not found in storage");
+      }
 
-    const downloadHeaders = buildDownloadHeaders({
-      integrity: ver.integrity,
-      yanked: ver.yanked,
-      scope: c.req.param("scope")!,
-      name: c.req.param("name")!,
-      version: ver.version,
-    });
-    return new Response(new Uint8Array(data), { status: 200, headers: downloadHeaders });
-  });
+      const downloadHeaders = buildDownloadHeaders({
+        integrity: ver.integrity,
+        yanked: ver.yanked,
+        scope: c.req.param("scope")!,
+        name: c.req.param("name")!,
+        version: ver.version,
+      });
+      return new Response(new Uint8Array(data), { status: 200, headers: downloadHeaders });
+    },
+  );
 
   return router;
 }

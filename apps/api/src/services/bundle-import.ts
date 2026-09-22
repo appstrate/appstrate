@@ -296,7 +296,7 @@ export async function importBundle(
   bundle: Bundle,
   scope: BundleAssemblyScope,
   userId: string,
-  mayShareRoot?: (packageId: string) => Promise<boolean>,
+  mayShareRoot: (packageId: string) => Promise<boolean>,
 ): Promise<ImportBundleResult> {
   const imported: ImportedPackageResult[] = [];
   const warnings: string[] = [];
@@ -542,7 +542,7 @@ export async function importBundle(
   }
   let rootActive = false;
   try {
-    const mayShare = (await mayShareRoot?.(rootParsed.packageId)) ?? false;
+    const mayShare = await mayShareRoot(rootParsed.packageId);
     await activatePackage(scope, rootParsed.packageId, mayShare ? { shareBy: userId } : undefined);
     rootActive = true;
   } catch (err) {
@@ -671,7 +671,7 @@ export async function handleImportBundle(
   scope: BundleAssemblyScope,
   userId: string,
   authorize: (bundle: Bundle) => Promise<void>,
-  mayShareRoot?: (packageId: string) => Promise<boolean>,
+  mayShareRoot: (packageId: string) => Promise<boolean>,
 ): Promise<ImportBundleResult> {
   const { bundle, conflicts } = await preflightBundleImport(bytes, scope, authorize);
   if (conflicts.length > 0) {

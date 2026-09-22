@@ -32,19 +32,11 @@ interface PackageFileToolContext {
    */
   authorizeBundle: NonNullable<Parameters<typeof preflightBundleImport>[2]>;
   /**
-   * Whether the caller may OFFER a package out of its home space — asked of a
-   * re-imported root that already lives in ANOTHER space, so this tool places
-   * it by the same rule as `POST /api/packages/import-bundle` and
-   * `POST /api/spaces/{id}/packages`: the offer is written with the placement
-   * when the caller holds `<type>:share` in the home, and the result reports
-   * `root_active: false` when they do not.
-   *
-   * Optional, and absent means `false`: a caller with no request context
-   * cannot be asked, and an import that silently offered on their behalf would
-   * be the one door that placed a package without proving the authority. One
-   * act, one rule — the fail-closed answer is the honest one here.
+   * Required. Decides whether a re-imported root homed in ANOTHER space is
+   * placed here WITH its offer, exactly as `POST /api/packages/import-bundle`
+   * decides it: no authority, no placement, and `root_active: false`.
    */
-  mayShareRoot?: (packageId: string) => Promise<boolean>;
+  mayShareRoot: (packageId: string) => Promise<boolean>;
 }
 
 interface PackageFileBytes {
@@ -56,20 +48,17 @@ interface PackageFileBytes {
 
 type PackageFileImportContext = Pick<PackageFileToolContext, "permissions" | "actor">;
 
-function packageFileImportAccessError(ctx: PackageFileImportContext): string | undefined {
-  if (
-    !ctx.permissions.has("mcp:invoke") ||
-    !PACKAGE_WRITE_PERMISSIONS.some((permission) => ctx.permissions.has(permission))
-  ) {
-    return "Permissions 'mcp:invoke' and a package write permission are required to import packages.";
-  }
-  if (ctx.actor.type !== "user") return "Only organization users can import packages.";
-  return undefined;
-}
-
-/** Keep tool disclosure and server guidance on the same import eligibility rule. */
+/**
+ * Keep tool disclosure and server guidance on the same import eligibility rule.
+ * The one enforcement point: `import_package_file` is declared only when this
+ * holds, so its handler re-asking would be unreachable by construction.
+ */
 export function canImportPackageFiles(ctx: PackageFileImportContext): boolean {
-  return packageFileImportAccessError(ctx) === undefined;
+  return (
+    ctx.actor.type === "user" &&
+    ctx.permissions.has("mcp:invoke") &&
+    PACKAGE_WRITE_PERMISSIONS.some((permission) => ctx.permissions.has(permission))
+  );
 }
 
 function packageSizeError(): McpError {
@@ -216,8 +205,6 @@ function buildImportPackageFileTool(ctx: PackageFileToolContext): AppstrateToolD
     inputSchema: packageFileInputSchema(),
   };
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
-    const accessError = packageFileImportAccessError(ctx);
-    if (accessError) return textResult({ error: accessError }, true);
     const uri = asString(args.file_uri);
     if (!uri) throw new McpError(ErrorCode.InvalidParams, "file_uri is required.");
     try {

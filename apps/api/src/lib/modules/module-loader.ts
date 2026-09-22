@@ -691,11 +691,13 @@ export function getModulePublicPaths(): ReadonlySet<string> {
  * catch-all, otherwise the catch-all shadows every module-owned path.
  */
 export function registerModuleRoutes(app: Hono<AppEnv>): void {
-  // Expose the fully-wired app so modules can issue authenticated in-process
-  // requests back through the platform (e.g. the `mcp` module re-enters via
-  // `app.fetch` to reuse the auth pipeline + RBAC). Generic capability — set
-  // here because this is the single production site where every route
-  // (core + module) is mounted on one app instance.
+  // Register the app so modules can issue authenticated in-process requests
+  // back through the platform (e.g. the `mcp` module re-enters via `app.fetch`
+  // to reuse the auth pipeline + RBAC). Generic capability — set here because
+  // this is the single production site where every route (core + module) is
+  // mounted on one app instance. It is registered BEFORE the module routers
+  // below mount, so every reader must run at request time, never at boot
+  // (`lib/platform-app.ts`).
   setPlatformApp(app);
   for (const mod of _modules.values()) {
     const router = mod.createRouter?.();

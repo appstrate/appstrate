@@ -116,12 +116,6 @@ describe("deriveToolPhase", () => {
     );
   });
 
-  it("outcome:denied → error", () => {
-    expect(
-      deriveToolPhase({ status: { type: "complete" }, result: { outcome: "denied", error: "x" } }),
-    ).toBe("error");
-  });
-
   it("incomplete status → error", () => {
     expect(
       deriveToolPhase({ status: { type: "incomplete", reason: "error" }, result: undefined }),
