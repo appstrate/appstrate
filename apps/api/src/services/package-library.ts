@@ -151,8 +151,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
           inArray(spacePackages.spaceId, accessibleIds),
         ),
       )
-      // No `listedFilter`: the management map is the one listing that must still
-      // show an unlisted package to those who place, activate or delete it.
+      // No `listedFilter`: this map is where an unlisted package is managed.
       .where(and(orgOrSystemFilter(orgId), notEphemeralFilter()))
       .orderBy(packages.id),
     // The sharer is named only while they are still a MEMBER of this

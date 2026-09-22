@@ -66,16 +66,19 @@ indexed, whatever the session state, and are never offered in the picker. A
 default that does not resolve — a space may switch a system skill off — is not
 indexed, and says nothing: that is a choice, not a fault. These three skills are written
 for the chat assistant — they read its `## Your context` block — which is why
-they are unlisted platform defaults and not agent dependencies. Their bodies
-carry only what the persona (`prompt.ts`) and the MCP server instructions
-(`modules/mcp/router.ts`) do not already say.
+they are unlisted platform defaults and not agent dependencies. Their
+descriptions (in the prompt every turn) say only when to load them; their
+bodies carry only what the persona (`prompt.ts`) and the MCP server
+instructions (`modules/mcp/router.ts`) do not already say.
 
 Boot: the system-package sync upserts with `setWhere: isNull(orgId)` — it
 refuses to overwrite an organization-owned row under the same id. The collision
 is logged at error level (id, owning org, the fix: rename the org package),
 reported in `ownershipConflicts`, and that system package is skipped — no row
 write, no version registered, and the id is dropped from the system registry,
-so the org keeps full control of its package; the boot continues. Pre-deploy check, on prod:
+so the org keeps full control of its package; the boot continues. The chat
+agrees: `(platform)` is read off the hint's `source`, so that id is the org's
+ordinary skill, indexed only when pinned. Pre-deploy check, on prod:
 `SELECT id, org_id FROM packages WHERE id IN ('@appstrate/copilot', '@appstrate/web-search', '@appstrate/connector-choice');`
 — any row with a non-null `org_id` must be renamed first.
 

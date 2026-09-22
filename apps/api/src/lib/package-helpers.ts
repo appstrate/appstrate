@@ -23,10 +23,7 @@ export function notEphemeralFilter() {
 /** AFPS §10.1 vendor namespace of the visibility extension (`{ "level": "unlisted" }`). */
 export const VISIBILITY_META_NAMESPACE = "dev.appstrate/visibility";
 
-/**
- * Excludes unlisted packages from catalogue listings only; exact-id reads ignore
- * it. In SQL so LIMIT and the window `total` stay honest.
- */
+/** Drops unlisted packages from catalogue listings, in SQL so LIMIT and totals stay honest. */
 export function listedFilter() {
   return sql`${packages.draftManifest} -> '_meta' -> ${VISIBILITY_META_NAMESPACE} ->> 'level' IS DISTINCT FROM 'unlisted'`;
 }

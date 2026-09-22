@@ -200,12 +200,10 @@ interface CallerContext {
       }[]
     | null;
   agents_truncated?: boolean | null;
-  /** The space's capped, listed-only skill catalogue. */
   skills?: SkillHint[] | null;
   skills_truncated?: boolean | null;
   /** `?skills=` resolved by exact id — unlisted included, uncapped. */
   requested_skills?: SkillHint[] | null;
-  /** Requested ids no package answered (unknown, inactive, or out of reach). */
   unresolved_skills?: string[] | null;
 }
 
@@ -260,8 +258,7 @@ export function formatCallerContext(
 ): string {
   const author = opts.canAuthorAgents ?? true;
   const ctx = (raw ?? {}) as CallerContext;
-  // Resolved before the emptiness check: a payload holding only skills still
-  // deserves a block. Without `skills:read` the server returns none of them.
+  // Before the emptiness check: a payload holding only skills deserves a block.
   const skills = resolveChatSkills({
     selection: opts.skills,
     defaults: PLATFORM_DEFAULT_SKILLS,
@@ -435,9 +432,7 @@ export async function buildCallerContextBlock(
       { locale, skills },
     );
 
-  // The indexed skills are resolved by exact id in the same round trip; the
-  // route answers none without `skills:read`. Sorted and deduped: the same
-  // session state must yield the same cached block.
+  // Sorted and deduped: the same session state must yield the same cached block.
   const url = new URL("/api/me/context", origin);
   const requested = [...new Set([...PLATFORM_DEFAULT_SKILLS, ...skills.pinned])].sort();
   url.searchParams.set("skills", requested.join(","));
@@ -453,9 +448,7 @@ export async function buildCallerContextBlock(
         skills,
       });
     }
-    // No space context (e.g. requireSpaceContext rejected), or `?skills=`
-    // refused — a chat-side bug that would otherwise only show as a prompt with
-    // no skills. Keep the identity/role block rather than dropping context.
+    // No space context, or `?skills=` refused (a chat-side bug): keep identity.
     if (res.status === 400) {
       logger.warn("me/context refused the chat's request — degrading to identity-only", {
         requestedSkills: requested.length,

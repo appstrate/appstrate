@@ -235,7 +235,6 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
   const env = (await import("@appstrate/env")).getEnv();
 
   // Reconcile the loaded system packages into the DB + S3.
-  // An org-owned id collision is logged and skipped inside the sync, never thrown.
   await syncSystemPackagesToDb().catch((err) => {
     logger.warn("Could not sync system packages", {
       error: getErrorMessage(err),

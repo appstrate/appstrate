@@ -97,13 +97,7 @@ export function isSystemPackage(id: string): boolean {
   return systemPackages.has(id);
 }
 
-/**
- * Drop ids from the live registry (a fresh Map, never a mutation of the one
- * installed). Called by the sync for an org-owned id: left in, the org's own
- * package would read as system — refused by the update/delete/version routes,
- * served the system manifest, authorized as system in bundles — so the org
- * could not apply the rename the boot log asks for.
- */
+/** Drop org-owned ids: left in, the org's package reads as system and its rename is refused. */
 function dropFromSystemRegistry(ids: ReadonlySet<string>): void {
   systemPackages = new Map([...systemPackages].filter(([id]) => !ids.has(id)));
   systemPackageVersions = systemPackageVersions.filter((entry) => !ids.has(entry.packageId));
@@ -164,7 +158,6 @@ export async function syncSystemPackagesToDb(
   let syncedVersions = 0;
   let unchangedPackages = 0;
   let unchangedVersions = 0;
-  /** Ids whose `packages` row belongs to an ORGANIZATION — see the UPSERT below. */
   const ownershipConflicts = new Set<string>();
 
   // One SHA-256 per loaded archive, shared by both passes below (the canonical
@@ -372,8 +365,7 @@ export async function syncSystemPackagesToDb(
     }),
   );
 
-  // Never register a version under an org-owned id, and on this deployment
-  // the id is simply not a system package.
+  // No version under an org-owned id: here it is simply not a system package.
   if (ownershipConflicts.size > 0) dropFromSystemRegistry(ownershipConflicts);
   const versionsToSync = allVersions.filter((entry) => !ownershipConflicts.has(entry.packageId));
 

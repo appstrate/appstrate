@@ -433,10 +433,8 @@ const Conversation = memo(function Conversation({
   // Stable identity: `ConversationInner` keys its store-attach effect on it.
   const initialMessages = useMemo(() => history.data?.messages ?? [], [history.data?.messages]);
 
-  // The picker lives here, under the `key={id}` remount, so its local selection
-  // is seeded once per conversation and never written back into this query.
-  // A failed read has no stored selection to seed it: its first click would PUT
-  // over the stored pins, so the composer goes without a picker instead.
+  // Seeded once per conversation (`key={id}` remount). No picker on a failed
+  // read: its first click would PUT defaults over the stored pins.
   const initialSkills = history.data?.skills ?? DEFAULT_SKILL_SELECTION;
   const skillsReadable = !history.isError;
   const slot = useMemo(

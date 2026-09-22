@@ -62,11 +62,8 @@ export const chatSessions = pgTable(
     // DTO so only a boolean crosses the wire.
     lastAssistantSeq: integer("last_assistant_seq"),
     lastReadSeq: integer("last_read_seq"),
-    // Whether turns also list the space's skill catalogue; defaults and pins
-    // are always indexed. A context-budget dial, never an authorization one.
     skillCatalogue: boolean("skill_catalogue").notNull().default(true),
-    // Pins by `@scope/name`, no FK: re-resolved every turn, a missing package
-    // becomes a notice. Stored sorted and deduped.
+    // No FK: re-resolved every turn, a missing package becomes a notice.
     pinnedSkills: text("pinned_skills")
       .array()
       .notNull()

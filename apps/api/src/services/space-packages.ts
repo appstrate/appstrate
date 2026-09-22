@@ -728,7 +728,6 @@ const hintColumns = {
   latestVersionId: packageDistTags.versionId,
 } as const;
 
-/** One row as {@link hintColumns} selects it. */
 type HintRow = {
   id: string;
   type: PackageType;
@@ -759,7 +758,6 @@ function projectPackageHint<T extends PackageHint>(
   return project(base, manifest);
 }
 
-/** Join on the `latest` dist-tag row {@link hintColumns} reads `latestVersionId` from. */
 function latestDistTagJoin() {
   return and(eq(packageDistTags.packageId, packages.id), eq(packageDistTags.tag, "latest"));
 }
@@ -859,7 +857,6 @@ interface ActiveSkillsResult {
   total: number;
 }
 
-/** The skill-specific half of the hint projection, shared by both reads below. */
 function projectActiveSkill(base: PackageHint, manifest: Record<string, unknown>): ActiveSkill {
   return { ...base, version: typeof manifest.version === "string" ? manifest.version : null };
 }
@@ -867,8 +864,8 @@ function projectActiveSkill(base: PackageHint, manifest: Record<string, unknown>
 /**
  * Active-skill hint for the caller context. Skills are not run directly: the
  * model declares them under an agent manifest's `dependencies.skills`, and the
- * inline-run preflight validates they exist at invoke time. Same `agents:run`
- * caller gate as agents. See {@link listActivePackageHints}.
+ * inline-run preflight validates they exist at invoke time. The route gates it
+ * on `skills:read`. See {@link listActivePackageHints}.
  */
 export async function listActiveSkills(
   scope: SpaceScope,
@@ -883,11 +880,7 @@ export async function listActiveSkills(
   return { skills: items, truncated, total };
 }
 
-/**
- * Resolve named skills by exact id, without `listedFilter` (visibility ≠
- * authorization); ordered by id so the rendered index is byte-stable.
- * `unresolved` keeps request order.
- */
+/** Exact-id resolution, unlisted included (visibility ≠ authorization), sorted for a stable prompt. */
 export async function resolveSkillsByIds(
   scope: SpaceScope,
   ids: readonly string[],
