@@ -1,15 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The composer's skill picker: whether this conversation shows the assistant
- * the space's catalogue, and which skills it always loads (pins).
- *
- * The selection is LOCAL state seeded once from the history payload; clicks
- * apply optimistically and write through a coalescer. A failed write reverts
- * to the last selection the server confirmed.
- */
+// Skill picker: local selection seeded once; one PUT at a time, reverted on failure.
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { BookOpenIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
@@ -22,14 +15,7 @@ import {
 } from "@appstrate/ui/components/tooltip";
 import { cn } from "@appstrate/ui/cn";
 import { MAX_PINNED_SKILLS, type ChatSkillSelection } from "../skills.ts";
-import {
-  createSkillsWriter,
-  putSessionSkills,
-  settleSkillsWrite,
-  skillPickerRows,
-  togglePinned,
-  type SkillsWriter,
-} from "./chat-skills.ts";
+import { putSessionSkills, skillPickerRows, togglePinned } from "./chat-skills.ts";
 import { useChatHost, type GetHeaders } from "./runtime-context.ts";
 import { useChatSkillsCatalog } from "./use-chat-skills.ts";
 
@@ -48,8 +34,8 @@ export function SkillsPicker({ sessionId, getHeaders, initialSelection }: Skills
   const { t } = useChatHost();
   const [open, setOpen] = useState(false);
   const [selection, setSelection] = useState(initialSelection);
-  const confirmedRef = useRef(initialSelection);
-  const writerRef = useRef<SkillsWriter | null>(null);
+  // Controls are disabled while a PUT is in flight, so writes never race.
+  const [saving, setSaving] = useState(false);
   const { skills, loading, failed } = useChatSkillsCatalog();
 
   const pinned = selection.pinned;
@@ -58,16 +44,12 @@ export function SkillsPicker({ sessionId, getHeaders, initialSelection }: Skills
   const rows = skillPickerRows(skills, pinned);
 
   const apply = (next: ChatSkillSelection) => {
+    const previous = selection;
     setSelection(next);
-    writerRef.current ??= createSkillsWriter(
-      (sent) => putSessionSkills(getHeaders, sessionId, sent),
-      (outcome) => {
-        const settled = settleSkillsWrite(confirmedRef.current, outcome);
-        confirmedRef.current = settled.confirmed;
-        if (settled.revert) setSelection(settled.confirmed);
-      },
-    );
-    writerRef.current.write(next);
+    setSaving(true);
+    putSessionSkills(getHeaders, sessionId, next)
+      .catch(() => setSelection(previous))
+      .finally(() => setSaving(false));
   };
 
   const togglePin = (packageId: string) => {
@@ -136,6 +118,7 @@ export function SkillsPicker({ sessionId, getHeaders, initialSelection }: Skills
             id="skills-catalogue"
             data-testid="skills-catalogue-toggle"
             checked={selection.catalogue}
+            disabled={saving}
             onCheckedChange={(checked) => apply({ ...selection, catalogue: checked === true })}
             className="mt-0.5"
           />
@@ -177,7 +160,7 @@ export function SkillsPicker({ sessionId, getHeaders, initialSelection }: Skills
                     id={id}
                     data-testid={`skill-pin-${skill.package_id}`}
                     checked={checked}
-                    disabled={!checked && atPinCap}
+                    disabled={saving || (!checked && atPinCap)}
                     onCheckedChange={() => togglePin(skill.package_id)}
                     className="mt-0.5 shrink-0"
                   />

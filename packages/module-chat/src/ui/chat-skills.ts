@@ -52,64 +52,6 @@ export function skillPickerRows(
   ];
 }
 
-export interface SkillsWriteOutcome {
-  sent: ChatSkillSelection;
-  ok: boolean;
-  /** No newer selection is queued behind this one. */
-  idle: boolean;
-}
-
-/**
- * The picker's state after a write settles. A failure reverts to the last
- * confirmed selection — unless a newer write is queued, which then decides.
- */
-export function settleSkillsWrite(
-  confirmed: ChatSkillSelection,
-  outcome: SkillsWriteOutcome,
-): { confirmed: ChatSkillSelection; revert: boolean } {
-  if (outcome.ok) return { confirmed: outcome.sent, revert: false };
-  return { confirmed, revert: outcome.idle };
-}
-
-/**
- * One PUT in flight, newest wins: racing PUTs would let completion order
- * decide the stored set. Queue depth 1 — an unseen intermediate is not sent.
- */
-export interface SkillsWriter {
-  write(selection: ChatSkillSelection): void;
-}
-
-export function createSkillsWriter(
-  put: (selection: ChatSkillSelection) => Promise<void>,
-  onSettled?: (outcome: SkillsWriteOutcome) => void,
-): SkillsWriter {
-  let busy = false;
-  let queued: ChatSkillSelection | null = null;
-
-  const run = (selection: ChatSkillSelection): void => {
-    busy = true;
-    void put(selection).then(
-      () => finish(selection, true),
-      () => finish(selection, false),
-    );
-  };
-
-  const finish = (sent: ChatSkillSelection, ok: boolean): void => {
-    busy = false;
-    const next = queued;
-    queued = null;
-    onSettled?.({ sent, ok, idle: next === null });
-    if (next) run(next);
-  };
-
-  return {
-    write(selection) {
-      if (busy) queued = selection;
-      else run(selection);
-    },
-  };
-}
-
 /** The space's listed skills. A 403 (no `skills:read`) means nothing to offer. */
 export async function fetchChatSkills(
   getHeaders: GetHeaders | null | undefined,

@@ -100,8 +100,9 @@ DTO carries both fields. There is no chat-specific skill listing: the picker
 reads `GET /api/packages/skills`.
 
 UI: a picker in the composer (catalogue switch + one pin checkbox per skill).
-The selection lives in local state seeded from the session detail; writes are
-coalesced (one in flight, the newest wins) and reverted on failure.
+The selection lives in local state seeded from the session detail; one write at
+a time (the controls are disabled while it is in flight, so writes never race),
+reverted on failure.
 
 ## Out of scope
 
