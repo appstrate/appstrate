@@ -18,7 +18,10 @@ import { db } from "../../helpers/db.ts";
 import { packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { activatePackage } from "../../../src/services/space-packages.ts";
-import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
+import {
+  apiIntegrationManifest,
+  localIntegrationManifest,
+} from "../../helpers/integration-manifests.ts";
 
 const app = getTestApp();
 
@@ -352,6 +355,50 @@ describe("POST /api/runs/inline/validate", () => {
         body: JSON.stringify({ manifest, prompt: "do something" }),
       });
     }
+
+    it("answers an auth_key serving no selected tool once, as the resolver's 412", async () => {
+      const API = "@inlineorg/api-svc";
+      const manifest = apiIntegrationManifest({
+        name: API,
+        apiCall: { authKey: "primary" },
+        auths: { primary: { type: "api_key" }, backup: { type: "api_key" } },
+      }) as unknown as Record<string, unknown>;
+      await seedPackage({
+        id: API,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        type: "integration",
+        draftManifest: manifest,
+      });
+      await seedPackageVersion({ packageId: API, version: "1.0.0", manifest });
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, API);
+      const misfit = {
+        ...validManifest(),
+        dependencies: { skills: {}, integrations: { [API]: "^1.0.0" } },
+        integrations_configuration: { [API]: { tools: ["api_call"], auth_key: "backup" } },
+      };
+
+      const launched = await launch(misfit);
+      expect(launched.status).toBe(412);
+      const launchBody = (await launched.json()) as {
+        errors?: { field: string; code: string; required_auth_key?: string }[];
+      };
+      expect(launchBody.errors).toContainEqual(
+        expect.objectContaining({
+          field: `integrations.${API}`,
+          code: "pinned_auth_serves_no_selected_tool",
+          required_auth_key: "backup",
+        }),
+      );
+
+      const validated = (await (await validate(misfit)).json()) as {
+        errors?: { code: string }[];
+      };
+      const reported = (validated.errors ?? []).filter(
+        (e) => e.code === "pinned_auth_serves_no_selected_tool",
+      );
+      expect(reported).toHaveLength(1);
+    });
 
     it("refuses a tool the integration does not expose, on BOTH routes", async () => {
       // One code is enough HERE: what this file proves is that the inline

@@ -24,9 +24,10 @@
  *    catalog → the corresponding subset check is skipped (matches the
  *    Phase 0 schema semantics).
  *
- * `requireCallableTools` adds one more rule that is NOT a subset check — the
- * declared-but-empty gate — and is opt-in per call site (a publish/import rule,
- * not a draft rule).
+ * `requireCallableTools` adds two freeze-point rules that are NOT subset checks
+ * — the declared-but-empty gate (`no_tools_selected`) and an `auth_key` serving
+ * none of the selected tools (`pinned_auth_serves_no_selected_tool`) — opt-in
+ * per call site (a publish/import rule, not a draft or run rule).
  *
  * WHICH manifest every check above judges against is a SEPARATE axis: the
  * PINNED version the run will resolve whenever pins are available — the flag
@@ -169,7 +170,7 @@ interface ValidateAgentIntegrationSelectionsInput {
   /**
    * Also refuse a DECLARED integration whose effective tool selection is
    * empty (AFPS §4.4) — the state `assertIntegrationExposesTools` turns into
-   * a failed run.
+   * a failed run — and an `auth_key` serving none of the selected tools.
    *
    * OFF by default, and that default is load-bearing: the agent editor's own
    * flow passes THROUGH the empty state (add the dependency, then tick a tool)

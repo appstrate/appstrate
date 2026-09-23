@@ -169,6 +169,13 @@ describe("MCP server instructions — run guidance", () => {
     expect(bullet).toBeDefined();
     expect(bullet).toContain("configuration must change");
     expect(bullet).toContain("Do not start a connect flow");
+    expect(bullet).toContain("Do not retry");
+    // A caller that composes inline runs wrote the configuration itself.
+    const composer = prose(new Set([...RUNNER, "agents:write"]))
+      .split("\n")
+      .find((line) => line.startsWith("- Code `pinned_auth_serves_no_selected_tool`"));
+    expect(composer).toContain("in your manifest and retry");
+    expect(composer).toContain("for a stored agent, do not retry");
     // The connection-bound code keeps its own remedy, always with a connection_id.
     const connectionBound = prose(RUNNER)
       .split("\n")

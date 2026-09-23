@@ -158,8 +158,9 @@ export async function runInlinePreflight(params: {
   // selections (`requiredScopesForAgent`), so a caller could name arbitrary
   // scopes and have the platform relay them as the consent to request.
   //
-  // `requireCallableTools` stays OFF: it is the freeze-point rule (publish /
-  // import), and an inline agent freezes nothing. The subset checks below are
+  // `requireCallableTools` stays OFF: its rules are freeze-point rules (publish /
+  // import), and an inline agent freezes nothing — readiness below answers an
+  // `auth_key` misfit as the resolver's 412. The subset checks below are
   // the whole point here.
   //
   // The memo below is what makes those checks judge the PINNED integration
