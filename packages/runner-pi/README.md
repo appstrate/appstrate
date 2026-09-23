@@ -28,7 +28,7 @@ shapes closely enough that a floating range would break silently:
 
 ## Exports
 
-Four subpaths, all declared in `package.json`. `src/index.ts` is the
+Five subpaths, all declared in `package.json`. `src/index.ts` is the
 authoritative list — the groups below say what each cluster is FOR; they are not
 a narrower "supported subset", and nothing enforces one.
 
@@ -44,6 +44,7 @@ from `./runtime-tools`, and they are deliberately absent from `.`.
 | `./runtime-tools` | The built-in runtime tools the agent can call during a run, with their descriptors. |
 | `./provider-map`  | Provider mapping on its own, for callers that want it without the barrel.           |
 | `./model-compat`  | The pi-ai `model.compat` flag bag and its pricing invariants.                       |
+| `./log-line`      | The pino-compatible JSON log line (numeric level) for pino-free processes.          |
 
 From `.`:
 

@@ -339,12 +339,18 @@
       "dependencies": {
         "@appstrate/core": "workspace:*",
       },
+      "devDependencies": {
+        "@earendil-works/pi-ai": "0.86.1",
+      },
     },
     "packages/module-codex": {
       "name": "@appstrate/module-codex",
       "version": "0.0.0",
       "dependencies": {
         "@appstrate/core": "workspace:*",
+      },
+      "devDependencies": {
+        "@earendil-works/pi-ai": "0.86.1",
       },
     },
     "packages/module-ee": {

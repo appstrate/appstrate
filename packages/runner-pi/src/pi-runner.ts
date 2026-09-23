@@ -65,6 +65,7 @@ import {
   type TerminalRunResult,
   type TokenUsage,
 } from "@appstrate/afps-runtime/runner";
+import { formatLogLine } from "./log-line.ts";
 
 /**
  * Pi model configuration. Mirrors the Pi SDK's `Model<Api>` shape so
@@ -666,14 +667,12 @@ export class PiRunner {
       // 401/retry silently (the platform's kickoff fail-fast should prevent
       // this, so reaching here means a run bypassed that guard). Surface a
       // line on the surprising path.
-      // runner-pi intentionally avoids a logger dep — same JSON-line-on-stderr
-      // convention as the compaction-wait + sink-heartbeat paths.
       process.stderr.write(
-        `${JSON.stringify({
-          level: "warn",
-          msg: "[pi-runner] no API key for model — provider calls will be unauthenticated",
-          provider: model.provider,
-        })}\n`,
+        formatLogLine(
+          "warn",
+          "[pi-runner] no API key for model — provider calls will be unauthenticated",
+          { provider: model.provider },
+        ),
       );
     }
 
@@ -1102,15 +1101,9 @@ export async function waitForCompactionToSettle(
     if (signal?.aborted) return;
     if (Date.now() >= deadline) {
       // Only surface a line on the surprising path — happy-path
-      // compactions resolve silently. runner-pi intentionally avoids
-      // a logger dep, so the existing JSON-line-on-stderr convention
-      // from sink-heartbeat applies.
+      // compactions resolve silently.
       process.stderr.write(
-        `${JSON.stringify({
-          level: "warn",
-          msg: "[pi-runner] compaction wait timed out",
-          timeoutMs,
-        })}\n`,
+        formatLogLine("warn", "[pi-runner] compaction wait timed out", { timeoutMs }),
       );
       return;
     }

@@ -31,6 +31,7 @@
  */
 
 import { sign } from "@appstrate/afps-runtime/events";
+import { formatLogLine } from "./log-line.ts";
 
 export interface StartSinkHeartbeatOptions {
   /**
@@ -64,17 +65,13 @@ export interface StartSinkHeartbeatOptions {
 }
 
 function defaultErrorSink(err: unknown): void {
-  const line = {
-    level: "error" as const,
-    time: Date.now(),
-    component: "sink-heartbeat",
-    msg: err instanceof Error ? err.message : String(err),
-    ...(err instanceof Error && err.stack ? { stack: err.stack } : {}),
-  };
-  // stderr write — JSON line, pino-compatible enough that downstream
-  // platform consumers parse it without special-casing.
   try {
-    process.stderr.write(`${JSON.stringify(line)}\n`);
+    process.stderr.write(
+      formatLogLine("error", err instanceof Error ? err.message : String(err), {
+        component: "sink-heartbeat",
+        ...(err instanceof Error && err.stack ? { stack: err.stack } : {}),
+      }),
+    );
   } catch {
     // Last-resort fallback when the raw stderr write throws (closed pipe,
     // detached fd). This is the ONE sanctioned `console.*` in the repo, and it

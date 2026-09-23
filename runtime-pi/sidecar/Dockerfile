@@ -74,6 +74,9 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 #                                             subpath is pi-free (no pi-ai /
 #                                             pi-coding-agent imports) so the
 #                                             compiled binary stays minimal.
+#   - @appstrate/runner-pi/log-line           the shared pino-compatible JSON
+#                                             log line written by logger.ts
+#                                             (import-free, no pino).
 COPY packages/connect/src        packages/connect/src
 COPY packages/afps-runtime/src   packages/afps-runtime/src
 COPY packages/afps-shared/src    packages/afps-shared/src
