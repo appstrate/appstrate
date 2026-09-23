@@ -77,7 +77,7 @@ describe("resolveIntegrationSpawns — remote source", () => {
     await db.insert(integrationConnections).values({
       integrationId: INTEG,
       authKey: "primary",
-      accountId: "default",
+      accountId: null,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,
@@ -169,7 +169,7 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
     await db.insert(integrationConnections).values({
       integrationId: LOCAL,
       authKey: "primary",
-      accountId: "default",
+      accountId: null,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,

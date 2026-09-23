@@ -633,10 +633,14 @@ describe("api_key connection flow", () => {
       body: JSON.stringify({ credentials: { api_key: "AKIA-SECRET" } }),
     });
     expect(post.status).toBe(200);
-    const conn = (await post.json()) as { id: string; auth_key: string; account_id: string };
+    const conn = (await post.json()) as {
+      id: string;
+      auth_key: string;
+      account_id: string | null;
+    };
     expect(conn.auth_key).toBe("api");
-    // No identity extraction declared → account_id falls back to "default"
-    expect(conn.account_id).toBe("default");
+    // No identity extraction declared → no provider identity
+    expect(conn.account_id).toBeNull();
 
     const list = await app.request("/api/integrations/@myorg/gmail/connections", {
       headers: authHeaders(ctx),

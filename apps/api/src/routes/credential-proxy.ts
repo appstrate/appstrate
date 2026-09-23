@@ -99,7 +99,7 @@ export function createCredentialProxyRouter() {
       const integrationId = c.req.header("X-Integration-Id");
       const target = c.req.header("X-Target");
       const sessionId = c.req.header("X-Session-Id");
-      const substituteBody = c.req.header("X-Substitute-Body") === "true";
+      const substituteBody = readFlagHeader(c, "X-Substitute-Body");
       // X-Run-Id is optional — populated by runners that want per-run
       // attribution in `credential_proxy_usage`. The value is not validated
       // against the principal here (matches llm-proxy behaviour); a
@@ -166,8 +166,8 @@ export function createCredentialProxyRouter() {
       const actor = getActor(c);
 
       // Streaming control headers from the runtime.
-      const streamRequest = c.req.header("x-stream-request") === "1";
-      const streamResponse = c.req.header("x-stream-response") === "1";
+      const streamRequest = readFlagHeader(c, "X-Stream-Request");
+      const streamResponse = readFlagHeader(c, "X-Stream-Response");
       const declaredLen = parseInt(c.req.header("content-length") || "-1", 10);
 
       // Optional caller-supplied buffered-response cap. Clamped to the
@@ -376,6 +376,18 @@ export function createCredentialProxyRouter() {
   );
 
   return router;
+}
+
+/**
+ * The one encoding of every boolean control header: `1` / `0`, absent = `0`.
+ * Anything else is a 400 — a silently-false `true` is how a caller once lost
+ * body substitution without noticing.
+ */
+function readFlagHeader(c: Context<AppEnv>, name: string): boolean {
+  const value = c.req.header(name);
+  if (value === undefined || value === "0") return false;
+  if (value === "1") return true;
+  throw invalidRequest(`${name} must be "1" or "0" (got "${value.slice(0, 32)}")`);
 }
 
 const PROXY_CONTROL_HEADERS = new Set([

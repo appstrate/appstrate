@@ -4207,7 +4207,7 @@
         "operationId": "streamAllRuns",
         "tags": ["Realtime"],
         "summary": "SSE: all run status changes",
-        "description": "Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent format: `event: run_update\\ndata: {\"id\":\"run_...\",\"status\":\"running\",\"packageId\":\"@scope/name\",...}\\n\\n`\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.\n\nRun visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.",
+        "description": "Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=apst_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent format: `event: run_update\\ndata: {\"id\":\"run_...\",\"status\":\"running\",\"packageId\":\"@scope/name\",...}\\n\\n`\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.\n\nRun visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/SseOrgId"
@@ -4259,7 +4259,7 @@
         "operationId": "streamRun",
         "tags": ["Realtime"],
         "summary": "SSE: single run events",
-        "description": "Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.\n\nRun visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.",
+        "description": "Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=apst_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.\n\nRun visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.",
         "parameters": [
           {
             "name": "id",
@@ -4319,7 +4319,7 @@
         "operationId": "streamAgentRuns",
         "tags": ["Realtime"],
         "summary": "SSE: agent run changes",
-        "description": "Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.\n\nRun visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.",
+        "description": "Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=apst_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.\n\nRun visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.",
         "parameters": [
           {
             "name": "packageId",
@@ -5307,7 +5307,8 @@
                                   "type": "string"
                                 },
                                 "account_id": {
-                                  "type": "string"
+                                  "type": ["string", "null"],
+                                  "description": "Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity."
                                 },
                                 "identity_claims": {
                                   "type": ["object", "null"],
@@ -6158,7 +6159,8 @@
                       "type": "string"
                     },
                     "account_id": {
-                      "type": "string"
+                      "type": ["string", "null"],
+                      "description": "Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity."
                     },
                     "identity_claims": {
                       "type": ["object", "null"],
@@ -6653,7 +6655,8 @@
                           "type": "string"
                         },
                         "account_id": {
-                          "type": "string"
+                          "type": ["string", "null"],
+                          "description": "Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity."
                         },
                         "identity_claims": {
                           "type": ["object", "null"],
@@ -6836,7 +6839,8 @@
                             "type": "string"
                           },
                           "account_id": {
-                            "type": "string"
+                            "type": ["string", "null"],
+                            "description": "Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity."
                           },
                           "identity_claims": {
                             "type": ["object", "null"],
@@ -6996,7 +7000,8 @@
                       "type": "string"
                     },
                     "account_id": {
-                      "type": "string"
+                      "type": ["string", "null"],
+                      "description": "Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity."
                     },
                     "identity_claims": {
                       "type": ["object", "null"],
@@ -7217,7 +7222,8 @@
                                   "type": "string"
                                 },
                                 "account_id": {
-                                  "type": "string"
+                                  "type": ["string", "null"],
+                                  "description": "Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity."
                                 },
                                 "identity_claims": {
                                   "type": ["object", "null"],
@@ -10428,7 +10434,7 @@
                     {
                       "id": "cm8vwx234",
                       "name": "Production CI",
-                      "keyPrefix": "ask_prod",
+                      "keyPrefix": "apst_k3x9M2pq",
                       "scopes": ["agents:run", "runs:read"],
                       "created_by": "user_abc",
                       "created_by_name": "Jane Doe",
@@ -10517,11 +10523,11 @@
                     },
                     "key": {
                       "type": "string",
-                      "description": "Raw API key (prefix: ask_). Store it securely — it will not be shown again."
+                      "description": "Raw API key (prefix: apst_). Store it securely — it will not be shown again."
                     },
                     "keyPrefix": {
                       "type": "string",
-                      "description": "First 8 characters for identification"
+                      "description": "The `apst_` prefix and the first 8 characters after it, for identification"
                     },
                     "scopes": {
                       "type": "array",
@@ -10534,8 +10540,8 @@
                 },
                 "example": {
                   "id": "cm8vwx235",
-                  "key": "ask_prod_k3x9m2pq7r4t1w6y0a5d8g",
-                  "keyPrefix": "ask_prod",
+                  "key": "apst_k3x9M2pq7R4t1W6y0a5D8gHs2LmQ4v4WVgvC",
+                  "keyPrefix": "apst_k3x9M2pq",
                   "scopes": ["agents:run", "runs:read"]
                 }
               }
@@ -12008,7 +12014,7 @@
                                   ]
                                 },
                                 "identity": {
-                                  "type": "string"
+                                  "type": ["string", "null"]
                                 },
                                 "reused_by_agents": {
                                   "type": "integer"
@@ -21899,7 +21905,7 @@
         "operationId": "credentialProxyGet",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a GET request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.",
         "security": [
           {
             "bearerApiKey": []
@@ -21950,10 +21956,10 @@
             "name": "X-Substitute-Body",
             "in": "header",
             "required": false,
-            "description": "When `true`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "description": "When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
             "schema": {
               "type": "string",
-              "enum": ["true", "false"]
+              "enum": ["0", "1"]
             }
           },
           {
@@ -22081,7 +22087,7 @@
         "operationId": "credentialProxyPost",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a POST request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.",
         "security": [
           {
             "bearerApiKey": []
@@ -22132,10 +22138,10 @@
             "name": "X-Substitute-Body",
             "in": "header",
             "required": false,
-            "description": "When `true`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "description": "When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
             "schema": {
               "type": "string",
-              "enum": ["true", "false"]
+              "enum": ["0", "1"]
             }
           },
           {
@@ -22270,7 +22276,7 @@
         "operationId": "credentialProxyPut",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a PUT request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.",
         "security": [
           {
             "bearerApiKey": []
@@ -22321,10 +22327,10 @@
             "name": "X-Substitute-Body",
             "in": "header",
             "required": false,
-            "description": "When `true`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "description": "When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
             "schema": {
               "type": "string",
-              "enum": ["true", "false"]
+              "enum": ["0", "1"]
             }
           },
           {
@@ -22459,7 +22465,7 @@
         "operationId": "credentialProxyPatch",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a PATCH request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.",
         "security": [
           {
             "bearerApiKey": []
@@ -22510,10 +22516,10 @@
             "name": "X-Substitute-Body",
             "in": "header",
             "required": false,
-            "description": "When `true`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "description": "When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
             "schema": {
               "type": "string",
-              "enum": ["true", "false"]
+              "enum": ["0", "1"]
             }
           },
           {
@@ -22648,7 +22654,7 @@
         "operationId": "credentialProxyDelete",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a DELETE request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.",
         "security": [
           {
             "bearerApiKey": []
@@ -22699,10 +22705,10 @@
             "name": "X-Substitute-Body",
             "in": "header",
             "required": false,
-            "description": "When `true`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "description": "When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
             "schema": {
               "type": "string",
-              "enum": ["true", "false"]
+              "enum": ["0", "1"]
             }
           },
           {
@@ -23533,7 +23539,7 @@
       "bearerApiKey": {
         "type": "http",
         "scheme": "bearer",
-        "description": "API key authentication. Use `Authorization: Bearer ask_...` header. The org is resolved from the key — no `X-Org-Id` header needed."
+        "description": "API key authentication. Use `Authorization: Bearer apst_...` header. The org is resolved from the key — no `X-Org-Id` header needed. A key is `apst_` + 30 base62 characters + a 6-character base62 CRC32 of those 30, so a malformed key is refused without a lookup. A key in the retired `ask_` format is refused with `401 api_key_format_retired`: create a new key."
       },
       "bearerJwt": {
         "type": "http",
@@ -23649,7 +23655,7 @@
         "name": "view_as",
         "in": "query",
         "required": false,
-        "description": "Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=ask_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`.",
+        "description": "Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=apst_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`.",
         "schema": {
           "type": "string",
           "example": "org_role=member; space=spc_…; role=preset:viewer"
@@ -23659,7 +23665,7 @@
         "name": "token",
         "in": "query",
         "required": false,
-        "description": "API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead.",
+        "description": "API key (`apst_` prefix) for SSE authentication. A retired `ask_` key is `401 api_key_format_retired`. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead.",
         "schema": {
           "type": "string"
         }
@@ -23791,8 +23797,8 @@
                   "description": "User-given name; `null` when the connection was never labelled."
                 },
                 "account_id": {
-                  "type": "string",
-                  "description": "The auth's account discriminator (`sub` claim, email, host…)."
+                  "type": ["string", "null"],
+                  "description": "The auth's account discriminator (`sub` claim, email, host…); `null` when the provider exposed no identity."
                 },
                 "owned_by_actor": {
                   "type": "boolean",
@@ -25441,7 +25447,7 @@
           },
           "keyPrefix": {
             "type": "string",
-            "description": "First 8 chars of the key for identification"
+            "description": "The first characters of the key, for identification: `apst_` + 8. A key created before the checksummed format shows `ask_` + 4 and no longer authenticates."
           },
           "scopes": {
             "type": "array",
@@ -26092,7 +26098,7 @@
                   "type": "string"
                 },
                 "account_id": {
-                  "type": "string"
+                  "type": ["string", "null"]
                 },
                 "label": {
                   "type": ["string", "null"]

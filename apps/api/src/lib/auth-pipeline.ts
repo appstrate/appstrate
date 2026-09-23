@@ -24,7 +24,12 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { user as userTable } from "@appstrate/db/schema";
 import { getAuth } from "@appstrate/db/auth";
-import { validateApiKey } from "../services/api-keys.ts";
+import {
+  API_KEY_PREFIX,
+  apiKeyFormatRetired,
+  isRetiredApiKey,
+  validateApiKey,
+} from "../services/api-keys.ts";
 import { requireOrgContext } from "../middleware/org-context.ts";
 import { requirePlatformRealm } from "../middleware/realm-guard.ts";
 import { isEndUserInSpace } from "../services/end-users.ts";
@@ -124,7 +129,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     // Module-contributed auth strategies run first (first-match-wins).
     // Strategies MUST return `null` fast when the request does not match
     // their signature (e.g. a JWT strategy only claims `Bearer ey…`,
-    // never `Bearer ask_…`). A strategy claiming every request would
+    // never `Bearer apst_…`). A strategy claiming every request would
     // shadow core API key auth — documented in `apps/api/src/modules/README.md`.
     const strategies = authStrategies();
     if (strategies.length > 0) {
@@ -206,7 +211,8 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
 
     // Try Bearer API key
     const rawKey = parseBearer(c.req.header("Authorization"));
-    if (rawKey?.startsWith("ask_")) {
+    if (rawKey && isRetiredApiKey(rawKey)) throw apiKeyFormatRetired();
+    if (rawKey?.startsWith(API_KEY_PREFIX)) {
       const keyInfo = await validateApiKey(rawKey);
       if (!keyInfo) {
         throw unauthorized("Invalid or expired API key");

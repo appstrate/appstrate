@@ -43,13 +43,13 @@ function manifestWith({
   } as unknown as IntegrationManifest;
 }
 
-// Backwards-compatible helper for the historical OIDC-keys-equal-AFPS-keys
-// case (mapping `{ email: "email", sub: "sub" }`). The reverse-lookup
-// resolves identically here — both keyspaces coincide.
+// The OIDC-keys-equal-AFPS-keys case (mapping `{ email: "$.email", sub:
+// "$.sub" }`). The reverse-lookup resolves identically here — both keyspaces
+// coincide.
 function manifestWithRequired(required: string[] | undefined): IntegrationManifest {
   return manifestWith({
     ...(required ? { required } : {}),
-    identityClaims: { email: "email", sub: "sub" },
+    identityClaims: { email: "$.email", sub: "$.sub" },
   });
 }
 
@@ -165,11 +165,9 @@ describe("assertRequiredIdentityClaims — OIDC keyspace resolution (§7.4 line 
     ).toThrow(/'email'/);
   });
 
-  it("accepts the bare-string accessor form (no $. prefix) as identical to the JSONPath form", () => {
-    // `"sub"` and `"$.sub"` are interchangeable per extractIdentity's
-    // readPath() behaviour. The reverse-lookup must treat them the same.
+  it("reads the bracket form `$['sub']` as the same OIDC claim as `$.sub`", () => {
     const m = manifestWith({
-      identityClaims: { account_id: "sub" },
+      identityClaims: { account_id: "$['sub']" },
       required: ["sub"],
     });
     expect(() =>

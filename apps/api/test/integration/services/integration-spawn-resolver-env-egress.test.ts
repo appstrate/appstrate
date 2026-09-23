@@ -92,7 +92,7 @@ async function seedAll(ctx: TestContext, manifest: Record<string, unknown>) {
   await db.insert(integrationConnections).values({
     integrationId: INTEG,
     authKey: "session",
-    accountId: "default",
+    accountId: null,
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     endUserId: null,

@@ -58,6 +58,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`integrationManifestSchema`** (`@appstrate/core/integration`) refuses an
+  `auths.{key}.identity_claims` value outside the manifest JSONPath subset of
+  `@appstrate/afps-shared/jsonpath` (`$`, `.name`, `['name']`, `[0]`, `[-1]`).
+  A bare claim name (`"sub"`) is no longer read as `"$.sub"`: write the `$`.
+- **`ConnectionCandidate.accountId`** (`@appstrate/core/integration`) and
+  **`ResolutionFieldError.candidate_connections[].account_id`**
+  (`@appstrate/core/api-errors`) are `string | null`. `null` means the provider
+  exposed no identity; it replaces the magic account id `"default"`.
 - **`SubscriptionChatModel.input`** (`@appstrate/core/chat-contract`) is typed
   `ModelInputModality[] | null` instead of `string[] | null`.
 - **`formatErrorChain`** (`@appstrate/core/errors`) starts a cause as a new
@@ -87,6 +95,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`@appstrate/core/permissions`), the universal-id carve-out of the casing
   conventions. The role keys (`preset_role`, `custom_role_id`) are unchanged.
   Stored rows move with it: `scripts/migration/0020-space-assignments-spaceid-key.sql`.
+- **BREAKING: the MCP tool-name grammar keeps the upstream body**
+  (`@appstrate/core/naming`). `isValidToolName` now accepts
+  `{namespace}__{body}` with `body` in `[A-Za-z0-9_-]+` (case, `-`, a leading
+  digit and inner `__` allowed; the namespace stays lowercase snake-case), and
+  is re-exported from `@appstrate/afps-shared/mcp-naming`, the one copy of the
+  grammar. `normaliseMcpToolBody` no longer lowercases, collapses or strips an
+  upstream `ns__` prefix: it only maps characters providers reject to `_`.
+  New **`allocateMcpToolName(namespace, upstreamName, taken)`** replaces the
+  sidecar's `{ns}__tool_N` / `_2` fallbacks with a truncated body plus an
+  8-hex hash of the original name. Exposed names of upstream tools that used
+  upper case, `-`, `__` or overlong names change; stored manifests reference
+  ORIGINAL upstream names (`tools`, `hidden_tools`, `tools_policy`) and are
+  unaffected.
 
 ## [11.1.0] — 2026-09-22
 

@@ -188,8 +188,8 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     //   2. `id_token` JWT claims — OIDC providers. No sig check: PKCE + signed
     //      state already vetted the channel; claims are identity hints only.
     //   3. `userinfoUrl` GET — non-OIDC OAuth2 (GitHub, Slack, Notion, …).
-    //      Without it, accountId falls back to "default" and every new
-    //      connection collapses onto the same row.
+    //      Without it, accountId is null (no identity) and every new
+    //      connection is labelled "Connexion N" instead of the account.
     const identitySource: Record<string, unknown> = { ...result.tokenResponse };
     const idToken = result.tokenResponse.id_token;
     if (typeof idToken === "string") {
@@ -248,7 +248,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
           // exchange and then stalls its userinfo endpoint would hold the
           // callback open and leave the connection unsaved, losing a
           // credential the user already granted. Identity is best-effort
-          // enrichment (a timeout degrades to accountId "default"); it must
+          // enrichment (a timeout degrades to a null accountId); it must
           // never decide whether the connection persists.
           signal: AbortSignal.timeout(USERINFO_TIMEOUT_MS),
         });

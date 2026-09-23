@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING (API keys): keys use a checksummed `apst_` format, and every
+  existing `ask_` key stops authenticating.** A key is now `apst_` + 30 base62
+  characters + a 6-character base62 CRC32 of those 30, so a secret scanner can
+  recognise and validate a leaked key offline, and a malformed key is refused
+  before any database lookup. Keys are stored hashed and cannot be converted:
+  an `ask_` key is refused with `401 api_key_format_retired` (header and
+  `?token=` alike). **Every API-key client (CI, GitHub Action secrets, MCP
+  clients) fails from the moment of the upgrade until a new key, created after
+  it, is swapped in.**
+  Old keys stay listed in Settings → API keys, marked as retired, until
+  revoked. The display prefix grows from `ask_` + 4 to `apst_` + 8 characters.
 - **BREAKING (CLI): `appstrate packages pull --version <spec>` is now
   `appstrate packages pull <package>@<spec>`** — the shape `appstrate run` and
   npm already take: `@acme/pdf@1.2.0`, `pdf@latest`, `@acme/pdf@^1.2`. The flag

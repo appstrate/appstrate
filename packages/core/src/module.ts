@@ -142,7 +142,7 @@ export interface AppstrateModule {
   /**
    * Custom authentication strategies contributed by this module.
    *
-   * Strategies are tried in module load order, BEFORE core auth (Bearer ask_
+   * Strategies are tried in module load order, BEFORE core auth (Bearer apst_
    * API key → session cookie). The first strategy whose `authenticate()` returns
    * a non-null `AuthResolution` claims the request; subsequent strategies and
    * core auth are skipped.

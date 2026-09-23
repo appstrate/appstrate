@@ -498,6 +498,13 @@
       "when": 1790187427591,
       "tag": "0070_webhook_deliveries_keyset_index",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1790188431487,
+      "tag": "0071_integration_connections_account_id_nullable",
+      "breakpoints": true
     }
   ]
 }

@@ -157,8 +157,9 @@ export const schemas = {
               description: "User-given name; `null` when the connection was never labelled.",
             },
             account_id: {
-              type: "string",
-              description: "The auth's account discriminator (`sub` claim, email, host…).",
+              type: ["string", "null"],
+              description:
+                "The auth's account discriminator (`sub` claim, email, host…); `null` when the provider exposed no identity.",
             },
             owned_by_actor: {
               type: "boolean",
@@ -1437,7 +1438,11 @@ export const schemas = {
     properties: {
       id: { type: "string" },
       name: { type: "string" },
-      keyPrefix: { type: "string", description: "First 8 chars of the key for identification" },
+      keyPrefix: {
+        type: "string",
+        description:
+          "The first characters of the key, for identification: `apst_` + 8. A key created before the checksummed format shows `ask_` + 4 and no longer authenticates.",
+      },
       scopes: {
         type: "array",
         items: { type: "string" },
@@ -1865,7 +1870,7 @@ export const schemas = {
           properties: {
             id: { type: "string", format: "uuid" },
             auth_key: { type: "string" },
-            account_id: { type: "string" },
+            account_id: { type: ["string", "null"] },
             label: { type: ["string", "null"] },
             owner_user_id: { type: ["string", "null"] },
             owner_end_user_id: { type: ["string", "null"] },

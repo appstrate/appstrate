@@ -10,7 +10,12 @@ import { runs } from "@appstrate/db/schema";
 import { addSubscriber, removeSubscriber, REALTIME_CHANNELS } from "../services/realtime.ts";
 import type { RealtimeEvent, RealtimeChannel } from "../services/realtime.ts";
 import { ApiError, forbidden, notFound, unauthorized } from "../lib/errors.ts";
-import { validateApiKey } from "../services/api-keys.ts";
+import {
+  API_KEY_PREFIX,
+  apiKeyFormatRetired,
+  isRetiredApiKey,
+  validateApiKey,
+} from "../services/api-keys.ts";
 import { getOrgMember } from "../services/organizations.ts";
 import { effectivePermissions } from "../lib/permissions.ts";
 import { resolveSpaceRole, type SpaceMemberRow } from "../lib/space-role.ts";
@@ -143,7 +148,7 @@ async function resolveSpaceGrants(
  * Validate auth for SSE endpoints.
  *
  * Supports two auth methods:
- *  1. API key via `?token=ask_...` query param (EventSource can't send headers)
+ *  1. API key via `?token=apst_...` query param (EventSource can't send headers)
  *  2. Cookie session (existing behavior)
  *
  * Org context: `?orgId=` query param (cookie auth only — API key already resolves org).
@@ -173,7 +178,8 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
 
   // 1. Try API key auth via ?token= query param
   const token = c.req.query("token");
-  if (token?.startsWith("ask_")) {
+  if (token && isRetiredApiKey(token)) throw apiKeyFormatRetired();
+  if (token?.startsWith(API_KEY_PREFIX)) {
     if (viewAsRaw !== undefined) {
       // Same refusal as the HTTP transport guard: a key has no session to narrow.
       throw new ApiError({

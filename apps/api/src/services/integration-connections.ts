@@ -51,7 +51,12 @@ import { isActiveHere } from "./package-activation.ts";
 import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
 import { mergeSystemAndDb, setExactlyOneDefault, isUuid } from "../lib/db-helpers.ts";
 import { logger } from "../lib/logger.ts";
-import { notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
+import { ApiError, notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
+import {
+  evaluateJsonPath,
+  JsonPathSyntaxError,
+  parseJsonPath,
+} from "@appstrate/afps-shared/jsonpath";
 import type { ActorScope, SpaceScope } from "../lib/scope.ts";
 import { actorInsert, actorFilter, actorOrSharedFilter } from "../lib/actor.ts";
 import {
@@ -1862,27 +1867,26 @@ export async function deleteIntegrationOAuthClient(
 // ─────────────────────────────────────────────
 
 /**
- * Apply `extractTokenIdentity` JSONPath-like accessors against a token
- * response (or a credentials bag for non-OAuth auths). The mapping is
- * intentionally simple — `"$.field"` or `"field"` selects a top-level
- * key, `"$.a.b"` walks nested objects, missing values become `""`.
+ * Apply the AFPS `identity_claims` JSONPaths (`@appstrate/afps-shared/jsonpath`)
+ * to a token response (or a credentials bag for non-OAuth auths). A claim whose
+ * path selects nothing is left out of the bag — an optional claim the provider
+ * did not return is normal. A path outside the supported subset is the
+ * manifest's defect and fails the connect with `invalid_config`.
  *
- * Always produces a stable `accountId` — falls back to:
- *   1. The declared `extractTokenIdentity.accountId` mapping
- *   2. `email` / `account_email` / `sub` claims if present
- *   3. The literal string `"default"` when nothing matches (single-account)
+ * `accountId` is the declared `accountId` / `account_id` claim, else the
+ * source's `email` / `account_email` / `sub`, else `null`: no provider identity.
  */
 export function extractIdentity(
   manifest: IntegrationManifest,
   authKey: string,
   source: Record<string, unknown>,
-): { accountId: string; identityClaims: Record<string, unknown> } {
+): { accountId: string | null; identityClaims: Record<string, unknown> } {
   const auth = lookupAuth(manifest, authKey) as AfpsManifestAuth;
-  // AFPS: the token identity mapping is `identity_claims`.
   const mapping = auth.identity_claims ?? {};
   const claims: Record<string, unknown> = {};
-  for (const [outKey, accessor] of Object.entries(mapping)) {
-    claims[outKey] = readPath(source, accessor);
+  for (const [outKey, path] of Object.entries(mapping)) {
+    const value = evaluateIdentityPath(source, path, authKey, outKey);
+    if (value !== undefined) claims[outKey] = value;
   }
   const accountId =
     (typeof claims.accountId === "string" && claims.accountId) ||
@@ -1890,8 +1894,28 @@ export function extractIdentity(
     (typeof source.email === "string" && source.email) ||
     (typeof source.account_email === "string" && source.account_email) ||
     (typeof source.sub === "string" && source.sub) ||
-    "default";
+    null;
   return { accountId, identityClaims: claims };
+}
+
+function evaluateIdentityPath(
+  source: Record<string, unknown>,
+  path: string,
+  authKey: string,
+  claim: string,
+): unknown {
+  try {
+    return evaluateJsonPath(source, path);
+  } catch (err) {
+    if (!(err instanceof JsonPathSyntaxError)) throw err;
+    throw new ApiError({
+      status: 400,
+      code: "invalid_config",
+      title: "Invalid Integration Manifest",
+      detail: `auths.${authKey}.identity_claims.${claim}: ${err.message}`,
+      cause: err,
+    });
+  }
 }
 
 /**
@@ -1934,19 +1958,18 @@ export function assertRequiredIdentityClaims(
 
   const mapping = auth.identity_claims ?? {};
   // Build a reverse index OIDC-claim-name → AFPS keys that reference it.
-  // The mapping value is either a bare claim name (`"sub"`) or a JSONPath
-  // (`"$.sub"`, `"$.user.email"`). For the OIDC keyspace check we only
-  // care about leaf single-segment names — that's the canonical form of
-  // an OIDC claim. A deeper path like `"$.user.email"` is by definition
-  // not an OIDC claim, so we don't index it (the spec example in §7.4
-  // line 931 shows OIDC standard claims only).
+  // Only a single-member path (`"$.sub"`, `"$['sub']"`) names an OIDC claim;
+  // a deeper path like `"$.user.email"` is by definition not one, so it is
+  // not indexed (the spec example in §7.4 line 931 shows OIDC standard
+  // claims only). `extractIdentity` has already refused an invalid path.
   const oidcToAfpsKeys = new Map<string, string[]>();
-  for (const [afpsKey, accessor] of Object.entries(mapping)) {
-    const path = accessor.startsWith("$.") ? accessor.slice(2) : accessor;
-    if (path.length === 0 || path.includes(".")) continue;
-    const list = oidcToAfpsKeys.get(path);
+  for (const [afpsKey, path] of Object.entries(mapping)) {
+    const segments = parseJsonPath(path);
+    const claim = segments[0];
+    if (segments.length !== 1 || typeof claim !== "string") continue;
+    const list = oidcToAfpsKeys.get(claim);
     if (list) list.push(afpsKey);
-    else oidcToAfpsKeys.set(path, [afpsKey]);
+    else oidcToAfpsKeys.set(claim, [afpsKey]);
   }
 
   const isPresent = (value: unknown): boolean =>
@@ -1978,20 +2001,6 @@ export function assertRequiredIdentityClaims(
   );
 }
 
-function readPath(source: Record<string, unknown>, accessor: string): unknown {
-  const path = accessor.startsWith("$.") ? accessor.slice(2) : accessor;
-  const parts = path.split(".");
-  let cur: unknown = source;
-  for (const part of parts) {
-    if (cur && typeof cur === "object" && part in (cur as Record<string, unknown>)) {
-      cur = (cur as Record<string, unknown>)[part];
-    } else {
-      return "";
-    }
-  }
-  return cur;
-}
-
 // ─────────────────────────────────────────────
 // Connection storage
 // ─────────────────────────────────────────────
@@ -1999,7 +2008,8 @@ function readPath(source: Record<string, unknown>, accessor: string): unknown {
 interface StoreConnectionInput {
   packageId: string;
   authKey: string;
-  accountId: string;
+  /** `null` = the provider exposed no identity. */
+  accountId: string | null;
   credentials: Record<string, unknown>;
   identityClaims?: Record<string, unknown>;
   scopesGranted?: string[];
@@ -2083,7 +2093,8 @@ interface PersistCredentialInput {
   inputs?: Record<string, unknown>;
   expiresAt?: Date | null;
   needsReconnection?: boolean;
-  accountId?: string;
+  /** `null` = no provider identity; `undefined` = leave untouched. */
+  accountId?: string | null;
   identityClaims?: Record<string, unknown>;
   scopesGranted?: string[];
   /**
@@ -2114,7 +2125,7 @@ interface PersistCredentialInput {
  *
  * Why no upsert-by-accountId: the previous model collapsed every connection on
  * the same `(packageId, authKey, accountId, space, owner)` tuple and silently
- * overwrote rows when `accountId` defaulted to "default". The current model
+ * overwrote every identity-less row onto one. The current model
  * trusts the caller's intent — explicit connectionId = update; no id = insert.
  *
  * Callers that pass explicit `connectionId` for UPDATE: token refresh paths,
@@ -2161,8 +2172,7 @@ export async function persistCredentialBundle(
     // count for this (space, integration) + 1, computed as a subquery in the
     // INSERT so it's one statement. This is the single source of truth for the
     // UI: no render-time fallback, the label is always set. User-editable after.
-    const identityLabel =
-      input.accountId && input.accountId !== "default" ? input.accountId : undefined;
+    const identityLabel = input.accountId || undefined;
     const ownerFilter = userId ? sql`user_id = ${userId}` : sql`end_user_id = ${endUserId}`;
     const labelValue: string | SQL =
       identityLabel ??
@@ -2250,7 +2260,7 @@ export async function persistCredentialBundle(
     // refuse — silently rebinding a connection (possibly shared or pinned to
     // agents under the assumption it's account A) to a different account is a
     // data-integrity and access surprise. Only enforced between two real
-    // identities; "default" (identity-less) never blocks an upgrade.
+    // identities; a null (identity-less) side never blocks an upgrade.
     //
     // The read (identity check) and the write must be atomic: performed as two
     // separate statements, a concurrent update could change `accountId` between
@@ -2258,18 +2268,14 @@ export async function persistCredentialBundle(
     // transaction and take a row lock (`FOR UPDATE`) on the SELECT so the row
     // is pinned for the duration.
     const row = await db.transaction(async (tx) => {
-      if (input.accountId !== undefined && input.accountId !== "default") {
+      if (input.accountId) {
         const [existing] = await tx
           .select({ accountId: integrationConnections.accountId })
           .from(integrationConnections)
           .where(ownerScope)
           .limit(1)
           .for("update");
-        if (
-          existing &&
-          existing.accountId !== "default" &&
-          existing.accountId !== input.accountId
-        ) {
+        if (existing?.accountId && existing.accountId !== input.accountId) {
           throw conflict(
             "identity_mismatch",
             `This connection is linked to a different account (${existing.accountId}). Reconnect with the same account, or create a new connection.`,

@@ -168,7 +168,7 @@ export class RemoteRunError extends Error {
 export interface RunRemoteOptions {
   /** Pinned instance origin (e.g. `https://app.example.com`). */
   instance: string;
-  /** Bearer token (`ask_…` or OIDC JWT). */
+  /** Bearer token (`apst_…` or OIDC JWT). */
   bearerToken: string;
   /** Space id (`X-Space-Id`). */
   spaceId: string;

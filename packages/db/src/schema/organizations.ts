@@ -367,7 +367,7 @@ export const modelProviderCredentials = pgTable(
 export const modelProviderPairings = pgTable(
   "model_provider_pairings",
   {
-    /** App-generated id with `pair_` prefix (matches existing `ask_`/`pair_` log conventions). */
+    /** App-generated id with `pair_` prefix (matches the `apst_`/`pair_` log conventions). */
     id: text("id").primaryKey(),
     /** SHA-256 of the secret portion, base64url-encoded. The plaintext is never stored. */
     tokenHash: text("token_hash").notNull().unique(),

@@ -398,6 +398,7 @@
   "apiKeys.neverExpires": "Never expires",
   "apiKeys.active": "Active",
   "apiKeys.expired": "Expired",
+  "apiKeys.retiredFormat": "Retired format — create a new key",
   "apiKeys.revoke": "Revoke",
   "apiKeys.revokeConfirm": "Revoke API key \"{{name}}\"? This action cannot be undone.",
   "apiKeys.expiresOn": "Expires: {{date}}",

@@ -13,7 +13,7 @@
  *      to core auth (401 without other credentials).
  *   3. A malformed `Bearer ey...` (valid structure, invalid signature) →
  *      null → falls through to core auth.
- *   4. An `Authorization: Bearer ask_...` header does NOT match this
+ *   4. An `Authorization: Bearer apst_...` header does NOT match this
  *      strategy (fast no-match path) so core API-key auth keeps working.
  *
  * This is the Stage 3 smoke test proving the full wiring chain:
@@ -245,13 +245,13 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     expect(res.status).toBe(401);
   });
 
-  it("ignores `Bearer ask_...` (API key) — fast no-match path", async () => {
-    // The strategy must not shadow core API-key auth. An invalid ask_ key
+  it("ignores `Bearer apst_...` (API key) — fast no-match path", async () => {
+    // The strategy must not shadow core API-key auth. An invalid apst_ key
     // should reach core's API-key path and come back as 401 from there,
     // not as a JWT verification error.
     const res = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
-        Authorization: "Bearer ask_invalid_key_000000000000000000000000",
+        Authorization: "Bearer apst_invalid_key_000000000000000000000000",
         "X-Space-Id": spaceId,
       },
     });

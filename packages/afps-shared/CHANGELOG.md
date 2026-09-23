@@ -12,7 +12,37 @@ consumer that raises its range — `scripts/verify-package-resolves.ts` installs
 the real tarball outside the monorepo, so an unpublished leaf fails the
 consumer's publish rather than the first user's `npm install`.
 
-## [0.8.0] — unreleased
+## [Unreleased]
+
+Not additive: `normaliseMcpToolBody` changes behaviour (see Changed). Under the
+0.x convention that is breaking, so the next release is **0.9.0**.
+
+### Added
+
+- **`./jsonpath`** — `parseJsonPath`, `evaluateJsonPath` and
+  `JsonPathSyntaxError`: the one JSONPath dialect of integration manifests,
+  moved out of `@appstrate/connect`'s login engine so `identity_claims` reads
+  paths with the same evaluator. The single-value RFC 9535 subset `$`,
+  `.name`, `['name']` / `["name"]`, `[0]` / `[-1]` (negative counts from the
+  end). A path outside it throws — including a `.name` starting with a digit
+  (write `[0]`); a valid path that selects nothing returns `undefined`. A member
+  selects only an object's own property, an index only an array element.
+
+- **`isValidMcpToolName`**, **`allocateMcpToolName`** and **`fnv1a64Hex`**
+  (`./mcp-naming`) — the exposed-name grammar (`{namespace}__{body}`, body in
+  `[A-Za-z0-9_-]+`, at most `MCP_TOOL_NAME_MAX_LENGTH`), the allocator that
+  truncates and hash-suffixes a name that is too long or taken, and the digest
+  it uses.
+
+### Changed
+
+- **BREAKING: `normaliseMcpToolBody`** (`./mcp-naming`) maps only the
+  characters LLM providers reject in a tool name to `_`, one per code point.
+  It no longer lowercases, collapses runs, trims underscores or drops an
+  upstream `ns__` prefix (`drive__api.upload` now yields `drive__api_upload`,
+  not `api_upload`).
+
+## [0.8.0] — 2026-09-03
 
 Not yet on npm. `@appstrate/core` declares `^0.8.0` at HEAD, so **this version
 must be published (`git tag afps-shared@0.8.0`) before the next

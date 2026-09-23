@@ -23,6 +23,7 @@ import {
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
 import { McpHost, normaliseNamespace } from "../mcp-host.ts";
+import { allocateMcpToolName } from "@appstrate/core/naming";
 import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
 
 function fsTool(): AppstrateToolDefinition[] {
@@ -300,18 +301,17 @@ describe("McpHost — buildTools", () => {
     }
   });
 
-  it("disambiguates two same-server tools that collapse to one name", async () => {
-    // `list-issues` and `list_issues` both sanitise to body `list_issues`,
-    // so without dedup the second would silently overwrite the first's
-    // dispatch index while both got advertised under `gh__list_issues`.
+  it("disambiguates two same-server tools that map to one name with a hash of the upstream name", async () => {
+    // `list.issues` maps to body `list_issues` (providers reject `.`), so the
+    // literal `list_issues` registered after it must not overwrite its index.
     const upstream = await makeUpstream([
       {
         descriptor: {
-          name: "list-issues",
-          description: "dash variant",
+          name: "list.issues",
+          description: "dot variant",
           inputSchema: { type: "object" },
         },
-        handler: async () => ({ content: [{ type: "text", text: "dash" }] }),
+        handler: async () => ({ content: [{ type: "text", text: "dot" }] }),
       },
       {
         descriptor: {
@@ -322,25 +322,80 @@ describe("McpHost — buildTools", () => {
         handler: async () => ({ content: [{ type: "text", text: "underscore" }] }),
       },
     ]);
-    const logs: Array<{ event?: string }> = [];
     try {
-      const host = new McpHost({ onLog: (e) => logs.push(e.data as { event?: string }) });
+      const host = new McpHost();
       await host.register({ namespace: "gh", client: upstream.client });
       const tools = host.buildTools();
-      const names = tools.map((t) => t.descriptor.name).sort();
-      // Two distinct names — no overwrite, no lost tool.
-      expect(names).toEqual(["gh__list_issues", "gh__list_issues_2"]);
-      // Registration order is preserved: first tool keeps the base name.
-      const base = tools.find((t) => t.descriptor.name === "gh__list_issues")!;
-      const suffixed = tools.find((t) => t.descriptor.name === "gh__list_issues_2")!;
-      const baseResult = await base.handler({}, { signal: undefined as never } as never);
-      const suffixedResult = await suffixed.handler({}, { signal: undefined as never } as never);
-      // Each namespaced name dispatches to its OWN upstream tool — proving the
-      // per-tool index was not clobbered by the collision.
-      expect(baseResult.content[0]).toEqual({ type: "text", text: "dash" });
-      expect(suffixedResult.content[0]).toEqual({ type: "text", text: "underscore" });
-      // A collision audit log was emitted.
-      expect(logs.some((l) => l.event === "tool_name_collision")).toBe(true);
+      const hashed = allocateMcpToolName("gh", "list_issues", (n) => n === "gh__list_issues");
+      expect(hashed).toMatch(/^gh__list_issues_[0-9a-f]{8}$/);
+      expect(tools.map((t) => t.descriptor.name)).toEqual(["gh__list_issues", hashed]);
+      const call = (name: string) =>
+        tools
+          .find((t) => t.descriptor.name === name)!
+          .handler({}, { signal: undefined as never } as never);
+      expect((await call("gh__list_issues")).content[0]).toEqual({ type: "text", text: "dot" });
+      expect((await call(hashed)).content[0]).toEqual({ type: "text", text: "underscore" });
+    } finally {
+      await upstream.pair.close();
+    }
+  });
+
+  it("keeps upstream case, hyphens and inner __ and routes back to the exact upstream name", async () => {
+    const seen: string[] = [];
+    const tool = (name: string): AppstrateToolDefinition => ({
+      descriptor: { name, description: "d", inputSchema: { type: "object" } },
+      handler: async () => {
+        seen.push(name);
+        return { content: [{ type: "text", text: name }] };
+      },
+    });
+    const upstream = await makeUpstream([
+      tool("getPage"),
+      tool("list-issues"),
+      tool("github__search"),
+      tool("files.read"),
+    ]);
+    try {
+      const host = new McpHost();
+      await host.register({ namespace: "gh", client: upstream.client });
+      const tools = host.buildTools();
+      expect(tools.map((t) => t.descriptor.name)).toEqual([
+        "gh__getPage",
+        "gh__list-issues",
+        "gh__github__search",
+        "gh__files_read",
+      ]);
+      for (const t of tools) await t.handler({}, { signal: undefined as never } as never);
+      expect(seen).toEqual(["getPage", "list-issues", "github__search", "files.read"]);
+      // Only the rewritten name carries the upstream original in its description.
+      expect(tools[0]!.descriptor.description).toBe("d");
+      expect(tools[3]!.descriptor.description).toBe('Upstream tool name: "files.read".\n\nd');
+    } finally {
+      await upstream.pair.close();
+    }
+  });
+
+  it("truncates an over-long upstream name deterministically within the ceiling", async () => {
+    const long = `fetch_${"x".repeat(80)}`;
+    const upstream = await makeUpstream([
+      {
+        descriptor: { name: long, inputSchema: { type: "object" } },
+        handler: async () => ({ content: [{ type: "text", text: "long" }] }),
+      },
+    ]);
+    try {
+      const host = new McpHost();
+      await host.register({ namespace: "gh", client: upstream.client });
+      const [only] = host.buildTools();
+      expect(only!.descriptor.name).toHaveLength(56);
+      expect(only!.descriptor.name).toBe(allocateMcpToolName("gh", long, () => false));
+      expect(only!.descriptor.description).toContain(long);
+      expect((await only!.handler({}, { signal: undefined as never } as never)).content[0]).toEqual(
+        {
+          type: "text",
+          text: "long",
+        },
+      );
     } finally {
       await upstream.pair.close();
     }
@@ -571,7 +626,7 @@ describe("McpHost — trusted (first-party) bypass of the poisoning sanitiser", 
   it("lets a trusted canonical tool replace a colliding normalised untrusted name", async () => {
     const untrusted = await makeUpstream([
       {
-        descriptor: { name: "drive__api-call", inputSchema: { type: "object" } },
+        descriptor: { name: "api.call", inputSchema: { type: "object" } },
         handler: async () => ({ content: [{ type: "text" as const, text: "untrusted" }] }),
       },
     ]);
@@ -611,7 +666,7 @@ describe("McpHost — trusted (first-party) bypass of the poisoning sanitiser", 
     ]);
     const untrusted = await makeUpstream([
       {
-        descriptor: { name: "drive__api-call", inputSchema: { type: "object" } },
+        descriptor: { name: "api.call", inputSchema: { type: "object" } },
         handler: async () => ({ content: [{ type: "text" as const, text: "untrusted" }] }),
       },
     ]);

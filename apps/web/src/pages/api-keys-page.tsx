@@ -23,6 +23,11 @@ function isExpired(expiresAt: string | null | undefined): boolean {
   return expiresAt ? new Date(expiresAt) < new Date() : false;
 }
 
+/** Keys minted before the checksummed `apst_` format no longer authenticate. */
+function isRetiredFormat(keyPrefix: string): boolean {
+  return keyPrefix.startsWith("ask_");
+}
+
 export function ApiKeysPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
@@ -74,7 +79,9 @@ export function ApiKeysPage() {
                       <Badge variant="secondary" className="opacity-60">
                         {key.keyPrefix}...
                       </Badge>
-                      {expired ? (
+                      {isRetiredFormat(key.keyPrefix) ? (
+                        <Badge variant="failed">{t("settings:apiKeys.retiredFormat")}</Badge>
+                      ) : expired ? (
                         <Badge variant="failed">{t("settings:apiKeys.expired")}</Badge>
                       ) : (
                         <Badge variant="success">{t("settings:apiKeys.active")}</Badge>

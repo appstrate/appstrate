@@ -15,7 +15,7 @@ export const securitySchemes = {
     type: "http" as const,
     scheme: "bearer",
     description:
-      "API key authentication. Use `Authorization: Bearer ask_...` header. The org is resolved from the key — no `X-Org-Id` header needed.",
+      "API key authentication. Use `Authorization: Bearer apst_...` header. The org is resolved from the key — no `X-Org-Id` header needed. A key is `apst_` + 30 base62 characters + a 6-character base62 CRC32 of those 30, so a malformed key is refused without a lookup. A key in the retired `ask_` format is refused with `401 api_key_format_retired`: create a new key.",
   },
   bearerJwt: {
     type: "http" as const,

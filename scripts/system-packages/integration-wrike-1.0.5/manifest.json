@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/wrike",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "Wrike (API)",
@@ -26,9 +26,9 @@
       "token_endpoint": "https://login.wrike.com/oauth2/token",
       "userinfo_endpoint": "https://www.wrike.com/api/v4/contacts?me=true",
       "identity_claims": {
-        "accountId": "$.data.0.primaryEmail",
-        "sub": "$.data.0.id",
-        "email": "$.data.0.primaryEmail"
+        "accountId": "$.data[0].primaryEmail",
+        "sub": "$.data[0].id",
+        "email": "$.data[0].primaryEmail"
       },
       "default_scopes": ["Default"],
       "token_endpoint_auth_method": "client_secret_post",

@@ -861,7 +861,7 @@ async function buildResolverInputs(
 
   // Remote mode — two independent credential paths, checked in order:
   //
-  //   1. Headless: an explicit `ask_…` API key via `--api-key` or
+  //   1. Headless: an explicit `apst_…` API key via `--api-key` or
   //      `APPSTRATE_API_KEY`. Pair with `APPSTRATE_INSTANCE` /
   //      `APPSTRATE_SPACE_ID` (or a profile for fallback). This is the
   //      flow CI runners and the GitHub Action take.

@@ -73,7 +73,7 @@ export interface MissingIntegrationFieldError {
   candidate_connections?: {
     id: string;
     label: string | null;
-    account_id: string;
+    account_id: string | null;
     owned_by_actor: boolean;
   }[];
   /**

@@ -398,6 +398,7 @@
   "apiKeys.neverExpires": "N'expire jamais",
   "apiKeys.active": "Active",
   "apiKeys.expired": "Expirée",
+  "apiKeys.retiredFormat": "Format retiré — créez une nouvelle clé",
   "apiKeys.revoke": "Révoquer",
   "apiKeys.revokeConfirm": "Révoquer la clé API \"{{name}}\" ? Cette action est irréversible.",
   "apiKeys.expiresOn": "Expire le : {{date}}",

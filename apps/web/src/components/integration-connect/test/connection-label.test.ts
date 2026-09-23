@@ -25,6 +25,10 @@ describe("connectionDisplayLabel", () => {
     expect(connectionDisplayLabel({ account_id: "acct-1" })).toBe("acct-1");
     expect(connectionDisplayLabel({ account_id: "acct-1", label: null })).toBe("acct-1");
   });
+
+  it("renders a dash when neither a label nor a provider identity exists", () => {
+    expect(connectionDisplayLabel({ account_id: null, label: null })).toBe("—");
+  });
 });
 
 describe("isConnectionOwnedBy", () => {

@@ -1169,7 +1169,9 @@ export interface paths {
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
-         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).
+         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
+         *
+         *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
          */
         get: operations["credentialProxyGet"];
         /**
@@ -1180,7 +1182,9 @@ export interface paths {
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
-         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).
+         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
+         *
+         *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
          */
         put: operations["credentialProxyPut"];
         /**
@@ -1191,7 +1195,9 @@ export interface paths {
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
-         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).
+         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
+         *
+         *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
          */
         post: operations["credentialProxyPost"];
         /**
@@ -1202,7 +1208,9 @@ export interface paths {
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
-         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).
+         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
+         *
+         *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
          */
         delete: operations["credentialProxyDelete"];
         options?: never;
@@ -1215,7 +1223,9 @@ export interface paths {
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
-         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).
+         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
+         *
+         *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
          */
         patch: operations["credentialProxyPatch"];
         trace?: never;
@@ -3755,7 +3765,7 @@ export interface paths {
         };
         /**
          * SSE: agent run changes
-         * @description Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.
+         * @description Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=apst_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.
          *
          *     Event types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.
          *
@@ -3783,7 +3793,7 @@ export interface paths {
         };
         /**
          * SSE: all run status changes
-         * @description Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.
+         * @description Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=apst_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.
          *
          *     Event format: `event: run_update\ndata: {"id":"run_...","status":"running","packageId":"@scope/name",...}\n\n`
          *
@@ -3813,7 +3823,7 @@ export interface paths {
         };
         /**
          * SSE: single run events
-         * @description Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.
+         * @description Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=apst_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.
          *
          *     Event types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.
          *
@@ -5298,7 +5308,7 @@ export interface components {
         ApiKeyInfo: {
             id: string;
             name: string;
-            /** @description First 8 chars of the key for identification */
+            /** @description The first characters of the key, for identification: `apst_` + 8. A key created before the checksummed format shows `ask_` + 4 and no longer authenticates. */
             keyPrefix: string;
             /** @description Permission scopes granted to this API key. */
             scopes: string[];
@@ -5489,7 +5499,7 @@ export interface components {
                 /** Format: uuid */
                 id: string;
                 auth_key: string;
-                account_id: string;
+                account_id: string | null;
                 label: string | null;
                 owner_user_id: string | null;
                 owner_end_user_id: string | null;
@@ -6049,8 +6059,8 @@ export interface components {
                 id: string;
                 /** @description User-given name; `null` when the connection was never labelled. */
                 label: string | null;
-                /** @description The auth's account discriminator (`sub` claim, email, host…). */
-                account_id: string;
+                /** @description The auth's account discriminator (`sub` claim, email, host…); `null` when the provider exposed no identity. */
+                account_id: string | null;
                 /** @description True when the connection is the caller's own, false when inherited via org sharing. */
                 owned_by_actor: boolean;
             }[];
@@ -6853,9 +6863,9 @@ export interface components {
         ConnectOffers: "1";
         /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
         SseSpaceId: string;
-        /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=ask_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
+        /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=apst_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
         SseViewAs: string;
-        /** @description API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
+        /** @description API key (`apst_` prefix) for SSE authentication. A retired `ask_` key is `401 api_key_format_retired`. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
         SseToken: string;
         /**
          * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
@@ -8386,7 +8396,7 @@ export interface operations {
                      *         {
                      *           "id": "cm8vwx234",
                      *           "name": "Production CI",
-                     *           "keyPrefix": "ask_prod",
+                     *           "keyPrefix": "apst_k3x9M2pq",
                      *           "scopes": [
                      *             "agents:run",
                      *             "runs:read"
@@ -8452,8 +8462,8 @@ export interface operations {
                     /**
                      * @example {
                      *       "id": "cm8vwx235",
-                     *       "key": "ask_prod_k3x9m2pq7r4t1w6y0a5d8g",
-                     *       "keyPrefix": "ask_prod",
+                     *       "key": "apst_k3x9M2pq7R4t1W6y0a5D8gHs2LmQ4v4WVgvC",
+                     *       "keyPrefix": "apst_k3x9M2pq",
                      *       "scopes": [
                      *         "agents:run",
                      *         "runs:read"
@@ -8462,9 +8472,9 @@ export interface operations {
                      */
                     "application/json": {
                         id?: string;
-                        /** @description Raw API key (prefix: ask_). Store it securely — it will not be shown again. */
+                        /** @description Raw API key (prefix: apst_). Store it securely — it will not be shown again. */
                         key?: string;
-                        /** @description First 8 characters for identification */
+                        /** @description The `apst_` prefix and the first 8 characters after it, for identification */
                         keyPrefix?: string;
                         /** @description Validated scopes granted to the key. Empty = full role access. */
                         scopes?: string[];
@@ -10188,8 +10198,8 @@ export interface operations {
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
-                /** @description When `true`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE). */
-                "X-Substitute-Body"?: "true" | "false";
+                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE). */
+                "X-Substitute-Body"?: "0" | "1";
                 /** @description Impersonation header — scopes the call to this end-user's connection. */
                 "Appstrate-User"?: string;
                 /** @description When `1`, forward the request body as a stream instead of buffering. Required for uploads larger than the buffered body cap; the upstream content length is still validated against `CREDENTIAL_PROXY_LIMITS.max_request_bytes`. Ignored on verbs that do not carry a body (GET, DELETE). */
@@ -10270,8 +10280,8 @@ export interface operations {
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
-                /** @description When `true`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE). */
-                "X-Substitute-Body"?: "true" | "false";
+                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE). */
+                "X-Substitute-Body"?: "0" | "1";
                 /** @description Impersonation header — scopes the call to this end-user's connection. */
                 "Appstrate-User"?: string;
                 /** @description When `1`, forward the request body as a stream instead of buffering. Required for uploads larger than the buffered body cap; the upstream content length is still validated against `CREDENTIAL_PROXY_LIMITS.max_request_bytes`. Ignored on verbs that do not carry a body (GET, DELETE). */
@@ -10357,8 +10367,8 @@ export interface operations {
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
-                /** @description When `true`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE). */
-                "X-Substitute-Body"?: "true" | "false";
+                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE). */
+                "X-Substitute-Body"?: "0" | "1";
                 /** @description Impersonation header — scopes the call to this end-user's connection. */
                 "Appstrate-User"?: string;
                 /** @description When `1`, forward the request body as a stream instead of buffering. Required for uploads larger than the buffered body cap; the upstream content length is still validated against `CREDENTIAL_PROXY_LIMITS.max_request_bytes`. Ignored on verbs that do not carry a body (GET, DELETE). */
@@ -10444,8 +10454,8 @@ export interface operations {
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
-                /** @description When `true`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE). */
-                "X-Substitute-Body"?: "true" | "false";
+                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE). */
+                "X-Substitute-Body"?: "0" | "1";
                 /** @description Impersonation header — scopes the call to this end-user's connection. */
                 "Appstrate-User"?: string;
                 /** @description When `1`, forward the request body as a stream instead of buffering. Required for uploads larger than the buffered body cap; the upstream content length is still validated against `CREDENTIAL_PROXY_LIMITS.max_request_bytes`. Ignored on verbs that do not carry a body (GET, DELETE). */
@@ -10526,8 +10536,8 @@ export interface operations {
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
-                /** @description When `true`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE). */
-                "X-Substitute-Body"?: "true" | "false";
+                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE). */
+                "X-Substitute-Body"?: "0" | "1";
                 /** @description Impersonation header — scopes the call to this end-user's connection. */
                 "Appstrate-User"?: string;
                 /** @description When `1`, forward the request body as a stream instead of buffering. Required for uploads larger than the buffered body cap; the upstream content length is still validated against `CREDENTIAL_PROXY_LIMITS.max_request_bytes`. Ignored on verbs that do not carry a body (GET, DELETE). */
@@ -11551,7 +11561,8 @@ export interface operations {
                             id: string;
                             packageId: string;
                             auth_key: string;
-                            account_id: string;
+                            /** @description Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity. */
+                            account_id: string | null;
                             identity_claims: {
                                 [key: string]: unknown;
                             } | null;
@@ -11665,7 +11676,8 @@ export interface operations {
                                 id: string;
                                 packageId: string;
                                 auth_key: string;
-                                account_id: string;
+                                /** @description Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity. */
+                                account_id: string | null;
                                 identity_claims: {
                                     [key: string]: unknown;
                                 } | null;
@@ -11825,7 +11837,8 @@ export interface operations {
                         id: string;
                         packageId: string;
                         auth_key: string;
-                        account_id: string;
+                        /** @description Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity. */
+                        account_id: string | null;
                         identity_claims: {
                             [key: string]: unknown;
                         } | null;
@@ -12163,7 +12176,8 @@ export interface operations {
                             id: string;
                             packageId: string;
                             auth_key: string;
-                            account_id: string;
+                            /** @description Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity. */
+                            account_id: string | null;
                             identity_claims: {
                                 [key: string]: unknown;
                             } | null;
@@ -12231,7 +12245,8 @@ export interface operations {
                         id: string;
                         packageId: string;
                         auth_key: string;
-                        account_id: string;
+                        /** @description Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity. */
+                        account_id: string | null;
                         identity_claims: {
                             [key: string]: unknown;
                         } | null;
@@ -12706,7 +12721,8 @@ export interface operations {
                                 id: string;
                                 packageId: string;
                                 auth_key: string;
-                                account_id: string;
+                                /** @description Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity. */
+                                account_id: string | null;
                                 identity_claims: {
                                     [key: string]: unknown;
                                 } | null;
@@ -13223,7 +13239,7 @@ export interface operations {
                                 connected_at: string;
                                 needs_reconnection: boolean;
                                 expiresAt: string | null;
-                                identity: string;
+                                identity: string | null;
                                 reused_by_agents: number;
                                 auth_key: string;
                                 shared_with_org: boolean;
@@ -19357,11 +19373,11 @@ export interface operations {
             query: {
                 /** @description Organization ID. Required for SSE auth (cookies cannot carry X-Org-Id header on EventSource). */
                 orgId: components["parameters"]["SseOrgId"];
-                /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=ask_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
+                /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=apst_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
                 view_as?: components["parameters"]["SseViewAs"];
                 /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
                 spaceId?: components["parameters"]["SseSpaceId"];
-                /** @description API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
+                /** @description API key (`apst_` prefix) for SSE authentication. A retired `ask_` key is `401 api_key_format_retired`. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
                 token?: components["parameters"]["SseToken"];
                 /** @description When true, include full payload with `result` and `data` fields. Default (false) strips large user-content fields for safer consumption by external agents. */
                 verbose?: components["parameters"]["Verbose"];
@@ -19397,11 +19413,11 @@ export interface operations {
             query: {
                 /** @description Organization ID. Required for SSE auth (cookies cannot carry X-Org-Id header on EventSource). */
                 orgId: components["parameters"]["SseOrgId"];
-                /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=ask_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
+                /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=apst_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
                 view_as?: components["parameters"]["SseViewAs"];
                 /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
                 spaceId?: components["parameters"]["SseSpaceId"];
-                /** @description API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
+                /** @description API key (`apst_` prefix) for SSE authentication. A retired `ask_` key is `401 api_key_format_retired`. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
                 token?: components["parameters"]["SseToken"];
                 /** @description When true, include full payload with `result` and `data` fields. Default (false) strips large user-content fields for safer consumption by external agents. */
                 verbose?: components["parameters"]["Verbose"];
@@ -19434,11 +19450,11 @@ export interface operations {
             query: {
                 /** @description Organization ID. Required for SSE auth (cookies cannot carry X-Org-Id header on EventSource). */
                 orgId: components["parameters"]["SseOrgId"];
-                /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=ask_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
+                /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=apst_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
                 view_as?: components["parameters"]["SseViewAs"];
                 /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
                 spaceId?: components["parameters"]["SseSpaceId"];
-                /** @description API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
+                /** @description API key (`apst_` prefix) for SSE authentication. A retired `ask_` key is `401 api_key_format_retired`. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
                 token?: components["parameters"]["SseToken"];
                 /** @description When true, include full payload with `result` and `data` fields. Default (false) strips large user-content fields for safer consumption by external agents. */
                 verbose?: components["parameters"]["Verbose"];

@@ -46,7 +46,7 @@ Agents are **prompt-driven**: the AI coding agent inside the container interpret
 - **Skills & MCP servers** — Extend agent capabilities with SKILL.md instructions and packaged MCP Bundles (`server.type ∈ node | python | binary | uv`)
 - **Realtime** — SSE-based run monitoring with LISTEN/NOTIFY
 - **Multi-tenant** — Organization-based isolation with role-based access (owner/admin/member/guest), per-space membership and space roles
-- **API keys** — Programmatic access via `ask_*` prefixed API keys
+- **API keys** — Programmatic access via `apst_*` prefixed API keys
 - **OpenAPI documentation** — every endpoint documented at `/api/openapi.json` + Swagger UI at `/api/docs` (coverage enforced by `bun run verify:openapi`)
 - **Connection profiles** — Share connection sets across agents
 - **Proxy system** — Org-level and agent-level outbound HTTP proxy support
@@ -231,7 +231,7 @@ The API is organized into 30+ route domains. The live endpoint count is whatever
 | **Integrations**        | Integration package configuration (OAuth 2.0 + discovery, API key, basic, mTLS, custom; `source.kind = local \| remote \| api`) |
 | **Model Provider Keys** | Org-level LLM model provider API key management (OpenAI, Anthropic, etc.) — distinct from AFPS integrations                     |
 | **Proxies**             | Org-level and agent-level HTTP proxy config                                                                                     |
-| **API Keys**            | Programmatic access tokens (`ask_*`)                                                                                            |
+| **API Keys**            | Programmatic access tokens (`apst_*`)                                                                                           |
 | **Packages**            | Org packages CRUD, import (incl. `.afps-bundle` multi-package), publish, dist-tags, version pinning                             |
 | **Library**             | Consolidated package list with per-space install state                                                                          |
 | **Notifications**       | Run notification management                                                                                                     |
@@ -354,7 +354,7 @@ Test infrastructure (PostgreSQL, Redis, MinIO, DinD) is started automatically by
 - **Runtime**: Bun
 - **API**: Hono (SSE, middleware, routing)
 - **Database**: PostgreSQL 16 + Drizzle ORM
-- **Auth**: Better Auth (cookie sessions) + API keys (`ask_*`)
+- **Auth**: Better Auth (cookie sessions) + API keys (`apst_*`)
 - **Frontend**: React 19 + Vite + React Router v7 + React Query v5 + Zustand
 - **Styling**: Tailwind CSS 4 (`@tailwindcss/vite` plugin + `tailwind-merge`, dark theme via `@theme inline`)
 - **i18n**: i18next (fr default, en)

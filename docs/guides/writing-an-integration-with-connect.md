@@ -200,7 +200,7 @@ a fully-manual configuration MUST be supported.
       { "value": "write", "label": "Write access" },
       { "value": "admin", "label": "Admin access", "implies": ["read", "write"] }
     ],
-    "identity_claims": { "email": "email", "user_id": "sub" },
+    "identity_claims": { "email": "$.email", "user_id": "$.sub" },
     "required_identity_claims": ["email"],
     "callback_url_hint": "Set the authorized redirect URI to: {{callback_url}}",
     "authorized_uris": ["https://api.example.com/**"],
@@ -233,21 +233,22 @@ provider. Resolution, in order:
 
 1. the `accountId` (or `account_id`) key of your `identity_claims` map;
 2. a top-level `email`, `account_email` or `sub` in the payload;
-3. the literal `"default"`.
+3. none: the account key is `null`.
 
-Landing on `"default"` is not an error and nothing is logged: the connection is
-simply labelled `Connexion 1`, `Connexion 2`, … and every connection on that
-provider shares one account key, so a member holding two accounts cannot tell
-them apart. **Declare `accountId` explicitly.** Choose the most human-readable
+Landing on `null` is not an error and nothing is logged: the connection is
+simply labelled `Connexion 1`, `Connexion 2`, … and carries no account key, so
+a member holding two accounts cannot tell them apart. **Declare `accountId` explicitly.** Choose the most human-readable
 value that is _unique per account_ — email, else a unique handle, else an opaque
 id. A display name that two accounts can share is the wrong choice even though
 it reads better.
 
-Accessors are `$.`-prefixed dotted paths (`$.data.email`,
-`$.identity.email_address`). A numeric segment indexes an array, which is how a
-provider that answers with a single-element list is read: `$.data.0.primaryEmail`.
-A path that matches nothing yields `""` and falls through to the chain above —
-so a typo degrades silently. `apps/api/test/unit/services/system-package-identity-claims.test.ts`
+Accessors are JSONPaths in the single-value RFC 9535 subset the login engine's
+selectors use too (`@appstrate/afps-shared/jsonpath`): `$`, `.name`,
+`['name']` / `["name"]`, and array indices `[0]` / `[-1]` — a provider that
+answers with a single-element list is read as `$.data[0].primaryEmail`.
+Filters, slices, wildcards, recursive descent, a `.name` starting with a digit
+and a bare name without the `$` are refused when the manifest is imported. A valid path that matches nothing leaves that claim out and falls
+through to the chain above — so a typo degrades silently. `apps/api/test/unit/services/system-package-identity-claims.test.ts`
 pins every shipped mapping against a payload taken from the provider's docs for
 exactly that reason.
 

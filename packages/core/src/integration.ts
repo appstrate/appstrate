@@ -37,6 +37,7 @@ import {
 } from "@appstrate/afps-shared/api-tool-naming";
 import { isBareAuthSchemePrefix } from "@appstrate/afps-shared/delivery-http";
 import { normaliseMcpToolBody } from "@appstrate/afps-shared/mcp-naming";
+import { JsonPathSyntaxError, parseJsonPath } from "@appstrate/afps-shared/jsonpath";
 import { isToolsWildcard, TOOLS_WILDCARD, type ManifestIntegrationEntry } from "./dependencies.ts";
 
 // ─────────────────────────────────────────────
@@ -206,6 +207,23 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
           message:
             "mtls + delivery.http is not supported — the MITM proxy cannot perform mtls on the upstream handshake. Use delivery.files instead.",
           path: ["auths", authKey, "delivery", "http"],
+        });
+      }
+    }
+
+    // (1f) §7.4 install gate — every `identity_claims` value is read with the
+    // one manifest JSONPath dialect (`@appstrate/afps-shared/jsonpath`). A path
+    // outside its subset would only fail at connect time, in the user's face.
+    const identityClaims = (auth as { identity_claims?: Record<string, string> }).identity_claims;
+    for (const [claim, path] of Object.entries(identityClaims ?? {})) {
+      try {
+        parseJsonPath(path);
+      } catch (err) {
+        if (!(err instanceof JsonPathSyntaxError)) throw err;
+        ctx.addIssue({
+          code: "custom",
+          message: `${err.message} — supported: $, .name, ['name'], [0], [-1]`,
+          path: ["auths", authKey, "identity_claims", claim],
         });
       }
     }
@@ -1190,14 +1208,15 @@ export type ConnectionResolutionErrorCode =
  * the rows, so denormalizing the three distinguishing fields costs no query.
  *
  * `label` is user-given and may be null; `accountId` is the connect flow's own
- * discriminator and is always set, so the pair always identifies the account.
+ * discriminator, `null` when the provider exposed no identity — the connect
+ * flow then labels the row "Connexion N", so one of the two is always set.
  */
 export interface ConnectionCandidate {
   id: string;
   /** User-given name, `null` when the connection was never labelled. */
   label: string | null;
-  /** The auth's account discriminator (`sub` claim, email, host…). */
-  accountId: string;
+  /** The auth's account discriminator (`sub` claim, email, host…); `null` = no identity. */
+  accountId: string | null;
   /** True when the row is the calling actor's own, false when inherited via org sharing. */
   ownedByActor: boolean;
 }

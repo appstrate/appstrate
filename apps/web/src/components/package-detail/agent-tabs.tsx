@@ -194,7 +194,7 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
   if (rawKey) {
     authToken = rawKey;
   } else if (firstKey) {
-    authToken = `${firstKey.keyPrefix}${"•".repeat(44)}`;
+    authToken = `${firstKey.keyPrefix}${"•".repeat(28)}`;
   } else {
     authToken = "<your-api-key>";
   }
@@ -250,13 +250,13 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
             <span className="text-muted-foreground shrink-0">{t("api.selectKey")} :</span>
             {rawKey ? (
               <code className="truncate rounded bg-emerald-500/10 px-2 py-0.5 font-mono text-xs text-emerald-400">
-                {rawKey.slice(0, 12)}
+                {rawKey.slice(0, 13)}
                 {"•".repeat(20)}
               </code>
             ) : firstKey ? (
               <code className="bg-muted/50 text-foreground truncate rounded px-2 py-0.5 font-mono text-xs">
                 {firstKey.keyPrefix}
-                {"•".repeat(44)}
+                {"•".repeat(28)}
               </code>
             ) : null}
             {!rawKey && (

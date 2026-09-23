@@ -102,7 +102,7 @@ export const parameters = {
       "Role preview for this stream — the same value, grammar and refusals as the `X-View-As` " +
       "header (see that parameter). It is a query parameter here because `EventSource` cannot " +
       "send headers — presenting it as the `X-View-As` header on these routes is " +
-      "`400 invalid_view_as`. Sessions only: with `?token=ask_…` it is " +
+      "`400 invalid_view_as`. Sessions only: with `?token=apst_…` it is " +
       "`400 view_as_unsupported`. A stream opened under a persona sees what that role would see " +
       "and stops where that role would stop (`403 not_a_space_member`, or `404` for a private " +
       "space), and carries `X-View-As-Active: 1`.",
@@ -113,7 +113,7 @@ export const parameters = {
     in: "query" as const,
     required: false,
     description:
-      "API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead.",
+      "API key (`apst_` prefix) for SSE authentication. A retired `ask_` key is `401 api_key_format_retired`. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead.",
     schema: { type: "string" },
   },
   XViewAs: {

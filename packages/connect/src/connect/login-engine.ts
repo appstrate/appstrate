@@ -30,8 +30,8 @@
  *     runtime `LoginError` at extraction time — there is no XPath evaluator
  *     in this engine yet.
  *   - The Arazzo Selector Object `type: "jsonpath"` supports only the
- *     single-value RFC 9535 subset `$.foo.bar` / `$.foo[0].bar` (no filters,
- *     no slices, no wildcards). More complex queries raise a
+ *     single-value RFC 9535 subset of `@appstrate/afps-shared/jsonpath` (no
+ *     filters, no slices, no wildcards). More complex queries raise a
  *     `LoginError`.
  *
  * This is a manifest-author-driven HTTP request → an SSRF / exfil / DoS
@@ -58,6 +58,10 @@ import {
   matchesAuthorizedUriSpec,
 } from "../proxy-primitives.ts";
 import { decodeJwtPayload } from "@appstrate/core/jwt";
+import {
+  evaluateJsonPath as evaluateManifestJsonPath,
+  JsonPathSyntaxError,
+} from "@appstrate/afps-shared/jsonpath";
 import { resolveAndCheckHost, type HostResolver } from "@appstrate/core/ssrf";
 import { isAllowedInternalIdpHost } from "../oauth-egress.ts";
 
@@ -502,77 +506,16 @@ function resolveSelectorContext(context: string, bodyText: string, name: string)
   );
 }
 
-/**
- * Minimal RFC 9535 single-value JSONPath evaluator. Supports the subset
- * `$.foo.bar`, `$.foo[0].bar`, `$['foo bar']`. No filters, no slices, no
- * wildcards, no recursive descent — those forms fail with `invalid_config`
- * so manifest authors get a clear error instead of a silent miss.
- */
+/** The shared manifest JSONPath subset; an unsupported form is the author's `invalid_config`. */
 function evaluateJsonPath(root: unknown, path: string): unknown {
-  if (path === "$" || path === "") return root;
-  if (!path.startsWith("$")) {
-    throw new LoginError(`jsonpath '${path}' must start with '$'`, "invalid_config");
-  }
-  // Tokenize: walk segments separated by `.` or `[…]`.
-  const tokens: (string | number)[] = [];
-  let i = 1;
-  while (i < path.length) {
-    const ch = path[i]!;
-    if (ch === ".") {
-      i++;
-      let end = i;
-      while (end < path.length && path[end] !== "." && path[end] !== "[") end++;
-      const key = path.slice(i, end);
-      if (key.length === 0) {
-        throw new LoginError(`empty jsonpath segment in '${path}'`, "invalid_config");
-      }
-      if (key === "*" || key.includes("..")) {
-        throw new LoginError(
-          `jsonpath '${path}' uses an unsupported form (wildcards/recursive descent not implemented)`,
-          "invalid_config",
-        );
-      }
-      tokens.push(key);
-      i = end;
-    } else if (ch === "[") {
-      const close = path.indexOf("]", i);
-      if (close === -1) {
-        throw new LoginError(`unterminated '[' in jsonpath '${path}'`, "invalid_config");
-      }
-      const inner = path.slice(i + 1, close).trim();
-      if (/^-?\d+$/.test(inner)) {
-        tokens.push(Number(inner));
-      } else if (
-        (inner.startsWith("'") && inner.endsWith("'")) ||
-        (inner.startsWith('"') && inner.endsWith('"'))
-      ) {
-        tokens.push(inner.slice(1, -1));
-      } else if (inner === "*" || inner.startsWith("?")) {
-        throw new LoginError(
-          `jsonpath '${path}' uses an unsupported form (wildcards/filters not implemented)`,
-          "invalid_config",
-        );
-      } else {
-        throw new LoginError(
-          `unsupported jsonpath segment '[${inner}]' in '${path}'`,
-          "invalid_config",
-        );
-      }
-      i = close + 1;
-    } else {
-      throw new LoginError(`unexpected character '${ch}' in jsonpath '${path}'`, "invalid_config");
+  try {
+    return evaluateManifestJsonPath(root, path);
+  } catch (err) {
+    if (err instanceof JsonPathSyntaxError) {
+      throw new LoginError(err.message, "invalid_config", { cause: err });
     }
+    throw err;
   }
-  let cur: unknown = root;
-  for (const tok of tokens) {
-    if (cur == null || typeof cur !== "object") return undefined;
-    if (typeof tok === "number") {
-      cur = (cur as unknown[])[tok];
-    } else {
-      cur = (cur as Record<string, unknown>)[tok];
-    }
-  }
-  return cur;
 }
 
 /**

@@ -6,9 +6,9 @@
  * Builds a test app with a stub module that contributes an `AuthStrategy`,
  * then issues real HTTP requests to prove that:
  *   1. The stub strategy's resolution is applied to `c` (user, orgId, …)
- *   2. Requests matching the strategy bypass core Bearer ask_ / cookie auth
+ *   2. Requests matching the strategy bypass core Bearer apst_ / cookie auth
  *   3. Requests NOT matching the strategy fall through to core auth
- *   4. Core API key auth (Bearer ask_) still works when strategies don't claim
+ *   4. Core API key auth (Bearer apst_) still works when strategies don't claim
  *   5. A strategy-set `endUser` flows through to `c.get("endUser")`
  *   6. A strategy that misdeclares its `principalKind` is a 500, not a bucket
  *   7. Identity-shaped gates read that kind, never the transport that carried it

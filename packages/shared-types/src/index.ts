@@ -461,8 +461,8 @@ export interface MeConnectionEntry {
   connected_at: string;
   needs_reconnection: boolean;
   expiresAt: string | null;
-  /** Human-friendly identity (accountEmail, sub claim). */
-  identity: string;
+  /** Human-friendly identity (accountEmail, sub claim); `null` when the provider exposed none. */
+  identity: string | null;
   /** Which auth slot this connection satisfies. */
   auth_key: string;
   /** Admin/owner sharing toggle (per-org). */

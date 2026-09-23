@@ -186,7 +186,7 @@ describe("integrationManifestSchema — oauth2 discovery + manual", () => {
     auths.oauth!.code_challenge_methods_supported = ["S256"];
     auths.oauth!.authorization_params = { access_type: "offline" };
     auths.oauth!.token_endpoint_auth_method = "client_secret_post";
-    auths.oauth!.identity_claims = { account_id: "sub", email: "email" };
+    auths.oauth!.identity_claims = { account_id: "$.sub", email: "$.email" };
     auths.oauth!.required_identity_claims = ["sub"];
     expect(integrationManifestSchema.safeParse(m).success).toBe(true);
   });
@@ -581,6 +581,41 @@ describe("integrationManifestSchema — delivery.http.prefix install gate", () =
   it("leaves a non-auth header's bare prefix alone — there it is a literal", () => {
     expect(integrationManifestSchema.safeParse(withPrefix("Cookie", "session")).success).toBe(true);
   });
+});
+
+describe("integrationManifestSchema — identity_claims JSONPath install gate", () => {
+  const withClaims = (identity_claims: Record<string, string>) =>
+    baseManifest({
+      source: { kind: "none" },
+      auths: {
+        key: {
+          type: "api_key",
+          credentials: { schema: { type: "object", properties: {} } },
+          authorized_uris: ["https://api.example.com/**"],
+          delivery: { http: { in: "header", name: "X-Api-Key", value: "{$credential.api_key}" } },
+          identity_claims,
+        },
+      },
+    });
+
+  it("accepts every form of the manifest JSONPath subset", () => {
+    const claims = {
+      a: "$.email",
+      b: "$.data[0].id",
+      d: "$['display name']",
+      e: "$.items[-1]",
+    };
+    expect(integrationManifestSchema.safeParse(withClaims(claims)).success).toBe(true);
+  });
+
+  it.each(["email", "$..email", "$.users[*].id", "$[?(@.a)]", "$.data.0.id"])(
+    "rejects %p on the claim's own path",
+    (path) => {
+      expect(errorPaths(withClaims({ accountId: path }))).toContain(
+        "auths.key.identity_claims.accountId",
+      );
+    },
+  );
 });
 
 // ─────────────────────────────────────────────
