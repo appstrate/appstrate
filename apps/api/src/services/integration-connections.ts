@@ -20,13 +20,15 @@
  * module is the write side that populates it.
  */
 
-import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, arrayOverlaps, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   spacePackages,
   packageShares,
   integrationConnections,
   integrationOauthClients,
+  integrationOrgDefaults,
+  integrationPins,
   packages,
 } from "@appstrate/db/schema";
 import {
@@ -268,8 +270,7 @@ async function loadActorConnection(
 /**
  * Load a specific connection row by its id, scoped to the space
  * and protected by the actor's access predicate (own OR shared). Used
- * by the spawn and live-credentials resolvers to load a connection the
- * run's cascade bound, and return its authKey for delivery selection.
+ * by the spawn and live-credentials resolvers to load a run-bound connection.
  *
  * SECURITY — `integrationId` is a REQUIRED filter: a connection id is
  * caller-supplied on some paths (`X-Connection-Id` on the credential
@@ -329,8 +330,7 @@ export async function loadAccessibleConnectionById(
 }
 
 /**
- * Fallback connection pick for a credential-proxy call that names no
- * connection. Walks the declared
+ * Fallback pick for a credential-proxy call naming no connection. Walks the declared
  * auth keys and returns the first accessible connection found — same
  * auto-pick semantics as the runtime resolver's single-candidate fallback.
  * Multi-candidate ambiguity is resolved by iteration order (declared-auth
@@ -358,9 +358,8 @@ async function pickAnyAccessibleConnection(
 }
 
 /**
- * The credential proxy's connection selection: the named row when the caller
- * sent one, otherwise the auto-pick. Run paths never auto-pick — they load
- * the connections their cascade bound via {@link loadAccessibleConnectionById}.
+ * The credential proxy's connection selection: the named row, else the
+ * auto-pick. Run paths never auto-pick ({@link loadAccessibleConnectionById}).
  *
  * Both branches are bound to `packageId`: the by-id branch filters on
  * `integrationId` (and `requiredAuthKey` when set) so a pinned/overridden
@@ -1824,6 +1823,19 @@ export async function deleteIntegrationOAuthClient(
   clientId: string,
 ): Promise<{ deletedConnections: number }> {
   await assertSpaceInScope(scope);
+  const minted = await db
+    .select({ id: integrationConnections.id })
+    .from(integrationConnections)
+    .where(
+      and(
+        eq(integrationConnections.clientRef, clientId),
+        eq(integrationConnections.spaceId, scope.spaceId),
+      ),
+    );
+  await assertConnectionsUnpinned(
+    minted.map((c) => c.id),
+    "A connection this OAuth client minted cannot be deleted",
+  );
   return db.transaction(async (tx) => {
     const deleted = await tx
       .delete(integrationOauthClients)
@@ -2155,11 +2167,8 @@ export async function persistCredentialBundle(
     // No mono-auth-per-actor gate: an actor may hold N connections across any
     // mix of declared auths (OAuth + PAT + custom).
     //
-    // Display name, set once here: the identity or `labelHint`, else "Connexion
-    // N", N one past the highest minted for this (space, integration) across
-    // EVERY owner — a pin or org default binds several owners' connections into
-    // one set, whose labels must be distinct (same rule as the 0069 backfill).
-    // The advisory lock stops concurrent inserts reading the same MAX.
+    // Label: identity or `labelHint`, else "Connexion N" past the highest N across EVERY
+    // owner (a set spans owners); the advisory lock serialises concurrent reads of MAX.
     const namedLabel = [displayAccountId(input.accountId), input.labelHint]
       .map((raw) => (raw ? toMintedLabel(raw) : ""))
       .find((label) => label.length > 0);
@@ -2568,6 +2577,41 @@ export async function listUsableIntegrationsForActor(
 }
 
 /**
+ * 409 `connection_pinned` while any pin (the owner's own included) or org default
+ * names one of `ids`: the sets have no FK, so a dead id would fail every run.
+ */
+export async function assertConnectionsUnpinned(
+  ids: readonly string[],
+  refused: string,
+): Promise<void> {
+  if (ids.length === 0) return;
+  const [pins, orgDefaults] = await Promise.all([
+    db
+      .select({ id: integrationPins.id })
+      .from(integrationPins)
+      .where(arrayOverlaps(integrationPins.connectionIds, [...ids]))
+      .limit(1),
+    db
+      .select({ id: integrationOrgDefaults.id })
+      .from(integrationOrgDefaults)
+      .where(arrayOverlaps(integrationOrgDefaults.connectionIds, [...ids]))
+      .limit(1),
+  ]);
+  if (pins.length > 0) {
+    throw conflict(
+      "connection_pinned",
+      `${refused} while it is pinned to one or more agents. Remove it from the pin(s) first.`,
+    );
+  }
+  if (orgDefaults.length > 0) {
+    throw conflict(
+      "connection_pinned",
+      `${refused} while it is the org default for an integration. Remove it from the default first.`,
+    );
+  }
+}
+
+/**
  * Delete one connection row. Used by the "disconnect" button per auth
  * (or per account, when multi-account).
  */
@@ -2589,6 +2633,19 @@ export async function deleteIntegrationConnection(
   // routes skip org context.
   if ("orgId" in scope) await assertSpaceInScope(scope);
   const ownerPredicate = actorFilter(actor, integrationConnections);
+  const [owned] = await db
+    .select({ id: integrationConnections.id })
+    .from(integrationConnections)
+    .where(
+      and(
+        eq(integrationConnections.id, connectionId),
+        eq(integrationConnections.spaceId, scope.spaceId),
+        ownerPredicate,
+      ),
+    )
+    .limit(1);
+  if (!owned) throw notFound(`Connection '${connectionId}' not found or not owned by caller`);
+  await assertConnectionsUnpinned([connectionId], "Connection cannot be deleted");
   const deleted = await db
     .delete(integrationConnections)
     .where(

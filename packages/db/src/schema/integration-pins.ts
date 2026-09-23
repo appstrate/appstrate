@@ -14,18 +14,11 @@
  *     persisted "for MY runs of this agent, use MY connections X, Y" choice.
  *     Written via `/api/me/integration-pins/...` by the member themselves.
  *
- * Resolver cascade: see `apps/api/src/services/integration-connection-resolver.ts`.
- *
  * A pin must reference connections accessible to the actor at run time.
  * For admin pins, validation lives in the pin service (admin can't pin
  * a member's personal connection — would let them coerce credentials by
  * sleight of hand). For member pins, validation also lives in the
  * service (member can only pin a connection they themselves can see).
- *
- * `connection_ids` has no FK (Postgres has none on array elements), and that
- * is the point: a deleted member stays in the set, so the resolver refuses the
- * run with `pinned_connection_unavailable` instead of quietly binding the
- * survivors.
  */
 
 import { pgTable, text, uuid, timestamp, index, uniqueIndex, check } from "drizzle-orm/pg-core";
@@ -83,17 +76,11 @@ export const integrationPins = pgTable(
       table.integrationId,
       sql`coalesce(${table.userId}, '')`,
     ),
-    // Reverse lookup (`connection_ids @> …`): the unshare guard refuses
-    // turning sharedWithOrg off while a pin references the connection.
     index("idx_integration_pins_connection_ids").using("gin", table.connectionIds),
-    // Member-pin partial index: lookups filtering by `user_id` (member
-    // self-management endpoints + resolver layer 5) hit only the small
-    // member-scoped subset, not the admin-pin majority.
     index("idx_integration_pins_user")
       .on(table.userId)
       .where(sql`${table.userId} IS NOT NULL`),
-    // 10 = `MAX_CONNECTIONS_PER_INTEGRATION`, spelled out: the schema must not
-    // pull `@appstrate/core/integration`'s AFPS graph into drizzle-kit.
+    // 10 = MAX_CONNECTIONS_PER_INTEGRATION, spelled out for drizzle-kit; no FK on elements, by design.
     check(
       "integration_pins_connection_ids_cardinality",
       sql`cardinality(connection_ids) BETWEEN 1 AND 10`,

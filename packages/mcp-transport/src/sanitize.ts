@@ -44,9 +44,6 @@ export const MAX_SCHEMA_SERIALISED_BYTES = 8192;
  * payloads. We strip every entry in this set before any length
  * accounting so attackers can't pack bytes into otherwise-empty space.
  *
- * Built with `new RegExp(...)` and `\uXXXX` escapes so the source file
- * itself stays free of the very characters we're trying to defeat.
- *
  * Coverage:
  *   - U+00AD soft hyphen
  *   - U+115F-U+1160 Hangul fillers
@@ -58,12 +55,13 @@ export const MAX_SCHEMA_SERIALISED_BYTES = 8192;
  *   - U+3164 Hangul filler
  *   - U+FEFF BOM
  *   - U+FFA0 halfwidth Hangul filler
+ *   - U+E0000-U+E007F tag characters (invisible, yet read by models)
  */
 // Hidden code points stripped on every text field. Encoded as a
 // per-code-point predicate (not a regex character class) because some
 // adjacent fillers — e.g. Hangul ᅟ + ᅠ — render as a single
 // combined glyph and trip eslint's no-misleading-character-class rule.
-function isHiddenCodePoint(cp: number): boolean {
+export function isHiddenCodePoint(cp: number): boolean {
   return (
     cp === 0x00ad ||
     cp === 0x115f ||
@@ -76,15 +74,16 @@ function isHiddenCodePoint(cp: number): boolean {
     (cp >= 0x2060 && cp <= 0x206f) ||
     cp === 0x3164 ||
     cp === 0xfeff ||
-    cp === 0xffa0
+    cp === 0xffa0 ||
+    (cp >= 0xe0000 && cp <= 0xe007f)
   );
 }
 
+/** By code point: a tag character is a surrogate pair. */
 function stripHiddenCodePoints(value: string): string {
   let out = "";
-  for (let i = 0; i < value.length; i += 1) {
-    const cp = value.charCodeAt(i);
-    if (!isHiddenCodePoint(cp)) out += value[i];
+  for (const ch of value) {
+    if (!isHiddenCodePoint(ch.codePointAt(0)!)) out += ch;
   }
   return out;
 }

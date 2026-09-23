@@ -1192,7 +1192,8 @@ export type ConnectionResolutionErrorCode =
   | "must_choose_connection"
   | "duplicate_connection_label"
   | "insufficient_scopes"
-  | "auth_key_mismatch";
+  | "auth_key_mismatch"
+  | "auth_serves_no_selected_tool";
 
 /**
  * One connection carried by `must_choose_connection` or `duplicate_connection_label`.
@@ -1226,6 +1227,7 @@ export interface ConnectionResolutionError {
    * The connection the error is bound to:
    *   - `insufficient_scopes` → the under-scoped connection (target of OAuth upgrade).
    *   - `needs_reconnection` → the dead connection (target of OAuth reconnect).
+   *   - `auth_serves_no_selected_tool` → the member to take out of the set.
    * Threaded into the OAuth re-kickoff `state` so the callback UPDATEs the
    * existing row instead of INSERTing a duplicate (integration-connections.ts
    * "explicit connectionId = update; no id = insert").
@@ -1257,7 +1259,8 @@ export interface ConnectionResolutionError {
   authKey?: string;
   /**
    * The cascade layer that resolved the (failing) connection, when the error
-   * is bound to a specific connection (`insufficient_scopes`). Lets callers
+   * is bound to a specific connection (`insufficient_scopes`,
+   * `auth_serves_no_selected_tool`). Lets callers
    * derive the pick status directly instead of re-comparing `connectionId`
    * against re-fetched pin ids.
    */

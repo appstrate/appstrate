@@ -652,7 +652,9 @@ export const integrationsPaths = {
       summary: "Delete a custom OAuth client",
       description:
         "Deletes one custom client by id. If it was the default, the cascade " +
-        "falls to the system client (no auto-promotion). Requires `integrations:configure`, which is never granted to an API key.",
+        "falls to the system client (no auto-promotion). The connections it minted are deleted with it, " +
+        "so it is refused with 409 `connection_pinned` while a pin or an org default names one of them. " +
+        "Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -666,6 +668,15 @@ export const integrationsPaths = {
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "A connection the client minted is named by a pin or an org default",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },

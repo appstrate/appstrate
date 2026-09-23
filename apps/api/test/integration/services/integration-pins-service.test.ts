@@ -22,8 +22,8 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
-import { eq } from "drizzle-orm";
-import { integrationConnections } from "@appstrate/db/schema";
+import { eq, sql } from "drizzle-orm";
+import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
 import {
   validatePinTarget,
@@ -32,8 +32,13 @@ import {
   loadConnectionOwnership,
   listIntegrationPins,
   upsertIntegrationPin,
+  upsertMemberPin,
   updateConnectionMetadata,
 } from "../../../src/services/integration-pins-service.ts";
+import {
+  deleteIntegrationConnection,
+  deleteIntegrationOAuthClient,
+} from "../../../src/services/integration-connections.ts";
 
 const INTEGRATION = "@official/gmail";
 const OTHER_INTEGRATION = "@official/clickup";
@@ -431,6 +436,100 @@ describe("integration-pins-service — DB access/ownership", () => {
       const [outside] = await seedSharedConnections(1);
       const row = await updateConnectionMetadata(outside!, { sharedWithOrg: false });
       expect(row.sharedWithOrg).toBe(false);
+    });
+
+    it("returns the written pin even when the row is deleted right after the write", async () => {
+      // An AFTER trigger stands in for a concurrent DELETE landing between the
+      // upsert and any follow-up read: the summary must come from the write.
+      const ids = await seedSharedConnections(1);
+      await db.execute(sql`
+        CREATE OR REPLACE FUNCTION pin_vanish_fn() RETURNS trigger AS $$
+        BEGIN
+          DELETE FROM integration_pins WHERE id = NEW.id;
+          RETURN NULL;
+        END $$ LANGUAGE plpgsql`);
+      await db.execute(sql`
+        CREATE TRIGGER pin_vanish_trg AFTER INSERT OR UPDATE ON integration_pins
+        FOR EACH ROW EXECUTE FUNCTION pin_vanish_fn()`);
+      try {
+        const pin = await upsertIntegrationPin(scope, INTEGRATION, {
+          agentPackageId: AGENT,
+          connectionIds: ids,
+          createdBy: ctx.user.id,
+        });
+        expect(pin.connection_ids).toEqual(ids);
+        expect(Number.isNaN(Date.parse(pin.createdAt))).toBe(false);
+      } finally {
+        await db.execute(sql`DROP TRIGGER IF EXISTS pin_vanish_trg ON integration_pins`);
+        await db.execute(sql`DROP FUNCTION IF EXISTS pin_vanish_fn()`);
+      }
+    });
+
+    it("refuses to delete ANY member of a pinned set (409 connection_pinned)", async () => {
+      const ids = await seedSharedConnections(2);
+      await upsertIntegrationPin(scope, INTEGRATION, {
+        agentPackageId: AGENT,
+        connectionIds: ids,
+        createdBy: ctx.user.id,
+      });
+      const owner = { type: "user" as const, id: memberId };
+      await expect(deleteIntegrationConnection(scope, ids[1]!, owner)).rejects.toMatchObject({
+        status: 409,
+        code: "connection_pinned",
+      });
+      const [still] = await db
+        .select({ id: integrationConnections.id })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, ids[1]!));
+      expect(still?.id).toBe(ids[1]);
+      // Control: a connection outside every set deletes freely.
+      const [outside] = await seedSharedConnections(1);
+      await deleteIntegrationConnection(scope, outside!, owner);
+    });
+
+    it("refuses to delete a connection its owner pinned for themselves", async () => {
+      const [own] = await seedSharedConnections(1);
+      await upsertMemberPin(scope, {
+        agentPackageId: AGENT,
+        integrationId: INTEGRATION,
+        connectionIds: [own!],
+        userId: memberId,
+      });
+      await expect(
+        deleteIntegrationConnection(scope, own!, { type: "user", id: memberId }),
+      ).rejects.toThrow(/Remove it from the pin\(s\) first/);
+    });
+
+    it("refuses to delete an OAuth client whose minted connection is pinned", async () => {
+      const [client] = await db
+        .insert(integrationOauthClients)
+        .values({
+          spaceId: scope.spaceId,
+          integrationId: INTEGRATION,
+          authKey: "google",
+          clientId: "byo-app",
+          clientSecretEncrypted: "x",
+        })
+        .returning({ id: integrationOauthClients.id });
+      const ids = await seedSharedConnections(1);
+      await db
+        .update(integrationConnections)
+        .set({ clientRef: client!.id })
+        .where(eq(integrationConnections.id, ids[0]!));
+      await upsertIntegrationPin(scope, INTEGRATION, {
+        agentPackageId: AGENT,
+        connectionIds: ids,
+        createdBy: ctx.user.id,
+      });
+      await expect(deleteIntegrationOAuthClient(scope, client!.id)).rejects.toMatchObject({
+        status: 409,
+        code: "connection_pinned",
+      });
+      const [kept] = await db
+        .select({ id: integrationOauthClients.id })
+        .from(integrationOauthClients)
+        .where(eq(integrationOauthClients.id, client!.id));
+      expect(kept?.id).toBe(client!.id);
     });
 
     it("refuses the whole set when ONE member is not shared", async () => {

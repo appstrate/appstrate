@@ -62,7 +62,7 @@ export interface ResolutionFieldError extends ValidationFieldError {
     account_id: string;
     owned_by_actor: boolean;
   }[];
-  /** `needs_reconnection` / `insufficient_scopes` — the existing connection's id to UPDATE in place. */
+  /** `needs_reconnection` / `insufficient_scopes`: the row to UPDATE in place; `auth_serves_no_selected_tool`: the member to remove. */
   connection_id?: string;
   /** `insufficient_scopes` — OAuth scopes the selected tools require that the connection lacks. */
   missing_scopes?: string[];

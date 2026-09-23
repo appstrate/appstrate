@@ -14,14 +14,13 @@
  * caller already holds it.
  */
 
-import { and, arrayContains, eq, isNull, sql } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
+import { and, eq, isNull, sql } from "drizzle-orm";
+import { db, toRows } from "@appstrate/db/client";
 import {
   spacePackages,
   packageShares,
   integrationConnections,
   integrationPins,
-  integrationOrgDefaults,
   packages,
 } from "@appstrate/db/schema";
 import type {
@@ -50,7 +49,7 @@ import {
   notEphemeralFilter,
   orgOrSystemFilter,
 } from "../lib/package-helpers.ts";
-import { conflict, notFound, invalidRequest } from "../lib/errors.ts";
+import { notFound, invalidRequest } from "../lib/errors.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { actorOrSharedFilter, type Actor } from "../lib/actor.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
@@ -59,6 +58,7 @@ import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
 import { fetchIntegrationManifest, resolveRunIntegrationVersions } from "./integration-service.ts";
 import { getOrgDefault } from "./integration-org-defaults-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
+import { assertConnectionsUnpinned } from "./integration-connections.ts";
 import {
   resolveConnectionsForRun,
   translateResolutionError,
@@ -232,9 +232,6 @@ interface SetPinInput {
  *   2. references the integration this pin governs,
  *   3. is `sharedWithOrg=true` (pinning a personal connection would
  *      leak the admin's identity to other members at run time).
- *
- * Each connection carries its own authKey — pinning a PAT connection
- * overrides the agent's oauth-by-default just by virtue of being picked.
  */
 export async function upsertIntegrationPin(
   scope: SpaceScope,
@@ -253,8 +250,8 @@ export async function upsertIntegrationPin(
 }
 
 /**
- * Raw SQL because the conflict target is the unique index's `coalesce`
- * expression, which drizzle's `onConflictDoUpdate` cannot name.
+ * Raw SQL: `onConflictDoUpdate` cannot target the index's `coalesce`. One
+ * statement writes and returns, mapped by drizzle's column mappers (drivers differ).
  */
 async function upsertPin(args: {
   scope: SpaceScope;
@@ -276,30 +273,36 @@ async function upsertPin(args: {
     connectionIds.map((id) => sql`${id}`),
     sql`, `,
   )}]::uuid[]`;
-  await db.execute(sql`
-    INSERT INTO ${integrationPins}
-      (space_id, package_id, integration_package_id, user_id, connection_ids, created_by)
-    VALUES (${scope.spaceId}, ${agentPackageId}, ${integrationId}, ${userIdValue}, ${ids}, ${createdBy})
-    ON CONFLICT (space_id, package_id, integration_package_id, (coalesce(user_id, '')))
-    DO UPDATE SET
-      connection_ids = EXCLUDED.connection_ids,
-      created_by = EXCLUDED.created_by,
-      updated_at = now()
-  `);
-  const [pin] = await db
-    .select()
-    .from(integrationPins)
-    .where(
-      and(
-        eq(integrationPins.spaceId, scope.spaceId),
-        eq(integrationPins.packageId, agentPackageId),
-        eq(integrationPins.integrationId, integrationId),
-        userIdValue === null
-          ? isNull(integrationPins.userId)
-          : eq(integrationPins.userId, userIdValue),
-      ),
-    );
-  return toPinSummary(pin!);
+  const [row] = toRows<{
+    connection_ids: string | unknown[];
+    created_at: string | Date;
+    updated_at: string | Date;
+  }>(
+    await db.execute(sql`
+      INSERT INTO ${integrationPins}
+        (space_id, package_id, integration_package_id, user_id, connection_ids, created_by)
+      VALUES (${scope.spaceId}, ${agentPackageId}, ${integrationId}, ${userIdValue}, ${ids}, ${createdBy})
+      ON CONFLICT (space_id, package_id, integration_package_id, (coalesce(user_id, '')))
+      DO UPDATE SET
+        connection_ids = EXCLUDED.connection_ids,
+        created_by = EXCLUDED.created_by,
+        updated_at = now()
+      RETURNING connection_ids, created_at, updated_at
+    `),
+  );
+  return {
+    packageId: agentPackageId,
+    integration_package_id: integrationId,
+    connection_ids: integrationPins.connectionIds.mapFromDriverValue(
+      row!.connection_ids,
+    ) as string[],
+    createdAt: (
+      integrationPins.createdAt.mapFromDriverValue(row!.created_at) as Date
+    ).toISOString(),
+    updatedAt: (
+      integrationPins.updatedAt.mapFromDriverValue(row!.updated_at) as Date
+    ).toISOString(),
+  };
 }
 
 export async function deleteIntegrationPin(
@@ -476,31 +479,7 @@ export async function updateConnectionMetadata(
   input: UpdateConnectionMetadataInput,
 ): Promise<ConnectionRow> {
   if (input.sharedWithOrg === false) {
-    const [pins, orgDefaults] = await Promise.all([
-      db
-        .select({ packageId: integrationPins.packageId })
-        .from(integrationPins)
-        .where(arrayContains(integrationPins.connectionIds, [connectionId]))
-        .limit(1),
-      db
-        .select({ id: integrationOrgDefaults.id })
-        .from(integrationOrgDefaults)
-        .where(arrayContains(integrationOrgDefaults.connectionIds, [connectionId]))
-        .limit(1),
-    ]);
-    if (pins.length > 0) {
-      // Existence check only (`.limit(1)`), so don't claim a count.
-      throw conflict(
-        "connection_pinned",
-        "Connection cannot be unshared while it is pinned to one or more agents. Remove the pin(s) first.",
-      );
-    }
-    if (orgDefaults.length > 0) {
-      throw conflict(
-        "connection_pinned",
-        "Connection cannot be unshared while it is the org default for an integration. Remove the default first.",
-      );
-    }
+    await assertConnectionsUnpinned([connectionId], "Connection cannot be unshared");
   }
 
   const updates: { label?: string; sharedWithOrg?: boolean; updatedAt: Date } = {
@@ -610,10 +589,8 @@ function pickStatusForSource(source: ConnectionResolutionSource): IntegrationPic
  * connection the next run would use for this (agent, integration, actor),
  * plus the candidate list and pin/blocked state the dropdown renders.
  *
- * The "which connections" decision delegates to {@link resolveConnectionsForRun}
- * — the exact cascade + scope check the runtime uses — so the UI never
- * re-implements it. Per-candidate `missingScopes` are an additional display
- * annotation (the resolver only scope-checks the bound connections).
+ * The decision is {@link resolveConnectionsForRun}'s, never re-implemented;
+ * per-candidate `missingScopes` are a display annotation on top.
  *
  * `agentManifest` and `resolution` are REQUIRED and caller-supplied, which is
  * load-bearing rather than stylistic. This function used to load the package
@@ -732,6 +709,11 @@ async function resolveAgentIntegrationPick(args: {
       case "pinned_connection_unavailable":
       case "override_connection_unavailable":
         status = "stale";
+        break;
+      // A pick to change (`stale`), or — on the fallback — a connection to add.
+      case "auth_serves_no_selected_tool":
+        resolvedConnectionIds = err.boundConnectionIds ?? [];
+        status = err.source === "fallback_auto" ? "none" : "stale";
         break;
       default:
         status = "none";

@@ -238,7 +238,8 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  *  - `duplicate_label` — the bound set shares a label, so it is unaddressable;
  *                     the remedy is renaming a connection, not re-picking.
  *  - `none`         — no accessible connection.
- *  - `stale`        — a pin points at a connection no longer accessible.
+ *  - `stale`        — a pin names a connection the run cannot use: no longer
+ *                     accessible, or on an auth serving none of the selected tools.
  *  - `needs_reconnection` — the resolved connection is flagged for re-consent.
  */
 export type IntegrationPickStatus =

@@ -500,11 +500,7 @@ export function createInternalRouter() {
 
   const connectionIdQuerySchema = z.uuid();
 
-  /**
-   * The `connection_id` member of `runs.resolved_connections[packageId]`, else
-   * 400: the platform never picks a connection for the caller, and a run token
-   * authorises only the connections its cascade bound.
-   */
+  /** The run-bound member `?connection_id` names, else 400 — the platform never picks one. */
   function requireBoundConnection(
     c: Context,
     packageId: string,
@@ -562,15 +558,15 @@ export function createInternalRouter() {
     }
   }
 
-  // GET /internal/integration-credentials/:scope/:name?connection_id=<uuid>
+  // GET /internal/integration-credentials/:scope/:name
   // Sidecar-only. Returns the LIVE credential payload + per-auth HTTP
   // delivery plans for ONE connection the run bound to an integration it depends on.
   // OAuth tokens are refreshed proactively if within the lead window;
   // POST .../refresh forces a refresh regardless.
   //
-  // A 2xx on the run path always carries a usable credential surface. Every state where
-  // a credential was expected but could not be produced fails loud — 400 (see
-  // `requireBoundConnection`), 404 (the bound connection is gone), 409
+  // A 2xx on the run path always carries a usable credential surface. Every state
+  // where a credential was expected but could not be produced fails loud — 400
+  // (see `requireBoundConnection`), 404 (the bound connection is gone), 409
   // `integration_auth_undeclared` (the pinned manifest version no longer
   // declares the connection's auth), 410 (dead credential, connection flagged).
   // The sidecar treats an empty payload as "no `delivery.http` auths, skip the
@@ -620,7 +616,7 @@ export function createInternalRouter() {
     return c.json(serializeIntegrationCredentialsWire(result));
   });
 
-  // POST /internal/integration-credentials/:scope/:name/refresh?connection_id=<uuid>
+  // POST /internal/integration-credentials/:scope/:name/refresh
   // Sidecar-only. Called by the sidecar (api_call adapter + MITM listener) when
   // an upstream 401 is seen. Force-refreshes that connection's credential and
   // returns the fresh payload (200). When the credential cannot be recovered —

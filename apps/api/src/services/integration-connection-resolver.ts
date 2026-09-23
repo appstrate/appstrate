@@ -64,6 +64,7 @@ import type { Actor } from "../lib/actor.ts";
 import { actorOrSharedFilter } from "../lib/actor.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "./integration-service.ts";
+import { authKeysServingSelection } from "./integration-manifest-helpers.ts";
 import {
   listOrgDefaultsForResolver,
   type OrgDefaultPick,
@@ -123,6 +124,8 @@ export interface IntegrationRequirement {
    * semantics (any connection on the integration is a valid pick).
    */
   requiredAuthKey?: string;
+  /** Effective selection (`tools[]`, else `default_tools`); absent → any auth serves it. */
+  effectiveTools?: readonly string[] | "*";
 }
 
 interface ResolveConnectionsInput {
@@ -304,6 +307,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       connectionIndex: filteredIndex,
       actorUserId,
       actorEndUserId: input.actorEndUserId ?? null,
+      servingAuthKeys: authKeysServingSelection(req.manifest, req.effectiveTools),
       ...(req.requiredAuthKey !== undefined ? { requiredAuthKey: req.requiredAuthKey } : {}),
     });
 
@@ -338,6 +342,8 @@ interface ResolveOneArgs {
   connectionIndex: Map<string, ConnectionRow>;
   actorUserId: string | null;
   actorEndUserId: string | null;
+  /** Auths whose connection exposes a selected tool; `null` = any auth does. */
+  servingAuthKeys: ReadonlySet<string> | null;
   /**
    * AFPS §4.1 `auth_key` from the agent dep — already applied as a candidate
    * filter by {@link resolveConnections}. Threaded in so the `not_connected`
@@ -352,14 +358,9 @@ type ResolveOneResult =
   | { kind: "error"; error: ConnectionResolutionError };
 
 /**
- * Look up a SET of connection ids in the index, treating a row that belongs
- * to a DIFFERENT integration as not-found. Pins/overrides (cascade layers
- * 1-6) carry caller-supplied connection ids; without this guard a
- * run/schedule override (or pin) pointing at an accessible connection of
- * another integration would be accepted and its credentials injected under
- * the wrong integration's auth — an intra-tenant confused-deputy. Layer 7
- * (fallback) already filters by integrationId, so it does not need this.
- * Reports the first id that could not be resolved.
+ * Look up a SET of caller-supplied ids (layers 1-6), a row of ANOTHER
+ * integration counting as not-found — else its credentials would be injected
+ * under this integration's auth. Reports the first id it cannot resolve.
  */
 function ownedConns(
   args: ResolveOneArgs,
@@ -374,11 +375,7 @@ function ownedConns(
   return { rows };
 }
 
-/**
- * Health-check every member of the winning set, then require distinct labels:
- * the sidecar's `connection` argument addresses a bound connection by label.
- * A failure carries the whole set as `boundConnectionIds`.
- */
+/** Every member must pass `checkHealth`, then carry a distinct label (the sidecar's address). */
 function bindSet(
   args: ResolveOneArgs,
   rows: ConnectionRow[],
@@ -407,11 +404,7 @@ function bindSet(
   return { kind: "resolved", value };
 }
 
-/**
- * The one wording for a colliding set, shared by the resolver and the writes.
- * The rule itself is `labelsSharedBy` in `@appstrate/core/integration`, so the
- * API and the web picker cannot disagree about what collides.
- */
+/** The one wording for a colliding set (rule: `labelsSharedBy`), shared by the resolver and the writes. */
 export function duplicateLabelMessage(
   integrationId: string,
   colliding: readonly ConnectionRow[],
@@ -478,9 +471,8 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     return bindSet(args, owned.rows, layer.source);
   }
 
-  // 6. Org default SOFT — non-binding, so an unreachable member falls through
-  // to the fallback instead of erroring; logged, as the admin has no other
-  // signal that the set stopped being reachable.
+  // 6. Org default SOFT — an unreachable member falls through to the fallback,
+  // logged since the admin has no other signal.
   const softIds = args.orgDefault?.enforce ? null : nonEmpty(args.orgDefault?.connectionIds);
   if (softIds) {
     const owned = ownedConns(args, softIds);
@@ -512,12 +504,17 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     });
   }
 
+  // A connection whose auth serves none of the selected tools is never a
+  // candidate; with nothing else, checkHealth refuses the first one.
+  const serving = candidates.filter((c) => servesSelection(args, c));
+  if (serving.length === 0) return bindSet(args, [candidates[0]!], "fallback_auto");
+
   // Prefer HEALTHY candidates (not flagged needsReconnection). A dead
   // connection must never be auto-picked when a live sibling exists, and the
   // picker should not offer a dead option as a valid choice. So: a single
   // healthy connection auto-resolves even if dead siblings exist, and the
   // must_choose picker lists only live candidates.
-  const healthy = candidates.filter((c) => !c.needsReconnection);
+  const healthy = serving.filter((c) => !c.needsReconnection);
 
   if (healthy.length === 1) {
     return bindSet(args, [healthy[0]!], "fallback_auto");
@@ -544,7 +541,11 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   // flagged needsReconnection. Surface needs_reconnection (with one id for the
   // reconnect CTA to UPDATE in place) rather than must_choose, which would only
   // offer dead options. checkHealth on the first emits the canonical shape.
-  return bindSet(args, [candidates[0]!], "fallback_auto");
+  return bindSet(args, [serving[0]!], "fallback_auto");
+}
+
+function servesSelection(args: ResolveOneArgs, conn: ConnectionRow): boolean {
+  return args.servingAuthKeys === null || args.servingAuthKeys.has(conn.authKey);
 }
 
 /**
@@ -646,6 +647,17 @@ function checkHealth(
   source: ResolvedConnection["source"],
 ): CheckHealthResult {
   const ownedByActor = isOwnedByActor(args, conn);
+
+  // Checked first: neither a reconnect nor a scope upgrade gives this auth a tool.
+  if (!servesSelection(args, conn)) {
+    const serving = [...args.servingAuthKeys!].join(", ") || "none";
+    return errorOf(args, {
+      code: "auth_serves_no_selected_tool",
+      connectionId: conn.id,
+      source,
+      message: `Connection '${conn.label}' for ${args.integrationId} uses auth '${conn.authKey}', which exposes none of the agent's selected tools (auths that do: ${serving}) — remove it from the set.`,
+    });
+  }
 
   if (conn.needsReconnection) {
     // A reconnect is a connect flow, so it carries the same relay as the other
@@ -918,6 +930,9 @@ export function translateResolutionError(e: ConnectionResolutionError): Resoluti
           ...(e.ownedByActor !== undefined ? { owned_by_actor: e.ownedByActor } : {}),
         }
       : {}),
+    ...(e.code === "auth_serves_no_selected_tool" && e.connectionId
+      ? { connection_id: e.connectionId }
+      : {}),
     // Surface the dead connection id on needs_reconnection so the modal's
     // reconnect CTA can UPDATE the existing row in place. Omitting it makes
     // the OAuth callback INSERT a duplicate (single-writer contract in
@@ -953,6 +968,7 @@ const TITLE_BY_CODE: Record<ConnectionResolutionError["code"], string> = {
   duplicate_connection_label: "Duplicate Connection Label",
   insufficient_scopes: "Insufficient Permissions",
   auth_key_mismatch: "Connection Auth Method Mismatch",
+  auth_serves_no_selected_tool: "Connection Auth Serves No Selected Tool",
 };
 
 async function buildRequirement(
@@ -998,6 +1014,7 @@ async function buildRequirement(
     // Activeness (above) and scope requirements are different questions.
     agentTools: wildcard ? "*" : (entry.tools ?? []),
     agentScopes: entry.scopes ?? [],
+    ...(effectiveTools !== undefined ? { effectiveTools } : {}),
     ...(entry.auth_key !== undefined ? { requiredAuthKey: entry.auth_key } : {}),
   };
 }

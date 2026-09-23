@@ -354,9 +354,11 @@ export const mePaths = {
       tags: ["Profile"],
       summary: "Delete one of the caller's own connections (destructive)",
       description:
-        "Removes the `integration_connections` row globally. ON DELETE CASCADE vacates " +
-        "every reference (admin pins, member pins, run snapshots, schedule overrides). " +
+        "Removes the `integration_connections` row globally. " +
         "Intent is destructive: 'I never want to use this credential anywhere again'. " +
+        "Refused with 409 `connection_pinned` while a pin (admin or member, the caller's own included) " +
+        "or an org default names the connection: those sets carry no foreign key, so the dead id would " +
+        "fail every consuming run. Remove it from the pin(s) or default first. " +
         "Surfaced only from the /connections management page — agent-surface unlinks now " +
         "drop the member pin instead (see `DELETE /api/me/integration-pins`). " +
         "With a delegated or end-user credential, only connections inside its bound " +
@@ -372,6 +374,15 @@ export const mePaths = {
       responses: {
         "204": { description: "Connection deleted (or never existed)" },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "409": {
+          description: "Connection is named by a pin or an org default (`connection_pinned`)",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },

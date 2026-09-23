@@ -66,3 +66,23 @@ describe("toMintedLabel", () => {
     expect(toMintedLabel("​​")).toBe("");
   });
 });
+
+describe("connection labels share the tool sanitiser's hidden-code-point predicate", () => {
+  const HANGUL_FILLER = String.fromCodePoint(0x3164);
+  // "ignore" spelled in Unicode TAG characters: invisible, still read by a model.
+  const TAG_SUFFIX = [..."ignore"]
+    .map((c) => String.fromCodePoint(0xe0000 + c.charCodeAt(0)))
+    .join("");
+
+  it("refuses a Hangul filler (U+3164)", () => {
+    expect(connectionLabelProblem(`prod${HANGUL_FILLER}`)).toMatch(/invisible/);
+  });
+
+  it("refuses a tag-character suffix", () => {
+    expect(connectionLabelProblem(`prod${TAG_SUFFIX}`)).toMatch(/invisible/);
+  });
+
+  it("mints both away, keeping the visible label", () => {
+    expect(toMintedLabel(`pr${HANGUL_FILLER}od${TAG_SUFFIX}`)).toBe("prod");
+  });
+});

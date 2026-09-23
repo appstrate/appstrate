@@ -1617,3 +1617,79 @@ describe("resolveConnections — the fallback never auto-binds N", () => {
     expect(result.resolved[INTEG]![0]!.source).toBe("fallback_auto");
   });
 });
+
+/**
+ * A multi-auth set binds one spec per member, and an `api_call` tool reaches the
+ * agent only through its own auth's connection — so a member whose auth serves
+ * none of the selected tools is refused here, not dropped at spawn.
+ */
+describe("resolveConnections — auth_serves_no_selected_tool", () => {
+  function serverlessManifest(): IntegrationManifest {
+    const m = oauth2Manifest() as unknown as Record<string, unknown>;
+    m.source = { kind: "none" };
+    m._meta = { "dev.appstrate/api": { auths: { oauth: {}, pat: {} } } };
+    return m as unknown as IntegrationManifest;
+  }
+  function selecting(manifest: IntegrationManifest, tools: string[] | "*") {
+    return { ...req(manifest), effectiveTools: tools };
+  }
+
+  it("refuses a pinned set whose second member's auth serves no selected tool", () => {
+    const a = conn({ label: "main" });
+    const b = conn({ authKey: "pat", label: "spare" });
+    const result = resolveConnections({
+      requirements: [selecting(serverlessManifest(), ["api_call__oauth"])],
+      accessibleConnections: [a, b],
+      pins: [pin([a.id, b.id])],
+    });
+    expect(result.resolved[INTEG]).toBeUndefined();
+    const err = result.errors[0]!;
+    expect(err.code).toBe("auth_serves_no_selected_tool");
+    expect(err.connectionId).toBe(b.id);
+    expect(err.boundConnectionIds).toEqual([a.id, b.id]);
+    expect(translateResolutionError(err)).toMatchObject({
+      code: "auth_serves_no_selected_tool",
+      connection_id: b.id,
+    });
+  });
+
+  it("control — a selection covering both auths binds the same set", () => {
+    const a = conn({ label: "main" });
+    const b = conn({ authKey: "pat", label: "spare" });
+    const result = resolveConnections({
+      requirements: [selecting(serverlessManifest(), ["api_call__oauth", "api_call__pat"])],
+      accessibleConnections: [a, b],
+      pins: [pin([a.id, b.id])],
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.resolved[INTEG]!.map((r) => r.connectionId)).toEqual([a.id, b.id]);
+  });
+
+  it("does not apply when a server's own tools reach every connection", () => {
+    const a = conn({ label: "main" });
+    const b = conn({ authKey: "pat", label: "spare" });
+    const local = oauth2Manifest() as unknown as Record<string, unknown>;
+    local._meta = { "dev.appstrate/api": { auths: { oauth: {}, pat: {} } } };
+    const result = resolveConnections({
+      requirements: [
+        selecting(local as unknown as IntegrationManifest, ["search", "api_call__oauth"]),
+      ],
+      accessibleConnections: [a, b],
+      pins: [pin([a.id, b.id])],
+    });
+    expect(result.errors).toEqual([]);
+  });
+
+  it("fallback skips a non-serving candidate instead of asking to choose", () => {
+    const a = conn({ label: "main" });
+    const b = conn({ authKey: "pat", label: "spare" });
+    const result = resolveConnections({
+      requirements: [selecting(serverlessManifest(), ["api_call__oauth"])],
+      accessibleConnections: [a, b],
+      pins: [],
+      actorUserId: USER_ID,
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.resolved[INTEG]!.map((r) => r.connectionId)).toEqual([a.id]);
+  });
+});

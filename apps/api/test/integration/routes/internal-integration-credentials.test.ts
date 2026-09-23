@@ -327,7 +327,7 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
 
   // ─── The connection selector (plan §8 row 8) ───
   //
-  // There is no "the connection of this integration" any more, so the caller
+  // A run may bind several connections to one integration, so the caller
   // names one and the run's kickoff snapshot is what authorises it. Both
   // refusals are 400: a request that cannot say which connection it means gets
   // no guess, and one naming a connection this run never bound is asking for a

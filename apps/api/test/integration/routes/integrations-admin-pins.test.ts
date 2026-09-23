@@ -40,6 +40,7 @@ import {
 } from "../../helpers/auth.ts";
 import { seedAgent, seedPackage } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
+import { eq } from "drizzle-orm";
 import { integrationConnections, organizationMembers } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
@@ -375,11 +376,15 @@ describe("/api/integrations/:packageId admin surface", () => {
       });
       expect(put.status).toBe(200);
 
+      // The API refuses to drop a pinned member...
       const del = await app.request(`/api/me/connections/${connB}`, {
         method: "DELETE",
         headers: authHeaders(ctx),
       });
-      expect(del.status).toBe(204);
+      expect(del.status).toBe(409);
+      expect(((await del.json()) as { code: string }).code).toBe("connection_pinned");
+      // ...so a row gone anyway (direct SQL, a race) must still fail the run by name.
+      await db.delete(integrationConnections).where(eq(integrationConnections.id, connB));
 
       const res = await app.request(`/api/agents/${AGENT}/connection-readiness`, {
         headers: authHeaders(ctx),
