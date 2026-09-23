@@ -69,7 +69,13 @@ function assertPath(path: string): void {
     );
 }
 
-function canonicalPath(path: string): string {
+/**
+ * The key two paths collide on: NFC, lowercased. The tree algebra refuses a
+ * NEW path that shares it with another, since a case- or normalization-
+ * insensitive filesystem (macOS, Windows) cannot hold both; a client that
+ * writes a tree to such a disk asks the same question before it does.
+ */
+export function canonicalPackagePath(path: string): string {
   return path.normalize("NFC").toLowerCase();
 }
 
@@ -78,13 +84,13 @@ function assertNames<T>(files: Record<string, T>, added: Iterable<string>): void
   const names = new Map<string, string[]>();
   const directories = new Set<string>();
   for (const path of Object.keys(files)) {
-    const key = canonicalPath(path);
+    const key = canonicalPackagePath(path);
     names.set(key, [...(names.get(key) ?? []), path]);
     for (let cut = key.indexOf("/"); cut >= 0; cut = key.indexOf("/", cut + 1))
       directories.add(key.slice(0, cut));
   }
   for (const path of added) {
-    const key = canonicalPath(path);
+    const key = canonicalPackagePath(path);
     if ((names.get(key)?.length ?? 0) > 1 || directories.has(key)) {
       throw new PackageFileWriteError(
         "path_conflict",

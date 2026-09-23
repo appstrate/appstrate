@@ -556,14 +556,16 @@ export async function getLatestVersionCreatedAt(packageId: string): Promise<Date
 }
 
 /** Get the integrity hash of the latest version. Returns null if no versions exist. */
-async function getLatestVersionIntegrity(packageId: string): Promise<string | null> {
+async function getLatestVersionSnapshot(
+  packageId: string,
+): Promise<{ version: string; integrity: string } | null> {
   const [row] = await db
-    .select({ integrity: packageVersions.integrity })
+    .select({ version: packageVersions.version, integrity: packageVersions.integrity })
     .from(packageVersions)
     .where(eq(packageVersions.packageId, packageId))
     .orderBy(desc(packageVersions.createdAt))
     .limit(1);
-  return row?.integrity ?? null;
+  return row ?? null;
 }
 
 type CreateVersionError = "invalid_version" | "invalid_bundle" | "no_changes" | "version_exists";
@@ -719,19 +721,19 @@ export async function createVersionFromDraft(params: {
   }
 
   // Check for duplicate content — reject if identical to the latest version.
-  // A version OVERRIDE is not a change of content: it is the number the
-  // publish dialog (or `appstrate packages publish --bump`) picks for a draft
-  // still carrying the published version. Compared as sent, the new number
-  // alone changes the archive's digest, and the same content was cut again
-  // under every bump. So the comparison freezes the draft under its OWN
-  // version — what an unchanged draft published without an override would be.
-  const ownVersion = baseManifest.version;
+  // A new NUMBER is not new content: whether it came as an override (the
+  // publish dialog's bump, `appstrate packages publish --bump`) or as an edit
+  // of the draft manifest's `version`, it changes the archive's digest by
+  // itself, and the same content was cut again under every number. So the
+  // draft is frozen a second time under the latest version's number and
+  // compared to it — the bytes an unchanged draft would reproduce exactly.
+  const latest = await getLatestVersionSnapshot(packageId);
   const comparable =
-    params.version !== undefined && params.version !== ownVersion
-      ? buildArtifact({ ...finalManifest, version: ownVersion }).zip
+    latest && latest.version !== version
+      ? buildArtifact({ ...finalManifest, version: latest.version }).zip
       : zipBuffer;
   const newIntegrity = computeIntegrity(new Uint8Array(comparable));
-  const latestIntegrity = await getLatestVersionIntegrity(packageId);
+  const latestIntegrity = latest?.integrity;
   if (latestIntegrity && newIntegrity === latestIntegrity) {
     return { error: "no_changes" };
   }

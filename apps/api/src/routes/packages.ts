@@ -1747,10 +1747,11 @@ function fileCacheHeaders(etag: string, yanked: boolean): Record<string, string>
  * `GET …/draft/download` — the DRAFT as one archive, the tree an author's
  * local checkout starts from.
  *
- * The caller has already cleared everything the versioned download asks
- * (visibility, `<type>:read`, `restrict_package_copy`). Naming the working copy
- * adds the one rule every other surface applies to it: an author's act,
- * `403 draft_not_writable` for anyone else — a system package included, since
+ * The caller has already cleared visibility and `<type>:read`. The copy
+ * restriction does not apply: an author fetching their own draft is editing
+ * it, not taking a copy away. Naming the working copy adds the one rule every
+ * other surface applies to it: an author's act, `403 draft_not_writable` for
+ * anyone else — a system package included, since
  * nobody writes one.
  *
  * The bytes are the file explorer's, from its own reader, so the archive and
@@ -3081,6 +3082,15 @@ export function createPackagesRouter() {
       // as sensitive as the detail route — it needs the same `<type>:read`.
       await requirePackageReadPermission(c, pkg.type);
 
+      // The DRAFT is the author's working copy, and an author edits it here and
+      // through `…/files` byte for byte: fetching it whole is editing, not
+      // taking a copy away, so the copy restriction below does not stand
+      // between an author and their own draft. `downloadDraftArchive` asks the
+      // stricter question — write authority in the home.
+      if (versionSpec === VERSION_SELECTOR_DRAFT) {
+        return downloadDraftArchive(c, pkg);
+      }
+
       // …and, when the organization restricts copying (plan decision 12), the
       // source's `<type>:share`. This is the route the archive leaves through,
       // so reading it and taking it away are two different permissions there.
@@ -3092,10 +3102,6 @@ export function createPackagesRouter() {
         { ...pkg, type: pkg.type as PackageType },
         { orgId, accessible: await packageAccessSpaces(c) },
       );
-
-      if (versionSpec === VERSION_SELECTOR_DRAFT) {
-        return downloadDraftArchive(c, pkg);
-      }
 
       const ver = await getVersionForDownload(packageId, versionSpec);
       if (!ver) {

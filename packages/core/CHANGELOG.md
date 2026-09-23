@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`decodePackageFileText`** (`@appstrate/core/package-file-operations`) — the
   text a package file's bytes are (strict UTF-8, BOM kept), or `null`: the one
   test behind a file's `text` vs `bytes_base64` on every end of the wire.
+- **`canonicalPackagePath`** (`@appstrate/core/package-file-operations`) — the
+  NFC, lowercased key two package paths collide on, shared by the tree algebra
+  and by clients writing a tree to a case-insensitive disk.
 - **`planPublishVersion`** and **`VersionBump`** (`@appstrate/core/semver`) —
   what publishing a draft would cut (`bump` | `direct` | `blocked` | `none`)
   from the draft's version and the latest published one, shared by the

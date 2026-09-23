@@ -687,7 +687,7 @@ describe("package-versions service", () => {
       expect(await downloadVersionZip(pkg.id, "2.0.0", row!.integrity)).not.toBeNull();
     });
 
-    it("createVersionFromDraft answers no_changes to a bump over an unchanged draft", async () => {
+    it("createVersionFromDraft answers no_changes to a new number over unchanged content", async () => {
       const id = `@${orgSlug}/bump-only`;
       const pkg = await seedPackage({
         orgId,
@@ -707,6 +707,14 @@ describe("package-versions service", () => {
         version: "1.0.1",
       });
       expect(bumped).toEqual({ error: "no_changes" });
+
+      // Nor under a number edited into the draft manifest itself.
+      await db
+        .update(packages)
+        .set({ draftManifest: { name: id, version: "1.0.1", type: "agent" } })
+        .where(eq(packages.id, pkg.id));
+      const edited = await createVersionFromDraft({ packageId: pkg.id, orgId, userId });
+      expect(edited).toEqual({ error: "no_changes" });
 
       // With a real change, the bump publishes.
       await db
