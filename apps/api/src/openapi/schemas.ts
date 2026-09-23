@@ -1295,7 +1295,7 @@ export const schemas = {
     type: "object",
     required: ["id", "runId", "type", "level", "createdAt"],
     properties: {
-      id: { type: "integer" },
+      id: { type: "integer", format: "int64" },
       runId: { type: "string" },
       orgId: { type: "string" },
       type: { type: "string" },

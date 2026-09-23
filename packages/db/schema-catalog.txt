@@ -40,13 +40,13 @@ column audit_events.user_agent text
 column chat_messages.content jsonb not null
 column chat_messages.created_at timestamp with time zone not null default now()
 column chat_messages.message_id text not null
-column chat_messages.seq integer not null default nextval('chat_messages_seq_seq'::regclass)
+column chat_messages.seq bigint not null default nextval('chat_messages_seq_seq'::regclass)
 column chat_messages.session_id text not null
 column chat_sessions.active_stream_id text
 column chat_sessions.created_at timestamp with time zone not null default now()
 column chat_sessions.id text not null
-column chat_sessions.last_assistant_seq integer
-column chat_sessions.last_read_seq integer
+column chat_sessions.last_assistant_seq bigint
+column chat_sessions.last_read_seq bigint
 column chat_sessions.org_id uuid not null
 column chat_sessions.space_id text not null
 column chat_sessions.title text
@@ -172,7 +172,7 @@ column llm_usage.cost_usd double precision not null default 0
 column llm_usage.created_at timestamp with time zone not null default now()
 column llm_usage.credential_source credential_source
 column llm_usage.duration_ms integer
-column llm_usage.id integer not null default nextval('llm_usage_id_seq'::regclass)
+column llm_usage.id bigint not null default nextval('llm_usage_id_seq'::regclass)
 column llm_usage.input_tokens integer not null default 0
 column llm_usage.model text
 column llm_usage.org_id uuid not null
@@ -459,7 +459,7 @@ column profiles.updated_at timestamp with time zone not null default now()
 column run_logs.created_at timestamp with time zone not null default now()
 column run_logs.data jsonb
 column run_logs.event text
-column run_logs.id integer not null default nextval('run_logs_id_seq'::regclass)
+column run_logs.id bigint not null default nextval('run_logs_id_seq'::regclass)
 column run_logs.level text not null default 'debug'::text
 column run_logs.message text
 column run_logs.org_id uuid not null

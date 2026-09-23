@@ -377,6 +377,40 @@ describe("migration chain upgrades", () => {
     // Re-runnable: applying it a second time is a no-op, not an error.
     await applyMigration("0007_bigint_cost_credits");
   });
+
+  it("0008 widens every column holding an llm_usage id to bigint", async () => {
+    await resetToBlankSlate();
+    for (const tag of [
+      "0000_init",
+      "0001_cursor_billing",
+      "0002_numeric_cost",
+      "0003_normalize_free_subscription_status",
+      "0004_billing_managers_and_contact",
+      "0005_rename_ee_tables",
+      "0006_cutover_floor_and_pricing_status",
+      "0007_bigint_cost_credits",
+      "0008_bigint_llm_usage_ids",
+    ]) {
+      await applyMigration(tag);
+    }
+
+    const columns = await db.execute(
+      sql.raw(
+        `SELECT table_name || '.' || column_name AS col, data_type FROM information_schema.columns
+         WHERE (table_name, column_name) IN (('ee_billed_llm_usage', 'llm_usage_id'),
+           ('ee_billing_cursor', 'last_llm_usage_id'), ('ee_billing_cursor', 'floor_id'))
+         ORDER BY 1`,
+      ),
+    );
+    expect([...columns]).toEqual([
+      { col: "ee_billed_llm_usage.llm_usage_id", data_type: "bigint" },
+      { col: "ee_billing_cursor.floor_id", data_type: "bigint" },
+      { col: "ee_billing_cursor.last_llm_usage_id", data_type: "bigint" },
+    ]);
+
+    // Past the int4 ceiling, as the platform's `llm_usage.id` can now be.
+    await db.execute(sql.raw(`INSERT INTO ee_billed_llm_usage (llm_usage_id) VALUES (3000000000)`));
+  });
 });
 
 // The proof of the header's claim, held where a future edit that re-points this
@@ -393,6 +427,6 @@ describe("isolation from the platform test database", () => {
     const [applied] = await live.execute<{ count: number }>(sql`
       SELECT count(*)::int AS count FROM drizzle.ee_migrations
     `);
-    expect(applied?.count).toBe(8);
+    expect(applied?.count).toBe(9);
   });
 });

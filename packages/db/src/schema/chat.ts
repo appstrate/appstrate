@@ -7,8 +7,8 @@ import {
   jsonb,
   uuid,
   index,
-  integer,
-  serial,
+  bigserial,
+  bigint,
   unique,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
@@ -58,8 +58,8 @@ export const chatSessions = pgTable(
     // since sending implies having seen the thread. A session is unread when
     // lastAssistantSeq > lastReadSeq; the comparison lives server-side in the
     // DTO so only a boolean crosses the wire.
-    lastAssistantSeq: integer("last_assistant_seq"),
-    lastReadSeq: integer("last_read_seq"),
+    lastAssistantSeq: bigint("last_assistant_seq", { mode: "number" }),
+    lastReadSeq: bigint("last_read_seq", { mode: "number" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -80,10 +80,10 @@ export const chatSessions = pgTable(
  * `packages/module-chat/src/persistence.ts` is the ONLY writer: it persists the
  * user turn before inference starts and the assistant turn when the stream
  * finalizes, upserting on `(session_id, message_id)`. The server decides `seq`
- * (a `serial`); the client decides nothing.
+ * (a `bigserial`); the client decides nothing.
  *
  * Ordering is `seq`, always — never `created_at`. Two messages in one turn can
- * share a clock tick; a `serial` cannot collide. The same reasoning already
+ * share a clock tick; a sequence cannot collide. The same reasoning already
  * governs `chat_sessions.lastAssistantSeq` / `lastReadSeq`, which are message
  * POINTERS into this column rather than timestamps.
  *
@@ -111,7 +111,7 @@ export const chatSessions = pgTable(
 export const chatMessages = pgTable(
   "chat_messages",
   {
-    seq: serial("seq").primaryKey(),
+    seq: bigserial("seq", { mode: "number" }).primaryKey(),
     sessionId: text("session_id")
       .notNull()
       .references(() => chatSessions.id, { onDelete: "cascade" }),

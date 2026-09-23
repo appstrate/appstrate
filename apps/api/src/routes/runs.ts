@@ -608,7 +608,8 @@ export function createRunsRouter() {
     let sinceId: number | undefined;
     if (sinceParam !== undefined && sinceParam !== "") {
       const parsed = Number(sinceParam);
-      if (Number.isInteger(parsed) && parsed >= 0) sinceId = parsed;
+      // Safe-integer bound keeps the value inside int8, so a huge cursor falls back instead of a 500.
+      if (Number.isSafeInteger(parsed) && parsed >= 0) sinceId = parsed;
     }
 
     const minLevel = z.enum(RUN_LOG_LEVELS).optional().catch(undefined).parse(c.req.query("level"));
