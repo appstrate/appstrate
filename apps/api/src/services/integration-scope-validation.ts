@@ -489,14 +489,16 @@ export async function validateAgentIntegrationSelections(
       // Deliberately NO `continue`: `{ tools: [], scopes: ["bogus"] }` still
       // has a checkable scope, and both errors must land in one pass.
     }
-    // Same gate as above: the run resolves the pinned version's auths and tools.
-    const pinnedMisfit = pinnedManifest
-      ? pinnedAuthServingNoSelectedTool(
-          pinnedManifest,
-          entry.auth_key,
-          resolveEffectiveToolSelection(entry.tools, pinnedManifest),
-        )
-      : null;
+    // Freeze points only: at a run kickoff the resolver answers it as a 412 on
+    // `integrations.<id>`, and reporting it here too would double it.
+    const pinnedMisfit =
+      requireCallableTools && pinnedManifest
+        ? pinnedAuthServingNoSelectedTool(
+            pinnedManifest,
+            entry.auth_key,
+            resolveEffectiveToolSelection(entry.tools, pinnedManifest),
+          )
+        : null;
     if (pinnedMisfit) {
       errors.push({
         field: `integrations_configuration.${entry.id}.auth_key`,

@@ -36,15 +36,7 @@ export function resolutionBlocksRun(resolution: IntegrationAgentResolution): boo
   );
 }
 
-/**
- * Codes that no connection pick can fix — surfaced as a plain message, no
- * picker. The four the readiness pass raises about the integration PACKAGE,
- * before any account is looked at (the declared package is absent, is not an
- * integration, has a manifest that will not load, or is not active in this
- * space), and the resolver's one verdict about the AGENT's configuration (its
- * `auth_key` names an auth serving none of its selected tools). Connecting an
- * account changes none of them.
- */
+/** Codes no connection pick can fix — the package-level verdicts and the agent's own `auth_key` misfit: a message, no picker. */
 export function isStructuralCode(code: string): boolean {
   return (
     code === "integration_not_active" ||
