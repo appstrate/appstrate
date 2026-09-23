@@ -12,7 +12,7 @@
  * own policy.
  */
 
-import { apiFetchRaw } from "./api.ts";
+import { apiFetchRaw, problemFields } from "./api.ts";
 import { encodePackageIdPath } from "@appstrate/core/naming";
 import { verifyArtifactIntegrity } from "@appstrate/core/integrity";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
@@ -22,6 +22,9 @@ import {
   stripWrapperPrefix,
   unzipArtifact,
 } from "@appstrate/core/zip";
+
+/** The signature file of a published archive: produced by publishing, never authored. */
+export const SIGNATURE_RECORD = "RECORD";
 
 export class PackageDefinitionError extends Error {
   constructor(
@@ -89,7 +92,7 @@ export async function fetchPackageDefinition(
     ref.source === "draft" ? `the draft of ${ref.packageId}` : `${ref.packageId}@${ref.version}`;
   const res = await apiFetchRaw(profileName, path, ref.spaceId ? { spaceId: ref.spaceId } : {});
   if (!res.ok) {
-    const problem = await readProblem(res);
+    const problem = problemFields(await res.json().catch(() => undefined));
     if (ref.source === "draft" && problem.code === "draft_not_writable") {
       throw draftRefusal(ref.packageId, ref.type, ref.refusalRemedy);
     }
@@ -126,17 +129,4 @@ export async function fetchPackageDefinition(
   return stripWrapperPrefix(
     unzipArtifact(bytes, { maxDecompressedBytes: PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES }),
   );
-}
-
-/** `code` and `detail` of an RFC 9457 body, whichever are there. */
-async function readProblem(res: Response): Promise<{ code?: string; detail?: string }> {
-  try {
-    const body = (await res.json()) as { code?: unknown; detail?: unknown };
-    return {
-      ...(typeof body.code === "string" ? { code: body.code } : {}),
-      ...(typeof body.detail === "string" ? { detail: body.detail } : {}),
-    };
-  } catch {
-    return {};
-  }
 }

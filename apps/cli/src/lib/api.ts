@@ -123,6 +123,20 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The RFC 9457 `code` and `detail` of an error body, whichever are there — an
+ * {@link ApiError}'s `body`, or a raw response's parsed JSON. The one parser
+ * every caller that switches on a problem `code` goes through.
+ */
+export function problemFields(body: unknown): { code?: string; detail?: string } {
+  if (!body || typeof body !== "object") return {};
+  const { code, detail } = body as { code?: unknown; detail?: unknown };
+  return {
+    ...(typeof code === "string" ? { code } : {}),
+    ...(typeof detail === "string" ? { detail } : {}),
+  };
+}
+
 export class AuthError extends Error {
   constructor(message: string) {
     super(message);

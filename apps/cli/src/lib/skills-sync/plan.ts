@@ -6,7 +6,7 @@
  * changed; concurrency is capped because the package routes are rate limited.
  */
 
-import { apiFetch, apiFetchRaw, apiList, ApiError } from "../api.ts";
+import { apiFetch, apiFetchRaw, apiList, ApiError, problemFields } from "../api.ts";
 import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
 import { extractSkillMeta } from "@appstrate/core/validation";
 import { lstat } from "node:fs/promises";
@@ -157,7 +157,9 @@ async function resolveDraft(
       // This request names `?version=draft` as well, so for a non-author it is
       // the FIRST one refused — before `/files` below ever runs. Relaying the
       // raw 403 here is what would lose the actionable refusal entirely.
-      if (err.status === 403) throw draftRefusal(packageId, "skill", DRAFT_REMEDY);
+      if (problemFields(err.body).code === "draft_not_writable") {
+        throw draftRefusal(packageId, "skill", DRAFT_REMEDY);
+      }
       throw err;
     }
     throw err;
@@ -176,9 +178,12 @@ async function resolveDraft(
     { spaceId },
   );
   if (!res.ok) {
-    if (res.status === 403) throw draftRefusal(packageId, "skill", DRAFT_REMEDY);
+    const problem = problemFields(await res.json().catch(() => undefined));
+    if (problem.code === "draft_not_writable") {
+      throw draftRefusal(packageId, "skill", DRAFT_REMEDY);
+    }
     throw new SkillSyncError(
-      `Draft file index for ${packageId} failed: HTTP ${res.status} ${res.statusText}`,
+      `Draft file index for ${packageId} failed: ${problem.detail ?? `HTTP ${res.status} ${res.statusText}`}`,
       "Re-run without `--source draft`, or check that the skill still exists.",
     );
   }

@@ -590,7 +590,7 @@ const packagesGroup = program
 packagesGroup
   .command("pull <package> [dir]")
   .description(
-    "Bring a package into a local working folder: its draft when you may write it, else its published version (read-only). Default folder: <workDir>/<org>/packages/<type segment>/<name>.",
+    "Bring a package into a local working folder: its draft when you may write it, else its published version (read-only). Default folder: <workDir>/<org>/packages/<type segment>/@<scope>/<name>.",
   )
   .option("--version <spec>", "A published version (latest, exact, or range) instead of the draft")
   .option(
@@ -632,7 +632,7 @@ packagesGroup
   )
   .option(
     "--space <id>",
-    "With --create: the space that becomes its home (default: the pinned space)",
+    "With --create only: the space that becomes its home (default: the pinned space)",
   )
   .option("--force", "Replace the draft with this folder, even if this folder did not see it")
   .option("--dry-run", "Show what would be sent and send nothing")

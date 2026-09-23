@@ -24,6 +24,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import type { PackageType } from "@appstrate/core/validation";
+import { parseScopedName } from "@appstrate/core/naming";
 import { mkdir, readFile, rename, writeFile, unlink } from "node:fs/promises";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import { DEFAULT_IO, type CommandIO } from "./io.ts";
@@ -76,7 +77,7 @@ export interface Config {
   profiles: Record<string, Profile>;
   /**
    * Root of the working copies `packages pull` writes and `packages push`
-   * reads: `<workDir>/<org slug>/packages/<type segment>/<name>`. Default
+   * reads: `<workDir>/<org slug>/packages/<type segment>/@<scope>/<name>`. Default
    * `~/Appstrate Packages`, a visible folder, unlike the regenerable state under
    * `getDataDir()`. Never `~/Appstrate`: that is `appstrate install`'s default
    * instance directory (`~/appstrate` on a case-insensitive disk), which
@@ -204,14 +205,28 @@ export function resolveWorkDir(config: Config): string {
   return resolve(expandHome(config.workDir ?? join("~", DEFAULT_WORK_DIR_NAME)));
 }
 
-/** One package's working copy: `<workDir>/<org slug>/packages/<type segment>/<name>`. */
+/**
+ * One package's working copy:
+ * `<workDir>/<org slug>/packages/<type segment>/@<scope>/<name>`. The scope is
+ * part of the path because one organization reads packages of several scopes,
+ * and `@acme/pdf` and `@other/pdf` must not share a folder.
+ */
 export function packageWorkDir(
   config: Config,
   orgSlug: string,
   type: PackageType,
-  name: string,
+  packageId: string,
 ): string {
-  return join(resolveWorkDir(config), orgSlug, "packages", PACKAGE_TYPE_ROUTE_SEGMENT[type], name);
+  const parsed = parseScopedName(packageId);
+  if (!parsed) throw new Error(`Not a package id: ${packageId}`);
+  return join(
+    resolveWorkDir(config),
+    orgSlug,
+    "packages",
+    PACKAGE_TYPE_ROUTE_SEGMENT[type],
+    `@${parsed.scope}`,
+    parsed.name,
+  );
 }
 
 /**

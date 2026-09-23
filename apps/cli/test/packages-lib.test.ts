@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -84,6 +84,21 @@ describe("diffFiles", () => {
     expect(diffFiles(local, remote)).toEqual([]);
   });
 
+  it("matches paths in NFC, keeping the draft's spelling for what it writes and deletes", () => {
+    const nfd = "Cafe\u0301.md";
+    const local = { "Caf\u00e9.md": utf8("mine"), "SKILL.md": utf8("x") };
+    const remote = { [nfd]: utf8("theirs"), "SKILL.md": utf8("x"), "old\u0301.md": utf8("o") };
+    const changes = diffFiles(local, remote);
+    expect(changes).toEqual([
+      { path: nfd, kind: "modified", localPath: "Caf\u00e9.md" },
+      { path: "old\u0301.md", kind: "removed" },
+    ]);
+    expect(toOperations(changes, local)).toEqual([
+      { op: "write", path: nfd, text: "mine" },
+      { op: "delete", path: "old\u0301.md" },
+    ]);
+  });
+
   it("compares manifests as JSON, so key order and indentation are not changes", () => {
     const local = { "manifest.json": utf8('{\n  "version": "1.0.0",\n  "name": "@a/b"\n}\n') };
     const remote = { "manifest.json": utf8('{"name":"@a/b","version":"1.0.0"}') };
@@ -148,6 +163,12 @@ describe("toOperations", () => {
 describe("lineDiff", () => {
   it("marks kept, removed and added lines", () => {
     expect(lineDiff(["a", "b", "c"], ["a", "x", "c"])).toEqual(["  a", "- b", "+ x", "  c"]);
+  });
+
+  it("summarises instead of building a table past the cap", () => {
+    const a = Array.from({ length: 2001 }, (_, i) => `a${i}`);
+    const b = Array.from({ length: 2001 }, (_, i) => `b${i}`);
+    expect(lineDiff(a, b)).toEqual(["  diff too large: 2001 → 2001 lines"]);
   });
 });
 
@@ -268,6 +289,20 @@ describe("locks per working folder", () => {
     await symlink(join(work, "a"), join(work, "link"));
     await recordLock("p", join(work, "link"), "@s/pkg", 7);
     expect(await readLock("p", join(work, "a", "..", "a"), "@s/pkg")).toBe(7);
+  });
+
+  it("refuses a lock table it cannot parse instead of starting over", async () => {
+    const path = join(dataHome, "appstrate", "packages", "p-locks.json");
+    await mkdir(join(dataHome, "appstrate", "packages"), { recursive: true });
+    await writeFile(path, "{ not json");
+
+    await expect(readLock("p", join(work, "a"), "@s/pkg")).rejects.toThrow(
+      /not a valid packages lock table/,
+    );
+    await expect(recordLock("p", join(work, "a"), "@s/pkg", 1)).rejects.toThrow(
+      /not a valid packages lock table/,
+    );
+    expect(await readFile(path, "utf-8")).toBe("{ not json");
   });
 
   it("loses no entry when two writers record at once", async () => {

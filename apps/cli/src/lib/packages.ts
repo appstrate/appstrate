@@ -13,6 +13,7 @@ import writeFileAtomic from "write-file-atomic";
 import type { AgentDetail, OrgPackageItemDetail, PackageHome } from "@appstrate/shared-types";
 import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
 import {
+  PACKAGE_CONTENT_ENTRY,
   PACKAGE_FILE_INLINE_MAX_BYTES,
   PACKAGE_MANIFEST_FILE,
   PACKAGE_TYPE_ROUTE_SEGMENT,
@@ -23,14 +24,12 @@ import { isSafeArchivePath } from "@appstrate/core/zip";
 import { apiFetch, ApiError } from "./api.ts";
 import { getDataDir } from "./config.ts";
 import { withFileLock } from "./file-lock.ts";
+import { SIGNATURE_RECORD } from "./package-definition.ts";
 
 export type PackageFiles = Record<string, Uint8Array>;
 
 /** The skill entry, which alone makes a folder without a manifest a package folder. */
-const SKILL_ENTRY = "SKILL.md";
-
-/** The signature file of a published archive: produced by publishing, never authored. */
-const SIGNATURE_RECORD = "RECORD";
+export const SKILL_ENTRY = PACKAGE_CONTENT_ENTRY.skill!.path;
 
 /** Tooling residue by name, on top of every dot-named entry. */
 const IGNORED_NAMES: ReadonlySet<string> = new Set(["node_modules", "__pycache__"]);
@@ -38,16 +37,6 @@ const IGNORED_NAMES: ReadonlySet<string> = new Set(["node_modules", "__pycache__
 /** `/api/packages/<segment>/@scope/name`: the per-type detail, update and versions root. */
 export function packageRoute(type: PackageType, packageId: string): string {
   return `/api/packages/${PACKAGE_TYPE_ROUTE_SEGMENT[type]}/${encodePackageIdPath(packageId)}`;
-}
-
-/** The RFC 9457 `code` and `detail` an {@link ApiError} carries, whichever are there. */
-export function problemOf(err: ApiError): { code?: string; detail?: string } {
-  const body = err.body as { code?: unknown; detail?: unknown } | undefined;
-  if (!body || typeof body !== "object") return {};
-  return {
-    ...(typeof body.code === "string" ? { code: body.code } : {}),
-    ...(typeof body.detail === "string" ? { detail: body.detail } : {}),
-  };
 }
 
 /** Where a package lives and how this caller reaches it; `null` when no readable package has this id. */
@@ -226,8 +215,11 @@ export function typeOfFolder(files: PackageFiles): PackageType | null {
 type ChangeKind = "modified" | "added" | "removed";
 
 export interface FileChange {
+  /** The archive path the change names: the draft's own spelling for a file it already has. */
   path: string;
   kind: ChangeKind;
+  /** The folder's key for the file, when it is not spelled like `path` (NFC vs the draft's form). */
+  localPath?: string;
 }
 
 /** Code-unit order: the same on every machine and locale. */
@@ -238,24 +230,39 @@ export function byCodeUnit(a: string, b: string): number {
 /**
  * File-by-file comparison of a folder to a definition. Ignored paths are out of
  * it on both sides, so a dotfile in the draft is neither deleted nor reported.
- * `manifest.json` counts — an agent's, an integration's or an MCP server's
- * configuration lives there — compared as JSON, so formatting alone is not a
- * change; a folder without one does not author its manifest, and the draft's
- * is then not compared at all.
+ * Paths are matched in NFC, the form the folder is read in, so a draft path in
+ * another normalization is the same file, not a removal plus an addition; a
+ * change keeps the draft's own spelling, so a write replaces that entry and a
+ * delete names it. `manifest.json` counts — an agent's, an integration's or an
+ * MCP server's configuration lives there — compared as JSON, so formatting
+ * alone is not a change; a folder without one does not author its manifest,
+ * and the draft's is then not compared at all.
  */
 export function diffFiles(local: PackageFiles, remote: PackageFiles): FileChange[] {
   const authorsManifest = PACKAGE_MANIFEST_FILE in local;
   const tracked = (path: string) =>
     !isIgnoredPath(path) && (authorsManifest || path !== PACKAGE_MANIFEST_FILE);
+  const remoteByNfc = new Map<string, string>();
+  for (const path of Object.keys(remote)) remoteByNfc.set(path.normalize("NFC"), path);
+  const localByNfc = new Map<string, string>();
+  for (const path of Object.keys(local)) localByNfc.set(path.normalize("NFC"), path);
+
   const changes: FileChange[] = [];
-  for (const path of new Set([...Object.keys(local), ...Object.keys(remote)])) {
-    if (!tracked(path)) continue;
-    const mine = local[path];
-    const theirs = remote[path];
-    if (mine && !theirs) changes.push({ path, kind: "added" });
-    else if (!mine && theirs) changes.push({ path, kind: "removed" });
-    else if (mine && theirs && !sameContent(path, mine, theirs)) {
-      changes.push({ path, kind: "modified" });
+  for (const key of new Set([...localByNfc.keys(), ...remoteByNfc.keys()])) {
+    if (!tracked(key)) continue;
+    const mine = localByNfc.get(key);
+    const theirs = remoteByNfc.get(key);
+    if (mine !== undefined && theirs === undefined) {
+      changes.push({ path: mine, kind: "added" });
+    } else if (mine === undefined && theirs !== undefined) {
+      changes.push({ path: theirs, kind: "removed" });
+    } else if (mine !== undefined && theirs !== undefined) {
+      if (sameContent(key, local[mine]!, remote[theirs]!)) continue;
+      changes.push({
+        path: theirs,
+        kind: "modified",
+        ...(mine !== theirs ? { localPath: mine } : {}),
+      });
     }
   }
   return changes.sort((a, b) => byCodeUnit(a.path, b.path));
@@ -317,7 +324,7 @@ export function toOperations(changes: FileChange[], local: PackageFiles): FileOp
     .map((change) =>
       change.kind === "removed"
         ? { op: "delete" as const, path: change.path }
-        : writeOperation(change.path, local[change.path]!),
+        : writeOperation(change.path, local[change.localPath ?? change.path]!),
     );
 }
 
@@ -352,26 +359,36 @@ async function folderKey(dir: string): Promise<string> {
   }
 }
 
+/**
+ * Only a missing file is an empty table. Anything else unreadable throws: a
+ * table silently reset would let every folder's next push go out with
+ * `--force` semantics nobody asked for, and its next write would erase the rest.
+ */
 async function readLockTable(profileName: string): Promise<LockTable> {
+  const path = locksPath(profileName);
   let raw: string;
   try {
-    raw = await readFile(locksPath(profileName), "utf-8");
-  } catch {
-    return {};
+    raw = await readFile(path, "utf-8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw new Error(`Cannot read the packages lock table ${path}.`, { cause: err });
   }
+  const invalid = (cause?: unknown) =>
+    new Error(`${path} is not a valid packages lock table: repair or delete it.`, { cause });
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
-  } catch {
-    return {};
+  } catch (err) {
+    throw invalid(err);
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw invalid();
   const table: LockTable = {};
   for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
     const entry = value as Partial<LockEntry> | null;
-    if (entry && typeof entry.packageId === "string" && typeof entry.lock === "number") {
-      table[key] = { packageId: entry.packageId, lock: entry.lock };
+    if (!entry || typeof entry.packageId !== "string" || typeof entry.lock !== "number") {
+      throw invalid();
     }
+    table[key] = { packageId: entry.packageId, lock: entry.lock };
   }
   return table;
 }

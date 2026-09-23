@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { computeIntegrity } from "@appstrate/core/integrity";
@@ -66,6 +66,13 @@ interface FakePackage {
   published: { version: string; files: Tree }[];
   /** Problem `code` the version POST answers with instead of publishing. */
   publishError?: { status: number; code: string };
+  /** Problem the draft PUT answers with instead of writing. */
+  putError?: { status: number; code: string };
+  /**
+   * Someone else pushes while the version POST runs: the lock moves by one and
+   * the server, seeing the draft written in between, leaves its version alone.
+   */
+  concurrentPushOnPublish?: boolean;
 }
 
 interface Seen {
@@ -217,6 +224,9 @@ function createPackageServer(packages: FakePackage[]) {
           )[];
         };
         entry.body = body;
+        if (p.putError) {
+          return problem(p.putError.status, p.putError.code, "Refused by the stand-in");
+        }
         if (body.lock_version !== p.draft.lock) {
           return problem(409, "conflict", "The package was modified since you loaded it");
         }
@@ -244,11 +254,15 @@ function createPackageServer(packages: FakePackage[]) {
         if (p.publishError) {
           return problem(p.publishError.status, p.publishError.code, "Refused by the stand-in");
         }
-        if (body.version !== undefined && body.version !== p.draft.manifest.version) {
+        let version = p.draft.manifest.version as string;
+        if (p.concurrentPushOnPublish) {
+          p.draft.lock += 1;
+          version = body.version ?? version;
+        } else if (body.version !== undefined && body.version !== version) {
           p.draft.manifest = { ...p.draft.manifest, version: body.version };
           p.draft.lock += 1;
+          version = body.version;
         }
-        const version = p.draft.manifest.version as string;
         p.published.push({ version, files: { ...p.draft.files } });
         return json({ version, integrity: "sha256-x" }, 201);
       }
@@ -312,6 +326,10 @@ afterEach(async () => {
 
 const text = (path: string) => readFile(path, "utf-8");
 
+/** The default working copy of a skill: `<workDir>/<org slug>/packages/skills/<@scope>/<name>`. */
+const workCopy = (scope: string, name: string) =>
+  join(root, "home", "Appstrate Packages", "acme", "packages", "skills", scope, name);
+
 async function pulled(
   pkg: FakePackage,
   dir: string,
@@ -348,11 +366,63 @@ describe("packages pull", () => {
     expect(stdout()).toContain("Pulled @acme/pdf (skill, draft, 3 files)");
   });
 
-  it("defaults to the work dir, under the type's route segment", async () => {
+  it("defaults to the work dir, under the type's route segment and the package's scope", async () => {
     createPackageServer([skill()]).install();
     await packagesPullCommand({ package: "@acme/pdf" }, createMemoryIO().io);
-    const dir = join(root, "home", "Appstrate Packages", "acme", "packages", "skills", "pdf");
+    const dir = workCopy("@acme", "pdf");
     expect(await text(join(dir, "SKILL.md"))).toContain("Draft.");
+
+    // Found again by its scoped id, or by a bare name under the org's slug.
+    for (const ref of ["@acme/pdf", "pdf"]) {
+      const { io, stdout } = createMemoryIO();
+      await packagesStatusCommand({ dir: ref }, io);
+      expect(stdout()).toContain(`← ${dir}`);
+      expect(stdout()).toContain("clean");
+    }
+  });
+
+  it("never writes ignored entries a definition carries, and says which", async () => {
+    const pkg = skill();
+    pkg.draft.files[".git/config"] = "[core]\n\tfsmonitor = evil\n";
+    pkg.draft.files[".vscode/tasks.json"] = "{}";
+    createPackageServer([pkg]).install();
+    const dir = join(root, "pdf");
+    const { io, stderr } = createMemoryIO();
+
+    await packagesPullCommand({ package: "@acme/pdf", dir }, io);
+
+    expect((await readdir(dir)).sort()).toEqual(["SKILL.md", "manifest.json", "ref"]);
+    expect(stderr()).toContain(
+      "Not written (ignored by the authoring loop): .git/config, .vscode/tasks.json",
+    );
+  });
+
+  it("matches a draft path in another Unicode normalization to the folder's file", async () => {
+    const pkg = skill();
+    pkg.draft.files["Cafe\u0301.md"] = "decomposed";
+    createPackageServer([pkg]).install();
+    const dir = join(root, "pdf");
+    await packagesPullCommand({ package: "@acme/pdf", dir }, createMemoryIO().io);
+
+    const { io, stdout } = createMemoryIO();
+    await packagesStatusCommand({ dir }, io);
+
+    expect(stdout()).toContain("clean");
+  });
+
+  it("with --force, keeps a folder file that is the draft's file in another normalization", async () => {
+    const pkg = skill();
+    pkg.draft.files["Cafe\u0301.md"] = "new";
+    createPackageServer([pkg]).install();
+    const dir = join(root, "pdf");
+    await mkdir(dir);
+    await writeFile(join(dir, "Caf\u00e9.md"), "old");
+    const { io, stderr } = createMemoryIO();
+
+    await packagesPullCommand({ package: "@acme/pdf", dir, force: true }, io);
+
+    expect(stderr()).not.toContain("Removed");
+    expect(await text(join(dir, "Cafe\u0301.md"))).toBe("new");
   });
 
   it("reads a read-only package's published version from a space that reads it", async () => {
@@ -402,6 +472,24 @@ describe("packages pull", () => {
     expect((await readdir(dir)).sort()).toEqual([".env", "SKILL.md", "manifest.json", "ref"]);
     expect(await text(join(dir, ".env"))).toBe("SECRET=1");
     expect(stderr()).toContain("Removed 1 file(s) the package does not have: old/extra.md");
+  });
+});
+
+describe("working copies found by name", () => {
+  it("refuses a work-dir folder that holds another package", async () => {
+    createPackageServer([skill()]).install();
+    const dir = workCopy("@acme", "pdf");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, "manifest.json"),
+      JSON.stringify({ name: "@other/pdf", type: "skill", version: "1.0.0" }),
+    );
+    await writeFile(join(dir, "SKILL.md"), "---\nname: pdf\ndescription: PDFs.\n---\n");
+    const { io, stderr } = createMemoryIO();
+
+    await expect(packagesStatusCommand({ dir: "pdf" }, io)).rejects.toBeInstanceOf(ExitError);
+
+    expect(stderr()).toContain("holds @other/pdf, not @acme/pdf");
   });
 });
 
@@ -492,6 +580,34 @@ describe("packages push", () => {
     expect(stderr()).toContain("was edited elsewhere since this folder last saw it (lock 3 → 4)");
     expect(stderr()).toContain("push --force");
     expect(pkg.draft.files["SKILL.md"]).toContain("Draft.");
+  });
+
+  it("reports a 409 that is not a stale lock as the problem it names", async () => {
+    const pkg = skill();
+    const dir = join(root, "pdf");
+    await pulled(pkg, dir);
+    pkg.putError = { status: 409, code: "path_conflict" };
+    await writeFile(join(dir, "SKILL.md"), "---\nname: pdf\ndescription: PDFs.\n---\nMine.\n");
+    const { io, stderr } = createMemoryIO();
+
+    await expect(packagesPushCommand({ dir }, io)).rejects.toBeInstanceOf(ExitError);
+
+    expect(stderr()).toContain(
+      "Push of @acme/pdf refused: Refused by the stand-in (path_conflict)",
+    );
+    expect(stderr()).not.toContain("edited elsewhere");
+  });
+
+  it("refuses --space without --create", async () => {
+    const dir = join(root, "pdf");
+    await pulled(skill(), dir);
+    const { io, stderr } = createMemoryIO();
+
+    await expect(packagesPushCommand({ dir, space: "spc_x" }, io)).rejects.toBeInstanceOf(
+      ExitError,
+    );
+
+    expect(stderr()).toContain("--space only applies with --create");
   });
 
   it("refuses a folder that never pulled the draft, pointing at push --force only", async () => {
@@ -599,6 +715,66 @@ describe("packages publish", () => {
       version: "1.0.1",
     });
     expect(await readLock("default", dir, "@acme/pdf")).toBe(4);
+  });
+
+  it("leaves every folder behind when a concurrent push moved the draft during the publish", async () => {
+    const pkg = skill();
+    const dir = join(root, "pdf");
+    await pulled(pkg, dir);
+    pkg.concurrentPushOnPublish = true;
+    const { io, stdout, stderr } = createMemoryIO();
+
+    await packagesPublishCommand({ package: "@acme/pdf" }, io);
+
+    expect(stdout()).toContain("Published @acme/pdf@1.0.1");
+    expect(pkg.draft.lock).toBe(4);
+    // The lock moved by one, but for an edit this folder never saw.
+    expect(await readLock("default", dir, "@acme/pdf")).toBe(3);
+    expect(JSON.parse(await text(join(dir, "manifest.json"))).version).toBe("1.0.0");
+    expect(stderr()).not.toContain("Updated the version");
+  });
+
+  it("warns, without failing the publish, when a synced folder's manifest cannot be updated", async () => {
+    const pkg = skill();
+    const dir = join(root, "pdf");
+    await pulled(pkg, dir);
+    await writeFile(join(dir, "manifest.json"), "{ not json");
+    const { io, stdout, stderr } = createMemoryIO();
+
+    await packagesPublishCommand({ package: "@acme/pdf" }, io);
+
+    expect(stdout()).toContain("Published @acme/pdf@1.0.1");
+    // Lock records are keyed by real path: that is the folder the warning names.
+    expect(stderr()).toContain(
+      `warning: could not carry version 1.0.1 into ${await realpath(dir)}`,
+    );
+  });
+
+  it("refuses to publish from a folder holding changes the draft does not have", async () => {
+    const pkg = skill();
+    const dir = join(root, "pdf");
+    const server = await pulled(pkg, dir);
+    await writeFile(join(dir, "SKILL.md"), "---\nname: pdf\ndescription: PDFs.\n---\nUnpushed.\n");
+    const { io, stderr } = createMemoryIO();
+
+    await expect(packagesPublishCommand({ package: dir }, io)).rejects.toBeInstanceOf(ExitError);
+
+    expect(stderr()).toContain(`${dir} has changes the draft does not have: push them first`);
+    expect(server.seen.some((s) => s.path.endsWith("/versions") && s.method === "POST")).toBe(
+      false,
+    );
+  });
+
+  it("refuses to publish from a folder whose draft moved since it read it", async () => {
+    const pkg = skill();
+    const dir = join(root, "pdf");
+    await pulled(pkg, dir);
+    pkg.draft.lock = 7;
+    const { io, stderr } = createMemoryIO();
+
+    await expect(packagesPublishCommand({ package: dir }, io)).rejects.toBeInstanceOf(ExitError);
+
+    expect(stderr()).toContain("has changes the draft does not have");
   });
 
   it("cuts a draft ahead of the latest version as is", async () => {

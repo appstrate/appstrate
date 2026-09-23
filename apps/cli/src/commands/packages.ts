@@ -29,7 +29,7 @@ import { decodePackageFileText } from "@appstrate/core/package-file-operations";
 import { planPublishVersion, type VersionBump } from "@appstrate/core/semver";
 import { extractSkillMeta, packageTypeEnum, type PackageType } from "@appstrate/core/validation";
 import { isSafeArchivePath, zipArtifact } from "@appstrate/core/zip";
-import { apiFetch, ApiError } from "../lib/api.ts";
+import { apiFetch, ApiError, problemFields } from "../lib/api.ts";
 import {
   expandHome,
   packageWorkDir,
@@ -42,7 +42,11 @@ import { PROJECT_FILE_RELPATH } from "../lib/install/project.ts";
 import { listOrgs } from "../lib/orgs.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { formatError } from "../lib/ui.ts";
-import { fetchPackageDefinition, PackageDefinitionError } from "../lib/package-definition.ts";
+import {
+  fetchPackageDefinition,
+  PackageDefinitionError,
+  SIGNATURE_RECORD,
+} from "../lib/package-definition.ts";
 import {
   advanceLocks,
   byCodeUnit,
@@ -54,13 +58,13 @@ import {
   listFolderFiles,
   manifestFileText,
   packageRoute,
-  problemOf,
   readDraftState,
   readLock,
   readPackageFolder,
   readSpaceOf,
   recordLock,
   resolvePackage,
+  SKILL_ENTRY,
   toOperations,
   typeOfFolder,
   type DraftDetail,
@@ -113,7 +117,7 @@ async function resolvePackageId(session: Session, ref: string): Promise<string> 
 
 /** Refuse the command with a message that names the package, never a bare status. */
 function describeProblem(err: ApiError): string {
-  const { code, detail } = problemOf(err);
+  const { code, detail } = problemFields(err.body);
   return `${detail ?? err.message}${code ? ` (${code})` : ""}`;
 }
 
@@ -149,29 +153,48 @@ function isPathLike(target: string): boolean {
   );
 }
 
-/** The package's working copy in the work dir, the folder `packages pull` fills by default. */
-async function findWorkingCopy(session: Session, ref: string): Promise<string | null> {
-  const name = ref.startsWith("@") ? parseScopedName(ref)?.name : ref;
-  if (!name) throw new Error(`Not a package name: ${ref}`);
+/** A folder, and the package id it must hold when it was found by that id. */
+interface ResolvedFolder {
+  dir: string;
+  expectedId?: string;
+}
+
+/**
+ * The package's working copy in the work dir, the folder `packages pull` fills
+ * by default. A bare name is `@<org slug>/<name>`; a scoped ref keeps its scope.
+ */
+async function findWorkingCopy(session: Session, ref: string): Promise<ResolvedFolder | null> {
+  const packageId = await resolvePackageId(session, ref);
   const config = await readConfig();
   await assertNotInstallDir(resolveWorkDir(config));
   const slug = await orgSlug(session);
   for (const type of PACKAGE_TYPES) {
-    const dir = packageWorkDir(config, slug, type, name);
-    if (await isDirectory(dir)) return dir;
+    const dir = packageWorkDir(config, slug, type, packageId);
+    if (await isDirectory(dir)) return { dir, expectedId: packageId };
   }
   return null;
 }
 
 /** A folder path as given (`~` expanded), else a bare name or id resolved in the work dir. */
-async function resolveFolder(session: Session, target: string): Promise<string> {
-  if (isPathLike(target)) return resolve(expandHome(target));
-  if (!target.startsWith("@") && (await isDirectory(resolve(target)))) return resolve(target);
+async function resolveFolder(session: Session, target: string): Promise<ResolvedFolder> {
+  if (isPathLike(target)) return { dir: resolve(expandHome(target)) };
+  if (!target.startsWith("@") && (await isDirectory(resolve(target)))) {
+    return { dir: resolve(target) };
+  }
   const found = await findWorkingCopy(session, target);
   if (found) return found;
   throw new Error(
     `No working copy for ${target} in ${resolveWorkDir(await readConfig())}. Run: appstrate packages pull ${target}, or pass a folder path.`,
   );
+}
+
+/** A folder found in the work dir by id must hold that id: anything else is a stale or moved copy. */
+function assertHolds(folder: ResolvedFolder, packageId: string): void {
+  if (folder.expectedId !== undefined && folder.expectedId !== packageId) {
+    throw new Error(
+      `${folder.dir} holds ${packageId}, not ${folder.expectedId}. Pass the folder path, or pull ${folder.expectedId} again.`,
+    );
+  }
 }
 
 /** The folder's id: its manifest's `name`, else `@<org slug>/<SKILL.md frontmatter name>`. */
@@ -183,8 +206,8 @@ async function packageIdOfFolder(session: Session, files: PackageFiles): Promise
     }
     return manifest.name;
   }
-  const meta = extractSkillMeta(new TextDecoder().decode(files["SKILL.md"]!));
-  if (!meta.name) throw new Error("SKILL.md: frontmatter has no `name`.");
+  const meta = extractSkillMeta(new TextDecoder().decode(files[SKILL_ENTRY]!));
+  if (!meta.name) throw new Error(`${SKILL_ENTRY}: frontmatter has no \`name\`.`);
   return `@${await orgSlug(session)}/${meta.name}`;
 }
 
@@ -196,11 +219,22 @@ interface LocalPackage {
 }
 
 async function readLocalPackage(session: Session, target: string): Promise<LocalPackage> {
-  const dir = await resolveFolder(session, target);
+  const folder = await resolveFolder(session, target);
+  return readFolderPackage(session, folder);
+}
+
+async function readFolderPackage(session: Session, folder: ResolvedFolder): Promise<LocalPackage> {
+  const { dir } = folder;
   const files = await readPackageFolder(dir);
   const type = typeOfFolder(files);
-  if (!type) throw new Error(`${dir}: no manifest.json with a known \`type\`, and no SKILL.md.`);
-  return { dir, files, type, packageId: await packageIdOfFolder(session, files) };
+  if (!type) {
+    throw new Error(
+      `${dir}: no ${PACKAGE_MANIFEST_FILE} with a known \`type\`, and no ${SKILL_ENTRY}.`,
+    );
+  }
+  const packageId = await packageIdOfFolder(session, files);
+  assertHolds(folder, packageId);
+  return { dir, files, type, packageId };
 }
 
 function assertSameType(local: LocalPackage, home: PackageHome): void {
@@ -223,7 +257,7 @@ export interface PackagesPullOptions {
   profile?: string;
   /** `@scope/name`, or a bare name under the organization's slug. */
   package: string;
-  /** Destination folder. Default: `<workDir>/<org slug>/packages/<type segment>/<name>`. */
+  /** Destination folder. Default: `<workDir>/<org slug>/packages/<type segment>/@<scope>/<name>`. */
   dir?: string;
   /** A published version (`latest`, exact, range) instead of the draft. */
   version?: string;
@@ -247,8 +281,7 @@ export async function packagesPullCommand(
     else {
       const config = await readConfig();
       await assertNotInstallDir(resolveWorkDir(config));
-      const name = parseScopedName(packageId)!.name;
-      dir = packageWorkDir(config, await orgSlug(session), home.type, name);
+      dir = packageWorkDir(config, await orgSlug(session), home.type, packageId);
     }
     const existing = await prepareDestination(dir, opts.force === true);
 
@@ -280,7 +313,7 @@ export async function packagesPullCommand(
       files = published;
     }
 
-    const { written, removed } = await writeDefinition(dir, files, existing);
+    const { written, removed, skipped } = await writeDefinition(dir, files, existing);
     if (lock !== undefined) await recordLock(session.profileName, dir, packageId, lock);
     else await forgetLock(session.profileName, dir);
 
@@ -292,6 +325,9 @@ export async function packagesPullCommand(
         `Removed ${removed.length} file(s) the package does not have: ${removed.join(", ")}\n`,
       );
     }
+    if (skipped.length > 0) {
+      io.stderr.write(`Not written (ignored by the authoring loop): ${skipped.join(", ")}\n`);
+    }
     if (!home.home_writable) {
       io.stderr.write(
         "Read-only: you cannot write this package in its home space. Ask its owners to add you as a co-editor to push changes.\n",
@@ -302,7 +338,7 @@ export async function packagesPullCommand(
       );
     } else {
       io.stderr.write(
-        `Edit it there, then: appstrate packages push ${opts.dir ? dir : parseScopedName(packageId)!.name}\n`,
+        `Edit it there, then: appstrate packages push ${opts.dir ? dir : packageId}\n`,
       );
     }
   } catch (err) {
@@ -372,18 +408,33 @@ async function prepareDestination(
   return listFolderFiles(dir);
 }
 
-/** Write every entry but `RECORD`, then delete what `existing` has and the definition does not. */
+/**
+ * Mirror the definition into `dir`. Ignored entries are never written — a
+ * definition could otherwise plant a `.git/config` or an editor task that runs
+ * on open — and are reported, `RECORD` aside. Removals are decided and done
+ * FIRST, by NFC path: on a disk that folds normalization or case, the file the
+ * write below lands on is then never the one a later removal deletes.
+ */
 async function writeDefinition(
   dir: string,
   files: PackageFiles,
   existing: Map<string, string> | null,
-): Promise<{ written: number; removed: string[] }> {
-  const paths = Object.keys(files)
-    .filter((path) => path !== "RECORD")
-    .sort(byCodeUnit);
-  // All checked before the first write: a refused entry leaves the folder as it was.
+): Promise<{ written: number; removed: string[]; skipped: string[] }> {
+  const all = Object.keys(files).sort(byCodeUnit);
+  const paths = all.filter((path) => !isIgnoredPath(path));
+  const skipped = all.filter((path) => isIgnoredPath(path) && path !== SIGNATURE_RECORD);
+  // All checked before the first change: a refused entry leaves the folder as it was.
   for (const path of paths) {
     if (!isSafeArchivePath(path)) throw new Error(`Refusing archive entry "${path}".`);
+  }
+  const incoming = new Set(paths.map((path) => path.normalize("NFC")));
+  const removed = [...(existing?.keys() ?? [])]
+    .filter((path) => !incoming.has(path.normalize("NFC")))
+    .sort(byCodeUnit);
+  for (const path of removed) {
+    const full = existing!.get(path)!;
+    await rm(full, { force: true });
+    await pruneEmptyParents(dirname(full), dir);
   }
   await mkdir(dir, { recursive: true });
   for (const path of paths) {
@@ -391,13 +442,7 @@ async function writeDefinition(
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, files[path]!);
   }
-  const removed = [...(existing?.keys() ?? [])].filter((path) => !(path in files)).sort(byCodeUnit);
-  for (const path of removed) {
-    const full = existing!.get(path)!;
-    await rm(full, { force: true });
-    await pruneEmptyParents(dirname(full), dir);
-  }
-  return { written: paths.length, removed };
+  return { written: paths.length, removed, skipped };
 }
 
 /** Remove the directories a deletion emptied, up to (never including) `root`. */
@@ -502,7 +547,7 @@ function renderChanges(
   if (!withDiff) return lines;
   for (const change of changes) {
     if (change.kind !== "modified") continue;
-    const mine = local[change.path]!;
+    const mine = local[change.localPath ?? change.path]!;
     const theirs = remote[change.path]!;
     const mineText = decodePackageFileText(mine);
     const theirsText = decodePackageFileText(theirs);
@@ -516,10 +561,14 @@ function renderChanges(
   return lines;
 }
 
-/** Minimal LCS line diff: package files are small, quadratic is fine. */
+/** Past this many LCS cells, a line diff costs more than it tells. */
+const LINE_DIFF_MAX_CELLS = 4_000_000;
+
+/** Minimal LCS line diff: package files are small, quadratic is fine — up to a cap. */
 export function lineDiff(a: string[], b: string[]): string[] {
   const n = a.length;
   const m = b.length;
+  if (n * m > LINE_DIFF_MAX_CELLS) return [`  diff too large: ${n} → ${m} lines`];
   const table: Uint32Array[] = [];
   for (let i = 0; i <= n; i += 1) table.push(new Uint32Array(m + 1));
   for (let i = n - 1; i >= 0; i -= 1) {
@@ -570,6 +619,9 @@ export async function packagesPushCommand(
   const session = await openSession(opts.profile, io);
   if (!session) return;
   try {
+    if (opts.space !== undefined && !opts.create) {
+      throw new Error("--space only applies with --create: it names the new package's home.");
+    }
     const local = await readLocalPackage(session, opts.dir);
     const { dir, files, type, packageId } = local;
     const entry = PACKAGE_CONTENT_ENTRY[type];
@@ -631,7 +683,8 @@ export async function packagesPushCommand(
         ...(home.home_space_id ? { spaceId: home.home_space_id } : {}),
       });
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
+      // 409 `conflict` is the stale lock; any other refusal is the problem it names.
+      if (err instanceof ApiError && problemFields(err.body).code === "conflict") {
         const now = await readDraftState(session.profileName, home).then(
           (s) => ` → ${s.lockVersion}`,
           () => "",
@@ -747,17 +800,25 @@ function isBump(value: string): value is VersionBump {
   return (BUMPS as readonly string[]).includes(value);
 }
 
-/** A working folder names its package through its files; anything else is an id. */
-async function publishTargetId(session: Session, target: string): Promise<string> {
-  let dir: string | null = null;
-  if (isPathLike(target)) dir = resolve(expandHome(target));
+/**
+ * A working folder names its package through its files; anything else is an
+ * id. `@scope/name` is always an id: publishing by id publishes the draft as
+ * it is, whatever any folder holds.
+ */
+async function publishTarget(
+  session: Session,
+  target: string,
+): Promise<{ packageId: string; folder?: LocalPackage }> {
+  let folder: ResolvedFolder | null = null;
+  if (isPathLike(target)) folder = { dir: resolve(expandHome(target)) };
   else if (!target.startsWith("@")) {
-    dir = (await isDirectory(resolve(target)))
-      ? resolve(target)
+    folder = (await isDirectory(resolve(target)))
+      ? { dir: resolve(target) }
       : await findWorkingCopy(session, target);
   }
-  if (!dir) return resolvePackageId(session, target);
-  return packageIdOfFolder(session, await readPackageFolder(dir));
+  if (!folder) return { packageId: await resolvePackageId(session, target) };
+  const local = await readFolderPackage(session, folder);
+  return { packageId: local.packageId, folder: local };
 }
 
 export async function packagesPublishCommand(
@@ -772,7 +833,7 @@ export async function packagesPublishCommand(
     if (opts.bump !== undefined && opts.version !== undefined) {
       throw new Error("Pass --bump or --version, not both.");
     }
-    const packageId = await publishTargetId(session, opts.package);
+    const { packageId, folder } = await publishTarget(session, opts.package);
     const home = await resolvePackage(session.profileName, packageId);
     if (!home) throw new Error(`${packageId}: no package with this id that you can read.`);
     if (!home.home_writable) {
@@ -783,9 +844,29 @@ export async function packagesPublishCommand(
     const route = packageRoute(home.type, packageId);
     const inHome = home.home_space_id ? { spaceId: home.home_space_id } : {};
     const before = await readDraftState(session.profileName, home);
+    // Publishing FROM a folder promises that folder's content: one that the
+    // draft does not hold — unpushed edits, or a draft moved since it was read —
+    // would cut a version its author did not look at.
+    if (folder) {
+      assertSameType(folder, home);
+      const seen = await readLock(session.profileName, folder.dir, packageId);
+      const draft = await fetchPackageDefinition(session.profileName, {
+        packageId,
+        type: home.type,
+        spaceId: home.home_space_id ?? undefined,
+        source: "draft",
+        refusalRemedy: DRAFT_REMEDY_PULL,
+      });
+      if (seen !== before.lockVersion || diffFiles(folder.files, draft).length > 0) {
+        throw new Error(
+          `${folder.dir} has changes the draft does not have: push them first, or publish by id (${packageId}) to publish the draft as it is.`,
+        );
+      }
+    }
     // The dashboard's publish button is off for a draft that has not moved
-    // since the latest version, and so is this command: a bumped override
-    // would otherwise cut the same content again under a new number.
+    // since the latest version, and so is this command. Asked after the folder
+    // check, so a folder ahead of its draft is told to push, not that nothing
+    // changed.
     if (!before.hasUnpublishedChanges) {
       throw new Error(
         `Nothing changed in the draft of ${packageId} since its latest version: there is nothing to publish.`,
@@ -828,12 +909,14 @@ export async function packagesPublishCommand(
     }
     const version = typeof created.version === "string" ? created.version : (target ?? "?");
 
-    // An override rewrites the draft manifest's version, which moves its lock
-    // by one: every folder that was current with the draft still is, once its
-    // manifest carries the new version too.
-    if (override !== undefined) {
+    // An override rewrites the draft manifest's version — only when nobody
+    // wrote the draft in between — which moves its lock by one: every folder
+    // current with the draft still is, once its manifest carries the new
+    // version too. A lock that moved for any other reason (a concurrent push is
+    // ALSO one step) is an edit those folders never saw, so they stay behind.
+    if (override !== undefined && before.manifest.version !== version) {
       const after = await readDraftState(session.profileName, home);
-      if (after.lockVersion === before.lockVersion + 1) {
+      if (after.lockVersion === before.lockVersion + 1 && after.manifest.version === version) {
         const folders = await advanceLocks(
           session.profileName,
           packageId,
@@ -841,8 +924,7 @@ export async function packagesPublishCommand(
           after.lockVersion,
         );
         for (const dir of folders) {
-          const updated = await carryVersion(dir, before.manifest.version, after.manifest.version);
-          if (updated) io.stderr.write(`Updated the version in ${updated} to ${version}.\n`);
+          await carryVersion(dir, before.manifest.version, version, io);
         }
       }
     }
@@ -856,29 +938,39 @@ export async function packagesPublishCommand(
 /**
  * Move a folder's `manifest.json` from the draft's old version to its new one,
  * touching nothing else: the folder's other manifest edits are its own, not yet
- * pushed. A folder whose version already differs chose its own, and a folder
- * without a readable manifest has none to carry. Returns the file written.
+ * pushed. A folder whose version already differs chose its own, and one
+ * without a manifest has none to carry. Any other failure is a warning: the
+ * version is published, and that is not undone by a folder it could not update.
  */
-async function carryVersion(dir: string, from: unknown, to: unknown): Promise<string | null> {
+async function carryVersion(dir: string, from: unknown, to: string, io: CommandIO): Promise<void> {
   const path = join(dir, PACKAGE_MANIFEST_FILE);
-  let manifest: Record<string, unknown> | undefined;
   try {
-    manifest = folderManifest({ [PACKAGE_MANIFEST_FILE]: new Uint8Array(await readFile(path)) });
-  } catch {
-    return null;
+    let raw: Uint8Array;
+    try {
+      raw = new Uint8Array(await readFile(path));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw err;
+    }
+    const manifest = folderManifest({ [PACKAGE_MANIFEST_FILE]: raw });
+    if (!manifest || manifest.version !== from) return;
+    await writeFile(path, manifestFileText({ ...manifest, version: to }));
+    io.stderr.write(`Updated the version in ${path} to ${to}.\n`);
+  } catch (err) {
+    io.stderr.write(
+      `warning: could not carry version ${to} into ${dir}: ${formatError(err)}. Set it in ${PACKAGE_MANIFEST_FILE} by hand.\n`,
+    );
   }
-  if (!manifest || manifest.version !== from) return null;
-  await writeFile(path, manifestFileText({ ...manifest, version: to }));
-  return path;
 }
 
 function publishRefusal(err: ApiError, packageId: string, target: string | undefined): Error {
-  const { code } = problemOf(err);
+  const { code } = problemFields(err.body);
   const cut = target ? ` ${target}` : "";
   switch (code) {
     case "version_exists":
       return new Error(
         `Version${cut} of ${packageId} is already published. Set a higher \`version\` in manifest.json and push, or pass --version.`,
+        { cause: err },
       );
     case "no_changes":
       return new Error(
