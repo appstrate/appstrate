@@ -995,7 +995,8 @@ async function carryVersion(
       throw err;
     }
     const manifest = folderManifest({ [PACKAGE_MANIFEST_FILE]: raw });
-    if (!manifest || manifest.version !== from) return true;
+    if (!manifest) return false;
+    if (manifest.version !== from) return true;
     await writeFile(path, manifestFileText({ ...manifest, version: to }));
     io.stderr.write(`Updated the version in ${path} to ${to}.\n`);
     return true;

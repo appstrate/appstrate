@@ -742,6 +742,12 @@ export async function createVersionFromDraft(params: {
   const newIntegrity = computeIntegrity(new Uint8Array(comparable));
   const latestIntegrity = await getLatestVersionIntegrity(packageId);
   if (latestIntegrity && newIntegrity === latestIntegrity) {
+    // The draft IS the latest version (a revert, a save of identical bytes):
+    // clear the marker, so neither the dashboard nor the CLI keeps offering a
+    // publish that can only answer `no_changes`.
+    await withPackageDraftLock(packageId, (tx) =>
+      settleDraftAgainstLatest(tx, packageId, orgId, pkg.lockVersion),
+    );
     return { error: "no_changes" };
   }
 
@@ -768,6 +774,33 @@ export async function createVersionFromDraft(params: {
   return { id: result.id, version: result.version };
 }
 
+/**
+ * The draft's unpublished-changes marker (`updatedAt` against the latest
+ * version's `createdAt`), settled for a snapshot captured at `lockVersion`: the
+ * latest version holds that snapshot, so the draft is clean — unless a save
+ * landed since (the lock moved), which stays dirty even when it preceded the
+ * version's creation timestamp.
+ */
+async function settleDraftAgainstLatest(
+  tx: Parameters<Parameters<typeof withPackageDraftLock>[1]>[0],
+  packageId: string,
+  orgId: string,
+  lockVersion: number,
+): Promise<void> {
+  const publishedAt = sql`(
+    SELECT MAX(${packageVersions.createdAt}) FROM ${packageVersions}
+    WHERE ${packageVersions.packageId} = ${packageId}
+  )`;
+  await tx
+    .update(packages)
+    .set({
+      updatedAt: sql`CASE WHEN ${packages.lockVersion} = ${lockVersion}
+        THEN LEAST(${packages.updatedAt}, ${publishedAt})
+        ELSE GREATEST(${packages.updatedAt}, ${publishedAt} + interval '1 millisecond') END`,
+    })
+    .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
+}
+
 /** Reconcile a published snapshot with the draft without hiding concurrent edits. */
 export async function finalizeDraftPublication(params: {
   packageId: string;
@@ -789,22 +822,7 @@ export async function finalizeDraftPublication(params: {
     // the draft state finalized by a later one.
     if (latest?.id !== versionId) return;
 
-    // A save during validation can precede the version's creation timestamp,
-    // even though its changes were not captured. Keep that newer draft dirty
-    // under the existing timestamp-based unpublished-changes contract. If this
-    // snapshot is still current, clear any dirty marker left by an older publish.
-    const publishedAt = sql`(
-      SELECT MAX(${packageVersions.createdAt}) FROM ${packageVersions}
-      WHERE ${packageVersions.packageId} = ${packageId}
-    )`;
-    await tx
-      .update(packages)
-      .set({
-        updatedAt: sql`CASE WHEN ${packages.lockVersion} = ${lockVersion}
-          THEN LEAST(${packages.updatedAt}, ${publishedAt})
-          ELSE GREATEST(${packages.updatedAt}, ${publishedAt} + interval '1 millisecond') END`,
-      })
-      .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
+    await settleDraftAgainstLatest(tx, packageId, orgId, lockVersion);
 
     // Reflect an override only in the unchanged draft, after successful publish.
     // Advance its editor token, but not updatedAt: this change is already published.

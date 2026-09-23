@@ -53,11 +53,15 @@ export async function resolvePackage(
     );
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
-      if (problemFields(err.body).code === "package_not_found") return null;
-      throw new Error(
-        "This instance does not serve GET /api/packages/{scope}/{name}/home: it is older than this CLI. Update the instance, or use a CLI of its version.",
-        { cause: err },
-      );
+      const { code, detail } = problemFields(err.body);
+      if (code === "package_not_found") return null;
+      // The `/api/*` fallback's own wording: the route itself is unknown here.
+      if (detail?.startsWith("API endpoint not found")) {
+        throw new Error(
+          "This instance does not serve GET /api/packages/{scope}/{name}/home: it is older than this CLI. Update the instance, or use a CLI of its version.",
+          { cause: err },
+        );
+      }
     }
     throw err;
   }
@@ -458,7 +462,7 @@ export async function forgetLock(profileName: string, dir: string): Promise<void
  * a draft change the platform made itself (a publish rewriting the manifest's
  * version) — once `carry` has brought the folder along. A folder `carry` could
  * not update keeps its lock, so its next push is refused rather than silently
- * undoing the change. Returns the folders moved.
+ * undoing the change.
  */
 export async function advanceLocks(
   profileName: string,
@@ -466,15 +470,12 @@ export async function advanceLocks(
   from: number,
   to: number,
   carry: (dir: string) => Promise<boolean>,
-): Promise<string[]> {
-  const moved: string[] = [];
+): Promise<void> {
   await updateLockTable(profileName, async (table) => {
     for (const [dir, entry] of Object.entries(table)) {
       if (entry.packageId !== packageId || entry.lock !== from) continue;
       if (!(await carry(dir))) continue;
       table[dir] = { packageId, lock: to };
-      moved.push(dir);
     }
   });
-  return moved.sort(byCodeUnit);
 }

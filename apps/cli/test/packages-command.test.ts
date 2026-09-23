@@ -100,8 +100,14 @@ function zipOf(files: Tree): Uint8Array {
   );
 }
 
-/** `homeRoute: false` is an instance older than `GET …/home`: its `/api/*` fallback answers. */
-function createPackageServer(packages: FakePackage[], { homeRoute = true } = {}) {
+/**
+ * `homeRoute: false` is an instance older than `GET …/home`: its `/api/*`
+ * fallback answers. `spaceGone` is the space context refusing the pinned space.
+ */
+function createPackageServer(
+  packages: FakePackage[],
+  { homeRoute = true, spaceGone = false } = {},
+) {
   const seen: Seen[] = [];
   const byId = (scope: string, name: string) =>
     packages.find((p) => p.id === `${decodeURIComponent(scope)}/${decodeURIComponent(name)}`);
@@ -155,6 +161,7 @@ function createPackageServer(packages: FakePackage[], { homeRoute = true } = {})
     const home = path.match(/^\/api\/packages\/(@[^/]+)\/([^/]+)\/home$/);
     if (home) {
       if (!homeRoute) return problem(404, "not_found", `API endpoint not found: GET ${path}`);
+      if (spaceGone) return problem(404, "not_found", "Space 'spc_gone' not found");
       const p = byId(home[1]!, home[2]!);
       if (!p) return problem(404, "package_not_found", "Package not found");
       return json({
@@ -171,7 +178,7 @@ function createPackageServer(packages: FakePackage[], { homeRoute = true } = {})
     const draftDownload = path.match(/^\/api\/packages\/(@[^/]+)\/([^/]+)\/draft\/download$/);
     if (draftDownload) {
       const p = byId(draftDownload[1]!, draftDownload[2]!);
-      if (!p || spaceId !== p.homeSpaceId) return problem(404, "package_not_found", "Not here");
+      if (!p || spaceId !== p.homeSpaceId) return problem(404, "not_found", "Not here");
       if (!p.writable) return problem(403, "draft_not_writable", "Not yours");
       return new Response(new Uint8Array(zipOf(draftTree(p))), {
         headers: { "Content-Type": "application/zip", ETag: `"d${p.draft.lock}"` },
@@ -182,7 +189,7 @@ function createPackageServer(packages: FakePackage[], { homeRoute = true } = {})
     if (download) {
       const p = byId(download[1]!, download[2]!);
       const reads = p && (spaceId === p.homeSpaceId || p.readSpaceIds.includes(spaceId ?? ""));
-      if (!p || !reads) return problem(404, "package_not_found", "Not here");
+      if (!p || !reads) return problem(404, "not_found", "Not here");
       const spec = decodeURIComponent(download[3]!);
       const version =
         spec === "latest" ? p.published.at(-1) : p.published.find((v) => v.version === spec);
@@ -203,7 +210,7 @@ function createPackageServer(packages: FakePackage[], { homeRoute = true } = {})
     if (typed) {
       const p = byId(typed[2]!, typed[3]!);
       if (!p || PACKAGE_TYPE_ROUTE_SEGMENT[p.type] !== typed[1] || spaceId !== p.homeSpaceId) {
-        return problem(404, "package_not_found", "Not here");
+        return problem(404, "not_found", "Not here");
       }
       const tail = typed[4];
       if (!tail && method === "GET") {
@@ -768,6 +775,19 @@ describe("packages push", () => {
 
     expect(stderr()).toContain("older than this CLI");
     expect(server.seen.some((s) => s.path === "/api/packages/import")).toBe(false);
+  });
+
+  it("reports a refused pinned space as such, not as an older instance", async () => {
+    createPackageServer([], { spaceGone: true }).install();
+    const dir = join(root, "fresh");
+    await mkdir(dir);
+    await writeFile(join(dir, "SKILL.md"), "---\nname: fresh\ndescription: New.\n---\nBody.\n");
+    const { io, stderr } = createMemoryIO();
+
+    await expect(packagesPushCommand({ dir, create: true }, io)).rejects.toBeInstanceOf(ExitError);
+
+    expect(stderr()).toContain("Space 'spc_gone' not found");
+    expect(stderr()).not.toContain("older than this CLI");
   });
 
   it("creates a missing package through the import route only with --create", async () => {

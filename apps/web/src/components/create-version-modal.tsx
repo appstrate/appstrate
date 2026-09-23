@@ -10,6 +10,7 @@ import { Label } from "@appstrate/ui/components/label";
 import { Spinner } from "./spinner";
 import { useCreateVersion, useVersionInfo } from "../hooks/use-packages";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { ApiError } from "../api/errors";
 import { translateSkillFrontmatterError } from "../lib/skill-frontmatter";
 
 interface CreateVersionModalProps {
@@ -70,8 +71,14 @@ export function CreateVersionModal({
         onError: (err) => {
           // The publish gate re-checks the stored SKILL.md, so a frontmatter
           // code arrives here too.
+          const refused =
+            err instanceof ApiError && err.code === "no_changes"
+              ? t("version.noChanges")
+              : err instanceof ApiError && err.code === "conflict"
+                ? t("version.draftChanged")
+                : null;
           setError("root", {
-            message: translateSkillFrontmatterError(err, t) ?? getErrorMessage(err),
+            message: refused ?? translateSkillFrontmatterError(err, t) ?? getErrorMessage(err),
           });
         },
       },

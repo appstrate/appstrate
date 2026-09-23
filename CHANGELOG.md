@@ -59,7 +59,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   dashboard.** Its publish button compared only the manifest and the main
   content file, so an edit to any other file left it disabled. It now follows
   the server's own change flag, like `appstrate packages publish`, and the
-  server judges the content (annexes included) when the version is cut.
+  server judges the content (annexes included) when the version is cut. A
+  publish refused as `no_changes` (an edit reverted) clears the "modified"
+  marker, so the draft stops offering it.
+- **CLI errors carry the server's explanation.** Error responses were read for
+  a `message` field the API does not send (RFC 9457 carries `detail`), so most
+  refusals printed only `HTTP 404`.
 
 ## [1.0.0-beta.60] - 2026-09-23
 

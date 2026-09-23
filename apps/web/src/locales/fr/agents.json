@@ -339,6 +339,7 @@
   "version.diff": "Modifications",
   "version.diffManifest": "Manifest",
   "version.noChanges": "Aucune modification depuis la dernière version",
+  "version.draftChanged": "Le brouillon a changé pendant la publication : rien n'a été publié. Vérifiez-le puis publiez à nouveau.",
   "version.modified": "Modifié",
   "version.activeLabel": "Version active",
   "editor.errorContent": "Le contenu est requis.",

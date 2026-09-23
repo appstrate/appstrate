@@ -13,6 +13,7 @@ import { triggerBlobDownload } from "../lib/blob-download";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
+import { ApiError } from "../api/errors";
 import { packageKeys, agentsKeys, invalidatePackageFiles } from "../lib/query-keys";
 import type {
   OrgPackageItem,
@@ -443,6 +444,15 @@ export function useCreateVersion(type: PackageType, packageId: string) {
       // A published artifact appeared or vanished: a pinned Files tab and any
       // dist-tag-resolved read of it are now wrong.
       invalidatePackageFiles(qc);
+    },
+    // A refusal that moved or settled the draft (`conflict`: someone wrote it;
+    // `no_changes`: the server cleared its dirty marker) leaves the page stale.
+    onError: (err) => {
+      if (err instanceof ApiError && (err.code === "conflict" || err.code === "no_changes")) {
+        qc.invalidateQueries({ queryKey: ["version-info"] });
+        qc.invalidateQueries({ queryKey: agentsKeys.all });
+        qc.invalidateQueries({ queryKey: packageKeys.all });
+      }
     },
   });
 }

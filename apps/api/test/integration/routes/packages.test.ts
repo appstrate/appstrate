@@ -24,7 +24,7 @@ import {
   __resetSystemIntegrationsForTest,
 } from "../../../src/services/integration-client-registry.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
-import { assertDbMissing, assertDbHas } from "../../helpers/assertions.ts";
+import { assertDbMissing, assertDbHas, expectProblem } from "../../helpers/assertions.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
 import {
   mcpServerManifest,
@@ -3158,6 +3158,38 @@ describe("Packages API", () => {
       // No operation envelope.
       expect(body.message).toBeUndefined();
       expect(body.restored_version).toBeUndefined();
+    });
+
+    it("POST versions refuses a stale lock_version and cuts the draft it names", async () => {
+      const headers = authHeaders(ctx, { "Content-Type": "application/json" });
+      const create = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ manifest: agentManifest("@pkgorg/locked"), content: "v1" }),
+      });
+      expect(create.status).toBe(201);
+      const read = (await create.json()) as { lock_version: number };
+      const saved = await app.request("/api/packages/agents/@pkgorg/locked", {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ lock_version: read.lock_version, content: "v2" }),
+      });
+      expect(saved.status).toBe(200);
+      const current = ((await saved.json()) as { lock_version: number }).lock_version;
+
+      const stale = await app.request("/api/packages/agents/@pkgorg/locked/versions", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ version: "0.2.0", lock_version: read.lock_version }),
+      });
+      await expectProblem(stale, 409, { code: "conflict" });
+
+      const cut = await app.request("/api/packages/agents/@pkgorg/locked/versions", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ version: "0.2.0", lock_version: current }),
+      });
+      expect(cut.status, await cut.clone().text()).toBe(201);
     });
 
     it("POST fork returns the bare forked AGENT detail DTO (oneOf agent arm)", async () => {

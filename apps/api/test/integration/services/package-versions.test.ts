@@ -698,8 +698,14 @@ describe("package-versions service", () => {
       const first = await createVersionFromDraft({ packageId: pkg.id, orgId, userId });
       expect("error" in first).toBe(false);
 
-      // The publish dialog's bump is a number, not a change: the same content
-      // is not cut again under 1.0.1.
+      // A save of identical bytes (an edit reverted) marks the draft dirty…
+      await db
+        .update(packages)
+        .set({ updatedAt: new Date(Date.now() + 60_000) })
+        .where(eq(packages.id, pkg.id));
+
+      // …and the publish dialog's bump is a number, not a change: the same
+      // content is not cut again under 1.0.1.
       const bumped = await createVersionFromDraft({
         packageId: pkg.id,
         orgId,
@@ -707,6 +713,16 @@ describe("package-versions service", () => {
         version: "1.0.1",
       });
       expect(bumped).toEqual({ error: "no_changes" });
+      // The refusal settles the marker, so nothing keeps offering this publish.
+      const [settled] = await db
+        .select({ updatedAt: packages.updatedAt })
+        .from(packages)
+        .where(eq(packages.id, pkg.id));
+      const [cut] = await db
+        .select({ createdAt: packageVersions.createdAt })
+        .from(packageVersions)
+        .where(eq(packageVersions.packageId, pkg.id));
+      expect(settled!.updatedAt!.getTime()).toBeLessThanOrEqual(cut!.createdAt.getTime());
 
       // With a real change, the bump publishes.
       await db

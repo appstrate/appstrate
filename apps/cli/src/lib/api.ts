@@ -362,10 +362,13 @@ export async function apiFetch<T>(
     } catch {
       body = await res.text().catch(() => undefined);
     }
+    // The platform answers RFC 9457 (`detail`); Better Auth's endpoints answer
+    // `{ message }`. Two producers, two shapes — each read as what it is.
     const message =
-      body && typeof body === "object" && "message" in body && typeof body.message === "string"
+      problemFields(body).detail ??
+      (body && typeof body === "object" && "message" in body && typeof body.message === "string"
         ? body.message
-        : `HTTP ${res.status} ${res.statusText}`;
+        : `HTTP ${res.status} ${res.statusText}`);
     throw new ApiError(res.status, message, body);
   }
 
