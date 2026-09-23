@@ -1,204 +1,142 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The authoring loop's view of a package: where it lives, who may write it, and
- * how a local working folder compares to it. Every call rides routes the
- * platform already serves — the per-type detail (home, write right, lock), the
- * type-agnostic file index and file bytes, and the per-type `PUT` whose file
- * operations write a draft under its optimistic lock. Nothing here needs a
- * server change.
+ * The authoring loop's view of a package: where it lives and who may write it
+ * (`GET …/home`), what its draft's optimistic lock is, and how a local working
+ * folder compares to one of its definitions. Definitions themselves are read
+ * through `./package-definition.ts`, the path `skills sync` reads them through.
  */
 
-import { mkdir, readdir, readFile, stat } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { lstat, mkdir, readdir, readFile, realpath, stat } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import writeFileAtomic from "write-file-atomic";
+import type { AgentDetail, OrgPackageItemDetail, PackageHome } from "@appstrate/shared-types";
 import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
-import { apiFetch, apiFetchRaw, ApiError } from "./api.ts";
-import { getDataDir, getProfile } from "./config.ts";
-import { listSpaces } from "./spaces.ts";
+import {
+  PACKAGE_FILE_INLINE_MAX_BYTES,
+  PACKAGE_MANIFEST_FILE,
+  PACKAGE_TYPE_ROUTE_SEGMENT,
+} from "@appstrate/core/package-files";
+import { decodePackageFileText } from "@appstrate/core/package-file-operations";
+import { packageTypeEnum, type PackageType } from "@appstrate/core/validation";
+import { isSafeArchivePath } from "@appstrate/core/zip";
+import { apiFetch, ApiError } from "./api.ts";
+import { getDataDir } from "./config.ts";
+import { withFileLock } from "./file-lock.ts";
 
-export type PackageType = "skill" | "agent" | "integration" | "mcp-server";
+export type PackageFiles = Record<string, Uint8Array>;
 
-export const PACKAGE_TYPES: readonly PackageType[] = [
-  "skill",
-  "agent",
-  "integration",
-  "mcp-server",
-];
+/** The skill entry, which alone makes a folder without a manifest a package folder. */
+const SKILL_ENTRY = "SKILL.md";
 
-const TYPE_PLURAL: Record<PackageType, string> = {
-  skill: "skills",
-  agent: "agents",
-  integration: "integrations",
-  "mcp-server": "mcp-servers",
-};
+/** The signature file of a published archive: produced by publishing, never authored. */
+const SIGNATURE_RECORD = "RECORD";
 
-/** The file a package of that type is authored around, when it has one. */
-export const CONTENT_ENTRY: Record<PackageType, string | null> = {
-  skill: "SKILL.md",
-  agent: "prompt.md",
-  integration: null,
-  "mcp-server": null,
-};
+/** Tooling residue by name, on top of every dot-named entry. */
+const IGNORED_NAMES: ReadonlySet<string> = new Set(["node_modules", "__pycache__"]);
 
-export const MANIFEST = "manifest.json";
-
-/** Never read from a working folder: tooling residue, not package content. */
-const SKIPPED_ENTRIES = new Set([".git", ".DS_Store", "node_modules", ".venv", "__pycache__"]);
-
-/** The `PUT` accepts at most this many operations per request. */
-export const MAX_OPERATIONS_PER_PUT = 200;
-
-function isPackageType(value: unknown): value is PackageType {
-  return typeof value === "string" && (PACKAGE_TYPES as readonly string[]).includes(value);
+/** `/api/packages/<segment>/@scope/name`: the per-type detail, update and versions root. */
+export function packageRoute(type: PackageType, packageId: string): string {
+  return `/api/packages/${PACKAGE_TYPE_ROUTE_SEGMENT[type]}/${encodePackageIdPath(packageId)}`;
 }
 
-/** `/api/packages/<plural>/@scope/name`: the per-type detail, update and versions root. */
-export function packagePath(type: PackageType, packageId: string): string {
-  return `/api/packages/${TYPE_PLURAL[type]}/${encodePackageIdPath(packageId)}`;
+/** The RFC 9457 `code` and `detail` an {@link ApiError} carries, whichever are there. */
+export function problemOf(err: ApiError): { code?: string; detail?: string } {
+  const body = err.body as { code?: unknown; detail?: unknown } | undefined;
+  if (!body || typeof body !== "object") return {};
+  return {
+    ...(typeof body.code === "string" ? { code: body.code } : {}),
+    ...(typeof body.detail === "string" ? { detail: body.detail } : {}),
+  };
 }
 
-/** `/api/packages/<plural>`: the per-type create route. */
-export function packageCollectionPath(type: PackageType): string {
-  return `/api/packages/${TYPE_PLURAL[type]}`;
-}
-
-export interface LocatedPackage {
-  packageId: string;
-  type: PackageType;
-  /** The space whose `<type>:write` governs the draft, the versions and the identity. */
-  homeSpaceId: string;
-  /** Whether this caller may write the draft and publish. */
-  homeWritable: boolean;
-  /** The draft's optimistic-lock token, when the caller may see it. */
-  lockVersion: number | undefined;
-  manifest: Record<string, unknown> | undefined;
-}
-
-interface DetailBody {
-  home_space_id?: unknown;
-  home_writable?: unknown;
-  lock_version?: unknown;
-  manifest?: unknown;
+/** Where a package lives and how this caller reaches it; `null` when no readable package has this id. */
+export async function resolvePackage(
+  profileName: string,
+  packageId: string,
+): Promise<PackageHome | null> {
+  if (!parseScopedName(packageId)) throw new Error(`Not a package id: ${packageId}`);
+  try {
+    return await apiFetch<PackageHome>(
+      profileName,
+      `/api/packages/${encodePackageIdPath(packageId)}/home`,
+    );
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
 }
 
 /**
- * Find a package. The per-type detail is space-scoped: it answers for a package
- * placed in, or homed in, the space the request names, and 404 otherwise — also
- * for a type the id is not, and for an id the caller cannot read at all. So the
- * pinned space is asked first, then every other space this profile is a member
- * of: a package homed in a personal space is invisible from the team space it
- * was never placed in. `type`, when the caller knows it, spares the probes of
- * the other three types. `null` means no readable package has this id.
+ * The space to read a package from: its home for a writer — the draft and the
+ * versions answer there — else the pinned space when it reads the package,
+ * else the first space that does. `undefined` leaves the pinned space in the
+ * header. A `null` home is a withheld home or a system package, both readable.
  */
-export async function locatePackage(
-  profileName: string,
-  packageId: string,
-  type?: PackageType,
-): Promise<LocatedPackage | null> {
-  if (!parseScopedName(packageId)) throw new Error(`Not a package id: ${packageId}`);
-  const types = type ? [type] : PACKAGE_TYPES;
-  const probe = async (spaceId: string | undefined): Promise<LocatedPackage | null> => {
-    for (const candidate of types) {
-      try {
-        const detail = await apiFetch<DetailBody>(
-          profileName,
-          packagePath(candidate, packageId),
-          spaceId ? { spaceId } : {},
-        );
-        return toLocated(packageId, candidate, detail);
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 404) continue;
-        throw err;
-      }
-    }
-    return null;
-  };
-  const inPinned = await probe(undefined);
-  if (inPinned) return inPinned;
-  const pinned = (await getProfile(profileName))?.spaceId;
-  for (const space of await listSpaces(profileName)) {
-    if (space.access !== "member" || space.id === pinned) continue;
-    const found = await probe(space.id);
-    if (found) return found;
-  }
-  return null;
+export function readSpaceOf(home: PackageHome, pinnedSpaceId?: string): string | undefined {
+  if (home.home_writable && home.home_space_id) return home.home_space_id;
+  if (pinnedSpaceId && home.read_space_ids.includes(pinnedSpaceId)) return pinnedSpaceId;
+  return home.read_space_ids[0];
 }
 
-export function toLocated(
-  packageId: string,
-  type: PackageType,
-  detail: DetailBody,
-): LocatedPackage {
-  if (typeof detail.home_space_id !== "string") {
-    throw new Error(
-      `${packageId} has no home space in its detail: the instance is too old for this command.`,
-    );
+/** What the loop reads from a per-type detail or update response. */
+export type DraftDetail = Pick<
+  OrgPackageItemDetail | AgentDetail,
+  "lock_version" | "manifest" | "has_unarchived_changes"
+>;
+
+export interface DraftState {
+  lockVersion: number;
+  manifest: Record<string, unknown>;
+  /**
+   * The server's `has_unarchived_changes`: whether the draft moved since the
+   * latest version was cut. The dashboard's publish button reads the same flag.
+   */
+  hasUnpublishedChanges: boolean;
+}
+
+/** The draft's lock and validated manifest, read in the home space. Writers only. */
+export async function readDraftState(profileName: string, home: PackageHome): Promise<DraftState> {
+  const detail = await apiFetch<DraftDetail>(
+    profileName,
+    `${packageRoute(home.type, home.id)}?version=draft`,
+    home.home_space_id ? { spaceId: home.home_space_id } : {},
+  );
+  return draftStateOf(home.id, detail);
+}
+
+/** A detail or update response, narrowed to what the loop needs from it. */
+export function draftStateOf(packageId: string, detail: DraftDetail): DraftState {
+  if (typeof detail.lock_version !== "number" || !detail.manifest) {
+    throw new Error(`${packageId}: the draft detail carries no lock_version or manifest.`);
   }
   return {
-    packageId,
-    type,
-    homeSpaceId: detail.home_space_id,
-    homeWritable: detail.home_writable === true,
-    lockVersion: typeof detail.lock_version === "number" ? detail.lock_version : undefined,
-    manifest:
-      typeof detail.manifest === "object" &&
-      detail.manifest !== null &&
-      !Array.isArray(detail.manifest)
-        ? (detail.manifest as Record<string, unknown>)
-        : undefined,
+    lockVersion: detail.lock_version,
+    manifest: detail.manifest,
+    hasUnpublishedChanges: detail.has_unarchived_changes !== false,
   };
 }
 
-interface FileIndexEntry {
-  path?: unknown;
-  inline?: unknown;
+// ─── working folder ──────────────────────────────────────────────────────
+
+/**
+ * Whether the loop leaves a path alone on BOTH sides: never read, never pushed,
+ * never deleted from the draft, never reported. Any dot-named segment (`.git`,
+ * `.env`, `.DS_Store`, editor state), `node_modules`, `__pycache__`, and the
+ * root `RECORD` a published archive is signed with.
+ */
+export function isIgnoredPath(path: string): boolean {
+  if (path === SIGNATURE_RECORD) return true;
+  return path.split("/").some((segment) => segment.startsWith(".") || IGNORED_NAMES.has(segment));
 }
 
 /**
- * Every file of one definition of a package: `draft`, or a published version
- * spec (`latest`, an exact version, a range). Small text files come inline with
- * the index; the others are fetched one by one as raw bytes, so a binary annex
- * travels untouched.
+ * Every non-ignored file under `dir` → its path on disk, keyed by its NFC,
+ * `/`-joined path, as the archive would name it. A symlink is refused, naming
+ * it: what it points at is not the folder's to send, and silently skipping it
+ * would push a package missing a file its author sees.
  */
-export async function fetchPackageFiles(
-  profileName: string,
-  located: LocatedPackage,
-  selector: string,
-): Promise<Record<string, Uint8Array>> {
-  const base = `/api/packages/${encodePackageIdPath(located.packageId)}/files`;
-  const query = `version=${encodeURIComponent(selector)}`;
-  const spaceId = located.homeSpaceId;
-  const index = await apiFetch<{ entries?: unknown }>(profileName, `${base}?${query}`, { spaceId });
-  if (!Array.isArray(index.entries)) {
-    throw new Error(`Malformed file index for ${located.packageId}: expected { entries: [...] }.`);
-  }
-  const encoder = new TextEncoder();
-  const files: Record<string, Uint8Array> = {};
-  for (const entry of index.entries as FileIndexEntry[]) {
-    if (typeof entry.path !== "string") continue;
-    if (typeof entry.inline === "string") {
-      files[entry.path] = encoder.encode(entry.inline);
-      continue;
-    }
-    const res = await apiFetchRaw(
-      profileName,
-      `${base}/content?path=${encodeURIComponent(entry.path)}&${query}`,
-      { spaceId },
-    );
-    if (!res.ok) {
-      throw new ApiError(
-        res.status,
-        `Could not read ${entry.path} of ${located.packageId}: HTTP ${res.status}`,
-      );
-    }
-    files[entry.path] = new Uint8Array(await res.arrayBuffer());
-  }
-  return files;
-}
-
-/** Every file under `dir`, keyed by its forward-slash path. */
-export async function readPackageFolder(dir: string): Promise<Record<string, Uint8Array>> {
+export async function listFolderFiles(dir: string): Promise<Map<string, string>> {
   let info: Awaited<ReturnType<typeof stat>>;
   try {
     info = await stat(dir);
@@ -207,59 +145,111 @@ export async function readPackageFolder(dir: string): Promise<Record<string, Uin
   }
   if (!info.isDirectory()) throw new Error(`${dir}: not a directory.`);
 
-  const files: Record<string, Uint8Array> = {};
-  const walk = async (current: string): Promise<void> => {
+  const found = new Map<string, string>();
+  const walk = async (current: string, prefix: string): Promise<void> => {
     for (const entry of await readdir(current, { withFileTypes: true })) {
-      if (SKIPPED_ENTRIES.has(entry.name)) continue;
+      const name = entry.name.normalize("NFC");
+      const path = prefix ? `${prefix}/${name}` : name;
+      if (isIgnoredPath(path)) continue;
       const full = join(current, entry.name);
-      if (entry.isDirectory()) await walk(full);
-      else if (entry.isFile()) {
-        files[relative(dir, full).split("\\").join("/")] = new Uint8Array(await readFile(full));
+      if (entry.isSymbolicLink()) {
+        throw new Error(`${path}: a symbolic link. Replace it with the file itself.`);
       }
+      if (entry.isDirectory()) {
+        await walk(full, path);
+        continue;
+      }
+      if (!entry.isFile()) throw new Error(`${path}: not a regular file.`);
+      if (found.has(path)) {
+        throw new Error(`${path}: two files in this folder have this name once normalized.`);
+      }
+      found.set(path, full);
     }
   };
-  await walk(dir);
-  if (!files[MANIFEST] && !files["SKILL.md"]) {
+  await walk(dir, "");
+  return found;
+}
+
+/**
+ * {@link listFolderFiles}, read — after refusing, naming the file and before
+ * any byte leaves the machine, what the draft write would refuse anyway: a
+ * path no package can carry, a file over the per-file ceiling.
+ */
+export async function readPackageFolder(dir: string): Promise<PackageFiles> {
+  const found = await listFolderFiles(dir);
+  for (const [path, full] of found) {
+    if (!isSafeArchivePath(path)) {
+      throw new Error(
+        `${path}: not a path a package can carry (no commas, line breaks or backslashes).`,
+      );
+    }
+    const { size } = await lstat(full);
+    if (size > PACKAGE_FILE_INLINE_MAX_BYTES) {
+      throw new Error(`${path}: ${size} bytes, over the 1 MiB limit of a package file.`);
+    }
+  }
+  const files: PackageFiles = {};
+  for (const [path, full] of found) files[path] = new Uint8Array(await readFile(full));
+  if (!files[PACKAGE_MANIFEST_FILE] && !files[SKILL_ENTRY]) {
     throw new Error(
-      `${dir}: neither ${MANIFEST} nor SKILL.md at the top level. A package folder starts with one of them.`,
+      `${dir}: neither ${PACKAGE_MANIFEST_FILE} nor ${SKILL_ENTRY} at the top level. A package folder starts with one of them.`,
     );
   }
   return files;
 }
 
-/** Type from a folder's files: the manifest's `type`, else a skill when it has a SKILL.md. */
-export function typeOfFolder(files: Record<string, Uint8Array>): PackageType | null {
-  const manifest = files[MANIFEST];
-  if (manifest) {
-    try {
-      const parsed = JSON.parse(new TextDecoder().decode(manifest)) as { type?: unknown };
-      if (isPackageType(parsed.type)) return parsed.type;
-    } catch {
-      // Reported where the manifest is actually parsed.
-    }
+/** The folder's `manifest.json`, parsed; `undefined` when it has none. */
+export function folderManifest(files: PackageFiles): Record<string, unknown> | undefined {
+  const raw = files[PACKAGE_MANIFEST_FILE];
+  if (!raw) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(raw));
+  } catch {
+    throw new Error(`${PACKAGE_MANIFEST_FILE} is not valid JSON.`);
   }
-  return files["SKILL.md"] ? "skill" : null;
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`${PACKAGE_MANIFEST_FILE} is not a JSON object.`);
+  }
+  return parsed as Record<string, unknown>;
 }
 
-export type ChangeKind = "modified" | "added" | "removed";
+/** The manifest's `type`, else a skill when the folder has a `SKILL.md`. */
+export function typeOfFolder(files: PackageFiles): PackageType | null {
+  const declared = packageTypeEnum.safeParse(folderManifest(files)?.type);
+  if (declared.success) return declared.data;
+  return files[SKILL_ENTRY] ? "skill" : null;
+}
+
+// ─── comparison ──────────────────────────────────────────────────────────
+
+type ChangeKind = "modified" | "added" | "removed";
 
 export interface FileChange {
   path: string;
   kind: ChangeKind;
 }
 
+/** Code-unit order: the same on every machine and locale. */
+export function byCodeUnit(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 /**
- * File-by-file comparison of a folder to a definition, `manifest.json`
- * included: an agent's, an integration's or an MCP server's configuration lives
- * there, so a manifest-only edit is a change like any other. Manifests are
- * compared as JSON, not as bytes, so indentation alone is not a change.
+ * File-by-file comparison of a folder to a definition. Ignored paths are out of
+ * it on both sides, so a dotfile in the draft is neither deleted nor reported.
+ * `manifest.json` counts — an agent's, an integration's or an MCP server's
+ * configuration lives there — compared as JSON, so formatting alone is not a
+ * change; a folder without one does not author its manifest, and the draft's
+ * is then not compared at all.
  */
-export function diffFiles(
-  local: Record<string, Uint8Array>,
-  remote: Record<string, Uint8Array>,
-): FileChange[] {
+export function diffFiles(local: PackageFiles, remote: PackageFiles): FileChange[] {
+  const authorsManifest = PACKAGE_MANIFEST_FILE in local;
+  const tracked = (path: string) =>
+    !isIgnoredPath(path) && (authorsManifest || path !== PACKAGE_MANIFEST_FILE);
   const changes: FileChange[] = [];
   for (const path of new Set([...Object.keys(local), ...Object.keys(remote)])) {
+    if (!tracked(path)) continue;
     const mine = local[path];
     const theirs = remote[path];
     if (mine && !theirs) changes.push({ path, kind: "added" });
@@ -268,17 +258,18 @@ export function diffFiles(
       changes.push({ path, kind: "modified" });
     }
   }
-  return changes.sort((a, b) => a.path.localeCompare(b.path));
+  return changes.sort((a, b) => byCodeUnit(a.path, b.path));
 }
 
 function sameContent(path: string, a: Uint8Array, b: Uint8Array): boolean {
-  if (path === MANIFEST) {
+  if (path === PACKAGE_MANIFEST_FILE) {
     const left = parseJson(a);
     const right = parseJson(b);
-    if (left !== undefined && right !== undefined)
+    if (left !== undefined && right !== undefined) {
       return canonicalJson(left) === canonicalJson(right);
+    }
   }
-  return sameBytes(a, b);
+  return Buffer.from(a).equals(Buffer.from(b));
 }
 
 function parseJson(bytes: Uint8Array): unknown {
@@ -289,52 +280,40 @@ function parseJson(bytes: Uint8Array): unknown {
   }
 }
 
-/** JSON with object keys sorted, so two equal manifests serialize identically. */
+/** JSON with object keys sorted by code unit, so two equal manifests serialize identically. */
 export function canonicalJson(value: unknown): string {
   return JSON.stringify(value, (_key, v: unknown) =>
     v && typeof v === "object" && !Array.isArray(v)
       ? Object.fromEntries(
-          Object.entries(v as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)),
+          Object.entries(v as Record<string, unknown>).sort(([a], [b]) => byCodeUnit(a, b)),
         )
       : v,
   );
 }
 
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.byteLength !== b.byteLength) return false;
-  for (let i = 0; i < a.byteLength; i += 1) if (a[i] !== b[i]) return false;
-  return true;
+/** The manifest as a folder stores it: what `pull` writes and `push` rewrites. */
+export function manifestFileText(manifest: Record<string, unknown>): string {
+  return `${JSON.stringify(manifest, null, 2)}\n`;
 }
 
-export type FileOperation =
+/** One entry of the draft `PUT`'s `operations`. */
+type FileOperation =
   | { op: "write"; path: string; text: string }
   | { op: "write"; path: string; bytes_base64: string }
   | { op: "delete"; path: string };
 
-const strictUtf8 = new TextDecoder("utf-8", { fatal: true });
-
-/**
- * A write carries `text` only when the bytes ARE that text: strict UTF-8 that
- * re-encodes to the same bytes. Anything else travels as base64, so a binary
- * annex (an image, a font, a compiled helper) reaches the draft byte for byte.
- */
+/** `text` when the bytes ARE text by the platform's own rule, else base64, so a binary annex arrives byte for byte. */
 export function writeOperation(path: string, bytes: Uint8Array): FileOperation {
-  try {
-    const text = strictUtf8.decode(bytes);
-    if (sameBytes(new TextEncoder().encode(text), bytes)) return { op: "write", path, text };
-  } catch {
-    // Not UTF-8: base64 below.
-  }
-  return { op: "write", path, bytes_base64: Buffer.from(bytes).toString("base64") };
+  const text = decodePackageFileText(bytes);
+  return text !== null
+    ? { op: "write", path, text }
+    : { op: "write", path, bytes_base64: Buffer.from(bytes).toString("base64") };
 }
 
 /** The operations that turn the draft into the folder. `manifest.json` travels as `manifest`, never as a file. */
-export function toOperations(
-  changes: FileChange[],
-  local: Record<string, Uint8Array>,
-): FileOperation[] {
+export function toOperations(changes: FileChange[], local: PackageFiles): FileOperation[] {
   return changes
-    .filter((change) => change.path !== MANIFEST)
+    .filter((change) => change.path !== PACKAGE_MANIFEST_FILE)
     .map((change) =>
       change.kind === "removed"
         ? { op: "delete" as const, path: change.path }
@@ -342,48 +321,77 @@ export function toOperations(
     );
 }
 
-/** `[a, b, c, d, e]` in batches of `size`. */
-export function chunk<T>(items: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
-  return out;
-}
+// ─── draft locks per working folder ──────────────────────────────────────
 
 /**
- * `<data dir>/packages/<profile>-locks.json`: working folder (absolute path) →
+ * `<data dir>/packages/<profile>-locks.json`: working folder (its real path) →
  * the package it holds and the draft lock that folder last read from a pull or
  * wrote with a push. Keyed by FOLDER, not by package: two folders of one
- * package on one machine are two authors, and the second push must not ride
- * the lock the first one moved. Only a DRAFT read records a lock: a published
- * version says nothing about the draft, and a lock taken from it would let the
- * next push overwrite edits it never saw.
+ * package are two authors, and the second push must not ride the lock the
+ * first one moved. Only a DRAFT read records a lock: a published version says
+ * nothing about the draft. Every write is a read-modify-write under an flock
+ * on the `.lock` beside it, so two commands never drop each other's entries.
  */
 function locksPath(profileName: string): string {
   return join(getDataDir(), "packages", `${profileName}-locks.json`);
 }
 
-type LockEntry = { packageId: string; lock: number };
+function locksMutexPath(profileName: string): string {
+  return join(getDataDir(), "packages", `${profileName}-locks.lock`);
+}
 
-async function readLockFile(profileName: string): Promise<Record<string, LockEntry>> {
+type LockEntry = { packageId: string; lock: number };
+type LockTable = Record<string, LockEntry>;
+
+/** The key a folder is recorded under: its real path, so a symlinked or relative spelling finds it. */
+async function folderKey(dir: string): Promise<string> {
   try {
-    const parsed: unknown = JSON.parse(await readFile(locksPath(profileName), "utf-8"));
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
-    return Object.fromEntries(
-      Object.entries(parsed as Record<string, unknown>).filter(
-        (entry): entry is [string, LockEntry] => {
-          const value = entry[1] as Partial<LockEntry> | null;
-          return (
-            typeof value === "object" &&
-            value !== null &&
-            typeof value.packageId === "string" &&
-            typeof value.lock === "number"
-          );
-        },
-      ),
-    );
+    return await realpath(dir);
+  } catch {
+    return resolve(dir);
+  }
+}
+
+async function readLockTable(profileName: string): Promise<LockTable> {
+  let raw: string;
+  try {
+    raw = await readFile(locksPath(profileName), "utf-8");
   } catch {
     return {};
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+  const table: LockTable = {};
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    const entry = value as Partial<LockEntry> | null;
+    if (entry && typeof entry.packageId === "string" && typeof entry.lock === "number") {
+      table[key] = { packageId: entry.packageId, lock: entry.lock };
+    }
+  }
+  return table;
+}
+
+async function updateLockTable(
+  profileName: string,
+  mutate: (table: LockTable) => void,
+): Promise<void> {
+  await withFileLock(
+    locksMutexPath(profileName),
+    "packages lock update",
+    async () => {
+      const table = await readLockTable(profileName);
+      mutate(table);
+      const path = locksPath(profileName);
+      await mkdir(join(path, ".."), { recursive: true, mode: 0o700 });
+      await writeFileAtomic(path, `${JSON.stringify(table, null, 2)}\n`, { mode: 0o600 });
+    },
+    { timeoutMs: 10_000, pollMs: 25 },
+  );
 }
 
 /** The lock `dir` last saw of `packageId`'s draft, or `undefined` when it never read that draft. */
@@ -392,7 +400,7 @@ export async function readLock(
   dir: string,
   packageId: string,
 ): Promise<number | undefined> {
-  const entry = (await readLockFile(profileName))[dir];
+  const entry = (await readLockTable(profileName))[await folderKey(dir)];
   return entry?.packageId === packageId ? entry.lock : undefined;
 }
 
@@ -402,42 +410,39 @@ export async function recordLock(
   packageId: string,
   lock: number,
 ): Promise<void> {
-  const locks = await readLockFile(profileName);
-  locks[dir] = { packageId, lock };
-  const path = locksPath(profileName);
-  await mkdir(join(path, ".."), { recursive: true, mode: 0o700 });
-  await writeFileAtomic(path, `${JSON.stringify(locks, null, 2)}\n`, { mode: 0o600 });
+  const key = await folderKey(dir);
+  await updateLockTable(profileName, (table) => {
+    table[key] = { packageId, lock };
+  });
 }
 
-/** `version:` pinned in a SKILL.md frontmatter, when the author pins it there. */
-export function frontmatterVersion(skillMd: string): string | undefined {
-  const block = skillMd.match(/^---[^\S\n]*\n([\s\S]*?)\n---/)?.[1];
-  const line = block?.match(/^version:[ \t]*["']?([0-9]+\.[0-9]+\.[0-9]+[^"'\s]*)["']?[ \t]*$/m);
-  return line?.[1];
+/** `dir` no longer holds what the draft was at any lock: its next push needs `--force`. */
+export async function forgetLock(profileName: string, dir: string): Promise<void> {
+  const key = await folderKey(dir);
+  await updateLockTable(profileName, (table) => {
+    delete table[key];
+  });
 }
 
-export function bumpPatch(version: string): string {
-  const m = version.match(/^(\d+)\.(\d+)\.(\d+)/);
-  if (!m) return "1.0.0";
-  return `${m[1]}.${m[2]}.${Number(m[3]) + 1}`;
-}
-
-/** The latest published version, or `null` when nothing was ever published. */
-export async function latestPublished(
+/**
+ * Move every folder of `packageId` that saw the draft at `from` to `to`, and
+ * return those folders. For a draft change the platform made itself (a publish
+ * rewriting the manifest's version) that every folder current with it has
+ * therefore seen.
+ */
+export async function advanceLocks(
   profileName: string,
-  type: PackageType,
   packageId: string,
-  spaceId?: string,
-): Promise<string | null> {
-  try {
-    const latest = await apiFetch<{ version?: unknown }>(
-      profileName,
-      `${packagePath(type, packageId)}/versions/latest`,
-      spaceId ? { spaceId } : {},
-    );
-    return typeof latest.version === "string" ? latest.version : null;
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return null;
-    throw err;
-  }
+  from: number,
+  to: number,
+): Promise<string[]> {
+  const moved: string[] = [];
+  await updateLockTable(profileName, (table) => {
+    for (const [dir, entry] of Object.entries(table)) {
+      if (entry.packageId !== packageId || entry.lock !== from) continue;
+      table[dir] = { packageId, lock: to };
+      moved.push(dir);
+    }
+  });
+  return moved.sort(byCodeUnit);
 }

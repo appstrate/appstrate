@@ -11,11 +11,8 @@ import { extractSkillMeta } from "@appstrate/core/validation";
 import { toSlug } from "@appstrate/core/naming";
 import { isSafeArchivePath } from "@appstrate/core/zip";
 
-/**
- * Appstrate packaging, not skill content. Exported because the draft path must
- * know the same set BEFORE fetching: each file there is its own request.
- */
-export const DROPPED_ENTRIES: ReadonlySet<string> = new Set(["manifest.json", "RECORD"]);
+/** Appstrate packaging, not skill content: both archives carry them, no skill directory does. */
+const DROPPED_ENTRIES: ReadonlySet<string> = new Set(["manifest.json", "RECORD"]);
 
 export const SKILL_ENTRY = "SKILL.md";
 

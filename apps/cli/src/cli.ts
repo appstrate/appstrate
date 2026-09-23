@@ -590,10 +590,13 @@ const packagesGroup = program
 packagesGroup
   .command("pull <package> [dir]")
   .description(
-    "Bring a package into a local working folder: its draft when you may write it, else its published version (read-only). Default folder: <workDir>/<org>/packages/<type>s/<name>.",
+    "Bring a package into a local working folder: its draft when you may write it, else its published version (read-only). Default folder: <workDir>/<org>/packages/<type segment>/<name>.",
   )
   .option("--version <spec>", "A published version (latest, exact, or range) instead of the draft")
-  .option("--force", "Write into a folder that already has files, replacing same-named ones")
+  .option(
+    "--force",
+    "Pull into a folder that already has files: it then mirrors the package, and files the package does not have are deleted",
+  )
   .action(
     async (pkg: string, dir: string | undefined, opts: { version?: string; force?: boolean }) => {
       const globalOpts = program.opts<{ profile?: string }>();
@@ -621,7 +624,7 @@ packagesGroup
 packagesGroup
   .command("push <dir>")
   .description(
-    "Write a working folder to the package's draft, under the lock this machine last saw. Nobody else sees it until you publish.",
+    "Write a working folder to the package's draft in one atomic update, under the lock this folder last saw. Nobody else sees it until you publish.",
   )
   .option(
     "--create",
@@ -631,7 +634,7 @@ packagesGroup
     "--space <id>",
     "With --create: the space that becomes its home (default: the pinned space)",
   )
-  .option("--force", "Replace the draft even if it changed since this machine last saw it")
+  .option("--force", "Replace the draft with this folder, even if this folder did not see it")
   .option("--dry-run", "Show what would be sent and send nothing")
   .action(
     async (
@@ -651,16 +654,21 @@ packagesGroup
   );
 
 packagesGroup
-  .command("publish <package>")
+  .command("publish <package-or-dir>")
   .description(
-    "Publish the draft as a new version. Sharing and activation stay in their own routes.",
+    "Publish the draft as a new version, by the dashboard's version rule. Sharing and activation stay in their own routes.",
   )
-  .option("--version <version>", "Version to cut (default: the draft manifest's version)")
-  .action(async (pkg: string, opts: { version?: string }) => {
+  .option(
+    "--bump <segment>",
+    "patch, minor or major: bumped from the latest version when the draft still carries it (default: patch)",
+  )
+  .option("--version <version>", "Exact version to cut, bypassing the version rule")
+  .action(async (target: string, opts: { bump?: string; version?: string }) => {
     const globalOpts = program.opts<{ profile?: string }>();
     await packagesPublishCommand({
       profile: globalOpts.profile,
-      package: pkg,
+      package: target,
+      bump: opts.bump,
       version: opts.version,
     });
   });

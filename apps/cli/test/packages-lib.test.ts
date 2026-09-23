@@ -1,51 +1,101 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The pure half of the authoring loop: how a folder compares to a draft, which
- * bytes travel as text and which as base64, and which lock a working folder
- * carries. The HTTP half rides existing platform routes and was exercised
- * end to end against a live instance.
+ * The pure half of the authoring loop: what a working folder is, how it
+ * compares to a definition, which bytes travel as text and which as base64,
+ * and which draft lock a folder carries. The HTTP half is exercised through the
+ * commands in `packages-command.test.ts`.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  bumpPatch,
-  chunk,
+  canonicalJson,
   diffFiles,
-  frontmatterVersion,
+  isIgnoredPath,
   readLock,
+  readPackageFolder,
+  readSpaceOf,
   recordLock,
   toOperations,
   writeOperation,
 } from "../src/lib/packages.ts";
 import { lineDiff } from "../src/commands/packages.ts";
+import type { PackageHome } from "@appstrate/shared-types";
 
 const utf8 = (text: string) => new TextEncoder().encode(text);
 
+describe("isIgnoredPath", () => {
+  it("ignores dot-named segments, tooling folders and the root signature", () => {
+    for (const path of [
+      ".git/config",
+      ".env",
+      "docs/.DS_Store",
+      "src/.vscode/settings.json",
+      "node_modules/x/index.js",
+      "tools/__pycache__/a.pyc",
+      "RECORD",
+    ]) {
+      expect(isIgnoredPath(path)).toBe(true);
+    }
+  });
+
+  it("keeps ordinary files, including a RECORD that is not the root one", () => {
+    for (const path of ["SKILL.md", "docs/RECORD", "a.b.md", "references/x.md"]) {
+      expect(isIgnoredPath(path)).toBe(false);
+    }
+  });
+});
+
 describe("diffFiles", () => {
-  it("reports added, removed and modified files, sorted by path", () => {
-    const local = { "SKILL.md": utf8("new"), "b.md": utf8("b") };
-    const remote = { "SKILL.md": utf8("old"), "a.md": utf8("a") };
+  it("reports added, removed and modified files, in code-unit order", () => {
+    const local = { "SKILL.md": utf8("new"), "b.md": utf8("b"), "Z.md": utf8("z") };
+    const remote = { "SKILL.md": utf8("old"), "a.md": utf8("a"), "manifest.json": utf8("{}") };
+    // Code units put upper case first: `S` < `Z` < `a` < `b`, whatever the locale.
     expect(diffFiles(local, remote)).toEqual([
+      { path: "SKILL.md", kind: "modified" },
+      { path: "Z.md", kind: "added" },
       { path: "a.md", kind: "removed" },
       { path: "b.md", kind: "added" },
-      { path: "SKILL.md", kind: "modified" },
     ]);
   });
 
-  it("counts a manifest-only edit as a change", () => {
+  it("leaves ignored paths out on both sides, so a remote dotfile is never deleted", () => {
+    const local = { "SKILL.md": utf8("x"), ".env": utf8("SECRET=1") };
+    const remote = {
+      "SKILL.md": utf8("x"),
+      ".editorconfig": utf8("root = true"),
+      RECORD: utf8(""),
+    };
+    expect(diffFiles(local, remote)).toEqual([]);
+  });
+
+  it("counts a manifest-only edit as a change when the folder authors the manifest", () => {
     const local = { "manifest.json": utf8('{"name":"@a/b","version":"1.0.1"}') };
     const remote = { "manifest.json": utf8('{"name":"@a/b","version":"1.0.0"}') };
     expect(diffFiles(local, remote)).toEqual([{ path: "manifest.json", kind: "modified" }]);
+  });
+
+  it("does not compare the manifest of a folder that has none", () => {
+    const local = { "SKILL.md": utf8("x") };
+    const remote = { "SKILL.md": utf8("x"), "manifest.json": utf8('{"name":"@a/b"}') };
+    expect(diffFiles(local, remote)).toEqual([]);
   });
 
   it("compares manifests as JSON, so key order and indentation are not changes", () => {
     const local = { "manifest.json": utf8('{\n  "version": "1.0.0",\n  "name": "@a/b"\n}\n') };
     const remote = { "manifest.json": utf8('{"name":"@a/b","version":"1.0.0"}') };
     expect(diffFiles(local, remote)).toEqual([]);
+  });
+});
+
+describe("canonicalJson", () => {
+  it("sorts keys by code unit at every depth", () => {
+    expect(canonicalJson({ b: 1, B: { z: 1, a: 2 }, a: [3] })).toBe(
+      '{"B":{"a":2,"z":1},"a":[3],"b":1}',
+    );
   });
 });
 
@@ -60,17 +110,20 @@ describe("writeOperation", () => {
 
   it("sends bytes that are not valid UTF-8 as base64, byte for byte", () => {
     const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe, 0x00]);
-    const op = writeOperation("pixel.png", bytes);
-    expect(op).toEqual({
+    expect(writeOperation("pixel.png", bytes)).toEqual({
       op: "write",
       path: "pixel.png",
       bytes_base64: Buffer.from(bytes).toString("base64"),
     });
   });
 
-  it("sends a leading BOM as base64, since decoding it as text would drop it", () => {
+  it("keeps a leading BOM in the text, by the platform's own decoding rule", () => {
     const bytes = new Uint8Array([0xef, 0xbb, 0xbf, 0x61]);
-    expect("bytes_base64" in writeOperation("bom.txt", bytes)).toBe(true);
+    expect(writeOperation("bom.txt", bytes)).toEqual({
+      op: "write",
+      path: "bom.txt",
+      text: "\uFEFFa",
+    });
   });
 });
 
@@ -98,31 +151,92 @@ describe("lineDiff", () => {
   });
 });
 
-describe("chunk", () => {
-  it("splits into batches of the given size", () => {
-    expect(chunk([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);
-    expect(chunk([], 2)).toEqual([]);
+describe("readSpaceOf", () => {
+  const home = (overrides: Partial<PackageHome>): PackageHome => ({
+    id: "@a/b",
+    type: "skill",
+    home_space_id: "spc_home",
+    home_writable: false,
+    home_deletable: false,
+    home_shareable: false,
+    read_space_ids: ["spc_home", "spc_team"],
+    ...overrides,
+  });
+
+  it("reads a writer's package in its home", () => {
+    expect(readSpaceOf(home({ home_writable: true }), "spc_team")).toBe("spc_home");
+  });
+
+  it("reads a reader's package in the pinned space when that space reads it", () => {
+    expect(readSpaceOf(home({}), "spc_team")).toBe("spc_team");
+  });
+
+  it("falls back to the first reading space, a withheld home included", () => {
+    expect(readSpaceOf(home({ home_space_id: null, read_space_ids: ["spc_x"] }), "spc_y")).toBe(
+      "spc_x",
+    );
   });
 });
 
-describe("versions", () => {
-  it("bumps the patch", () => {
-    expect(bumpPatch("1.2.3")).toBe("1.2.4");
-    expect(bumpPatch("not-a-version")).toBe("1.0.0");
+describe("working folders", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "appstrate-cli-packages-folder-"));
   });
 
-  it("reads a version pinned in the frontmatter", () => {
-    expect(frontmatterVersion("---\nname: a\nversion: 2.1.0\n---\nbody")).toBe("2.1.0");
-    expect(frontmatterVersion("---\nname: a\n---\nversion: 2.1.0")).toBeUndefined();
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("reads files by NFC path and never reads ignored entries", async () => {
+    await writeFile(join(dir, "SKILL.md"), "x");
+    await writeFile(join(dir, "Cafe\u0301.md"), "decomposed");
+    await mkdir(join(dir, ".git"));
+    await writeFile(join(dir, ".git", "HEAD"), "ref");
+    await writeFile(join(dir, ".env"), "SECRET=1");
+    await mkdir(join(dir, "node_modules", "x"), { recursive: true });
+    await writeFile(join(dir, "node_modules", "x", "i.js"), "");
+
+    const files = await readPackageFolder(dir);
+
+    expect(Object.keys(files).sort()).toEqual(["Caf\u00e9.md", "SKILL.md"]);
+  });
+
+  it("refuses a path no package can carry, naming it", async () => {
+    await writeFile(join(dir, "SKILL.md"), "x");
+    await writeFile(join(dir, "sales,2024.csv"), "a,b");
+    await expect(readPackageFolder(dir)).rejects.toThrow("sales,2024.csv");
+  });
+
+  it("refuses a file over the per-file limit before reading it, naming it", async () => {
+    await writeFile(join(dir, "SKILL.md"), "x");
+    await writeFile(join(dir, "big.bin"), new Uint8Array(1_048_577));
+    await expect(readPackageFolder(dir)).rejects.toThrow(/big\.bin.*1 MiB/);
+  });
+
+  it("refuses a symbolic link instead of skipping it", async () => {
+    await writeFile(join(dir, "SKILL.md"), "x");
+    await symlink(join(dir, "SKILL.md"), join(dir, "alias.md"));
+    await expect(readPackageFolder(dir)).rejects.toThrow(/alias\.md.*symbolic link/);
+  });
+
+  it("needs manifest.json or SKILL.md at the top level", async () => {
+    await writeFile(join(dir, "notes.md"), "x");
+    await expect(readPackageFolder(dir)).rejects.toThrow(/neither manifest\.json nor SKILL\.md/);
   });
 });
 
 describe("locks per working folder", () => {
   const originalDataHome = process.env.XDG_DATA_HOME;
   let dataHome: string;
+  let work: string;
 
   beforeEach(async () => {
-    dataHome = await mkdtemp(join(tmpdir(), "appstrate-cli-packages-"));
+    dataHome = await mkdtemp(join(tmpdir(), "appstrate-cli-packages-data-"));
+    work = await mkdtemp(join(tmpdir(), "appstrate-cli-packages-work-"));
+    await mkdir(join(work, "a"));
+    await mkdir(join(work, "b"));
     process.env.XDG_DATA_HOME = dataHome;
   });
 
@@ -130,22 +244,38 @@ describe("locks per working folder", () => {
     if (originalDataHome === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = originalDataHome;
     await rm(dataHome, { recursive: true, force: true });
+    await rm(work, { recursive: true, force: true });
   });
 
   it("keeps one lock per folder, so two folders of one package do not share it", async () => {
-    await recordLock("p", "/work/a", "@s/pkg", 2);
-    await recordLock("p", "/work/b", "@s/pkg", 3);
-    expect(await readLock("p", "/work/a", "@s/pkg")).toBe(2);
-    expect(await readLock("p", "/work/b", "@s/pkg")).toBe(3);
+    await recordLock("p", join(work, "a"), "@s/pkg", 2);
+    await recordLock("p", join(work, "b"), "@s/pkg", 3);
+    expect(await readLock("p", join(work, "a"), "@s/pkg")).toBe(2);
+    expect(await readLock("p", join(work, "b"), "@s/pkg")).toBe(3);
   });
 
   it("forgets a folder's lock when it now holds another package", async () => {
-    await recordLock("p", "/work/a", "@s/one", 2);
-    expect(await readLock("p", "/work/a", "@s/two")).toBeUndefined();
+    await recordLock("p", join(work, "a"), "@s/one", 2);
+    expect(await readLock("p", join(work, "a"), "@s/two")).toBeUndefined();
   });
 
   it("keeps profiles apart", async () => {
-    await recordLock("prod", "/work/a", "@s/pkg", 5);
-    expect(await readLock("dev", "/work/a", "@s/pkg")).toBeUndefined();
+    await recordLock("prod", join(work, "a"), "@s/pkg", 5);
+    expect(await readLock("dev", join(work, "a"), "@s/pkg")).toBeUndefined();
+  });
+
+  it("finds a folder by its real path, whatever spelling reached it", async () => {
+    await symlink(join(work, "a"), join(work, "link"));
+    await recordLock("p", join(work, "link"), "@s/pkg", 7);
+    expect(await readLock("p", join(work, "a", "..", "a"), "@s/pkg")).toBe(7);
+  });
+
+  it("loses no entry when two writers record at once", async () => {
+    await Promise.all([
+      recordLock("p", join(work, "a"), "@s/one", 1),
+      recordLock("p", join(work, "b"), "@s/two", 2),
+    ]);
+    expect(await readLock("p", join(work, "a"), "@s/one")).toBe(1);
+    expect(await readLock("p", join(work, "b"), "@s/two")).toBe(2);
   });
 });

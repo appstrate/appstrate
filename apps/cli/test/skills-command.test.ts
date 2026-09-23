@@ -548,13 +548,12 @@ describe("skills sync — --source draft", () => {
         skillMd: skillMd("PDF Tools", "Draft copy."),
         lockVersion: 3,
         etag: "idx-a",
-        inlineFiles: { "reference/small.md": "small" },
-        fetchedFiles: { "assets/big.txt": "big" },
+        files: { "reference/small.md": "small", "assets/big.txt": "big" },
       },
     },
   ];
 
-  it("materializes the working copy and reuses the index's inline text", async () => {
+  it("materializes the working copy from ONE draft archive", async () => {
     const server = createSkillServer(DRAFT);
     server.install();
     const { io } = createMemoryIO();
@@ -566,13 +565,10 @@ describe("skills sync — --source draft", () => {
     expect(await readText(join(dir, "reference/small.md"))).toBe("small");
     expect(await readText(join(dir, "assets/big.txt"))).toBe("big");
     expect(await readdir(dir)).not.toContain("manifest.json");
-    // Only the one entry the index did not inline is fetched — `SKILL.md`,
-    // `manifest.json` and `reference/small.md` cost no extra request.
-    expect(server.contentReads()).toBe(1);
+    // Every file of the draft rides one archive, whatever its count.
+    expect(server.draftDownloads()).toBe(1);
     expect(server.downloads()).toBe(0);
-    // The index is read ONCE: resolution needs its ETag as the change token
-    // and hands the same body to the download, so the two halves cannot see
-    // different snapshots of a draft edited between them.
+    // Resolution reads the index once, for its ETag, the change token.
     expect(server.indexReads()).toBe(1);
   });
 
@@ -582,10 +578,10 @@ describe("skills sync — --source draft", () => {
     const { io } = createMemoryIO();
 
     await skillsSyncCommand({ source: "draft" }, io);
-    const after = server.contentReads();
+    const after = server.draftDownloads();
     await skillsSyncCommand({ source: "draft" }, io);
 
-    expect(server.contentReads()).toBe(after);
+    expect(server.draftDownloads()).toBe(after);
   });
 
   it("re-materializes when the draft ETag moves", async () => {
@@ -607,7 +603,7 @@ describe("skills sync — --source draft", () => {
     edited.install();
     await skillsSyncCommand({ source: "draft" }, io);
 
-    expect(edited.contentReads()).toBe(1);
+    expect(edited.draftDownloads()).toBe(1);
     expect(await readText(join(pluginRoot(), "skills", "pdf-tools", "SKILL.md"))).toContain(
       "Edited draft.",
     );

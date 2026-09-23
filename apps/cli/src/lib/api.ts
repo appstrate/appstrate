@@ -279,7 +279,9 @@ export async function apiFetchRaw(
     // header would otherwise slip past a bare `headers["Content-Type"]`
     // lookup and we'd add a SECOND, conflicting content-type entry.
     const hasContentType = Object.keys(headers).some((k) => k.toLowerCase() === "content-type");
-    if (!hasContentType && init.body) {
+    // Strings only: a `FormData` body gets its multipart boundary from
+    // `fetch`, and a forced JSON type would erase it.
+    if (!hasContentType && typeof init.body === "string") {
       headers["Content-Type"] = "application/json";
     }
     if (profile.orgId) headers["X-Org-Id"] = profile.orgId;

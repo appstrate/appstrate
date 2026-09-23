@@ -116,7 +116,7 @@ describe("resolveSkill — the draft is NAMED, never left to the route's default
         draft: {
           skillMd: skillMd("pdf-tools-draft", "Working copy."),
           etag: "idx-9",
-          fetchedFiles: { "reference/notes.md": "draft notes" },
+          files: { "reference/notes.md": "draft notes" },
         },
       },
     ]).install();
@@ -132,7 +132,7 @@ describe("resolveSkill — the draft is NAMED, never left to the route's default
     const files = await fetchSkillFiles("default", skill, "draft");
     const decoder = new TextDecoder();
     expect(decoder.decode(files["SKILL.md"]!)).toContain("Working copy.");
-    // Fetched separately, so this one pins the selector on `/files/content`.
+    // Only the draft archive carries this text: the published one says otherwise.
     expect(decoder.decode(files["reference/notes.md"]!)).toBe("draft notes");
   });
 
@@ -159,7 +159,7 @@ describe("resolveSkill — the draft is NAMED, never left to the route's default
     expect(rendered).not.toContain("HTTP 403");
   });
 
-  it("explains the same refusal when it lands on a file download", async () => {
+  it("explains the same refusal when it lands on the draft archive", async () => {
     // Resolution and download are separate requests: a grant revoked between
     // them refuses the second one, and that refusal must read the same way.
     createSkillServer([
@@ -174,13 +174,13 @@ describe("resolveSkill — the draft is NAMED, never left to the route's default
       packageId: "@acme/pdf",
       version: "draft",
       integrity: 'draft:1:"idx-1"',
-      draftIndex: [{ path: "reference/notes.md" }],
     });
     const err = await fetchSkillFiles("default", skill, "draft").then(
       () => null,
       (e: unknown) => e,
     );
-    expect(formatError(err)).toContain("reference/notes.md");
+    expect(formatError(err)).toContain("author's working copy");
+    expect(formatError(err)).toContain("skills:write");
     expect(formatError(err)).toContain("--source published");
   });
 });

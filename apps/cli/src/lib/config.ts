@@ -21,7 +21,9 @@
  */
 
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
+import type { PackageType } from "@appstrate/core/validation";
 import { mkdir, readFile, rename, writeFile, unlink } from "node:fs/promises";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import { DEFAULT_IO, type CommandIO } from "./io.ts";
@@ -74,7 +76,7 @@ export interface Config {
   profiles: Record<string, Profile>;
   /**
    * Root of the working copies `packages pull` writes and `packages push`
-   * reads: `<workDir>/<org slug>/packages/<type>s/<name>`. Default
+   * reads: `<workDir>/<org slug>/packages/<type segment>/<name>`. Default
    * `~/Appstrate Packages`, a visible folder, unlike the regenerable state under
    * `getDataDir()`. Never `~/Appstrate`: that is `appstrate install`'s default
    * instance directory (`~/appstrate` on a case-insensitive disk), which
@@ -187,20 +189,29 @@ export async function readConfig(): Promise<Config> {
 
 const DEFAULT_WORK_DIR_NAME = "Appstrate Packages";
 
-/** `workDir` from the config with `~` expanded, `~/Appstrate Packages` when unset. */
-export function resolveWorkDir(config: Config): string {
-  const raw = config.workDir ?? join("~", DEFAULT_WORK_DIR_NAME);
-  return raw === "~" || raw.startsWith("~/") ? join(homeDir(), raw.slice(1)) : raw;
+/**
+ * `~` and `~/…` against {@link homeDir}, the way a shell would have expanded
+ * them had the path not been quoted or read from `config.toml`. Anything else
+ * is returned as given.
+ */
+export function expandHome(path: string): string {
+  if (path === "~") return homeDir();
+  return path.startsWith("~/") ? join(homeDir(), path.slice(2)) : path;
 }
 
-/** One package's working copy: `<workDir>/<org slug>/packages/<type>s/<name>`. */
+/** `workDir` from the config, absolute, `~/Appstrate Packages` when unset. */
+export function resolveWorkDir(config: Config): string {
+  return resolve(expandHome(config.workDir ?? join("~", DEFAULT_WORK_DIR_NAME)));
+}
+
+/** One package's working copy: `<workDir>/<org slug>/packages/<type segment>/<name>`. */
 export function packageWorkDir(
   config: Config,
   orgSlug: string,
-  type: "skill" | "agent" | "integration" | "mcp-server",
+  type: PackageType,
   name: string,
 ): string {
-  return join(resolveWorkDir(config), orgSlug, "packages", `${type}s`, name);
+  return join(resolveWorkDir(config), orgSlug, "packages", PACKAGE_TYPE_ROUTE_SEGMENT[type], name);
 }
 
 /**
