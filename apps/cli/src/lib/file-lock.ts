@@ -42,8 +42,6 @@ export interface FileLockOptions {
   io?: CommandIO;
   /** Test seam; production resolves the libc binding once per process. */
   tryLock?: TryLock;
-  /** The error thrown past `timeoutMs`. Default: {@link FileLockBusyError}. */
-  busyError?: () => Error;
 }
 
 const DEFAULTS: Required<Pick<FileLockOptions, "timeoutMs" | "pollMs">> = {
@@ -102,7 +100,7 @@ export async function withFileLock<T>(
         );
         return await body();
       }
-      if (Date.now() >= deadline) throw options.busyError?.() ?? new FileLockBusyError(label);
+      if (Date.now() >= deadline) throw new FileLockBusyError(label);
       await new Promise((resolve) => setTimeout(resolve, pollMs));
     }
   } finally {
