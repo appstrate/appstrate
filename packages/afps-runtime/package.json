@@ -74,8 +74,8 @@
     "zod": "^4.6.5"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "0.85.1",
-    "@earendil-works/pi-ai": "0.85.1"
+    "@earendil-works/pi-coding-agent": "0.86.1",
+    "@earendil-works/pi-ai": "0.86.1"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-coding-agent": {
