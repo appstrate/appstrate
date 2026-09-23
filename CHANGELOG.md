@@ -6,6 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Edit a package in a local folder with `appstrate packages`** (#1499). `pull`
+  brings a package's draft (or, for someone who cannot write it, its published
+  version, read-only) into a working folder; `status` shows what the folder
+  would change; `push` writes it back to the draft; `publish` cuts a version as
+  a separate step. Skills, agents, integrations and MCP servers alike, with any
+  editor or coding agent. A push is ONE atomic write under the draft's lock: a
+  draft edited elsewhere since the folder last saw it (the dashboard, another
+  machine, a colleague) is refused, never overwritten. Dot-named entries
+  (`.env`, `.git/`, editor state), `__pycache__` and the signature `RECORD` are
+  never sent, never deleted from the draft and never written by a pull.
+  `push --create` creates a package through the import route and says it
+  publishes the first version. `publish` picks the version exactly as the
+  dashboard's dialog does (`--bump patch|minor|major`, or `--version`).
+- **`GET /api/packages/{scope}/{name}/home`** — a package's type, home space and
+  the spaces the caller reads it from, resolved by id alone across every space
+  the caller reaches. A package homed in a personal space is found from a team
+  space; an id the caller cannot read is a 404, exactly as in the catalog.
+- **`GET /api/packages/{scope}/{name}/draft/download`** — the draft as one
+  archive, for whoever may write the package (`403 draft_not_writable`
+  otherwise). An author fetching their own draft is editing it, so
+  `restrict_package_copy` does not apply to it; published versions keep that
+  gate.
+
+### Changed
+
+- **Draft writes have no operation-count limit any more.** A `PUT` carrying file
+  operations used to accept at most 200, so a large edit had to be split into
+  several non-atomic writes. The real bounds are unchanged: the request body
+  limit, 1 MiB per written file and the tree limits.
+- **Publishing identical content under a new version number is refused.** A
+  version bump (the publish dialog's patch/minor/major, or a `version` edited
+  into the manifest) with no other change now answers `409 no_changes`, in the
+  dashboard as in the CLI. Before, the new number alone changed the archive's
+  digest and the same content was published again under every bump.
+
 ## [1.0.0-beta.60] - 2026-09-23
 
 ### Added
