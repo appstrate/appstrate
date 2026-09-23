@@ -522,7 +522,11 @@ Four properties matter for the threat model:
   an authz denial can never be converted into a 500 that masks the 403.
 - **A credential can never exceed its ceiling.** Both halves of the union are
   intersected with `scopeCeiling` on the way into `permissions`, including an
-  empty OIDC scope claim.
+  empty OIDC scope claim. An act authorized by ownership rather than a role
+  grant (a user's own connections and pins under `/api/me`, notifications,
+  staged uploads, a file's creator lifecycle) reads `scopeCeiling` directly
+  through `requireCeiling` / `requireAnyCeiling` / `ceilingAllows` (RBAC spec
+  §7.1).
 - **Modules cannot widen core.** A module gates on core resources through
   `requireCorePermission` (typechecked against the core catalog) and on its own
   through `requireModulePermission`; the role→permission policy lives in
