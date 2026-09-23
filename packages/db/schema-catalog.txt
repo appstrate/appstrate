@@ -1,0 +1,1112 @@
+column account.access_token text
+column account.access_token_expires_at timestamp with time zone
+column account.account_id text not null
+column account.created_at timestamp with time zone not null default now()
+column account.id text not null
+column account.id_token text
+column account.password text
+column account.provider_id text not null
+column account.refresh_token text
+column account.refresh_token_expires_at timestamp with time zone
+column account.scope text
+column account.updated_at timestamp with time zone not null default now()
+column account.user_id text not null
+column api_keys.created_at timestamp with time zone not null default now()
+column api_keys.created_by text
+column api_keys.expires_at timestamp with time zone
+column api_keys.id text not null
+column api_keys.key_hash text not null
+column api_keys.key_prefix text not null
+column api_keys.last_used_at timestamp with time zone
+column api_keys.name text not null
+column api_keys.org_id uuid not null
+column api_keys.revoked_at timestamp with time zone
+column api_keys.scopes text[] not null default '{}'::text[]
+column api_keys.space_id text not null
+column audit_events.action text not null
+column audit_events.actor_id text
+column audit_events.actor_type text not null
+column audit_events.after jsonb
+column audit_events.before jsonb
+column audit_events.created_at timestamp with time zone not null default now()
+column audit_events.id bigint not null default nextval('audit_events_id_seq'::regclass)
+column audit_events.ip text
+column audit_events.org_id uuid not null
+column audit_events.request_id text
+column audit_events.resource_id text
+column audit_events.resource_type text not null
+column audit_events.space_id text
+column audit_events.user_agent text
+column chat_messages.content jsonb not null
+column chat_messages.created_at timestamp with time zone not null default now()
+column chat_messages.message_id text not null
+column chat_messages.seq integer not null default nextval('chat_messages_seq_seq'::regclass)
+column chat_messages.session_id text not null
+column chat_sessions.active_stream_id text
+column chat_sessions.created_at timestamp with time zone not null default now()
+column chat_sessions.id text not null
+column chat_sessions.last_assistant_seq integer
+column chat_sessions.last_read_seq integer
+column chat_sessions.org_id uuid not null
+column chat_sessions.space_id text not null
+column chat_sessions.title text
+column chat_sessions.updated_at timestamp with time zone not null default now()
+column chat_sessions.user_id text not null
+column cli_refresh_tokens.client_id text not null
+column cli_refresh_tokens.created_at timestamp with time zone not null default now()
+column cli_refresh_tokens.created_ip text
+column cli_refresh_tokens.device_name text
+column cli_refresh_tokens.expires_at timestamp with time zone not null
+column cli_refresh_tokens.family_id text not null
+column cli_refresh_tokens.id text not null
+column cli_refresh_tokens.last_used_at timestamp with time zone
+column cli_refresh_tokens.last_used_ip text
+column cli_refresh_tokens.parent_id text
+column cli_refresh_tokens.revoked_at timestamp with time zone
+column cli_refresh_tokens.revoked_reason text
+column cli_refresh_tokens.scope text
+column cli_refresh_tokens.token_hash text not null
+column cli_refresh_tokens.used_at timestamp with time zone
+column cli_refresh_tokens.user_agent text
+column cli_refresh_tokens.user_id text not null
+column device_codes.attempts integer not null default 0
+column device_codes.client_id text
+column device_codes.device_code text not null
+column device_codes.expires_at timestamp with time zone not null
+column device_codes.id text not null
+column device_codes.last_polled_at timestamp with time zone
+column device_codes.polling_interval integer
+column device_codes.scope text
+column device_codes.status text not null
+column device_codes.user_code text not null
+column device_codes.user_id text
+column end_users.created_at timestamp with time zone not null default now()
+column end_users.email text
+column end_users.external_id text
+column end_users.id text not null
+column end_users.metadata jsonb
+column end_users.name text
+column end_users.org_id uuid not null
+column end_users.space_id text not null
+column end_users.updated_at timestamp with time zone not null default now()
+column file_links.consumer_run_id text not null
+column file_links.created_at timestamp with time zone not null default now()
+column file_links.file_id text not null
+column file_links.org_id uuid not null
+column files.chat_session_id text
+column files.created_at timestamp with time zone not null default now()
+column files.end_user_id text
+column files.expires_at timestamp with time zone
+column files.id text not null
+column files.mime text not null
+column files.name text not null
+column files.org_id uuid not null
+column files.package_id text
+column files.purpose file_purpose not null
+column files.run_id text
+column files.sha256 text not null
+column files.size bigint not null
+column files.space_id text not null
+column files.storage_key text not null
+column files.user_id text
+column integration_connections.account_id text not null
+column integration_connections.auth_key text not null
+column integration_connections.client_ref text
+column integration_connections.created_at timestamp with time zone not null default now()
+column integration_connections.credentials_encrypted text not null
+column integration_connections.end_user_id text
+column integration_connections.expires_at timestamp with time zone
+column integration_connections.id uuid not null default gen_random_uuid()
+column integration_connections.identity_claims jsonb
+column integration_connections.integration_package_id text not null
+column integration_connections.label text
+column integration_connections.needs_reconnection boolean not null default false
+column integration_connections.refresh_failure_count integer not null default 0
+column integration_connections.scopes_granted text[] not null default '{}'::text[]
+column integration_connections.shared_with_org boolean not null default false
+column integration_connections.space_id text not null
+column integration_connections.updated_at timestamp with time zone not null default now()
+column integration_connections.user_id text
+column integration_oauth_clients.auth_key text not null
+column integration_oauth_clients.auto_provisioned boolean not null default false
+column integration_oauth_clients.client_id text not null
+column integration_oauth_clients.client_secret_encrypted text not null
+column integration_oauth_clients.created_at timestamp with time zone not null default now()
+column integration_oauth_clients.id uuid not null default gen_random_uuid()
+column integration_oauth_clients.integration_package_id text not null
+column integration_oauth_clients.is_default boolean not null default false
+column integration_oauth_clients.redirect_uri text
+column integration_oauth_clients.space_id text not null
+column integration_oauth_clients.token_endpoint_auth_method text
+column integration_oauth_clients.updated_at timestamp with time zone not null default now()
+column integration_org_defaults.connection_id uuid not null
+column integration_org_defaults.created_at timestamp with time zone not null default now()
+column integration_org_defaults.created_by text
+column integration_org_defaults.enforce boolean not null default false
+column integration_org_defaults.id uuid not null default gen_random_uuid()
+column integration_org_defaults.integration_package_id text not null
+column integration_org_defaults.space_id text not null
+column integration_org_defaults.updated_at timestamp with time zone not null default now()
+column integration_pins.connection_id uuid not null
+column integration_pins.created_at timestamp with time zone not null default now()
+column integration_pins.created_by text
+column integration_pins.id uuid not null default gen_random_uuid()
+column integration_pins.integration_package_id text not null
+column integration_pins.package_id text not null
+column integration_pins.space_id text not null
+column integration_pins.updated_at timestamp with time zone not null default now()
+column integration_pins.user_id text
+column jwks.alg text
+column jwks.created_at timestamp with time zone not null default now()
+column jwks.crv text
+column jwks.expires_at timestamp with time zone
+column jwks.id text not null
+column jwks.private_key text not null
+column jwks.public_key text not null
+column llm_usage.api text
+column llm_usage.api_key_id text
+column llm_usage.cache_read_tokens integer
+column llm_usage.cache_write_tokens integer
+column llm_usage.chat_session_id text
+column llm_usage.cost_usd double precision not null default 0
+column llm_usage.created_at timestamp with time zone not null default now()
+column llm_usage.credential_source credential_source
+column llm_usage.duration_ms integer
+column llm_usage.id integer not null default nextval('llm_usage_id_seq'::regclass)
+column llm_usage.input_tokens integer not null default 0
+column llm_usage.model text
+column llm_usage.org_id uuid not null
+column llm_usage.output_tokens integer not null default 0
+column llm_usage.pricing_status text
+column llm_usage.real_model text
+column llm_usage.request_id text
+column llm_usage.run_id text
+column llm_usage.source llm_usage_source not null
+column llm_usage.user_id text
+column model_provider_credentials.available_model_ids jsonb
+column model_provider_credentials.base_url_override text
+column model_provider_credentials.created_at timestamp with time zone not null default now()
+column model_provider_credentials.created_by text
+column model_provider_credentials.credentials_encrypted text not null
+column model_provider_credentials.expires_at timestamp with time zone
+column model_provider_credentials.id uuid not null default gen_random_uuid()
+column model_provider_credentials.label text not null
+column model_provider_credentials.org_id uuid not null
+column model_provider_credentials.provider_id text not null
+column model_provider_credentials.refresh_failure_count integer not null default 0
+column model_provider_credentials.updated_at timestamp with time zone not null default now()
+column model_provider_pairings.consumed_at timestamp with time zone
+column model_provider_pairings.created_at timestamp with time zone not null default now()
+column model_provider_pairings.credential_id uuid
+column model_provider_pairings.expires_at timestamp with time zone not null
+column model_provider_pairings.id text not null
+column model_provider_pairings.org_id uuid not null
+column model_provider_pairings.provider_id text not null
+column model_provider_pairings.reconnect_credential_id uuid
+column model_provider_pairings.token_hash text not null
+column model_provider_pairings.user_id text not null
+column notifications.created_at timestamp with time zone not null default now()
+column notifications.id uuid not null default gen_random_uuid()
+column notifications.org_id uuid not null
+column notifications.payload jsonb
+column notifications.read_at timestamp with time zone
+column notifications.recipient_id text not null
+column notifications.recipient_type text not null
+column notifications.run_id text
+column notifications.space_id text not null
+column notifications.type text not null
+column oauth_access_tokens.authorization_code_id text
+column oauth_access_tokens.client_id text not null
+column oauth_access_tokens.confirmation jsonb
+column oauth_access_tokens.created_at timestamp with time zone default now()
+column oauth_access_tokens.expires_at timestamp with time zone
+column oauth_access_tokens.id text not null
+column oauth_access_tokens.reference_id text
+column oauth_access_tokens.refresh_id text
+column oauth_access_tokens.requested_user_info_claims text[]
+column oauth_access_tokens.resources text[]
+column oauth_access_tokens.revoked timestamp with time zone
+column oauth_access_tokens.scopes text[] not null
+column oauth_access_tokens.session_id text
+column oauth_access_tokens.token text
+column oauth_access_tokens.user_id text
+column oauth_client_assertions.expires_at timestamp with time zone not null
+column oauth_client_assertions.id text not null
+column oauth_client_resources.client_id text not null
+column oauth_client_resources.created_at timestamp with time zone default now()
+column oauth_client_resources.id text not null
+column oauth_client_resources.metadata jsonb
+column oauth_client_resources.resource_id text not null
+column oauth_clients.allow_signup boolean not null default false
+column oauth_clients.application_type text
+column oauth_clients.backchannel_logout_session_required boolean
+column oauth_clients.backchannel_logout_uri text
+column oauth_clients.client_credentials_scopes text[] default '{}'::text[]
+column oauth_clients.client_discovery_id text
+column oauth_clients.client_id text not null
+column oauth_clients.client_secret text
+column oauth_clients.contacts text[]
+column oauth_clients.created_at timestamp with time zone default now()
+column oauth_clients.disabled boolean default false
+column oauth_clients.dpop_bound_access_tokens boolean default false
+column oauth_clients.enable_end_session boolean
+column oauth_clients.expires_at timestamp with time zone
+column oauth_clients.grant_types text[]
+column oauth_clients.icon text
+column oauth_clients.id text not null
+column oauth_clients.is_first_party boolean default false
+column oauth_clients.jwks text
+column oauth_clients.jwks_uri text
+column oauth_clients.level text not null default 'instance'::text
+column oauth_clients.metadata text
+column oauth_clients.name text
+column oauth_clients.policy text
+column oauth_clients.post_logout_redirect_uris text[]
+column oauth_clients.redirect_uris text[] not null
+column oauth_clients.reference_id text
+column oauth_clients.referenced_org_id uuid
+column oauth_clients.referenced_space_id text
+column oauth_clients.require_pkce boolean
+column oauth_clients.response_types text[]
+column oauth_clients.scopes text[] default '{}'::text[]
+column oauth_clients.self_service boolean not null default false
+column oauth_clients.signup_role text not null default 'member'::text
+column oauth_clients.signup_space_assignments jsonb not null default '[]'::jsonb
+column oauth_clients.software_id text
+column oauth_clients.software_statement text
+column oauth_clients.software_version text
+column oauth_clients.subject_type text
+column oauth_clients.token_endpoint_auth_method text
+column oauth_clients.tos text
+column oauth_clients.updated_at timestamp with time zone default now()
+column oauth_clients.uri text
+column oauth_clients.user_id text
+column oauth_consents.client_id text not null
+column oauth_consents.created_at timestamp with time zone default now()
+column oauth_consents.id text not null
+column oauth_consents.reference_id text
+column oauth_consents.requested_user_info_claims text[]
+column oauth_consents.resources text[]
+column oauth_consents.scopes text[] not null
+column oauth_consents.updated_at timestamp with time zone default now()
+column oauth_consents.user_id text
+column oauth_refresh_tokens.auth_time timestamp with time zone
+column oauth_refresh_tokens.authorization_code_id text
+column oauth_refresh_tokens.client_id text not null
+column oauth_refresh_tokens.confirmation jsonb
+column oauth_refresh_tokens.created_at timestamp with time zone default now()
+column oauth_refresh_tokens.expires_at timestamp with time zone
+column oauth_refresh_tokens.id text not null
+column oauth_refresh_tokens.reference_id text
+column oauth_refresh_tokens.requested_user_info_claims text[]
+column oauth_refresh_tokens.resources text[]
+column oauth_refresh_tokens.revoked timestamp with time zone
+column oauth_refresh_tokens.rotated_at timestamp with time zone
+column oauth_refresh_tokens.rotation_replay_expires_at timestamp with time zone
+column oauth_refresh_tokens.rotation_replay_response text
+column oauth_refresh_tokens.scopes text[] not null
+column oauth_refresh_tokens.session_id text
+column oauth_refresh_tokens.token text not null
+column oauth_refresh_tokens.user_id text not null
+column oauth_resources.access_token_ttl integer
+column oauth_resources.allowed_scopes text[]
+column oauth_resources.created_at timestamp with time zone default now()
+column oauth_resources.custom_claims jsonb
+column oauth_resources.disabled boolean default false
+column oauth_resources.dpop_bound_access_tokens_required boolean default false
+column oauth_resources.id text not null
+column oauth_resources.identifier text not null
+column oauth_resources.metadata jsonb
+column oauth_resources.name text not null
+column oauth_resources.policy_version integer default 1
+column oauth_resources.refresh_token_ttl integer
+column oauth_resources.signing_algorithm text
+column oauth_resources.signing_key_id text
+column oauth_resources.updated_at timestamp with time zone default now()
+column oidc_end_user_profiles.auth_user_id text
+column oidc_end_user_profiles.created_at timestamp with time zone not null default now()
+column oidc_end_user_profiles.email_verified boolean not null default false
+column oidc_end_user_profiles.end_user_id text not null
+column oidc_end_user_profiles.status text not null default 'active'::text
+column oidc_end_user_profiles.updated_at timestamp with time zone not null default now()
+column org_invitations.created_at timestamp with time zone not null default now()
+column org_invitations.email text not null
+column org_invitations.expires_at timestamp with time zone not null
+column org_invitations.id text not null
+column org_invitations.invited_by text
+column org_invitations.org_id uuid not null
+column org_invitations.role org_role not null
+column org_invitations.space_assignments jsonb not null default '[]'::jsonb
+column org_invitations.status invitation_status not null default 'pending'::invitation_status
+column org_invitations.token text not null
+column org_members.joined_at timestamp with time zone not null default now()
+column org_members.org_id uuid not null
+column org_members.role org_role not null
+column org_members.user_id text not null
+column org_models.aliased boolean not null default false
+column org_models.context_window integer
+column org_models.cost jsonb
+column org_models.created_at timestamp with time zone not null default now()
+column org_models.created_by text
+column org_models.credential_id uuid not null
+column org_models.enabled boolean not null default true
+column org_models.id uuid not null default gen_random_uuid()
+column org_models.input jsonb
+column org_models.label text not null
+column org_models.max_tokens integer
+column org_models.model_id text not null
+column org_models.org_id uuid not null
+column org_models.reasoning boolean
+column org_models.source text not null default 'custom'::text
+column org_models.updated_at timestamp with time zone not null default now()
+column org_proxies.created_at timestamp with time zone not null default now()
+column org_proxies.created_by text
+column org_proxies.enabled boolean not null default true
+column org_proxies.id uuid not null default gen_random_uuid()
+column org_proxies.label text not null
+column org_proxies.org_id uuid not null
+column org_proxies.source text not null default 'custom'::text
+column org_proxies.updated_at timestamp with time zone not null default now()
+column org_proxies.url_encrypted text not null
+column organizations.created_at timestamp with time zone not null default now()
+column organizations.created_by text
+column organizations.default_model_id text
+column organizations.default_proxy_id text
+column organizations.deleting_at timestamp with time zone
+column organizations.files_bytes_limit bigint
+column organizations.files_bytes_used bigint not null default 0
+column organizations.id uuid not null default gen_random_uuid()
+column organizations.name text not null
+column organizations.org_settings jsonb not null default '{}'::jsonb
+column organizations.slug text not null
+column organizations.updated_at timestamp with time zone not null default now()
+column package_dist_tags.package_id text not null
+column package_dist_tags.tag text not null
+column package_dist_tags.updated_at timestamp with time zone not null default now()
+column package_dist_tags.version_id integer not null
+column package_persistence.actor_id text
+column package_persistence.actor_type text not null
+column package_persistence.content jsonb not null
+column package_persistence.created_at timestamp with time zone not null default now()
+column package_persistence.id integer not null default nextval('package_persistence_id_seq'::regclass)
+column package_persistence.key text
+column package_persistence.org_id uuid not null
+column package_persistence.package_id text not null
+column package_persistence.pinned boolean not null default false
+column package_persistence.run_id text
+column package_persistence.space_id text not null
+column package_persistence.updated_at timestamp with time zone not null default now()
+column package_schedules.connection_overrides jsonb
+column package_schedules.created_at timestamp with time zone not null default now()
+column package_schedules.cron_expression text not null
+column package_schedules.dependency_overrides jsonb
+column package_schedules.enabled boolean not null default true
+column package_schedules.end_user_id text
+column package_schedules.generation_config_override jsonb
+column package_schedules.id text not null
+column package_schedules.input jsonb
+column package_schedules.last_run_at timestamp with time zone
+column package_schedules.model_id_override text
+column package_schedules.name text
+column package_schedules.next_run_at timestamp with time zone
+column package_schedules.org_id uuid not null
+column package_schedules.package_id text not null
+column package_schedules.proxy_id_override text
+column package_schedules.space_id text not null
+column package_schedules.timezone text not null default 'UTC'::text
+column package_schedules.updated_at timestamp with time zone not null default now()
+column package_schedules.user_id text
+column package_schedules.version_override text
+column package_shares.created_at timestamp with time zone not null default now()
+column package_shares.package_id text not null
+column package_shares.shared_by text
+column package_shares.space_id text not null
+column package_version_dependencies.dep_name text not null
+column package_version_dependencies.dep_scope text not null
+column package_version_dependencies.dep_type package_type not null
+column package_version_dependencies.id integer not null default nextval('package_version_dependencies_id_seq'::regclass)
+column package_version_dependencies.version_id integer not null
+column package_version_dependencies.version_range text not null
+column package_versions.artifact_size integer not null
+column package_versions.created_at timestamp with time zone not null default now()
+column package_versions.created_by text
+column package_versions.id integer not null default nextval('package_versions_id_seq'::regclass)
+column package_versions.integrity text not null
+column package_versions.manifest jsonb not null
+column package_versions.package_id text not null
+column package_versions.version text not null
+column package_versions.yanked boolean not null default false
+column package_versions.yanked_reason text
+column packages.auto_installed boolean not null default false
+column packages.created_at timestamp with time zone not null default now()
+column packages.created_by text
+column packages.draft_content text
+column packages.draft_manifest jsonb
+column packages.ephemeral boolean not null default false
+column packages.forked_from text
+column packages.home_space_id text
+column packages.id text not null
+column packages.lock_version integer not null default 1
+column packages.org_id uuid
+column packages.source package_source not null default 'local'::package_source
+column packages.type package_type not null
+column packages.updated_at timestamp with time zone not null default now()
+column profiles.created_at timestamp with time zone not null default now()
+column profiles.display_name text
+column profiles.id text not null
+column profiles.language text not null
+column profiles.updated_at timestamp with time zone not null default now()
+column run_logs.created_at timestamp with time zone not null default now()
+column run_logs.data jsonb
+column run_logs.event text
+column run_logs.id integer not null default nextval('run_logs_id_seq'::regclass)
+column run_logs.level text not null default 'debug'::text
+column run_logs.message text
+column run_logs.org_id uuid not null
+column run_logs.run_id text not null
+column run_logs.type text not null default 'progress'::text
+column runs.agent_name text
+column runs.agent_scope text
+column runs.api_key_id text
+column runs.artifacts jsonb
+column runs.boot_deadline_at timestamp with time zone
+column runs.chat_session_id text
+column runs.checkpoint jsonb
+column runs.completed_at timestamp with time zone
+column runs.connection_overrides jsonb
+column runs.context_snapshot jsonb
+column runs.cost double precision
+column runs.cost_pricing_status text
+column runs.dependency_overrides jsonb
+column runs.duration integer
+column runs.end_user_id text
+column runs.error text
+column runs.generation_config jsonb
+column runs.generation_config_override jsonb
+column runs.id text not null
+column runs.input jsonb
+column runs.last_event_sequence integer not null default 0
+column runs.last_heartbeat_at timestamp with time zone not null default now()
+column runs.metadata jsonb
+column runs.model_cost jsonb
+column runs.model_credential_id uuid
+column runs.model_label text
+column runs.model_source text
+column runs.org_id uuid not null
+column runs.package_id text
+column runs.proxy_label text
+column runs.resolved_connections jsonb
+column runs.resolved_integration_versions jsonb
+column runs.result jsonb
+column runs.run_number integer
+column runs.run_origin run_origin not null default 'platform'::run_origin
+column runs.runner_kind text
+column runs.runner_name text
+column runs.schedule_id text
+column runs.sink_closed_at timestamp with time zone
+column runs.sink_expires_at timestamp with time zone
+column runs.sink_secret_encrypted text
+column runs.space_id text not null
+column runs.started_at timestamp with time zone not null default now()
+column runs.status run_status not null default 'pending'::run_status
+column runs.token_usage jsonb
+column runs.user_id text
+column runs.version_label text
+column runs.version_ref text not null default 'draft'::text
+column session.created_at timestamp with time zone not null default now()
+column session.expires_at timestamp with time zone not null
+column session.id text not null
+column session.ip_address text
+column session.realm text not null default 'platform'::text
+column session.token text not null
+column session.updated_at timestamp with time zone not null default now()
+column session.user_agent text
+column session.user_id text not null
+column space_members.added_by text
+column space_members.created_at timestamp with time zone not null default now()
+column space_members.custom_role_id text
+column space_members.preset_role text
+column space_members.space_id text not null
+column space_members.user_id text not null
+column space_packages.block_user_connections boolean not null default false
+column space_packages.enabled boolean not null default true
+column space_packages.generation_config jsonb
+column space_packages.input_settings jsonb not null default '{"locked": [], "values": {}}'::jsonb
+column space_packages.installed_at timestamp with time zone not null default now()
+column space_packages.model_id text
+column space_packages.package_id text not null
+column space_packages.proxy_id text
+column space_packages.space_id text not null
+column space_packages.updated_at timestamp with time zone not null default now()
+column space_roles.created_at timestamp with time zone not null default now()
+column space_roles.created_by text
+column space_roles.description text
+column space_roles.id text not null
+column space_roles.key text not null
+column space_roles.name text not null
+column space_roles.org_id uuid not null
+column space_roles.permissions text[] not null default '{}'::text[]
+column space_roles.updated_at timestamp with time zone not null default now()
+column space_smtp_configs.created_at timestamp with time zone not null default now()
+column space_smtp_configs.from_address text not null
+column space_smtp_configs.from_name text
+column space_smtp_configs.host text not null
+column space_smtp_configs.pass_encrypted text not null
+column space_smtp_configs.port integer not null
+column space_smtp_configs.secure_mode text not null default 'auto'::text
+column space_smtp_configs.space_id text not null
+column space_smtp_configs.updated_at timestamp with time zone not null default now()
+column space_smtp_configs.username text not null
+column space_social_providers.client_id text not null
+column space_social_providers.client_secret_encrypted text not null
+column space_social_providers.created_at timestamp with time zone not null default now()
+column space_social_providers.provider text not null
+column space_social_providers.scopes text[]
+column space_social_providers.space_id text not null
+column space_social_providers.updated_at timestamp with time zone not null default now()
+column spaces.created_at timestamp with time zone not null default now()
+column spaces.created_by text
+column spaces.default_role text not null default 'operator'::text
+column spaces.id text not null
+column spaces.is_default boolean not null default false
+column spaces.name text not null
+column spaces.org_id uuid not null
+column spaces.orphaned_at timestamp with time zone
+column spaces.owner_user_id text
+column spaces.settings jsonb not null default '{}'::jsonb
+column spaces.updated_at timestamp with time zone not null default now()
+column spaces.visibility text not null default 'open'::text
+column storage_deletion_jobs.attempts integer not null default 0
+column storage_deletion_jobs.bucket text not null
+column storage_deletion_jobs.completed_at timestamp with time zone
+column storage_deletion_jobs.created_at timestamp with time zone not null default now()
+column storage_deletion_jobs.id text not null
+column storage_deletion_jobs.last_error text
+column storage_deletion_jobs.next_attempt_at timestamp with time zone not null default now()
+column storage_deletion_jobs.reason text not null
+column storage_deletion_jobs.storage_key text not null
+column uploads.consumed_at timestamp with time zone
+column uploads.created_at timestamp with time zone not null default now()
+column uploads.created_by text
+column uploads.end_user_id text
+column uploads.expires_at timestamp with time zone not null
+column uploads.id text not null
+column uploads.mime text not null
+column uploads.name text not null
+column uploads.org_id uuid not null
+column uploads.sha256 text
+column uploads.size bigint not null
+column uploads.space_id text not null
+column uploads.storage_key text not null
+column user.created_at timestamp with time zone not null default now()
+column user.email text not null
+column user.email_verified boolean not null default false
+column user.id text not null
+column user.image text
+column user.name text not null
+column user.realm text not null default 'platform'::text
+column user.updated_at timestamp with time zone not null default now()
+column verification.created_at timestamp with time zone not null default now()
+column verification.expires_at timestamp with time zone not null
+column verification.id text not null
+column verification.identifier text not null
+column verification.updated_at timestamp with time zone not null default now()
+column verification.value text not null
+column webhook_deliveries.attempt integer not null default 1
+column webhook_deliveries.created_at timestamp with time zone not null default now()
+column webhook_deliveries.error text
+column webhook_deliveries.event_id text not null
+column webhook_deliveries.event_type text not null
+column webhook_deliveries.id uuid not null default gen_random_uuid()
+column webhook_deliveries.latency integer
+column webhook_deliveries.status text not null default 'pending'::text
+column webhook_deliveries.status_code integer
+column webhook_deliveries.webhook_id text not null
+column webhooks.created_at timestamp with time zone not null default now()
+column webhooks.enabled boolean not null default true
+column webhooks.events text[] not null
+column webhooks.id text not null
+column webhooks.level text not null
+column webhooks.org_id uuid not null
+column webhooks.package_id text
+column webhooks.payload_mode text not null default 'full'::text
+column webhooks.secret text not null
+column webhooks.secret_next text
+column webhooks.secret_next_expires_at timestamp with time zone
+column webhooks.space_id text
+column webhooks.updated_at timestamp with time zone not null default now()
+column webhooks.url text not null
+constraint account account_pkey PRIMARY KEY (id)
+constraint account account_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint api_keys api_keys_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
+constraint api_keys api_keys_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint api_keys api_keys_pkey PRIMARY KEY (id)
+constraint api_keys api_keys_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint audit_events audit_events_pkey PRIMARY KEY (id)
+constraint chat_messages chat_messages_pkey PRIMARY KEY (seq)
+constraint chat_messages chat_messages_session_id_chat_sessions_id_fk FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+constraint chat_messages uq_chat_messages_session_message UNIQUE (session_id, message_id)
+constraint chat_sessions chat_sessions_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint chat_sessions chat_sessions_pkey PRIMARY KEY (id)
+constraint chat_sessions chat_sessions_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint chat_sessions chat_sessions_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint cli_refresh_tokens cli_refresh_tokens_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
+constraint cli_refresh_tokens cli_refresh_tokens_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES cli_refresh_tokens(id) ON DELETE SET NULL
+constraint cli_refresh_tokens cli_refresh_tokens_pkey PRIMARY KEY (id)
+constraint cli_refresh_tokens cli_refresh_tokens_token_hash_unique UNIQUE (token_hash)
+constraint cli_refresh_tokens cli_refresh_tokens_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint device_codes device_codes_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
+constraint device_codes device_codes_device_code_unique UNIQUE (device_code)
+constraint device_codes device_codes_pkey PRIMARY KEY (id)
+constraint device_codes device_codes_user_code_unique UNIQUE (user_code)
+constraint device_codes device_codes_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint end_users end_users_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint end_users end_users_pkey PRIMARY KEY (id)
+constraint end_users end_users_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint file_links file_links_consumer_run_id_org_id_fk FOREIGN KEY (consumer_run_id, org_id) REFERENCES runs(id, org_id) ON DELETE CASCADE
+constraint file_links file_links_consumer_run_id_runs_id_fk FOREIGN KEY (consumer_run_id) REFERENCES runs(id) ON DELETE CASCADE
+constraint file_links file_links_file_id_consumer_run_id_pk PRIMARY KEY (file_id, consumer_run_id)
+constraint file_links file_links_file_id_files_id_fk FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+constraint file_links file_links_file_id_org_id_fk FOREIGN KEY (file_id, org_id) REFERENCES files(id, org_id) ON DELETE CASCADE
+constraint files chk_files_single_container CHECK ((NOT ((run_id IS NOT NULL) AND (chat_session_id IS NOT NULL))))
+constraint files files_chat_session_id_chat_sessions_id_fk FOREIGN KEY (chat_session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+constraint files files_chat_session_id_org_id_fk FOREIGN KEY (chat_session_id, org_id) REFERENCES chat_sessions(id, org_id) ON DELETE CASCADE
+constraint files files_end_user_id_end_users_id_fk FOREIGN KEY (end_user_id) REFERENCES end_users(id) ON DELETE CASCADE
+constraint files files_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint files files_pkey PRIMARY KEY (id)
+constraint files files_run_id_org_id_fk FOREIGN KEY (run_id, org_id) REFERENCES runs(id, org_id) ON DELETE CASCADE
+constraint files files_run_id_runs_id_fk FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+constraint files files_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint files files_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE SET NULL
+constraint integration_connections integration_conn_exactly_one_owner CHECK ((((user_id IS NOT NULL) AND (end_user_id IS NULL)) OR ((user_id IS NULL) AND (end_user_id IS NOT NULL))))
+constraint integration_connections integration_connections_auth_key_valid CHECK ((auth_key ~ '^[a-z][a-z0-9_]*$'::text))
+constraint integration_connections integration_connections_end_user_id_end_users_id_fk FOREIGN KEY (end_user_id) REFERENCES end_users(id) ON DELETE CASCADE
+constraint integration_connections integration_connections_integration_package_id_packages_id_fk FOREIGN KEY (integration_package_id) REFERENCES packages(id) ON DELETE CASCADE
+constraint integration_connections integration_connections_pkey PRIMARY KEY (id)
+constraint integration_connections integration_connections_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint integration_connections integration_connections_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint integration_oauth_clients integration_oauth_clients_integration_package_id_packages_id_fk FOREIGN KEY (integration_package_id) REFERENCES packages(id) ON DELETE CASCADE
+constraint integration_oauth_clients integration_oauth_clients_pkey PRIMARY KEY (id)
+constraint integration_oauth_clients integration_oauth_clients_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint integration_oauth_clients ioc_auth_method_values CHECK (((token_endpoint_auth_method IS NULL) OR (token_endpoint_auth_method = ANY (ARRAY['client_secret_post'::text, 'client_secret_basic'::text, 'none'::text]))))
+constraint integration_oauth_clients ioc_public_iff_no_secret CHECK ((((token_endpoint_auth_method = 'none'::text) AND (client_secret_encrypted = ''::text)) OR ((token_endpoint_auth_method IS DISTINCT FROM 'none'::text) AND (client_secret_encrypted <> ''::text))))
+constraint integration_org_defaults integration_org_defaults_connection_id_fk FOREIGN KEY (connection_id) REFERENCES integration_connections(id) ON DELETE CASCADE
+constraint integration_org_defaults integration_org_defaults_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
+constraint integration_org_defaults integration_org_defaults_integration_package_id_packages_id_fk FOREIGN KEY (integration_package_id) REFERENCES packages(id) ON DELETE CASCADE
+constraint integration_org_defaults integration_org_defaults_pkey PRIMARY KEY (id)
+constraint integration_org_defaults integration_org_defaults_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint integration_pins integration_pins_connection_id_integration_connections_id_fk FOREIGN KEY (connection_id) REFERENCES integration_connections(id) ON DELETE CASCADE
+constraint integration_pins integration_pins_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
+constraint integration_pins integration_pins_integration_package_id_packages_id_fk FOREIGN KEY (integration_package_id) REFERENCES packages(id) ON DELETE CASCADE
+constraint integration_pins integration_pins_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
+constraint integration_pins integration_pins_pkey PRIMARY KEY (id)
+constraint integration_pins integration_pins_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint integration_pins integration_pins_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint jwks jwks_pkey PRIMARY KEY (id)
+constraint llm_usage llm_usage_api_key_id_api_keys_id_fk FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE SET NULL
+constraint llm_usage llm_usage_chat_session_id_chat_sessions_id_fk FOREIGN KEY (chat_session_id) REFERENCES chat_sessions(id) ON DELETE SET NULL
+constraint llm_usage llm_usage_chat_session_id_org_id_fk FOREIGN KEY (chat_session_id, org_id) REFERENCES chat_sessions(id, org_id) ON DELETE SET NULL (chat_session_id)
+constraint llm_usage llm_usage_context_single CHECK (((run_id IS NULL) OR (chat_session_id IS NULL)))
+constraint llm_usage llm_usage_cost_usd_non_negative CHECK ((cost_usd >= (0)::double precision))
+constraint llm_usage llm_usage_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint llm_usage llm_usage_pkey PRIMARY KEY (id)
+constraint llm_usage llm_usage_pricing_status_valid CHECK ((pricing_status = ANY (ARRAY['priced'::text, 'partial'::text, 'unpriced'::text])))
+constraint llm_usage llm_usage_principal_single CHECK (((api_key_id IS NULL) OR (user_id IS NULL)))
+constraint llm_usage llm_usage_proxy_has_request_id CHECK (((source <> 'proxy'::llm_usage_source) OR (request_id IS NOT NULL)))
+constraint llm_usage llm_usage_run_id_org_id_fk FOREIGN KEY (run_id, org_id) REFERENCES runs(id, org_id) ON DELETE SET NULL (run_id)
+constraint llm_usage llm_usage_run_id_runs_id_fk FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE SET NULL
+constraint llm_usage llm_usage_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE SET NULL
+constraint model_provider_credentials model_provider_credentials_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
+constraint model_provider_credentials model_provider_credentials_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint model_provider_credentials model_provider_credentials_pkey PRIMARY KEY (id)
+constraint model_provider_pairings model_provider_pairings_credential_id_fk FOREIGN KEY (credential_id) REFERENCES model_provider_credentials(id) ON DELETE SET NULL
+constraint model_provider_pairings model_provider_pairings_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint model_provider_pairings model_provider_pairings_pkey PRIMARY KEY (id)
+constraint model_provider_pairings model_provider_pairings_token_hash_unique UNIQUE (token_hash)
+constraint model_provider_pairings model_provider_pairings_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint notifications notifications_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint notifications notifications_pkey PRIMARY KEY (id)
+constraint notifications notifications_recipient_type_valid CHECK ((recipient_type = ANY (ARRAY['user'::text, 'end_user'::text])))
+constraint notifications notifications_run_id_runs_id_fk FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+constraint notifications notifications_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint oauth_access_tokens oauth_access_tokens_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
+constraint oauth_access_tokens oauth_access_tokens_pkey PRIMARY KEY (id)
+constraint oauth_access_tokens oauth_access_tokens_refresh_id_oauth_refresh_tokens_id_fk FOREIGN KEY (refresh_id) REFERENCES oauth_refresh_tokens(id) ON DELETE CASCADE
+constraint oauth_access_tokens oauth_access_tokens_session_id_session_id_fk FOREIGN KEY (session_id) REFERENCES session(id) ON DELETE SET NULL
+constraint oauth_access_tokens oauth_access_tokens_token_unique UNIQUE (token)
+constraint oauth_access_tokens oauth_access_tokens_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint oauth_client_assertions oauth_client_assertions_pkey PRIMARY KEY (id)
+constraint oauth_client_resources oauth_client_resources_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
+constraint oauth_client_resources oauth_client_resources_pkey PRIMARY KEY (id)
+constraint oauth_client_resources oauth_client_resources_resource_id_fk FOREIGN KEY (resource_id) REFERENCES oauth_resources(identifier) ON DELETE CASCADE
+constraint oauth_clients oauth_clients_client_id_unique UNIQUE (client_id)
+constraint oauth_clients oauth_clients_level_check CHECK ((((level = 'org'::text) AND (referenced_org_id IS NOT NULL) AND (referenced_space_id IS NULL)) OR ((level = 'space'::text) AND (referenced_space_id IS NOT NULL) AND (referenced_org_id IS NULL)) OR ((level = 'instance'::text) AND (referenced_org_id IS NULL) AND (referenced_space_id IS NULL))))
+constraint oauth_clients oauth_clients_pkey PRIMARY KEY (id)
+constraint oauth_clients oauth_clients_referenced_org_id_organizations_id_fk FOREIGN KEY (referenced_org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint oauth_clients oauth_clients_referenced_space_id_spaces_id_fk FOREIGN KEY (referenced_space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint oauth_clients oauth_clients_signup_role_check CHECK ((signup_role = ANY (ARRAY['admin'::text, 'member'::text, 'guest'::text])))
+constraint oauth_clients oauth_clients_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint oauth_consents oauth_consents_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
+constraint oauth_consents oauth_consents_pkey PRIMARY KEY (id)
+constraint oauth_consents oauth_consents_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint oauth_refresh_tokens oauth_refresh_tokens_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
+constraint oauth_refresh_tokens oauth_refresh_tokens_pkey PRIMARY KEY (id)
+constraint oauth_refresh_tokens oauth_refresh_tokens_session_id_session_id_fk FOREIGN KEY (session_id) REFERENCES session(id) ON DELETE SET NULL
+constraint oauth_refresh_tokens oauth_refresh_tokens_token_unique UNIQUE (token)
+constraint oauth_refresh_tokens oauth_refresh_tokens_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint oauth_resources oauth_resources_identifier_unique UNIQUE (identifier)
+constraint oauth_resources oauth_resources_pkey PRIMARY KEY (id)
+constraint oidc_end_user_profiles oidc_end_user_profiles_auth_user_id_user_id_fk FOREIGN KEY (auth_user_id) REFERENCES "user"(id) ON DELETE SET NULL
+constraint oidc_end_user_profiles oidc_end_user_profiles_end_user_id_end_users_id_fk FOREIGN KEY (end_user_id) REFERENCES end_users(id) ON DELETE CASCADE
+constraint oidc_end_user_profiles oidc_end_user_profiles_pkey PRIMARY KEY (end_user_id)
+constraint oidc_end_user_profiles oidc_end_user_profiles_status_valid CHECK ((status = ANY (ARRAY['active'::text, 'suspended'::text])))
+constraint org_invitations org_invitations_invited_by_user_id_fk FOREIGN KEY (invited_by) REFERENCES "user"(id) ON DELETE SET NULL
+constraint org_invitations org_invitations_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint org_invitations org_invitations_pkey PRIMARY KEY (id)
+constraint org_invitations org_invitations_token_unique UNIQUE (token)
+constraint org_members org_members_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint org_members org_members_org_id_user_id_pk PRIMARY KEY (org_id, user_id)
+constraint org_members org_members_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint org_models org_models_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
+constraint org_models org_models_credential_id_model_provider_credentials_id_fk FOREIGN KEY (credential_id) REFERENCES model_provider_credentials(id) ON DELETE RESTRICT
+constraint org_models org_models_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint org_models org_models_pkey PRIMARY KEY (id)
+constraint org_models org_models_source_valid CHECK ((source = ANY (ARRAY['built-in'::text, 'custom'::text])))
+constraint org_proxies org_proxies_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
+constraint org_proxies org_proxies_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint org_proxies org_proxies_pkey PRIMARY KEY (id)
+constraint org_proxies org_proxies_source_valid CHECK ((source = ANY (ARRAY['built-in'::text, 'custom'::text])))
+constraint organizations organizations_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
+constraint organizations organizations_pkey PRIMARY KEY (id)
+constraint organizations organizations_slug_unique UNIQUE (slug)
+constraint package_dist_tags package_dist_tags_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
+constraint package_dist_tags package_dist_tags_package_id_tag_pk PRIMARY KEY (package_id, tag)
+constraint package_dist_tags package_dist_tags_version_id_package_versions_id_fk FOREIGN KEY (version_id) REFERENCES package_versions(id) ON DELETE CASCADE
+constraint package_persistence package_persistence_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint package_persistence package_persistence_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
+constraint package_persistence package_persistence_pkey PRIMARY KEY (id)
+constraint package_persistence package_persistence_run_id_runs_id_fk FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE SET NULL
+constraint package_persistence package_persistence_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint package_persistence pkp_actor_id_shape CHECK ((((actor_type = 'shared'::text) AND (actor_id IS NULL)) OR ((actor_type <> 'shared'::text) AND (actor_id IS NOT NULL))))
+constraint package_persistence pkp_actor_type_valid CHECK ((actor_type = ANY (ARRAY['user'::text, 'end_user'::text, 'shared'::text])))
+constraint package_schedules package_schedules_end_user_id_end_users_id_fk FOREIGN KEY (end_user_id) REFERENCES end_users(id) ON DELETE CASCADE
+constraint package_schedules package_schedules_exactly_one_actor CHECK (((user_id IS NOT NULL) <> (end_user_id IS NOT NULL)))
+constraint package_schedules package_schedules_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint package_schedules package_schedules_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
+constraint package_schedules package_schedules_pkey PRIMARY KEY (id)
+constraint package_schedules package_schedules_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint package_schedules package_schedules_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint package_shares package_shares_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
+constraint package_shares package_shares_package_id_space_id_pk PRIMARY KEY (package_id, space_id)
+constraint package_shares package_shares_shared_by_user_id_fk FOREIGN KEY (shared_by) REFERENCES "user"(id) ON DELETE SET NULL
+constraint package_shares package_shares_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint package_version_dependencies package_version_dependencies_pkey PRIMARY KEY (id)
+constraint package_version_dependencies package_version_dependencies_version_id_package_versions_id_fk FOREIGN KEY (version_id) REFERENCES package_versions(id) ON DELETE CASCADE
+constraint package_versions package_versions_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
+constraint package_versions package_versions_manifest_v0 CHECK (((manifest IS NULL) OR ((manifest ->> 'schema_version'::text) IS NULL) OR ((manifest ->> 'schema_version'::text) ~~ '0.%'::text)))
+constraint package_versions package_versions_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
+constraint package_versions package_versions_pkey PRIMARY KEY (id)
+constraint packages packages_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
+constraint packages packages_draft_manifest_v0 CHECK (((draft_manifest IS NULL) OR ((draft_manifest ->> 'schema_version'::text) IS NULL) OR ((draft_manifest ->> 'schema_version'::text) ~~ '0.%'::text)))
+constraint packages packages_home_space_id_spaces_id_fk FOREIGN KEY (home_space_id) REFERENCES spaces(id) ON DELETE RESTRICT
+constraint packages packages_id_format CHECK ((id ~ '^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$'::text))
+constraint packages packages_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint packages packages_org_package_has_home CHECK (((org_id IS NULL) OR ephemeral OR (home_space_id IS NOT NULL)))
+constraint packages packages_pkey PRIMARY KEY (id)
+constraint profiles language_check CHECK ((language = ANY (ARRAY['fr'::text, 'en'::text])))
+constraint profiles profiles_id_user_id_fk FOREIGN KEY (id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint profiles profiles_pkey PRIMARY KEY (id)
+constraint run_logs run_logs_level_valid CHECK ((level = ANY (ARRAY['debug'::text, 'info'::text, 'warn'::text, 'error'::text])))
+constraint run_logs run_logs_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint run_logs run_logs_pkey PRIMARY KEY (id)
+constraint run_logs run_logs_run_id_runs_id_fk FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+constraint runs runs_api_key_id_api_keys_id_fk FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE SET NULL
+constraint runs runs_at_most_one_actor CHECK ((NOT ((user_id IS NOT NULL) AND (end_user_id IS NOT NULL))))
+constraint runs runs_chat_session_id_org_id_fk FOREIGN KEY (chat_session_id, org_id) REFERENCES chat_sessions(id, org_id) ON DELETE SET NULL (chat_session_id)
+constraint runs runs_cost_non_negative CHECK ((cost >= (0)::double precision))
+constraint runs runs_cost_pricing_status_valid CHECK ((cost_pricing_status = ANY (ARRAY['priced'::text, 'partial'::text, 'unpriced'::text])))
+constraint runs runs_end_user_id_end_users_id_fk FOREIGN KEY (end_user_id) REFERENCES end_users(id) ON DELETE SET NULL
+constraint runs runs_model_credential_id_model_provider_credentials_id_fk FOREIGN KEY (model_credential_id) REFERENCES model_provider_credentials(id) ON DELETE SET NULL
+constraint runs runs_open_sink_has_secret CHECK (((sink_expires_at IS NULL) OR (sink_secret_encrypted IS NOT NULL)))
+constraint runs runs_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint runs runs_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE SET NULL
+constraint runs runs_pkey PRIMARY KEY (id)
+constraint runs runs_schedule_id_package_schedules_id_fk FOREIGN KEY (schedule_id) REFERENCES package_schedules(id) ON DELETE SET NULL
+constraint runs runs_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint runs runs_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE SET NULL
+constraint session session_pkey PRIMARY KEY (id)
+constraint session session_token_unique UNIQUE (token)
+constraint session session_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint space_members space_members_added_by_user_id_fk FOREIGN KEY (added_by) REFERENCES "user"(id) ON DELETE SET NULL
+constraint space_members space_members_custom_role_id_space_roles_id_fk FOREIGN KEY (custom_role_id) REFERENCES space_roles(id) ON DELETE RESTRICT
+constraint space_members space_members_one_role CHECK ((num_nonnulls(preset_role, custom_role_id) = 1))
+constraint space_members space_members_preset_valid CHECK (((preset_role IS NULL) OR (preset_role = ANY (ARRAY['admin'::text, 'builder'::text, 'operator'::text, 'runner'::text, 'viewer'::text]))))
+constraint space_members space_members_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint space_members space_members_space_id_user_id_pk PRIMARY KEY (space_id, user_id)
+constraint space_members space_members_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint space_packages space_packages_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
+constraint space_packages space_packages_space_id_package_id_pk PRIMARY KEY (space_id, package_id)
+constraint space_packages space_packages_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint space_roles space_roles_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
+constraint space_roles space_roles_key_not_preset CHECK ((key <> ALL (ARRAY['admin'::text, 'builder'::text, 'operator'::text, 'runner'::text, 'viewer'::text])))
+constraint space_roles space_roles_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint space_roles space_roles_pkey PRIMARY KEY (id)
+constraint space_smtp_configs space_smtp_configs_pkey PRIMARY KEY (space_id)
+constraint space_smtp_configs space_smtp_configs_secure_mode_check CHECK ((secure_mode = ANY (ARRAY['auto'::text, 'tls'::text, 'starttls'::text, 'none'::text])))
+constraint space_smtp_configs space_smtp_configs_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint space_social_providers space_social_providers_provider_check CHECK ((provider = ANY (ARRAY['google'::text, 'github'::text])))
+constraint space_social_providers space_social_providers_space_id_provider_pk PRIMARY KEY (space_id, provider)
+constraint space_social_providers space_social_providers_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint spaces spaces_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
+constraint spaces spaces_default_is_open CHECK (((NOT is_default) OR (visibility = 'open'::text)))
+constraint spaces spaces_default_role_valid CHECK ((default_role = ANY (ARRAY['admin'::text, 'builder'::text, 'operator'::text, 'runner'::text, 'viewer'::text])))
+constraint spaces spaces_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint spaces spaces_orphaned_is_personal CHECK (((orphaned_at IS NULL) OR (owner_user_id IS NOT NULL)))
+constraint spaces spaces_owner_user_id_user_id_fk FOREIGN KEY (owner_user_id) REFERENCES "user"(id) ON DELETE RESTRICT
+constraint spaces spaces_personal_is_private CHECK (((owner_user_id IS NULL) OR (visibility = 'private'::text)))
+constraint spaces spaces_personal_not_default CHECK (((owner_user_id IS NULL) OR (NOT is_default)))
+constraint spaces spaces_pkey PRIMARY KEY (id)
+constraint spaces spaces_visibility_valid CHECK ((visibility = ANY (ARRAY['open'::text, 'closed'::text, 'private'::text])))
+constraint storage_deletion_jobs storage_deletion_jobs_pkey PRIMARY KEY (id)
+constraint uploads uploads_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
+constraint uploads uploads_end_user_id_end_users_id_fk FOREIGN KEY (end_user_id) REFERENCES end_users(id) ON DELETE CASCADE
+constraint uploads uploads_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint uploads uploads_pkey PRIMARY KEY (id)
+constraint uploads uploads_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint user user_email_unique UNIQUE (email)
+constraint user user_pkey PRIMARY KEY (id)
+constraint verification verification_pkey PRIMARY KEY (id)
+constraint webhook_deliveries webhook_deliveries_pkey PRIMARY KEY (id)
+constraint webhook_deliveries webhook_deliveries_status_valid CHECK ((status = ANY (ARRAY['pending'::text, 'success'::text, 'failed'::text])))
+constraint webhook_deliveries webhook_deliveries_webhook_id_webhooks_id_fk FOREIGN KEY (webhook_id) REFERENCES webhooks(id) ON DELETE CASCADE
+constraint webhooks webhooks_level_check CHECK ((((level = 'org'::text) AND (space_id IS NULL)) OR ((level = 'space'::text) AND (space_id IS NOT NULL))))
+constraint webhooks webhooks_level_values CHECK ((level = ANY (ARRAY['org'::text, 'space'::text])))
+constraint webhooks webhooks_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint webhooks webhooks_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE SET NULL
+constraint webhooks webhooks_payload_mode_valid CHECK ((payload_mode = ANY (ARRAY['full'::text, 'summary'::text])))
+constraint webhooks webhooks_pkey PRIMARY KEY (id)
+constraint webhooks webhooks_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+enum credential_source system,org
+enum file_purpose user_upload,agent_output
+enum invitation_status pending,accepted,expired,cancelled
+enum llm_usage_source proxy,runner
+enum org_role owner,admin,member,guest
+enum package_source local,system
+enum package_type agent,skill,integration,mcp-server
+enum run_origin platform,remote
+enum run_status pending,running,success,failed,timeout,cancelled
+index CREATE INDEX account_user_id_idx ON public.account USING btree (user_id)
+index CREATE INDEX idx_api_keys_created_by ON public.api_keys USING btree (created_by)
+index CREATE INDEX idx_api_keys_org_id ON public.api_keys USING btree (org_id)
+index CREATE INDEX idx_api_keys_space_id ON public.api_keys USING btree (space_id)
+index CREATE INDEX idx_audit_events_actor ON public.audit_events USING btree (actor_type, actor_id)
+index CREATE INDEX idx_audit_events_org_created ON public.audit_events USING btree (org_id, created_at)
+index CREATE INDEX idx_audit_events_resource ON public.audit_events USING btree (resource_type, resource_id)
+index CREATE INDEX idx_chat_messages_session_seq ON public.chat_messages USING btree (session_id, seq)
+index CREATE INDEX idx_chat_sessions_org_user ON public.chat_sessions USING btree (org_id, user_id)
+index CREATE INDEX idx_chat_sessions_space_user ON public.chat_sessions USING btree (space_id, user_id)
+index CREATE INDEX idx_cli_refresh_tokens_family ON public.cli_refresh_tokens USING btree (family_id)
+index CREATE INDEX idx_cli_refresh_tokens_user ON public.cli_refresh_tokens USING btree (user_id)
+index CREATE INDEX idx_end_users_org_id ON public.end_users USING btree (org_id)
+index CREATE INDEX idx_end_users_space_id ON public.end_users USING btree (space_id)
+index CREATE INDEX idx_file_links_consumer_run ON public.file_links USING btree (consumer_run_id)
+index CREATE INDEX idx_files_chat_session ON public.files USING btree (chat_session_id)
+index CREATE INDEX idx_files_end_user ON public.files USING btree (end_user_id) WHERE (end_user_id IS NOT NULL)
+index CREATE INDEX idx_files_expires ON public.files USING btree (expires_at) WHERE (expires_at IS NOT NULL)
+index CREATE INDEX idx_files_org_space_created ON public.files USING btree (org_id, space_id, created_at)
+index CREATE INDEX idx_files_run ON public.files USING btree (run_id)
+index CREATE INDEX idx_files_space ON public.files USING btree (space_id)
+index CREATE INDEX idx_integration_conn_end_user ON public.integration_connections USING btree (end_user_id) WHERE (end_user_id IS NOT NULL)
+index CREATE INDEX idx_integration_conn_lookup ON public.integration_connections USING btree (integration_package_id, space_id, auth_key)
+index CREATE INDEX idx_integration_conn_shared ON public.integration_connections USING btree (space_id, integration_package_id, auth_key) WHERE (shared_with_org = true)
+index CREATE INDEX idx_integration_conn_space ON public.integration_connections USING btree (space_id)
+index CREATE INDEX idx_integration_conn_user ON public.integration_connections USING btree (user_id) WHERE (user_id IS NOT NULL)
+index CREATE INDEX idx_integration_oauth_clients_lookup ON public.integration_oauth_clients USING btree (space_id, integration_package_id, auth_key)
+index CREATE INDEX idx_integration_oauth_clients_package ON public.integration_oauth_clients USING btree (integration_package_id)
+index CREATE INDEX idx_integration_org_defaults_connection ON public.integration_org_defaults USING btree (connection_id)
+index CREATE INDEX idx_integration_pins_connection ON public.integration_pins USING btree (connection_id)
+index CREATE INDEX idx_integration_pins_user ON public.integration_pins USING btree (user_id) WHERE (user_id IS NOT NULL)
+index CREATE INDEX idx_llm_usage_api_key_id ON public.llm_usage USING btree (api_key_id)
+index CREATE INDEX idx_llm_usage_chat_session_id ON public.llm_usage USING btree (chat_session_id)
+index CREATE INDEX idx_llm_usage_org_created ON public.llm_usage USING btree (org_id, created_at)
+index CREATE INDEX idx_llm_usage_run_id ON public.llm_usage USING btree (run_id)
+index CREATE INDEX idx_llm_usage_user_id ON public.llm_usage USING btree (user_id)
+index CREATE INDEX idx_model_provider_credentials_created_by ON public.model_provider_credentials USING btree (created_by)
+index CREATE INDEX idx_model_provider_credentials_expires_at_oauth ON public.model_provider_credentials USING btree (expires_at) WHERE (expires_at IS NOT NULL)
+index CREATE INDEX idx_model_provider_credentials_org_provider ON public.model_provider_credentials USING btree (org_id, provider_id)
+index CREATE INDEX idx_model_provider_pairings_org_id ON public.model_provider_pairings USING btree (org_id)
+index CREATE INDEX idx_notifications_recipient ON public.notifications USING btree (org_id, recipient_type, recipient_id, space_id)
+index CREATE INDEX idx_notifications_run ON public.notifications USING btree (run_id)
+index CREATE INDEX idx_notifications_space ON public.notifications USING btree (space_id)
+index CREATE INDEX idx_notifications_unread ON public.notifications USING btree (org_id, space_id, recipient_type, recipient_id, created_at DESC NULLS LAST, id DESC NULLS LAST) WHERE (read_at IS NULL)
+index CREATE INDEX idx_oauth_access_tokens_auth_code ON public.oauth_access_tokens USING btree (authorization_code_id)
+index CREATE INDEX idx_oauth_access_tokens_client ON public.oauth_access_tokens USING btree (client_id)
+index CREATE INDEX idx_oauth_access_tokens_refresh ON public.oauth_access_tokens USING btree (refresh_id)
+index CREATE INDEX idx_oauth_access_tokens_session ON public.oauth_access_tokens USING btree (session_id)
+index CREATE INDEX idx_oauth_access_tokens_user ON public.oauth_access_tokens USING btree (user_id)
+index CREATE INDEX idx_oauth_client_resources_client ON public.oauth_client_resources USING btree (client_id)
+index CREATE INDEX idx_oauth_client_resources_resource ON public.oauth_client_resources USING btree (resource_id)
+index CREATE INDEX idx_oauth_clients_org ON public.oauth_clients USING btree (referenced_org_id)
+index CREATE INDEX idx_oauth_clients_space ON public.oauth_clients USING btree (referenced_space_id)
+index CREATE INDEX idx_oauth_clients_user ON public.oauth_clients USING btree (user_id)
+index CREATE INDEX idx_oauth_consents_client ON public.oauth_consents USING btree (client_id)
+index CREATE INDEX idx_oauth_consents_user ON public.oauth_consents USING btree (user_id)
+index CREATE INDEX idx_oauth_refresh_tokens_auth_code ON public.oauth_refresh_tokens USING btree (authorization_code_id)
+index CREATE INDEX idx_oauth_refresh_tokens_client ON public.oauth_refresh_tokens USING btree (client_id)
+index CREATE INDEX idx_oauth_refresh_tokens_session ON public.oauth_refresh_tokens USING btree (session_id)
+index CREATE INDEX idx_oauth_refresh_tokens_user ON public.oauth_refresh_tokens USING btree (user_id)
+index CREATE INDEX idx_oidc_profiles_auth_user ON public.oidc_end_user_profiles USING btree (auth_user_id)
+index CREATE INDEX idx_org_invitations_email ON public.org_invitations USING btree (email)
+index CREATE INDEX idx_org_invitations_invited_by ON public.org_invitations USING btree (invited_by)
+index CREATE INDEX idx_org_invitations_org_id ON public.org_invitations USING btree (org_id)
+index CREATE INDEX idx_org_members_user_id ON public.org_members USING btree (user_id)
+index CREATE INDEX idx_org_models_created_by ON public.org_models USING btree (created_by)
+index CREATE INDEX idx_org_models_org_id ON public.org_models USING btree (org_id)
+index CREATE INDEX idx_org_proxies_created_by ON public.org_proxies USING btree (created_by)
+index CREATE INDEX idx_org_proxies_org_id ON public.org_proxies USING btree (org_id)
+index CREATE INDEX idx_organizations_created_by ON public.organizations USING btree (created_by)
+index CREATE INDEX idx_package_schedules_org_id ON public.package_schedules USING btree (org_id)
+index CREATE INDEX idx_package_schedules_space_id ON public.package_schedules USING btree (space_id)
+index CREATE INDEX idx_package_shares_shared_by ON public.package_shares USING btree (shared_by)
+index CREATE INDEX idx_package_shares_space_id ON public.package_shares USING btree (space_id)
+index CREATE INDEX idx_package_versions_created_by ON public.package_versions USING btree (created_by)
+index CREATE INDEX idx_packages_created_by ON public.packages USING btree (created_by)
+index CREATE INDEX idx_packages_ephemeral_created ON public.packages USING btree (created_at) WHERE (ephemeral = true)
+index CREATE INDEX idx_packages_home_space_id ON public.packages USING btree (home_space_id)
+index CREATE INDEX idx_packages_org_type ON public.packages USING btree (org_id, type)
+index CREATE INDEX idx_packages_type ON public.packages USING btree (type)
+index CREATE INDEX idx_run_logs_lookup ON public.run_logs USING btree (run_id, id)
+index CREATE INDEX idx_run_logs_org_id ON public.run_logs USING btree (org_id)
+index CREATE INDEX idx_runs_api_key_id ON public.runs USING btree (api_key_id) WHERE (api_key_id IS NOT NULL)
+index CREATE INDEX idx_runs_boot_deadline_sweep ON public.runs USING btree (boot_deadline_at) WHERE ((boot_deadline_at IS NOT NULL) AND (sink_closed_at IS NULL) AND (last_event_sequence = 0))
+index CREATE INDEX idx_runs_chat_session_started ON public.runs USING btree (chat_session_id, started_at) WHERE (chat_session_id IS NOT NULL)
+index CREATE INDEX idx_runs_end_user_id ON public.runs USING btree (end_user_id)
+index CREATE INDEX idx_runs_model_credential_id ON public.runs USING btree (model_credential_id) WHERE (model_credential_id IS NOT NULL)
+index CREATE INDEX idx_runs_org_id ON public.runs USING btree (org_id)
+index CREATE INDEX idx_runs_package_run_number ON public.runs USING btree (package_id, run_number)
+index CREATE INDEX idx_runs_package_started ON public.runs USING btree (package_id, started_at)
+index CREATE INDEX idx_runs_schedule_id ON public.runs USING btree (schedule_id) WHERE (schedule_id IS NOT NULL)
+index CREATE INDEX idx_runs_sink_expires_at ON public.runs USING btree (sink_expires_at) WHERE ((sink_expires_at IS NOT NULL) AND (sink_closed_at IS NULL))
+index CREATE INDEX idx_runs_space_started ON public.runs USING btree (space_id, started_at)
+index CREATE INDEX idx_runs_space_status_started ON public.runs USING btree (space_id, status, started_at)
+index CREATE INDEX idx_runs_stall_sweep ON public.runs USING btree (last_heartbeat_at) WHERE ((sink_closed_at IS NULL) AND (sink_expires_at IS NOT NULL))
+index CREATE INDEX idx_runs_status ON public.runs USING btree (status)
+index CREATE INDEX idx_runs_user_id ON public.runs USING btree (user_id)
+index CREATE INDEX idx_schedules_end_user_id ON public.package_schedules USING btree (end_user_id)
+index CREATE INDEX idx_schedules_package_id ON public.package_schedules USING btree (package_id)
+index CREATE INDEX idx_schedules_user_id ON public.package_schedules USING btree (user_id)
+index CREATE INDEX idx_space_members_added_by ON public.space_members USING btree (added_by)
+index CREATE INDEX idx_space_members_custom_role_id ON public.space_members USING btree (custom_role_id)
+index CREATE INDEX idx_space_members_user_id ON public.space_members USING btree (user_id)
+index CREATE INDEX idx_space_packages_package_id ON public.space_packages USING btree (package_id)
+index CREATE INDEX idx_space_roles_created_by ON public.space_roles USING btree (created_by)
+index CREATE INDEX idx_spaces_org_id ON public.spaces USING btree (org_id)
+index CREATE INDEX idx_storage_deletion_jobs_due ON public.storage_deletion_jobs USING btree (next_attempt_at) WHERE (completed_at IS NULL)
+index CREATE INDEX idx_uploads_created_by ON public.uploads USING btree (created_by) WHERE (created_by IS NOT NULL)
+index CREATE INDEX idx_uploads_end_user ON public.uploads USING btree (end_user_id) WHERE (end_user_id IS NOT NULL)
+index CREATE INDEX idx_uploads_expires_unconsumed ON public.uploads USING btree (expires_at) WHERE (consumed_at IS NULL)
+index CREATE INDEX idx_uploads_org ON public.uploads USING btree (org_id)
+index CREATE INDEX idx_uploads_space ON public.uploads USING btree (space_id)
+index CREATE INDEX idx_webhook_deliveries_webhook_id ON public.webhook_deliveries USING btree (webhook_id)
+index CREATE INDEX idx_webhooks_org_id ON public.webhooks USING btree (org_id)
+index CREATE INDEX idx_webhooks_space_enabled ON public.webhooks USING btree (space_id, enabled)
+index CREATE INDEX pkp_lookup ON public.package_persistence USING btree (package_id, space_id, actor_type, actor_id, key, pinned)
+index CREATE INDEX pkp_org ON public.package_persistence USING btree (org_id)
+index CREATE INDEX pkp_run_id ON public.package_persistence USING btree (run_id) WHERE (run_id IS NOT NULL)
+index CREATE INDEX pkp_space ON public.package_persistence USING btree (space_id)
+index CREATE INDEX session_realm_idx ON public.session USING btree (realm)
+index CREATE INDEX session_user_id_idx ON public.session USING btree (user_id)
+index CREATE INDEX user_realm_idx ON public."user" USING btree (realm)
+index CREATE INDEX verification_identifier_idx ON public.verification USING btree (identifier)
+index CREATE UNIQUE INDEX account_pkey ON public.account USING btree (id)
+index CREATE UNIQUE INDEX api_keys_pkey ON public.api_keys USING btree (id)
+index CREATE UNIQUE INDEX audit_events_pkey ON public.audit_events USING btree (id)
+index CREATE UNIQUE INDEX chat_messages_pkey ON public.chat_messages USING btree (seq)
+index CREATE UNIQUE INDEX chat_sessions_pkey ON public.chat_sessions USING btree (id)
+index CREATE UNIQUE INDEX cli_refresh_tokens_pkey ON public.cli_refresh_tokens USING btree (id)
+index CREATE UNIQUE INDEX cli_refresh_tokens_token_hash_unique ON public.cli_refresh_tokens USING btree (token_hash)
+index CREATE UNIQUE INDEX device_codes_device_code_unique ON public.device_codes USING btree (device_code)
+index CREATE UNIQUE INDEX device_codes_pkey ON public.device_codes USING btree (id)
+index CREATE UNIQUE INDEX device_codes_user_code_unique ON public.device_codes USING btree (user_code)
+index CREATE UNIQUE INDEX end_users_pkey ON public.end_users USING btree (id)
+index CREATE UNIQUE INDEX file_links_file_id_consumer_run_id_pk ON public.file_links USING btree (file_id, consumer_run_id)
+index CREATE UNIQUE INDEX files_pkey ON public.files USING btree (id)
+index CREATE UNIQUE INDEX idx_api_keys_key_hash ON public.api_keys USING btree (key_hash)
+index CREATE UNIQUE INDEX idx_end_users_external_id ON public.end_users USING btree (space_id, external_id) WHERE (external_id IS NOT NULL)
+index CREATE UNIQUE INDEX idx_end_users_space_email ON public.end_users USING btree (space_id, email) WHERE (email IS NOT NULL)
+index CREATE UNIQUE INDEX idx_integration_org_defaults_unique ON public.integration_org_defaults USING btree (space_id, integration_package_id)
+index CREATE UNIQUE INDEX idx_integration_pins_unique ON public.integration_pins USING btree (space_id, package_id, integration_package_id, COALESCE(user_id, ''::text))
+index CREATE UNIQUE INDEX idx_ioc_one_auto ON public.integration_oauth_clients USING btree (space_id, integration_package_id, auth_key) WHERE auto_provisioned
+index CREATE UNIQUE INDEX idx_ioc_one_default ON public.integration_oauth_clients USING btree (space_id, integration_package_id, auth_key) WHERE is_default
+index CREATE UNIQUE INDEX idx_space_roles_org_key ON public.space_roles USING btree (org_id, key)
+index CREATE UNIQUE INDEX idx_spaces_one_default ON public.spaces USING btree (org_id) WHERE (is_default = true)
+index CREATE UNIQUE INDEX integration_connections_pkey ON public.integration_connections USING btree (id)
+index CREATE UNIQUE INDEX integration_oauth_clients_pkey ON public.integration_oauth_clients USING btree (id)
+index CREATE UNIQUE INDEX integration_org_defaults_pkey ON public.integration_org_defaults USING btree (id)
+index CREATE UNIQUE INDEX integration_pins_pkey ON public.integration_pins USING btree (id)
+index CREATE UNIQUE INDEX jwks_pkey ON public.jwks USING btree (id)
+index CREATE UNIQUE INDEX llm_usage_pkey ON public.llm_usage USING btree (id)
+index CREATE UNIQUE INDEX model_provider_credentials_pkey ON public.model_provider_credentials USING btree (id)
+index CREATE UNIQUE INDEX model_provider_pairings_pkey ON public.model_provider_pairings USING btree (id)
+index CREATE UNIQUE INDEX model_provider_pairings_token_hash_unique ON public.model_provider_pairings USING btree (token_hash)
+index CREATE UNIQUE INDEX notifications_pkey ON public.notifications USING btree (id)
+index CREATE UNIQUE INDEX oauth_access_tokens_pkey ON public.oauth_access_tokens USING btree (id)
+index CREATE UNIQUE INDEX oauth_access_tokens_token_unique ON public.oauth_access_tokens USING btree (token)
+index CREATE UNIQUE INDEX oauth_client_assertions_pkey ON public.oauth_client_assertions USING btree (id)
+index CREATE UNIQUE INDEX oauth_client_resources_pkey ON public.oauth_client_resources USING btree (id)
+index CREATE UNIQUE INDEX oauth_clients_client_id_unique ON public.oauth_clients USING btree (client_id)
+index CREATE UNIQUE INDEX oauth_clients_pkey ON public.oauth_clients USING btree (id)
+index CREATE UNIQUE INDEX oauth_consents_pkey ON public.oauth_consents USING btree (id)
+index CREATE UNIQUE INDEX oauth_refresh_tokens_pkey ON public.oauth_refresh_tokens USING btree (id)
+index CREATE UNIQUE INDEX oauth_refresh_tokens_token_unique ON public.oauth_refresh_tokens USING btree (token)
+index CREATE UNIQUE INDEX oauth_resources_identifier_unique ON public.oauth_resources USING btree (identifier)
+index CREATE UNIQUE INDEX oauth_resources_pkey ON public.oauth_resources USING btree (id)
+index CREATE UNIQUE INDEX oidc_end_user_profiles_pkey ON public.oidc_end_user_profiles USING btree (end_user_id)
+index CREATE UNIQUE INDEX org_invitations_pkey ON public.org_invitations USING btree (id)
+index CREATE UNIQUE INDEX org_invitations_token_unique ON public.org_invitations USING btree (token)
+index CREATE UNIQUE INDEX org_members_org_id_user_id_pk ON public.org_members USING btree (org_id, user_id)
+index CREATE UNIQUE INDEX org_models_pkey ON public.org_models USING btree (id)
+index CREATE UNIQUE INDEX org_proxies_pkey ON public.org_proxies USING btree (id)
+index CREATE UNIQUE INDEX organizations_pkey ON public.organizations USING btree (id)
+index CREATE UNIQUE INDEX organizations_slug_unique ON public.organizations USING btree (slug)
+index CREATE UNIQUE INDEX package_dist_tags_package_id_tag_pk ON public.package_dist_tags USING btree (package_id, tag)
+index CREATE UNIQUE INDEX package_persistence_pkey ON public.package_persistence USING btree (id)
+index CREATE UNIQUE INDEX package_schedules_pkey ON public.package_schedules USING btree (id)
+index CREATE UNIQUE INDEX package_shares_package_id_space_id_pk ON public.package_shares USING btree (package_id, space_id)
+index CREATE UNIQUE INDEX package_version_dependencies_pkey ON public.package_version_dependencies USING btree (id)
+index CREATE UNIQUE INDEX package_versions_pkey ON public.package_versions USING btree (id)
+index CREATE UNIQUE INDEX package_versions_pkg_version_unique ON public.package_versions USING btree (package_id, version)
+index CREATE UNIQUE INDEX packages_pkey ON public.packages USING btree (id)
+index CREATE UNIQUE INDEX pkg_ver_deps_unique ON public.package_version_dependencies USING btree (version_id, dep_scope, dep_name, dep_type)
+index CREATE UNIQUE INDEX pkp_key_unique ON public.package_persistence USING btree (package_id, space_id, actor_type, COALESCE(actor_id, '__shared__'::text), key) WHERE (key IS NOT NULL)
+index CREATE UNIQUE INDEX profiles_pkey ON public.profiles USING btree (id)
+index CREATE UNIQUE INDEX run_logs_pkey ON public.run_logs USING btree (id)
+index CREATE UNIQUE INDEX runs_pkey ON public.runs USING btree (id)
+index CREATE UNIQUE INDEX session_pkey ON public.session USING btree (id)
+index CREATE UNIQUE INDEX session_token_unique ON public.session USING btree (token)
+index CREATE UNIQUE INDEX space_members_space_id_user_id_pk ON public.space_members USING btree (space_id, user_id)
+index CREATE UNIQUE INDEX space_packages_space_id_package_id_pk ON public.space_packages USING btree (space_id, package_id)
+index CREATE UNIQUE INDEX space_roles_pkey ON public.space_roles USING btree (id)
+index CREATE UNIQUE INDEX space_smtp_configs_pkey ON public.space_smtp_configs USING btree (space_id)
+index CREATE UNIQUE INDEX space_social_providers_space_id_provider_pk ON public.space_social_providers USING btree (space_id, provider)
+index CREATE UNIQUE INDEX spaces_pkey ON public.spaces USING btree (id)
+index CREATE UNIQUE INDEX storage_deletion_jobs_pkey ON public.storage_deletion_jobs USING btree (id)
+index CREATE UNIQUE INDEX uploads_pkey ON public.uploads USING btree (id)
+index CREATE UNIQUE INDEX uq_chat_messages_session_message ON public.chat_messages USING btree (session_id, message_id)
+index CREATE UNIQUE INDEX uq_chat_sessions_id_org_id ON public.chat_sessions USING btree (id, org_id)
+index CREATE UNIQUE INDEX uq_files_id_org_id ON public.files USING btree (id, org_id)
+index CREATE UNIQUE INDEX uq_files_run_output_dedup ON public.files USING btree (run_id, sha256, name) WHERE (purpose = 'agent_output'::file_purpose)
+index CREATE UNIQUE INDEX uq_llm_usage_proxy_request_id ON public.llm_usage USING btree (request_id) WHERE ((source = 'proxy'::llm_usage_source) AND (request_id IS NOT NULL))
+index CREATE UNIQUE INDEX uq_llm_usage_runner_run_id ON public.llm_usage USING btree (run_id) WHERE ((source = 'runner'::llm_usage_source) AND (run_id IS NOT NULL))
+index CREATE UNIQUE INDEX uq_notifications_run_recipient_type ON public.notifications USING btree (run_id, recipient_type, recipient_id, type) WHERE (run_id IS NOT NULL)
+index CREATE UNIQUE INDEX uq_oauth_client_resources_pair ON public.oauth_client_resources USING btree (client_id, resource_id)
+index CREATE UNIQUE INDEX uq_org_invitations_pending ON public.org_invitations USING btree (org_id, email) WHERE (status = 'pending'::invitation_status)
+index CREATE UNIQUE INDEX uq_org_models_unaliased_binding ON public.org_models USING btree (org_id, credential_id, model_id) WHERE (aliased = false)
+index CREATE UNIQUE INDEX uq_runs_id_org_id ON public.runs USING btree (id, org_id)
+index CREATE UNIQUE INDEX uq_spaces_org_owner ON public.spaces USING btree (org_id, owner_user_id) WHERE (owner_user_id IS NOT NULL)
+index CREATE UNIQUE INDEX uq_storage_deletion_jobs_pending ON public.storage_deletion_jobs USING btree (bucket, storage_key) WHERE (completed_at IS NULL)
+index CREATE UNIQUE INDEX user_email_unique ON public."user" USING btree (email)
+index CREATE UNIQUE INDEX user_pkey ON public."user" USING btree (id)
+index CREATE UNIQUE INDEX verification_pkey ON public.verification USING btree (id)
+index CREATE UNIQUE INDEX webhook_deliveries_pkey ON public.webhook_deliveries USING btree (id)
+index CREATE UNIQUE INDEX webhooks_pkey ON public.webhooks USING btree (id)

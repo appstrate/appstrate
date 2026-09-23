@@ -116,6 +116,7 @@
     "verify:type-coverage": "type-coverage --project apps/web/tsconfig.json --strict --at-least 99 --ignore-files \"apps/web/src/api/schema.d.ts\"",
     "verify:compose-defaults": "bun scripts/verify-compose-defaults.ts",
     "verify:release-version": "bun scripts/verify-release-version.ts",
+    "verify:schema-catalog": "bun scripts/verify-schema-catalog.ts",
     "verify:env-docs": "bun scripts/verify-env-docs.ts",
     "verify:workflows": "bun scripts/verify-workflows.ts",
     "openapi:baseline": "bun scripts/detect-breaking-changes.ts --update-baseline",
