@@ -125,10 +125,6 @@ jobs:
           TARBALL: ${{ steps.version.outputs.tarball }}
         run: |
           npm pack
-          if ! tar -xOzf "$TARBALL" package/package.json | jq -e '.bin.appstrate' >/dev/null; then
-            echo "::error::$TARBALL has no bin.appstrate in its package.json"
-            exit 1
-          fi
           WORK="$(mktemp -d)"
           (cd "$WORK" && npm init -y >/dev/null && npm install "${GITHUB_WORKSPACE}/apps/cli/$TARBALL")
           INFO="$("$WORK/node_modules/.bin/appstrate" __install-source)"
@@ -186,9 +182,9 @@ jobs:
         # ~4 min after publish, and the CDN caches it for 300 s: ~10 min worst
         # case. Retrying bunx is the wrong loop: in run 35872274810 each of its
         # 6 attempts failed within ~35 ms, i.e. likely without a fresh registry
-        # read. So poll what bun sees (same URL and Accept header, no cache
-        # buster) for up to 12 min, the worst case plus slack; a curl error or
-        # a request hung past 30 s counts as "not yet".
+        # read. So poll what bun sees (same URL, bun's abbreviated-packument
+        # Accept header, no cache buster) for up to 12 min, the worst case plus
+        # slack; a curl error or a request hung past 30 s counts as "not yet".
         env:
           VERSION: ${{ steps.version.outputs.version }}
           WAIT_MINUTES: 12
@@ -212,7 +208,7 @@ jobs:
 
       - name: Post-publish smoke test (registry → bunx)
         # Runs what users download, once: catches wrong registry metadata (bin
-        # dropped, etc.) or a wrong stamp that the tarball check above cannot.
+        # dropped, etc.) or a wrong stamp that the pre-publish smoke cannot.
         # A fresh BUN_INSTALL_CACHE_DIR so no manifest cached earlier in the job
         # can answer for the registry. Same assertion as the pre-publish smoke.
         env:
@@ -220,7 +216,7 @@ jobs:
         run: |
           INFO="$(BUN_INSTALL_CACHE_DIR="$(mktemp -d)" bunx -y "appstrate@$VERSION" __install-source)"
           if ! jq -e --arg v "$VERSION" '.source == "bun" and .version == $v' <<<"$INFO" >/dev/null; then
-            echo "::error::Published CLI reports $INFO, expected source \"bun\" and version \"$VERSION\""
+            echo "::error::npm publish succeeded, but the published CLI reports $INFO, expected source \"bun\" and version \"$VERSION\". Do NOT re-run this job (npm refuses an existing version)."
             exit 1
           fi
 
