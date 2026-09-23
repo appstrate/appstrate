@@ -80,8 +80,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `@appstrate/google-{calendar,contacts,drive,forms,sheets}` 1.0.4 add that
   canonical scope to their catalog with `implies: ["email"]`; the OAuth callback
   no longer logs a false scope shortfall for such echoes; a new gate-tier
-  conformance check, `scope-echo`, fails any Google manifest requesting
-  `email`/`profile` without the alias. No data migration: existing connections
+  conformance check, `scope-echo`, fails any oauth2 auth whose `issuer` is
+  `https://accounts.google.com` and requests `email`/`profile` without the
+  alias. No data migration: existing connections
   already store the echoed form.
 - **`appstrate … --version` after a command no longer prints the CLI's version
   and exits 0** (#1516). `-V, --version` was a program option, which commander

@@ -1277,11 +1277,19 @@ describe("scopesNotCovered", () => {
   const USERINFO_EMAIL = "https://www.googleapis.com/auth/userinfo.email";
   const GMAIL_READONLY = "https://www.googleapis.com/auth/gmail.readonly";
   const m = baseManifest();
-  (m.auths as Record<string, Record<string, unknown>>).oauth!.scope_catalog = [
+  const auths = m.auths as Record<string, Record<string, unknown>>;
+  auths.oauth!.scope_catalog = [
     { value: USERINFO_EMAIL, label: "Email", implies: ["email"] },
     { value: "email", label: "Email (short)" },
     { value: GMAIL_READONLY, label: "Read mail" },
   ];
+  auths.plain = {
+    ...auths.oauth!,
+    scope_catalog: [
+      { value: USERINFO_EMAIL, label: "Email" },
+      { value: "email", label: "Email (short)" },
+    ],
+  };
   const google = parse(m);
 
   it("counts a scope as covered by the alias the catalog declares", () => {
@@ -1298,7 +1306,9 @@ describe("scopesNotCovered", () => {
   });
 
   it("compares verbatim for an auth key without the alias", () => {
-    expect(scopesNotCovered(["email"], [USERINFO_EMAIL], google, "other")).toEqual(["email"]);
+    // The alias is per auth: `plain` lists the same scopes without `implies`.
+    expect(scopesNotCovered(["email"], [USERINFO_EMAIL], google, "oauth")).toEqual([]);
+    expect(scopesNotCovered(["email"], [USERINFO_EMAIL], google, "plain")).toEqual(["email"]);
   });
 });
 
