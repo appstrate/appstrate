@@ -12,7 +12,8 @@
  * `test/integration/services/docker-api.test.ts`.)
  */
 
-import { describe, it, expect, afterEach } from "bun:test";
+import { describe, it, expect, afterEach, spyOn } from "bun:test";
+import { logger } from "../../../src/lib/logger.ts";
 import {
   reconcileRuntimeImages,
   startRuntimeImageWarmer,
@@ -64,6 +65,26 @@ describe("runtime image warmer", () => {
     // not throw: it runs on a timer with no caller to catch it.
     expect(pinned).toEqual(["sidecar"]);
     expect(report.pinned).toEqual(["sidecar"]);
+  });
+
+  it("warns only for a missing pin, not for one replaced after spec drift", async () => {
+    // A replaced pin is every host's first pass after a release — warning
+    // "missing" there is a false alarm; a created one means a janitor struck.
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const info = spyOn(logger, "info").mockImplementation(() => {});
+    try {
+      const report = await reconcileRuntimeImages({
+        images: IMAGES,
+        ensureImagePin: async (_image, slot) => (slot === "pi" ? "created" : "replaced"),
+      });
+
+      expect(report.pinned).toEqual(["pi", "sidecar"]);
+      expect(warn.mock.calls.map(([, data]) => data?.slot)).toEqual(["pi"]);
+      expect(info.mock.calls.map(([, data]) => data?.slot)).toEqual(["sidecar"]);
+    } finally {
+      warn.mockRestore();
+      info.mockRestore();
+    }
   });
 });
 

@@ -76,12 +76,17 @@ export async function reconcileRuntimeImages(
   for (const { image, slot } of deps.images) {
     try {
       const outcome = await ensureImagePin(image, slot);
-      if (outcome !== "unchanged") {
+      if (outcome === "created") {
         // Deliberately loud: a converged pin is the steady state, so a pass
-        // that had to create or replace one means something on this host
-        // removed it — the very janitor whose invisible nightly re-pull this
-        // module exists to stop. Silent self-healing would hide it again.
+        // that had to create one means something on this host removed it —
+        // the very janitor whose invisible nightly re-pull this module exists
+        // to stop. Silent self-healing would hide it again.
         logger.warn("runtime image pin was missing — recreated", { image, slot, outcome });
+        pinned.push(slot);
+      } else if (outcome === "replaced") {
+        // The pin was there but its spec drifted (image tag or pin config
+        // changed) — expected once per host after a release, not an alarm.
+        logger.info("runtime image pin replaced — spec drifted", { image, slot, outcome });
         pinned.push(slot);
       }
     } catch (err) {
