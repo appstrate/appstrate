@@ -70,12 +70,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- **Google integrations no longer report the `email` scope as missing** (#1131).
+- **Google connections are ready again, and their agents launch** (#1131).
   Google's token endpoint echoes the requested OIDC `email` scope as
   `https://www.googleapis.com/auth/userinfo.email`, and no manifest declared the
-  equivalence. `@appstrate/gmail` 1.1.5, `@appstrate/gmail-mcp` 2.3.4 and
+  equivalence, so readiness kept asking for a reconnect and any agent whose
+  integration config uses `tools: "*"` failed to launch with
+  `412 missing_integration_connection`. `@appstrate/gmail` 1.1.5,
+  `@appstrate/gmail-mcp` 2.3.4 and
   `@appstrate/google-{calendar,contacts,drive,forms,sheets}` 1.0.4 add that
-  canonical scope to their catalog with `implies: ["email"]`.
+  canonical scope to their catalog with `implies: ["email"]`; the OAuth callback
+  no longer logs a false scope shortfall for such echoes; a new gate-tier
+  conformance check, `scope-echo`, fails any Google manifest requesting
+  `email`/`profile` without the alias. No data migration: existing connections
+  already store the echoed form.
 - **`appstrate … --version` after a command no longer prints the CLI's version
   and exits 0** (#1516). `-V, --version` was a program option, which commander
   recognises anywhere on the line, so it shadowed every subcommand:

@@ -38,7 +38,7 @@ const CHECK = "scope-echo";
  * equivalences in "Google OAuth2 API, v2" at
  * https://developers.google.com/identity/protocols/oauth2/scopes#oauth2.
  */
-export const ISSUER_SCOPE_ECHOES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+const ISSUER_SCOPE_ECHOES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   "https://accounts.google.com": {
     email: "https://www.googleapis.com/auth/userinfo.email",
     profile: "https://www.googleapis.com/auth/userinfo.profile",
