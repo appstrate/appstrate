@@ -42,7 +42,6 @@ import {
 import { collectSSEEvents, pgNotify } from "../../helpers/sse.ts";
 import { initRealtime } from "../../../src/services/realtime.ts";
 import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
-import { resetCatalog } from "../../../src/modules/mcp/catalog.ts";
 import { collectModulePermissions } from "../../../src/lib/modules/module-loader.ts";
 import { getDiscoveredModules } from "../../helpers/test-modules.ts";
 // Reaching into the chat module's source on purpose: this is the one carrier
@@ -880,7 +879,6 @@ describe("view as role", () => {
   // ─── B1b. The inbound MCP endpoint re-enters with the persona ─────
 
   it("carries the persona into the MCP endpoint's in-process dispatch", async () => {
-    resetCatalog();
     // `mcp:invoke` is space-level and reaches preset `operator`; `spaces:write`
     // is org-level and admin-tier. So this persona can drive the tool and must
     // still be refused the operation it drives — which only holds if the header
@@ -926,7 +924,6 @@ describe("view as role", () => {
   });
 
   it("narrows the advertised MCP tool surface to the previewed role", async () => {
-    resetCatalog();
     // A preview must get the answers the real role would, declarations
     // included: `viewer` holds no `agents:run`, so `run_and_wait` is not among
     // the tools it is shown; `operator` — same session, same endpoint — is.
@@ -951,7 +948,6 @@ describe("view as role", () => {
   });
 
   it("resolves the persona in the space the REQUEST names, not the one the persona names", async () => {
-    resetCatalog();
     // Two spaces, one persona. `X-Space-Id` is what the MCP endpoint enters, so
     // a persona whose space half points elsewhere previews nothing here — and
     // the advertised surface must say so exactly as the REST route does.

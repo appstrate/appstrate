@@ -13,11 +13,10 @@
  * kinds — delivery — and whether authoring guidance is present at all.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
-import { buildServerInstructions } from "../../../../src/modules/mcp/router.ts";
+import { describe, it, expect } from "bun:test";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
-import { resetCatalog } from "../../../../src/modules/mcp/catalog.ts";
+import { instructionsFor } from "./helpers.ts";
 
 // The appended operation index is filtered per operation against the mounted
 // guards, so building the instructions reads the route table.
@@ -25,7 +24,8 @@ await registerTestPlatformApp();
 
 /**
  * Launch and read back: the connect bullet is run-readiness guidance, so it is
- * only written for a caller who can get a run off the ground (`canRunAgents`);
+ * only written for a caller who can get a run off the ground (`runAgent` and
+ * `getRun` both granted);
  * its kickoff half also needs the grant `initiateIntegrationConnect` asks for.
  */
 const permissions = new Set([
@@ -38,7 +38,7 @@ const permissions = new Set([
 
 /** The connect bullet only — asserting on the whole prompt would match the index. */
 function connectBullet(contextInjected: boolean): string {
-  const instructions = buildServerInstructions(permissions, contextInjected);
+  const instructions = instructionsFor(permissions, contextInjected);
   const start = instructions.indexOf("- Connecting or reconnecting an integration before a run");
   const end = instructions.indexOf("\n- The exception —", start);
   expect(start).toBeGreaterThan(-1);
@@ -47,8 +47,6 @@ function connectBullet(contextInjected: boolean): string {
 }
 
 describe("MCP server instructions — connect bullet", () => {
-  beforeEach(() => resetCatalog());
-
   it("names the readiness refusal as a 412 and never as a 400", () => {
     // The readiness envelope is `412 missing_integration_connection`
     // (services/agent-readiness.ts); a model told to expect a 400 treats the
@@ -100,13 +98,11 @@ describe("MCP server instructions — connect bullet", () => {
 });
 
 describe("MCP server instructions — named operations follow their grant", () => {
-  beforeEach(() => resetCatalog());
-
   const RUNNER = ["mcp:read", "mcp:invoke", "agents:run", "runs:read"];
 
   /** Prose only — the appended operation index would match on its own. */
   function prose(caller: readonly string[]): string {
-    const instructions = buildServerInstructions(new Set(caller), false);
+    const instructions = instructionsFor(new Set(caller));
     return instructions.slice(0, instructions.indexOf(OPERATION_INDEX_HEADING));
   }
 
@@ -138,10 +134,8 @@ describe("MCP server instructions — named operations follow their grant", () =
 });
 
 describe("MCP server instructions — run guidance", () => {
-  beforeEach(() => resetCatalog());
-
   // Rule 1: an act the caller's set makes structurally impossible is ABSENT,
-  // not contradicted. `run_and_wait` is declared on `canRunAgents`, so every
+  // not contradicted. `run_and_wait` is declared on `McpSurface.runs`, so every
   // paragraph that teaches running goes with it — dropping that gate makes
   // each of these three markers reappear for the caller below.
   const RUNNER = new Set(["mcp:read", "mcp:invoke", "agents:run", "runs:read"]);
@@ -149,7 +143,7 @@ describe("MCP server instructions — run guidance", () => {
 
   /** Prose only — the appended operation index would match on its own. */
   function prose(caller: ReadonlySet<string>): string {
-    const instructions = buildServerInstructions(caller, true);
+    const instructions = instructionsFor(caller, true);
     return instructions.slice(0, instructions.indexOf(OPERATION_INDEX_HEADING));
   }
 
@@ -196,8 +190,12 @@ describe("MCP server instructions — run guidance", () => {
   it("promises a conflict report only where importing is possible", () => {
     // The sentence tells the model what to do INSTEAD of importing; without the
     // tool there is no mutation to be talked out of.
-    expect(buildServerInstructions(READ_ONLY, true, false)).not.toContain("non-importable");
-    expect(buildServerInstructions(INVOKER, true, true)).toContain("non-importable");
+    expect(instructionsFor(READ_ONLY, true)).not.toContain("non-importable");
+    // Importing is `POST /api/packages/import-bundle`: any package `write`.
+    expect(instructionsFor(INVOKER, true)).not.toContain("non-importable");
+    expect(instructionsFor(new Set([...INVOKER, "skills:write"]), true)).toContain(
+      "non-importable",
+    );
     // True of validation on its own, so it is written for every caller.
     expect(prose(READ_ONLY)).toContain("Archive bytes stay server-side throughout.");
   });
@@ -212,14 +210,9 @@ describe("MCP server instructions — run guidance", () => {
 });
 
 describe("MCP server instructions — agent authoring", () => {
-  beforeEach(() => resetCatalog());
-
   it("teaches tool selection and `dependencies.*` only to a caller holding `agents:write`", () => {
-    const withWrite = buildServerInstructions(
-      new Set(["mcp:read", "mcp:invoke", "agents:write"]),
-      true,
-    );
-    const without = buildServerInstructions(permissions, true);
+    const withWrite = instructionsFor(new Set(["mcp:read", "mcp:invoke", "agents:write"]), true);
+    const without = instructionsFor(permissions, true);
     expect(withWrite).toContain("Integration tool selection");
     expect(withWrite).toContain("building or configuring an agent");
     expect(without).not.toContain("Integration tool selection");
@@ -230,7 +223,7 @@ describe("MCP server instructions — agent authoring", () => {
     // Authoring an agent is `createAgent` through `invoke_operation`: a
     // discovery-only caller cannot act on manifest guidance, so it is absent
     // rather than taught and then refused.
-    const cannotInvoke = buildServerInstructions(new Set(["mcp:read", "agents:write"]), true);
+    const cannotInvoke = instructionsFor(new Set(["mcp:read", "agents:write"]), true);
     expect(cannotInvoke).not.toContain("Integration tool selection");
     expect(cannotInvoke).not.toContain("building or configuring an agent");
   });

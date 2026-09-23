@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New export `packageIdSchema` (`@appstrate/core/validation`)** — a Zod
+  string schema for a `@scope/name` package id (`scopedNameRegex`), for request
+  bodies and queries that name packages.
+
+### Changed
+
+- **A guard carrying the boolean `appstrate.permissionGuard` marker but no
+  `PERMISSION_REQUIREMENT_MARKER` requirement is no longer read as row-aware**
+  — the platform now reads it as naming no requirement, where 11.1.0 read it as
+  conditional. A middleware whose verdict comes from the row it loads declares
+  that with the registry symbol `Symbol.for("appstrate.rowAuthority")` set to
+  `true` on the mounted function
+  (`Object.defineProperty(mw, Symbol.for("appstrate.rowAuthority"), { value: true })`);
+  being a registry symbol, a module stamps it without importing the platform.
+- **BREAKING: every operation a module's `openApiPaths()` documents must be
+  served by a terminal route handler, or the platform refuses to boot.** A
+  documented operation no route served used to fail only in the MCP tool
+  catalog; it now stops the boot, so an out-of-tree module that documents an
+  operation it does not serve crash-loops on upgrade. Middleware alone does not
+  serve, nor does a sub-app attached with `mount()`. Before upgrading, forward
+  each such operation from a route handler,
+  `router.all("/x/*", (c) => handler(c.req.raw))`, or remove it from
+  `openApiPaths()`.
+
+## [11.1.0] — 2026-09-22
+
+### Added
+
 - **New exports `RunLevel`, `reaches`, `agentCapabilities`
   (`@appstrate/core/permissions`)** — the one derivation of how far a caller
   gets with runs (`none` → `read` → `run` → `compose`) and whether it may author
@@ -17,9 +45,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New export `ConnectionCandidate` (`@appstrate/core/integration`)** — one
   connection the caller may pick from on `must_choose_connection`, carrying
   `id`, `label`, `accountId` and `ownedByActor`.
-- **New export `packageIdSchema` (`@appstrate/core/validation`)** — a Zod
-  string schema for a `@scope/name` package id (`scopedNameRegex`), for request
-  bodies and queries that name packages.
 - **New export `canComposeInline` (`@appstrate/core/permissions`)** — whether
   a caller may compose an inline agent: `agents:write` and `agents:run`. Takes a
   membership test, so a `Set` or an array both fit.
@@ -54,6 +79,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `connection_overrides`. The resolver already holds the rows, so the three
   distinguishing fields cost no extra query. Read `candidate_connections[].id`
   where the old array held the ids.
+
+## [11.0.0] — 2026-09-18
+
+### Changed
 
 - **BREAKING: `AuthResolution.principalKind` is a new REQUIRED member** (type
   `PrincipalKind`, with the tuple `PRINCIPAL_KINDS`, in `@appstrate/core/module`).

@@ -2,7 +2,6 @@
 
 /** File-backed package validation/import and MCP runtime discovery tools. */
 
-import { PACKAGE_WRITE_PERMISSIONS } from "../../lib/package-access.ts";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
@@ -32,9 +31,8 @@ interface PackageFileToolContext {
    */
   authorizeBundle: NonNullable<Parameters<typeof preflightBundleImport>[2]>;
   /**
-   * Required. Decides whether a re-imported root homed in ANOTHER space is
-   * placed here WITH its offer, exactly as `POST /api/packages/import-bundle`
-   * decides it: no authority, no placement, and `root_active: false`.
+   * Whether a root re-imported from ANOTHER home space is placed here with its
+   * offer, as `POST /api/packages/import-bundle` decides; `false` → `root_active: false`.
    */
   mayShareRoot: (packageId: string) => Promise<boolean>;
 }
@@ -44,21 +42,6 @@ interface PackageFileBytes {
   fileId: string;
   name: string;
   mime: string;
-}
-
-type PackageFileImportContext = Pick<PackageFileToolContext, "permissions" | "actor">;
-
-/**
- * Keep tool disclosure and server guidance on the same import eligibility rule.
- * The one enforcement point: `import_package_file` is declared only when this
- * holds, so its handler re-asking would be unreachable by construction.
- */
-export function canImportPackageFiles(ctx: PackageFileImportContext): boolean {
-  return (
-    ctx.actor.type === "user" &&
-    ctx.permissions.has("mcp:invoke") &&
-    PACKAGE_WRITE_PERMISSIONS.some((permission) => ctx.permissions.has(permission))
-  );
 }
 
 function packageSizeError(): McpError {
@@ -303,10 +286,15 @@ function buildRuntimeCapabilitiesTool(): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
-export function buildPackageFileTools(ctx: PackageFileToolContext): AppstrateToolDefinition[] {
+/** `imports` is `McpSurface.importsPackages` — the only check on `mcp:invoke` and on
+ *  the actor being a user; the import service re-checks each package's `write`. */
+export function buildPackageFileTools(
+  ctx: PackageFileToolContext,
+  imports: boolean,
+): AppstrateToolDefinition[] {
   return [
     buildValidatePackageFileTool(ctx),
-    ...(canImportPackageFiles(ctx) ? [buildImportPackageFileTool(ctx)] : []),
+    ...(imports ? [buildImportPackageFileTool(ctx)] : []),
     buildRuntimeCapabilitiesTool(),
   ];
 }

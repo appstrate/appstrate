@@ -36,7 +36,6 @@ import {
 } from "../../helpers/auth.ts";
 import { seedApiKey, seedPackage, seedSpacePackage, seedSpace } from "../../helpers/seed.ts";
 import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
-import { resetCatalog } from "../../../src/modules/mcp/catalog.ts";
 import { createUpload } from "../../../src/services/uploads.ts";
 import { createFileFromStream, createFileFromUpload } from "../../../src/services/files.ts";
 import { zipSync } from "fflate";
@@ -147,7 +146,6 @@ describe("mcp list_files", () => {
 
   beforeEach(async () => {
     await truncateAll();
-    resetCatalog();
     ctx = await createTestContext({ orgSlug: "mcpdocs" });
     scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     runOwner = ctx.user.id;
@@ -274,7 +272,6 @@ describe("mcp resources/read (appfile://)", () => {
 
   beforeEach(async () => {
     await truncateAll();
-    resetCatalog();
     ctx = await createTestContext({ orgSlug: "mcpres" });
     scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     runOwner = ctx.user.id;
@@ -522,7 +519,6 @@ describe("mcp file-backed package workflow", () => {
 
   beforeEach(async () => {
     await truncateAll();
-    resetCatalog();
     ctx = await createTestContext({ orgSlug: "mcppkgdoc" });
     scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     runOwner = ctx.user.id;

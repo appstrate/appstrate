@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { beforeEach, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { ErrorCode, McpError, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
-import { resetCatalog } from "../../../../src/modules/mcp/catalog.ts";
-import { buildServerInstructions } from "../../../../src/modules/mcp/router.ts";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
-import { buildMcpTools, type Dispatch } from "../../../../src/modules/mcp/tools.ts";
+import type { Dispatch, McpToolContext } from "../../../../src/modules/mcp/tools.ts";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
+import { instructionsFor, toolsFor } from "./helpers.ts";
 
 // Both `buildMcpTools` (what this caller is shown) and the appended operation
 // index read the mounted guards off the route table.
 await registerTestPlatformApp();
 
 const noExtra = {} as AppstrateRequestExtra;
+
 /** What composing an inline agent takes: authoring AND launching. */
 const COMPOSER = ["agents:write", "agents:run"];
 /**
@@ -55,7 +55,7 @@ function makeRunAndWait(opts: {
   /** Rows the stubbed `GET /api/files?run_id=…` returns (published docs). */
   files?: Array<Record<string, unknown>>;
 }): {
-  tool: ReturnType<typeof buildMcpTools>[number];
+  tool: ReturnType<typeof toolsFor>[number];
   calls: Array<{
     method: string;
     path: string;
@@ -106,7 +106,7 @@ function makeRunAndWait(opts: {
     throw new Error(`unexpected dispatch: ${req.method} ${url.pathname}`);
   };
 
-  const tools = buildMcpTools({
+  const ctx: McpToolContext = {
     origin: "http://test.local",
     authHeaders: new Headers({ "X-Org-Id": "org_1", "X-Space-Id": "spc_1" }),
     // `runs:read` is in the default because the tool cannot function without
@@ -120,15 +120,14 @@ function makeRunAndWait(opts: {
     scope: { orgId: "org_1", spaceId: "spc_1" },
     authorizeBundle: async () => {},
     mayShareRoot: async () => false,
-  });
+  };
+  const tools = toolsFor(ctx);
   const tool = tools.find((t) => t.descriptor.name === "run_and_wait");
   if (!tool) throw new Error("run_and_wait tool not built");
   return { tool, calls };
 }
 
 describe("run_and_wait", () => {
-  beforeEach(() => resetCatalog());
-
   it("is registered as the single launch-and-wait tool", () => {
     const { tool } = makeRunAndWait({});
     expect(tool.descriptor.name).toBe("run_and_wait");
@@ -249,7 +248,7 @@ describe("run_and_wait", () => {
   });
 
   it("describes package authoring with the remaining file publisher", () => {
-    const instructions = buildServerInstructions(new Set(["mcp:read", ...LAUNCHES, ...COMPOSER]));
+    const instructions = instructionsFor(["mcp:read", ...LAUNCHES, ...COMPOSER]);
 
     expect(instructions).toContain("python3 -m zipfile -c package.afps");
     expect(instructions).toContain("publish that archive with `publish_file`");
@@ -303,7 +302,7 @@ describe("run_and_wait", () => {
       // The operation index is a coarse, tag-level list — cut it off; only the
       // prose is this caller's to be told.
       const prose = (permissions: string[]) => {
-        const instructions = buildServerInstructions(new Set(permissions), true);
+        const instructions = instructionsFor(permissions, true);
         return instructions.slice(0, instructions.indexOf(OPERATION_INDEX_HEADING));
       };
       // Both sides can run — only authoring differs, so what disappears is

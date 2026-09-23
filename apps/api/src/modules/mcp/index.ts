@@ -121,8 +121,9 @@ const mcpModule: AppstrateModule = {
   // so every existing org's per-org MCP resource URI is mintable immediately at
   // boot (no restart needed when an org pre-dates this module). It is then kept
   // live by the `onOrgCreate` / `onOrgDelete` events and converged across
-  // replicas by the periodic tick. The operation catalog is built lazily on
-  // first request (after all modules have contributed their paths).
+  // replicas by the periodic tick. The operations are joined onto their routes
+  // at boot by `registerPlatformApp()`; the catalog only caches its view of
+  // them on first read.
   async init() {
     await reconcileMcpOrgAudiences();
     // Singleton timer (the module object is a process-wide singleton, but
