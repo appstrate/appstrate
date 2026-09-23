@@ -20,7 +20,7 @@
  * module is the write side that populates it.
  */
 
-import { and, arrayOverlaps, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, arrayOverlaps, asc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   spacePackages,
@@ -2577,8 +2577,10 @@ export async function listUsableIntegrationsForActor(
 }
 
 /**
- * 409 `connection_pinned` while any pin (the owner's own included) or org default
- * names one of `ids`: the sets have no FK, so a dead id would fail every run.
+ * 409 `connection_pinned` while an admin pin or an org default names one of
+ * `ids` — the references only an admin can clear (the sets have no FK). A member
+ * pin never blocks: only its owner can clear it, so it keeps the id and that
+ * member's next run fails with `pinned_connection_unavailable` until they re-pick.
  */
 export async function assertConnectionsUnpinned(
   ids: readonly string[],
@@ -2589,7 +2591,9 @@ export async function assertConnectionsUnpinned(
     db
       .select({ id: integrationPins.id })
       .from(integrationPins)
-      .where(arrayOverlaps(integrationPins.connectionIds, [...ids]))
+      .where(
+        and(isNull(integrationPins.userId), arrayOverlaps(integrationPins.connectionIds, [...ids])),
+      )
       .limit(1),
     db
       .select({ id: integrationOrgDefaults.id })
@@ -2600,7 +2604,7 @@ export async function assertConnectionsUnpinned(
   if (pins.length > 0) {
     throw conflict(
       "connection_pinned",
-      `${refused} while it is pinned to one or more agents. Remove it from the pin(s) first.`,
+      `${refused} while an admin has pinned it to one or more agents. Remove it from the pin(s) first.`,
     );
   }
   if (orgDefaults.length > 0) {

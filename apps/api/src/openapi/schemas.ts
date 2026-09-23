@@ -167,7 +167,7 @@ export const schemas = {
       connection_id: {
         type: "string",
         description:
-          "Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`). Populated on `auth_serves_no_selected_tool` too, naming the bound connection whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set (or connecting on an auth that does), not a connect flow.",
+          "Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`). Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow.",
       },
       missing_scopes: {
         type: "array",
@@ -1838,7 +1838,7 @@ export const schemas = {
         items: { type: "string" },
         maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
         description:
-          "The set the next run binds. On `duplicate_label`, on an `insufficient_scopes` verdict and on an `auth_serves_no_selected_tool` verdict (`stale`, or `none` on the fallback), the whole set the winning layer tried to bind.",
+          "The set the next run binds. On `duplicate_label`, on an `insufficient_scopes` verdict and on an `auth_serves_no_selected_tool` verdict (`stale`), the whole set the winning layer tried to bind.",
       },
       resolved_missing_scopes: {
         type: "array",

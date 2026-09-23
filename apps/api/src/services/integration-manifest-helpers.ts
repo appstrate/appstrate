@@ -293,8 +293,10 @@ export function getIntegrationSourceKind(
 
 /**
  * The auths whose connection exposes at least one tool of `selection` — `null`
- * when every auth does. A local/remote server's own tools reach the agent
- * through any connection; an `api_call` tool only through its own auth's.
+ * when every auth does, or when none does: an integration exposing no selected
+ * tool is not a connection problem, and spawn/readiness report it as such. A
+ * local/remote server's own tools reach the agent through any connection; an
+ * `api_call` tool only through its own auth's.
  */
 export function authKeysServingSelection(
   manifest: IntegrationManifest,
@@ -304,25 +306,29 @@ export function authKeysServingSelection(
   const kind = getIntegrationSourceKind(manifest);
   const hasServer = kind === "local" || kind === "remote";
   const apiCalls = getApiCallConfigs(manifest);
+  let serving: Set<string>;
   if (isToolsWildcard(selection)) {
-    return hasServer ? null : new Set(apiCalls.map((cfg) => cfg.authKey));
+    if (hasServer) return null;
+    serving = new Set(apiCalls.map((cfg) => cfg.authKey));
+  } else {
+    const picked = new Set(selection);
+    const apiCallNames = new Set(
+      apiCalls.flatMap((cfg) =>
+        cfg.uploadToolName ? [cfg.toolName, cfg.uploadToolName] : [cfg.toolName],
+      ),
+    );
+    if (hasServer && selection.some((name) => !apiCallNames.has(name))) return null;
+    serving = new Set(
+      apiCalls
+        .filter(
+          (cfg) =>
+            picked.has(cfg.toolName) ||
+            (cfg.uploadToolName !== undefined && picked.has(cfg.uploadToolName)),
+        )
+        .map((cfg) => cfg.authKey),
+    );
   }
-  const picked = new Set(selection);
-  const apiCallNames = new Set(
-    apiCalls.flatMap((cfg) =>
-      cfg.uploadToolName ? [cfg.toolName, cfg.uploadToolName] : [cfg.toolName],
-    ),
-  );
-  if (hasServer && selection.some((name) => !apiCallNames.has(name))) return null;
-  return new Set(
-    apiCalls
-      .filter(
-        (cfg) =>
-          picked.has(cfg.toolName) ||
-          (cfg.uploadToolName !== undefined && picked.has(cfg.uploadToolName)),
-      )
-      .map((cfg) => cfg.authKey),
-  );
+  return serving.size === 0 ? null : serving;
 }
 
 /** `source.server` reference for a `local`-source integration (the mcp-server package). */

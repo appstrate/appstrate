@@ -81,8 +81,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   names a connection by, so a colliding set is unaddressable; it carries
   `candidateConnections` (the rows sharing a label), the same field
   `must_choose_connection` uses. `auth_serves_no_selected_tool` is raised when a
-  bound connection's auth exposes none of the agent's selected tools; it
-  carries that `connectionId`. Exhaustive `switch`es over the code must handle
+  connection an explicit layer binds (pin, org default, run or schedule
+  override) is on an auth that exposes none of the agent's selected tools; it
+  carries that `connectionId`. The fallback raises `not_connected` instead, its
+  `authKey` restricted to auths that serve the selection. Exhaustive `switch`es over the code must handle
   both.
 
 - **BREAKING: a connection label is never null.** `ConnectionCandidate.label`

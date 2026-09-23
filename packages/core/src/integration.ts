@@ -1251,10 +1251,11 @@ export interface ConnectionResolutionError {
    * The integration manifest auth the connect flow must target
    * (`/auths/{authKey}/connect/...`), for the three codes a connect flow can
    * clear: `insufficient_scopes` and `needs_reconnection` (the resolved
-   * connection's own auth) and `not_connected` (the agent dep's pinned
-   * `auth_key`, else the integration's single `oauth2` auth). Omitted on
-   * `not_connected` when the integration declares several oauth2 auths and
-   * the dep pins none — the caller must then let the user choose.
+   * connection's own auth) and `not_connected` (among the auths serving the
+   * selected tools: the agent dep's pinned `auth_key`, else the single
+   * `oauth2` one). Omitted on `not_connected` when several oauth2 auths
+   * qualify (or none) and the dep pins none — the caller must then let the
+   * user choose.
    */
   authKey?: string;
   /**

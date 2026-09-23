@@ -22,7 +22,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
 import {
@@ -39,6 +39,7 @@ import {
   deleteIntegrationConnection,
   deleteIntegrationOAuthClient,
 } from "../../../src/services/integration-connections.ts";
+import { upsertOrgDefault } from "../../../src/services/integration-org-defaults-service.ts";
 
 const INTEGRATION = "@official/gmail";
 const OTHER_INTEGRATION = "@official/clickup";
@@ -429,9 +430,9 @@ describe("integration-pins-service — DB access/ownership", () => {
         connectionIds: ids,
         createdBy: ctx.user.id,
       });
-      await expect(updateConnectionMetadata(ids[1]!, { sharedWithOrg: false })).rejects.toThrow(
-        /pinned/,
-      );
+      await expect(
+        updateConnectionMetadata(ids[1]!, { sharedWithOrg: false }),
+      ).rejects.toMatchObject({ status: 409, code: "connection_pinned" });
       // Control: a shared connection outside the set unshares freely.
       const [outside] = await seedSharedConnections(1);
       const row = await updateConnectionMetadata(outside!, { sharedWithOrg: false });
@@ -487,17 +488,51 @@ describe("integration-pins-service — DB access/ownership", () => {
       await deleteIntegrationConnection(scope, outside!, owner);
     });
 
-    it("refuses to delete a connection its owner pinned for themselves", async () => {
-      const [own] = await seedSharedConnections(1);
+    it("a member pin — the owner's own or a colleague's — blocks neither delete nor unshare", async () => {
+      const [ownPinned, colleaguePinned, toUnshare] = await seedSharedConnections(3);
       await upsertMemberPin(scope, {
         agentPackageId: AGENT,
         integrationId: INTEGRATION,
-        connectionIds: [own!],
+        connectionIds: [ownPinned!],
         userId: memberId,
       });
-      await expect(
-        deleteIntegrationConnection(scope, own!, { type: "user", id: memberId }),
-      ).rejects.toThrow(/Remove it from the pin\(s\) first/);
+      for (const id of [colleaguePinned!, toUnshare!]) {
+        await upsertMemberPin(scope, {
+          agentPackageId: AGENT,
+          integrationId: INTEGRATION,
+          connectionIds: [id],
+          userId: ctx.user.id,
+        });
+      }
+      const owner = { type: "user" as const, id: memberId };
+      await deleteIntegrationConnection(scope, ownPinned!, owner);
+      await deleteIntegrationConnection(scope, colleaguePinned!, owner);
+      expect(
+        (await updateConnectionMetadata(toUnshare!, { sharedWithOrg: false })).sharedWithOrg,
+      ).toBe(false);
+      const left = await db
+        .select({ id: integrationConnections.id })
+        .from(integrationConnections)
+        .where(inArray(integrationConnections.id, [ownPinned!, colleaguePinned!]));
+      expect(left).toEqual([]);
+    });
+
+    it("an org default still blocks delete and unshare (409 connection_pinned)", async () => {
+      const [id] = await seedSharedConnections(1);
+      await upsertOrgDefault(scope, INTEGRATION, {
+        connectionIds: [id!],
+        enforce: false,
+        createdBy: ctx.user.id,
+      });
+      const owner = { type: "user" as const, id: memberId };
+      await expect(deleteIntegrationConnection(scope, id!, owner)).rejects.toMatchObject({
+        status: 409,
+        code: "connection_pinned",
+      });
+      await expect(updateConnectionMetadata(id!, { sharedWithOrg: false })).rejects.toMatchObject({
+        status: 409,
+        code: "connection_pinned",
+      });
     });
 
     it("refuses to delete an OAuth client whose minted connection is pinned", async () => {

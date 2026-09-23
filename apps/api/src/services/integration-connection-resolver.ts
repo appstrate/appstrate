@@ -16,8 +16,8 @@
  *      explicitly picks via the agent-page picker; a server-side record
  *      the resolver sees on every run.
  *   6. integration_org_defaults (soft)         → org-wide default, all agents
- *   7. fallback: actor's accessible connections
- *      = own + (shared_with_org AND space match)
+ *   7. fallback: actor's accessible connections on an auth serving the
+ *      selected tools = own + (shared_with_org AND space match)
  *      → 1 match → auto, 0 → not_connected, N → must_choose (never binds N)
  *
  * The exported `resolveConnections()` is pure — no DB access — so it can
@@ -489,25 +489,26 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     (c) => c.integrationId === args.integrationId,
   );
 
-  if (candidates.length === 0) {
-    // Nothing connected, so nothing carries an `authKey` — name the auth the
-    // connect flow must target and the scopes that consent has to cover, or
-    // the user connects with `default_scopes` only and the very next
-    // resolution fails with `insufficient_scopes` on the tools that need more.
+  // A connection whose auth serves none of the selected tools is never a
+  // candidate: with only those, the remedy is connecting on an auth that does.
+  const serving = candidates.filter((c) => servesSelection(args, c));
+  if (serving.length === 0) {
+    // Nothing usable carries an `authKey` — name the auth the connect flow must
+    // target and the scopes that consent has to cover, or the user connects
+    // with `default_scopes` only and the very next resolution fails with
+    // `insufficient_scopes` on the tools that need more.
     const authKey = connectTargetAuthKey(args);
     const requiredScopes = authKey === null ? [] : oauthScopesForAuth(args, authKey);
     return errorOf(args, {
       code: "not_connected",
       ...(authKey !== null ? { authKey } : {}),
       ...(requiredScopes.length > 0 ? { requiredScopes } : {}),
-      message: `Integration '${args.integrationId}' has no connection accessible to this actor.`,
+      message:
+        candidates.length === 0
+          ? `Integration '${args.integrationId}' has no connection accessible to this actor.`
+          : `Integration '${args.integrationId}' has no connection accessible to this actor on an auth that exposes the agent's selected tools.`,
     });
   }
-
-  // A connection whose auth serves none of the selected tools is never a
-  // candidate; with nothing else, checkHealth refuses the first one.
-  const serving = candidates.filter((c) => servesSelection(args, c));
-  if (serving.length === 0) return bindSet(args, [candidates[0]!], "fallback_auto");
 
   // Prefer HEALTHY candidates (not flagged needsReconnection). A dead
   // connection must never be auto-picked when a live sibling exists, and the
@@ -545,14 +546,19 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
 }
 
 function servesSelection(args: ResolveOneArgs, conn: ConnectionRow): boolean {
-  return args.servingAuthKeys === null || args.servingAuthKeys.has(conn.authKey);
+  return servesAuth(args, conn.authKey);
+}
+
+function servesAuth(args: ResolveOneArgs, authKey: string): boolean {
+  return args.servingAuthKeys === null || args.servingAuthKeys.has(authKey);
 }
 
 /**
  * Which manifest auth a fresh connect flow must target when the actor has NO
- * connection on the integration. In order: the agent dep's pinned `auth_key`
- * (AFPS §4.1), else the integration's single `oauth2` auth. `null` when the
- * manifest declares several oauth2 auths (or none) and the dep pins nothing —
+ * connection on an auth serving the selection. Only a serving auth qualifies
+ * (`servesAuth`); among those, in order: the agent dep's pinned `auth_key`
+ * (AFPS §4.1), else the single `oauth2` auth. `null` when the manifest
+ * declares several serving oauth2 auths (or none) and the dep pins nothing —
  * the resolver refuses to guess and the caller lets the user choose.
  *
  * A pin naming an auth the manifest no longer declares is `null` too — see
@@ -560,10 +566,11 @@ function servesSelection(args: ResolveOneArgs, conn: ConnectionRow): boolean {
  */
 function connectTargetAuthKey(args: ResolveOneArgs): string | null {
   if (args.requiredAuthKey !== undefined) {
-    return declaredAuthKey(args.manifest, args.requiredAuthKey);
+    const key = declaredAuthKey(args.manifest, args.requiredAuthKey);
+    return key !== null && servesAuth(args, key) ? key : null;
   }
   const oauthKeys = Object.entries(args.manifest.auths ?? {})
-    .filter(([, auth]) => auth.type === "oauth2")
+    .filter(([key, auth]) => auth.type === "oauth2" && servesAuth(args, key))
     .map(([key]) => key);
   return oauthKeys.length === 1 ? oauthKeys[0]! : null;
 }
@@ -650,7 +657,7 @@ function checkHealth(
 
   // Checked first: neither a reconnect nor a scope upgrade gives this auth a tool.
   if (!servesSelection(args, conn)) {
-    const serving = [...args.servingAuthKeys!].join(", ") || "none";
+    const serving = [...args.servingAuthKeys!].join(", ");
     return errorOf(args, {
       code: "auth_serves_no_selected_tool",
       connectionId: conn.id,

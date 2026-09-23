@@ -206,18 +206,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     the other refused characters are dropped.
   - Deleting a connection (`DELETE /api/me/connections/{id}`, or deleting the
     custom OAuth client that minted it) is refused with `409
-connection_pinned` while a pin — admin or member — or an org default names
-    it, exactly like unsharing it: the sets carry no foreign key. A member that
-    becomes unreachable anyway (its owner leaves the space, say) stays in the
-    set: an admin pin, an enforced org default or a member pin then fails the
-    run with `pinned_connection_unavailable`, never binds the survivors; a soft
-    org default is skipped for the fallback, with a server log.
-  - A bound connection whose auth exposes none of the agent's selected tools
+connection_pinned` while an admin pin or an org default names it, exactly
+    like unsharing it: the sets carry no foreign key, and those are the
+    references an admin can clear. A member pin — anyone's, the owner's own
+    included — never blocks: only its owner can clear it. It keeps the id, so
+    a member that becomes unreachable (deleted, unshared, its owner gone from
+    the space) stays in the set: an admin pin, an enforced org default or a
+    member pin then fails the run with `pinned_connection_unavailable`, never
+    binds the survivors, until someone picks again; a soft org default is
+    skipped for the fallback, with a server log.
+  - A connection an explicit layer binds (a pin, an org default, a run or
+    schedule override) whose auth exposes none of the agent's selected tools
     (a multi-auth integration whose `api_call` tools are per auth) is refused:
     `errors[].code` `auth_serves_no_selected_tool`, carrying that
-    `connection_id`, at kickoff and in the readiness verdict (`stale`, or
-    `none` on the fallback, which never auto-picks such a connection). The
-    remedy is taking it out of the set, not a connect flow.
+    `connection_id`, at kickoff and in the readiness verdict (`stale`). The
+    remedy is taking it out of the set, not a connect flow. The fallback never
+    picks such a connection: with none on a serving auth it reports
+    `not_connected`, its `auth_key` naming an auth that does serve the
+    selection (when one can be named), and readiness says `none`.
   - `GET /internal/integration-credentials/{scope}/{name}` and its `/refresh`
     sibling REQUIRE `?connection_id=<uuid>`, and it must be one the run's
     snapshot bound — `400 connection_not_in_run` otherwise, naming the bound

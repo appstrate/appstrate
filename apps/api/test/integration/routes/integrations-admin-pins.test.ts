@@ -36,6 +36,7 @@ import {
   createTestContext,
   createTestUser,
   authHeaders,
+  memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedAgent, seedPackage } from "../../helpers/seed.ts";
@@ -402,6 +403,39 @@ describe("/api/integrations/:packageId admin surface", () => {
       const resolution = body.integrations[0]!.resolution;
       expect(resolution.status).toBe("stale");
       expect(resolution.admin_pinned_connection_ids).toEqual([connA, connB]);
+    });
+
+    it("a colleague's member pin never blocks the owner's delete — that member's run fails by name", async () => {
+      const shared = await seedSharedConnection();
+      const bob = await memberContext(ctx, "member");
+      const pinned = await app.request("/api/me/integration-pins", {
+        method: "PUT",
+        headers: { ...authHeaders(bob), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent_package_id: AGENT,
+          integration_package_id: INTEGRATION,
+          connection_ids: [shared],
+        }),
+      });
+      expect(pinned.status).toBe(200);
+
+      const del = await app.request(`/api/me/connections/${shared}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(del.status).toBe(204);
+
+      const res = await app.request(`/api/agents/${AGENT}/connection-readiness`, {
+        headers: authHeaders(bob),
+      });
+      const body = (await res.json()) as {
+        blocks_run: boolean;
+        errors: Array<{ field: string; code: string; message: string }>;
+      };
+      expect(body.blocks_run).toBe(true);
+      const err = body.errors.find((e) => e.field === `integrations.${INTEGRATION}`)!;
+      expect(err.code).toBe("pinned_connection_unavailable");
+      expect(err.message).toContain(shared);
     });
 
     it("a pinned set whose labels collide AFTER the write reports every bound id", async () => {

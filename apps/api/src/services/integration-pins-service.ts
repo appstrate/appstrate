@@ -470,9 +470,9 @@ interface UpdateConnectionMetadataInput {
  * (only the owner OR an admin can mutate metadata; sharedWithOrg
  * specifically requires the owner since sharing is consent).
  *
- * Refuses turning sharedWithOrg=false when the connection is referenced
- * by ≥1 pin — admins must remove the pin first, otherwise the pinned
- * resolution would silently break for every member at the next run.
+ * Refuses turning sharedWithOrg=false while an admin pin or an org default
+ * names the connection (see `assertConnectionsUnpinned`); a member pin does
+ * not block — that member's next run reports `pinned_connection_unavailable`.
  */
 export async function updateConnectionMetadata(
   connectionId: string,
@@ -710,10 +710,10 @@ async function resolveAgentIntegrationPick(args: {
       case "override_connection_unavailable":
         status = "stale";
         break;
-      // A pick to change (`stale`), or — on the fallback — a connection to add.
+      // Only an explicit set raises it (the fallback says `not_connected`): a pick to change.
       case "auth_serves_no_selected_tool":
         resolvedConnectionIds = err.boundConnectionIds ?? [];
-        status = err.source === "fallback_auto" ? "none" : "stale";
+        status = "stale";
         break;
       default:
         status = "none";

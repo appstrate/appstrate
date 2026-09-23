@@ -25,6 +25,7 @@ import {
   translateResolutionError,
   type IntegrationRequirement,
 } from "../../../src/services/integration-connection-resolver.ts";
+import { connectOfferTarget } from "../../../src/services/connect/preflight-connect-offer.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import type {
   IntegrationConnectionRow as ConnectionRow,
@@ -1678,6 +1679,47 @@ describe("resolveConnections — auth_serves_no_selected_tool", () => {
       pins: [pin([a.id, b.id])],
     });
     expect(result.errors).toEqual([]);
+  });
+
+  it("fallback with only a non-serving connection is not_connected on a serving auth", () => {
+    const b = conn({ authKey: "pat", label: "spare" });
+    const result = resolveConnections({
+      requirements: [selecting(serverlessManifest(), ["api_call__oauth"])],
+      accessibleConnections: [b],
+      pins: [],
+      actorUserId: USER_ID,
+    });
+    const err = result.errors[0]!;
+    expect(err.code).toBe("not_connected");
+    expect(err.authKey).toBe("oauth");
+    expect(connectOfferTarget(translateResolutionError(err))).toEqual({
+      integrationId: INTEG,
+      authKey: "oauth",
+      scopes: [],
+    });
+  });
+
+  it("names no connect target on an auth that serves none of the selection", () => {
+    const result = resolveConnections({
+      requirements: [selecting(serverlessManifest(), ["api_call__pat"])],
+      accessibleConnections: [],
+      pins: [],
+      actorUserId: USER_ID,
+    });
+    const err = result.errors[0]!;
+    expect(err.code).toBe("not_connected");
+    expect(err.authKey).toBeUndefined();
+  });
+
+  it("refuses nothing when no auth serves the selection — not a connection problem", () => {
+    const a = conn({ label: "main" });
+    const result = resolveConnections({
+      requirements: [selecting(serverlessManifest(), ["api_call__gone"])],
+      accessibleConnections: [a],
+      pins: [pin([a.id])],
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.resolved[INTEG]!.map((r) => r.connectionId)).toEqual([a.id]);
   });
 
   it("fallback skips a non-serving candidate instead of asking to choose", () => {

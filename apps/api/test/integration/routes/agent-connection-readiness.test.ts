@@ -332,4 +332,51 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     const item = problem.errors.find((e) => e.field === `integrations.${INTEGRATION}`);
     expect(item!.code).toBe("auth_serves_no_selected_tool");
   });
+
+  it("fallback with only a non-serving connection → not_connected, status none", async () => {
+    const auth = {
+      type: "api_key" as const,
+      authorizedUris: ["https://api.example.com/**"],
+      credentialFields: ["api_key"],
+    };
+    const manifest = apiIntegrationManifest({
+      name: INTEGRATION,
+      auths: { primary: auth, backup: auth },
+    });
+    (manifest as unknown as { _meta: unknown })._meta = {
+      "dev.appstrate/api": { auths: { primary: {}, backup: {} } },
+    };
+    await seedAgentWith({
+      ...buildAgentManifest([INTEGRATION], false),
+      integrations_configuration: { [INTEGRATION]: { tools: ["api_call__primary"] } },
+    });
+    await seedPackage({
+      id: INTEGRATION,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      type: "integration",
+      draftManifest: manifest,
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+    await db.insert(integrationConnections).values({
+      integrationId: INTEGRATION,
+      authKey: "backup",
+      accountId: "spare",
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      endUserId: null,
+      credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
+      scopesGranted: [],
+      label: "spare",
+    });
+
+    const body = (await (await getReadiness()).json()) as ReadinessBody;
+    expect(body.blocks_run).toBe(true);
+    expect(body.errors.find((e) => e.field === `integrations.${INTEGRATION}`)!.code).toBe(
+      "not_connected",
+    );
+    const integ = body.integrations.find((i) => i.integration_id === INTEGRATION);
+    expect(integ!.resolution.status).toBe("none");
+    expect(integ!.resolution.resolved_connection_ids).toEqual([]);
+  });
 });

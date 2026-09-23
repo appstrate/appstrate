@@ -653,7 +653,8 @@ export const integrationsPaths = {
       description:
         "Deletes one custom client by id. If it was the default, the cascade " +
         "falls to the system client (no auto-promotion). The connections it minted are deleted with it, " +
-        "so it is refused with 409 `connection_pinned` while a pin or an org default names one of them. " +
+        "so it is refused with 409 `connection_pinned` while an admin pin or an org default names one of them. " +
+        "A member pin does not block it; that member's next run fails with `pinned_connection_unavailable`. " +
         "Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -669,7 +670,7 @@ export const integrationsPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "A connection the client minted is named by a pin or an org default",
+          description: "A connection the client minted is named by an admin pin or an org default",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/problem+json": {
@@ -1100,6 +1101,10 @@ export const integrationsPaths = {
       operationId: "updateIntegrationConnectionMetadata",
       tags: ["Integrations"],
       summary: "Update an integration connection's label and/or shared_with_org flag",
+      description:
+        "Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin " +
+        "or an org default names the connection. A member pin does not block it; that member's next run " +
+        "fails with `pinned_connection_unavailable` until they pick again.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1144,7 +1149,8 @@ export const integrationsPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Connection is pinned and cannot be unshared",
+          description:
+            "Connection is named by an admin pin or an org default (`connection_pinned`)",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/problem+json": {
