@@ -440,7 +440,7 @@ The recorded command string is:
 if command -v appstrate >/dev/null 2>&1; then exec appstrate packages sync --target claude-plugin --target codex --print-path; else exec npx -y appstrate@latest packages sync --target claude-plugin --target codex --print-path; fi
 ```
 
-It must stay byte-stable: changing it stops the background re-runs until the user re-accepts via `claude plugin update`. Skills then appear as `/appstrate:<skill>`.
+It must stay byte-stable: changing it stops the background re-runs until the user re-accepts via `claude plugin update appstrate@appstrate` — so a change ships with the CLI release that introduces it, and is announced in the CHANGELOG. Skills then appear as `/appstrate:<skill>`.
 
 **Fresh machine.** Installing the plugin is the only step that has to come first. The command uses the installed CLI when there is one and `npx` otherwise, and `--print-path` on a machine whose profile is not configured (or has no org / space pinned) still succeeds: it installs a plugin whose only skill, `/appstrate:setup`, states what is missing and the exact command to run, plus a `SessionStart` hook that says so at every session start — to the user, and to Claude so it can offer to run `appstrate login` itself (the CLI opens the browser; the user only approves there; `login` pins the single organization and its default space by itself). The first connected sync replaces that skill with the organization's. Outside explicit logout, this only happens on a fresh plugin: once skills have been synced, a lapsed login fails the run and leaves the installed plugin untouched. Explicit logout performs the cleanup described above.
 
@@ -559,7 +559,7 @@ Edit a package (skill, agent, integration, MCP server) in a local folder with an
 appstrate packages pull my-skill                 # the draft → <workDir>/<org>/packages/skills/@<org>/my-skill
 appstrate packages status my-skill --diff        # what the folder would change in the draft
 appstrate packages push my-skill                 # the folder → the draft; nobody else sees it yet
-appstrate packages sync --source draft             # test the draft on this machine
+appstrate packages sync --source draft           # test the draft on this machine
 appstrate packages publish my-skill              # the draft → a version every space resolves
 ```
 
