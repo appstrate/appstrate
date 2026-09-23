@@ -28,7 +28,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs, runLogs, llmUsage, packages } from "@appstrate/db/schema";
 import { and } from "drizzle-orm";
@@ -40,6 +40,7 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
 import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
+import { failRunLogsInsert, clearRunLogsFault } from "../../helpers/run-logs-fault.ts";
 import {
   finalizeRun,
   getRunSinkContext,
@@ -61,6 +62,8 @@ import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 const app = getTestApp();
 
 const RUN_SECRET = "a".repeat(43); // matches mintSinkCredentials base64url(32 bytes)
+/** serialization_failure — transient: the ingest must roll back so the runner retries. */
+const TRANSIENT_SQLSTATE = "40001";
 
 function signedHeaders(secret: string, body: string) {
   const msgId = `msg_${crypto.randomUUID()}`;
@@ -633,15 +636,15 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
   // and the dispatch in `db.transaction()` so either both apply or
   // neither does.
   //
-  // We simulate a transient failure by adding a CHECK constraint that
-  // rejects a marker message. The dispatch INSERT throws inside the tx,
-  // rolling the CAS back.
+  // We simulate a TRANSIENT failure: a trigger raises 40001
+  // (serialization_failure) on a marker message. The dispatch INSERT throws
+  // inside the tx, rolling the CAS back. A row-value failure (22xxx, 23514)
+  // would instead be claimed with a placeholder row — see
+  // `services/run-event-ingestion-poison.test.ts`.
   it("rolls back the sequence advance when the run_logs INSERT fails", async () => {
     const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
 
-    await db.execute(
-      sql`ALTER TABLE run_logs ADD CONSTRAINT _test_reject_poison CHECK (message != '__poison__')`,
-    );
+    await failRunLogsInsert("__poison__", TRANSIENT_SQLSTATE);
 
     try {
       const envelope = buildEnvelope(
@@ -651,7 +654,7 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
         1,
       );
       const res = await postEvent(runId, envelope);
-      // The transaction aborts on the CHECK violation; the route surfaces
+      // The transaction aborts on the serialization failure; the route surfaces
       // an unhandled error as a 5xx. Either 500 or a problem+json shape
       // is acceptable — the contract is the rollback below.
       expect(res.status).toBeGreaterThanOrEqual(500);
@@ -664,7 +667,7 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
       const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
       expect(logs).toHaveLength(0);
     } finally {
-      await db.execute(sql`ALTER TABLE run_logs DROP CONSTRAINT _test_reject_poison`);
+      await clearRunLogsFault();
     }
   });
 
@@ -685,14 +688,12 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     const body = JSON.stringify(envelope);
     const stickyHeaders = signedHeaders(RUN_SECRET, body);
 
-    await db.execute(
-      sql`ALTER TABLE run_logs ADD CONSTRAINT _test_reject_poison CHECK (message != '__poison__')`,
-    );
+    await failRunLogsInsert("__poison__", TRANSIENT_SQLSTATE);
 
-    // The DROP is part of the test flow (it lifts the simulated failure), but it
-    // MUST also run when an assertion above it throws — otherwise the constraint
-    // survives on the shared test database and poisons every later test in this
-    // process. `IF EXISTS` makes the finally idempotent with the in-flow drop.
+    // Clearing the fault is part of the test flow (it lifts the simulated
+    // failure), but it MUST also run when an assertion above it throws —
+    // otherwise the trigger survives on the shared test database and poisons
+    // every later test in this process. `clearRunLogsFault` is idempotent.
     try {
       const first = await app.request(`/api/runs/${runId}/events`, {
         method: "POST",
@@ -706,7 +707,7 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
       // replay key was sticky for `replayWindow` seconds and this retry
       // would have been swallowed as "replay" with the event never
       // persisted.
-      await db.execute(sql`ALTER TABLE run_logs DROP CONSTRAINT _test_reject_poison`);
+      await clearRunLogsFault();
 
       const second = await app.request(`/api/runs/${runId}/events`, {
         method: "POST",
@@ -726,7 +727,7 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
         .where(and(eq(runLogs.runId, runId), eq(runLogs.message, "__poison__")));
       expect(logs).toHaveLength(1);
     } finally {
-      await db.execute(sql`ALTER TABLE run_logs DROP CONSTRAINT IF EXISTS _test_reject_poison`);
+      await clearRunLogsFault();
     }
   });
 

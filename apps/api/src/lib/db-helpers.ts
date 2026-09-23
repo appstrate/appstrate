@@ -157,6 +157,21 @@ export function isUniqueViolation(err: unknown): boolean {
   return hasSqlState(err, "23505");
 }
 
+/**
+ * SQLSTATE of a write refused for the row's own values (class 22, or 23514), else `null`:
+ * it fails identically on retry, unlike unique/FK violations, which depend on other rows.
+ */
+export function rowValueErrorCode(err: unknown): string | null {
+  let code: string | null = null;
+  someCause(err, (e) => {
+    if (typeof e.code !== "string") return false;
+    if (!e.code.startsWith("22") && e.code !== "23514") return false;
+    code = e.code;
+    return true;
+  });
+  return code;
+}
+
 // --- System + DB merge ---
 
 interface MergeSystemAndDbOptions<SystemDef, DbRow extends { id: string }, Out> {
