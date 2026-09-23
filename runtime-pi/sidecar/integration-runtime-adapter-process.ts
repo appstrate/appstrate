@@ -198,24 +198,6 @@ function planSubprocess(spec: IntegrationSpawnSpec, bundleRoot: string): Subproc
 }
 
 /**
- * AFPS §7.6 (CC-5) — materialise `delivery.files` for the process
- * adapter. Subprocesses share the host filesystem, so we attempt to write
- * each entry at the manifest-declared absolute path with the requested
- * mode. When that fails (typically a dev machine without write permission
- * to `/run/`, `/etc/`, …), we fall back to a per-run (per-connection when
- * the spec binds one) scratch dir under the sidecar's tmp space and surface
- * the actual path via an env var `APPSTRATE_FILE_MOUNT_<sanitized-path>` so
- * the integration code can pick it up. Pure-Docker deployments don't hit the
- * fallback (the runner image always permits writes to `/tmp` and `/run/`).
- *
- * Every runner of a run shares this filesystem, so a declared path listed in
- * `placement.relocate` — already written for another connection — goes
- * straight to the scratch dir: the declared path keeps the first
- * connection's bytes.
- *
- * Returns the set of created paths so `shutdown()` can clean them up.
- */
-/**
  * R8a — safe-path floor for `delivery.files` on the process adapter.
  *
  * ENTIRELY the shared floor: {@link isPathSafeForMount} refuses every surface
@@ -260,6 +242,22 @@ async function writeMountFile(path: string, bytes: Buffer, mode: number): Promis
   await chmod(path, mode);
 }
 
+/**
+ * AFPS §7.6 (CC-5) — materialise `delivery.files` for the process
+ * adapter. Subprocesses share the host filesystem, so we attempt to write
+ * each entry at the manifest-declared absolute path with the requested
+ * mode. When that fails (typically a dev machine without write permission
+ * to `/run/`, `/etc/`, …), we fall back to a per-run (per-connection when
+ * the spec binds one) scratch dir under the sidecar's tmp space and surface
+ * the actual path via an env var `APPSTRATE_FILE_MOUNT_<sanitized-path>` so
+ * the integration code can pick it up. Pure-Docker deployments don't hit the
+ * fallback (the runner image always permits writes to `/tmp` and `/run/`).
+ *
+ * A path in `placement.relocate` (another connection of the run holds it)
+ * goes straight to the scratch dir.
+ *
+ * Returns the set of created paths so `shutdown()` can clean them up.
+ */
 export async function materializeFileMountsOnHost(
   runId: string,
   fileMounts: Record<string, { content_b64: string; mode: string }>,
@@ -444,14 +442,17 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
           const path = normalizeMountPath(declared);
           const current = declaredPathHolders.get(path);
           if (current === undefined || current === holder) continue;
-          // Relocating is only sound when an env var tells the server where
-          // the file is; a hardcoded path would read the other connection's.
-          if (pointsAt(path).length === 0) {
+          // Relocating is only sound when an env var names the file exactly;
+          // a hardcoded or embedded path would read the other connection's.
+          const embeds = Object.values(procEnv).some(
+            (value) => value.includes(path) && normalizeMountPath(value) !== path,
+          );
+          if (pointsAt(path).length === 0 || embeds) {
             throw new Error(
               `${spec.integrationId} [${spec.connection?.label ?? "connect"}]: refusing to spawn — ` +
                 `delivery.files path "${path}" already holds another connection's credential ` +
-                `in this run, and no env var of this runner names it, so the runner cannot be ` +
-                `pointed at its own copy and would read the other connection's file.`,
+                `in this run, and no env var of this runner names it exactly, so the runner ` +
+                `cannot be pointed at its own copy and would read the other connection's file.`,
             );
           }
           relocate.add(path);
@@ -468,7 +469,7 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
         Object.assign(procEnv, envOverrides);
         for (const [path, writtenAt] of locations) {
           if (writtenAt === path) declaredPathHolders.set(path, holder);
-          else if (relocate.has(path)) for (const key of pointsAt(path)) procEnv[key] = writtenAt;
+          else for (const key of pointsAt(path)) procEnv[key] = writtenAt;
         }
       }
       // Privilege-drop wrapper (Firecracker guest): the supervisor provides

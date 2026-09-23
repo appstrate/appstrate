@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -117,6 +117,7 @@ describe("process adapter — delivery.files across connections of one run", () 
   });
 
   afterEach(async () => {
+    await chmod(join(dir, "run"), 0o700).catch(() => {});
     await adapter.shutdown();
     await wrapper.restore();
     await rm(dir, { recursive: true, force: true });
@@ -171,6 +172,37 @@ describe("process adapter — delivery.files across connections of one run", () 
     expect(error.message).toContain("@appstrate/ssh");
     expect(error.message).toContain("[db]");
     expect(error.message).toContain(declaredPath);
+    expect(await readFile(declaredPath, "utf8")).toBe("web-key");
+  });
+
+  it("points the env var at the scratch copy when the declared path cannot be written", async () => {
+    // A parent the sidecar may not write — `/run` for a non-root sidecar.
+    await mkdir(join(dir, "run"), { recursive: true });
+    await chmod(join(dir, "run"), 0o500);
+    const onlySpec = spec({ id: "conn-only", label: "only" }, "only-key", {
+      KEY_PATH: declaredPath,
+    });
+    const only = await dump(await spawn(onlySpec), onlySpec);
+
+    expect(only.content).toBe("only-key");
+    expect(only.keyPath).not.toBe(declaredPath);
+    expect(Object.values(only.mountVars)).toEqual([only.keyPath]);
+  });
+
+  it("refuses a second connection whose env embeds the colliding path", async () => {
+    await spawn(spec({ id: "conn-web", label: "web" }, "web-key", { KEY_PATH: declaredPath }));
+
+    // `KEY_PATH` could be repointed; `SSH_OPTS` would still name web's file.
+    const refused = spawn(
+      spec({ id: "conn-db", label: "db" }, "db-key", {
+        KEY_PATH: declaredPath,
+        SSH_OPTS: `-i ${declaredPath}`,
+      }),
+    );
+
+    const error = (await refused.catch((err: unknown) => err)) as Error;
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toContain("[db]");
     expect(await readFile(declaredPath, "utf8")).toBe("web-key");
   });
 });
