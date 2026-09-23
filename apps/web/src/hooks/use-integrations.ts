@@ -546,7 +546,7 @@ export function useUpdateIntegrationConnection() {
       // refresh the whole integration subtree, readiness included.
       void invalidateIntegrationQueries(qc);
     },
-    // Unsharing a connection a pin or an org default binds is refused (409 `connection_pinned`).
+    // Unsharing a connection an admin pin or an org default names is refused (409 `connection_pinned`).
     onError: onMutationError,
   });
 }
@@ -560,5 +560,8 @@ export function useDeleteIntegrationOAuthClient() {
       toast.success(t("integration.oauthClient.delete.success"));
       invalidate();
     },
+    // Refused (409 `connection_pinned`) while an admin pin or an org default names a connection it
+    // minted. The spec types the problem body; the client middleware throws it as an `ApiError`.
+    onError: (err: unknown) => onMutationError(err as Error),
   });
 }
