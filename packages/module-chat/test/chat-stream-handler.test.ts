@@ -502,8 +502,9 @@ describe("handleChatStream", () => {
   });
 
   it("teaches no skill on a turn without `skills:read`", async () => {
-    // The persona follows the turn's token; the context block renders what the
-    // route answers, and the route answers no skill without `skills:read`.
+    // The payload below DOES carry skills, so every absence asserted is the
+    // turn's own gate, not an empty fixture: no `?skills=` is asked, and
+    // neither the persona nor the block names a skill.
     const sessionId = mintSessionId();
     const PIN = "@acme/pinned-skill";
     await db.insert(chatSessions).values({
@@ -515,24 +516,34 @@ describe("handleChatStream", () => {
       pinnedSkills: [PIN],
     });
     const contextUrls: URL[] = [];
+    const withSkills = () =>
+      Response.json({
+        user: { name: "Chat Tester", email: "chat-tester@test.com" },
+        org: { role: "owner", name: CONTEXT_ORG_MARKER, slug: "chat-handler-test" },
+        connections: [],
+        agents: [],
+        skills: [{ package_id: "@acme/catalogued", display_name: "Catalogued" }],
+        requested_skills: [{ package_id: PIN, display_name: "Pinned" }],
+      });
     const dispatch = async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
       if (url.pathname === "/api/me/context") contextUrls.push(url);
-      return scriptedDispatch()(req);
+      return scriptedDispatch(undefined, withSkills)(req);
     };
 
     const { engine, calls } = scriptedEngine();
     const res = await postChat(sessionId, undefined, engine, {
       dispatch,
-      permissions: new Set(["agents:read", "agents:run"]),
+      permissions: new Set(["mcp:read", "mcp:invoke", "agents:read", "agents:run"]),
     });
     expect(res.status).toBe(200);
     await collectUiChunks(res);
 
     expect(contextUrls).toHaveLength(1);
+    expect(contextUrls[0]!.searchParams.has("skills")).toBe(false);
     const system = calls[0]!.system;
     expect(system).toContain(CONTEXT_ORG_MARKER);
-    for (const absent of ["## Skills", PIN, "getSkill", "listSkills"]) {
+    for (const absent of ["## Skills", PIN, "@acme/catalogued", "getSkill", "listSkills"]) {
       expect(system).not.toContain(absent);
     }
 

@@ -173,10 +173,11 @@ describe("full persona invariants", () => {
     expect(readerOnly).toContain("guides for YOU");
   });
 
-  it("forbids browsing `listSkills` outside the two cases that need it", () => {
+  it("names `listSkills` for an unlisted request here, and for a truncated list only in the list bullet", () => {
     expect(FULL).toContain(
-      "Never call `listSkills` to browse: only when the user asks for a skill you do not see listed, or the list is marked `(list truncated)`",
+      "Call `listSkills` only when the user asks for a skill you do not see listed",
     );
+    expect(FULL.split("listSkills")).toHaveLength(3);
   });
 
   it("teaches nothing about skills to a turn without `skills:read`", () => {

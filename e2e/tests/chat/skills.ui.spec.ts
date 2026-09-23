@@ -39,18 +39,15 @@ test("hides the catalogue and pins a skill before the first message", async ({
   await expect(pin).toBeEnabled();
   await pin.click();
   await expect(pin).toBeChecked();
+  // The controls are disabled while a write is in flight: enabled again means
+  // the second PUT has answered, so one read is enough.
+  await expect(pin).toBeEnabled();
   await page.keyboard.press("Escape");
   await expect(popover).toBeHidden();
 
-  // The PUTs are asynchronous: poll until the row carries both writes.
-  await expect
-    .poll(async () => {
-      const res = await apiClient.get("/chat/sessions");
-      const body = (await res.json()) as { data: SessionRow[] };
-      return body.data.map((s) => ({
-        skill_catalogue: s.skill_catalogue,
-        pinned_skills: s.pinned_skills,
-      }));
-    })
-    .toEqual([{ skill_catalogue: false, pinned_skills: [packageId] }]);
+  const res = await apiClient.get("/chat/sessions");
+  const body = (await res.json()) as { data: SessionRow[] };
+  expect(
+    body.data.map((s) => ({ skill_catalogue: s.skill_catalogue, pinned_skills: s.pinned_skills })),
+  ).toEqual([{ skill_catalogue: false, pinned_skills: [packageId] }]);
 });
