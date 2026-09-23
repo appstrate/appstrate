@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The cross-process lock `appstrate skills sync` holds for its whole body.
+ * The cross-process lock `appstrate packages sync` holds for its whole body.
  *
  * Tested through the helper rather than the command: the production wait is
  * 60 seconds, and a suite that exercised it for real would take a minute to
@@ -15,12 +15,8 @@ import { lstat, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { closeSync, openSync } from "node:fs";
-import {
-  getLockPath,
-  resolveTryLock,
-  SyncLockBusyError,
-  withSyncLock,
-} from "../src/lib/skills-sync/lock.ts";
+import { getLockPath, SyncLockBusyError, withSyncLock } from "../src/lib/skills-sync/lock.ts";
+import { resolveTryLock } from "../src/lib/file-lock.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
 
 const originalDataHome = process.env.XDG_DATA_HOME;
@@ -165,7 +161,7 @@ describe("withSyncLock without a working flock", () => {
       tryLock: () => ({ status: "unsupported", reason: "Windows has no flock(2)" }),
     });
     expect(result).toBe("ran");
-    expect(stderr()).toContain("skills sync lock unavailable (Windows has no flock(2))");
+    expect(stderr()).toContain("packages sync lock unavailable (Windows has no flock(2))");
     expect(stderr()).toContain("continuing unlocked");
   });
 

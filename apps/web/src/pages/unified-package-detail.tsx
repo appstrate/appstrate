@@ -196,7 +196,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     versionParam,
   );
 
-  // Diff: fetch latest version when timestamps suggest changes
+  // The server's own flag gates publishing (the header badge and the publish
+  // dialog), as it does for `appstrate packages publish`: the server judges the
+  // content itself — annexes included, which the manifest/prompt comparison
+  // below cannot see — and answers `409 no_changes` when nothing moved. The
+  // comparison only decides whether a diff tab has anything to show.
   const hasTimestampChanges = source !== "system" && !!hasUnarchivedChanges;
   const { data: latestVersionForDiff } = useVersionDetail(
     type,
@@ -388,7 +392,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       <SharedHeader
         detail={unifiedForHeader}
         isHistoricalVersion={isHistoricalVersion}
-        hasUnarchivedChanges={hasArchivableChanges}
+        hasUnarchivedChanges={hasTimestampChanges}
         actionsLeft={
           type === "agent" ? (
             <AgentRunButtonInline packageId={packageId} versionLabel={versionLabel} />
@@ -609,7 +613,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         onClose={() => setCreateVersionOpen(false)}
         type={type}
         packageId={packageId}
-        hasUnarchivedChanges={hasArchivableChanges}
+        hasUnarchivedChanges={hasTimestampChanges}
+        lockVersion={(agentDetail ?? pkgDetail)?.lock_version}
       />
 
       <ForkPackageModal

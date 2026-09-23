@@ -31,6 +31,28 @@ export class PackageFileWriteError extends Error {
   }
 }
 
+// A non-streaming `decode()` carries no state between calls, so one instance
+// serves every caller — the file index decodes each file of a tree through it.
+const STRICT_UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
+/**
+ * The text a package file's bytes ARE, or `null` when they are not text.
+ *
+ * Strict UTF-8 with the BOM kept (`ignoreBOM: true`): the default decoder drops
+ * a leading U+FEFF, so text decoded that way and written back loses it. Every
+ * end that chooses between a file's `text` and its `bytes_base64` asks this one
+ * question — the file index deciding what to inline, the editor projecting a
+ * staged write, the CLI encoding a local file — so a file cannot be text on one
+ * side of the wire and binary on the other.
+ */
+export function decodePackageFileText(bytes: Uint8Array): string | null {
+  try {
+    return STRICT_UTF8.decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
 export function isProtectedPackageFile(type: PackageType, path: string): boolean {
   const entry = PACKAGE_CONTENT_ENTRY[type];
   return path === PACKAGE_MANIFEST_FILE || (entry?.required === true && path === entry.path);
@@ -47,7 +69,13 @@ function assertPath(path: string): void {
     );
 }
 
-function canonicalPath(path: string): string {
+/**
+ * The key two paths collide on: NFC, lowercased. The tree algebra refuses a
+ * NEW path that shares it with another, since a case- or normalization-
+ * insensitive filesystem (macOS, Windows) cannot hold both; a client that
+ * writes a tree to such a disk asks the same question before it does.
+ */
+export function canonicalPackagePath(path: string): string {
   return path.normalize("NFC").toLowerCase();
 }
 
@@ -56,13 +84,13 @@ function assertNames<T>(files: Record<string, T>, added: Iterable<string>): void
   const names = new Map<string, string[]>();
   const directories = new Set<string>();
   for (const path of Object.keys(files)) {
-    const key = canonicalPath(path);
+    const key = canonicalPackagePath(path);
     names.set(key, [...(names.get(key) ?? []), path]);
     for (let cut = key.indexOf("/"); cut >= 0; cut = key.indexOf("/", cut + 1))
       directories.add(key.slice(0, cut));
   }
   for (const path of added) {
-    const key = canonicalPath(path);
+    const key = canonicalPackagePath(path);
     if ((names.get(key)?.length ?? 0) > 1 || directories.has(key)) {
       throw new PackageFileWriteError(
         "path_conflict",

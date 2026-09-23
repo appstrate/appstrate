@@ -38,7 +38,8 @@ const RUNTIME_TOOL_IDS = [...SELECTABLE_RUNTIME_TOOLS];
 /**
  * The `home_space_id` / `home_writable` / `home_deletable` / `home_shareable`
  * group, on every shape that carries a package's home (`AgentDetail`,
- * `OrgPackageItem`, `OrgPackageItemDetail`, `LibraryPackageList`). ONE
+ * `OrgPackageItem`, `OrgPackageItemDetail`, `LibraryPackageList`,
+ * `PackageHome`). ONE
  * definition: the server computes all four in one place (`homeWireForCaller`),
  * and four hand-copied descriptions drifted the moment the contract changed.
  */
@@ -69,7 +70,7 @@ export const ORG_SETTINGS_PROPERTIES = {
   restrict_package_copy: {
     type: "boolean",
     description:
-      "When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space: `POST /api/packages/{scope}/{name}/fork`, `GET /api/packages/{scope}/{name}/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt on all three: the CLI's skills sync downloads them into a local checkout by design. A SERVER-side agent run is unaffected — it assembles the same bundle and hands it to nobody — but `appstrate run --local`, which downloads one, is not: a copy of the agent leaves the platform to perform it, which is what this setting is about.",
+      "When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space: `POST /api/packages/{scope}/{name}/fork`, `GET /api/packages/{scope}/{name}/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt on all three: the CLI's `packages sync` downloads them into a local checkout by design. A SERVER-side agent run is unaffected — it assembles the same bundle and hands it to nobody — but `appstrate run --local`, which downloads one, is not: a copy of the agent leaves the platform to perform it, which is what this setting is about.",
   },
   api_version: {
     type: "string",
@@ -2461,6 +2462,31 @@ export const schemas = {
         },
       },
       created_at: { type: "string", format: "date-time" },
+    },
+  },
+  PackageHome: {
+    type: "object",
+    description:
+      "Where a package lives and where this caller reads it from, resolved across EVERY space the caller reaches rather than the one in `X-Space-Id` — the answer a client holding only a package id needs to know which space to address.",
+    required: [
+      "id",
+      "type",
+      "home_space_id",
+      "home_writable",
+      "home_deletable",
+      "home_shareable",
+      "read_space_ids",
+    ],
+    properties: {
+      id: { type: "string", description: "Package id (`@scope/name`)." },
+      type: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
+      ...PACKAGE_HOME_PROPERTIES,
+      read_space_ids: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Spaces (`spc_…`) where this caller holds the package type's read AND the placement grants it — the home, or a space it is offered to; every reachable space holding that read for a system package. The home comes first when it is one of them, the rest sorted by id. Never empty: a package readable from nowhere is a 404.",
+      },
     },
   },
 } as const;

@@ -57,6 +57,7 @@ import {
   seedPackageVersion,
   seedSpace,
   seedSpaceMember,
+  seedSpaceRole,
 } from "../../helpers/seed.ts";
 import {
   createFakeOrchestrator,
@@ -1580,7 +1581,7 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
     expect((await download(viewer, AGENT, homeId)).status).not.toBe(403);
   });
 
-  it("on: a SKILL of the organization is exempt — the CLI's skills sync copies by design", async () => {
+  it("on: a SKILL of the organization is exempt — the CLI's `packages sync` copies by design", async () => {
     // The org's own skill, not the system one: a system package is exempt for a
     // reason of its own, so asserting the skill exemption on one would pass
     // whatever the type rule did.
@@ -1590,6 +1591,34 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
     await expectProblem(await download(viewer, AGENT, homeId), 403, {
       code: "package_copy_restricted",
     });
+  });
+
+  it("on: an author without `agents:share` still fetches their own DRAFT, not a version", async () => {
+    // A custom role that writes agents without sharing them: the draft is the
+    // author's working copy, which they already edit byte for byte through the
+    // file routes — fetching it whole is editing, not copying it out.
+    const user = await createTestUser();
+    await addOrgMember(ctx.orgId, user.id, "member");
+    const role = await seedSpaceRole({
+      orgId: ctx.orgId,
+      permissions: ["agents:read", "agents:write"],
+    });
+    await seedSpaceMember({
+      spaceId: homeId,
+      userId: user.id,
+      presetRole: null,
+      customRoleId: role.id,
+    });
+    const headers = { Cookie: user.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": homeId };
+    await setRestrictCopy(true);
+
+    const draft = await app.request(`/api/packages/${AGENT}/draft/download`, { headers });
+    expect(draft.status, await draft.clone().text()).toBe(200);
+    await expectProblem(
+      await app.request(`/api/packages/${AGENT}/0.1.0/download`, { headers }),
+      403,
+      { code: "package_copy_restricted" },
+    );
   });
 
   it("off: `/bundle` hands the agent to any reader of the space it is installed in", async () => {

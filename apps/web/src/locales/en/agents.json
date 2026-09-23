@@ -339,6 +339,7 @@
   "version.diff": "Changes",
   "version.diffManifest": "Manifest",
   "version.noChanges": "No changes since the last version",
+  "version.draftChanged": "The draft changed while publishing: nothing was published. Check it and publish again.",
   "version.modified": "Modified",
   "version.activeLabel": "Active version",
   "editor.errorContent": "Content is required.",

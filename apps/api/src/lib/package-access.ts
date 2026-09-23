@@ -28,6 +28,7 @@ import { makePermissionGuard, reportPermissionDenial } from "@appstrate/core/per
 import { requireAnyPermission } from "../middleware/require-permission.ts";
 import { getOrgMember, getOrgSettings } from "../services/organizations.ts";
 import type { PackageType } from "@appstrate/core/validation";
+import type { PackageHome } from "@appstrate/shared-types";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import type { AppEnv } from "../types/index.ts";
 import type { SpaceScope } from "./scope.ts";
@@ -506,17 +507,68 @@ function assertPackageIsReachable(
   sharedIn: readonly string[],
   accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
 ): void {
-  const opens = packageReadPermissions(pkg.type);
-  const permitted = accessible.filter((space) =>
-    opens.some((permission) => space.permissions.has(permission)),
-  );
-  const readable = new Set(permitted.map((space) => space.id));
-  if (
-    permitted.length === 0 ||
-    (pkg.source !== "system" && !placementGrantsRead(pkg, sharedIn, readable))
-  ) {
+  if (packageReadSpaces(pkg, sharedIn, accessible).length === 0) {
     throw notFound(`Package '${packageId}' not found`);
   }
+}
+
+/**
+ * Every space of the caller's reach this package is READ from — the type's
+ * read permission held there ({@link packageReadPermissions}) and the placement
+ * granting it there ({@link placementGrantsRead}); every such space for a
+ * system package, which the platform places everywhere. Reachable = non-empty.
+ */
+function packageReadSpaces(
+  pkg: PackageAccessRow,
+  sharedIn: readonly string[],
+  accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
+): PackageAccessSpace[] {
+  const opens = packageReadPermissions(pkg.type);
+  return accessible.filter(
+    (space) =>
+      opens.some((permission) => space.permissions.has(permission)) &&
+      (isSystemPackageRow(pkg) || placementGrantsRead(pkg, sharedIn, new Set([space.id]))),
+  );
+}
+
+/**
+ * A package's home and its reach, resolved across EVERY space the caller
+ * reaches rather than the one in `X-Space-Id` — `GET …/home`.
+ *
+ * That is the question the per-type detail cannot answer: it reads from the
+ * current space alone, so a package homed in the caller's personal space and
+ * offered nowhere is a 404 from every team space. A client holding only an id
+ * — the CLI, pointed at a working folder — asks here which space to address.
+ *
+ * `null` exactly when {@link assertCatalogPackageAccess} would refuse, from the
+ * same predicate. `home_*` is {@link homeWireForCaller}, so a home the caller
+ * does not reach stays `null` even when a share makes the package readable;
+ * `read_space_ids` puts the home first when it is one of them, then sorts by
+ * id so the answer does not depend on row order.
+ */
+export async function resolvePackageHome(
+  c: Context<AppEnv>,
+  packageId: string,
+): Promise<PackageHome | null> {
+  const orgId = c.get("orgId");
+  const [pkg, accessible, sharedIn] = await Promise.all([
+    findPackageRow(packageId, orgId),
+    packageAccessSpaces(c),
+    loadPackageShares(packageId, orgId),
+  ]);
+  if (!pkg) return null;
+  const readSpaces = packageReadSpaces(pkg, sharedIn, accessible);
+  if (readSpaces.length === 0) return null;
+  const rank = (id: string) => (id === pkg.homeSpaceId ? 0 : 1);
+  const readSpaceIds = readSpaces
+    .map((space) => space.id)
+    .sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0));
+  return {
+    id: pkg.id,
+    type: pkg.type,
+    ...homeWireForCaller(pkg, accessible),
+    read_space_ids: readSpaceIds,
+  };
 }
 
 /**
@@ -900,7 +952,7 @@ export function holdsHomeAuthority(
  * mandatory and the two rows it exempts are refused above. An owner or admin
  * governs a package by reaching its home space (RBAC spec §13.7).
  *
- * Three exemptions. SKILLS, in both settings: the CLI's skills sync downloads
+ * Three exemptions. SKILLS, in both settings: the CLI's `packages sync` downloads
  * them into a local checkout by design (`apps/cli/src/lib/skills-sync/plan.ts`).
  * RUNS, since a run's bundle is assembled server-side and never travels as a
  * copy. SYSTEM packages, stated HERE rather than left to the home rule — they

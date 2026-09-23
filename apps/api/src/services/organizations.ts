@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { db } from "@appstrate/db/client";
-import { notFound } from "../lib/errors.ts";
+import { conflict, forbidden, notFound } from "../lib/errors.ts";
 import { CURRENT_API_VERSION } from "../lib/api-versions.ts";
 import { toISO, toISORequired } from "../lib/date-helpers.ts";
 import {
@@ -17,20 +17,38 @@ import {
   schedules,
   files,
   uploads,
+  apiKeys,
+  oauthClient,
+  oauthAccessToken,
+  oauthRefreshToken,
 } from "@appstrate/db/schema";
-import { and, eq, inArray, notInArray, count, sql } from "drizzle-orm";
+import {
+  and,
+  arrayContains,
+  eq,
+  ne,
+  inArray,
+  isNull,
+  notInArray,
+  or,
+  count,
+  sql,
+} from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
-import { scopedWhere, type DbOrTx } from "../lib/db-helpers.ts";
+import { scopedWhere, type DbOrTx, type Tx } from "../lib/db-helpers.ts";
 import { countInProgressRuns, orgRunConcurrencyLockKey } from "./state/runs.ts";
 import { removeScheduleJobs } from "./scheduler.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { orgPackageStorageDeletionJobs } from "./package-storage-deletion.ts";
 import { orgApiVersionCache } from "./org-settings-cache.ts";
-import { deleteSpaceMembershipsInOrg } from "./space-members.ts";
+import { deleteSpaceMembershipsInOrg, lockOrgMember } from "./space-members.ts";
 import { orphanPersonalSpaces } from "./spaces.ts";
 import { ensurePersonalSpace, provisionOrg } from "@appstrate/db/provision-org";
 import type { RevokedSpaceAssignment } from "./space-members.ts";
+import { assignableRolesForMember, canRemoveMember } from "@appstrate/shared-types";
+import { getMcpOrgResourceUri } from "../lib/audiences.ts";
+import { emitEvent } from "../lib/modules/module-loader.ts";
 
 interface OrgResult {
   id: string;
@@ -277,8 +295,9 @@ export async function getOrgMembers(orgId: string) {
 }
 
 /**
- * The one reader of `org_members` for a `(org, user)` pair. Every caller that
- * needs a role goes through it.
+ * The one unlocked reader of `org_members` for a `(org, user)` pair. Every
+ * caller that needs a role goes through it — `lockedActorRole` included, under
+ * the ownership lock; the membership writes lock the target with `lockOrgMember`.
  *
  * `tx` is not a convenience: an invitation accept inserts the membership row
  * and the space rows in one transaction, so the read that follows must see its
@@ -364,114 +383,249 @@ export async function provisionMember(
   return { created: inserted.length > 0 };
 }
 
+interface MemberActor {
+  userId: string;
+  /** `authMethod === "session"`: the dashboard, not a token acting for the user. */
+  firstPartySession: boolean;
+}
+
+/** What an exit revoked, for the `org.member_removed` / `org.member_left` audit. */
+interface MemberExitResult {
+  orphanedSpaceIds: string[];
+  revokedApiKeyIds: string[];
+}
+
 /**
- * @returns the ids of the personal spaces this removal put on the offboarding
- *   clock, so the route can record them on `org.member_removed`. Without them
- *   the audit trail says a member left and nothing about the space that now has
- *   30 days to live — which is exactly the row an owner has to act on.
+ * Serialises every write to the org's owner set. NO KEY UPDATE: child inserts
+ * take FOR KEY SHARE on this row and must not queue behind a membership change.
+ */
+async function lockOrgOwnership(tx: Tx, orgId: string): Promise<void> {
+  const [org] = await tx
+    .select({ id: organizations.id })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1)
+    .for("no key update");
+  if (!org) throw notFound("Organization not found");
+}
+
+/** Under {@link lockOrgOwnership}, which all role writers take — not the request's role. */
+async function lockedActorRole(tx: Tx, orgId: string, actor: MemberActor): Promise<OrgRole> {
+  const row = await getOrgMember(orgId, actor.userId, tx);
+  if (!row) throw forbidden("Not a member of this organization");
+  return row.role;
+}
+
+// Any token — a self-registered MCP client resolves as the user — can be driven
+// by a prompt-injected agent; handing the org over takes the dashboard.
+function assertOwnerChangeInSession(actor: MemberActor): void {
+  if (!actor.firstPartySession) {
+    throw forbidden("Granting or changing the owner role requires signing in to the dashboard");
+  }
+}
+
+async function assertAnotherOwnerRemains(tx: Tx, orgId: string, userId: string): Promise<void> {
+  const [row] = await tx
+    .select({ owners: count() })
+    .from(organizationMembers)
+    .where(
+      and(
+        eq(organizationMembers.orgId, orgId),
+        eq(organizationMembers.role, "owner"),
+        ne(organizationMembers.userId, userId),
+      ),
+    );
+  if ((row?.owners ?? 0) === 0) {
+    throw conflict(
+      "last_owner",
+      "An organization must keep at least one owner. Promote another member to owner first, or delete the organization.",
+    );
+  }
+}
+
+/** The one exit door: leave and removal clean up the membership in one place. */
+async function removeMemberInTx(
+  tx: Tx,
+  orgId: string,
+  userId: string,
+): Promise<MemberExitResult & { disabledScheduleIds: string[] }> {
+  await tx.delete(organizationMembers).where(
+    scopedWhere(organizationMembers, {
+      orgId,
+      extra: [eq(organizationMembers.userId, userId)],
+    }),
+  );
+
+  // No FK on the polymorphic recipient, and runs (their source) stay as history.
+  await tx
+    .delete(notifications)
+    .where(
+      and(
+        eq(notifications.orgId, orgId),
+        eq(notifications.recipientType, "user"),
+        eq(notifications.recipientId, userId),
+      ),
+    );
+
+  // Neither these rows nor the keys and tokens below cascade from the membership,
+  // and all of them would silently come back to life on a re-invite.
+  await deleteSpaceMembershipsInOrg(tx, orgId, userId);
+
+  const revokedKeys = await tx
+    .update(apiKeys)
+    .set({ revokedAt: new Date() })
+    .where(and(eq(apiKeys.orgId, orgId), eq(apiKeys.createdBy, userId), isNull(apiKeys.revokedAt)))
+    .returning({ id: apiKeys.id });
+
+  // Tokens that grant only this org: its own clients' (a refresh through an
+  // `allowSignup` one re-provisions the member) and those bound to its MCP
+  // resource. Only opaque tokens are rows; a JWT lives until its TTL, stopped by
+  // the per-request membership check.
+  const orgClientIds = tx
+    .select({ clientId: oauthClient.clientId })
+    .from(oauthClient)
+    .where(and(eq(oauthClient.level, "org"), eq(oauthClient.referencedOrgId, orgId)));
+  const mcpResource = [getMcpOrgResourceUri(orgId)];
+  const revokedAt = new Date();
+  await tx
+    .update(oauthRefreshToken)
+    .set({ revoked: revokedAt })
+    .where(
+      and(
+        eq(oauthRefreshToken.userId, userId),
+        isNull(oauthRefreshToken.revoked),
+        or(
+          inArray(oauthRefreshToken.clientId, orgClientIds),
+          arrayContains(oauthRefreshToken.resources, mcpResource),
+        ),
+      ),
+    );
+  await tx
+    .update(oauthAccessToken)
+    .set({ revoked: revokedAt })
+    .where(
+      and(
+        eq(oauthAccessToken.userId, userId),
+        isNull(oauthAccessToken.revoked),
+        or(
+          inArray(oauthAccessToken.clientId, orgClientIds),
+          arrayContains(oauthAccessToken.resources, mcpResource),
+        ),
+      ),
+    );
+
+  // Not deleted: 30 days to convert it, or to hand it back on re-invite (spec §3.6).
+  const orphanedSpaceIds = await orphanPersonalSpaces(tx, orgId, userId);
+
+  // Disabled, not deleted (org history): they would keep firing under the
+  // departed identity, whose user row survives (CRIT-13).
+  const disabled = await tx
+    .update(schedules)
+    .set({ enabled: false, nextRunAt: null, updatedAt: new Date() })
+    .where(
+      and(eq(schedules.orgId, orgId), eq(schedules.userId, userId), eq(schedules.enabled, true)),
+    )
+    .returning({ id: schedules.id });
+
+  return {
+    orphanedSpaceIds,
+    revokedApiKeyIds: revokedKeys.map((row) => row.id),
+    disabledScheduleIds: disabled.map((row) => row.id),
+  };
+}
+
+/** `authorize` judges rows read under the lock: no role write lands before the delete. */
+async function exitOrg(
+  orgId: string,
+  userId: string,
+  authorize: (tx: Tx, role: OrgRole) => Promise<void>,
+): Promise<MemberExitResult> {
+  const { disabledScheduleIds, ...result } = await db.transaction(async (tx) => {
+    await lockOrgOwnership(tx, orgId);
+    const member = await lockOrgMember(tx, orgId, userId);
+    if (!member) throw notFound("Member not found");
+    await authorize(tx, member.role);
+    // Runs on every exit; only a leave can fail it (an owner is removed only by another owner).
+    if (member.role === "owner") await assertAnotherOwnerRemains(tx, orgId, userId);
+    return removeMemberInTx(tx, orgId, userId);
+  });
+
+  // Outside the transaction, best-effort; the scheduler revalidates the actor at fire time.
+  await removeScheduleJobs(disabledScheduleIds);
+  await emitEvent("onOrgMemberRemove", orgId, userId);
+  return result;
+}
+
+/**
+ * Remove `targetUserId` on `actor`'s authority. 404 when not a member; 403 when
+ * the actor is not a member, `canRemoveMember` refuses, or the target is an
+ * owner and the actor is not in a dashboard session.
+ *
+ * @returns what the removal orphaned and revoked, for `org.member_removed`.
  */
 export async function removeMember(
   orgId: string,
-  userId: string,
-): Promise<{ orphanedSpaceIds: string[] }> {
-  // One transaction: the member row, the member's notifications, the member's
-  // explicit space roles AND the member's schedules in this org are handled
-  // atomically. The member's runs
-  // stay in the org for history, so their notifications are not cascaded away
-  // — and since notifications carry the recipient as a polymorphic
-  // (recipientType, recipientId) tuple with NO foreign key, nothing else would
-  // clean them up (org/space FK cascades only fire on org/space deletion).
-  // Schedules similarly only cascade on user-ACCOUNT or org deletion, and a
-  // removed member's user row survives (multi-org) — without the disable here
-  // their schedules would keep firing under the revoked identity (CRIT-13).
-  // A throw inside rolls everything back.
-  const { disabledScheduleIds, orphanedSpaceIds } = await db.transaction(async (tx) => {
-    const deleted = await tx
-      .delete(organizationMembers)
-      .where(
-        scopedWhere(organizationMembers, {
-          orgId,
-          extra: [eq(organizationMembers.userId, userId)],
-        }),
-      )
-      .returning({ orgId: organizationMembers.orgId });
-
-    if (deleted.length === 0) {
-      throw new Error("Failed to remove member: member not found");
+  targetUserId: string,
+  actor: MemberActor,
+): Promise<MemberExitResult> {
+  return exitOrg(orgId, targetUserId, async (tx, targetRole) => {
+    const actorRole = await lockedActorRole(tx, orgId, actor);
+    const isSelf = targetUserId === actor.userId;
+    if (!canRemoveMember({ actorRole, targetRole, isSelf })) {
+      throw forbidden("You cannot remove this member");
     }
-
-    await tx
-      .delete(notifications)
-      .where(
-        and(
-          eq(notifications.orgId, orgId),
-          eq(notifications.recipientType, "user"),
-          eq(notifications.recipientId, userId),
-        ),
-      );
-
-    // `space_members` does NOT cascade here: its foreign keys point at
-    // `spaces` and `user`, and removing an org membership deletes neither.
-    // Left behind, the rows would silently restore every space role the moment
-    // the person is re-invited.
-    await deleteSpaceMembershipsInOrg(tx, orgId, userId);
-
-    // Start the offboarding window on the personal space they owned here. The
-    // space is NOT deleted now: for 30 days an owner or admin can convert it to
-    // a team space and keep what is in it, and a re-invite inside the window
-    // gives it back to them untouched (`ensurePersonalSpace`). After that the
-    // `personal-space-sweeper` worker empties and deletes it (spec §3.6).
-    const orphanedSpaceIds = await orphanPersonalSpaces(tx, orgId, userId);
-
-    // Disable (not delete — the row is org history) every schedule the
-    // removed member owns as its execution actor in THIS org.
-    const disabled = await tx
-      .update(schedules)
-      .set({ enabled: false, nextRunAt: null, updatedAt: new Date() })
-      .where(
-        and(eq(schedules.orgId, orgId), eq(schedules.userId, userId), eq(schedules.enabled, true)),
-      )
-      .returning({ id: schedules.id });
-    return { disabledScheduleIds: disabled.map((row) => row.id), orphanedSpaceIds };
+    if (targetRole === "owner") assertOwnerChangeInSession(actor);
   });
-
-  // Queue removal can't join the DB transaction; run it after commit,
-  // best-effort (errors logged inside). The fire-time actor revalidation in
-  // the scheduler is the backstop for any repeatable job that survives a
-  // crash between the commit and this call.
-  await removeScheduleJobs(disabledScheduleIds);
-  return { orphanedSpaceIds };
 }
 
-/** @returns the explicit space grants the promotion revoked, for the audit trail. */
+/** The member leaves — the removal's exit. 404 when not a member, 409 `last_owner`. */
+export async function leaveOrganization(orgId: string, userId: string): Promise<MemberExitResult> {
+  return exitOrg(orgId, userId, async () => {});
+}
+
+/**
+ * Change `targetUserId`'s role on `actor`'s authority. 404 when not a member;
+ * 403 when the actor is not a member, `assignableRolesForMember` does not offer
+ * `role`, or owner is granted or taken outside a dashboard session.
+ *
+ * @returns the previous role and the space grants the promotion revoked, for the audit.
+ */
 export async function updateMemberRole(
   orgId: string,
-  userId: string,
+  targetUserId: string,
   role: OrgRole,
-): Promise<RevokedSpaceAssignment[]> {
-  // One transaction: promoting someone to admin/owner makes their explicit
-  // space roles unreadable (the resolver answers `admin` from the org role
-  // before it looks at the row), so the rows go with the promotion rather than
-  // lying in wait for a later demotion to silently restore a role nobody
-  // re-granted. RBAC spec §3.2.
+  actor: MemberActor,
+): Promise<{ previousRole: OrgRole; revoked: RevokedSpaceAssignment[] }> {
   return db.transaction(async (tx) => {
-    const updated = await tx
+    await lockOrgOwnership(tx, orgId);
+    const target = await lockOrgMember(tx, orgId, targetUserId);
+    if (!target) throw notFound("Member not found");
+    const assignable = assignableRolesForMember({
+      actorRole: await lockedActorRole(tx, orgId, actor),
+      targetRole: target.role,
+      isSelf: targetUserId === actor.userId,
+    });
+    if (!assignable.includes(role)) {
+      throw forbidden("You cannot assign this role to this member");
+    }
+    if (role === "owner" || target.role === "owner") assertOwnerChangeInSession(actor);
+
+    await tx
       .update(organizationMembers)
       .set({ role })
       .where(
         scopedWhere(organizationMembers, {
           orgId,
-          extra: [eq(organizationMembers.userId, userId)],
+          extra: [eq(organizationMembers.userId, targetUserId)],
         }),
-      )
-      .returning({ orgId: organizationMembers.orgId });
-
-    if (updated.length === 0) {
-      throw new Error("Failed to update member role: member not found");
-    }
-    return role === "owner" || role === "admin"
-      ? await deleteSpaceMembershipsInOrg(tx, orgId, userId)
-      : [];
+      );
+    // An admin/owner's explicit space rows are unreadable (the org role answers
+    // first) and would silently restore on a later demotion (RBAC spec §3.2).
+    const revoked =
+      role === "owner" || role === "admin"
+        ? await deleteSpaceMembershipsInOrg(tx, orgId, targetUserId)
+        : [];
+    return { previousRole: target.role, revoked };
   });
 }
 

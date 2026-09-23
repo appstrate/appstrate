@@ -213,7 +213,8 @@ export const billingCursor = pgTable(
  * declares no reference across the licence boundary. Consequence: a row can
  * outlive the user it names. That is harmless because the resolver only ever answers "is THIS
  * caller a manager", and a caller the platform no longer authenticates never
- * reaches it.
+ * reaches it. A user who merely LEAVES the org still authenticates, and could
+ * be invited back, so that row is not left behind: `onOrgMemberRemove` drops it.
  */
 export const billingManagers = pgTable(
   "ee_billing_managers",

@@ -123,6 +123,20 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The RFC 9457 `code` and `detail` of an error body, whichever are there — an
+ * {@link ApiError}'s `body`, or a raw response's parsed JSON. The one parser
+ * every caller that switches on a problem `code` goes through.
+ */
+export function problemFields(body: unknown): { code?: string; detail?: string } {
+  if (!body || typeof body !== "object") return {};
+  const { code, detail } = body as { code?: unknown; detail?: unknown };
+  return {
+    ...(typeof code === "string" ? { code } : {}),
+    ...(typeof detail === "string" ? { detail } : {}),
+  };
+}
+
 export class AuthError extends Error {
   constructor(message: string) {
     super(message);
@@ -279,7 +293,9 @@ export async function apiFetchRaw(
     // header would otherwise slip past a bare `headers["Content-Type"]`
     // lookup and we'd add a SECOND, conflicting content-type entry.
     const hasContentType = Object.keys(headers).some((k) => k.toLowerCase() === "content-type");
-    if (!hasContentType && init.body) {
+    // Strings only: a `FormData` body gets its multipart boundary from
+    // `fetch`, and a forced JSON type would erase it.
+    if (!hasContentType && typeof init.body === "string") {
       headers["Content-Type"] = "application/json";
     }
     if (profile.orgId) headers["X-Org-Id"] = profile.orgId;
@@ -346,10 +362,13 @@ export async function apiFetch<T>(
     } catch {
       body = await res.text().catch(() => undefined);
     }
+    // The platform answers RFC 9457 (`detail`); Better Auth's endpoints answer
+    // `{ message }`. Two producers, two shapes — each read as what it is.
     const message =
-      body && typeof body === "object" && "message" in body && typeof body.message === "string"
+      problemFields(body).detail ??
+      (body && typeof body === "object" && "message" in body && typeof body.message === "string"
         ? body.message
-        : `HTTP ${res.status} ${res.statusText}`;
+        : `HTTP ${res.status} ${res.statusText}`);
     throw new ApiError(res.status, message, body);
   }
 

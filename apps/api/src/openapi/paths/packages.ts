@@ -117,10 +117,9 @@ const PACKAGE_MUTATION_AUTHORITY =
 const fileOperationsProperty = {
   type: "array",
   minItems: 1,
-  maxItems: 200,
   items: { $ref: "#/components/schemas/PackageFileWriteOperation" },
   description:
-    "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations.",
+    "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations.",
 } as const;
 
 export const packagesPaths = {
@@ -664,9 +663,9 @@ export const packagesPaths = {
     get: {
       operationId: "downloadPackageVersion",
       tags: ["Packages"],
-      summary: "Download a versioned package ZIP",
+      summary: "Download a package ZIP — a published version, or the draft",
       description:
-        "Download a specific version of a package as a ZIP file. Supports exact version, dist-tag, or semver range resolution. Rate-limited to 50 requests/minute.",
+        "Download a specific version of a package as a ZIP file. Supports exact version, dist-tag, or semver range resolution. The literal `draft` downloads the author's working copy instead — the same tree `GET /api/packages/{scope}/{name}/files?version=draft` lists (the stored draft archive overlaid with the authoritative `manifest.json` and primary content from the database), zipped. Naming the draft is an author's act: it is reserved to callers who may WRITE the package (`403 draft_not_writable` otherwise, a system package included), on top of the visibility and `<type>:read` checks every download applies. `restrict_package_copy` does not apply to the draft: an author fetching their own working copy is editing it, as the file routes already let them, not copying it out. A draft archive has no integrity hash, so it carries no `X-Integrity`; it carries a strong `ETag` instead and answers `If-None-Match` with `304`. Rate-limited to 50 requests/minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -676,16 +675,26 @@ export const packagesPaths = {
           name: "version",
           in: "path",
           required: true,
-          description: "Exact version, dist-tag (e.g. 'latest'), or semver range (e.g. '^1.0.0')",
+          description:
+            "Exact version, dist-tag (e.g. 'latest'), semver range (e.g. '^1.0.0'), or the literal `draft` for the author's working copy.",
+          schema: { type: "string" },
+        },
+        {
+          name: "If-None-Match",
+          in: "header",
+          required: false,
+          description:
+            "Entity-tag of a cached draft archive (`draft` only). A match yields `304 Not Modified`.",
           schema: { type: "string" },
         },
       ],
       responses: {
         "200": {
-          description: "ZIP file with integrity and disposition headers",
+          description:
+            "ZIP file. A published version carries `X-Integrity`; the draft carries `ETag`, `Cache-Control` and `Vary` instead.",
           headers: {
             "X-Integrity": {
-              description: "SHA256 SRI hash of the artifact",
+              description: "SHA256 SRI hash of the artifact. Published versions only.",
               schema: { type: "string" },
             },
             "X-Yanked": {
@@ -693,13 +702,50 @@ export const packagesPaths = {
               schema: { type: "string" },
             },
             "Content-Disposition": {
-              description: "Attachment filename in scope-name-version.zip format",
+              description:
+                "Attachment filename: `<scope>-<name>-<version>.afps`, with `draft` as the version for the draft.",
+              schema: { type: "string" },
+            },
+            "Content-Length": {
+              description: "Archive size in bytes.",
+              schema: { type: "string" },
+            },
+            ETag: {
+              description:
+                'Draft only. Strong entity-tag of the draft archive (`"z-…"`), a content digest of the overlaid tree: it changes with every save that changes a byte, and never matches a file-index or file-content tag.',
+              schema: { type: "string" },
+            },
+            "Cache-Control": {
+              description:
+                "Draft only. Always `private, no-cache` — the archive is tenant-scoped and RBAC-gated, so every reuse revalidates.",
+              schema: { type: "string" },
+            },
+            Vary: {
+              description: "Draft only. Always `X-Org-Id, X-Space-Id`.",
               schema: { type: "string" },
             },
           },
           content: {
-            "application/zip": {
+            "application/afps+zip": {
               schema: { type: "string", format: "binary" },
+            },
+          },
+        },
+        "304": {
+          description:
+            "The cached draft archive is still current (`If-None-Match` matched). No body. Reached only after every refusal, `draft_not_writable` included.",
+          headers: {
+            ETag: {
+              description: "Strong entity-tag of the draft archive.",
+              schema: { type: "string" },
+            },
+            "Cache-Control": {
+              description: "Always `private, no-cache`, as on the `200`.",
+              schema: { type: "string" },
+            },
+            Vary: {
+              description: "Always `X-Org-Id, X-Space-Id`, as on the `200`.",
+              schema: { type: "string" },
             },
           },
         },
@@ -707,9 +753,12 @@ export const packagesPaths = {
         "403": {
           $ref: "#/components/responses/Forbidden",
           description:
-            "Insufficient permissions — the package type's `read`, or `package_copy_restricted` under `restrict_package_copy`, which narrows this route to callers holding the package type's `share` in its HOME space. That is what the setting means — the ZIP is a COPY leaving the platform, so reading the package and taking it away are two different permissions here, exactly as on `fork` and on the agent `bundle` route. Skills and system packages are exempt.",
+            "Insufficient permissions — the package type's `read`; `draft_not_writable` when `draft` is asked by a caller who cannot WRITE the package; or `package_copy_restricted` under `restrict_package_copy`, which narrows this route to callers holding the package type's `share` in its HOME space. That is what the setting means — the ZIP is a COPY leaving the platform, so reading the package and taking it away are two different permissions here, exactly as on `fork` and on the agent `bundle` route. Skills and system packages are exempt from that setting, and so is the draft, an author's own working copy.",
         },
         "404": { $ref: "#/components/responses/NotFound" },
+        // The draft is read through the file explorer's reader, which unzips
+        // the stored draft archive under the package decompression ceiling.
+        "422": { $ref: "#/components/responses/PackageArchiveUnreadable" },
         "429": { $ref: "#/components/responses/RateLimited" },
         "500": {
           description: "Integrity check failed",
@@ -956,6 +1005,11 @@ export const packagesPaths = {
                   type: "string",
                   minLength: 1,
                   description: "Optional semver version override (e.g. from bump selector)",
+                },
+                lock_version: {
+                  type: "integer",
+                  description:
+                    "Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at.",
                 },
               },
               additionalProperties: false,
@@ -1557,6 +1611,11 @@ export const packagesPaths = {
                   minLength: 1,
                   description: "Optional semver version override (e.g. from bump selector)",
                 },
+                lock_version: {
+                  type: "integer",
+                  description:
+                    "Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at.",
+                },
               },
               additionalProperties: false,
             },
@@ -1690,6 +1749,37 @@ export const packagesPaths = {
     },
   },
   "/api/packages/{scope}/{name}/home": {
+    get: {
+      operationId: "getPackageHome",
+      tags: ["Packages"],
+      summary: "Locate a package: its type, its home and the spaces you read it from",
+      description:
+        "Resolve a package by id alone, across EVERY space the caller reaches — not only the one in `X-Space-Id`, which is what every other package read answers from. A package homed in the caller's personal space and offered nowhere is invisible from each team space's detail route; this is where a client that holds only the id (a CLI pointed at a working folder, for instance) learns the package's `type`, whether it may author it (`home_writable`, `home_deletable`, `home_shareable`), and which space to send its next request from (`read_space_ids`). `home_space_id` follows the same projection as on every package shape: `null` when the home is not a space the caller reaches, even when an offer makes the package readable. Answers 404 exactly when the package is not reachable: no space where the caller holds the type's read and the placement (home or offer) grants it — a system package is readable wherever that read is held. Read-only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "200": {
+          description: "The package's type, home and reach for this caller.",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/PackageHome" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description:
+            "`package_not_found`: no package with this id that the caller can read. (An unknown route answers `not_found`.)",
+        },
+      },
+    },
     put: {
       operationId: "movePackageHome",
       tags: ["Packages"],
@@ -2199,6 +2289,11 @@ export const packagesPaths = {
                   minLength: 1,
                   description: "Optional semver version override (e.g. from bump selector)",
                 },
+                lock_version: {
+                  type: "integer",
+                  description:
+                    "Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at.",
+                },
               },
               additionalProperties: false,
             },
@@ -2639,6 +2734,11 @@ export const packagesPaths = {
                   type: "string",
                   minLength: 1,
                   description: "Optional semver version override (e.g. from bump selector)",
+                },
+                lock_version: {
+                  type: "integer",
+                  description:
+                    "Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at.",
                 },
               },
               additionalProperties: false,

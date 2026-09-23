@@ -6,6 +6,160 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Edit a package in a local folder with `appstrate packages`** (#1499). `pull`
+  brings a package's draft (or, for someone who cannot write it, its published
+  version, read-only) into a working folder; `status` shows what the folder
+  would change; `push` writes it back to the draft; `publish` cuts a version as
+  a separate step. Skills, agents, integrations and MCP servers alike, with any
+  editor or coding agent. A push is ONE atomic write under the draft's lock: a
+  draft edited elsewhere since the folder last saw it (the dashboard, another
+  machine, a colleague) is refused, never overwritten. Dot-named entries
+  (`.env`, `.git/`, editor state), `__pycache__` and the signature `RECORD` are
+  never sent, never deleted from the draft and never written by a pull.
+  `push --create` creates a package through the import route and says it
+  publishes the first version. `publish` picks the version exactly as the
+  dashboard's dialog does (`--bump patch|minor|major`).
+- **`GET /api/packages/{scope}/{name}/home`** — a package's type, home space and
+  the spaces the caller reads it from, resolved by id alone across every space
+  the caller reaches. A package homed in a personal space is found from a team
+  space; an id the caller cannot read is `404 package_not_found`, exactly
+  where the catalog refuses it.
+- **`GET /api/packages/{scope}/{name}/draft/download`** — the draft as one
+  archive, for whoever may write the package (`403 draft_not_writable`
+  otherwise). An author fetching their own draft is editing it, so
+  `restrict_package_copy` does not apply to it; published versions keep that
+  gate.
+
+- **A member can leave an organization.** New operation
+  `POST /api/orgs/{orgId}/leave` (`leaveOrganization`): any member, `204`, no
+  RBAC permission beyond membership. It takes the first-party dashboard
+  session — an API key, an OAuth delegate, an MCP or CLI token is refused with
+  `403` (see Security). Leaving is the same
+  exit as being removed, with the same effects (below), and is audited
+  `org.member_left` with `after: { orphanedSpaceIds, revokedApiKeyIds }`
+  (removal keeps `org.member_removed`). In the web app, Settings → General's
+  danger zone carries « Quitter l'organisation » for every member, disabled
+  with an explanation for the sole owner and during a role preview. Its
+  confirmation spells out the consequences: the personal space is kept 30 days
+  (a re-invite inside that window gives it back), connections shared in team
+  spaces stay usable, and leaving the last organization lands on onboarding.
+
+- **An organization can have several owners.** An owner may promote another
+  member to owner (`PUT /api/orgs/{orgId}/members/{userId}` now accepts
+  `role: "owner"`), and manages every other member, owners included; the
+  Members page offers it, and demoting an owner, behind a confirmation. Only
+  an owner assigns `owner`,
+  and only by a role change on an existing member: invitations and an OIDC
+  client's `signupRole` still accept `guest`, `member` and `admin` only. There
+  is no ownership-transfer endpoint — promote, then leave or be demoted by the
+  new owner. **An organization always keeps at least one owner:** the last
+  owner cannot leave — `409 last_owner` ("promote another member to owner
+  first, or delete the organization"), checked in the same transaction under a
+  lock on the organization row. Removal and demotion cannot empty the owner
+  set, since they are acts of another owner, who remains. API consumers: one
+  new operation, a new `owner` value in `changeMemberRole`'s request body, and
+  `409 last_owner` on `leaveOrganization` only. No database migration. With several owners, the EE
+  billing fallback contact (no `billing_email` set) is the owner who joined
+  first; when that owner leaves, the new fallback is pushed to the Stripe
+  customer.
+
+- **Module event `onOrgMemberRemove(orgId, userId)`**, emitted by the
+  platform's member service once a leave or a removal has committed, for a
+  module to drop what it granted to that pair. Best-effort like every module
+  event: a failing handler is logged, not retried. `@appstrate/module-ee` uses it to delete the member's
+  billing-manager row, so a re-invited ex-billing-manager no longer regains
+  `billing:manage` — for exits from this release on: rows left by members who
+  departed before it are not repaired. This extends the `@appstrate/core` module contract: minor
+  core release.
+
+### Changed
+
+- **BREAKING (CLI): `appstrate skills sync` is now `appstrate packages sync`.**
+  A skill is a package, and every package command lives under one noun —
+  `packages sync` next to `pull`, `status`, `push` and `publish`. Same flags,
+  same targets, same on-disk state: a machine that synced before keeps its
+  plugin and the skill directories it owns. `appstrate skills` no longer
+  exists. What users do once:
+  - **Claude Code plugin:** the marketplace (`appstrate/claude-plugins`) now
+    runs the new command. Claude Code stops re-running a changed command in the
+    background until it is accepted again: run
+    `claude plugin update appstrate@appstrate` and accept it once.
+  - **CLI older than this release:** the new command is unknown to it; update
+    with `appstrate self-update` (curl install) or
+    `npm i -g appstrate@latest` (npm install).
+  - **Scripts:** a cron or launchd entry running `skills sync` (e.g.
+    `--target claude-user`) must be edited to `packages sync`.
+- **Draft writes have no operation-count limit any more.** A `PUT` carrying file
+  operations used to accept at most 200, so a large edit had to be split into
+  several non-atomic writes. The real bounds are unchanged: the request body
+  limit, 1 MiB per written file and the tree limits.
+- **A bumped version of unchanged content is refused.** The publish dialog's
+  patch/minor/major bump (and `appstrate packages publish --bump`) with nothing
+  else changed now answers `409 no_changes`. Before, the bumped number alone
+  changed the archive's digest and the same content was published again under
+  every bump. A version the author writes into the manifest (promoting
+  `1.0.0-rc.1` to `1.0.0`, say) is still theirs to cut.
+- **Publishing can be pinned to the draft the caller read.** The versions
+  endpoint accepts `lock_version`; a draft that moved since is refused with
+  `409 conflict` instead of being published unseen. The dashboard's publish
+  dialog and `appstrate packages publish` both send it.
+- **Removing a member now revokes their credentials in the organization.**
+  Removal and leaving share one exit path. Beside what removal already did
+  (membership row and notifications deleted, explicit space roles dropped,
+  personal space put on its 30-day clock, schedules disabled), it now
+  **revokes the member's API keys in that organization** (`revoked_at`) and
+  **their OAuth refresh tokens and opaque access tokens bound to the
+  organization** — those issued by its own org-level OAuth clients, and those
+  whose audience is its MCP resource (`/api/mcp/o/<orgId>`). JWT access tokens
+  cannot be revoked server-side and stay valid until their TTL (1 h by
+  default), refused meanwhile by the per-request membership check. API-key
+  creation now takes the creator's membership row lock, so a key created during
+  an exit cannot escape the revocation. Until now a removed member's keys were only
+  inert, and came back to life if the same user was invited again; and a
+  background token refresh through an auto-signup (`allowSignup`) client could
+  silently re-add a member who had left. Signing in again interactively
+  through such a client still re-joins, as a deliberate act. Instance-level
+  tokens not bound to the organization are untouched: membership is re-checked
+  on every use. Connections a
+  departed member created in team spaces are not revoked (unchanged).
+  **Operators: run `scripts/migration/0019-revoke-departed-members-credentials.sql`
+  once after deploying** — it revokes the API keys and OAuth tokens left behind
+  by members removed before this release, which the new exit path never saw.
+
+- **Deleting or leaving an organization no longer reloads the page.** The web
+  app moves to another organization, or to onboarding when none is left.
+
+### Fixed
+
+- **Setting an agent's skills moves the draft's lock.** The agent skills
+  endpoint rewrote the draft manifest without the draft lock or a new
+  `lock_version`, so a client holding the previous token could write its stale
+  manifest back over the change.
+- **A change to a package's annex files alone can be published from the
+  dashboard.** Its publish button compared only the manifest and the main
+  content file, so an edit to any other file left it disabled. It now follows
+  the server's own change flag, like `appstrate packages publish`, and the
+  server judges the content (annexes included) when the version is cut. A
+  publish refused as `no_changes` (an edit reverted) clears the "modified"
+  marker, so the draft stops offering it.
+- **CLI errors carry the server's explanation.** Error responses were read for
+  a `message` field the API does not send (RFC 9457 carries `detail`), so most
+  refusals printed only `HTTP 404`.
+
+### Security
+
+- **Owner changes and leaving need the first-party dashboard session.**
+  Promoting to owner, demoting or removing an owner, and leaving the
+  organization are refused with `403` unless the request comes from the
+  dashboard's cookie session — API keys, OAuth delegates, MCP and CLI tokens
+  alike, even when their user is an owner. Requiring a `user` principal was not
+  enough: self-registered (DCR/CIMD) MCP clients are instance-level and resolve
+  to one, so a prompt-injected MCP agent could have seized ownership. The
+  acting member's role and the target's are read from the database under the
+  organization lock, where the service decides.
+
 ## [1.0.0-beta.60] - 2026-09-23
 
 ### Added

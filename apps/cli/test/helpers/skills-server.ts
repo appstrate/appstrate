@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A stand-in for the four package routes `appstrate skills sync` reads,
+ * A stand-in for the package routes `appstrate packages sync` reads,
  * driven by a table of skills rather than by per-test URL matching.
  *
  * The artifacts are REAL `.afps` archives built with `zipArtifact` and hashed
@@ -71,17 +71,12 @@ export interface DraftFixture {
   lockVersion?: number;
   /** File-index `ETag`, the other half. */
   etag?: string;
-  /**
-   * Supporting files small enough that `buildFileIndex` inlines their text in
-   * the index — the sync must NOT re-request these.
-   */
-  inlineFiles?: Record<string, string>;
-  /** Supporting files listed without `inline`, so they need a content fetch. */
-  fetchedFiles?: Record<string, string>;
+  /** Supporting files of the working copy, path → text; the draft archive carries them. */
+  files?: Record<string, string>;
   /**
    * The caller cannot WRITE this skill. Naming the working copy is an author's
-   * act, so the detail route and the file routes alike answer
-   * `403 draft_not_writable` to an explicit `?version=draft` from anyone else.
+   * act, so the detail and index routes answer `403 draft_not_writable` to an
+   * explicit `?version=draft` from anyone else, and the draft archive to them all.
    */
   notWritable?: boolean;
 }
@@ -120,12 +115,12 @@ export interface SkillFixture {
 export interface SkillServer {
   /** Install the stub over `globalThis.fetch`. */
   install(): void;
-  /** Count of `/download` requests — the "no re-download" assertion. */
+  /** Count of published `/download` requests — the "no re-download" assertion. */
   downloads(): number;
   /** Count of `/files` index reads. */
   indexReads(): number;
-  /** Count of `/files/content` reads — the "inline is reused" assertion. */
-  contentReads(): number;
+  /** Count of `/draft/download` requests. */
+  draftDownloads(): number;
   /** Highest number of requests the stub held open at once. */
   peakInFlight(): number;
 }
@@ -181,7 +176,7 @@ export function createSkillServer(
   const spaceById = new Map(spaces.map((space) => [space.id, space]));
   let downloads = 0;
   let indexReads = 0;
-  let contentReads = 0;
+  let draftDownloads = 0;
   let inFlight = 0;
   let peakInFlight = 0;
 
@@ -297,6 +292,30 @@ export function createSkillServer(
       });
     }
 
+    // Before the published route, whose version segment `draft` would match.
+    const draftDownload = path.match(/^\/api\/packages\/(@[^/]+)\/([^/]+)\/draft\/download$/);
+    if (draftDownload) {
+      const found = prepared.find(
+        (p) => p.scope === draftDownload[1] && p.name === draftDownload[2],
+      );
+      if (!found?.fixture.draft) {
+        return json({ code: "not_found", message: "Package not found" }, 404);
+      }
+      if (found.fixture.draft.notWritable) return draftNotWritable(found);
+      draftDownloads += 1;
+      const entries: Record<string, Uint8Array> = {};
+      for (const [entryPath, text] of Object.entries(draftEntries(found))) {
+        entries[entryPath] = encoder.encode(text);
+      }
+      return new Response(new Uint8Array(zipArtifact(entries)), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/zip",
+          ETag: `"${found.fixture.draft.etag ?? "idx-1"}"`,
+        },
+      });
+    }
+
     const download = path.match(/^\/api\/packages\/(@[^/]+)\/([^/]+)\/([^/]+)\/download$/);
     if (download) {
       const found = prepared.find((p) => p.scope === download[1] && p.name === download[2]);
@@ -359,33 +378,16 @@ export function createSkillServer(
       if (refusal) return refusal;
       indexReads += 1;
       // `buildFileIndex` shape: sorted entries of { path, size, media_kind },
-      // with `inline` carrying the full text of small text files.
+      // with `inline` carrying the full text of these small text files.
       const entries = Object.entries(entriesFor(found, url))
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([entryPath, entry]) => ({
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([entryPath, text]) => ({
           path: entryPath,
-          size: encoder.encode(entry.text).byteLength,
+          size: encoder.encode(text).byteLength,
           media_kind: "text",
-          ...(entry.inline ? { inline: entry.text } : {}),
+          inline: text,
         }));
       return json({ entries }, 200, { ETag: `"${indexEtag(found, url)}"` });
-    }
-
-    const content = path.match(/^\/api\/packages\/(@[^/]+)\/([^/]+)\/files\/content$/);
-    if (content) {
-      const found = prepared.find((p) => p.scope === content[1] && p.name === content[2]);
-      if (found?.fixture.draft) {
-        const refusal = draftSelectorRefusal(found, url);
-        if (refusal) return refusal;
-      }
-      const wanted = url.searchParams.get("path") ?? "";
-      const entry = found?.fixture.draft ? entriesFor(found, url)[wanted] : undefined;
-      if (!entry) return json({ code: "not_found", message: "File not found" }, 404);
-      contentReads += 1;
-      return new Response(encoder.encode(entry.text), {
-        status: 200,
-        headers: { "Content-Type": "application/octet-stream" },
-      });
     }
 
     return json({ code: "not_found", message: `not stubbed: ${path}` }, 404);
@@ -397,7 +399,7 @@ export function createSkillServer(
     },
     downloads: () => downloads,
     indexReads: () => indexReads,
-    contentReads: () => contentReads,
+    draftDownloads: () => draftDownloads,
     peakInFlight: () => peakInFlight,
   };
 }
@@ -407,25 +409,29 @@ function draftSkillMd(p: Prepared): string {
 }
 
 /**
- * The detail and file routes serve the definition the detail page renders
+ * The detail and index routes serve the definition the detail page renders
  * unless a selector names one, and `draft` named explicitly is reserved to
- * whoever may WRITE the package. All three call this, so a sync that forgets
- * to name the working copy gets the PUBLISHED bytes — the way the routes
+ * whoever may WRITE the package. Both call this, so a sync that forgets to
+ * name the working copy gets the PUBLISHED metadata — the way the routes
  * answer it — and fails its assertion on content rather than on nothing.
  */
 function draftSelectorRefusal(p: Prepared, url: URL): Response | null {
   if (url.searchParams.get("version") !== "draft") return null;
   if (!p.fixture.draft?.notWritable) return null;
+  return draftNotWritable(p);
+}
+
+function draftNotWritable(p: Prepared): Response {
   return json(
     {
       code: "draft_not_writable",
-      message: `You cannot write ${p.fixture.id}, so its draft is not yours to read`,
+      detail: `You cannot write ${p.fixture.id}, so its draft is not yours to read`,
     },
     403,
   );
 }
 
-function entriesFor(p: Prepared, url: URL): Record<string, { text: string; inline: boolean }> {
+function entriesFor(p: Prepared, url: URL): Record<string, string> {
   return url.searchParams.get("version") === "draft" ? draftEntries(p) : publishedEntries(p);
 }
 
@@ -436,16 +442,13 @@ function indexEtag(p: Prepared, url: URL): string {
     : `published-${p.version}`;
 }
 
-/** The published snapshot of the same three-or-more entries. */
-function publishedEntries(p: Prepared): Record<string, { text: string; inline: boolean }> {
-  const out: Record<string, { text: string; inline: boolean }> = {
-    "manifest.json": { text: manifestJson(p), inline: true },
-    "SKILL.md": { text: p.fixture.skillMd, inline: true },
+/** The published snapshot of the same two-or-more entries. */
+function publishedEntries(p: Prepared): Record<string, string> {
+  return {
+    "manifest.json": manifestJson(p),
+    "SKILL.md": p.fixture.skillMd,
+    ...p.fixture.extraFiles,
   };
-  for (const [path, text] of Object.entries(p.fixture.extraFiles ?? {})) {
-    out[path] = { text, inline: true };
-  }
-  return out;
 }
 
 function manifestJson(p: Prepared): string {
@@ -458,20 +461,13 @@ function manifestJson(p: Prepared): string {
   });
 }
 
-/** Flat map of every draft entry, and whether the index inlines its text. */
-function draftEntries(p: Prepared): Record<string, { text: string; inline: boolean }> {
-  const draft = p.fixture.draft!;
-  const out: Record<string, { text: string; inline: boolean }> = {
-    "manifest.json": { text: manifestJson(p), inline: true },
-    "SKILL.md": { text: draftSkillMd(p), inline: true },
+/** Flat map of every draft entry — what the index lists and the draft archive carries. */
+function draftEntries(p: Prepared): Record<string, string> {
+  return {
+    "manifest.json": manifestJson(p),
+    "SKILL.md": draftSkillMd(p),
+    ...p.fixture.draft!.files,
   };
-  for (const [path, text] of Object.entries(draft.inlineFiles ?? {})) {
-    out[path] = { text, inline: true };
-  }
-  for (const [path, text] of Object.entries(draft.fetchedFiles ?? {})) {
-    out[path] = { text, inline: false };
-  }
-  return out;
 }
 
 /** A minimal conforming `SKILL.md`. */

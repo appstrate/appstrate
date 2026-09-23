@@ -62,6 +62,10 @@ interface SessionManagerFactory<T extends SessionManagerLike> {
 type AssistantMessage = Extract<Message, { role: "assistant" }>;
 type ToolResultMessage = Extract<Message, { role: "toolResult" }>;
 type ToolResultContent = ToolResultMessage["content"];
+type ToolCallArguments = Extract<
+  AssistantMessage["content"][number],
+  { type: "toolCall" }
+>["arguments"];
 
 /**
  * Historical assistant messages are NOT attributed to the model running this
@@ -102,11 +106,12 @@ function projectionClock(): () => number {
   return () => next++;
 }
 
-function record(value: unknown): Record<string, unknown> {
+// Tool inputs come from persisted (JSON-parsed) UI messages, so they are JSON.
+function record(value: unknown): ToolCallArguments {
   if (value && typeof value === "object" && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
+    return value as ToolCallArguments;
   }
-  return value === undefined ? {} : { value };
+  return value === undefined ? {} : ({ value } as ToolCallArguments);
 }
 
 function json(value: unknown): string {
@@ -186,10 +191,7 @@ function assistantMessages(
 
   const flush = () => {
     if (segment.length === 0) return;
-    const content: Array<
-      | { type: "text"; text: string }
-      | { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> }
-    > = [];
+    const content: AssistantMessage["content"] = [];
     const results: Array<Omit<ToolResultMessage, "timestamp">> = [];
 
     for (const part of segment) {

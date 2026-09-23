@@ -211,6 +211,10 @@ const NO_MOUNTED_GUARD: ReadonlyArray<{ path: string; why: string }> = [
   { path: "/api/orgs", why: "the caller's own orgs, listed or created outside any org context" },
   { path: "/api/orgs/{orgId}", why: "membership (`orgRole`) is the gate, and every role reads" },
   { path: "/api/orgs/{orgId}/settings", why: "membership (`orgRole`) is the gate, every role" },
+  {
+    path: "/api/orgs/{orgId}/leave",
+    why: "the person's own membership, dashboard session only (`orgRole`); last owner decided under lock",
+  },
 
   // ── No org data at all.
   {
@@ -287,6 +291,7 @@ describe("requirement anchors", () => {
     const unconditional = [
       "deleteFile",
       "keepFile",
+      "getPackageHome",
       "movePackageHome",
       "sharePackage",
       "listPackageShares",

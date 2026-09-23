@@ -19,7 +19,7 @@ export async function cleanupProfileSkills(
     return {
       pluginReset: false,
       warnings: [
-        "Skills ownership state is unreadable; files were preserved. Run skills sync after reconnecting to recover ownership.",
+        "Skills ownership state is unreadable; files were preserved. Run `appstrate packages sync` after reconnecting to recover ownership.",
       ],
     };
   const failures: string[] = [];

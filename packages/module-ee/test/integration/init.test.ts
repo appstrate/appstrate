@@ -39,6 +39,10 @@ describe("EE module exports", () => {
     it("has onOrgDelete function", () => {
       expect(typeof eeModule.events?.onOrgDelete).toBe("function");
     });
+
+    it("has onOrgMemberRemove function", () => {
+      expect(typeof eeModule.events?.onOrgMemberRemove).toBe("function");
+    });
   });
 
   describe("publicPaths", () => {

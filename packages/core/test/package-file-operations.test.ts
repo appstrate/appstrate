@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { applyFileTreeOperations, PackageFileWriteError } from "../src/package-file-operations.ts";
+import {
+  applyFileTreeOperations,
+  decodePackageFileText,
+  PackageFileWriteError,
+} from "../src/package-file-operations.ts";
 
 describe("portable file operations", () => {
   it.each([
@@ -45,5 +49,19 @@ describe("portable file operations", () => {
       "skill",
     );
     expect(Object.entries(result)).toEqual([["toString", "data"]]);
+  });
+});
+
+describe("decodePackageFileText", () => {
+  it("returns the text of strict UTF-8, keeping a leading BOM", () => {
+    expect(decodePackageFileText(new TextEncoder().encode("héllo"))).toBe("héllo");
+    const bom = new Uint8Array([0xef, 0xbb, 0xbf, 0x61]);
+    const text = decodePackageFileText(bom);
+    expect(text).toBe("﻿a");
+    expect(new TextEncoder().encode(text!)).toEqual(bom);
+  });
+
+  it("returns null for bytes that are not UTF-8", () => {
+    expect(decodePackageFileText(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff]))).toBeNull();
   });
 });

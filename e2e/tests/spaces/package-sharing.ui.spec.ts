@@ -219,8 +219,16 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
   expect(guestDraft.status(), await guestDraft.text()).toBe(403);
   expect((await guestDraft.json()).code).toBe("draft_not_writable");
 
-  // The author ships a fix. Nobody accepts anything again, nobody re-pins:
-  // the next run the guest starts carries the new version.
+  // The author ships a fix — a changed prompt, published as the next version
+  // (the same content under a new number is `409 no_changes`). Nobody accepts
+  // anything again, nobody re-pins: the next run the guest starts carries it.
+  const draft = await apiClient.get(`/packages/agents/${scope}/${name}`);
+  expect(draft.status(), await draft.text()).toBe(200);
+  const fixed = await apiClient.put(`/packages/agents/${scope}/${name}`, {
+    lock_version: ((await draft.json()) as { lock_version: number }).lock_version,
+    content: "Fixed prompt.",
+  });
+  expect(fixed.status(), await fixed.text()).toBe(200);
   const republished = await apiClient.post(`/packages/agents/${scope}/${name}/versions`, {
     version: "0.2.0",
   });

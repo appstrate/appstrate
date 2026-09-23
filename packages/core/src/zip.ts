@@ -139,7 +139,7 @@ export const ARCHIVE_MAX_FILES = 10_000;
  * because Finder slipped a resource fork into it. The draft write path REFUSES
  * the request: a caller naming the path is told its path is unusable rather
  * than being told the write succeeded and losing it silently. The CLI's
- * `skills sync` materializer refuses too, at the point where it creates the
+ * `packages sync` materializer refuses too, at the point where it creates the
  * file on disk — and it is why the `.` segment and the drive prefix are here:
  * a path this predicate admitted but the materializer refused failed a whole
  * skill's sync with "the published artifact is malformed", for bytes the write

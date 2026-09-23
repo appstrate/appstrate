@@ -12,7 +12,8 @@
  *   - `appstrate token`:   print access + refresh token metadata (debug).
  *   - `appstrate org`:     manage the pinned organization (`X-Org-Id`).
  *   - `appstrate space`:   manage the pinned space (`X-Space-Id`).
- *   - `appstrate skills`:  sync the space's skills to Claude Code / Codex.
+ *   - `appstrate packages`: sync the spaces' skills to Claude Code / Codex; pull a package
+ *                           into a folder, push it to its draft, publish it.
  *   - `appstrate api`:     authenticated HTTP passthrough for coding agents.
  *
  * Global flags:
@@ -50,7 +51,13 @@ import {
   spaceCurrentCommand,
   spaceCreateCommand,
 } from "./commands/space.ts";
-import { skillsSyncCommand } from "./commands/skills.ts";
+import { packagesSyncCommand } from "./commands/packages-sync.ts";
+import {
+  packagesPublishCommand,
+  packagesPullCommand,
+  packagesPushCommand,
+  packagesStatusCommand,
+} from "./commands/packages.ts";
 import { SYNC_TARGETS, type SyncTarget } from "./lib/skills-sync/targets.ts";
 import type { SkillSource } from "./lib/skills-sync/plan.ts";
 import { modelsListCommand } from "./commands/models.ts";
@@ -132,7 +139,7 @@ function collectTarget(val: string, prev: SyncTarget[] | undefined): SyncTarget[
   return [...(prev ?? []), val as SyncTarget];
 }
 
-/** `--source` on `appstrate skills sync`. */
+/** `--source` on `appstrate packages sync`. */
 function parseSkillSource(val: string): SkillSource {
   if (val !== "published" && val !== "draft") {
     throw new InvalidArgumentError(`expected published or draft, got "${val}"`);
@@ -525,13 +532,15 @@ spaceGroup
     });
   });
 
-// ─── `appstrate skills …` — sync org skills to Claude Code / Codex ─────
+// ─── `appstrate packages …` — sync skills to Claude Code / Codex; the authoring loop ─
 
-const skillsGroup = program
-  .command("skills")
-  .description("Sync the skills of every space you belong to, to Claude Code and Codex");
+const packagesGroup = program
+  .command("packages")
+  .description(
+    "Packages on this machine: sync your spaces' skills to Claude Code and Codex; edit a package (skill, agent, integration, MCP server) in a local folder, push it back, publish it",
+  );
 
-skillsGroup
+packagesGroup
   .command("sync")
   .description(
     "Materialize the skills of every space this profile is a member of as Agent Skills directories. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
@@ -561,7 +570,7 @@ skillsGroup
       dryRun?: boolean;
     }) => {
       const globalOpts = program.opts<{ profile?: string }>();
-      await skillsSyncCommand({
+      await packagesSyncCommand({
         profile: globalOpts.profile,
         target: opts.target,
         space: opts.space,
@@ -571,6 +580,90 @@ skillsGroup
       });
     },
   );
+
+packagesGroup
+  .command("pull <package> [dir]")
+  .description(
+    "Bring a package into a local working folder: its draft when you may write it, else its published version (read-only). Default folder: <workDir>/<org>/packages/<type segment>/@<scope>/<name>.",
+  )
+  .option("--version <spec>", "A published version (latest, exact, or range) instead of the draft")
+  .option(
+    "--force",
+    "Pull into a folder that already has files: it then mirrors the package, and files the package does not have are deleted",
+  )
+  .action(
+    async (pkg: string, dir: string | undefined, opts: { version?: string; force?: boolean }) => {
+      const globalOpts = program.opts<{ profile?: string }>();
+      await packagesPullCommand({
+        profile: globalOpts.profile,
+        package: pkg,
+        dir,
+        version: opts.version,
+        force: opts.force,
+      });
+    },
+  );
+
+packagesGroup
+  .command("status <dir>")
+  .description(
+    "Show what a working folder would change in the draft (folder path, or a package name in the work dir)",
+  )
+  .option("--diff", "Print a line diff for each modified text file")
+  .action(async (dir: string, opts: { diff?: boolean }) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await packagesStatusCommand({ profile: globalOpts.profile, dir, diff: opts.diff });
+  });
+
+packagesGroup
+  .command("push <dir>")
+  .description(
+    "Write a working folder to the package's draft in one atomic update, under the lock this folder last saw. Nobody else sees it until you publish.",
+  )
+  .option(
+    "--create",
+    "Create the package when it does not exist (this publishes its first version)",
+  )
+  .option(
+    "--space <id>",
+    "With --create only: the space that becomes its home (default: the pinned space)",
+  )
+  .option("--force", "Replace the draft with this folder, even if this folder did not see it")
+  .option("--dry-run", "Show what would be sent and send nothing")
+  .action(
+    async (
+      dir: string,
+      opts: { create?: boolean; space?: string; force?: boolean; dryRun?: boolean },
+    ) => {
+      const globalOpts = program.opts<{ profile?: string }>();
+      await packagesPushCommand({
+        profile: globalOpts.profile,
+        dir,
+        create: opts.create,
+        space: opts.space,
+        force: opts.force,
+        dryRun: opts.dryRun,
+      });
+    },
+  );
+
+packagesGroup
+  .command("publish <package-or-dir>")
+  .description(
+    "Publish the draft as a new version, by the dashboard's version rule. Sharing and activation stay in their own routes.",
+  )
+  .option(
+    "--bump <segment>",
+    "patch, minor or major: bumped from the latest version when the draft still carries it (default: patch)",
+  )
+  .action(async (target: string, opts: { bump?: string }) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await packagesPublishCommand({
+      profile: globalOpts.profile,
+      package: target,
+      bump: opts.bump,
+    });
+  });
 
 // ─── `appstrate models …` — discover model presets on the instance ────
 

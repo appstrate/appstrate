@@ -24,11 +24,7 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { OrgInvitationsList } from "../../components/org-invitations-list";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { toast } from "sonner";
-import {
-  assignableRolesForMember,
-  canRemoveMember,
-  type AssignableOrgRole,
-} from "@appstrate/shared-types";
+import { assignableRolesForMember, canRemoveMember, type OrgRole } from "@appstrate/shared-types";
 
 type OrgMember = components["schemas"]["OrgMember"];
 export function OrgSettingsMembersPage() {
@@ -44,6 +40,12 @@ export function OrgSettingsMembersPage() {
 
   const [inviting, setInviting] = useState(false);
   const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
+  // Ownership changes confirm first: a new owner can remove whoever named them.
+  const [ownerChange, setOwnerChange] = useState<{
+    label: string;
+    id: string;
+    role: OrgRole;
+  } | null>(null);
 
   const {
     data: orgData,
@@ -62,14 +64,17 @@ export function OrgSettingsMembersPage() {
     void queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });
   };
 
+  const toastMemberError = (err: unknown) =>
+    toast.error(t("error.prefix", { message: getErrorMessage(err) }));
+
   const removeMemberMutation = $api.useMutation("delete", "/api/orgs/{orgId}/members/{userId}", {
     onSuccess: invalidateOrg,
-    onError: (err) => toast.error(t("error.prefix", { message: getErrorMessage(err) })),
+    onError: toastMemberError,
   });
 
   const changeRoleMutation = $api.useMutation("put", "/api/orgs/{orgId}/members/{userId}", {
     onSuccess: invalidateOrg,
-    onError: (err) => toast.error(t("error.prefix", { message: getErrorMessage(err) })),
+    onError: toastMemberError,
   });
 
   if (isLoading) return <LoadingState />;
@@ -80,12 +85,24 @@ export function OrgSettingsMembersPage() {
     setConfirmState({ label, id: member.userId });
   };
 
-  const handleRoleChange = (userId: string, newRole: AssignableOrgRole) => {
+  const changeRole = (userId: string, role: OrgRole, onSuccess?: () => void) => {
     if (!orgId) return;
-    changeRoleMutation.mutate({
-      params: { path: { orgId, userId } },
-      body: { role: newRole },
-    });
+    changeRoleMutation.mutate(
+      { params: { path: { orgId, userId } }, body: { role } },
+      { onSuccess },
+    );
+  };
+
+  const handleRoleChange = (member: OrgMember, newRole: OrgRole) => {
+    if (newRole === "owner" || member.role === "owner") {
+      setOwnerChange({
+        label: member.displayName || member.email || member.userId,
+        id: member.userId,
+        role: newRole,
+      });
+      return;
+    }
+    changeRole(member.userId, newRole);
   };
 
   return (
@@ -140,7 +157,7 @@ export function OrgSettingsMembersPage() {
                   {assignableRoles.length > 0 && (
                     <Select
                       value={member.role}
-                      onValueChange={(v) => handleRoleChange(member.userId, v as AssignableOrgRole)}
+                      onValueChange={(v) => handleRoleChange(member, v as OrgRole)}
                       disabled={changeRoleMutation.isPending}
                     >
                       <SelectTrigger
@@ -203,6 +220,35 @@ export function OrgSettingsMembersPage() {
           />
         </Modal>
       )}
+
+      <ConfirmModal
+        open={!!ownerChange}
+        onClose={() => setOwnerChange(null)}
+        title={t(
+          ownerChange?.role === "owner"
+            ? "orgSettings.promoteOwnerTitle"
+            : "orgSettings.demoteOwnerTitle",
+        )}
+        description={
+          !ownerChange
+            ? ""
+            : ownerChange.role === "owner"
+              ? t("orgSettings.promoteOwnerConfirm", { name: ownerChange.label })
+              : t("orgSettings.demoteOwnerConfirm", {
+                  name: ownerChange.label,
+                  role: t(roleI18nKey(ownerChange.role)),
+                })
+        }
+        confirmLabel={t(
+          ownerChange?.role === "owner" ? "orgSettings.promoteOwner" : "orgSettings.demoteOwner",
+        )}
+        isPending={changeRoleMutation.isPending}
+        onConfirm={() => {
+          if (ownerChange) {
+            changeRole(ownerChange.id, ownerChange.role, () => setOwnerChange(null));
+          }
+        }}
+      />
 
       <ConfirmModal
         open={!!confirmState}

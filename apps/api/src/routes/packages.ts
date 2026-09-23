@@ -88,6 +88,7 @@ import {
   holdsHomeAuthority,
   packagePermission,
   requireAgentRead,
+  resolvePackageHome,
 } from "../lib/package-access.ts";
 import { requirePackageInOrg } from "../middleware/guards.ts";
 import {
@@ -112,6 +113,7 @@ import {
   buildFileIndex,
   indexEtag,
   fileEtag,
+  archiveEtag,
   applyFileOperations,
   validateAuthoredPackageFiles,
   createPackageDraft,
@@ -122,7 +124,11 @@ import {
   PackageFileWriteError,
   type PackageFileWriteErrorCode,
 } from "@appstrate/core/package-file-operations";
-import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
+import {
+  PACKAGE_CONTENT_ENTRY,
+  PACKAGE_MANIFEST_FILE,
+  PACKAGE_TYPE_ROUTE_SEGMENT,
+} from "@appstrate/core/package-files";
 import {
   collectConnectLoginWarnings,
   collectMetaWarnings,
@@ -297,8 +303,9 @@ const packageFileOperationsSchema = z
         .strict(),
     ]),
   )
-  .min(1)
-  .max(200);
+  // No count ceiling, so a working folder is written in ONE batch; bytes are
+  // bounded by the body limit, `file_too_large` and `tree_too_large`.
+  .min(1);
 
 export const packageJsonCreateSchema = z
   .object({
@@ -345,7 +352,9 @@ export const packageJsonUpdateSchema = z
   })
   .strict();
 
-export const createVersionBodySchema = z.object({ version: z.string().min(1).optional() }).strict();
+export const createVersionBodySchema = z
+  .object({ version: z.string().min(1).optional(), lock_version: z.number().int().optional() })
+  .strict();
 
 /**
  * Body of `PUT /api/packages/{scope}/{name}/home` — the package's home space,
@@ -549,10 +558,13 @@ async function createVersionSafe(params: {
 
 // --- Route configuration per package type ---
 
-interface PackageRouteConfig {
+interface PackageRouteConfig<T extends PackageType = PackageType> {
   cfg: PackageTypeConfig;
-  /** URL path segment used for routing (e.g. "skills", "integrations"). */
-  path: string;
+  /**
+   * URL path segment. A literal, because `verify:openapi` resolves routes
+   * statically; typed as `PACKAGE_TYPE_ROUTE_SEGMENT`'s entry so it cannot drift.
+   */
+  path: (typeof PACKAGE_TYPE_ROUTE_SEGMENT)[T];
   /** Storage entry for the content field: primary text or the portable manifest. */
   storageFileName: string;
   /** If true, version create/restore require no running runs (agents). */
@@ -583,7 +595,7 @@ interface PackageRouteConfig {
 }
 
 // Three types have JSON creation forms; MCP server creation accepts an archive.
-const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
+const ROUTE_CONFIGS: { [T in PackageType]: PackageRouteConfig<T> } = {
   skill: {
     cfg: CONFIG_BY_TYPE.skill,
     path: "skills",
@@ -1357,9 +1369,11 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     // entirely when no override is chosen), so only read it when present;
     // a present-but-malformed body is a 400, not a silent no-override.
     let versionOverride: string | undefined;
+    let expectedLock: number | undefined;
     if (c.req.raw.body !== null) {
       const body = await readJsonBody(c, createVersionBodySchema);
       versionOverride = body.version;
+      expectedLock = body.lock_version;
     }
 
     const result = await createVersionFromDraft({
@@ -1367,6 +1381,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       orgId,
       userId: user.id,
       version: versionOverride,
+      lockVersion: expectedLock,
       // Validate the exact snapshot that will be published, including its
       // version override. The route's earlier read is not a coherent snapshot.
       // Stored manifests may carry retired tools; empty callable selections
@@ -1378,6 +1393,12 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     });
 
     if ("error" in result) {
+      if (result.error === "conflict") {
+        throw conflict(
+          "conflict",
+          "The draft changed since you read it. Reload it before publishing.",
+        );
+      }
       if (result.error === "no_changes") {
         throw conflict("no_changes", "No changes since the last version");
       }
@@ -1691,7 +1712,8 @@ async function resolveFileExplorerVersion(
 }
 
 /**
- * One policy for every response on both routes: `private, no-cache`.
+ * One policy for every response on both routes — and on the draft archive
+ * ({@link downloadDraftArchive}), which serves the same bytes: `private, no-cache`.
  *
  * `private` is mandatory: these are authenticated, tenant-scoped bytes and a
  * shared cache must never hold them. `no-cache` is mandatory for the same
@@ -1723,6 +1745,50 @@ function fileCacheHeaders(etag: string, yanked: boolean): Record<string, string>
   };
   if (yanked) headers["X-Yanked"] = "true";
   return headers;
+}
+
+/**
+ * `GET …/draft/download` — the DRAFT as one archive, the tree an author's
+ * local checkout starts from.
+ *
+ * The caller has already cleared visibility and `<type>:read`. The copy
+ * restriction does not apply: an author fetching their own draft is editing
+ * it, not taking a copy away. Naming the working copy adds the one rule every
+ * other surface applies to it: an author's act, `403 draft_not_writable` for
+ * anyone else — a system package included, since
+ * nobody writes one.
+ *
+ * The bytes are the file explorer's, from its own reader, so the archive and
+ * `GET …/files` can never describe two different drafts. A draft has no SRI,
+ * hence no `X-Integrity`; its validator is the content digest, under a prefix
+ * of its own so it never matches an index or a file tag. The `304` comes after
+ * the read — a draft's identity IS its bytes — and after the refusal, so it
+ * confirms nothing to a caller the refusal keeps out.
+ */
+async function downloadDraftArchive(c: Context<AppEnv>, pkg: PackageFileSource): Promise<Response> {
+  await assertDraftSelectorAllowed(c, pkg.id, VERSION_SELECTOR_DRAFT);
+  const snapshot = await readPackageSnapshot(
+    pkg,
+    await resolvePackageFileValidator(pkg, VERSION_SELECTOR_DRAFT),
+  );
+  const etag = archiveEtag(snapshot.snapshotId);
+  const headers = fileCacheHeaders(etag, false);
+  if (ifNoneMatchSatisfied(c.req.header("if-none-match"), etag)) {
+    return new Response(null, { status: 304, headers });
+  }
+  const archive = zipArtifact(snapshot.files);
+  return new Response(new Uint8Array(archive), {
+    status: 200,
+    headers: {
+      ...headers,
+      ...buildDownloadHeaders({
+        scope: c.req.param("scope")!,
+        name: c.req.param("name")!,
+        version: VERSION_SELECTOR_DRAFT,
+      }),
+      "Content-Length": String(archive.byteLength),
+    },
+  });
 }
 
 // ═══════════════════════════════════════════════
@@ -2157,6 +2223,23 @@ export function createPackagesRouter() {
       throw internalError();
     }
     return c.json(detail);
+  });
+
+  // --- Where a package lives: the read of the move above (`resolvePackageHome`) ---
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/home`, rowAuthority(), async (c) => {
+    const packageId = getItemId(c);
+    const home = await resolvePackageHome(c, packageId);
+    // A code of its own, so a client tells "no such package" from a route this
+    // instance does not serve (the `/api/*` fallback answers `not_found`).
+    if (!home) {
+      throw new ApiError({
+        status: 404,
+        code: "package_not_found",
+        title: "Not Found",
+        detail: `Package '${packageId}' not found`,
+      });
+    }
+    return c.json(home);
   });
 
   // --- Fork route ---
@@ -2965,7 +3048,8 @@ export function createPackagesRouter() {
     });
   });
 
-  // GET /api/packages/:scope/:name/:version/download — download a versioned package ZIP
+  // GET /api/packages/:scope/:name/:version/download — download a package ZIP:
+  // a published version, or the DRAFT when `:version` is `draft`.
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/:version/download`,
     rateLimit(50),
@@ -2985,12 +3069,17 @@ export function createPackagesRouter() {
       }
 
       // Verify org ownership (or system package). Ephemeral shadows are hidden.
+      // The draft columns ride along for the `draft` branch below, which reads
+      // them through the file explorer's own snapshot reader.
       const [pkg] = await db
         .select({
           id: packages.id,
           type: packages.type,
           source: packages.source,
           homeSpaceId: packages.homeSpaceId,
+          orgId: packages.orgId,
+          draftManifest: packages.draftManifest,
+          draftContent: packages.draftContent,
         })
         .from(packages)
         .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
@@ -3003,11 +3092,16 @@ export function createPackagesRouter() {
       // as sensitive as the detail route — it needs the same `<type>:read`.
       await requirePackageReadPermission(c, pkg.type);
 
+      // Before the copy restriction: see `downloadDraftArchive`.
+      if (versionSpec === VERSION_SELECTOR_DRAFT) {
+        return downloadDraftArchive(c, pkg);
+      }
+
       // …and, when the organization restricts copying (plan decision 12), the
       // source's `<type>:share`. This is the route the archive leaves through,
       // so reading it and taking it away are two different permissions there.
       // Skills and system packages are exempt inside the helper: the CLI's
-      // skills sync is this route's other consumer and its copies are local by
+      // `packages sync` is this route's other consumer and its copies are local by
       // design, and a shipped system package has no owning space to protect.
       await assertPackageCopyAllowed(
         c,
