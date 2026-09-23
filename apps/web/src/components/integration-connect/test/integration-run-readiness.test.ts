@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from "bun:test";
 import type { IntegrationAgentResolution } from "@appstrate/shared-types";
-import { resolutionBlocksRun } from "../integration-run-readiness";
+import { isStructuralCode, resolutionBlocksRun } from "../integration-run-readiness";
 
 function resolution(over: Partial<IntegrationAgentResolution>): IntegrationAgentResolution {
   return {
@@ -68,5 +68,14 @@ describe("resolutionBlocksRun", () => {
     ] as const) {
       expect(resolutionBlocksRun(resolution({ status, resolved_connection_ids: [] }))).toBe(true);
     }
+  });
+});
+
+describe("isStructuralCode", () => {
+  it("treats the agent's auth_key serving no selected tool as structural — no connect remedy", () => {
+    expect(isStructuralCode("pinned_auth_serves_no_selected_tool")).toBe(true);
+    // Control: the same wording bound to a connection IS a pick to change.
+    expect(isStructuralCode("auth_serves_no_selected_tool")).toBe(false);
+    expect(isStructuralCode("not_connected")).toBe(false);
   });
 });

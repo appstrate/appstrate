@@ -167,7 +167,7 @@ export const schemas = {
       connection_id: {
         type: "string",
         description:
-          "Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`). Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow.",
+          "Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`). Always populated on `auth_serves_no_selected_tool`, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow.",
       },
       missing_scopes: {
         type: "array",
@@ -194,7 +194,7 @@ export const schemas = {
       required_auth_key: {
         type: "string",
         description:
-          "Populated on `auth_key_mismatch`. The agent dep's pinned `auth_key` per AFPS §4.1.",
+          "Populated on `auth_key_mismatch` and `pinned_auth_serves_no_selected_tool`. The agent dep's pinned `auth_key` per AFPS §4.1. On `pinned_auth_serves_no_selected_tool` it names an auth that exposes none of the agent's selected tools: an agent configuration error no connection clears — the agent's `auth_key` or its tool selection must change.",
       },
       available_auth_keys: {
         type: "array",
@@ -1822,6 +1822,8 @@ export const schemas = {
     properties: {
       status: {
         type: "string",
+        description:
+          "`stale` = something must be reconfigured, never connected: a pin or org default naming a connection the run cannot use, or the agent's own `auth_key` naming an auth that serves none of its selected tools (`pinned_auth_serves_no_selected_tool`). `none` = no usable connection — the remedy is a connect.",
         enum: [
           "admin_locked",
           "pinned",

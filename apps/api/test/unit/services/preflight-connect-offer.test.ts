@@ -151,6 +151,8 @@ describe("connectOfferTarget", () => {
       "duplicate_connection_label",
       "auth_key_mismatch",
       "auth_serves_no_selected_tool",
+      // The agent's own auth_key serves no selected tool: no consent clears it.
+      "pinned_auth_serves_no_selected_tool",
       "pinned_connection_unavailable",
       "override_connection_unavailable",
       "integration_not_active",

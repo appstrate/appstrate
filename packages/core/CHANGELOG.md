@@ -74,8 +74,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first connection": the array is the only accepted shape, and a value left in
   the old one fails loudly. Wrap each existing value in an array.
 
-- **BREAKING: `ConnectionResolutionErrorCode` gains `duplicate_connection_label`
-  and `auth_serves_no_selected_tool`** (`@appstrate/core/integration`).
+- **BREAKING: `ConnectionResolutionErrorCode` gains `duplicate_connection_label`,
+  `auth_serves_no_selected_tool` and `pinned_auth_serves_no_selected_tool`**
+  (`@appstrate/core/integration`).
   `duplicate_connection_label` is raised when the connections bound to one
   integration do not carry distinct labels — the label is the handle the agent
   names a connection by, so a colliding set is unaddressable; it carries
@@ -84,8 +85,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connection an explicit layer binds (pin, org default, run or schedule
   override) is on an auth that exposes none of the agent's selected tools; it
   carries that `connectionId`. The fallback raises `not_connected` instead, its
-  `authKey` restricted to auths that serve the selection. Exhaustive `switch`es over the code must handle
-  both.
+  `authKey` restricted to auths that serve the selection.
+  `pinned_auth_serves_no_selected_tool` is the agent's configuration, not a
+  connection: its own `auth_key` (AFPS §4.1) names a declared auth that exposes
+  none of its selected tools. It is raised before any connection is considered,
+  carries `requiredAuthKey` and no `connectionId`, and no connect flow clears it.
+  `ConnectionResolutionError.requiredAuthKey` and
+  `ResolutionFieldError.required_auth_key` (`@appstrate/core/api-errors`) are set
+  on it as well as on `auth_key_mismatch`. Exhaustive `switch`es over the code
+  must handle all three.
 
 - **BREAKING: a connection label is never null.** `ConnectionCandidate.label`
   (`@appstrate/core/integration`) and `ResolutionFieldError.candidate_connections[].label`

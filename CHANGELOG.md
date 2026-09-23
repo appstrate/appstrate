@@ -116,6 +116,16 @@ connection_pinned` while an admin pin or an org default names it, exactly
     picks such a connection: with none on a serving auth it reports
     `not_connected`, its `auth_key` naming an auth that does serve the
     selection (when one can be named), and readiness says `none`.
+  - An agent whose own `integrations_configuration.<id>.auth_key` names an auth
+    that exposes none of its selected tools is an agent configuration error,
+    answered before any connection, pin or override is looked at: `errors[].code`
+    `pinned_auth_serves_no_selected_tool` (new), with `required_auth_key` and no
+    `connection_id`, where it used to surface as `auth_key_mismatch`,
+    `not_connected` or `auth_serves_no_selected_tool`. Readiness reports it
+    `stale`, the run-kickoff 412 offers no `connect_url`, and the dashboard
+    shows the message with no connection picker. Publishing or importing such
+    an agent is refused with `400 pinned_auth_serves_no_selected_tool` on
+    `integrations_configuration.<id>.auth_key`; a draft save is not.
   - `GET /internal/integration-credentials/{scope}/{name}` and its `/refresh`
     sibling REQUIRE `?connection_id=<uuid>`, and it must be one the run's
     snapshot bound — `400 connection_not_in_run` otherwise, naming the bound

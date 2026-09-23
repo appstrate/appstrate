@@ -61,7 +61,10 @@ import {
   resolveRunIntegrationVersions,
   type IntegrationManifestCache,
 } from "./integration-service.ts";
-import { getLocalServerRef } from "./integration-manifest-helpers.ts";
+import {
+  getLocalServerRef,
+  pinnedAuthServingNoSelectedTool,
+} from "./integration-manifest-helpers.ts";
 
 /** One version of one package carried inside an incoming bundle. */
 export interface CarriedVersion {
@@ -485,6 +488,22 @@ export async function validateAgentIntegrationSelections(
       });
       // Deliberately NO `continue`: `{ tools: [], scopes: ["bogus"] }` still
       // has a checkable scope, and both errors must land in one pass.
+    }
+    // Same gate as above: the run resolves the pinned version's auths and tools.
+    const pinnedMisfit = pinnedManifest
+      ? pinnedAuthServingNoSelectedTool(
+          pinnedManifest,
+          entry.auth_key,
+          resolveEffectiveToolSelection(entry.tools, pinnedManifest),
+        )
+      : null;
+    if (pinnedMisfit) {
+      errors.push({
+        field: `integrations_configuration.${entry.id}.auth_key`,
+        code: "pinned_auth_serves_no_selected_tool",
+        title: "Pinned auth exposes no selected tool",
+        message: `integrations_configuration.${entry.id}.auth_key pins auth '${pinnedMisfit.authKey}', which exposes none of the selected tools, so no connection could run them. Pin an auth that does (${pinnedMisfit.servingAuthKeys.join(", ")}), drop auth_key, or change the tool selection.`,
+      });
     }
     if (!configuredIds.has(entry.id)) continue;
 

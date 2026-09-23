@@ -1711,21 +1711,52 @@ describe("resolveConnections — auth_serves_no_selected_tool", () => {
     expect(err.authKey).toBeUndefined();
   });
 
-  it("names the agent's auth_key pin when it excludes every serving auth", () => {
-    const b = conn({ authKey: "pat", label: "spare" });
+  // The agent's `auth_key` pin serving no selected tool is its configuration,
+  // answered before connections, pins or overrides: each case below used to
+  // surface a connection remedy (not_connected, auth_key_mismatch, "remove it").
+  it("answers pinned_auth_serves_no_selected_tool whatever the actor holds", () => {
+    const pinnedPat = {
+      ...selecting(serverlessManifest(), ["api_call__oauth"]),
+      requiredAuthKey: "pat",
+    };
+    const onServing = conn({ label: "main" });
+    const onPinned = conn({ authKey: "pat", label: "spare" });
+    const cases = [
+      { accessibleConnections: [], pins: [] },
+      { accessibleConnections: [onServing], pins: [] },
+      { accessibleConnections: [onPinned], pins: [pin([onPinned.id])] },
+    ];
+    for (const c of cases) {
+      const result = resolveConnections({
+        requirements: [pinnedPat],
+        ...c,
+        actorUserId: USER_ID,
+      });
+      expect(result.resolved[INTEG]).toBeUndefined();
+      const err = result.errors[0]!;
+      expect(err.code).toBe("pinned_auth_serves_no_selected_tool");
+      expect(err.connectionId).toBeUndefined();
+      expect(err.message).toContain("'pat'");
+      expect(err.message).toContain("oauth");
+      const item = translateResolutionError(err);
+      expect(item).toMatchObject({ required_auth_key: "pat" });
+      expect(item.connection_id).toBeUndefined();
+      expect(connectOfferTarget(item)).toBeNull();
+    }
+  });
+
+  it("control — a pin on a serving auth leaves the cascade to answer", () => {
+    const onServing = conn({ label: "main" });
     const result = resolveConnections({
       requirements: [
-        { ...selecting(serverlessManifest(), ["api_call__oauth"]), requiredAuthKey: "pat" },
+        { ...selecting(serverlessManifest(), ["api_call__oauth"]), requiredAuthKey: "oauth" },
       ],
-      accessibleConnections: [b],
+      accessibleConnections: [onServing],
       pins: [],
       actorUserId: USER_ID,
     });
-    const err = result.errors[0]!;
-    expect(err.code).toBe("auth_serves_no_selected_tool");
-    expect(err.connectionId).toBeUndefined();
-    expect(err.message).toContain("'pat'");
-    expect(err.message).toContain("oauth");
+    expect(result.errors).toEqual([]);
+    expect(result.resolved[INTEG]!.map((r) => r.connectionId)).toEqual([onServing.id]);
   });
 
   it("refuses nothing when no auth serves the selection — not a connection problem", () => {

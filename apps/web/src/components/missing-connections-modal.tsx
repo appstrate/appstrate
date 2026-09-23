@@ -9,7 +9,10 @@ import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
-import { resolutionBlocksRun } from "./integration-connect/integration-run-readiness";
+import {
+  isStructuralCode,
+  resolutionBlocksRun,
+} from "./integration-connect/integration-run-readiness";
 import {
   useIntegrationDetail,
   useIntegrationAgentResolution,
@@ -59,6 +62,7 @@ export interface MissingIntegrationFieldError {
     | "duplicate_connection_label"
     | "auth_key_mismatch"
     | "auth_serves_no_selected_tool"
+    | "pinned_auth_serves_no_selected_tool"
     | "pinned_connection_unavailable"
     | "override_connection_unavailable"
     | "integration_not_found"
@@ -93,22 +97,6 @@ export interface MissingIntegrationFieldError {
  * `apps/api/src/lib/launch-schemas.ts` (up to `MAX_CONNECTIONS_PER_INTEGRATION` ids per key).
  */
 type ConnectionOverridesMap = Record<string, string[]>;
-
-/**
- * Codes that no connection pick can fix — surfaced as a plain message, no
- * picker. They are exactly the four the readiness pass raises about the
- * integration PACKAGE, before any account is looked at: the declared package is
- * absent, is not an integration, has a manifest that will not load, or is not
- * active in this space. Connecting an account changes none of them.
- */
-function isStructuralCode(code: string): boolean {
-  return (
-    code === "integration_not_active" ||
-    code === "integration_not_found" ||
-    code === "integration_wrong_type" ||
-    code === "integration_invalid_manifest"
-  );
-}
 
 interface MissingConnectionsModalProps {
   open: boolean;
@@ -238,7 +226,7 @@ function MissingRow({
   const packageId = parseField(err.field);
   const { data: detail } = useIntegrationDetail(packageId);
   // Structural failures can't be fixed by connecting — an admin must activate
-  // the integration or the agent must drop the dependency. No picker.
+  // the integration, or the agent's dependency or configuration must change. No picker.
   const isStructural = isStructuralCode(err.code);
 
   // Server-authoritative verdict — the SAME `IntegrationAgentResolution` the

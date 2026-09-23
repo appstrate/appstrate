@@ -2050,6 +2050,51 @@ describe("Packages API", () => {
       expect((body.errors ?? []).map((e) => e.code)).toContain("no_tools_selected");
     });
 
+    // An `auth_key` whose auth exposes none of the selected tools can never
+    // run: no connection, pin or override clears it, so publish refuses it.
+    it("publish refuses an auth_key whose auth serves none of the selected tools", async () => {
+      const primary = (gmailIntegrationManifest().auths as Record<string, unknown>).primary;
+      const manifest = gmailIntegrationManifest({
+        source: { kind: "none" },
+        auths: { primary, backup: primary },
+        _meta: { "dev.appstrate/api": { auths: { primary: {}, backup: {} } } },
+      });
+      await seedPackage({
+        id: integrationId,
+        orgId: ctx.orgId,
+        type: "integration",
+        draftManifest: manifest,
+      });
+      await seedPackageVersion({ packageId: integrationId, version: "1.0.0", manifest });
+      const publish = (name: string) =>
+        app.request(`/api/packages/agents/${name}/versions`, {
+          method: "POST",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+
+      await seedDraftDeclaring("@pkgorg/publish-auth-misfit", {
+        tools: ["api_call__primary"],
+        auth_key: "backup",
+      });
+      const res = await publish("@pkgorg/publish-auth-misfit");
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { errors?: { code: string; field: string }[] };
+      expect(body.errors).toContainEqual(
+        expect.objectContaining({
+          code: "pinned_auth_serves_no_selected_tool",
+          field: `integrations_configuration.${integrationId}.auth_key`,
+        }),
+      );
+
+      // Control: the same selection pinned to the auth that serves it publishes.
+      await seedDraftDeclaring("@pkgorg/publish-auth-fit", {
+        tools: ["api_call__primary"],
+        auth_key: "primary",
+      });
+      expect((await publish("@pkgorg/publish-auth-fit")).status).toBe(201);
+    });
+
     it("publish refuses a draft whose declared integration selects no tool", async () => {
       await seedGmailIntegration();
       await seedDraftDeclaring("@pkgorg/publish-empty-tools", { tools: [] });

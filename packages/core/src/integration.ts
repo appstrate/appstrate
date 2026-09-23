@@ -1193,7 +1193,8 @@ export type ConnectionResolutionErrorCode =
   | "duplicate_connection_label"
   | "insufficient_scopes"
   | "auth_key_mismatch"
-  | "auth_serves_no_selected_tool";
+  | "auth_serves_no_selected_tool"
+  | "pinned_auth_serves_no_selected_tool";
 
 /**
  * One connection carried by `must_choose_connection` or `duplicate_connection_label`.
@@ -1276,8 +1277,8 @@ export interface ConnectionResolutionError {
    */
   ownedByActor?: boolean;
   /**
-   * AFPS §4.1 — agent dep's pinned `auth_key` when
-   * `code === "auth_key_mismatch"`.
+   * AFPS §4.1 — agent dep's pinned `auth_key` on `auth_key_mismatch` and
+   * `pinned_auth_serves_no_selected_tool`.
    */
   requiredAuthKey?: string;
   /**

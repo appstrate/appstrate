@@ -84,7 +84,7 @@ export interface ResolutionFieldError extends ValidationFieldError {
    * a foreign-owned one is a read-only error.
    */
   owned_by_actor?: boolean;
-  /** `auth_key_mismatch` — the agent dep's pinned `auth_key` (AFPS §4.1). */
+  /** `auth_key_mismatch` / `pinned_auth_serves_no_selected_tool` — the agent dep's pinned `auth_key` (AFPS §4.1). */
   required_auth_key?: string;
   /** `auth_key_mismatch` — auth keys the actor's existing connections use. */
   available_auth_keys?: string[];

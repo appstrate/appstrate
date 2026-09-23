@@ -241,7 +241,10 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  *                     tools (none at all, or only on auths that serve none).
  *  - `stale`        — a pin or an org default names a connection the run cannot
  *                     use: no longer accessible, or on an auth serving none of
- *                     the selected tools.
+ *                     the selected tools. Also the agent's own `auth_key`
+ *                     naming an auth that serves none of them
+ *                     (`pinned_auth_serves_no_selected_tool`): a
+ *                     reconfiguration, which no connection clears.
  *  - `needs_reconnection` — the resolved connection is flagged for re-consent.
  */
 export type IntegrationPickStatus =

@@ -5420,7 +5420,10 @@ export interface components {
         };
         /** @description Per-integration connection verdict for an agent: which connections the next run binds (admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback, each layer a set and the fallback binding at most one; then a scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses. */
         IntegrationAgentResolution: {
-            /** @enum {string} */
+            /**
+             * @description `stale` = something must be reconfigured, never connected: a pin or org default naming a connection the run cannot use, or the agent's own `auth_key` naming an auth that serves none of its selected tools (`pinned_auth_serves_no_selected_tool`). `none` = no usable connection — the remedy is a connect.
+             * @enum {string}
+             */
             status: "admin_locked" | "pinned" | "auto" | "must_choose" | "duplicate_label" | "none" | "stale" | "needs_reconnection";
             /** @description The set the next run binds. On `duplicate_label`, on an `insufficient_scopes` verdict and on an `auth_serves_no_selected_tool` verdict (`stale`), the whole set the winning layer tried to bind. */
             resolved_connection_ids: string[];
@@ -5979,7 +5982,7 @@ export interface components {
                 /** @description True when the connection is the caller's own, false when inherited via org sharing. */
                 owned_by_actor: boolean;
             }[];
-            /** @description Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`). Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow. */
+            /** @description Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`). Always populated on `auth_serves_no_selected_tool`, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow. */
             connection_id?: string;
             /** @description Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks; forwarded to the OAuth re-consent prompt. */
             missing_scopes?: string[];
@@ -5989,7 +5992,7 @@ export interface components {
             required_scopes?: string[];
             /** @description Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). Auth key of the integration manifest the connect flow must target (`/auths/{authKey}/connect/...`). */
             auth_key?: string;
-            /** @description Populated on `auth_key_mismatch`. The agent dep's pinned `auth_key` per AFPS §4.1. */
+            /** @description Populated on `auth_key_mismatch` and `pinned_auth_serves_no_selected_tool`. The agent dep's pinned `auth_key` per AFPS §4.1. On `pinned_auth_serves_no_selected_tool` it names an auth that exposes none of the agent's selected tools: an agent configuration error no connection clears — the agent's `auth_key` or its tool selection must change. */
             required_auth_key?: string;
             /** @description Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method. */
             available_auth_keys?: string[];

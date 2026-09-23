@@ -331,6 +331,22 @@ export function authKeysServingSelection(
   return serving.size === 0 ? null : serving;
 }
 
+/**
+ * The agent dep's `auth_key` (AFPS §4.1) when it names a declared auth that
+ * serves none of `selection` — an agent configuration no connection can
+ * satisfy — with the auths that do serve it. `null` otherwise.
+ */
+export function pinnedAuthServingNoSelectedTool(
+  manifest: IntegrationManifest,
+  authKey: string | undefined,
+  selection: readonly string[] | "*" | undefined,
+): { authKey: string; servingAuthKeys: string[] } | null {
+  if (authKey === undefined || !manifest.auths?.[authKey]) return null;
+  const serving = authKeysServingSelection(manifest, selection);
+  if (serving === null || serving.has(authKey)) return null;
+  return { authKey, servingAuthKeys: [...serving] };
+}
+
 /** `source.server` reference for a `local`-source integration (the mcp-server package). */
 export function getLocalServerRef(
   manifest: IntegrationManifest,

@@ -20,7 +20,8 @@ import type { IntegrationAgentResolution } from "@appstrate/shared-types";
  *   - `must_choose` .... N>1 candidates, ambiguous pick
  *   - `duplicate_label`  the bound set shares a label, so it is unaddressable
  *   - `needs_reconnection` connection flagged for re-consent
- *   - `stale` .......... pinned/override connection unavailable
+ *   - `stale` .......... pinned/override connection unusable, or the agent's
+ *                        `auth_key` serves none of its selected tools
  *   - `auto` / `pinned` / `admin_locked` resolve to a connection → OK, UNLESS
  *     `resolved_missing_scopes` is non-empty (insufficient_scopes upgrade).
  */
@@ -32,5 +33,24 @@ export function resolutionBlocksRun(resolution: IntegrationAgentResolution): boo
     resolution.status === "duplicate_label" ||
     resolution.status === "needs_reconnection" ||
     resolution.status === "stale"
+  );
+}
+
+/**
+ * Codes that no connection pick can fix — surfaced as a plain message, no
+ * picker. The four the readiness pass raises about the integration PACKAGE,
+ * before any account is looked at (the declared package is absent, is not an
+ * integration, has a manifest that will not load, or is not active in this
+ * space), and the resolver's one verdict about the AGENT's configuration (its
+ * `auth_key` names an auth serving none of its selected tools). Connecting an
+ * account changes none of them.
+ */
+export function isStructuralCode(code: string): boolean {
+  return (
+    code === "integration_not_active" ||
+    code === "integration_not_found" ||
+    code === "integration_wrong_type" ||
+    code === "integration_invalid_manifest" ||
+    code === "pinned_auth_serves_no_selected_tool"
   );
 }
