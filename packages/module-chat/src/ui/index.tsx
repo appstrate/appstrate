@@ -61,6 +61,7 @@ import {
   mintSessionId,
   sessionQueryKey,
   sessionsQueryKey,
+  skillWriteSettled,
   spaceIdFromHeaders,
   SESSIONS_QUERY_KEY,
   stopSession,
@@ -517,16 +518,20 @@ function ConversationInner({
         api: "/api/chat",
         credentials: "include",
         headers: buildHeaders,
-        prepareSendMessagesRequest: ({ id: chatId, messages, body }) => ({
-          body: {
-            ...body,
-            id: chatId,
-            messages,
-            generation: getCompatibleGenerationSettings(),
-            // Read at request time, like the model above, for the same reason.
-            agent_authoring: getAgentAuthoringEnabled(),
-          },
-        }),
+        prepareSendMessagesRequest: async ({ id: chatId, messages, body }) => {
+          // The turn reads the skill selection off the session row.
+          await skillWriteSettled(chatId);
+          return {
+            body: {
+              ...body,
+              id: chatId,
+              messages,
+              generation: getCompatibleGenerationSettings(),
+              // Read at request time, like the model above, for the same reason.
+              agent_authoring: getAgentAuthoringEnabled(),
+            },
+          };
+        },
         // Native resume targets our per-session stream endpoint (the chat id is
         // the conversation id = the URL).
         prepareReconnectToStreamRequest: ({ id: chatId }) => ({

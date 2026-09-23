@@ -189,6 +189,7 @@ describe("full persona invariants", () => {
       "Skills are not run on their own",
       "attach it under `dependencies.skills`",
       "and the skills available",
+      "in `dependencies.skills`",
     ]) {
       expect(FULL).toContain(skillRule);
       expect(noSkills).not.toContain(skillRule);

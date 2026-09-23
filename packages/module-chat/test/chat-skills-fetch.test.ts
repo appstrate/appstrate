@@ -6,7 +6,7 @@
  */
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { fetchSkills, putSessionSkills } from "../src/ui/sessions.ts";
+import { fetchSkills, putSessionSkills, skillWriteSettled } from "../src/ui/sessions.ts";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -104,5 +104,33 @@ describe("putSessionSkills", () => {
     await expect(
       putSessionSkills(() => ({}), "chs_1", { skillCatalogue: true, pinnedSkills: [] }),
     ).rejects.toThrow("HTTP 400");
+  });
+});
+
+describe("skillWriteSettled", () => {
+  it("holds a send until the session's write has answered, success or refusal", async () => {
+    for (const status of [204, 500]) {
+      let answer!: () => void;
+      globalThis.fetch = (() =>
+        new Promise<Response>((resolve) => {
+          answer = () => resolve(new Response(null, { status }));
+        })) as unknown as typeof fetch;
+      const write = putSessionSkills(() => ({}), "chs_w", {
+        skillCatalogue: true,
+        pinnedSkills: [],
+      }).catch(() => {});
+      let settled = false;
+      const waiting = skillWriteSettled("chs_w").then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      answer();
+      await waiting;
+      await write;
+      expect(settled).toBe(true);
+    }
+    // Another session never waits on this one.
+    expect(await skillWriteSettled("chs_other")).toBeUndefined();
   });
 });

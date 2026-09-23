@@ -71,7 +71,8 @@ mounted when the shell's `canPinSkills` holds (`chat:write` ∧ `readsSkills`) a
 the session read succeeded — a failed read would let the first click write the
 defaults over the stored pins. The selection lives in local state seeded from
 the session detail; one write at a time (the controls are disabled while it is
-in flight, so writes never race), reverted on failure.
+in flight, so writes never race), reverted on failure. A send waits for a
+selection write in flight, since the turn reads the selection off the row.
 
 ## Out of scope
 

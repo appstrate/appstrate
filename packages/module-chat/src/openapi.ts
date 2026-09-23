@@ -44,7 +44,7 @@ export const chatComponentSchemas = {
       skill_catalogue: {
         type: "boolean",
         description:
-          "Whether turns also list the space's skill catalogue. Platform default skills and pins are always indexed. A context-budget control, never an authorization boundary. Set via PUT /api/chat/sessions/{id}/skills.",
+          "Whether turns also list the space's skill catalogue. Pins are always indexed. A context-budget control, never an authorization boundary. Set via PUT /api/chat/sessions/{id}/skills.",
       },
       pinned_skills: {
         type: "array",

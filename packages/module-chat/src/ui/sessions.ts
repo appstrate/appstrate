@@ -187,8 +187,33 @@ export async function fetchSkills(getHeaders: GetHeaders | null | undefined): Pr
   }));
 }
 
+/** The selection write in flight per session, settled whatever it answered. */
+const skillWrites = new Map<string, Promise<void>>();
+
+/** The turn reads the selection off the row, so a send must not overtake the write. */
+export function skillWriteSettled(sessionId: string): Promise<void> {
+  return skillWrites.get(sessionId) ?? Promise.resolve();
+}
+
 /** Works on an id with no row yet — the route creates it as turn one would. */
-export async function putSessionSkills(
+export function putSessionSkills(
+  getHeaders: GetHeaders | null | undefined,
+  sessionId: string,
+  selection: ChatSkillSelection,
+): Promise<void> {
+  const write = writeSessionSkills(getHeaders, sessionId, selection);
+  const settled = write.then(
+    () => {},
+    () => {},
+  );
+  skillWrites.set(sessionId, settled);
+  void settled.then(() => {
+    if (skillWrites.get(sessionId) === settled) skillWrites.delete(sessionId);
+  });
+  return write;
+}
+
+async function writeSessionSkills(
   getHeaders: GetHeaders | null | undefined,
   sessionId: string,
   selection: ChatSkillSelection,

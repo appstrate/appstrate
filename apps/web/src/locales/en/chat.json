@@ -88,7 +88,7 @@
   "skills.pinned": "Pinned: {{n}}",
   "skills.pinnedMax": "Limit reached: {{max}} pinned skills.",
   "skills.catalogue.label": "Space catalogue",
-  "skills.catalogue.hint": "The assistant sees this space's skills. Off: only the platform's skills and the pinned ones.",
+  "skills.catalogue.hint": "The assistant sees this space's skills. Off: only the pinned ones.",
   "skills.pinHeading": "Pin (always shown to the assistant)",
   "skills.loading": "Loading skills…",
   "skills.empty": "No skill is available in this space.",

@@ -100,10 +100,19 @@ export function buildSystemPrompt(capabilities: TurnCapabilities): string {
   const author = (yes: string, no = "") => (authors ? yes : no);
   const invoke = (yes: string, no = "") => (invokes ? yes : no);
   const skills = (yes: string, no = "") => (readsSkills ? yes : no);
-  // Dropped whole when neither half applies: a bullet naming no target misleads.
-  const idVerbatimBullet = authors
-    ? `- Use every \`@scope/name\` id verbatim: ${runs("in `dependencies.integrations`, in `run_and_wait`'s `scope`/`name`, and in `dependencies.skills`", "in `dependencies.integrations` and in `dependencies.skills`")}.\n`
-    : runs("- Use every `@scope/name` id verbatim: in `run_and_wait`'s `scope`/`name`.\n");
+  // Dropped whole when no target applies: a bullet naming none misleads.
+  const idVerbatimTargets = [
+    ...(authors ? ["`dependencies.integrations`"] : []),
+    ...(mayRun ? ["`run_and_wait`'s `scope`/`name`"] : []),
+    ...(authors && readsSkills ? ["`dependencies.skills`"] : []),
+  ];
+  const ins = idVerbatimTargets.map((target) => `in ${target}`);
+  const idVerbatimBullet =
+    ins.length === 0
+      ? ""
+      : `- Use every \`@scope/name\` id verbatim: ${
+          ins.length > 2 ? `${ins.slice(0, -1).join(", ")}, and ${ins.at(-1)}` : ins.join(" and ")
+        }.\n`;
   // Only the lists the context renders: the route of one never shown may refuse.
   const fullListOps = [...(mayRun ? ["listAgents"] : []), ...(readsSkills ? ["listSkills"] : [])];
   const truncatedListBullet =

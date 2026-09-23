@@ -88,7 +88,7 @@
   "skills.pinned": "Épinglées : {{n}}",
   "skills.pinnedMax": "Maximum atteint : {{max}} compétences épinglées.",
   "skills.catalogue.label": "Catalogue de l'espace",
-  "skills.catalogue.hint": "L'assistant voit les compétences de l'espace. Désactivé : seules celles de la plateforme et les épinglées.",
+  "skills.catalogue.hint": "L'assistant voit les compétences de l'espace. Désactivé : seules les épinglées.",
   "skills.pinHeading": "Épingler (toujours visibles par l'assistant)",
   "skills.loading": "Chargement des compétences…",
   "skills.empty": "Aucune compétence disponible dans cet espace.",

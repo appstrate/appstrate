@@ -5300,7 +5300,7 @@ export interface components {
             generating: boolean;
             /** @description Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/chat/sessions/{id}/read. */
             unread: boolean;
-            /** @description Whether turns also list the space's skill catalogue. Platform default skills and pins are always indexed. A context-budget control, never an authorization boundary. Set via PUT /api/chat/sessions/{id}/skills. */
+            /** @description Whether turns also list the space's skill catalogue. Pins are always indexed. A context-budget control, never an authorization boundary. Set via PUT /api/chat/sessions/{id}/skills. */
             skill_catalogue: boolean;
             /** @description Package ids (`@scope/name`) pinned to this conversation, sorted. */
             pinned_skills: string[];
