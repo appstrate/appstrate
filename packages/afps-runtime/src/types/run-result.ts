@@ -38,24 +38,21 @@ export interface RunResult {
   logs: LogEntry[];
   error?: RunError;
   /**
-   * Terminal status hint. Optional — the reducer does not populate it (events
-   * alone cannot distinguish "success" from "cancelled by signal"). Runners
-   * that surface a specific terminal cause (timeout, cancellation) set this
-   * before calling {@link EventSink.finalize} so downstream ingestion can
-   * persist the exact `runs.status` without inferring from `error` text.
-   *
-   * When absent, consumers default to `"failed"` if `error` is set, else
-   * `"success"`.
+   * Terminal status. Unset on a mid-run aggregate — events alone cannot tell
+   * "success" from "cancelled by signal" — and stamped by the runner, which is
+   * the only party that knows the outcome. {@link TerminalRunResult} is the
+   * stamped shape {@link EventSink.finalize} accepts.
    */
-  status?: "success" | "failed" | "timeout" | "cancelled";
+  status?: RunTerminalStatus;
   /** Elapsed wall-clock time in milliseconds. Runners populate this. */
   durationMs?: number;
   /**
-   * Authoritative token usage for the run. When present, downstream
-   * consumers MUST treat this as the source of truth — the field exists
-   * so finalize is self-contained and does not race with the side-channel
-   * `appstrate.metric` event whose POST may not have landed yet. Runners
-   * that produce no LLM traffic (CLI replay, tests) leave this absent.
+   * Authoritative token usage for the run. Consumers MUST treat this as the
+   * source of truth — the field exists so finalize is self-contained and does
+   * not race with the side-channel `appstrate.metric` event whose POST may not
+   * have landed yet. The platform's finalize endpoint requires it when
+   * `status` is `"success"`, and fails a success that reports zero input and
+   * output tokens: the LLM was never reached.
    */
   usage?: TokenUsage;
   /**
@@ -77,6 +74,18 @@ export interface RunResult {
    * run's terminal success/failure — a successful run can still lose an artifact.
    */
   artifacts?: RunArtifactsSummary;
+}
+
+/** Terminal outcome of a run — the `runs.status` values a runner can report. */
+export type RunTerminalStatus = "success" | "failed" | "timeout" | "cancelled";
+
+/**
+ * A {@link RunResult} with its terminal `status` stamped — the payload
+ * {@link EventSink.finalize} accepts. The platform infers nothing from a
+ * missing status: a finalize without one is rejected.
+ */
+export interface TerminalRunResult extends RunResult {
+  status: RunTerminalStatus;
 }
 
 /**

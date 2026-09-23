@@ -6,7 +6,11 @@ import { orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
 import { lookupCatalogModel } from "./pricing-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
-import type { ModelCost } from "@appstrate/core/module";
+import {
+  MODEL_INPUT_MODALITIES,
+  type ModelCost,
+  type ModelInputModality,
+} from "@appstrate/core/module";
 import { logger } from "../lib/logger.ts";
 import { conflict, invalidRequest, notFound } from "../lib/errors.ts";
 import { checkEgressUrl, egressGuardedFetch } from "../lib/egress-host-guard.ts";
@@ -287,7 +291,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       return {
         id: row.id,
         ...resolveModelMetadata(
-          { ...row, input: row.input as string[] | null, cost: row.cost as ModelCost | null },
+          row,
           row.modelId,
           resolveCatalogDefaults(creds.providerId, row.modelId),
         ),
@@ -441,7 +445,7 @@ export async function createOrgModel(
   userId: string,
   credentialId: string,
   capabilities?: {
-    input?: string[];
+    input?: ModelInputModality[];
     contextWindow?: number;
     maxTokens?: number;
     reasoning?: boolean;
@@ -487,7 +491,7 @@ export async function updateOrgModel(
     label?: string;
     modelId?: string;
     enabled?: boolean;
-    input?: string[] | null;
+    input?: ModelInputModality[] | null;
     contextWindow?: number | null;
     maxTokens?: number | null;
     reasoning?: boolean | null;
@@ -729,11 +733,11 @@ interface DbOrgModelRow {
   modelId: string;
   credentialId: string;
   label: string;
-  input: unknown;
+  input: ModelInputModality[] | null;
   contextWindow: number | null;
   maxTokens: number | null;
   reasoning: boolean | null;
-  cost: unknown;
+  cost: ModelCost | null;
   aliased: boolean;
 }
 
@@ -758,7 +762,7 @@ interface DbModelCredentials {
  */
 export interface CatalogDefaults {
   label?: string;
-  input?: ("text" | "image")[];
+  input?: ModelInputModality[];
   contextWindow?: number;
   maxTokens?: number | null;
   reasoning?: boolean;
@@ -782,7 +786,7 @@ export function resolveCatalogDefaults(providerId: string, modelId: string): Cat
   }
   return {
     label: entry.label,
-    input: entry.capabilities.filter((c): c is "text" | "image" => c === "text" || c === "image"),
+    input: MODEL_INPUT_MODALITIES.filter((m) => entry.capabilities.includes(m)),
     contextWindow: entry.contextWindow,
     maxTokens: entry.maxTokens,
     reasoning: entry.capabilities.includes("reasoning"),
@@ -828,11 +832,7 @@ function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): Re
     baseUrl: creds.baseUrl,
     modelId: row.modelId,
     apiKey: creds.apiKey,
-    ...resolveModelMetadata(
-      { ...row, input: row.input as string[] | null, cost: row.cost as ModelCost | null },
-      row.modelId,
-      defaults,
-    ),
+    ...resolveModelMetadata(row, row.modelId, defaults),
     generation: defaults.generation ?? UNKNOWN_MODEL_GENERATION_CAPABILITIES,
     isSystemModel: false,
     aliased: row.aliased,

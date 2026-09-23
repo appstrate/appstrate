@@ -108,6 +108,17 @@ export const chatSessions = pgTable(
  * down exactly as before, it is simply no longer stored. Do not "simplify" that
  * argument away — every `gen_…` id already persisted was derived with it.
  */
+/**
+ * `chat_messages.content` — an AI SDK `UIMessage` without its `id`, validated by
+ * `safeValidateUIMessages` before it is written. Declared structurally because
+ * this package does not depend on `ai`.
+ */
+export interface ChatMessageContent {
+  role: string;
+  parts: unknown[];
+  metadata?: unknown;
+}
+
 export const chatMessages = pgTable(
   "chat_messages",
   {
@@ -117,7 +128,7 @@ export const chatMessages = pgTable(
       .references(() => chatSessions.id, { onDelete: "cascade" }),
     /** Client-generated message id (the format adapter's identity). */
     messageId: text("message_id").notNull(),
-    content: jsonb("content").notNull(),
+    content: jsonb("content").$type<ChatMessageContent>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

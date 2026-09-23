@@ -23,6 +23,7 @@ import {
   type ExtensionFactory,
   type Model,
 } from "@appstrate/runner-pi";
+import type { ModelInputModality } from "@appstrate/core/module";
 import type { OrgModel } from "../llm.ts";
 
 interface PiChatModelBindingBase {
@@ -79,7 +80,7 @@ function toPiModel(input: {
   baseUrl: string;
   reasoning?: boolean | null;
   reasoningLevelMap?: SubscriptionChatModel["reasoningLevelMap"];
-  input?: string[] | null;
+  input?: ModelInputModality[] | null;
   cost?: ChatUsageRecord["cost"];
   contextWindow?: number | null;
   maxTokens?: number | null;
@@ -98,7 +99,7 @@ function toPiModel(input: {
     baseUrl: input.baseUrl,
     reasoning: input.reasoning === true,
     ...(input.reasoningLevelMap ? { thinkingLevelMap: input.reasoningLevelMap } : {}),
-    input: (input.input ?? ["text"]) as Model<Api>["input"],
+    input: input.input ?? ["text"],
     // `Model.cost` is required by the Pi SDK; an unpriced model still carries
     // the shape. One spelling of those zeros — see `ZERO_MODEL_COST`.
     cost: (input.cost ?? { ...ZERO_MODEL_COST }) as Model<Api>["cost"],

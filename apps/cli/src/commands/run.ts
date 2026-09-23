@@ -25,6 +25,7 @@ import {
   buildRuntimeToolExtensions,
   emitRuntimeReady,
   startSinkHeartbeat,
+  type PiRunnerOptions,
   type SinkHeartbeatHandle,
 } from "@appstrate/runner-pi";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -75,7 +76,7 @@ import {
   type StdoutBridgeHandle,
 } from "@appstrate/afps-runtime/sinks";
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
-import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
+import { emptyRunResult, type TerminalRunResult } from "@appstrate/afps-runtime/runner";
 import { loadSnapshotFile, mergeSnapshotIntoContext } from "./run/snapshot.ts";
 import { DRAFT_SELECTOR, PackageSpecError, PUBLISHED_SELECTOR } from "../lib/package-spec.ts";
 import { parseRunTarget } from "./run/package-spec.ts";
@@ -481,12 +482,14 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       // headroom for the filesystem teardown that follows.
       if (reportSession && wasHttpSinkFinalized && !wasHttpSinkFinalized()) {
         const aborted = shutdownSignal.aborted;
-        const result: RunResult = emptyRunResult();
-        result.status = aborted ? "cancelled" : "failed";
-        result.error = {
-          message: aborted
-            ? "Runner cancelled by user (CLI received signal)."
-            : "Runner exited before completion (CLI bootstrap or teardown error).",
+        const result: TerminalRunResult = {
+          ...emptyRunResult(),
+          status: aborted ? "cancelled" : "failed",
+          error: {
+            message: aborted
+              ? "Runner cancelled by user (CLI received signal)."
+              : "Runner exited before completion (CLI bootstrap or teardown error).",
+          },
         };
         await raceFinalizeAgainstTimeout(
           reportSession.httpSink.finalize(result),
@@ -525,6 +528,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       agentDir: path.join(workspaceDir, ".pi-agent"),
       extensionFactories: [...apiCallFactories, ...runtimeToolFactories],
       authStoragePath: path.join(workspaceDir, ".pi-auth.json"),
+      ...piLoopOptionsFromShell(process.env),
     });
 
     // Emit the "runtime ready" heartbeat through the same sink that
@@ -1216,4 +1220,23 @@ export function _raceFinalizeAgainstTimeoutForTesting(
   timeoutMs: number,
 ): Promise<void> {
   return raceFinalizeAgainstTimeout(p, timeoutMs);
+}
+
+/**
+ * The Pi loop knobs a local run takes from the user's shell — the same three
+ * variables, with the same lenient reading, `PiRunner` used to take from
+ * `process.env` itself: only `"false"` turns a loop off, and an invalid byte
+ * cap falls back to the runner's default.
+ */
+export function piLoopOptionsFromShell(
+  env: Record<string, string | undefined>,
+): Pick<PiRunnerOptions, "modelRetry" | "modelCompaction" | "toolResultByteLimit"> {
+  const limit = Number(env.TOOL_RESULT_BYTE_LIMIT);
+  return {
+    modelRetry: env.MODEL_RETRY_ENABLED !== "false",
+    modelCompaction: env.MODEL_COMPACTION_ENABLED !== "false",
+    ...(env.TOOL_RESULT_BYTE_LIMIT && Number.isInteger(limit) && limit > 0
+      ? { toolResultByteLimit: limit }
+      : {}),
+  };
 }

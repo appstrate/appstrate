@@ -44,7 +44,8 @@ import {
 } from "../services/run-workspace-storage.ts";
 import { assertUniqueWorkspaceNames } from "../services/run-file-naming.ts";
 import { tokenUsageSchema } from "@appstrate/core/token-usage";
-import type { RunResult } from "@appstrate/afps-runtime/runner";
+import { terminalRunStatusValues } from "@appstrate/db/run-status";
+import type { TerminalRunResult } from "@appstrate/afps-runtime/runner";
 import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
 
@@ -71,19 +72,20 @@ export const CloudEventEnvelopeSchema = z
   .strict();
 
 /**
- * Terminal RunResult — the payload HttpSink sends to /finalize. Kept loose
- * (most fields optional) to match the runtime's own RunResult shape without
- * re-declaring its internals here.
+ * Terminal RunResult — the payload HttpSink sends to /finalize.
  *
  * Robustness contract: finalize reports the outcome of an *already-completed*
  * run — the agent loop is over, there is no LLM left to retry. A malformed
  * **cosmetic / side-effect / billing** field (a log line missing its
- * timestamp, a degenerate `usage` object, …) must therefore NEVER fail an
- * otherwise-successful run. Those fields use `.catch(...)` so a present-but-
- * invalid value degrades gracefully (defaulted or dropped) instead of
- * rejecting the whole payload with a 400 that the runner can't recover from.
- * Only the load-bearing outcome fields (`status`, `output`, `error`) stay
- * strict — a genuinely broken outcome should still surface loudly.
+ * timestamp, a bad `cost`, …) must therefore NEVER fail an otherwise-
+ * successful run. Those fields use `.catch(...)` so a present-but-invalid
+ * value degrades gracefully (defaulted or dropped) instead of rejecting the
+ * whole payload with a 400 that the runner can't recover from.
+ *
+ * The outcome fields stay strict, because the platform infers none of them:
+ * `status` is required, and `usage` is required on a `success` — it is what
+ * tells a real success from a run that never reached the LLM (zero input and
+ * output tokens → `failed`, see `finalizeRun`).
  */
 /** Ingest bounds for the artifacts summary — mirror runtime-pi/publish.ts. */
 const MAX_ARTIFACTS_FAILED = 1000;
@@ -165,13 +167,11 @@ export const RunResultSchema = z
         code: z.string().max(64).optional(),
       })
       .optional(),
-    status: z.enum(["success", "failed", "timeout", "cancelled"]).optional(),
+    status: z.enum(terminalRunStatusValues),
     durationMs: z.number().int().nonnegative().optional().catch(undefined),
     // Authoritative token usage for finalize liveness and the terminal
-    // `runs.tokenUsage` write. Missing/malformed usage is tolerated by the
-    // service boundary as explicit zero usage; metric events are not a finalize
-    // fallback.
-    usage: tokenUsageSchema.optional().catch(undefined),
+    // `runs.tokenUsage` write. Required on a success (refinement below).
+    usage: tokenUsageSchema.optional(),
     // Authoritative LLM cost in USD for the runner-source contribution.
     // When present, finalize synthesises a runner-source `llm_usage`
     // ledger row from this value if no metric event has landed yet, so
@@ -218,7 +218,16 @@ export const RunResultSchema = z
       .optional()
       .catch(undefined),
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((body, ctx) => {
+    if (body.status === "success" && body.usage === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["usage"],
+        message: 'usage is required when status is "success"',
+      });
+    }
+  });
 
 // ---------------------------------------------------------------------------
 // Router
@@ -301,13 +310,13 @@ export function createRunsEventsRouter() {
     // we project explicitly to the runtime's RunResult shape so the
     // service's type checks are enforced without a cast.
     const d = await readJsonBody(c, RunResultSchema);
-    const result: RunResult = {
+    const result: TerminalRunResult = {
       memories: d.memories,
       ...(d.pinned !== undefined ? { pinned: d.pinned } : {}),
       output: d.output ?? null,
       logs: d.logs,
       ...(d.error ? { error: d.error } : {}),
-      ...(d.status ? { status: d.status } : {}),
+      status: d.status,
       ...(d.durationMs !== undefined ? { durationMs: d.durationMs } : {}),
       ...(d.usage !== undefined ? { usage: d.usage } : {}),
       ...(d.cost !== undefined ? { cost: d.cost } : {}),

@@ -18,6 +18,7 @@ import type { IntegrationSpawnSpec, IntegrationBootReport } from "@appstrate/cor
 import { buildRuntimeToolDefs } from "@appstrate/core/runtime-tool-defs";
 import { RuntimeEventJournal, journalRuntimeToolDefs } from "./runtime-event-journal.ts";
 import { scrubSecretMaterial } from "./redact.ts";
+import { parseSidecarEnv, type SidecarEnv } from "./env.ts";
 
 /** Parse the agent-selected runtime tools forwarded as `RUNTIME_TOOLS_JSON`. */
 function readRuntimeToolsFromEnv(): string[] {
@@ -118,16 +119,40 @@ function readPositiveIntFromEnv(name: string): number | undefined {
   return parsed;
 }
 
+/**
+ * Connect-mode failure channel: the launcher reads only the stdout sentinel,
+ * so every connect-run failure — env included — must land on it.
+ */
+function failConnectRun(err: unknown): never {
+  // `runConnectOnce` surfaces the third-party login tool's own error prose
+  // verbatim (see `parseLoginToolResult`), and this line goes to stdout,
+  // which the platform reads and stores. Scrub credential shapes out of it —
+  // the diagnostic value is in the wording, never in a token it echoed.
+  const message = scrubSecretMaterial(err instanceof Error ? err.message : String(err));
+  process.stdout.write(`APPSTRATE_CONNECT_ERROR:${message}\n`);
+  process.exit(1);
+}
+
+const connectLoginJson = process.env.CONNECT_LOGIN_JSON;
+
+let env: SidecarEnv;
+try {
+  env = parseSidecarEnv();
+} catch (err) {
+  if (connectLoginJson) failConnectRun(err);
+  throw err;
+}
+
 // Config is set once at startup via env vars — sidecars are spawned per-run
 // with credentials already baked in.
 const config = {
-  platformApiUrl: process.env.PLATFORM_API_URL || "http://localhost:3000",
-  runToken: process.env.RUN_TOKEN || "",
+  platformApiUrl: env.platformApiUrl,
+  runToken: env.runToken,
   // Per-run agent↔sidecar secret. Absent ⇒ the control surface answers 401 to
   // everyone (see `SidecarConfig.sidecarAuthToken`) — there is no
   // unauthenticated mode to fall back to.
-  sidecarAuthToken: process.env.SIDECAR_AUTH_TOKEN || undefined,
-  proxyUrl: process.env.PROXY_URL || "",
+  sidecarAuthToken: env.sidecarAuthToken,
+  proxyUrl: env.proxyUrl,
   llm: readLlmConfigFromEnv(),
   modelContextWindow: readPositiveIntFromEnv("MODEL_CONTEXT_WINDOW"),
   modelMaxTokens: readPositiveIntFromEnv("MODEL_MAX_TOKENS"),
@@ -154,9 +179,7 @@ const config = {
 // line; the launcher holds the key and decrypts. The wire payload is
 // base64(iv‖authTag‖ciphertext). Error messages are NOT secrets and stay
 // plaintext so a boot failure is diagnosable from logs.
-if (process.env.CONNECT_LOGIN_JSON) {
-  const platformApiUrl = process.env.PLATFORM_API_URL || "http://localhost:3000";
-  const runToken = process.env.RUN_TOKEN || "";
+if (connectLoginJson) {
   const resultKeyB64 = process.env.CONNECT_RESULT_KEY || "";
   try {
     // Fail closed: without the ephemeral key we cannot emit the bundle without
@@ -168,8 +191,11 @@ if (process.env.CONNECT_LOGIN_JSON) {
     if (resultKey.length !== 32) {
       throw new Error("connect-run: CONNECT_RESULT_KEY must decode to 32 bytes (AES-256 key)");
     }
-    const spec = JSON.parse(process.env.CONNECT_LOGIN_JSON) as IntegrationSpawnSpec;
-    const bundle = await runConnectOnce(spec, { platformApiUrl, runToken });
+    const spec = JSON.parse(connectLoginJson) as IntegrationSpawnSpec;
+    const bundle = await runConnectOnce(spec, {
+      platformApiUrl: env.platformApiUrl,
+      runToken: env.runToken,
+    });
     // Encrypt the bundle JSON — plaintext credentials never reach stdout.
     const iv = randomBytes(12);
     const cipher = createCipheriv("aes-256-gcm", resultKey, iv);
@@ -181,20 +207,13 @@ if (process.env.CONNECT_LOGIN_JSON) {
     process.stdout.write(`APPSTRATE_CONNECT_RESULT:${payload}\n`);
     process.exit(0);
   } catch (err) {
-    // `runConnectOnce` surfaces the third-party login tool's own error prose
-    // verbatim (see `parseLoginToolResult`), and this line goes to stdout,
-    // which the platform reads and stores. Scrub credential shapes out of it —
-    // the diagnostic value is in the wording, never in a token it echoed.
-    const message = scrubSecretMaterial(err instanceof Error ? err.message : String(err));
-    process.stdout.write(`APPSTRATE_CONNECT_ERROR:${message}\n`);
-    process.exit(1);
+    failConnectRun(err);
   }
 }
 
 const cookieJar = new Map<string, string[]>();
 
-const port = parseInt(process.env.PORT || "8080", 10);
-const proxy = createForwardProxy({ config, listenPort: port + 1 });
+const proxy = createForwardProxy({ config, listenPort: env.port + 1 });
 // One cache per sidecar process — a sidecar serves a single run, so
 // cross-run pollution is impossible.
 const oauthTokenCache = new OAuthTokenCache({
@@ -306,10 +325,13 @@ const app = createApp({
   runtimeEventJournal,
 });
 
-logger.info("Sidecar proxy listening", { port, integrationsDeclared: specs?.length ?? 0 });
+logger.info("Sidecar proxy listening", {
+  port: env.port,
+  integrationsDeclared: specs?.length ?? 0,
+});
 
 // `idleTimeout` mirrors `apps/api/src/index.ts` — value + rationale live
 // in `SIDECAR_IDLE_TIMEOUT_SECONDS` so the test suite can pin the bound
 // without booting this entry point (which has port-binding side effects).
 // See issue #426.
-export default { port, fetch: app.fetch, idleTimeout: SIDECAR_IDLE_TIMEOUT_SECONDS };
+export default { port: env.port, fetch: app.fetch, idleTimeout: SIDECAR_IDLE_TIMEOUT_SECONDS };

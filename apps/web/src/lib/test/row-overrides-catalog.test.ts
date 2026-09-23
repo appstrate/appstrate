@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { rowOverridesCatalog } from "../row-overrides-catalog.ts";
+import { rowOverridesCatalog, type StoredModelValues } from "../row-overrides-catalog.ts";
 
 /** What the registry publishes for `claude-sonnet-4-5-20250929`. */
 const ENTRY = {
@@ -22,7 +22,7 @@ const ENTRY = {
 };
 
 /** What `GET /api/models` returns for a row bound to it and overriding nothing. */
-const RESOLVED = {
+const RESOLVED: StoredModelValues = {
   input: ["text", "image"],
   contextWindow: 200000,
   maxTokens: 64000,

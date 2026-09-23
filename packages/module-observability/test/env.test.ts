@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { readOtelEnv } from "../src/env.ts";
+import { otelEnvSchema, readOtelEnv } from "../src/env.ts";
 
 const VARS = [
   "OTEL_ENABLED",
@@ -73,5 +73,16 @@ describe("readOtelEnv", () => {
   it("honors a custom service name", () => {
     process.env.OTEL_SERVICE_NAME = "my-api";
     expect(readOtelEnv().serviceName).toBe("my-api");
+  });
+});
+
+describe("otelEnvSchema", () => {
+  it("is the exported contract the env gates discover, and never rejects (fail-open)", () => {
+    // `scripts/lib/module-env-schemas.ts` finds module schemas by their EXPORT,
+    // through a computed import knip cannot see; this pins the same key set.
+    expect(Object.keys(otelEnvSchema.shape)).toEqual([...VARS]);
+    expect(
+      otelEnvSchema.safeParse({ OTEL_ENABLED: "garbage", OTEL_SERVICE_NAME: "" }).success,
+    ).toBe(true);
   });
 });

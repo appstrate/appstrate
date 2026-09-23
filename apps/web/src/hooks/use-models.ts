@@ -7,7 +7,7 @@ import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgOnlyScope } from "./use-org-scope";
-import type { ModelCost } from "@appstrate/core/module";
+import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { ModelFormSubmission, ModelFormSubmitOutcome } from "../lib/model-form-payload";
 import { submitModelForm } from "../lib/model-form-submit";
 import { useCreateModelProviderCredential } from "./use-model-provider-credentials";
@@ -75,7 +75,7 @@ export interface OpenRouterModel {
   name: string;
   contextWindow: number | null;
   maxTokens: number | null;
-  input: string[];
+  input: ModelInputModality[];
   reasoning: boolean;
   cost: ModelCost | null;
 }

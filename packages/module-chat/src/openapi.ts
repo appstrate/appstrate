@@ -302,7 +302,10 @@ export const chatPaths = {
           headers: stdHeaders,
           content: { "text/event-stream": { schema: { type: "string" } } },
         },
-        "400": { description: "No enabled model configured, or invalid body" },
+        "400": {
+          description:
+            "No enabled model configured, or invalid body — including a message that is not a valid AI SDK UIMessage, or a last message whose JSON exceeds 256 KB.",
+        },
         "401": {
           description:
             'The selected model\'s subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json with `code: "needs_reconnection"`.',

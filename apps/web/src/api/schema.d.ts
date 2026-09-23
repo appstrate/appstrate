@@ -4077,6 +4077,8 @@ export interface paths {
         /**
          * Terminal RunResult — close the sink (HMAC, idempotent)
          * @description Closes the run. Flushes any buffered events (accepting sequence gaps — no more will arrive), sets terminal status/result/cost/duration on the `runs` row, broadcasts the `onRunStatusChange` module event. Idempotent: a replay after the sink is closed returns `200 { ok: true }` without re-broadcasting.
+         *
+         *     The runner declares the outcome; the platform infers none of it. `status` is required, and `usage` is required when `status` is `success` — either missing is a 400. Two rules can still turn a reported `success` into `failed`: an output that violates the agent's declared output schema, and a `usage` with zero `input_tokens` and zero `output_tokens`, which means the LLM was never reached (the run is failed with a "could not reach the LLM API" error). On any other status, a missing `usage` keeps the last cumulative usage the run reported through `appstrate.metric` events.
          */
         post: operations["finalizeRemoteRun"];
         delete?: never;
@@ -5714,7 +5716,7 @@ export interface components {
             modelId: string | null;
             /** @description Generation controls supported by the backing model. Null for managed aliases whose binding is hidden. */
             generation: components["schemas"]["ModelGenerationCapabilities"] | null;
-            input?: string[] | null;
+            input?: ("text" | "image")[] | null;
             contextWindow?: number | null;
             maxTokens?: number | null;
             reasoning?: boolean | null;
@@ -9820,7 +9822,7 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description No enabled model configured, or invalid body */
+            /** @description No enabled model configured, or invalid body — including a message that is not a valid AI SDK UIMessage, or a last message whose JSON exceeds 256 KB. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13792,8 +13794,8 @@ export interface operations {
                             label: string | null;
                             context_window: number | null;
                             max_tokens: number | null;
-                            /** @description Accepted input modalities (`text`, `image`). */
-                            input: string[] | null;
+                            /** @description Accepted input modalities. */
+                            input: ("text" | "image")[] | null;
                             reasoning: boolean | null;
                             /**
                              * @description Where the description came from: `endpoint` when the listing published at least one of these fields for this model, `catalog` on a pure catalog hit, `null` when neither described it.
@@ -14392,7 +14394,7 @@ export interface operations {
                     /** @description Provider credential ID. The provider's apiShape and baseUrl are resolved from the credential's providerId. */
                     credentialId: string;
                     /** @description Supported input types */
-                    input?: string[];
+                    input?: ("text" | "image")[];
                     /** @description Context window size in tokens */
                     contextWindow?: number;
                     /** @description Maximum output tokens */
@@ -14543,7 +14545,7 @@ export interface operations {
                             /** @description Max output tokens */
                             maxTokens?: number | null;
                             /** @description Supported input types */
-                            input?: string[];
+                            input?: ("text" | "image")[];
                             /** @description Whether model supports reasoning */
                             reasoning?: boolean;
                             /** @description Cost per million tokens (input/output/cacheRead/cacheWrite), or null when pricing is missing */
@@ -14704,7 +14706,7 @@ export interface operations {
                     /** @description Provider key ID to change which key is used */
                     credentialId?: string;
                     enabled?: boolean;
-                    input?: string[] | null;
+                    input?: ("text" | "image")[] | null;
                     contextWindow?: number | null;
                     maxTokens?: number | null;
                     reasoning?: boolean | null;
@@ -20466,10 +20468,13 @@ export interface operations {
                         message?: string;
                         stack?: string;
                     };
-                    /** @enum {string} */
-                    status?: "success" | "failed" | "timeout" | "cancelled";
+                    /**
+                     * @description Terminal outcome as the runner saw it.
+                     * @enum {string}
+                     */
+                    status: "success" | "failed" | "timeout" | "cancelled";
                     durationMs?: number;
-                    /** @description Authoritative terminal token usage written to the `runs` row. */
+                    /** @description Authoritative terminal token usage written to the `runs` row. Required when `status` is `success`; a success with zero `input_tokens` and `output_tokens` is recorded as `failed` (LLM never reached). */
                     usage?: {
                         input_tokens?: number;
                         output_tokens?: number;

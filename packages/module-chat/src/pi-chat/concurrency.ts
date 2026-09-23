@@ -13,17 +13,16 @@
  * (see {@link chatCapacityResponse}) and the client backs off instead of piling
  * on more sessions.
  *
- * The cap is read from `CHAT_PI_MAX_CONCURRENCY` (positive integer, default 6).
- * Higher limits used by the performance harness must remain explicit until
- * replica resources and cloud concurrency have been validated. The module knob
- * is read straight from `process.env` because the chat module also runs without
- * the platform env surface in tests and standalone OSS wiring.
+ * The cap is `CHAT_PI_MAX_CONCURRENCY` (positive integer, default 6), parsed
+ * once by the module's env schema. Higher limits used by the performance
+ * harness must remain explicit until replica resources and cloud concurrency
+ * have been validated.
  */
 
+import { getChatEnv } from "../env.ts";
 import { logger } from "../logger.ts";
 
 const DEFAULT_MAX_CONCURRENCY = 6;
-const ENV_VAR = "CHAT_PI_MAX_CONCURRENCY";
 
 /** A reserved session slot. `release()` is idempotent (safe to call twice). */
 export interface PiChatSlot {
@@ -34,26 +33,9 @@ let active = 0;
 let highWaterMark = 0;
 let rejected = 0;
 
-/**
- * The cap and where it came from, resolved in ONE place.
- *
- * Both facts fall out of the same parse on purpose: read separately they could
- * disagree after any change to what counts as valid, and a boot warning that
- * disagrees with the cap actually applied is worse than no warning.
- *
- * Absent, empty, non-numeric and non-positive all mean "no operator decision" —
- * a typo'd cap must not read as deliberate just because the variable is set.
- */
-function resolveChatConcurrency(): { max: number; fromEnv: boolean } {
-  const raw = process.env[ENV_VAR];
-  const parsed = raw === undefined ? Number.NaN : Number.parseInt(raw, 10);
-  return Number.isInteger(parsed) && parsed > 0
-    ? { max: parsed, fromEnv: true }
-    : { max: DEFAULT_MAX_CONCURRENCY, fromEnv: false };
-}
-
-/** Resolve the configured cap, falling back to the default on absent/invalid input. */
-export const piChatMaxConcurrency = (): number => resolveChatConcurrency().max;
+/** The configured cap, or the default when the operator set none. */
+export const piChatMaxConcurrency = (): number =>
+  getChatEnv().piMaxConcurrency ?? DEFAULT_MAX_CONCURRENCY;
 
 /**
  * Saturation snapshot for capacity sizing.
@@ -162,18 +144,14 @@ export function releaseOnClose<T>(
  * chat is refused. The default of 6 is a conservative product value, not a
  * sizing decision, and the only measurements that exist are local. An operator
  * who never saw this line would discover the ceiling from user reports.
- * Returns whether it warned. The boot caller ignores it; the return exists so
- * the `fromEnv` decision is assertable without a logger spy (this repo forbids
- * `mock.module()`). That decision needs pinning on its own: an invalid value
- * like `"nope"` or `"0"` must read as NOT an operator decision, so a typo'd cap
- * still gets the warning rather than silently passing as deliberate — and
- * `piChatMaxConcurrency` cannot show that, since it only surfaces `max`.
+ * Returns whether it warned, so the decision is assertable without a logger
+ * spy (this repo forbids `mock.module()`). An invalid value never reaches
+ * here: the env schema fails boot on it.
  */
 export function warnIfDefaultChatConcurrency(): boolean {
-  const { max, fromEnv } = resolveChatConcurrency();
-  if (fromEnv) return false;
+  if (getChatEnv().piMaxConcurrency !== undefined) return false;
   logger.warn(
-    `${ENV_VAR} is unset or invalid — chat is capped at ${max} concurrent turns per API process. ` +
+    `CHAT_PI_MAX_CONCURRENCY is unset — chat is capped at ${DEFAULT_MAX_CONCURRENCY} concurrent turns per API process. ` +
       "Set it from measured capacity before serving production chat traffic.",
   );
   return true;

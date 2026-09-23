@@ -565,6 +565,14 @@ export const envSchema = z
     PI_IMAGE: z.string().default("appstrate-pi:latest"),
     SIDECAR_IMAGE: z.string().default("appstrate-sidecar:latest"),
 
+    // Agent-container Pi loops, handed to every run via `buildRuntimePiEnv`
+    // (the container parses them in `runtime-pi/env.ts`). Retry and compaction
+    // are on unless turned off; the tool-result cap (bytes per tool result
+    // written to `run_logs`) falls back to the runner's 2048 when unset.
+    MODEL_RETRY_ENABLED: boolEnv("true"),
+    MODEL_COMPACTION_ENABLED: boolEnv("true"),
+    TOOL_RESULT_BYTE_LIMIT: z.coerce.number().int().positive().optional(),
+
     // Runtime-image warm-keeping sweep (Docker orchestrator only). Every
     // tick: re-pull PI_IMAGE/SIDECAR_IMAGE if they went missing, and
     // reconcile one holder ("pin") container per image so a host-level
@@ -794,10 +802,11 @@ export const envSchema = z
     // rejected when AFPS_SIGNATURE_POLICY=required.
     AFPS_TRUST_ROOT: jsonEnv<unknown[]>("[]"),
     // AFPS_SIGNATURE_POLICY — how to treat bundle signatures at load:
-    //   - "off"      (default) — no verification, unsigned bundles accepted
-    //   - "warn"     — verify if signed; log warnings on unsigned/invalid
+    //   - "off"      — no verification, unsigned bundles accepted
+    //   - "warn"     (default) — verify if signed; log warnings on unsigned/invalid
     //   - "required" — reject unsigned and invalid bundles (load fails)
-    AFPS_SIGNATURE_POLICY: z.enum(["off", "warn", "required"]).default("off"),
+    // System packages ship inside the image and are exempt from all three.
+    AFPS_SIGNATURE_POLICY: z.enum(["off", "warn", "required"]).default("warn"),
 
     // SMTP (optional — enables email verification when all are set)
     SMTP_HOST: z.string().optional(),

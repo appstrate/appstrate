@@ -45,7 +45,7 @@ import {
   getRunSinkContext,
   synthesiseFinalize,
 } from "../../../src/services/run-event-ingestion.ts";
-import { emptyRunResult } from "@appstrate/afps-runtime/runner";
+import { emptyRunResult, type TerminalRunResult } from "@appstrate/afps-runtime/runner";
 import {
   scheduleRunMetricBroadcast,
   activeRunMetricThrottleCount,
@@ -995,8 +995,8 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
   });
 
   // Service-level Zod boundary on `result.usage` — the HTTP route already
-  // drops malformed usage via `.catch(undefined)`, but `finalizeRun` is also
-  // reached by non-HTTP callers (platform synthesis, in-process runners).
+  // rejects malformed usage with a 400, but `finalizeRun` is also reached by
+  // non-HTTP callers (platform synthesis, the stall watchdog).
   // Invalid shape becomes explicit zero usage; finalize never falls back to
   // the side-channel column.
   it("service-level finalize treats malformed usage as zero terminal usage", async () => {
@@ -1006,8 +1006,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
 
     const run = await getRunSinkContext(runId);
     expect(run).not.toBeNull();
-    const result = emptyRunResult();
-    result.status = "success";
+    const result: TerminalRunResult = { ...emptyRunResult(), status: "success" };
     result.output = { ok: true };
     // Bypass the route schema deliberately — exercise the service boundary.
     (result as { usage?: unknown }).usage = { input_tokens: "lots", bogus: true };
@@ -1035,8 +1034,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(activeRunMetricThrottleCount()).toBe(baseline + 1);
 
     const run = await getRunSinkContext(runId);
-    const result = emptyRunResult();
-    result.status = "success";
+    const result: TerminalRunResult = { ...emptyRunResult(), status: "success" };
     await finalizeRun({ run: run!, result });
     expect(activeRunMetricThrottleCount()).toBe(baseline);
 
@@ -1078,8 +1076,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
 
     const run = await getRunSinkContext(runId);
     expect(run).not.toBeNull();
-    const result = emptyRunResult();
-    result.status = "failed";
+    const result: TerminalRunResult = { ...emptyRunResult(), status: "failed" };
     result.error = { message: "container crashed", code: "crash" };
     // No result.usage at all — the watchdog-kill / crash shape.
 
@@ -1099,8 +1096,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
 
     const run = await getRunSinkContext(runId);
     expect(run).not.toBeNull();
-    const result = emptyRunResult();
-    result.status = "failed";
+    const result: TerminalRunResult = { ...emptyRunResult(), status: "failed" };
     result.error = { message: "boom", code: "crash" };
     // Bypass the route schema deliberately — exercise the service boundary.
     (result as { usage?: unknown }).usage = { input_tokens: "lots", bogus: true };
@@ -1117,8 +1113,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
 
     const run = await getRunSinkContext(runId);
     expect(run).not.toBeNull();
-    const result = emptyRunResult();
-    result.status = "failed";
+    const result: TerminalRunResult = { ...emptyRunResult(), status: "failed" };
     result.error = { message: "died at boot", code: "crash" };
 
     await finalizeRun({ run: run!, result });
@@ -1138,8 +1133,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
 
     const run = await getRunSinkContext(runId);
     expect(run).not.toBeNull();
-    const result = emptyRunResult();
-    result.status = "failed";
+    const result: TerminalRunResult = { ...emptyRunResult(), status: "failed" };
     result.error = { message: "boom", code: "crash" };
 
     await finalizeRun({ run: run!, result });
@@ -1301,45 +1295,33 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.tokenUsage).toMatchObject({ input_tokens: 0, output_tokens: 0 });
   });
 
-  it("does not fall back to runs.tokenUsage when result.usage is absent on a success terminal", async () => {
-    // On a SUCCESS terminal the finalize body is authoritative. A side-channel
-    // metric may have populated the column, but absence from finalize is
-    // treated as explicit zero usage and overwrites the column — this keeps
-    // the zero-token liveness heuristic honest. (Non-success terminals
-    // preserve the column instead — see the killed-run tests below.)
+  // The platform infers no part of the outcome: a success without `usage`
+  // and a body without `status` are 400s, and the run stays open for a
+  // corrected finalize (or the watchdog).
+  it("rejects a success finalize without usage and leaves the run open", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent", {
       tokenUsage: { input_tokens: 50, output_tokens: 25 },
     });
 
-    const res = await postFinalize(runId, {
-      status: "success",
-      output: { ok: true },
-      durationMs: 100,
-      // no `usage` field
-    });
-    expect(res.status).toBe(200);
+    const res = await postFinalize(runId, { status: "success", output: { ok: true } });
+    expect(res.status).toBe(400);
+    const problem = (await res.json()) as { errors?: { field?: string }[] };
+    expect(JSON.stringify(problem.errors)).toContain("usage");
 
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
-    expect(row?.status).toBe("failed");
-    expect(row?.error).toMatch(/could not reach the LLM API/);
-    expect(row?.tokenUsage).toMatchObject({ input_tokens: 0, output_tokens: 0 });
+    expect(row?.status).toBe("running");
+    expect(row?.sinkClosedAt).toBeNull();
   });
 
-  it("flips to failed when result.usage is absent and no prior metric exists", async () => {
-    const runId = await seedRunWithSink(ctx, "@test/final-agent", { tokenUsage: null });
+  it("rejects a finalize without status instead of inferring it from error", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
 
-    const res = await postFinalize(runId, {
-      status: "success",
-      output: { ok: true },
-      durationMs: 100,
-      // no `usage` field
-    });
-    expect(res.status).toBe(200);
+    const res = await postFinalize(runId, { error: { message: "boom" } });
+    expect(res.status).toBe(400);
 
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
-    expect(row?.status).toBe("failed");
-    expect(row?.error).toMatch(/could not reach the LLM API/);
-    expect(row?.tokenUsage).toMatchObject({ input_tokens: 0, output_tokens: 0 });
+    expect(row?.status).toBe("running");
+    expect(row?.sinkClosedAt).toBeNull();
   });
 
   // ---------------------------------------------------------------------
@@ -1667,8 +1649,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     // finalizeRun itself must fall back to the metric snapshot.
     const run = await getRunSinkContext(runId);
     expect(run).not.toBeNull();
-    const result = emptyRunResult();
-    result.status = "failed";
+    const result: TerminalRunResult = { ...emptyRunResult(), status: "failed" };
     result.error = { message: "Runner stopped reporting — no heartbeat for 60s." };
     await finalizeRun({ run: run!, result });
 
@@ -1844,6 +1825,7 @@ describe("POST /api/runs/:runId/events/finalize — terminal broadcast params", 
       status: "success",
       output: { ok: true },
       durationMs: 100,
+      usage: { input_tokens: 10, output_tokens: 5 },
     });
     expect(res.status).toBe(200);
     expect(captured()).not.toBeNull();
@@ -1857,6 +1839,7 @@ describe("POST /api/runs/:runId/events/finalize — terminal broadcast params", 
       status: "success",
       output: { ok: true },
       durationMs: 100,
+      usage: { input_tokens: 10, output_tokens: 5 },
     });
     expect(res.status).toBe(200);
     expect(captured()).not.toBeNull();
@@ -1870,6 +1853,7 @@ describe("POST /api/runs/:runId/events/finalize — terminal broadcast params", 
       status: "success",
       output: { ok: true },
       durationMs: 100,
+      usage: { input_tokens: 10, output_tokens: 5 },
     });
     expect(res.status).toBe(200);
     expect(captured()).not.toBeNull();

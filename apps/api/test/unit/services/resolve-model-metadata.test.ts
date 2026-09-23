@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
+import type { ModelMetadata } from "@appstrate/shared-types";
 import { resolveModelMetadata } from "../../../src/services/org-models.ts";
 
 const FULL_CATALOG = {
@@ -25,7 +26,7 @@ describe("resolveModelMetadata", () => {
   });
 
   it("src overrides win over catalog defaults", () => {
-    const src = {
+    const src: ModelMetadata = {
       label: "Custom Label",
       input: ["text"],
       contextWindow: 8000,

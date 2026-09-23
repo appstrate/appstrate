@@ -235,10 +235,7 @@ async function emitError(message: string, data?: Record<string, unknown>): Promi
 async function die(message: string, data?: Record<string, unknown>): Promise<never> {
   await emitError(message, data);
   try {
-    const failureResult = emptyRunResult();
-    failureResult.error = { message };
-    failureResult.status = "failed";
-    await sink.finalize(failureResult);
+    await sink.finalize({ ...emptyRunResult(), status: "failed", error: { message } });
   } catch (finalizeErr) {
     // fall through — server-side synthesis covers us, but leave a trace.
     lastResortStderr(1, `failed-finalize POST failed — dying on: ${message}`, finalizeErr);
@@ -814,6 +811,11 @@ function buildPiRunner(): PiRunner {
     extensionFactories,
     authStoragePath: "/tmp/pi-auth/auth.json",
     ...(declaredRuntimeTools.includes("output") ? { terminalTools: ["output"] } : {}),
+    modelRetry: env.modelRetry,
+    modelCompaction: env.modelCompaction,
+    ...(env.toolResultByteLimit !== undefined
+      ? { toolResultByteLimit: env.toolResultByteLimit }
+      : {}),
   });
 }
 
@@ -946,11 +948,12 @@ try {
   const message = getErrorMessage(err);
   await emitError(message);
   try {
-    const failureResult = emptyRunResult();
-    failureResult.error = { message, stack: err instanceof Error ? err.stack : undefined };
-    failureResult.status = "failed";
-    failureResult.durationMs = Date.now() - startTime;
-    await sink.finalize(failureResult);
+    await sink.finalize({
+      ...emptyRunResult(),
+      status: "failed",
+      error: { message, stack: err instanceof Error ? err.stack : undefined },
+      durationMs: Date.now() - startTime,
+    });
   } catch (finalizeErr) {
     // swallow — container exit code + server-side synthesis cover us,
     // but leave a last-resort trace for the serial console.

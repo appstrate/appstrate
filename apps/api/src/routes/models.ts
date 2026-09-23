@@ -7,7 +7,7 @@ import { listResponse } from "../lib/list-response.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { isSystemModel, getSystemModelProviderCredentials } from "../services/model-registry.ts";
-import { modelCostSchema } from "@appstrate/core/module";
+import { modelCostSchema, modelInputModalitySchema } from "@appstrate/core/module";
 import {
   listOrgModels,
   getOrgModel,
@@ -70,7 +70,7 @@ export const createModelSchema = z
      * read path fall back to the live catalog — keeps existing rows in sync
      * with the weekly `refresh-pricing-catalog.ts` bump.
      */
-    input: z.array(z.string()).optional(),
+    input: z.array(modelInputModalitySchema).optional(),
     contextWindow: z.number().int().positive().optional(),
     maxTokens: z.number().int().positive().optional(),
     reasoning: z.boolean().optional(),
@@ -105,7 +105,7 @@ export const updateModelSchema = z
     modelId: z.string().min(1).optional(),
     credentialId: z.uuid({ message: "credentialId must be a valid UUID" }).optional(),
     enabled: z.boolean().optional(),
-    input: z.array(z.string()).nullable().optional(),
+    input: z.array(modelInputModalitySchema).nullable().optional(),
     contextWindow: z.number().int().positive().nullable().optional(),
     maxTokens: z.number().int().positive().nullable().optional(),
     reasoning: z.boolean().nullable().optional(),

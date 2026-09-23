@@ -2866,7 +2866,7 @@
         "operationId": "getRunLogs",
         "tags": ["Runs"],
         "summary": "Get run logs",
-        "description": "Get persisted log entries for a run, wrapped in the standard list envelope `{ object: \"list\", data, hasMore }`. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI's polling tail to bound per-poll payload growth, and the pagination cursor when combined with `?limit=`. Pass `?level=` to filter by minimum severity (`level=info` skips debug breadcrumbs). `limit` defaults to 1000 when omitted — the response is never unbounded; when more entries follow, `hasMore` is `true` and an RFC 5988 `Link: <…?since=<lastId>>; rel=\"next\"` response header points at the next page. `id` is a monotonic BIGSERIAL; invalid `since`/`level`/`limit` values fall back to the default rather than 400 so a stale cursor never breaks a polling tail. Rate-limited to 120/min per identity. Note: tool-result payloads inside `data` are truncated at write time by the runner (default 2048 bytes, operator-tunable via `TOOL_RESULT_BYTE_LIMIT`) — entries already persisted truncated cannot be recovered by this endpoint.",
+        "description": "Get persisted log entries for a run, wrapped in the standard list envelope `{ object: \"list\", data, hasMore }`. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI's polling tail to bound per-poll payload growth, and the pagination cursor when combined with `?limit=`. Pass `?level=` to filter by minimum severity (`level=info` skips debug breadcrumbs). `limit` defaults to 1000 when omitted — the response is never unbounded; when more entries follow, `hasMore` is `true` and an RFC 5988 `Link: <…?since=<lastId>>; rel=\"next\"` response header points at the next page. `id` is a monotonic int64 (one sequence across all runs, so consecutive entries of a run are not contiguous); invalid `since`/`level`/`limit` values fall back to the default rather than 400 so a stale cursor never breaks a polling tail. Rate-limited to 120/min per identity. Note: tool-result payloads inside `data` are truncated at write time by the runner (default 2048 bytes, operator-tunable via `TOOL_RESULT_BYTE_LIMIT`) — entries already persisted truncated cannot be recovered by this endpoint.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -3464,7 +3464,7 @@
         "operationId": "finalizeRemoteRun",
         "tags": ["Runs"],
         "summary": "Terminal RunResult — close the sink (HMAC, idempotent)",
-        "description": "Closes the run. Flushes any buffered events (accepting sequence gaps — no more will arrive), sets terminal status/result/cost/duration on the `runs` row, broadcasts the `onRunStatusChange` module event. Idempotent: a replay after the sink is closed returns `200 { ok: true }` without re-broadcasting.",
+        "description": "Closes the run. Flushes any buffered events (accepting sequence gaps — no more will arrive), sets terminal status/result/cost/duration on the `runs` row, broadcasts the `onRunStatusChange` module event. Idempotent: a replay after the sink is closed returns `200 { ok: true }` without re-broadcasting.\n\nThe runner declares the outcome; the platform infers none of it. `status` is required, and `usage` is required when `status` is `success` — either missing is a 400. Two rules can still turn a reported `success` into `failed`: an output that violates the agent's declared output schema, and a `usage` with zero `input_tokens` and zero `output_tokens`, which means the LLM was never reached (the run is failed with a \"could not reach the LLM API\" error). On any other status, a missing `usage` keeps the last cumulative usage the run reported through `appstrate.metric` events.",
         "parameters": [
           {
             "name": "runId",
@@ -3505,7 +3505,8 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "description": "AFPS runtime `RunResult` — `memories`, `pinned`, `output`, `logs` plus optional terminal `status`/`error`/`durationMs` and authoritative `usage`/`cost`. Unknown keys are ignored, so a runner older than the platform still finalizes cleanly.",
+                "description": "AFPS runtime `TerminalRunResult` — `memories`, `pinned`, `output`, `logs`, the required terminal `status`, optional `error`/`durationMs`, and authoritative `usage`/`cost`. Unknown keys are ignored.",
+                "required": ["status"],
                 "properties": {
                   "memories": {
                     "type": "array"
@@ -3530,7 +3531,8 @@
                   },
                   "status": {
                     "type": "string",
-                    "enum": ["success", "failed", "timeout", "cancelled"]
+                    "enum": ["success", "failed", "timeout", "cancelled"],
+                    "description": "Terminal outcome as the runner saw it."
                   },
                   "durationMs": {
                     "type": "integer",
@@ -3538,7 +3540,7 @@
                   },
                   "usage": {
                     "type": "object",
-                    "description": "Authoritative terminal token usage written to the `runs` row.",
+                    "description": "Authoritative terminal token usage written to the `runs` row. Required when `status` is `success`; a success with zero `input_tokens` and `output_tokens` is recorded as `failed` (LLM never reached).",
                     "properties": {
                       "input_tokens": {
                         "type": "integer",
@@ -7985,7 +7987,8 @@
                   "input": {
                     "type": "array",
                     "items": {
-                      "type": "string"
+                      "type": "string",
+                      "enum": ["text", "image"]
                     },
                     "description": "Supported input types"
                   },
@@ -8299,7 +8302,8 @@
                           "input": {
                             "type": "array",
                             "items": {
-                              "type": "string"
+                              "type": "string",
+                              "enum": ["text", "image"]
                             },
                             "description": "Supported input types"
                           },
@@ -8528,7 +8532,8 @@
                   "input": {
                     "type": ["array", "null"],
                     "items": {
-                      "type": "string"
+                      "type": "string",
+                      "enum": ["text", "image"]
                     }
                   },
                   "contextWindow": {
@@ -9231,9 +9236,10 @@
                           "input": {
                             "type": ["array", "null"],
                             "items": {
-                              "type": "string"
+                              "type": "string",
+                              "enum": ["text", "image"]
                             },
-                            "description": "Accepted input modalities (`text`, `image`)."
+                            "description": "Accepted input modalities."
                           },
                           "reasoning": {
                             "type": ["boolean", "null"]
@@ -13176,6 +13182,56 @@
         }
       }
     },
+    "/internal/model-credential/outcome": {
+      "post": {
+        "operationId": "reportModelCredentialOutcome",
+        "tags": ["Internal"],
+        "summary": "Report what the upstream said about the run's model API key",
+        "description": "Sidecar-only. Auth via Bearer run token. The sidecar's `/llm/*` API-key path reports an upstream `401` as `rejected` and the first `2xx` after a rejection (or of the run) as `accepted`. `rejected` counts toward the credential's failure streak — at `INTEGRATION_REFRESH_MAX_FAILURES` consecutive rejections the credential is flagged `needs_reconnection` — and is dropped when `key_sha256` does not match the stored key (a run still holding a key the user has since rotated). `accepted` resets the streak. The credential is always the run's own pinned `model_credential_id`; a run with none (built-in key, model alias, remote run) is a no-op.",
+        "security": [
+          {
+            "bearerExecToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["outcome", "key_sha256"],
+                "properties": {
+                  "outcome": {
+                    "type": "string",
+                    "enum": ["rejected", "accepted"]
+                  },
+                  "key_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "description": "SHA-256 (hex) of the API key the sidecar used — never the key itself."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Recorded (or nothing to record for this run)."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
     "/internal/integration-credentials/{scope}/{name}": {
       "get": {
         "operationId": "getIntegrationCredentials",
@@ -13314,7 +13370,7 @@
             "$ref": "#/components/responses/InternalServerError"
           },
           "502": {
-            "description": "Transient OAuth refresh failure upstream — same semantics as the GET endpoint.",
+            "description": "Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected fewer than `INTEGRATION_REFRESH_MAX_FAILURES` consecutive times; the rejection is counted and the connection is flagged (`410`) once the streak reaches the threshold.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -25147,7 +25203,8 @@
         "required": ["id", "runId", "type", "level", "createdAt"],
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
           },
           "runId": {
             "type": "string"
@@ -25724,7 +25781,8 @@
           "input": {
             "type": ["array", "null"],
             "items": {
-              "type": "string"
+              "type": "string",
+              "enum": ["text", "image"]
             }
           },
           "contextWindow": {
@@ -25744,7 +25802,7 @@
           },
           "needs_reconnection": {
             "type": "boolean",
-            "description": "True when the model's stored credential can no longer be used for inference — an OAuth credential flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment."
+            "description": "True when the model's stored credential can no longer be used for inference — a credential flagged as needing reconnection (an OAuth grant revoked, or an API key the upstream rejected on consecutive calls), or a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment."
           },
           "aliased": {
             "type": "boolean",

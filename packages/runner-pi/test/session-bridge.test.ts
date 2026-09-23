@@ -663,38 +663,32 @@ describe("truncateToolResult", () => {
     });
   });
 
-  it("honors the TOOL_RESULT_BYTE_LIMIT env override as the default cap", () => {
+  it("reads no process env: the cap is the caller's argument", () => {
     const original = process.env.TOOL_RESULT_BYTE_LIMIT;
     process.env.TOOL_RESULT_BYTE_LIMIT = "8192";
     try {
-      // 3000 bytes fits under the raised cap — returned verbatim where the
-      // compiled 2048 default would have truncated it.
+      const out = truncateToolResult({ data: "x".repeat(3000) }) as Record<string, unknown>;
+      expect(out.limit).toBe(2048);
       const s = "a".repeat(3000);
-      expect(truncateToolResult(s)).toBe(s);
-      // …and a payload above the raised cap still truncates against it.
-      const big = { data: "x".repeat(10000) };
-      const out = truncateToolResult(big) as Record<string, unknown>;
-      expect(out.__truncated).toBe(true);
-      expect(out.limit).toBe(8192);
+      expect(truncateToolResult(s, 8192)).toBe(s);
     } finally {
       if (original === undefined) delete process.env.TOOL_RESULT_BYTE_LIMIT;
       else process.env.TOOL_RESULT_BYTE_LIMIT = original;
     }
   });
 
-  it("falls back to the compiled default on an invalid TOOL_RESULT_BYTE_LIMIT", () => {
-    const original = process.env.TOOL_RESULT_BYTE_LIMIT;
-    try {
-      for (const bad of ["not-a-number", "-1", "0", "12.5"]) {
-        process.env.TOOL_RESULT_BYTE_LIMIT = bad;
-        const out = truncateToolResult({ data: "x".repeat(3000) }) as Record<string, unknown>;
-        expect(out.__truncated).toBe(true);
-        expect(out.limit).toBe(2048);
-      }
-    } finally {
-      if (original === undefined) delete process.env.TOOL_RESULT_BYTE_LIMIT;
-      else process.env.TOOL_RESULT_BYTE_LIMIT = original;
-    }
+  it("the bridge truncates against its toolResultByteLimit option", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID, { toolResultByteLimit: 8192 });
+    session.emit({
+      type: "tool_execution_end",
+      toolName: "read_file",
+      result: { data: "x".repeat(10000) },
+      isError: false,
+    });
+    const ev = sink.events[0] as unknown as { data: { result: Record<string, unknown> } };
+    expect(ev.data.result.limit).toBe(8192);
   });
 });
 

@@ -32,6 +32,7 @@ import {
   STREAM_IDLE,
 } from "./helpers.ts";
 import { anthropicThinkingBudgets } from "@appstrate/core/model-generation";
+import { MODEL_INPUT_MODALITIES, type ModelInputModality } from "@appstrate/core/module";
 import { PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "@appstrate/runner-pi/provider-map";
 import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import { logger } from "./logger.ts";
@@ -328,11 +329,12 @@ export function buildBackingModel(deps: PiMessagesBackendDeps): Model<Api> {
 }
 
 /**
- * Narrow the platform's free-string modalities onto pi's closed pair, with the
- * `["text"]` floor `runtime-pi/env.ts` applies: an empty list disables text too.
+ * Narrow the `PI_MODEL_SWAP_JSON` modalities (env text, so still strings) onto
+ * the platform's closed set, with the `["text"]` floor `runtime-pi/env.ts`
+ * applies: an empty list disables text too.
  */
-function narrowInputModalities(input: ReadonlyArray<string>): ("text" | "image")[] {
-  const known = input.filter((m): m is "text" | "image" => m === "text" || m === "image");
+function narrowInputModalities(input: ReadonlyArray<string>): ModelInputModality[] {
+  const known = MODEL_INPUT_MODALITIES.filter((m) => input.includes(m));
   return known.length > 0 ? known : ["text"];
 }
 

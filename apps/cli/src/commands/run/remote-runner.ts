@@ -44,7 +44,7 @@
 
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
-import type { RunResult } from "@appstrate/afps-runtime/runner";
+import type { TerminalRunResult } from "@appstrate/afps-runtime/runner";
 import {
   TERMINAL_RUN_STATUSES,
   type RunStatus,
@@ -865,9 +865,12 @@ function buildMetricEvent(record: RemoteRunRecord): RunEvent | null {
  * `output` carries `runs.result` (the AFPS `output()` value),
  * matching `RunResult.output`. The status is mapped one-to-one.
  */
-function buildRunResultPayload(record: RemoteRunRecord, status: TerminalRunStatus): RunResult {
+function buildRunResultPayload(
+  record: RemoteRunRecord,
+  status: TerminalRunStatus,
+): TerminalRunResult {
   const storedResult = isPlainObject(record.result) ? record.result : null;
-  const result: RunResult = {
+  const result: TerminalRunResult = {
     memories: [],
     pinned: {},
     output: storedResult && "output" in storedResult ? storedResult.output : null,

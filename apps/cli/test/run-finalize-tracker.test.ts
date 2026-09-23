@@ -16,11 +16,17 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { HttpSink } from "@appstrate/afps-runtime/sinks";
-import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
+import {
+  emptyRunResult,
+  type RunResult,
+  type TerminalRunResult,
+} from "@appstrate/afps-runtime/runner";
 import {
   _attachFinalizeTrackerForTesting as attach,
   _raceFinalizeAgainstTimeoutForTesting as raceTimeout,
 } from "../src/commands/run.ts";
+
+const failedResult = (): TerminalRunResult => ({ ...emptyRunResult(), status: "failed" });
 
 interface CapturedRequest {
   url: string;
@@ -85,7 +91,7 @@ describe("attachFinalizeTracker", () => {
     const wasFinalized = attach(sink);
 
     expect(wasFinalized()).toBe(false);
-    await sink.finalize(emptyRunResult());
+    await sink.finalize(failedResult());
     expect(wasFinalized()).toBe(true);
   });
 
@@ -97,7 +103,7 @@ describe("attachFinalizeTracker", () => {
     });
     attach(sink);
 
-    const result: RunResult = {
+    const result: TerminalRunResult = {
       ...emptyRunResult(),
       status: "cancelled",
       error: { message: "Runner cancelled by user (CLI received signal)." },
@@ -124,9 +130,9 @@ describe("attachFinalizeTracker", () => {
       runSecret: RUN_SECRET,
     });
     const wasFinalized = attach(sink);
-    await sink.finalize(emptyRunResult());
+    await sink.finalize(failedResult());
     expect(wasFinalized()).toBe(true);
-    await sink.finalize(emptyRunResult());
+    await sink.finalize(failedResult());
     expect(wasFinalized()).toBe(true);
     expect(server.received.filter((r) => r.url === "/events/finalize")).toHaveLength(2);
   });

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 
 export const modelProviderCredentialsPaths = {
@@ -415,8 +416,8 @@ export const modelProviderCredentialsPaths = {
                         max_tokens: { type: ["integer", "null"] },
                         input: {
                           type: ["array", "null"],
-                          items: { type: "string" },
-                          description: "Accepted input modalities (`text`, `image`).",
+                          items: { type: "string", enum: [...MODEL_INPUT_MODALITIES] },
+                          description: "Accepted input modalities.",
                         },
                         reasoning: { type: ["boolean", "null"] },
                         source: {
@@ -436,7 +437,7 @@ export const modelProviderCredentialsPaths = {
                             input: {
                               type: "array",
                               minItems: 1,
-                              items: { type: "string", enum: ["text", "image"] },
+                              items: { type: "string", enum: [...MODEL_INPUT_MODALITIES] },
                             },
                             reasoning: { type: "boolean" },
                           },

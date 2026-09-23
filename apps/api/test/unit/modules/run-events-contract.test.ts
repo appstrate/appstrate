@@ -21,6 +21,7 @@
 import { describe, it, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { terminalRunStatusValues } from "@appstrate/db/run-status";
 
 const SOURCE_FILES = [
   resolve(import.meta.dir, "../../../src/routes/runs.ts"),
@@ -41,16 +42,16 @@ describe("onRunStatusChange contract", () => {
     it(`covers status "${status}" with either a literal emission or a derived-status emission`, () => {
       // "started" and "cancelled" are literal `status: "…"` object keys
       // at the call site; "success" / "failed" / "timeout" arrive via
-      // the `status` local that `mapTerminalStatus(result)` returns —
-      // a union type whose members appear as string literals in the
-      // union declaration. Matching either shape means the contract is
+      // the `status` local `finalizeRun` seeds from the runner-declared
+      // `result.status`, which the finalize route validates against the
+      // terminal status tuple. Matching either shape means the contract is
       // enforced without pinning the tests to a specific code style.
       const literalObjectKey = new RegExp(`status:\\s*["']${status}["']`);
-      const unionMember = new RegExp(
-        `function mapTerminalStatus[\\s\\S]*?["']${status}["'][\\s\\S]*?\\n\\}`,
-      );
+      const derivedFromResult =
+        /let status = result\.status;/.test(source) &&
+        (terminalRunStatusValues as readonly string[]).includes(status);
 
-      const found = literalObjectKey.test(source) || unionMember.test(source);
+      const found = literalObjectKey.test(source) || derivedFromResult;
       expect(found).toBe(true);
     });
   }

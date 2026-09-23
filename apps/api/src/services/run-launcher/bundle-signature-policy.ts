@@ -24,7 +24,9 @@ import {
   type VerifySignatureFailureReason,
 } from "@appstrate/afps-runtime/bundle";
 import { getEnv } from "@appstrate/env";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../../lib/logger.ts";
+import { isSystemPackage } from "../system-packages.ts";
 
 /**
  * Error thrown when a bundle's signature fails verification under the
@@ -90,34 +92,73 @@ function getTrustRoot(): TrustRoot {
   return cachedTrustRoot;
 }
 
+/**
+ * Boot hook: parse `AFPS_TRUST_ROOT` now (a malformed entry fails boot, not the
+ * first run) and log the effective policy so an operator can see it.
+ */
+export function initBundleSignaturePolicy(): void {
+  logger.info("AFPS bundle signature policy", {
+    policy: getEnv().AFPS_SIGNATURE_POLICY,
+    trustedKeys: getTrustRoot().keys.length,
+  });
+}
+
 /** Reset the cached trust root — tests only. */
 export function _resetTrustRootCacheForTesting(): void {
   cachedTrustRoot = null;
 }
 
 /**
- * Load a bundle buffer + apply the configured signature policy.
+ * Apply the configured signature policy to one stored package about to be
+ * EXECUTED (see `downloadVersionZipForExecution`).
  *
- * Returns the loaded bundle (validated + size-capped by the runtime
- * loader). Throws {@link BundleSignatureError} only under the "required"
- * policy when the bundle is unsigned or fails verification.
+ * Returns the loaded bundle, or `null` when nothing was verified (policy
+ * `off`, a system package, or any failure under `warn`). Only `required`
+ * throws: {@link BundleSignatureError} for an unsigned / unverifiable bundle,
+ * the loader's own error for an archive that cannot be read. `warn` never
+ * throws — it is an observation mode and must add no failure to a run.
  */
 export async function loadAndVerifyBundle(
   buffer: Uint8Array,
   packageId: string,
 ): Promise<Bundle | null> {
   const policy = getEnv().AFPS_SIGNATURE_POLICY;
-  if (policy === "off") return null;
+  // System packages are read from the image at boot and their ids are
+  // write-protected, so the image is their trust root. None ships signed:
+  // verifying them would log on every run under `warn` and reject every
+  // system integration under `required`.
+  if (policy === "off" || isSystemPackage(packageId)) return null;
+  if (policy === "required") return verifyOrThrow(buffer, packageId, policy);
+  try {
+    return await verifyOrThrow(buffer, packageId, policy);
+  } catch (err) {
+    logger.warn("AFPS bundle signature could not be checked", {
+      packageId,
+      error: getErrorMessage(err),
+    });
+    return null;
+  }
+}
 
-  const bundle = await buildBundleFromAfps(buffer, emptyPackageCatalog);
+async function verifyOrThrow(
+  buffer: Uint8Array,
+  packageId: string,
+  policy: "warn" | "required",
+): Promise<Bundle> {
+  // `buffer` is ONE stored package: its dependencies are separate objects,
+  // each verified when it is loaded. Walking them here against an empty
+  // catalog would reject every package that declares one.
+  const bundle = await buildBundleFromAfps(buffer, emptyPackageCatalog, { depTypes: [] });
 
   try {
     verifyBundleWithPolicy(bundle, {
       policy,
       trustRoot: getTrustRoot(),
       onWarn: (reason, detail) => {
+        // The platform signs nothing on publish, so "unsigned" is the normal
+        // case; a signature that is present but fails is the signal.
         if (reason === "unsigned") {
-          logger.warn("AFPS bundle is unsigned", { packageId });
+          logger.debug("AFPS bundle is unsigned", { packageId });
         } else {
           logger.warn("AFPS bundle signature invalid", { packageId, reason, detail });
         }

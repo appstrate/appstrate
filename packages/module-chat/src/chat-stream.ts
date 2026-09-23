@@ -19,9 +19,10 @@
  */
 
 import type { Context } from "hono";
-import type { UIMessage } from "ai";
+import { safeValidateUIMessages, type UIMessage } from "ai";
 import { z } from "zod";
 import { parseBody, invalidRequest } from "@appstrate/core/api-errors";
+import { withByteCap } from "@appstrate/core/safe-json";
 import { isAttachmentUri } from "@appstrate/core/file-uri";
 import { logger } from "./logger.ts";
 import { listModels, pickModel } from "./llm.ts";
@@ -110,10 +111,17 @@ export type ChatEngine = (input: PiChatInput) => Response;
  */
 const CHAT_MESSAGE_ROLES = new Set(["user", "assistant"]);
 
+/**
+ * Ceiling on the turn's last message — the one this route persists into
+ * `chat_messages.content`. Attachments ride as `appfile://` references, so only
+ * typed text and part metadata count against it.
+ */
+export const CHAT_MESSAGE_MAX_BYTES = 256 * 1024;
+
 // The client (assistant-ui / useChat) posts the full thread plus optional
-// session/model/context extras. `messages` are UIMessages; the shape itself is
-// the AI SDK's and stays loose here, with two tightenings the engine cannot
-// make for us:
+// session/model/context extras. `messages` are UIMessages: their shape is the
+// AI SDK's, checked by `safeValidateUIMessages` in the handler. This schema adds
+// what that check cannot know:
 //   - `role` MUST be one of {@link CHAT_MESSAGE_ROLES}. Nothing legitimate
 //     sends another: the composer only produces user turns, and a reload
 //     replays what the server persisted — user or assistant, a server-authored
@@ -121,6 +129,7 @@ const CHAT_MESSAGE_ROLES = new Set(["user", "assistant"]);
 //   - any `file` part MUST reference an `upload://` or `appfile://` URI. That
 //     rejects inline `data:` bytes and arbitrary URLs in the chat channel
 //     (attachments flow only through the file store, never inline).
+//   - the last message, the one persisted, fits {@link CHAT_MESSAGE_MAX_BYTES}.
 export const chatStreamSchema = z.object({
   id: z.string().optional(),
   messages: z
@@ -152,6 +161,7 @@ export const chatStreamSchema = z.object({
           }
         });
       });
+      withByteCap(CHAT_MESSAGE_MAX_BYTES)(messages.at(-1), ctx);
     }),
   modelId: z.string().optional(),
   generation: modelGenerationSettingsSchema.optional(),
@@ -233,7 +243,11 @@ export async function handleChatStream(
   const persona = c.get("viewAs");
   const orgRole = persona?.orgRole ?? c.get("orgRole") ?? "member";
   const body = parseBody(chatStreamSchema, await c.req.json().catch(() => null));
-  const messages = body.messages as UIMessage[];
+  const validated = await safeValidateUIMessages({ messages: body.messages });
+  if (!validated.success) {
+    throw invalidRequest(`Invalid chat message: ${validated.error.message}`, "messages");
+  }
+  const messages = validated.data;
   logger.info("chat turn", { turns: messages.length });
 
   const sessionId = body.id;

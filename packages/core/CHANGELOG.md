@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`MODEL_INPUT_MODALITIES`**, **`modelInputModalitySchema`** and
+  **`ModelInputModality`** (`@appstrate/core/module`) — the closed set of model
+  input modalities (`text`, `image`) the Pi runtime accepts, shared by the model
+  API's request schemas, the `org_models.input` column type and the runtime's
+  `MODEL_INPUT` reader.
+- **`withByteCap(maxBytes)`** (`@appstrate/core/safe-json`) — Zod refinement
+  capping the UTF-8 size of a value's JSON serialization, so a module can cap a
+  JSONB payload it persists with the same idiom and wording as the platform.
 - **`PACKAGE_TYPE_ROUTE_SEGMENT`** (`@appstrate/core/package-files`) — the URL
   segment of each package type's collection (`skill` → `skills`, …), declared
   once for the API router, the dashboard and the CLI.
@@ -38,6 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`SubscriptionChatModel.input`** (`@appstrate/core/chat-contract`) is typed
+  `ModelInputModality[] | null` instead of `string[] | null`.
 - **`formatErrorChain`** (`@appstrate/core/errors`) starts a cause as a new
   sentence after a message that already ends one (`"Refused. Conflict"`, never
   `"Refused.: Conflict"`), and no longer appends a cause whose message the text

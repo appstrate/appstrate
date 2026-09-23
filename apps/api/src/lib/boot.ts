@@ -55,6 +55,7 @@ import { getExecutionMode } from "../infra/mode.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { ensureBucket } from "@appstrate/db/storage";
 import { logInfraMode } from "../infra/index.ts";
+import { initBundleSignaturePolicy } from "../services/run-launcher/bundle-signature-policy.ts";
 import { installPermissionAuditLogger } from "./permission-audit.ts";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 
@@ -191,6 +192,9 @@ export async function bootCritical(): Promise<void> {
 
   // Verify storage backend is accessible (fail-fast if misconfigured)
   await ensureBucket();
+
+  // Parse AFPS_TRUST_ROOT (fail-fast) and log the effective signature policy.
+  initBundleSignaturePolicy();
 
   // Parse + validate run limits (PLATFORM_RUN_LIMITS, INLINE_RUN_LIMITS).
   // Throws at boot on invalid shape — no run can start without them.

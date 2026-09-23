@@ -9,7 +9,7 @@ export {
   zeroTokenUsage,
   type ReduceOptions,
 } from "./reducer.ts";
-export { truncateToolResult, toolResultByteLimit } from "./tool-result.ts";
+export { truncateToolResult, DEFAULT_TOOL_RESULT_BYTE_LIMIT } from "./tool-result.ts";
 export {
   computeTokenCost,
   classifyTokenPricing,
@@ -34,6 +34,8 @@ export {
 // typically import it alongside the runner surface.
 export type {
   RunResult,
+  TerminalRunResult,
+  RunTerminalStatus,
   RunArtifactsSummary,
   RunError,
   LogEntry,

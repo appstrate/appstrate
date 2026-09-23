@@ -2,6 +2,7 @@
 
 import { orgRoleEnum } from "@appstrate/db/schema";
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
+import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
 import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
 
@@ -1672,7 +1673,10 @@ export const schemas = {
         description:
           "Generation controls supported by the backing model. Null for managed aliases whose binding is hidden.",
       },
-      input: { type: ["array", "null"], items: { type: "string" } },
+      input: {
+        type: ["array", "null"],
+        items: { type: "string", enum: [...MODEL_INPUT_MODALITIES] },
+      },
       contextWindow: { type: ["integer", "null"] },
       maxTokens: { type: ["integer", "null"] },
       reasoning: { type: ["boolean", "null"] },

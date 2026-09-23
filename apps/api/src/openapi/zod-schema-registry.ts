@@ -704,11 +704,13 @@ export const EXEMPT_REQUEST_BODIES: Record<string, string> = {
     "wire-shape guard only; manifest/prompt are z.unknown() and validated by the run preflight",
   "POST /api/runs/inline/validate":
     "wire-shape guard only; manifest/prompt are z.unknown() and validated by the run preflight",
-  // The finalize body is deliberately permissive: it reports the outcome of an
-  // already-completed run, so a malformed field must degrade to absent rather
-  // than 400 a run that has no way to retry. See routes/runs-events.ts.
+  // The finalize body splits in two: the outcome fields (`status`, `output`,
+  // `error`, and `usage`, required when `status` is `success`) are strict, while
+  // the cosmetic/billing fields `.catch` to absent so a malformed one never
+  // 400s an already-finished run. That conditional requirement and those
+  // degrading fields are not a comparable Zod object. See routes/runs-events.ts.
   "POST /api/runs/{runId}/events/finalize":
-    "tolerance-by-design body: fields degrade to absent instead of rejecting an already-finished run",
+    "strict outcome fields (status; usage required on success) plus cosmetic fields that degrade to absent — conditional requirement, not field-comparable",
 
   // ─── Empty bodies (documented for shape, never parsed) ──────────────────
   "POST /api/runs/{runId}/events/heartbeat":

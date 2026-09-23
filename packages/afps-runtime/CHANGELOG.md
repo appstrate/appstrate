@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — tool-result cap is a parameter, not an env read (BREAKING)
+
+- `truncateToolResult(result, limitBytes)` no longer reads
+  `TOOL_RESULT_BYTE_LIMIT`; its default is the exported
+  `DEFAULT_TOOL_RESULT_BYTE_LIMIT` (2048). `toolResultByteLimit()` is removed:
+  the embedding process parses its own env and passes the cap in.
+
+### Changed — `EventSink.finalize` takes a `TerminalRunResult` (BREAKING)
+
+- New `TerminalRunResult` (a `RunResult` whose `status` is required) and
+  `RunTerminalStatus` types, exported from `@appstrate/afps-runtime/runner` and
+  `/types`. `EventSink.finalize`, `HttpSink`, `CompositeSink`, the reducer sink
+  and `mergeTerminalResult` now take it: a runner must stamp the terminal
+  status before finalizing. The platform's finalize endpoint no longer infers
+  a missing status from `error`, and it requires `usage` when the status is
+  `success`.
+- `finalizeThrownFailure` always stamps a status. The `setFailedStatus` option
+  is removed; `terminalStatus` (default `"failed"`) is narrowed to the
+  non-success statuses.
+- `mergeTerminalResult` carries every terminal field of the runner's result,
+  `artifacts` included — it used to drop it.
+
 ### Removed — five unraised error classes and the `isAfpsError` marker
 
 - `RunTimeoutError`, `RunCancelledError`, `WorkloadExitError`,

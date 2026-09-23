@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { z } from "zod";
-import type { ModelCost } from "@appstrate/core/module";
+import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { TokenUsage } from "@appstrate/core/token-usage";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import type { ModelGenerationCapabilities } from "@appstrate/core/model-generation";
@@ -901,7 +901,7 @@ export interface ModelMetadata {
   contextWindow?: number | null;
   maxTokens?: number | null;
   /** Input modalities this model supports (e.g. `["text", "image"]`). */
-  input?: string[] | null;
+  input?: ModelInputModality[] | null;
   /** Whether the model exposes a reasoning/thinking mode. */
   reasoning?: boolean | null;
   /** Per-1M-token pricing in USD. */

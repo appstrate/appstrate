@@ -27,7 +27,11 @@ import { db } from "@appstrate/db/client";
 import { runs, TERMINAL_RUN_EVENT_TYPES, type RunResultPayload } from "@appstrate/db/schema";
 import { type CloudEventEnvelope } from "@appstrate/afps-runtime/events";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
-import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
+import {
+  emptyRunResult,
+  type RunResult,
+  type TerminalRunResult,
+} from "@appstrate/afps-runtime/runner";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
 import { getCache, getEventBuffer } from "../infra/index.ts";
@@ -97,7 +101,7 @@ interface IngestRunEventInput {
 
 interface FinalizeRunInput {
   run: RunSinkContext;
-  result: RunResult;
+  result: TerminalRunResult;
 }
 
 // ---------------------------------------------------------------------------
@@ -288,13 +292,12 @@ async function ingestInner(
  *
  *   1. Drain buffered events (accepting gaps — last chance).
  *   2. Load the package manifest (for output-schema validation).
- *   3. Derive the authoritative terminal status:
- *        a. Explicit `result.status` from the runner wins.
- *        b. `result.error` → failed.
- *        c. If status is still "success": validate output against manifest
- *           schema (if declared) — failure overrides to "failed".
- *        d. If status is still "success": apply the "zero tokens" heuristic
- *           (no LLM roundtrip ever happened) — overrides to "failed".
+ *   3. Derive the authoritative terminal status, starting from the
+ *      runner's required `result.status`:
+ *        a. If "success": validate output against manifest schema (if
+ *           declared) — failure overrides to "failed".
+ *        b. If still "success": apply the "zero tokens" rule (no LLM
+ *           roundtrip ever happened) — overrides to "failed".
  *   4. Build the result payload (`{ output }`) mirroring the legacy
  *      platform shape; consumers of `runs.result` get the same structure
  *      whether the run executed in-process or came from a remote runner.
@@ -350,7 +353,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // 3. Derive final status + error message. Pure computation — no DB writes
   //    before the CAS so concurrent synthesis + container-posted finalize
   //    don't duplicate log rows or memories.
-  let status = mapTerminalStatus(result);
+  let status = result.status;
   let errorMessage: string | null = result.error?.message ?? null;
   let outputValidationErrors: string[] | null = null;
 
@@ -407,8 +410,8 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // `status: "failed"` + `error` when the agent loop ended on an errored
   // final turn (see the bridge's `getTerminalError()` in runner-pi); a
   // transient mid-loop error the
-  // agent recovered from leaves `status: "success"`. `mapTerminalStatus`
-  // honours that authoritative status above. The platform deliberately
+  // agent recovered from leaves `status: "success"`, and finalize starts
+  // from that authoritative status above. The platform deliberately
   // does NOT second-guess it by scanning the `run_logs` adapter-error
   // trail — that post-hoc archaeology produced false positives, failing
   // runs whose agent recovered and delivered via `report`/`log` (which
@@ -416,14 +419,13 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // below remains as a distinct backstop for the "LLM never reachable,
   // zero tokens, no terminal error surfaced" shape.
 
-  // Zod boundary on the runner-supplied terminal usage (tolerant: known
-  // numeric fields kept, unknown keys stripped). The fallback semantics
-  // split on the terminal status:
+  // Terminal usage — required on a success by the route, which 400s without
+  // it. The fallback semantics for an absent/invalid value split on the status:
   //
-  //   - SUCCESS: the finalize body is the single source of truth — an
-  //     absent/invalid shape becomes explicit zero usage so the zero-token
-  //     liveness heuristic below cannot be defeated by a late side-channel
-  //     metric event.
+  //   - SUCCESS: reachable only from a non-HTTP caller (`synthesiseFinalize`
+  //     with no snapshot on the row). It becomes explicit zero usage so the
+  //     zero-token liveness rule below cannot be defeated by a late
+  //     side-channel metric event.
   //   - NON-SUCCESS (watchdog kill, container crash, runner-declared
   //     failure without a billing block): the run died before it could
   //     post terminal usage. Coercing to zeros here would ERASE the
@@ -871,8 +873,7 @@ export async function synthesiseFinalize(
     return;
   }
 
-  const result: RunResult = emptyRunResult();
-  result.status = terminal.status;
+  const result: TerminalRunResult = { ...emptyRunResult(), status: terminal.status };
   if (terminal.error) result.error = terminal.error;
   if (terminal.durationMs !== undefined) result.durationMs = terminal.durationMs;
 
@@ -926,7 +927,7 @@ export async function synthesiseFinalize(
  *
  * PAYLOAD ONLY: the caller's terminal status is untouched. A cancelled run
  * stays `cancelled`, a timeout stays `timeout`; recovering an output never
- * feeds `mapTerminalStatus`. It does legitimately change the outcome of the
+ * touches `result.status`. It does legitimately change the outcome of the
  * output-schema validation `finalizeRunImpl` runs on a synthesised
  * `success` — a run that really did emit a valid payload now stays
  * `success` instead of being failed for "finished without calling the
@@ -970,11 +971,11 @@ function tokenUsageIsNonZero(usage: TokenUsage): boolean {
 
 /**
  * Tolerant Zod boundary on the runner-supplied finalize `usage`: known numeric
- * fields validated, unknown keys stripped. Absent/invalid shapes return `null`
- * (+ warn log for the malformed case) so the caller decides the fallback —
- * zero usage on a success terminal, last-known snapshot on a non-success one.
- * A malformed billing field can never leave an already-completed run
- * unfinalized.
+ * fields validated, unknown keys stripped. The route already rejects a
+ * malformed value; this guards the non-HTTP callers. Absent/invalid shapes
+ * return `null` (+ warn log for the malformed case) so the caller decides the
+ * fallback — zero usage on a success terminal, last-known snapshot on a
+ * non-success one.
  */
 function validateFinalizeUsage(usage: unknown, runId: string): TokenUsage | null {
   if (usage === null || usage === undefined) return null;
@@ -1243,11 +1244,4 @@ async function drainBufferedEvents(
     if (await refreshSequence(run)) continue;
     return;
   }
-}
-
-function mapTerminalStatus(result: RunResult): "success" | "failed" | "timeout" | "cancelled" {
-  // Explicit status wins — runner-provided terminal cause (timeout,
-  // cancellation) is authoritative over inference from `error`.
-  if (result.status) return result.status;
-  return result.error ? "failed" : "success";
 }

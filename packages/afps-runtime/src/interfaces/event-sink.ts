@@ -2,7 +2,7 @@
 // Copyright 2026 Appstrate
 
 import type { RunEvent } from "@afps-spec/types";
-import type { RunResult } from "../types/run-result.ts";
+import type { TerminalRunResult } from "../types/run-result.ts";
 
 /**
  * Consumer of the stream of events emitted during a run.
@@ -12,7 +12,8 @@ import type { RunResult } from "../types/run-result.ts";
  *   (unknown to the runtime) — sinks MUST forward events they do not
  *   recognise without failing.
  * - `finalize`: called exactly once at the end of the run with the
- *   aggregated {@link RunResult}. Sinks may persist the result, close
+ *   aggregated result, its terminal `status` stamped
+ *   ({@link TerminalRunResult}). Sinks may persist the result, close
  *   connections, flush buffers, etc.
  *
  * Implementations MUST be safe under back-pressure — the runtime awaits
@@ -35,5 +36,5 @@ export interface EventSink {
    * aggregate. Use this to close files, flush HTTP queues, or persist
    * summaries.
    */
-  finalize(result: RunResult): Promise<void>;
+  finalize(result: TerminalRunResult): Promise<void>;
 }

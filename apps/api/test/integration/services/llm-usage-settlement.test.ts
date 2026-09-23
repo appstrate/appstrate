@@ -68,7 +68,7 @@ import {
   listLlmUsage,
   getSettledFrontierId,
 } from "../../../src/services/state/runs.ts";
-import { emptyRunResult } from "@appstrate/afps-runtime/runner";
+import { emptyRunResult, type TerminalRunResult } from "@appstrate/afps-runtime/runner";
 
 const AGENT = "@settleorg/settle-agent";
 const RUN_SECRET = "c".repeat(43);
@@ -332,8 +332,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
 
     // 1. The container's own finalize: cost + usage, barrier writes, CAS settles.
     const run = await getRunSinkContext(runId);
-    const result = emptyRunResult();
-    result.status = "success";
+    const result: TerminalRunResult = { ...emptyRunResult(), status: "success" };
     result.cost = 5;
     result.usage = { input_tokens: 1_000_000, output_tokens: 500_000 };
     await finalizeRun({ run: run!, result });
@@ -684,8 +683,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
     );
     try {
       const run = await getRunSinkContext(runId);
-      const result = emptyRunResult();
-      result.status = "success";
+      const result: TerminalRunResult = { ...emptyRunResult(), status: "success" };
       // The terminal snapshot the barrier must make durable: $7, superseding $3.
       // 0.5M×10/1e6 + 0.1M×20/1e6 = 5 + 2.
       result.usage = { input_tokens: 500_000, output_tokens: 100_000 };

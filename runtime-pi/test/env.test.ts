@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
+import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
 import { parseRuntimeEnv, RuntimeEnvError, scrubSinkEnv } from "../env.ts";
 
 const VALID = {
@@ -243,6 +244,13 @@ describe("parseRuntimeEnv — fail-fast errors", () => {
     );
   });
 
+  it("accepts exactly the modalities the platform API accepts", () => {
+    // The API validates `org_models.input` against the same core tuple, so a
+    // model it saves can never be refused here at container boot.
+    const env = parseRuntimeEnv({ ...VALID, MODEL_INPUT: JSON.stringify(MODEL_INPUT_MODALITIES) });
+    expect(env.modelInput).toEqual([...MODEL_INPUT_MODALITIES]);
+  });
+
   it("rejects non-positive MODEL_CONTEXT_WINDOW", () => {
     expect(() => parseRuntimeEnv({ ...VALID, MODEL_CONTEXT_WINDOW: "0" })).toThrow(
       /MODEL_CONTEXT_WINDOW: must be a positive integer/,
@@ -340,5 +348,37 @@ describe("scrubSinkEnv", () => {
     expect(process.env.APPSTRATE_SINK_SECRET).toBeUndefined();
     expect(process.env.APPSTRATE_SINK_URL).toBeUndefined();
     expect(process.env.APPSTRATE_SINK_FINALIZE_URL).toBeUndefined();
+  });
+});
+
+describe("parseRuntimeEnv — Pi loop knobs", () => {
+  it("defaults both loops on and leaves the tool-result cap to the runner", () => {
+    const env = parseRuntimeEnv(VALID);
+    expect(env.modelRetry).toBe(true);
+    expect(env.modelCompaction).toBe(true);
+    expect(env.toolResultByteLimit).toBeUndefined();
+  });
+
+  it("parses what buildRuntimePiEnv emits", () => {
+    const env = parseRuntimeEnv({
+      ...VALID,
+      MODEL_RETRY_ENABLED: "false",
+      MODEL_COMPACTION_ENABLED: "false",
+      TOOL_RESULT_BYTE_LIMIT: "16384",
+    });
+    expect(env.modelRetry).toBe(false);
+    expect(env.modelCompaction).toBe(false);
+    expect(env.toolResultByteLimit).toBe(16_384);
+  });
+
+  it("fails boot on a malformed value instead of silently using the default", () => {
+    expect(() =>
+      parseRuntimeEnv({
+        ...VALID,
+        MODEL_RETRY_ENABLED: "no",
+        MODEL_COMPACTION_ENABLED: "0",
+        TOOL_RESULT_BYTE_LIMIT: "12.5",
+      }),
+    ).toThrow(/MODEL_RETRY_ENABLED[\s\S]*MODEL_COMPACTION_ENABLED[\s\S]*TOOL_RESULT_BYTE_LIMIT/);
   });
 });

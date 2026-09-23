@@ -32,7 +32,12 @@ import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../../apps/api/test/helpers/auth.ts";
 import { createUIMessageStreamResponse, type UIMessageChunk } from "ai";
-import { handleChatStream, type ChatEngine, type ChatEnv } from "../src/chat-stream.ts";
+import {
+  CHAT_MESSAGE_MAX_BYTES,
+  handleChatStream,
+  type ChatEngine,
+  type ChatEnv,
+} from "../src/chat-stream.ts";
 import { mintSessionId } from "../src/session-id.ts";
 import { acquirePiChatSlot, releaseOnClose } from "../src/pi-chat/concurrency.ts";
 import type { PiChatInput } from "../src/pi-chat/engine.ts";
@@ -45,6 +50,7 @@ import { initSystemModelProviderKeys } from "../../../apps/api/src/services/mode
 import { buildSystemPrompt } from "../src/prompt.ts";
 import { turnCapabilities } from "../src/capabilities.ts";
 import { chatLoopbackStrategy } from "../src/loopback-auth.ts";
+import { _resetChatEnvForTests } from "../src/env.ts";
 
 // The chat handler reads the system model registry; the HTTP harness initializes it at boot.
 initSystemModelProviderKeys();
@@ -379,6 +385,35 @@ describe("handleChatStream", () => {
     expect(rows).toEqual([]);
   });
 
+  it("rejects a message that is not a UIMessage, before any persistence", async () => {
+    const sessionId = mintSessionId();
+    const { engine, calls } = scriptedEngine();
+    // A text part with no `text`: the old `z.unknown()` let it through and it
+    // was stored verbatim, then read back as a trusted `UIMessage`.
+    const res = await postChat(sessionId, undefined, engine, { parts: [{ type: "text" }] });
+
+    expect(res.status).toBe(400);
+    expect(res.headers.get("content-type") ?? "").toContain("application/problem+json");
+    expect(calls).toEqual([]);
+    const sessions = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+    expect(sessions).toEqual([]);
+  });
+
+  it("rejects a last message over the persisted-content cap, before any persistence", async () => {
+    const sessionId = mintSessionId();
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      parts: [{ type: "text", text: "x".repeat(CHAT_MESSAGE_MAX_BYTES) }],
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { detail?: string };
+    expect(body.detail).toContain(`max is ${CHAT_MESSAGE_MAX_BYTES}`);
+    expect(calls).toEqual([]);
+    const sessions = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+    expect(sessions).toEqual([]);
+  });
+
   it("rejects a model family the engine cannot bind, before any persistence", async () => {
     const sessionId = mintSessionId();
     const { engine, calls } = scriptedEngine();
@@ -416,6 +451,7 @@ describe("handleChatStream", () => {
   it("rejects a saturated turn before persisting its user message", async () => {
     const previousCap = process.env.CHAT_PI_MAX_CONCURRENCY;
     process.env.CHAT_PI_MAX_CONCURRENCY = "1";
+    _resetChatEnvForTests();
     const heldSlot = acquirePiChatSlot();
     expect(heldSlot).not.toBeNull();
 
@@ -439,6 +475,7 @@ describe("handleChatStream", () => {
       heldSlot?.release();
       if (previousCap === undefined) delete process.env.CHAT_PI_MAX_CONCURRENCY;
       else process.env.CHAT_PI_MAX_CONCURRENCY = previousCap;
+      _resetChatEnvForTests();
     }
   });
 

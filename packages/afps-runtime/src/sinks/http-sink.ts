@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { computeBackoffDelayMs, isRetryableHttpStatus } from "@appstrate/afps-shared/backoff";
 import type { EventSink } from "../interfaces/event-sink.ts";
 import type { RunEvent } from "@afps-spec/types";
-import type { RunResult } from "../types/run-result.ts";
+import type { TerminalRunResult } from "../types/run-result.ts";
 import { buildCloudEventEnvelope } from "../events/cloudevents.ts";
 import { sign } from "../events/signing.ts";
 import {
@@ -127,7 +127,7 @@ export class HttpSink implements EventSink {
     await this.sendSigned(this.url, id, nowMs, body);
   }
 
-  async finalize(result: RunResult): Promise<void> {
+  async finalize(result: TerminalRunResult): Promise<void> {
     const id = this.generateId();
     const nowMs = this.now();
     const body = JSON.stringify(result);

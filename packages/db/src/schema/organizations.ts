@@ -20,6 +20,7 @@ import { orgRoleEnum, invitationStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { spaces } from "./spaces.ts";
 import type { SpaceAssignment } from "@appstrate/core/permissions";
+import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 
 export const organizations = pgTable(
   "organizations",
@@ -468,11 +469,11 @@ export const orgModels = pgTable(
     credentialId: uuid("credential_id")
       .notNull()
       .references(() => modelProviderCredentials.id, { onDelete: "restrict" }),
-    input: jsonb("input"), // ["text", "image"] | null
+    input: jsonb("input").$type<ModelInputModality[]>(),
     contextWindow: integer("context_window"), // 200000 | null
     maxTokens: integer("max_tokens"), // 16384 | null
     reasoning: boolean("reasoning"), // true | null
-    cost: jsonb("cost"), // { input, output, cacheRead, cacheWrite } in $/M tokens | null
+    cost: jsonb("cost").$type<ModelCost>(), // $/M tokens
     enabled: boolean("enabled").notNull().default(true),
     // Model-alias flag (LLM-gateway alias pattern). When true, this row's `id`
     // is a public alias and its real binding (`modelId` + the credential's

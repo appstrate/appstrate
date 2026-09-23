@@ -54,8 +54,9 @@ inachevé.
 
 ## Configuration (variables d'environnement)
 
-Ces variables sont lues directement par le module (pas via le schéma Zod
-`@appstrate/env`), toutes optionnelles :
+Ces variables sont validées par le schéma Zod du module
+(`src/env.ts`, pas par `@appstrate/env`) au démarrage — une valeur invalide
+bloque le boot. Toutes optionnelles :
 
 | Variable                  | Défaut                   | Rôle                                                                                                                                                                                                                             |
 | ------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

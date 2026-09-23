@@ -13,7 +13,7 @@
  *   - tamper detection (flip one byte in a fetched package file)
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { zipSync } from "fflate";
 import { truncateAll } from "../../helpers/db.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
@@ -29,6 +29,9 @@ import {
   type PackageIdentity,
 } from "@appstrate/afps-runtime/bundle";
 import { toBundleApiError } from "../../../src/services/run-launcher/bundle-error-mapping.ts";
+import { DbPackageCatalog } from "../../../src/services/run-launcher/db-package-catalog.ts";
+import { BundleSignatureError } from "../../../src/services/run-launcher/bundle-signature-policy.ts";
+import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 
 const BUCKET = "agent-packages";
 
@@ -283,5 +286,48 @@ describe("bundle-assembly — storage integrity gate (#878)", () => {
 
     const bundle = await buildBundleFromDb(root, { orgId: ORG_ID, spaceId: SPACE_ID });
     expect(bundle.packages.has("@test/skill-a@1.0.0" as PackageIdentity)).toBe(true);
+  });
+});
+
+/**
+ * The signature policy gates what RUNS. Export assembles the same dependency
+ * graph through the same catalog, and must not be refused by it.
+ */
+describe("bundle-assembly — signature policy placement", () => {
+  let ORG_ID: string;
+  const skill = {
+    name: "@test/skill-a",
+    version: "1.0.0",
+    type: "skill",
+    schema_version: "0.1",
+    display_name: "A",
+    author: "tester",
+  };
+
+  beforeEach(async () => {
+    await truncateAll();
+    ORG_ID = (await createTestContext({ orgSlug: "bundletest" })).org.id;
+    await seedPackageWithZip({
+      id: "@test/skill-a",
+      type: "skill",
+      version: "1.0.0",
+      orgId: ORG_ID,
+      manifest: skill,
+    });
+    process.env.AFPS_SIGNATURE_POLICY = "required";
+    resetEnvCache();
+  });
+
+  afterEach(() => {
+    delete process.env.AFPS_SIGNATURE_POLICY;
+    resetEnvCache();
+  });
+
+  it("refuses an unsigned package on the execution fetch only", async () => {
+    const identity = "@test/skill-a@1.0.0" as PackageIdentity;
+    expect((await new DbPackageCatalog({ orgId: ORG_ID }).fetch(identity)).identity).toBe(identity);
+    await expect(
+      new DbPackageCatalog({ orgId: ORG_ID, forExecution: true }).fetch(identity),
+    ).rejects.toBeInstanceOf(BundleSignatureError);
   });
 });

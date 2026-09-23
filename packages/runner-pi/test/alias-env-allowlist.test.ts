@@ -86,6 +86,11 @@ const RUN: RuntimePiEnvOptions = {
   sidecarProxyLlmUrl: "http://sidecar:8080/llm",
   outputSchema: { type: "object", properties: { summary: { type: "string" } } },
   maxFileBytes: 104_857_600,
+  // Set off their defaults so the builder emits them — the fixture has to reach
+  // every key the container can receive.
+  modelRetry: false,
+  modelCompaction: false,
+  toolResultByteLimit: 16_384,
   forwardProxyUrl: "http://sidecar:8081",
   noProxy: "sidecar,localhost,127.0.0.1",
   sink: {
@@ -122,7 +127,7 @@ const RUN: RuntimePiEnvOptions = {
  *   once the run's network is gone.
  * - `MODEL_RETRY_ENABLED` is the operator's opt-out of the Pi SDK retry loop, and
  *   `MODEL_COMPACTION_ENABLED` the same opt-out for its auto-compaction loop.
- *   Both are the operator's own choice, read off the host env and identical
+ *   Both are the operator's own choice (platform env, passed as options) and identical
  *   whatever vendor backs the alias — a run either retries (or compacts) or it
  *   does not, and neither answer names a provider.
  * - the rest is run plumbing (prompt, input, sink, trace, proxy, caps) whose
@@ -224,7 +229,7 @@ function expectExactKeySet(actual: readonly string[], expected: readonly string[
 /**
  * The knobs `buildRuntimePiEnv` reads from the HOST's `process.env` rather than
  * from its options. All of them are set here, from the exported list rather than
- * the two the builder forwards today, so that widening the forwarded subset also
+ * the subset the builder forwards today, so that widening the forwarded subset also
  * trips this gate: left ambient, a newly forwarded knob would just be absent on a
  * machine that does not set it, and the gate would pass while the container
  * gained a variable.
@@ -233,14 +238,7 @@ function expectExactKeySet(actual: readonly string[], expected: readonly string[
  * unknown one, and this key is read at module scope by anything building a logger
  * while it is set.
  */
-const HOST_ENV_KEYS = [
-  ...SIDECAR_OPERATOR_ENV_KEYS,
-  "TOOL_RESULT_BYTE_LIMIT",
-  // The two Pi SDK loop switches. Forwarded from the host env, not from an
-  // option, so they belong here rather than in the builder fixture.
-  "MODEL_RETRY_ENABLED",
-  "MODEL_COMPACTION_ENABLED",
-] as const;
+const HOST_ENV_KEYS = [...SIDECAR_OPERATOR_ENV_KEYS] as const;
 const originalHostEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {

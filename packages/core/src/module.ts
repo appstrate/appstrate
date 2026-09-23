@@ -589,6 +589,16 @@ export const modelCostSchema = z.object({
   cacheWrite: z.number().nonnegative().optional(),
 });
 
+/**
+ * Input modalities a model can declare — exactly what the Pi runtime accepts
+ * at container boot, so a value it would refuse is refused at the API instead.
+ */
+export const MODEL_INPUT_MODALITIES = ["text", "image"] as const;
+
+export const modelInputModalitySchema = z.enum(MODEL_INPUT_MODALITIES);
+
+export type ModelInputModality = z.infer<typeof modelInputModalitySchema>;
+
 /** OAuth2 endpoints + client config for OAuth-authenticated providers. */
 export interface ModelProviderOAuthConfig {
   /** Public OAuth client_id — typically shared with the provider's official CLI. */

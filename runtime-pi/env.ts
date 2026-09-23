@@ -26,6 +26,11 @@ import {
   type ModelNativeReasoningLevel,
   type ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
+import {
+  MODEL_INPUT_MODALITIES,
+  modelInputModalitySchema,
+  type ModelInputModality,
+} from "@appstrate/core/module";
 
 interface RuntimeEnv {
   /** Run identifier injected by the platform on container create. */
@@ -54,7 +59,7 @@ interface RuntimeEnv {
    */
   modelProvider?: string;
   /** Pi SDK input modalities. */
-  modelInput: ReadonlyArray<"text" | "image">;
+  modelInput: ReadonlyArray<ModelInputModality>;
   /**
    * Per-token cost (input/output/cacheRead/cacheWrite USD), or ABSENT when the
    * platform resolved no rates — unpriced, or aliased (the published rate card
@@ -110,6 +115,10 @@ interface RuntimeEnv {
    * `undefined` → SDK default.
    */
   mcpToolTimeoutMs?: number;
+  /** Pi loop knobs (`MODEL_RETRY_ENABLED`, `MODEL_COMPACTION_ENABLED`, `TOOL_RESULT_BYTE_LIMIT`). */
+  modelRetry: boolean;
+  modelCompaction: boolean;
+  toolResultByteLimit?: number;
   /**
    * NON-FATAL boot diagnostics — the counterpart of {@link RuntimeEnvError}'s
    * fatal `issues`. A value that is present but malformed is a contract
@@ -185,10 +194,12 @@ function parseJsonRecord(name: string, raw: string, issues: string[]): Record<st
   }
 }
 
+const ALLOWED_MODALITIES = MODEL_INPUT_MODALITIES.map((m) => `"${m}"`).join(", ");
+
 function parseModelInput(
   raw: string | undefined,
   issues: string[],
-): ReadonlyArray<"text" | "image"> {
+): ReadonlyArray<ModelInputModality> {
   if (!raw) return ["text"];
   let parsed: unknown;
   try {
@@ -198,13 +209,15 @@ function parseModelInput(
     return ["text"];
   }
   if (!Array.isArray(parsed)) {
-    issues.push(`MODEL_INPUT: must be a JSON array of "text" | "image"`);
+    issues.push(`MODEL_INPUT: must be a JSON array of ${ALLOWED_MODALITIES}`);
     return ["text"];
   }
-  const out: Array<"text" | "image"> = [];
+  const out: ModelInputModality[] = [];
   for (const v of parsed) {
-    if (v === "text" || v === "image") out.push(v);
-    else issues.push(`MODEL_INPUT: invalid modality "${String(v)}" (allowed: "text", "image")`);
+    const modality = modelInputModalitySchema.safeParse(v);
+    if (modality.success) out.push(modality.data);
+    else
+      issues.push(`MODEL_INPUT: invalid modality "${String(v)}" (allowed: ${ALLOWED_MODALITIES})`);
   }
   return out.length > 0 ? out : ["text"];
 }
@@ -304,6 +317,14 @@ function parsePositiveNumber(
     return fallback;
   }
   return n;
+}
+
+/** `"true"` / `"false"`, absent meaning `true`; anything else is a launcher bug. */
+function parseOptionalBool(name: string, raw: string | undefined, issues: string[]): boolean {
+  if (raw === undefined || raw === "true") return true;
+  if (raw === "false") return false;
+  issues.push(`${name}: must be "true" or "false" (got "${raw}")`);
+  return true;
 }
 
 /**
@@ -423,6 +444,21 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     issues,
   );
 
+  // Pi loop knobs — `buildRuntimePiEnv` emits them only to depart from the
+  // runner's defaults.
+  const modelRetry = parseOptionalBool("MODEL_RETRY_ENABLED", source.MODEL_RETRY_ENABLED, issues);
+  const modelCompaction = parseOptionalBool(
+    "MODEL_COMPACTION_ENABLED",
+    source.MODEL_COMPACTION_ENABLED,
+    issues,
+  );
+  const toolResultByteLimit = parsePositiveInt(
+    "TOOL_RESULT_BYTE_LIMIT",
+    source.TOOL_RESULT_BYTE_LIMIT,
+    0,
+    issues,
+  );
+
   if (issues.length > 0) throw new RuntimeEnvError(issues);
 
   return {
@@ -451,6 +487,9 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     timeoutSeconds: agentTimeoutSeconds > 0 ? agentTimeoutSeconds : undefined,
     ...(mcpToolTimeoutMs > 0 ? { mcpToolTimeoutMs } : {}),
     traceparent: source.TRACEPARENT || undefined,
+    modelRetry,
+    modelCompaction,
+    ...(toolResultByteLimit > 0 ? { toolResultByteLimit } : {}),
     warnings,
   };
 }

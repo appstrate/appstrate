@@ -34,11 +34,13 @@ import {
   type PackageIdentity,
   type ResolvedPackage,
 } from "@appstrate/afps-runtime/bundle";
-import { downloadVersionZip } from "../package-storage.ts";
+import { downloadVersionZip, downloadVersionZipForExecution } from "../package-storage.ts";
 
 interface DbPackageCatalogOptions {
   /** Org whose packages are visible (plus system packages, `orgId IS NULL`). */
   orgId: string;
+  /** The bundle will run: apply the AFPS signature policy to every fetch. */
+  forExecution?: boolean;
 }
 
 export class DbPackageCatalog implements PackageCatalog {
@@ -150,11 +152,11 @@ export class DbPackageCatalog implements PackageCatalog {
       );
     }
 
-    // downloadVersionZip enforces the expected integrity (raw ZIP SRI
-    // stored in package_versions.integrity) AND runs the signature
-    // policy gate. Both live on the storage layer so every run path
-    // (classic, inline, scheduled) gets the same checks.
-    const zip = await downloadVersionZip(parsed.packageId, parsed.version, versionRow.integrity);
+    // Both downloads enforce the expected integrity (raw ZIP SRI stored in
+    // package_versions.integrity); only a bundle that will run also goes
+    // through the signature policy.
+    const download = this.opts.forExecution ? downloadVersionZipForExecution : downloadVersionZip;
+    const zip = await download(parsed.packageId, parsed.version, versionRow.integrity);
     if (!zip) {
       throw new BundleError(
         "DEPENDENCY_UNRESOLVED",
