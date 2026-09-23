@@ -32,7 +32,10 @@
 -- Idempotent without a marker: the predicate is the condition the write
 -- removes, so a second run captures nothing. One transaction, fenced. Only
 -- `UPDATE`s. Irreversible in practice — a revoked credential is re-issued, not
--- restored — and harmless: nothing it touches can authenticate today.
+-- restored. Not harmless to skip: a key or a token of a member's own
+-- organization authenticates again the moment they are re-invited, and a
+-- refresh through an `allowSignup` org client re-provisions the membership
+-- today, without any invitation.
 --
 -- ═══ INVOCATION ═══
 --
@@ -45,39 +48,53 @@
 --
 -- ═══ PRE-FLIGHT (read-only) ═══
 --
+-- The same three predicates as the views below (`mig0019_departed_*`), one row
+-- per credential — the three counts the script prints as "before":
+--
 --   \set app_url 'https://app.appstrate.com'
+--   WITH p AS (SELECT (:'app_url' || '/api/mcp/o/')::text AS mcp_prefix)
 --   SELECT
 --     (SELECT count(*) FROM api_keys k
 --       WHERE k.revoked_at IS NULL AND k.created_by IS NOT NULL
 --         AND NOT EXISTS (SELECT 1 FROM org_members m
 --                          WHERE m.org_id = k.org_id AND m.user_id = k.created_by)
 --     ) AS api_keys,
---     (SELECT count(*) FROM oauth_refresh_tokens t
---       JOIN oauth_clients c ON c.client_id = t.client_id
---       WHERE t.revoked IS NULL AND c.level = 'org'
---         AND NOT EXISTS (SELECT 1 FROM org_members m
---                          WHERE m.org_id = c.referenced_org_id AND m.user_id = t.user_id)
---     ) AS org_client_refresh_tokens,
---     (SELECT count(*) FROM oauth_refresh_tokens t, unnest(t.resources) r(uri)
---       WHERE t.revoked IS NULL
---         AND left(r.uri, length(:'app_url' || '/api/mcp/o/')) = :'app_url' || '/api/mcp/o/'
---         AND NOT EXISTS (SELECT 1 FROM org_members m
---                          WHERE m.user_id = t.user_id
---                            AND m.org_id::text = substr(r.uri, length(:'app_url' || '/api/mcp/o/') + 1))
---     ) AS mcp_bound_refresh_tokens;
---
--- (The access-token counts are the same two queries over `oauth_access_tokens`;
--- the script prints all five.)
+--     (SELECT count(*) FROM oauth_refresh_tokens t, p
+--       WHERE t.revoked IS NULL AND (
+--         EXISTS (SELECT 1 FROM oauth_clients c
+--                  WHERE c.client_id = t.client_id AND c.level = 'org'
+--                    AND NOT EXISTS (SELECT 1 FROM org_members m
+--                                     WHERE m.org_id = c.referenced_org_id AND m.user_id = t.user_id))
+--         OR EXISTS (SELECT 1 FROM unnest(t.resources) r(uri)
+--                     WHERE left(r.uri, length(p.mcp_prefix)) = p.mcp_prefix
+--                       AND substr(r.uri, length(p.mcp_prefix) + 1) ~ '^[0-9a-f-]{36}$'
+--                       AND NOT EXISTS (SELECT 1 FROM org_members m
+--                                        WHERE m.user_id = t.user_id
+--                                          AND m.org_id::text = substr(r.uri, length(p.mcp_prefix) + 1))))
+--     ) AS refresh_tokens,
+--     (SELECT count(*) FROM oauth_access_tokens t, p
+--       WHERE t.revoked IS NULL AND t.user_id IS NOT NULL AND (
+--         EXISTS (SELECT 1 FROM oauth_clients c
+--                  WHERE c.client_id = t.client_id AND c.level = 'org'
+--                    AND NOT EXISTS (SELECT 1 FROM org_members m
+--                                     WHERE m.org_id = c.referenced_org_id AND m.user_id = t.user_id))
+--         OR EXISTS (SELECT 1 FROM unnest(t.resources) r(uri)
+--                     WHERE left(r.uri, length(p.mcp_prefix)) = p.mcp_prefix
+--                       AND substr(r.uri, length(p.mcp_prefix) + 1) ~ '^[0-9a-f-]{36}$'
+--                       AND NOT EXISTS (SELECT 1 FROM org_members m
+--                                        WHERE m.user_id = t.user_id
+--                                          AND m.org_id::text = substr(r.uri, length(p.mcp_prefix) + 1))))
+--     ) AS access_tokens;
 --
 -- Rows: UNMEASURED — not rehearsed against a restored dump. Do that first
--- (README requirement 4) and record the counts the script prints.
+-- (README requirement 4) and record the three counts the script prints.
 
 BEGIN;
 SET LOCAL lock_timeout = '3s';
 SET LOCAL statement_timeout = '60s';
 
 -- psql variables do not expand inside `DO $$ … $$`, so the prefix is captured
--- into a table every step below reads.
+-- into a table the views and the checks read.
 CREATE TEMP TABLE mig0019_params ON COMMIT DROP AS
   SELECT (:'app_url' || '/api/mcp/o/')::text AS mcp_prefix;
 
@@ -92,86 +109,92 @@ BEGIN
   END IF;
 END $$;
 
--- ═══ 1. Capture ═════════════════════════════════════════════════════════════
+-- ═══ 1. The departed-member predicates, stated once ═════════════════════════
+--
+-- Read before the writes (the capture) and after them (the end-state check).
+-- A token is in scope when it grants an organization its user has left:
+-- through an org-level client of that organization, or through a bound MCP
+-- resource. The org id is taken off the URI only when the rest is a bare uuid —
+-- the platform binds nothing else (`orgIdFromMcpAudience`).
 
-CREATE TEMP TABLE mig0019_keys ON COMMIT DROP AS
+CREATE TEMP VIEW mig0019_departed_keys AS
   SELECT k.id FROM api_keys k
   WHERE k.revoked_at IS NULL AND k.created_by IS NOT NULL
     AND NOT EXISTS (SELECT 1 FROM org_members m
                      WHERE m.org_id = k.org_id AND m.user_id = k.created_by);
 
--- A token is captured when it grants an organization its user has left: through
--- an org-level client of that organization, or through a bound MCP resource.
--- The org id is taken off the URI only when the rest is a bare uuid — the
--- platform binds nothing else (`orgIdFromMcpAudience`).
-CREATE TEMP TABLE mig0019_refresh ON COMMIT DROP AS
-  SELECT t.id FROM oauth_refresh_tokens t
-  WHERE t.revoked IS NULL
-    AND (
-      EXISTS (SELECT 1 FROM oauth_clients c
-               WHERE c.client_id = t.client_id AND c.level = 'org'
-                 AND NOT EXISTS (SELECT 1 FROM org_members m
-                                  WHERE m.org_id = c.referenced_org_id AND m.user_id = t.user_id))
-      OR EXISTS (SELECT 1 FROM unnest(t.resources) r(uri), mig0019_params p
-                  WHERE left(r.uri, length(p.mcp_prefix)) = p.mcp_prefix
-                    AND substr(r.uri, length(p.mcp_prefix) + 1) ~ '^[0-9a-f-]{36}$'
-                    AND NOT EXISTS (SELECT 1 FROM org_members m
-                                     WHERE m.user_id = t.user_id
-                                       AND m.org_id::text = substr(r.uri, length(p.mcp_prefix) + 1)))
-    );
+CREATE TEMP VIEW mig0019_departed_refresh AS
+  SELECT t.id FROM oauth_refresh_tokens t, mig0019_params p
+  WHERE t.revoked IS NULL AND (
+    EXISTS (SELECT 1 FROM oauth_clients c
+             WHERE c.client_id = t.client_id AND c.level = 'org'
+               AND NOT EXISTS (SELECT 1 FROM org_members m
+                                WHERE m.org_id = c.referenced_org_id AND m.user_id = t.user_id))
+    OR EXISTS (SELECT 1 FROM unnest(t.resources) r(uri)
+                WHERE left(r.uri, length(p.mcp_prefix)) = p.mcp_prefix
+                  AND substr(r.uri, length(p.mcp_prefix) + 1) ~ '^[0-9a-f-]{36}$'
+                  AND NOT EXISTS (SELECT 1 FROM org_members m
+                                   WHERE m.user_id = t.user_id
+                                     AND m.org_id::text = substr(r.uri, length(p.mcp_prefix) + 1))));
 
-CREATE TEMP TABLE mig0019_access ON COMMIT DROP AS
-  SELECT t.id FROM oauth_access_tokens t
-  WHERE t.revoked IS NULL AND t.user_id IS NOT NULL
-    AND (
-      EXISTS (SELECT 1 FROM oauth_clients c
-               WHERE c.client_id = t.client_id AND c.level = 'org'
-                 AND NOT EXISTS (SELECT 1 FROM org_members m
-                                  WHERE m.org_id = c.referenced_org_id AND m.user_id = t.user_id))
-      OR EXISTS (SELECT 1 FROM unnest(t.resources) r(uri), mig0019_params p
-                  WHERE left(r.uri, length(p.mcp_prefix)) = p.mcp_prefix
-                    AND substr(r.uri, length(p.mcp_prefix) + 1) ~ '^[0-9a-f-]{36}$'
-                    AND NOT EXISTS (SELECT 1 FROM org_members m
-                                     WHERE m.user_id = t.user_id
-                                       AND m.org_id::text = substr(r.uri, length(p.mcp_prefix) + 1)))
-    );
+CREATE TEMP VIEW mig0019_departed_access AS
+  SELECT t.id FROM oauth_access_tokens t, mig0019_params p
+  WHERE t.revoked IS NULL AND t.user_id IS NOT NULL AND (
+    EXISTS (SELECT 1 FROM oauth_clients c
+             WHERE c.client_id = t.client_id AND c.level = 'org'
+               AND NOT EXISTS (SELECT 1 FROM org_members m
+                                WHERE m.org_id = c.referenced_org_id AND m.user_id = t.user_id))
+    OR EXISTS (SELECT 1 FROM unnest(t.resources) r(uri)
+                WHERE left(r.uri, length(p.mcp_prefix)) = p.mcp_prefix
+                  AND substr(r.uri, length(p.mcp_prefix) + 1) ~ '^[0-9a-f-]{36}$'
+                  AND NOT EXISTS (SELECT 1 FROM org_members m
+                                   WHERE m.user_id = t.user_id
+                                     AND m.org_id::text = substr(r.uri, length(p.mcp_prefix) + 1))));
+
+-- ═══ 2. Before ══════════════════════════════════════════════════════════════
 
 DO $$
 BEGIN
   RAISE NOTICE 'before: % api key(s), % refresh token(s), % opaque access token(s) to revoke',
-    (SELECT count(*) FROM mig0019_keys),
-    (SELECT count(*) FROM mig0019_refresh),
-    (SELECT count(*) FROM mig0019_access);
+    (SELECT count(*) FROM mig0019_departed_keys),
+    (SELECT count(*) FROM mig0019_departed_refresh),
+    (SELECT count(*) FROM mig0019_departed_access);
 END $$;
 
--- ═══ 2. Revoke ══════════════════════════════════════════════════════════════
+-- ═══ 3. Revoke ══════════════════════════════════════════════════════════════
 
 UPDATE api_keys SET revoked_at = now()
-WHERE id IN (SELECT id FROM mig0019_keys) AND revoked_at IS NULL;
+WHERE id IN (SELECT id FROM mig0019_departed_keys);
 
 UPDATE oauth_refresh_tokens SET revoked = now()
-WHERE id IN (SELECT id FROM mig0019_refresh) AND revoked IS NULL;
+WHERE id IN (SELECT id FROM mig0019_departed_refresh);
 
 UPDATE oauth_access_tokens SET revoked = now()
-WHERE id IN (SELECT id FROM mig0019_access) AND revoked IS NULL;
+WHERE id IN (SELECT id FROM mig0019_departed_access);
 
--- ═══ 3. After — every captured row carries its stamp ════════════════════════
+-- ═══ 4. After — the end state, re-derived from the real tables ══════════════
+--
+-- The views re-run the capture predicates against the tables as they now
+-- stand: any credential of a departed member still unrevoked fails the run.
 
 DO $$
 DECLARE
-  v_left bigint;
+  v_keys bigint;
+  v_refresh bigint;
+  v_access bigint;
 BEGIN
-  SELECT (SELECT count(*) FROM api_keys k JOIN mig0019_keys c ON c.id = k.id
-           WHERE k.revoked_at IS NULL)
-       + (SELECT count(*) FROM oauth_refresh_tokens t JOIN mig0019_refresh c ON c.id = t.id
-           WHERE t.revoked IS NULL)
-       + (SELECT count(*) FROM oauth_access_tokens t JOIN mig0019_access c ON c.id = t.id
-           WHERE t.revoked IS NULL)
-    INTO v_left;
-  RAISE NOTICE 'after: % captured credential(s) still unrevoked', v_left;
-  IF v_left <> 0 THEN
-    RAISE EXCEPTION '% captured credential(s) were not revoked — aborting', v_left;
+  SELECT count(*) INTO v_keys FROM mig0019_departed_keys;
+  SELECT count(*) INTO v_refresh FROM mig0019_departed_refresh;
+  SELECT count(*) INTO v_access FROM mig0019_departed_access;
+  RAISE NOTICE 'after: % api key(s), % refresh token(s), % opaque access token(s) of departed members left unrevoked',
+    v_keys, v_refresh, v_access;
+  IF v_keys + v_refresh + v_access > 0 THEN
+    RAISE EXCEPTION 'departed members still hold % unrevoked credential(s) — aborting',
+      v_keys + v_refresh + v_access;
   END IF;
 END $$;
+
+-- Temp views are not ON COMMIT DROP; drop them before the table they read.
+DROP VIEW mig0019_departed_keys, mig0019_departed_refresh, mig0019_departed_access;
 
 COMMIT;
