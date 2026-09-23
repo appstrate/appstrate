@@ -18,6 +18,8 @@ import { isPlainObject } from "@appstrate/core/safe-json";
 import { fileUri, PUBLISHED_FILE_LOG_EVENT } from "@appstrate/core/file-uri";
 import type { Db } from "@appstrate/db/client";
 import { modelCostSchema, type ModelCost } from "@appstrate/core/module";
+import { z } from "zod";
+import { tokenUsageSchema } from "@appstrate/core/token-usage";
 import { computeTokenCost, type TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 import { type CredentialSource } from "../llm-usage-ledger.ts";
 import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
@@ -25,6 +27,7 @@ import { resolvePricingStatus } from "../pricing-provenance.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { appendRunLog, updateRun } from "../state/runs.ts";
 import { logger } from "../../lib/logger.ts";
+import { rowValueErrorCode } from "../../lib/db-helpers.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { TokenUsage } from "./types.ts";
 import { scheduleRunMetricBroadcast } from "../run-metric-broadcaster.ts";
@@ -123,10 +126,9 @@ export async function persistRunEvent(
     }
 
     case "appstrate.metric": {
-      const usage = isPlainObject(event.usage) ? (event.usage as TokenUsage) : null;
-      // Advisory on a platform run (see {@link resolveRunnerCost}); the
-      // recorded cost only for a remote-origin run.
-      const cost = typeof event.cost === "number" ? event.cost : null;
+      // `cost` is advisory on a platform run (see {@link resolveRunnerCost});
+      // the recorded cost only for a remote-origin run.
+      const { usage, cost } = parseRunnerMetric(event, runId, opts.modelSource);
 
       // Token usage is a running-total snapshot on the run row.
       if (usage) {
@@ -138,9 +140,10 @@ export async function persistRunEvent(
         );
       }
       // Ledger row — only the ingestion path opts in. A runner write is never
-      // retried asynchronously (a replay past settlement is refused): it throws
-      // and aborts the ingestion transaction, so the sequence never advances
-      // and the runner's next cumulative snapshot replaces this one.
+      // retried asynchronously: a failed write throws and aborts the ingestion
+      // transaction, so the sequence never advances and the runner's next
+      // cumulative snapshot replaces this one. (A snapshot arriving after
+      // settlement does not throw: the upsert is a traced no-op.)
       if (opts.writeLedger) {
         await writeRunnerLedgerRow(
           scope,
@@ -159,6 +162,31 @@ export async function persistRunEvent(
       // memory.added / pinned.set / third-party — no run_logs row.
       return null;
   }
+}
+
+/** Same rule as the finalize body's `cost` (Zod 4 also rejects NaN and ±Infinity). */
+const runnerCostSchema = z.number().nonnegative();
+
+/** The metric's `usage`/`cost`, each read as absent when invalid, like the finalize body. */
+function parseRunnerMetric(
+  event: RunEvent,
+  runId: string,
+  modelSource: string | null | undefined,
+): { usage: TokenUsage | null; cost: number | null } {
+  const { usage: reportedUsage, cost: reportedCost } = event;
+  const parsedUsage = reportedUsage == null ? null : tokenUsageSchema.safeParse(reportedUsage);
+  const usage = parsedUsage?.success ? parsedUsage.data : null;
+  const parsedCost = reportedCost == null ? null : runnerCostSchema.safeParse(reportedCost);
+  const cost = parsedCost?.success ? parsedCost.data : null;
+  const ignored = [
+    ...(parsedUsage && !parsedUsage.success ? ["usage"] : []),
+    // An advisory cost is never recorded, so an invalid one loses nothing.
+    ...(parsedCost && !parsedCost.success && !costIsServerComputed(modelSource) ? ["cost"] : []),
+  ];
+  if (ignored.length > 0) {
+    logger.warn("appstrate.metric: invalid field ignored", { runId, ignored });
+  }
+  return { usage, cost };
 }
 
 function resolveLogLevel(value: unknown): "debug" | "info" | "warn" | "error" | null {
@@ -209,7 +237,9 @@ export async function writeRunnerLedgerRow(
   const serverPriced = costIsServerComputed(row.modelSource);
   if (!row.usage && (serverPriced || row.cost === null)) return;
 
-  const { costUsd, pricingStatus } = resolveRunnerCost(scope.orgId, runId, row);
+  // Priced from the SAME capped counts the row stores, so tokens × rate = cost.
+  const usage = row.usage && capTokenUsage(row.usage);
+  const { costUsd, pricingStatus } = resolveRunnerCost(scope.orgId, runId, { ...row, usage });
   warnOnReportedCostDivergence(scope.orgId, runId, row.cost, costUsd, {
     serverPriced,
     // `required` is set only by finalize's terminal ledger barrier, which makes
@@ -224,10 +254,10 @@ export async function writeRunnerLedgerRow(
         orgId: scope.orgId,
         runId,
         credentialSource: coerceCredentialSource(row.modelSource),
-        inputTokens: row.usage?.input_tokens ?? 0,
-        outputTokens: row.usage?.output_tokens ?? 0,
-        cacheReadTokens: row.usage?.cache_read_input_tokens ?? null,
-        cacheWriteTokens: row.usage?.cache_creation_input_tokens ?? null,
+        inputTokens: usage?.input_tokens ?? 0,
+        outputTokens: usage?.output_tokens ?? 0,
+        cacheReadTokens: usage?.cache_read_input_tokens ?? null,
+        cacheWriteTokens: usage?.cache_creation_input_tokens ?? null,
         costUsd,
         pricingStatus,
       },
@@ -238,12 +268,28 @@ export async function writeRunnerLedgerRow(
       },
     );
   } catch (err) {
-    logger.error("Failed to write runner ledger row", {
-      runId,
-      error: getErrorMessage(err),
-    });
+    // Inside the ingestion transaction, a row-value failure is logged once by
+    // the event-drop fallback that catches it.
+    if (!opts.executor || rowValueErrorCode(err) === null) {
+      logger.error("Failed to write runner ledger row", {
+        runId,
+        error: getErrorMessage(err),
+      });
+    }
     throw err;
   }
+}
+
+/** The `llm_usage` token columns are int4: a runner count is stored truncated and capped. */
+const MAX_TOKEN_COLUMN = 2_147_483_647;
+
+function capTokenUsage(usage: TokenUsage): TokenUsage {
+  return Object.fromEntries(
+    Object.entries(usage).map(([key, count]) => [
+      key,
+      count === undefined ? undefined : Math.min(Math.trunc(count), MAX_TOKEN_COLUMN),
+    ]),
+  ) as TokenUsage;
 }
 
 /** Narrow a run's free-form `model_source` to the `credential_source` enum. */

@@ -150,20 +150,21 @@ const runNotTerminalSql = sql`NOT EXISTS (
  */
 interface AdvanceableSql {
   costUsd: SQL;
-  totalTokens: SQL<number | null>;
+  totalTokens: SQL;
 }
 
 /** The stored side: the conflicting row's own columns (NULL on no such row). */
 const storedAdvanceableSql: AdvanceableSql = {
   costUsd: sql`${llmUsage.costUsd}`,
-  totalTokens: sql<number | null>`(${llmUsage.inputTokens} + ${llmUsage.outputTokens}
+  // bigint: a sum of int4 columns is int4 in Postgres, and overflows (22003).
+  totalTokens: sql`(${llmUsage.inputTokens}::bigint + ${llmUsage.outputTokens}
     + COALESCE(${llmUsage.cacheReadTokens}, 0) + COALESCE(${llmUsage.cacheWriteTokens}, 0))`,
 };
 
 /** The candidate side inside an upsert: Postgres' `EXCLUDED` pseudo-row. */
 const excludedAdvanceableSql: AdvanceableSql = {
   costUsd: sql`EXCLUDED.cost_usd`,
-  totalTokens: sql<number | null>`(EXCLUDED.input_tokens + EXCLUDED.output_tokens
+  totalTokens: sql`(EXCLUDED.input_tokens::bigint + EXCLUDED.output_tokens
     + COALESCE(EXCLUDED.cache_read_tokens, 0) + COALESCE(EXCLUDED.cache_write_tokens, 0))`,
 };
 
@@ -349,14 +350,17 @@ async function traceRejectedTerminalRunnerWrite(executor: Db, entry: LlmUsageEnt
   // leaning on the surrounding operands to resolve them.
   const incoming: AdvanceableSql = {
     costUsd: sql`${entry.costUsd}::double precision`,
-    totalTokens: sql<number | null>`${incomingTotalTokens}::integer`,
+    totalTokens: sql`${incomingTotalTokens}::bigint`,
   };
   try {
     const [row] = await executor
       .select({
         status: runs.status,
         storedCostUsd: llmUsage.costUsd,
-        storedTotalTokens: storedAdvanceableSql.totalTokens,
+        // A bigint reaches JS as a string on postgres.js.
+        storedTotalTokens: sql`${storedAdvanceableSql.totalTokens}`.mapWith(
+          (v: unknown): number | null => (v === null ? null : Number(v)),
+        ),
         advances: runnerAdvancesSql(incoming),
       })
       .from(runs)
