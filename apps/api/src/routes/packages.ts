@@ -3101,7 +3101,7 @@ export function createPackagesRouter() {
       // source's `<type>:share`. This is the route the archive leaves through,
       // so reading it and taking it away are two different permissions there.
       // Skills and system packages are exempt inside the helper: the CLI's
-      // skills sync is this route's other consumer and its copies are local by
+      // `packages sync` is this route's other consumer and its copies are local by
       // design, and a shipped system package has no owning space to protect.
       await assertPackageCopyAllowed(
         c,

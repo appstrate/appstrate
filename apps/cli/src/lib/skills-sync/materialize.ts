@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The pure half of `appstrate skills sync`. Output is a function of the input —
+ * The pure half of `appstrate packages sync`. Output is a function of the input —
  * sorted keys, no timestamps — because a `mode: "copy"` plugin's version IS the
  * hash of its contents, so a byte-identical re-run must hash identically.
  */

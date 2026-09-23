@@ -47,8 +47,7 @@ See [`examples/self-hosting/README.md`](../../examples/self-hosting/README.md#ve
 | `appstrate token`     | Print metadata about the stored access + refresh tokens (debug).                                            |
 | `appstrate org`       | List, switch, or create organizations pinned on the active profile.                                         |
 | `appstrate space`     | List, switch, or create spaces pinned on the active profile.                                                |
-| `appstrate skills`    | Sync your spaces' skills to Claude Code and Codex as Agent Skills directories.                              |
-| `appstrate packages`  | Edit a package in a local folder: pull its draft, check what changed, push it back, publish it.             |
+| `appstrate packages`  | Sync your spaces' skills to Claude Code and Codex; edit a package in a folder, push it, publish it.         |
 | `appstrate api`       | Authenticated HTTP passthrough to the Appstrate API.                                                        |
 | `appstrate openapi`   | Explore the active profile's OpenAPI schema without flooding stdout.                                        |
 | `appstrate run`       | Execute an agent — a package id runs on the pinned instance, a `.afps`/`.afps-bundle` path runs in-process. |
@@ -377,28 +376,28 @@ All four subcommands respect the global `--profile <name>` flag and talk to `GET
 
 ---
 
-### `appstrate skills`
+### `appstrate packages sync`
 
 Materialize the union of skills placed in the spaces you reach in the pinned organization as [Agent Skills](https://agentskills.io/specification) directories on this machine — one Claude Code plugin, and/or the shared skill directories Claude Code and Codex scan directly. The connected Claude Code plugin also configures the organization's Appstrate MCP server.
 
 The command is designed to run **unattended**. Claude Code plugin marketplaces accept a `command` source: a locally installed tool prints the path of a directory holding a complete plugin, and Claude Code re-runs that command at install, then once per session in the background, reinstalling and reloading the plugin when the directory's content hash changes. That is the whole auto-sync mechanism — no hook, no daemon, no server-side change.
 
 ```sh
-appstrate skills sync                                  # → the Claude Code plugin directory
-appstrate skills sync --target codex                   # → ~/.agents/skills/
-appstrate skills sync --target claude-user             # → ~/.claude/skills/
-appstrate skills sync --target claude-plugin --target codex
-appstrate skills sync --source draft                   # sync working copies instead of published versions
-appstrate skills sync --space spc_prod --space spc_team # narrow this run; MCP stays on the pinned space
-appstrate skills sync --dry-run                        # report what would change, write nothing
-appstrate skills sync --print-path                     # the plugin path as the ONLY stdout line
+appstrate packages sync                                  # → the Claude Code plugin directory
+appstrate packages sync --target codex                   # → ~/.agents/skills/
+appstrate packages sync --target claude-user             # → ~/.claude/skills/
+appstrate packages sync --target claude-plugin --target codex
+appstrate packages sync --source draft                   # sync working copies instead of published versions
+appstrate packages sync --space spc_prod --space spc_team # narrow this run; MCP stays on the pinned space
+appstrate packages sync --dry-run                        # report what would change, write nothing
+appstrate packages sync --print-path                     # the plugin path as the ONLY stdout line
 ```
 
-**Subcommand and flags**
+**Command and flags**
 
-| Flag / subcommand | Purpose                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Flag / command    | Purpose                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `skills sync`     | The only subcommand. Reads the skills ACTIVE in every space this profile is a member of — a skill switched off in a space is not synced from it — and writes one directory per skill into each requested target.                                                                                                                                                                                         |
+| `packages sync`   | Reads the skills ACTIVE in every space this profile is a member of — a skill switched off in a space is not synced from it — and writes one directory per skill into each requested target.                                                                                                                                                                                                              |
 | `--target <name>` | Repeatable. `claude-plugin` (default) → `$XDG_DATA_HOME/appstrate/claude-plugin/`; `codex` → `~/.agents/skills/`; `claude-user` → `~/.claude/skills/`.                                                                                                                                                                                                                                                   |
 | `--space <id>`    | Repeatable. Narrows this sync to the named spaces — IDs or unambiguous exact names from `appstrate space list`. Does not change the pinned MCP space and does not persist.                                                                                                                                                                                                                               |
 | `--source <name>` | `published` (default) syncs each skill's `latest` published version, integrity-verified. `draft` syncs the working copy instead — for authors iterating on their own machine: the sync NAMES the draft, and naming it needs `skills:write` on the skill in its home space, so the instance refuses it (`403 draft_not_writable`) to everybody else rather than quietly handing back the published bytes. |
@@ -412,7 +411,7 @@ appstrate skills sync --print-path                     # the plugin path as the 
 `--space` and `syncSpaces` **narrow** that set. They never widen it: a space you have not joined cannot be synced.
 
 ```sh
-appstrate skills sync --space spc_prod --space spc_team   # this invocation only
+appstrate packages sync --space spc_prod --space spc_team   # this invocation only
 ```
 
 For a persistent restriction, add IDs to the existing profile in `config.toml` (see the complete example below):
@@ -438,10 +437,10 @@ claude plugin install appstrate@appstrate
 The recorded command string is:
 
 ```
-if command -v appstrate >/dev/null 2>&1; then exec appstrate skills sync --target claude-plugin --target codex --print-path; else exec npx -y appstrate@latest skills sync --target claude-plugin --target codex --print-path; fi
+if command -v appstrate >/dev/null 2>&1; then exec appstrate packages sync --target claude-plugin --target codex --print-path; else exec npx -y appstrate@latest packages sync --target claude-plugin --target codex --print-path; fi
 ```
 
-It must stay byte-stable: changing it stops the background re-runs until the user re-accepts via `claude plugin update`. Skills then appear as `/appstrate:<skill>`.
+It must stay byte-stable: changing it stops the background re-runs until the user re-accepts via `claude plugin update appstrate@appstrate` — so a change ships with the CLI release that introduces it, and is announced in the CHANGELOG. Skills then appear as `/appstrate:<skill>`.
 
 **Fresh machine.** Installing the plugin is the only step that has to come first. The command uses the installed CLI when there is one and `npx` otherwise, and `--print-path` on a machine whose profile is not configured (or has no org / space pinned) still succeeds: it installs a plugin whose only skill, `/appstrate:setup`, states what is missing and the exact command to run, plus a `SessionStart` hook that says so at every session start — to the user, and to Claude so it can offer to run `appstrate login` itself (the CLI opens the browser; the user only approves there; `login` pins the single organization and its default space by itself). The first connected sync replaces that skill with the organization's. Outside explicit logout, this only happens on a fresh plugin: once skills have been synced, a lapsed login fails the run and leaves the installed plugin untouched. Explicit logout performs the cleanup described above.
 
@@ -536,12 +535,12 @@ claude mcp add --transport http --scope user appstrate https://app.example.com/a
 
 Inspect an existing entry with `claude mcp get appstrate` before adding; keep it or choose another name rather than replacing it blindly. [Claude Code installation scopes](https://code.claude.com/docs/en/mcp#user-scope).
 
-Two cases need you to run the sync yourself: you do not use Claude Code at all, or your organization blocks command-sourced plugins (`disableCommandPluginSources`). Then schedule `appstrate skills sync --target codex` (add or swap in `--target claude-user` to feed `~/.claude/skills/`, which Claude Code picks up live).
+Two cases need you to run the sync yourself: you do not use Claude Code at all, or your organization blocks command-sourced plugins (`disableCommandPluginSources`). Then schedule `appstrate packages sync --target codex` (add or swap in `--target claude-user` to feed `~/.claude/skills/`, which Claude Code picks up live).
 
 A cron entry every 15 minutes — cron's `PATH` is minimal, so give the absolute path:
 
 ```cron
-*/15 * * * * /usr/local/bin/appstrate skills sync --target codex >/dev/null 2>&1
+*/15 * * * * /usr/local/bin/appstrate packages sync --target codex >/dev/null 2>&1
 ```
 
 On macOS, prefer a `launchd` user agent running the same command every 900 seconds (`command -v appstrate` gives the absolute path).
@@ -552,15 +551,15 @@ Per-skill toggles survive all of this. We never write `~/.codex/config.toml`, an
 
 ---
 
-### `appstrate packages`
+### `appstrate packages` — pull, status, push, publish
 
-Edit a package (skill, agent, integration, MCP server) in a local folder with any tool, then write it back to its **draft** and publish it as a separate, deliberate step. `skills sync` is the other direction: it copies what is published (or, with `--source draft`, your draft) onto your machine and never sends anything back.
+Edit a package (skill, agent, integration, MCP server) in a local folder with any tool, then write it back to its **draft** and publish it as a separate, deliberate step. `packages sync` is the other direction: it copies what is published (or, with `--source draft`, your draft) onto your machine and never sends anything back.
 
 ```sh
 appstrate packages pull my-skill                 # the draft → <workDir>/<org>/packages/skills/@<org>/my-skill
 appstrate packages status my-skill --diff        # what the folder would change in the draft
 appstrate packages push my-skill                 # the folder → the draft; nobody else sees it yet
-appstrate skills sync --source draft             # test the draft on this machine
+appstrate packages sync --source draft           # test the draft on this machine
 appstrate packages publish my-skill              # the draft → a version every space resolves
 ```
 
@@ -891,7 +890,7 @@ $XDG_CONFIG_HOME/appstrate/              (or ~/.config/appstrate/)
 └── credentials.json                     # keyring fallback (only if keyring unavailable)
 
 $XDG_DATA_HOME/appstrate/                (or ~/.local/share/appstrate/)
-├── claude-plugin/                       # generated Claude Code plugin (`appstrate skills sync`)
+├── claude-plugin/                       # generated Claude Code plugin (`appstrate packages sync`)
 ├── skills-sync/state.json               # which skill directory each target owns, and from which artifact
 ├── packages/<profile>-locks.json       # working folder → package and the draft lock it last saw (`appstrate packages`)
 ├── packages/<profile>-locks.lock       # flock(2) target serializing updates of that file (never removed)

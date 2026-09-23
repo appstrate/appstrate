@@ -744,7 +744,7 @@ export async function packagesPushCommand(
     io.stdout.write(`Pushed ${summary} to the draft of ${packageId}.\n`);
     io.stderr.write(
       type === "skill"
-        ? `Test it here: appstrate skills sync --source draft. Then: appstrate packages publish ${packageId}\n`
+        ? `Test it here: appstrate packages sync --source draft. Then: appstrate packages publish ${packageId}\n`
         : `Test the draft on Appstrate, then: appstrate packages publish ${packageId}\n`,
     );
   } catch (err) {

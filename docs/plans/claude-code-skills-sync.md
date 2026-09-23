@@ -8,7 +8,7 @@ available locally as `/appstrate:<skill>`, kept up to date without a manual
 step. The connected plugin also supplies the organization's MCP endpoint. The
 same sync feeds OpenAI Codex skills; Codex MCP is configured separately.
 
-**How it behaves is documented in `apps/cli/README.md` → `appstrate skills`**
+**How it behaves is documented in `apps/cli/README.md` → `appstrate packages sync`**
 — flags, targets, failure modes, ownership rules, the marketplace command
 string, and the cron / `launchd` fallback. This file records only the choices
 behind it and what is still open.
@@ -96,35 +96,11 @@ and [Codex MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 
 ## Still open
 
-- **Release**: tag `cli@<version>` after merge. The marketplace command stays
-  unchanged; align publication of the companion `appstrate/claude-plugins`
-  README with the CLI release that includes #1261. An older installed CLI
-  continues to generate a skills-only plugin until the user updates it.
-  Release note to write: the plugin server is `plugin:appstrate:appstrate`, so
-  its tools are `mcp__plugin_appstrate_appstrate__*` — a `settings.json`
-  allowlist written for a manual `mcp__appstrate__*` server does not cover
-  them and must be duplicated by the user; nothing can migrate it.
-- **Client validation (Claude Code 2.1.261)**: local command-source marketplace
-  install/update in copy mode passed; changing only `.mcp.json` changed the cache
-  hash. A new session selected endpoint B without sending A's bearer to it.
-  Real CLI OAuth login against a local fixture passed for A and B, including
-  registration, state/PKCE, callback, resource-bound token exchange and authenticated
-  `tools/list`. An isolated credentials file kept the real macOS keychain untouched.
-  SDK `reload_plugins` with `--plugin-dir` retained A after a URL change; marketplace
-  update requested a restart. The documented switch requires a new session.
-  Live Appstrate account/browser login, automatic session refresh and system
-  managed-MCP configuration remain unverified by these local fixture probes.
-- **Logout cache validation (Claude Code 2.1.266)**: an isolated local
-  command-source fixture successfully updated a connected plugin source to a
-  setup-only source. The installed cache selected the new setup hash and the
-  client requested “Restart to apply changes”. This verifies manual update and
-  copy replacement, not removal of instructions already loaded in a session.
-  Automatic session refresh was not established by this local fixture;
-  keep the manual update and fresh-session instructions for immediate cleanup.
-- **Keychain access from a non-interactive background process on macOS** —
-  untested; the keyring needs the real `HOME`, so no isolated probe exists.
-- **A ledger read under a different `HOME`** (cron, `launchd`, `sudo -E`) is
-  unit-tested only, never exercised against a real second home.
+- **Release**: tag `cli@<version>` after merge. The marketplace command is
+  `appstrate packages sync …` since the command moved under `packages`; the
+  companion `appstrate/claude-plugins` change is merged only once the CLI
+  release that carries the new command is on npm, and each machine re-accepts
+  the changed command once (`claude plugin update appstrate@appstrate`).
 
 ## Follow-ups (not in this plan)
 

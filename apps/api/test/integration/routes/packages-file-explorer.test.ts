@@ -664,7 +664,7 @@ describe("package file explorer", () => {
    * the run, the schedule, the readiness endpoint and the bundle export all
    * refuse an explicit `draft` to a caller who cannot WRITE the package, while
    * `?version=draft` here was honoured for anyone holding `<type>:read` — one
-   * file at a time, which is the CLI's `skills sync --source draft`. The rule
+   * file at a time, which is the CLI's `packages sync --source draft`. The rule
    * is now the one the detail page answers, from the same two functions:
    * omitted is `writable ? draft : latest ?? draft`, and naming the draft is an
    * author's act.

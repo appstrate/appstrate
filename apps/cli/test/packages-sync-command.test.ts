@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `appstrate skills sync`, end to end minus the network.
+ * `appstrate packages sync`, end to end minus the network.
  *
  * The command is called directly (commander is not in the loop) with a
  * per-test `createMemoryIO()` sink, a throw-away `XDG_CONFIG_HOME` /
@@ -19,7 +19,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { skillsSyncCommand } from "../src/commands/skills.ts";
+import { packagesSyncCommand } from "../src/commands/packages-sync.ts";
 import { getDataDir } from "../src/lib/config.ts";
 import { getStatePath } from "../src/lib/skills-sync/state.ts";
 import {
@@ -84,12 +84,12 @@ const ONE_SKILL: SkillFixture[] = [
   { id: "@acme/pdf-tools", skillMd: skillMd("PDF Tools", "Work with PDFs.") },
 ];
 
-describe("skills sync — claude-plugin target", () => {
+describe("packages sync — claude-plugin target", () => {
   it("writes a complete plugin: manifest without a version, MCP config, README, and one skill dir", async () => {
     createSkillServer(ONE_SKILL).install();
     const { io, stdout } = createMemoryIO();
 
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
 
     const manifest = JSON.parse(
       await readText(join(pluginRoot(), ".claude-plugin", "plugin.json")),
@@ -99,7 +99,7 @@ describe("skills sync — claude-plugin target", () => {
     expect(await readText(join(pluginRoot(), ".mcp.json"))).toBe(
       '{\n  "mcpServers": {\n    "appstrate": {\n      "type": "http",\n      "url": "https://app.example.com/api/mcp/o/org_1",\n      "headers": {\n        "X-Space-Id": "spc_1"\n      }\n    }\n  }\n}\n',
     );
-    expect(await readText(join(pluginRoot(), "README.md"))).toContain("appstrate skills sync");
+    expect(await readText(join(pluginRoot(), "README.md"))).toContain("appstrate packages sync");
 
     const skill = await readText(join(pluginRoot(), "skills", "pdf-tools", "SKILL.md"));
     expect(skill).toContain("name: pdf-tools");
@@ -118,12 +118,12 @@ describe("skills sync — claude-plugin target", () => {
     server.install();
     const { io } = createMemoryIO();
 
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
     const first = await snapshot(pluginRoot());
 
     await rm(pluginRoot(), { recursive: true, force: true });
     await rm(getStatePath(), { force: true });
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
     const second = await snapshot(pluginRoot());
 
     expect(second).toEqual(first);
@@ -135,10 +135,10 @@ describe("skills sync — claude-plugin target", () => {
     server.install();
     const { io } = createMemoryIO();
 
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
     expect(server.downloads()).toBe(1);
 
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
     expect(server.downloads()).toBe(1);
   });
 
@@ -155,13 +155,13 @@ describe("skills sync — claude-plugin target", () => {
     it(`updates the MCP ${changed} without re-downloading unchanged skills`, async () => {
       const server = createSkillServer(ONE_SKILL);
       server.install();
-      await skillsSyncCommand({}, createMemoryIO().io);
+      await packagesSyncCommand({}, createMemoryIO().io);
       const skillPath = join(pluginRoot(), "skills", "pdf-tools", "SKILL.md");
       const before = await readText(skillPath);
       await seedLoggedInProfile("default", { orgId: "org_1", spaceId: "spc_1", ...profile });
       const { io, stdout } = createMemoryIO();
 
-      await skillsSyncCommand({ printPath: true }, io);
+      await packagesSyncCommand({ printPath: true }, io);
 
       expect(JSON.parse(await readText(join(pluginRoot(), ".mcp.json")))).toEqual({
         mcpServers: { appstrate: { type: "http", url, headers: { "X-Space-Id": spaceId } } },
@@ -175,7 +175,7 @@ describe("skills sync — claude-plugin target", () => {
   it("keeps connected plugin bytes unchanged when only the login changes", async () => {
     const server = createSkillServer(ONE_SKILL);
     server.install();
-    await skillsSyncCommand({}, createMemoryIO().io);
+    await packagesSyncCommand({}, createMemoryIO().io);
     const before = await snapshot(pluginRoot());
     const mcpStats = await lstat(join(pluginRoot(), ".mcp.json"));
     await seedLoggedInProfile("default", {
@@ -185,7 +185,7 @@ describe("skills sync — claude-plugin target", () => {
       email: "other@example.com",
     });
 
-    await skillsSyncCommand({}, createMemoryIO().io);
+    await packagesSyncCommand({}, createMemoryIO().io);
 
     expect(await snapshot(pluginRoot())).toEqual(before);
     expect((await lstat(join(pluginRoot(), ".mcp.json"))).ino).toBe(mcpStats.ino);
@@ -197,7 +197,7 @@ describe("skills sync — claude-plugin target", () => {
     server.install();
     const { io, stdout } = createMemoryIO();
 
-    await skillsSyncCommand({ printPath: true }, io);
+    await packagesSyncCommand({ printPath: true }, io);
 
     expect(JSON.parse(await readText(join(pluginRoot(), ".mcp.json")))).toEqual({
       mcpServers: {
@@ -216,13 +216,13 @@ describe("skills sync — claude-plugin target", () => {
   it("re-downloads when the published version moves", async () => {
     createSkillServer(ONE_SKILL).install();
     const { io } = createMemoryIO();
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
 
     const bumped = createSkillServer([
       { ...ONE_SKILL[0]!, version: "2.0.0", skillMd: skillMd("PDF Tools", "Now with tables.") },
     ]);
     bumped.install();
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
 
     expect(bumped.downloads()).toBe(1);
     expect(await readText(join(pluginRoot(), "skills", "pdf-tools", "SKILL.md"))).toContain(
@@ -237,7 +237,7 @@ describe("skills sync — claude-plugin target", () => {
     ]).install();
     const { io, stderr } = createMemoryIO();
 
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
 
     expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual([
       "other-reports",
@@ -253,7 +253,7 @@ describe("skills sync — claude-plugin target", () => {
     ]).install();
     const { io, stderr } = createMemoryIO();
 
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
 
     expect(stderr()).toContain("Skipped @acme/unpublished: no published version available.");
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
@@ -263,12 +263,12 @@ describe("skills sync — claude-plugin target", () => {
     createSkillServer([{ ...ONE_SKILL[0]!, corruptDownload: true }]).install();
     const { io, stderr } = createMemoryIO();
 
-    await expect(skillsSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
     expect(stderr()).toContain("Integrity mismatch");
   });
 });
 
-describe("skills sync — --print-path", () => {
+describe("packages sync — --print-path", () => {
   it("prints the plugin directory as the only stdout line", async () => {
     createSkillServer([
       ...ONE_SKILL,
@@ -276,7 +276,7 @@ describe("skills sync — --print-path", () => {
     ]).install();
     const { io, stdout, stderr } = createMemoryIO();
 
-    await skillsSyncCommand({ printPath: true }, io);
+    await packagesSyncCommand({ printPath: true }, io);
 
     expect(stdout()).toBe(`${pluginRoot()}\n`);
     expect(stderr()).toContain("Skipped @acme/unpublished");
@@ -286,13 +286,13 @@ describe("skills sync — --print-path", () => {
     const { io, stderr } = createMemoryIO();
 
     await expect(
-      skillsSyncCommand({ printPath: true, target: ["codex"] }, io),
+      packagesSyncCommand({ printPath: true, target: ["codex"] }, io),
     ).rejects.toBeInstanceOf(ExitError);
     expect(stderr()).toContain("--print-path prints the Claude Code plugin directory");
   });
 });
 
-describe("skills sync — shared targets", () => {
+describe("packages sync — shared targets", () => {
   it("leaves client MCP configurations untouched for codex and claude-user", async () => {
     const codexConfig = join(home, ".codex", "config.toml");
     const claudeConfig = join(home, ".claude.json");
@@ -302,7 +302,7 @@ describe("skills sync — shared targets", () => {
     const before = [await readText(codexConfig), await readText(claudeConfig)];
     createSkillServer(ONE_SKILL).install();
 
-    await skillsSyncCommand({ target: ["codex", "claude-user"] }, createMemoryIO().io);
+    await packagesSyncCommand({ target: ["codex", "claude-user"] }, createMemoryIO().io);
 
     expect([await readText(codexConfig), await readText(claudeConfig)]).toEqual(before);
     expect(await readdir(codexRoot())).toEqual(["pdf-tools"]);
@@ -317,7 +317,7 @@ describe("skills sync — shared targets", () => {
     createSkillServer(ONE_SKILL).install();
     const { io } = createMemoryIO();
 
-    await skillsSyncCommand({ target: ["codex"] }, io);
+    await packagesSyncCommand({ target: ["codex"] }, io);
 
     expect((await readdir(codexRoot())).sort()).toEqual(["my-own-skill", "pdf-tools"]);
     expect(await readText(join(foreign, "SKILL.md"))).toBe("mine\n");
@@ -328,12 +328,12 @@ describe("skills sync — shared targets", () => {
     createSkillServer([...ONE_SKILL, { id: "@acme/notes", skillMd: skillMd("notes") }]).install();
     const { io } = createMemoryIO();
 
-    await skillsSyncCommand({ target: ["codex"] }, io);
+    await packagesSyncCommand({ target: ["codex"] }, io);
     await mkdir(foreign, { recursive: true });
     await writeFile(join(foreign, "SKILL.md"), "mine\n");
 
     createSkillServer(ONE_SKILL).install();
-    await skillsSyncCommand({ target: ["codex"] }, io);
+    await packagesSyncCommand({ target: ["codex"] }, io);
 
     expect((await readdir(codexRoot())).sort()).toEqual(["my-own-skill", "pdf-tools"]);
     expect(await exists(join(codexRoot(), "notes"))).toBe(false);
@@ -342,10 +342,10 @@ describe("skills sync — shared targets", () => {
   it("drops the state entry along with the directory", async () => {
     createSkillServer([...ONE_SKILL, { id: "@acme/notes", skillMd: skillMd("notes") }]).install();
     const { io } = createMemoryIO();
-    await skillsSyncCommand({ target: ["codex"] }, io);
+    await packagesSyncCommand({ target: ["codex"] }, io);
 
     createSkillServer(ONE_SKILL).install();
-    await skillsSyncCommand({ target: ["codex"] }, io);
+    await packagesSyncCommand({ target: ["codex"] }, io);
 
     const state = JSON.parse(await readText(getStatePath())) as {
       targets: Record<string, { managed: Record<string, unknown> }>;
@@ -360,13 +360,13 @@ describe("skills sync — shared targets", () => {
     server.install();
     const { io } = createMemoryIO();
 
-    await skillsSyncCommand({ target: ["codex"] }, io);
+    await packagesSyncCommand({ target: ["codex"] }, io);
     // Only SKILL.md goes: the directory, and `references/guide.md` inside it,
     // stay put. The ledger entry still matches the server's integrity, so
     // nothing but an on-disk check can notice the skill is now unloadable.
     await rm(join(codexRoot(), "pdf-tools", "SKILL.md"));
 
-    await skillsSyncCommand({ target: ["codex"] }, io);
+    await packagesSyncCommand({ target: ["codex"] }, io);
 
     expect(server.downloads()).toBe(2);
     expect(await readText(join(codexRoot(), "pdf-tools", "SKILL.md"))).toContain("name: pdf-tools");
@@ -378,28 +378,28 @@ describe("skills sync — shared targets", () => {
     server.install();
     const { io } = createMemoryIO();
 
-    await skillsSyncCommand({ target: ["codex"] }, io);
+    await packagesSyncCommand({ target: ["codex"] }, io);
     await rm(join(codexRoot(), "pdf-tools"), { recursive: true, force: true });
 
-    await skillsSyncCommand({ target: ["codex"] }, io);
+    await packagesSyncCommand({ target: ["codex"] }, io);
     expect(server.downloads()).toBe(2);
     expect(await exists(join(codexRoot(), "pdf-tools"))).toBe(true);
   });
 });
 
-describe("skills sync — guards and dry run", () => {
+describe("packages sync — guards and dry run", () => {
   it("exits 1 with a remedy when no space is pinned", async () => {
     await seedLoggedInProfile("default", { orgId: "org_1" });
     const { io, stderr } = createMemoryIO();
 
-    await expect(skillsSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
     expect(stderr()).toBe("No space pinned. Run: appstrate space switch\n");
   });
 
   it("exits 1 with a remedy when the profile is not configured", async () => {
     const { io, stderr } = createMemoryIO();
 
-    await expect(skillsSyncCommand({ profile: "nope" }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesSyncCommand({ profile: "nope" }, io)).rejects.toBeInstanceOf(ExitError);
     expect(stderr()).toContain("Run: appstrate login --profile nope");
   });
 
@@ -408,7 +408,7 @@ describe("skills sync — guards and dry run", () => {
     server.install();
     const { io, stdout } = createMemoryIO();
 
-    await skillsSyncCommand({ dryRun: true, target: ["claude-plugin", "codex"] }, io);
+    await packagesSyncCommand({ dryRun: true, target: ["claude-plugin", "codex"] }, io);
 
     expect(await exists(pluginRoot())).toBe(false);
     expect(await exists(codexRoot())).toBe(false);
@@ -424,14 +424,14 @@ describe("skills sync — guards and dry run", () => {
     createSkillServer(ONE_SKILL).install();
     const { io, stderr } = createMemoryIO();
 
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
 
     expect(stderr()).toContain("Sync state could not be used");
     expect(await exists(join(pluginRoot(), "skills", "pdf-tools"))).toBe(true);
   });
 });
 
-describe("skills sync — unmanaged destinations", () => {
+describe("packages sync — unmanaged destinations", () => {
   it("refuses to overwrite a hand-written skill dir and reports it", async () => {
     const mine = join(codexRoot(), "pdf-tools");
     await mkdir(mine, { recursive: true });
@@ -440,7 +440,7 @@ describe("skills sync — unmanaged destinations", () => {
     createSkillServer(ONE_SKILL).install();
     const { io, stderr } = createMemoryIO();
 
-    await expect(skillsSyncCommand({ target: ["codex"] }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesSyncCommand({ target: ["codex"] }, io)).rejects.toBeInstanceOf(ExitError);
 
     expect(await readText(join(mine, "SKILL.md"))).toBe("hand written\n");
     expect(stderr()).toContain(
@@ -458,14 +458,14 @@ describe("skills sync — unmanaged destinations", () => {
     const { io } = createMemoryIO();
 
     await expect(
-      skillsSyncCommand({ target: ["claude-plugin", "codex"] }, io),
+      packagesSyncCommand({ target: ["claude-plugin", "codex"] }, io),
     ).rejects.toBeInstanceOf(ExitError);
 
     expect(await exists(join(pluginRoot(), "skills", "pdf-tools"))).toBe(true);
   });
 });
 
-describe("skills sync — exit codes", () => {
+describe("packages sync — exit codes", () => {
   it("exits 0 under --print-path when only individual skills failed", async () => {
     createSkillServer([
       ...ONE_SKILL,
@@ -473,7 +473,7 @@ describe("skills sync — exit codes", () => {
     ]).install();
     const { io, stdout, stderr } = createMemoryIO();
 
-    await skillsSyncCommand({ printPath: true }, io);
+    await packagesSyncCommand({ printPath: true }, io);
 
     expect(stdout()).toBe(`${pluginRoot()}\n`);
     expect(stderr()).toContain("Integrity mismatch");
@@ -487,7 +487,7 @@ describe("skills sync — exit codes", () => {
     ]).install();
     const { io } = createMemoryIO();
 
-    await expect(skillsSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
   });
 
   it("exits 1 and prints nothing on stdout when the catalogue call fails", async () => {
@@ -495,19 +495,19 @@ describe("skills sync — exit codes", () => {
       new Response("boom", { status: 500 })) as unknown as typeof fetch;
     const { io, stdout } = createMemoryIO();
 
-    await expect(skillsSyncCommand({ printPath: true }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesSyncCommand({ printPath: true }, io)).rejects.toBeInstanceOf(ExitError);
     expect(stdout()).toBe("");
   });
 });
 
-describe("skills sync — resilience", () => {
+describe("packages sync — resilience", () => {
   it("keeps the previous version of a skill whose refresh failed", async () => {
     createSkillServer(ONE_SKILL).install();
     const { io } = createMemoryIO();
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
 
     createSkillServer([{ ...ONE_SKILL[0]!, version: "2.0.0", corruptDownload: true }]).install();
-    await expect(skillsSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
 
     // The v1 directory must survive: a full-tree rebuild that dropped it would
     // delete a working skill because the NEW one could not be fetched.
@@ -522,10 +522,10 @@ describe("skills sync — resilience", () => {
     const server = createSkillServer(ONE_SKILL);
     server.install();
     const { io } = createMemoryIO();
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
     await rm(join(pluginRoot(), ".claude-plugin"), { recursive: true, force: true });
 
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
     expect(await exists(join(pluginRoot(), ".claude-plugin"))).toBe(true);
   });
 
@@ -533,13 +533,13 @@ describe("skills sync — resilience", () => {
     createSkillServer(ONE_SKILL).install();
     const { io } = createMemoryIO();
 
-    await skillsSyncCommand({ target: ["codex"] }, io);
+    await packagesSyncCommand({ target: ["codex"] }, io);
 
     expect(await readdir(codexRoot())).toEqual(["pdf-tools"]);
   });
 });
 
-describe("skills sync — --source draft", () => {
+describe("packages sync — --source draft", () => {
   const DRAFT: SkillFixture[] = [
     {
       id: "@acme/pdf-tools",
@@ -558,7 +558,7 @@ describe("skills sync — --source draft", () => {
     server.install();
     const { io } = createMemoryIO();
 
-    await skillsSyncCommand({ source: "draft" }, io);
+    await packagesSyncCommand({ source: "draft" }, io);
 
     const dir = join(pluginRoot(), "skills", "pdf-tools");
     expect(await readText(join(dir, "SKILL.md"))).toContain("Draft copy.");
@@ -577,9 +577,9 @@ describe("skills sync — --source draft", () => {
     server.install();
     const { io } = createMemoryIO();
 
-    await skillsSyncCommand({ source: "draft" }, io);
+    await packagesSyncCommand({ source: "draft" }, io);
     const after = server.draftDownloads();
-    await skillsSyncCommand({ source: "draft" }, io);
+    await packagesSyncCommand({ source: "draft" }, io);
 
     expect(server.draftDownloads()).toBe(after);
   });
@@ -587,7 +587,7 @@ describe("skills sync — --source draft", () => {
   it("re-materializes when the draft ETag moves", async () => {
     createSkillServer(DRAFT).install();
     const { io } = createMemoryIO();
-    await skillsSyncCommand({ source: "draft" }, io);
+    await packagesSyncCommand({ source: "draft" }, io);
 
     const edited = createSkillServer([
       {
@@ -601,7 +601,7 @@ describe("skills sync — --source draft", () => {
       },
     ]);
     edited.install();
-    await skillsSyncCommand({ source: "draft" }, io);
+    await packagesSyncCommand({ source: "draft" }, io);
 
     expect(edited.draftDownloads()).toBe(1);
     expect(await readText(join(pluginRoot(), "skills", "pdf-tools", "SKILL.md"))).toContain(
@@ -614,10 +614,10 @@ describe("skills sync — --source draft", () => {
     server.install();
     const { io } = createMemoryIO();
 
-    await skillsSyncCommand({ source: "draft" }, io);
+    await packagesSyncCommand({ source: "draft" }, io);
     expect(server.downloads()).toBe(0);
 
-    await skillsSyncCommand({ source: "published" }, io);
+    await packagesSyncCommand({ source: "published" }, io);
 
     expect(server.downloads()).toBe(1);
     expect(await readText(join(pluginRoot(), "skills", "pdf-tools", "SKILL.md"))).toContain(
@@ -626,13 +626,13 @@ describe("skills sync — --source draft", () => {
   });
 });
 
-describe("skills sync — a failed resolution is not a deletion", () => {
+describe("packages sync — a failed resolution is not a deletion", () => {
   const TWO: SkillFixture[] = [...ONE_SKILL, { id: "@acme/notes", skillMd: skillMd("notes") }];
 
   it("keeps the directory and the ledger entry when versions/latest 500s", async () => {
     createSkillServer(TWO).install();
     const { io } = createMemoryIO();
-    await skillsSyncCommand({ target: ["claude-plugin", "codex"] }, io);
+    await packagesSyncCommand({ target: ["claude-plugin", "codex"] }, io);
 
     // Same catalogue, one skill now failing to resolve. Nothing about that
     // says the skill is gone.
@@ -641,7 +641,7 @@ describe("skills sync — a failed resolution is not a deletion", () => {
       { id: "@acme/notes", skillMd: skillMd("notes"), resolveError: 500 },
     ]).install();
     await expect(
-      skillsSyncCommand({ target: ["claude-plugin", "codex"] }, io),
+      packagesSyncCommand({ target: ["claude-plugin", "codex"] }, io),
     ).rejects.toBeInstanceOf(ExitError);
 
     expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual(["notes", "pdf-tools"]);
@@ -659,14 +659,14 @@ describe("skills sync — a failed resolution is not a deletion", () => {
   it("exits 0 under --print-path and still prints the path", async () => {
     createSkillServer(TWO).install();
     const { io } = createMemoryIO();
-    await skillsSyncCommand({ printPath: true }, io);
+    await packagesSyncCommand({ printPath: true }, io);
 
     createSkillServer([
       ONE_SKILL[0]!,
       { id: "@acme/notes", skillMd: skillMd("notes"), resolveError: 500 },
     ]).install();
     const second = createMemoryIO();
-    await skillsSyncCommand({ printPath: true }, second.io);
+    await packagesSyncCommand({ printPath: true }, second.io);
 
     expect(second.stdout()).toBe(`${pluginRoot()}\n`);
     expect(await exists(join(pluginRoot(), "skills", "notes"))).toBe(true);
@@ -675,10 +675,10 @@ describe("skills sync — a failed resolution is not a deletion", () => {
   it("still deletes a skill that genuinely left the catalogue", async () => {
     createSkillServer(TWO).install();
     const { io } = createMemoryIO();
-    await skillsSyncCommand({ target: ["codex"] }, io);
+    await packagesSyncCommand({ target: ["codex"] }, io);
 
     createSkillServer(ONE_SKILL).install();
-    await skillsSyncCommand({ target: ["codex"] }, io);
+    await packagesSyncCommand({ target: ["codex"] }, io);
 
     expect(await readdir(codexRoot())).toEqual(["pdf-tools"]);
   });
@@ -686,14 +686,14 @@ describe("skills sync — a failed resolution is not a deletion", () => {
   it("stops claiming an unresolved skill whose directory is already gone", async () => {
     createSkillServer(TWO).install();
     const { io } = createMemoryIO();
-    await skillsSyncCommand({ target: ["codex"] }, io);
+    await packagesSyncCommand({ target: ["codex"] }, io);
     await rm(join(codexRoot(), "notes"), { recursive: true, force: true });
 
     createSkillServer([
       ONE_SKILL[0]!,
       { id: "@acme/notes", skillMd: skillMd("notes"), resolveError: 500 },
     ]).install();
-    await expect(skillsSyncCommand({ target: ["codex"] }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesSyncCommand({ target: ["codex"] }, io)).rejects.toBeInstanceOf(ExitError);
 
     // Nothing on disk and nothing fetchable: there is nothing to retain, and
     // a ledger entry pointing at a missing directory would later fail the
@@ -711,14 +711,14 @@ describe("skills sync — a failed resolution is not a deletion", () => {
       { id: "@zz/other", skillMd: skillMd("pdf-tools") },
     ]).install();
     const { io } = createMemoryIO();
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
     expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual(["pdf-tools", "zz-other"]);
 
     createSkillServer([
       { id: "@acme/pdf-tools", skillMd: skillMd("pdf-tools"), resolveError: 500 },
       { id: "@zz/other", skillMd: skillMd("pdf-tools") },
     ]).install();
-    await expect(skillsSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
 
     // `@zz/other` must NOT be promoted to `pdf-tools`: that command belongs to
     // a skill that is still in the catalogue and merely failed to answer.
@@ -726,11 +726,11 @@ describe("skills sync — a failed resolution is not a deletion", () => {
   });
 });
 
-describe("skills sync — ledger ownership", () => {
+describe("packages sync — ledger ownership", () => {
   it("refuses to overwrite directories recorded under a different HOME", async () => {
     createSkillServer(ONE_SKILL).install();
     const { io } = createMemoryIO();
-    await skillsSyncCommand({ target: ["codex"] }, io);
+    await packagesSyncCommand({ target: ["codex"] }, io);
 
     // Same profile and same state file, different HOME: cron, launchd,
     // `sudo -E`, a devcontainer. The ledger describes the OTHER tree.
@@ -741,7 +741,7 @@ describe("skills sync — ledger ownership", () => {
     await writeFile(join(mine, "SKILL.md"), "hand written\n");
 
     const second = createMemoryIO();
-    await expect(skillsSyncCommand({ target: ["codex"] }, second.io)).rejects.toBeInstanceOf(
+    await expect(packagesSyncCommand({ target: ["codex"] }, second.io)).rejects.toBeInstanceOf(
       ExitError,
     );
 
@@ -753,19 +753,19 @@ describe("skills sync — ledger ownership", () => {
   it("carries the ledger of a target this run did not touch", async () => {
     createSkillServer(ONE_SKILL).install();
     const { io } = createMemoryIO();
-    await skillsSyncCommand({ target: ["claude-plugin", "codex"] }, io);
+    await packagesSyncCommand({ target: ["claude-plugin", "codex"] }, io);
 
     // The README's first example: no `--target`, so only the plugin is synced.
     // The codex ledger must survive it — otherwise the next marketplace run
     // finds the directory it wrote itself and refuses it as unmanaged.
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
     const after = JSON.parse(await readText(getStatePath())) as {
       targets: Record<string, { managed: Record<string, unknown> }>;
     };
     expect(Object.keys(after.targets.codex!.managed)).toEqual(["pdf-tools"]);
 
     const third = createMemoryIO();
-    await skillsSyncCommand({ target: ["claude-plugin", "codex"] }, third.io);
+    await packagesSyncCommand({ target: ["claude-plugin", "codex"] }, third.io);
     expect(third.stderr()).not.toContain("is not managed by appstrate");
     expect(await exists(join(codexRoot(), "pdf-tools", "SKILL.md"))).toBe(true);
   });
@@ -773,7 +773,7 @@ describe("skills sync — ledger ownership", () => {
   it("retains ownership of a slug whose removal failed", async () => {
     createSkillServer([...ONE_SKILL, { id: "@acme/notes", skillMd: skillMd("notes") }]).install();
     const { io } = createMemoryIO();
-    await skillsSyncCommand({ target: ["codex"] }, io);
+    await packagesSyncCommand({ target: ["codex"] }, io);
 
     // `notes` leaves the catalogue, and its managed directory has been
     // replaced by a plain file — `removeManagedDir` refuses it and throws.
@@ -782,7 +782,7 @@ describe("skills sync — ledger ownership", () => {
 
     createSkillServer(ONE_SKILL).install();
     const second = createMemoryIO();
-    await expect(skillsSyncCommand({ target: ["codex"] }, second.io)).rejects.toBeInstanceOf(
+    await expect(packagesSyncCommand({ target: ["codex"] }, second.io)).rejects.toBeInstanceOf(
       ExitError,
     );
 
@@ -797,7 +797,7 @@ describe("skills sync — ledger ownership", () => {
     await seedTwoThenBreakCodexNotes();
 
     const withPath = createMemoryIO();
-    await skillsSyncCommand({ target: ["claude-plugin", "codex"], printPath: true }, withPath.io);
+    await packagesSyncCommand({ target: ["claude-plugin", "codex"], printPath: true }, withPath.io);
 
     expect(withPath.stdout()).toBe(`${pluginRoot()}\n`);
     expect(withPath.stderr()).toContain("Failed to remove codex/notes");
@@ -809,7 +809,7 @@ describe("skills sync — ledger ownership", () => {
 
     const plain = createMemoryIO();
     await expect(
-      skillsSyncCommand({ target: ["claude-plugin", "codex"] }, plain.io),
+      packagesSyncCommand({ target: ["claude-plugin", "codex"] }, plain.io),
     ).rejects.toBeInstanceOf(ExitError);
     expect(plain.stderr()).toContain("Failed to remove codex/notes");
   });
@@ -826,7 +826,7 @@ async function seedTwoThenBreakCodexNotes(): Promise<void> {
     { id: "@acme/notes", skillMd: skillMd("notes") },
   ]).install();
   const { io } = createMemoryIO();
-  await skillsSyncCommand({ target: ["claude-plugin", "codex"] }, io);
+  await packagesSyncCommand({ target: ["claude-plugin", "codex"] }, io);
 
   await rm(join(codexRoot(), "notes"), { recursive: true, force: true });
   await writeFile(join(codexRoot(), "notes"), "not a directory\n");
@@ -835,12 +835,12 @@ async function seedTwoThenBreakCodexNotes(): Promise<void> {
   ]).install();
 }
 
-describe("skills sync — plugin tree hygiene", () => {
+describe("packages sync — plugin tree hygiene", () => {
   for (const damage of ["missing", "tampered"] as const) {
     it(`repairs a ${damage} MCP file without downloading skills again`, async () => {
       const server = createSkillServer(ONE_SKILL);
       server.install();
-      await skillsSyncCommand({}, createMemoryIO().io);
+      await packagesSyncCommand({}, createMemoryIO().io);
       const before = await snapshot(pluginRoot());
       const mcpPath = join(pluginRoot(), ".mcp.json");
       if (damage === "missing") {
@@ -853,7 +853,7 @@ describe("skills sync — plugin tree hygiene", () => {
         );
       }
 
-      await skillsSyncCommand({}, createMemoryIO().io);
+      await packagesSyncCommand({}, createMemoryIO().io);
 
       expect(await snapshot(pluginRoot())).toEqual(before);
       expect(server.downloads()).toBe(1);
@@ -863,14 +863,14 @@ describe("skills sync — plugin tree hygiene", () => {
   it("keeps the previous MCP endpoint and prints no path when its replacement cannot be staged", async () => {
     const server = createSkillServer(ONE_SKILL);
     server.install();
-    await skillsSyncCommand({}, createMemoryIO().io);
+    await packagesSyncCommand({}, createMemoryIO().io);
     const before = await snapshot(pluginRoot());
     const staging = join(getDataDir(), ".appstrate-staging");
     await writeFile(staging, "blocks the next staging directory");
     await seedLoggedInProfile("default", { orgId: "org_2", spaceId: "spc_2" });
     const { io, stdout, stderr } = createMemoryIO();
 
-    await expect(skillsSyncCommand({ printPath: true }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesSyncCommand({ printPath: true }, io)).rejects.toBeInstanceOf(ExitError);
 
     expect(stdout()).toBe("");
     expect(stderr()).toContain("Failed to write claude-plugin");
@@ -878,7 +878,7 @@ describe("skills sync — plugin tree hygiene", () => {
     expect(server.downloads()).toBe(1);
     await rm(staging);
 
-    await skillsSyncCommand({ printPath: true }, createMemoryIO().io);
+    await packagesSyncCommand({ printPath: true }, createMemoryIO().io);
     expect(await readText(join(pluginRoot(), ".mcp.json"))).toContain("/api/mcp/o/org_2");
     expect(server.downloads()).toBe(1);
   });
@@ -887,12 +887,12 @@ describe("skills sync — plugin tree hygiene", () => {
     const server = createSkillServer(ONE_SKILL);
     server.install();
     const { io } = createMemoryIO();
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
 
     await mkdir(join(pluginRoot(), "skills", "intruder"), { recursive: true });
     await writeFile(join(pluginRoot(), "skills", "intruder", "SKILL.md"), "not ours\n");
 
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
 
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
     // Rebuilt from what is already on disk — no re-download needed.
@@ -900,11 +900,11 @@ describe("skills sync — plugin tree hygiene", () => {
   });
 });
 
-describe("skills sync — flag combinations", () => {
+describe("packages sync — flag combinations", () => {
   it("refuses --print-path together with --dry-run", async () => {
     const { io, stdout, stderr } = createMemoryIO();
 
-    await expect(skillsSyncCommand({ printPath: true, dryRun: true }, io)).rejects.toBeInstanceOf(
+    await expect(packagesSyncCommand({ printPath: true, dryRun: true }, io)).rejects.toBeInstanceOf(
       ExitError,
     );
 
@@ -915,7 +915,7 @@ describe("skills sync — flag combinations", () => {
   });
 });
 
-describe("skills sync — one bad skill does not cost the plugin", () => {
+describe("packages sync — one bad skill does not cost the plugin", () => {
   it("drops an artifact whose entries conflict and still writes the tree", async () => {
     createSkillServer([
       ...ONE_SKILL,
@@ -929,7 +929,7 @@ describe("skills sync — one bad skill does not cost the plugin", () => {
     ]).install();
     const { io, stdout, stderr } = createMemoryIO();
 
-    await skillsSyncCommand({ printPath: true }, io);
+    await packagesSyncCommand({ printPath: true }, io);
 
     expect(stdout()).toBe(`${pluginRoot()}\n`);
     expect(stderr()).toContain("Failed to write claude-plugin/broken");
@@ -943,7 +943,7 @@ describe("skills sync — one bad skill does not cost the plugin", () => {
   it("keeps existing ledger entries when a new skill's destination is not ours", async () => {
     createSkillServer([...ONE_SKILL, { id: "@acme/notes", skillMd: skillMd("notes") }]).install();
     const { io } = createMemoryIO();
-    await skillsSyncCommand({ target: ["codex"] }, io);
+    await packagesSyncCommand({ target: ["codex"] }, io);
 
     // A third skill arrives, and something the ledger does not claim already
     // sits at its destination: it takes the BLOCKED path. The two existing
@@ -955,7 +955,7 @@ describe("skills sync — one bad skill does not cost the plugin", () => {
       { id: "@acme/third", skillMd: skillMd("third") },
     ]).install();
     const second = createMemoryIO();
-    await expect(skillsSyncCommand({ target: ["codex"] }, second.io)).rejects.toBeInstanceOf(
+    await expect(packagesSyncCommand({ target: ["codex"] }, second.io)).rejects.toBeInstanceOf(
       ExitError,
     );
 
@@ -969,7 +969,7 @@ describe("skills sync — one bad skill does not cost the plugin", () => {
   it("keeps existing ledger entries when a shared-target write actually fails", async () => {
     createSkillServer([...ONE_SKILL, { id: "@acme/notes", skillMd: skillMd("notes") }]).install();
     const { io } = createMemoryIO();
-    await skillsSyncCommand({ target: ["codex"] }, io);
+    await packagesSyncCommand({ target: ["codex"] }, io);
 
     // A plain FILE where the staging directory has to be created: the write of
     // the new skill fails inside `writeSharedSkill`, not before it.
@@ -980,7 +980,7 @@ describe("skills sync — one bad skill does not cost the plugin", () => {
       { id: "@acme/third", skillMd: skillMd("third") },
     ]).install();
     const second = createMemoryIO();
-    await expect(skillsSyncCommand({ target: ["codex"] }, second.io)).rejects.toBeInstanceOf(
+    await expect(packagesSyncCommand({ target: ["codex"] }, second.io)).rejects.toBeInstanceOf(
       ExitError,
     );
 
@@ -992,24 +992,24 @@ describe("skills sync — one bad skill does not cost the plugin", () => {
   });
 });
 
-describe("skills sync — the plugin tree is repaired, not just extended", () => {
+describe("packages sync — the plugin tree is repaired, not just extended", () => {
   it("rebuilds when README.md was deleted", async () => {
     createSkillServer(ONE_SKILL).install();
     const { io } = createMemoryIO();
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
     await rm(join(pluginRoot(), "README.md"));
 
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
     expect(await exists(join(pluginRoot(), "README.md"))).toBe(true);
   });
 
   it("rebuilds when plugin.json was tampered with", async () => {
     createSkillServer(ONE_SKILL).install();
     const { io } = createMemoryIO();
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
     await writeFile(join(pluginRoot(), ".claude-plugin", "plugin.json"), '{"name":"other"}');
 
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
     const manifest = JSON.parse(
       await readText(join(pluginRoot(), ".claude-plugin", "plugin.json")),
     ) as { name: string };
@@ -1019,10 +1019,10 @@ describe("skills sync — the plugin tree is repaired, not just extended", () =>
   it("rebuilds when a stray file sits in the plugin root", async () => {
     createSkillServer(ONE_SKILL).install();
     const { io } = createMemoryIO();
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
     await writeFile(join(pluginRoot(), "stray.txt"), "not ours\n");
 
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
     expect((await readdir(pluginRoot())).sort()).toEqual([
       ".claude-plugin",
       ".mcp.json",
@@ -1035,7 +1035,7 @@ describe("skills sync — the plugin tree is repaired, not just extended", () =>
     const server = createSkillServer(ONE_SKILL);
     server.install();
     const { io } = createMemoryIO();
-    await skillsSyncCommand({ target: ["claude-plugin", "codex"] }, io);
+    await packagesSyncCommand({ target: ["claude-plugin", "codex"] }, io);
     expect(server.downloads()).toBe(1);
 
     // A CLI whose materializer changed leaves a ledger this build cannot
@@ -1045,13 +1045,13 @@ describe("skills sync — the plugin tree is repaired, not just extended", () =>
     raw.version = 999;
     await writeFile(getStatePath(), JSON.stringify(raw));
 
-    await skillsSyncCommand({ target: ["claude-plugin", "codex"] }, io);
+    await packagesSyncCommand({ target: ["claude-plugin", "codex"] }, io);
     expect(server.downloads()).toBe(2);
     expect(await exists(join(codexRoot(), "pdf-tools"))).toBe(true);
   });
 });
 
-describe("skills sync — non-conforming frontmatter", () => {
+describe("packages sync — non-conforming frontmatter", () => {
   it("syncs the skill as authored and says so once, without failing the run", async () => {
     // A legacy published artifact: `yaml` refuses the unquoted second colon.
     // The sync copies it verbatim and reports it; it never rewrites the body.
@@ -1059,7 +1059,7 @@ describe("skills sync — non-conforming frontmatter", () => {
     createSkillServer([{ id: "@pierre-cabriere/meeting-notes-fr", skillMd: source }]).install();
     const { io, stdout, stderr } = createMemoryIO();
 
-    await skillsSyncCommand({ printPath: true }, io);
+    await packagesSyncCommand({ printPath: true }, io);
 
     expect(stdout()).toBe(`${pluginRoot()}\n`);
     expect(stderr()).toContain(
@@ -1077,19 +1077,19 @@ describe("skills sync — non-conforming frontmatter", () => {
     createSkillServer([{ id: "@acme/pdf-tools", skillMd: skillMd("pdf-tools") }]).install();
     const { io, stderr } = createMemoryIO();
 
-    await skillsSyncCommand({ printPath: true }, io);
+    await packagesSyncCommand({ printPath: true }, io);
 
     expect(stderr()).toBe("");
   });
 });
 
-describe("skills sync — fresh install", () => {
+describe("packages sync — fresh install", () => {
   const setupSkill = (): string => join(pluginRoot(), "skills", "setup", "SKILL.md");
 
   it("installs a setup skill under --print-path when the profile is not configured", async () => {
     const { io, stdout, stderr } = createMemoryIO();
 
-    await skillsSyncCommand({ profile: "nope", printPath: true }, io);
+    await packagesSyncCommand({ profile: "nope", printPath: true }, io);
 
     expect(stdout()).toBe(`${pluginRoot()}\n`);
     expect(stderr()).toBe('Profile "nope" not configured. Run: appstrate login --profile nope\n');
@@ -1102,7 +1102,7 @@ describe("skills sync — fresh install", () => {
   });
 
   it("ships a SessionStart hook whose command prints the remedy to the user and the model", async () => {
-    await skillsSyncCommand({ profile: "nope", printPath: true }, createMemoryIO().io);
+    await packagesSyncCommand({ profile: "nope", printPath: true }, createMemoryIO().io);
 
     const hooks = JSON.parse(await readText(join(pluginRoot(), "hooks", "hooks.json"))) as {
       hooks: { SessionStart: { matcher: string; hooks: { type: string; command: string }[] }[] };
@@ -1124,25 +1124,25 @@ describe("skills sync — fresh install", () => {
     await seedLoggedInProfile("default", { orgId: "org_1" });
     const { io } = createMemoryIO();
 
-    await skillsSyncCommand({ printPath: true }, io);
+    await packagesSyncCommand({ printPath: true }, io);
 
     expect(await readText(setupSkill())).toContain("appstrate space switch");
   });
 
   it("is byte-identical across runs, so the plugin version does not churn", async () => {
-    await skillsSyncCommand({ profile: "nope", printPath: true }, createMemoryIO().io);
+    await packagesSyncCommand({ profile: "nope", printPath: true }, createMemoryIO().io);
     const first = await readText(setupSkill());
-    await skillsSyncCommand({ profile: "nope", printPath: true }, createMemoryIO().io);
+    await packagesSyncCommand({ profile: "nope", printPath: true }, createMemoryIO().io);
     expect(await readText(setupSkill())).toBe(first);
   });
 
   it("keeps an existing plugin and exits 1 instead when the profile is lost later", async () => {
     createSkillServer(ONE_SKILL).install();
-    await skillsSyncCommand({ printPath: true }, createMemoryIO().io);
+    await packagesSyncCommand({ printPath: true }, createMemoryIO().io);
     const { io, stdout, stderr } = createMemoryIO();
 
     await expect(
-      skillsSyncCommand({ profile: "nope", printPath: true }, io),
+      packagesSyncCommand({ profile: "nope", printPath: true }, io),
     ).rejects.toBeInstanceOf(ExitError);
 
     expect(stdout()).toBe("");
@@ -1154,12 +1154,12 @@ describe("skills sync — fresh install", () => {
   for (const source of ["published", "draft"] as const) {
     it(`preserves an empty connected plugin on a profile gap with source ${source}`, async () => {
       createSkillServer([]).install();
-      await skillsSyncCommand({ printPath: true }, createMemoryIO().io);
+      await packagesSyncCommand({ printPath: true }, createMemoryIO().io);
       const before = await snapshot(pluginRoot());
       const { io, stdout, stderr } = createMemoryIO();
 
       await expect(
-        skillsSyncCommand({ profile: "nope", printPath: true, source }, io),
+        packagesSyncCommand({ profile: "nope", printPath: true, source }, io),
       ).rejects.toBeInstanceOf(ExitError);
 
       expect(stdout()).toBe("");
@@ -1175,24 +1175,24 @@ describe("skills sync — fresh install", () => {
     const staging = join(getDataDir(), ".appstrate-staging");
     await writeFile(staging, "blocks staging");
     await expect(
-      skillsSyncCommand({ printPath: true }, createMemoryIO().io),
+      packagesSyncCommand({ printPath: true }, createMemoryIO().io),
     ).rejects.toBeInstanceOf(ExitError);
     await rm(staging);
     const { io, stdout } = createMemoryIO();
 
-    await skillsSyncCommand({ profile: "nope", printPath: true }, io);
+    await packagesSyncCommand({ profile: "nope", printPath: true }, io);
     expect(stdout()).toBe(`${pluginRoot()}\n`);
     expect(await exists(setupSkill())).toBe(true);
-    await skillsSyncCommand({ printPath: true }, createMemoryIO().io);
+    await packagesSyncCommand({ printPath: true }, createMemoryIO().io);
     expect(await exists(join(pluginRoot(), ".mcp.json"))).toBe(true);
   });
 
   it("replaces the setup skill with the real skills once connected", async () => {
-    await skillsSyncCommand({ profile: "nope", printPath: true }, createMemoryIO().io);
+    await packagesSyncCommand({ profile: "nope", printPath: true }, createMemoryIO().io);
     createSkillServer(ONE_SKILL).install();
     const { io, stdout } = createMemoryIO();
 
-    await skillsSyncCommand({ printPath: true }, io);
+    await packagesSyncCommand({ printPath: true }, io);
 
     expect(stdout()).toBe(`${pluginRoot()}\n`);
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
@@ -1201,7 +1201,7 @@ describe("skills sync — fresh install", () => {
   });
 });
 
-describe("skills sync — request concurrency", () => {
+describe("packages sync — request concurrency", () => {
   it("never holds more than eight package-route requests open", async () => {
     const many = Array.from({ length: 24 }, (_, i) => ({
       id: `@acme/skill-${String(i).padStart(2, "0")}`,
@@ -1211,7 +1211,7 @@ describe("skills sync — request concurrency", () => {
     server.install();
     const { io } = createMemoryIO();
 
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
 
     expect((await readdir(join(pluginRoot(), "skills"))).length).toBe(24);
     expect(server.peakInFlight()).toBe(8);
@@ -1255,7 +1255,7 @@ function failSpaceListing(status: number): void {
   );
 }
 
-describe("skills sync — multiple spaces", () => {
+describe("packages sync — multiple spaces", () => {
   it("never sources a listed space this member never joined", async () => {
     // The org lists its `closed` spaces to every member so they can ask to be
     // added; the stub refuses every space-scoped read of one, as the server
@@ -1266,7 +1266,7 @@ describe("skills sync — multiple spaces", () => {
     ]).install();
     const { io, stderr } = createMemoryIO();
 
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
 
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
     expect(stderr()).not.toMatch(/not_a_space_member/);
@@ -1278,13 +1278,13 @@ describe("skills sync — multiple spaces", () => {
     // Read as standing, that silence resolves zero sources and would plan the
     // removal of every installed skill (issue #1320).
     createSkillServer(ONE_SKILL).install();
-    await skillsSyncCommand({}, createMemoryIO().io);
+    await packagesSyncCommand({}, createMemoryIO().io);
     interceptSpaceListing(() =>
       Response.json({ data: [{ id: "spc_1", name: "Active", isDefault: true }] }),
     );
     const { io, stderr } = createMemoryIO();
 
-    await expect(skillsSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
 
     expect(stderr()).toContain("older than the CLI");
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
@@ -1299,12 +1299,12 @@ describe("skills sync — multiple spaces", () => {
     // which under `--print-path` no amount of re-running ever cleared
     // (issue #1362).
     createSkillServer(ONE_SKILL).install();
-    await skillsSyncCommand({}, createMemoryIO().io);
+    await packagesSyncCommand({}, createMemoryIO().io);
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
     failSpaceListing(403);
     const { io, stderr } = createMemoryIO();
 
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
 
     expect(stderr()).toContain("no longer grants this profile access to its spaces");
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual([]);
@@ -1315,11 +1315,11 @@ describe("skills sync — multiple spaces", () => {
     // has to say so: applied as the removal plan it wiped the tree and exited 0,
     // never acknowledging the space the user named.
     createSkillServer(ONE_SKILL).install();
-    await skillsSyncCommand({}, createMemoryIO().io);
+    await packagesSyncCommand({}, createMemoryIO().io);
     failSpaceListing(403);
     const { io, stderr } = createMemoryIO();
 
-    await expect(skillsSyncCommand({ space: ["spc_1"] }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesSyncCommand({ space: ["spc_1"] }, io)).rejects.toBeInstanceOf(ExitError);
 
     expect(stderr()).toContain("no longer grants this profile access to them");
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
@@ -1330,11 +1330,11 @@ describe("skills sync — multiple spaces", () => {
     // exactly as it was and the run fails — the revocation branch must not
     // widen into "the listing did not come back".
     createSkillServer(ONE_SKILL).install();
-    await skillsSyncCommand({}, createMemoryIO().io);
+    await packagesSyncCommand({}, createMemoryIO().io);
     failSpaceListing(503);
     const { io, stderr } = createMemoryIO();
 
-    await expect(skillsSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
 
     expect(stderr()).not.toContain("no longer grants");
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
@@ -1367,7 +1367,7 @@ describe("skills sync — multiple spaces", () => {
       return serve(input, init);
     }) as unknown as typeof fetch;
     const { io } = createMemoryIO();
-    await skillsSyncCommand({ space: ["spc_1", "Library", "spc_2"] }, io);
+    await packagesSyncCommand({ space: ["spc_1", "Library", "spc_2"] }, io);
     expect(seen.filter((path) => path.endsWith("/download"))).toHaveLength(2);
     expect(
       JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.headers[
@@ -1388,22 +1388,22 @@ it("uses stored sync spaces, supports an empty selection, and explicit spaces re
       ? Response.json({ data: [{ id: "spc_1", name: "Active", ...MEMBER }] })
       : serve(input, init)) as typeof fetch;
   const { io } = createMemoryIO();
-  await skillsSyncCommand({}, io);
+  await packagesSyncCommand({}, io);
   expect(await readdir(join(pluginRoot(), "skills"))).toEqual([]);
   expect(await exists(join(pluginRoot(), ".mcp.json"))).toBe(true);
-  await skillsSyncCommand({ space: ["spc_1"] }, io);
+  await packagesSyncCommand({ space: ["spc_1"] }, io);
   expect(await readdir(join(pluginRoot(), "skills"))).toHaveLength(1);
   await updateProfile("default", { orgId: "org_2" });
   const profile = await (await import("../src/lib/config.ts")).getProfile("default");
   expect(profile?.syncSpaces).toBeUndefined();
 });
 
-describe("skills sync — active context replacement", () => {
+describe("packages sync — active context replacement", () => {
   it("preserves skills and MCP together when a new context download fails, then replaces on retry", async () => {
     const { updateProfile } = await import("../src/lib/config.ts");
     createSkillServer(ONE_SKILL).install();
     const { io } = createMemoryIO();
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
     const previousMcp = await readText(join(pluginRoot(), ".mcp.json"));
     const previousState = await readText(getStatePath());
     // The organization is what an installation belongs to; the pinned space is
@@ -1414,11 +1414,11 @@ describe("skills sync — active context replacement", () => {
       skillMd: skillMd("new-context", "New context skill."),
     };
     createSkillServer([{ ...nextSkill, corruptDownload: true }]).install();
-    await expect(skillsSyncCommand({ printPath: true }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesSyncCommand({ printPath: true }, io)).rejects.toBeInstanceOf(ExitError);
     expect(await readText(join(pluginRoot(), ".mcp.json"))).toBe(previousMcp);
     expect(await readText(getStatePath())).toBe(previousState);
     createSkillServer([nextSkill]).install();
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["new-context"]);
     expect(
       JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.url,
@@ -1436,7 +1436,7 @@ describe("skills sync — active context replacement", () => {
       return serve(input, init);
     }) as unknown as typeof fetch;
     const { io } = createMemoryIO();
-    await expect(skillsSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
     expect(await exists(pluginRoot())).toBe(false);
   });
 
@@ -1446,7 +1446,7 @@ describe("skills sync — active context replacement", () => {
     // fails to resolve is kept, exactly as it is on any other run.
     const { updateProfile } = await import("../src/lib/config.ts");
     createSkillServer(ONE_SKILL).install();
-    await skillsSyncCommand({}, createMemoryIO().io);
+    await packagesSyncCommand({}, createMemoryIO().io);
     const skillPath = join(pluginRoot(), "skills", "pdf-tools", "SKILL.md");
     const before = await readText(skillPath);
     await updateProfile("default", { spaceId: "spc_2" });
@@ -1454,7 +1454,7 @@ describe("skills sync — active context replacement", () => {
     server.install();
     const { io, stdout, stderr } = createMemoryIO();
 
-    await skillsSyncCommand({ printPath: true }, io);
+    await packagesSyncCommand({ printPath: true }, io);
 
     expect(stdout()).toBe(`${pluginRoot()}\n`);
     expect(stderr()).toContain("Skipped @acme/pdf-tools");
@@ -1472,7 +1472,7 @@ describe("skills sync — active context replacement", () => {
     // from it: swapping now would publish a header naming the previous space.
     const { updateProfile } = await import("../src/lib/config.ts");
     createSkillServer(ONE_SKILL).install();
-    await skillsSyncCommand({}, createMemoryIO().io);
+    await packagesSyncCommand({}, createMemoryIO().io);
     const previousMcp = await readText(join(pluginRoot(), ".mcp.json"));
     const serve = createSkillServer([
       ...ONE_SKILL,
@@ -1488,7 +1488,7 @@ describe("skills sync — active context replacement", () => {
     }) as unknown as typeof fetch;
     const { io, stderr } = createMemoryIO();
 
-    await expect(skillsSyncCommand({ printPath: true }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesSyncCommand({ printPath: true }, io)).rejects.toBeInstanceOf(ExitError);
 
     expect(stderr()).toContain("Active sync context changed");
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
@@ -1501,13 +1501,13 @@ describe("skills sync — active context replacement", () => {
     // nothing and the run re-materializes everything.
     const server = createSkillServer(ONE_SKILL);
     server.install();
-    await skillsSyncCommand({}, createMemoryIO().io);
+    await packagesSyncCommand({}, createMemoryIO().io);
     const pinned = JSON.parse(await readText(getStatePath()));
     pinned.targets["claude-plugin"].context.spaceId = "spc_1";
     await writeFile(getStatePath(), JSON.stringify(pinned));
     const { io, stderr } = createMemoryIO();
 
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
 
     expect(stderr()).toContain("Sync state could not be used and has been ignored");
     expect(server.downloads()).toBe(2);
@@ -1523,7 +1523,7 @@ describe("skills sync — active context replacement", () => {
 it("aborts a strict context replacement when a staged skill cannot be written", async () => {
   const { writePluginTree, pluginFixedFiles } = await import("../src/lib/skills-sync/targets.ts");
   createSkillServer(ONE_SKILL).install();
-  await skillsSyncCommand({}, createMemoryIO().io);
+  await packagesSyncCommand({}, createMemoryIO().io);
   const before = await snapshot(pluginRoot());
   const bytes = new TextEncoder().encode("content");
   await expect(
@@ -1544,7 +1544,7 @@ describe("logout — managed skills", () => {
     const { getProfile } = await import("../src/lib/config.ts");
     const { loadTokens } = await import("../src/lib/keyring.ts");
     createSkillServer(ONE_SKILL).install();
-    await skillsSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
+    await packagesSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
     await mkdir(join(codexRoot(), "personal"));
     await writeFile(join(codexRoot(), "personal", "SKILL.md"), "mine");
     globalThis.fetch = (async () => {
@@ -1556,13 +1556,13 @@ describe("logout — managed skills", () => {
     expect(await exists(join(pluginRoot(), ".mcp.json"))).toBe(false);
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["setup"]);
     expect(await readdir(codexRoot())).toEqual(["personal"]);
-    await skillsSyncCommand({ printPath: true }, createMemoryIO().io);
+    await packagesSyncCommand({ printPath: true }, createMemoryIO().io);
   });
 
   it("does not remove another profile's installation and retries failed removals without tokens", async () => {
     const { logoutCommand } = await import("../src/commands/logout.ts");
     createSkillServer(ONE_SKILL).install();
-    await skillsSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
+    await packagesSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
     await seedLoggedInProfile("other", { orgId: "org_other", spaceId: "spc_other" });
     const before = await snapshot(pluginRoot());
     await logoutCommand({ profile: "other" }, createMemoryIO().io);
@@ -1583,7 +1583,7 @@ describe("logout — managed skills", () => {
   it("refuses a ledger that names no context, and owns the tree again after one sync", async () => {
     const { logoutCommand } = await import("../src/commands/logout.ts");
     createSkillServer(ONE_SKILL).install();
-    await skillsSyncCommand({}, createMemoryIO().io);
+    await packagesSyncCommand({}, createMemoryIO().io);
     // The shape written before a ledger carried its context. It is not this
     // format, so it claims nothing — rather than being read as "owner unknown".
     const contextless = JSON.parse(await readText(getStatePath()));
@@ -1596,7 +1596,7 @@ describe("logout — managed skills", () => {
 
     await seedLoggedInProfile("default", { orgId: "org_1", spaceId: "spc_1" });
     const { io, stderr } = createMemoryIO();
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
     expect(stderr()).toContain("Sync state could not be used and has been ignored");
     await logoutCommand({}, createMemoryIO().io);
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["setup"]);
@@ -1625,7 +1625,7 @@ it("serializes logout behind an in-flight sync and leaves no connected installat
     if (path.endsWith("/cli/revoke")) return Response.json({ revoked: true });
     return serve(input, init);
   }) as unknown as typeof fetch;
-  const sync = skillsSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
+  const sync = packagesSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
   await downloading;
   const logout = logoutCommand({}, createMemoryIO().io);
   release();
@@ -1639,7 +1639,7 @@ it("serializes logout behind an in-flight sync and leaves no connected installat
 it("a sync queued during logout re-reads the disconnected profile under the lock", async () => {
   const { logoutCommand } = await import("../src/commands/logout.ts");
   createSkillServer(ONE_SKILL).install();
-  await skillsSyncCommand({}, createMemoryIO().io);
+  await packagesSyncCommand({}, createMemoryIO().io);
   let release!: () => void;
   let started!: () => void;
   const held = new Promise<void>((resolve) => {
@@ -1655,7 +1655,7 @@ it("a sync queued during logout re-reads the disconnected profile under the lock
   }) as unknown as typeof fetch;
   const logout = logoutCommand({}, createMemoryIO().io);
   await revoking;
-  const sync = skillsSyncCommand({ printPath: true }, createMemoryIO().io);
+  const sync = packagesSyncCommand({ printPath: true }, createMemoryIO().io);
   release();
   await Promise.all([logout, sync]);
   expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["setup"]);

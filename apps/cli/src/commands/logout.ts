@@ -108,7 +108,7 @@ export async function logoutCommand(
   }
   outro(hadTokens ? `Signed out of "${profileName}".` : "Already signed out.", io);
   // Reported already, above, on its own terms — so this is the `io.exit` shape
-  // `skills.ts` and `whoami.ts` use rather than a throw: the whole report stays
+  // `packages-sync.ts` and `whoami.ts` use rather than a throw: the whole report stays
   // on screen and the process still ends non-zero. Rethrowing would render the
   // same multi-line remediation a second time through `exitWithError`.
   if (keyringRefusal !== undefined) io.exit(1);

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `appstrate skills sync` — the skills of every space this profile is a member
+ * `appstrate packages sync` — the skills of every space this profile is a member
  * of, as Agent Skills directories, run by a *machine*: a marketplace `command`
  * source re-runs it once per session in the background. So `--print-path` writes
  * exactly one stdout line and only on success, and a per-skill failure must
@@ -57,7 +57,7 @@ import {
   type SyncTarget,
 } from "../lib/skills-sync/targets.ts";
 
-export interface SkillsSyncOptions {
+export interface PackagesSyncOptions {
   profile?: string;
   target?: SyncTarget[];
   space?: string[];
@@ -79,8 +79,8 @@ interface Report {
   note(message: string): void;
 }
 
-export async function skillsSyncCommand(
-  opts: SkillsSyncOptions,
+export async function packagesSyncCommand(
+  opts: PackagesSyncOptions,
   io: CommandIO = DEFAULT_IO,
 ): Promise<void> {
   const targets = uniqueTargets(opts.target);
@@ -150,7 +150,7 @@ export async function skillsSyncCommand(
             current.profile.spaceId !== profile!.spaceId ||
             JSON.stringify(current.profile.syncSpaces) !== JSON.stringify(profile!.syncSpaces)
           ) {
-            throw new Error("Active sync context changed; run skills sync again.");
+            throw new Error("Active sync context changed; run `appstrate packages sync` again.");
           }
         };
         const spaceIds = await selectedSpaces(profileName, profile!, opts.space, report);

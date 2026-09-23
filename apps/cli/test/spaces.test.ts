@@ -138,7 +138,7 @@ describe("listSpaces", () => {
     );
     // `access` / `permissions` arrived with granular space roles. Casting a
     // pre-RBAC row to `Space` reads its silence as "a member of nothing", which
-    // is what makes `skills sync` delete every skill it installed (issue #1320).
+    // is what makes `packages sync` delete every skill it installed (issue #1320).
     await expect(listSpaces("default")).rejects.toThrow(/older than the CLI/);
   });
 
