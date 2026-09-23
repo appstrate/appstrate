@@ -7,14 +7,15 @@
  * else and never displayed. The host key is asked for, not scanned — a first
  * unauthenticated contact is exactly what a machine-in-the-middle answers.
  *
- * An auth opts in with `_meta["dev.appstrate/provisioning"]: { "kind": … }`
- * (AFPS §10). What a kind mints is declared once, in {@link KINDS}, never in
- * the (immutable) manifest.
+ * Which auths are provisioned, and what each mints, is the code table
+ * {@link PROVISIONING}, keyed by package id and auth key — never the manifest.
  *
  * Invariants, stated here once:
  * - SYSTEM PACKAGES ONLY: provisioning has the platform mint a key and author a
- *   block pasted as root. {@link readProvisioning}, which every reader goes
- *   through, refuses it elsewhere.
+ *   block pasted as root. The table names system package ids, and
+ *   {@link readProvisioning} answers only for a package the platform loaded as
+ *   a system package, so an org row that happens to carry the id is never
+ *   provisioned.
  * - NO DOOR LETS A CLIENT SUPPLY `private_key`: the hosted form never renders
  *   it, the portal overwrites it, and `POST .../connect/fields` (no
  *   provisioner) refuses a minted name.
@@ -328,73 +329,56 @@ function sshHandoffSteps(credentials: Record<string, unknown>): HandoffStep[] {
   ];
 }
 
-/** One entry per kind: what it mints, the minting, and the steps it leaves the user. */
-const KINDS: Record<
-  string,
-  {
-    /** Names the platform owns: never read from a request body, never asked for. */
-    provides: readonly string[];
-    mint: (
-      fields: SubmittedFields,
-      existing: Record<string, unknown> | null,
-    ) => Promise<Record<string, string>>;
-    handoff: (credentials: Record<string, unknown>) => HandoffStep[];
-  }
-> = {
-  ssh_keypair: {
-    // NOT `host_key`: the user supplies that.
-    provides: ["private_key"],
-    mint: provisionSshKeyPair,
-    handoff: sshHandoffSteps,
-  },
-};
+/** One provisioned auth: what it mints, the minting, and the steps it leaves the user. */
+interface Provisioning {
+  /** Names the platform owns: never read from a request body, never asked for. */
+  provides: readonly string[];
+  mint: (
+    fields: SubmittedFields,
+    existing: Record<string, unknown> | null,
+  ) => Promise<Record<string, string>>;
+  handoff: (credentials: Record<string, unknown>) => HandoffStep[];
+}
 
-type Provisioning = (typeof KINDS)[string];
+/** Package id → auth key → provisioner. */
+const PROVISIONING: ReadonlyMap<string, ReadonlyMap<string, Provisioning>> = new Map([
+  [
+    "@appstrate/ssh",
+    new Map([
+      [
+        "primary",
+        {
+          // NOT `host_key`: the user supplies that.
+          provides: ["private_key"],
+          mint: provisionSshKeyPair,
+          handoff: sshHandoffSteps,
+        },
+      ],
+    ]),
+  ],
+]);
+
+/** The provisioner of this system package's auth, or null. */
+export function readProvisioning(packageId: string, authKey: string): Provisioning | null {
+  if (!isSystemPackage(packageId)) return null;
+  return PROVISIONING.get(packageId)?.get(authKey) ?? null;
+}
 
 /** The steps a connection's credentials imply; `[]` when there are none. */
 export function handoffStepsFor(
   packageId: string,
-  auth: unknown,
+  authKey: string,
   credentials: Record<string, unknown>,
 ): readonly HandoffStep[] {
-  let provisioning: Provisioning | null;
-  try {
-    provisioning = readProvisioning(packageId, auth);
-  } catch {
-    // An unreadable or refused declaration must never block a deletion.
-    return [];
-  }
-  return provisioning?.handoff(credentials) ?? [];
-}
-
-/**
- * The provisioner an auth declares, or null. Throws on a non-system package or
- * an unknown kind — never falls back to "the user types it".
- */
-export function readProvisioning(packageId: string, auth: unknown): Provisioning | null {
-  const meta = (auth as { _meta?: Record<string, unknown> } | null)?._meta;
-  const block = meta?.["dev.appstrate/provisioning"] as { kind?: unknown } | undefined;
-  if (!block) return null;
-  if (!isSystemPackage(packageId)) {
-    throw invalidRequest(
-      `\`${packageId}\` declares credential provisioning, which only system packages may`,
-    );
-  }
-  const kind = block.kind;
-  const provisioning =
-    typeof kind === "string" && Object.hasOwn(KINDS, kind) ? KINDS[kind] : undefined;
-  if (!provisioning) {
-    throw invalidRequest(`unknown credential provisioning kind: ${String(kind)}`);
-  }
-  return provisioning;
+  return readProvisioning(packageId, authKey)?.handoff(credentials) ?? [];
 }
 
 /**
  * A copy of the auth without the minted names in `credentials.schema`, for the
  * hosted form. Display only: submissions are validated against the full schema.
  */
-export function authWithoutMintedCredentials<T>(packageId: string, auth: T): T {
-  const provisioning = readProvisioning(packageId, auth);
+export function authWithoutMintedCredentials<T>(packageId: string, authKey: string, auth: T): T {
+  const provisioning = readProvisioning(packageId, authKey);
   if (!provisioning) return auth;
   const block = auth as { credentials?: { schema?: { properties?: unknown; required?: unknown } } };
   const schema = block.credentials?.schema;
@@ -416,15 +400,15 @@ export function authWithoutMintedCredentials<T>(packageId: string, auth: T): T {
 }
 
 /**
- * Run the declared provisioner, or null. `existing` is the decrypted bundle of
+ * Run the auth's provisioner, or null. `existing` is the decrypted bundle of
  * a RECONNECTED connection (null on creation).
  */
 export async function provisionCredentials(
   packageId: string,
-  auth: unknown,
+  authKey: string,
   fields: SubmittedFields,
   existing: Record<string, unknown> | null,
 ): Promise<Record<string, string> | null> {
-  const provisioning = readProvisioning(packageId, auth);
+  const provisioning = readProvisioning(packageId, authKey);
   return provisioning ? provisioning.mint(fields, existing) : null;
 }

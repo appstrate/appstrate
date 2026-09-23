@@ -15,6 +15,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   not aliased: `--version` after a command is now refused as an unknown option.
   `<package>@draft` pulls the draft explicitly, and is refused to someone who
   cannot write the package instead of falling back to the published version.
+- **Credential provisioning is a platform table, no longer a manifest
+  declaration** (#1528). `_meta["dev.appstrate/provisioning"]` is no longer
+  read: the auths the platform mints credentials for are listed in
+  `apps/api/src/services/connect/provisioning.ts` by package id and auth key
+  (`@appstrate/ssh` / `primary`), and answer only for a package the platform
+  loaded as a system package. The 400 that
+  `GET /api/integrations/connect/context`, the hosted submit and
+  `POST …/connect/fields` returned for provisioning declared on a non-system
+  package or of an unknown kind is gone: a copy of the SSH manifest under
+  another package id is an ordinary custom auth whose `private_key` the user
+  supplies. `POST …/connect/fields` still refuses a caller-supplied
+  `private_key` for `@appstrate/ssh`. The published `@appstrate/ssh` 1.0.0
+  manifest still carries the key, now ignored; it goes at the package's next
+  version.
 
 ### Fixed
 

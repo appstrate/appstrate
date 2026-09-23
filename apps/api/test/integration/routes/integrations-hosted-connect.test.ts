@@ -615,21 +615,26 @@ describe("hosted connect portal — a fault while resolving scopes (issue #1352)
   });
 });
 
+/** The package id the provisioning table names — the only one it provisions. */
+const SSH_ID = "@appstrate/ssh";
+
 /**
  * Credential PROVISIONING at the ROUTE level.
  *
  * The provisioner's own guards are unit-tested; what only this level can show
  * is WHICH routes run it. There are two doors onto `FieldsStrategy`: the
  * hosted form, which provisions, and the programmatic import, which does not
- * — and therefore refuses any name the auth declares as platform-minted.
+ * — and therefore refuses any name the platform mints for that auth.
  * The invariants the SSH integration relies on cannot live in the provisioner
  * alone: they live in `credentials.schema`, which both doors validate.
  */
-async function provisionedManifest(name = "@myorg/ssh"): Promise<IntegrationManifest> {
+async function sshManifest(name = SSH_ID): Promise<IntegrationManifest> {
   // Read the SHIPPED manifest rather than restating its schema here: the
   // constraints under test are the ones `@appstrate/ssh` actually carries, and
   // a local copy of them would stay green after someone deleted the originals.
-  // Only the identifiers are rewritten, so the package can be seeded per-org.
+  // Seeded as a row (`getTestApp()` skips the boot sync, see
+  // `registerSshAsSystemPackage`); `name` rewrites the identifiers for a copy
+  // under another id.
   const sources = join(import.meta.dir, "../../../../../scripts/system-packages");
   const dir = (await readdir(sources))
     .filter((d) => d.startsWith("integration-ssh-"))
@@ -645,16 +650,16 @@ async function provisionedManifest(name = "@myorg/ssh"): Promise<IntegrationMani
 }
 
 /**
- * Provisioning is honoured for system packages only, and `getTestApp()` skips
- * the boot that fills the system registry — so a describe seeding the SSH
- * package under `@myorg/ssh` registers that id for its own duration. Handed
- * back afterwards: the whole suite shares one process and one registry.
+ * Provisioning answers only for a loaded system package, and `getTestApp()`
+ * skips the boot that fills the system registry — so a describe connecting the
+ * SSH package registers its id for its own duration. Handed back afterwards:
+ * the whole suite shares one process and one registry.
  */
-function registerAsSystemPackage(packageId: string) {
+function registerSshAsSystemPackage() {
   let restore: () => void;
   beforeAll(() => {
     restore = _setSystemPackagesForTesting(
-      new Map([[packageId, { packageId } as SystemPackageEntry]]),
+      new Map([[SSH_ID, { packageId: SSH_ID } as SystemPackageEntry]]),
     );
   });
   afterAll(() => restore());
@@ -711,19 +716,19 @@ async function submitConnectForm(
 }
 
 describe("hosted connect portal — credential provisioning", () => {
-  registerAsSystemPackage("@myorg/ssh");
+  registerSshAsSystemPackage();
   let ctx: TestContext;
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
-    await seedIntegration(ctx.orgId, await provisionedManifest("@myorg/ssh"));
+    await seedIntegration(ctx.orgId, await sshManifest());
   });
 
   const submit = async (credentials: Record<string, unknown>) =>
-    submitConnectForm(ctx, "@myorg/ssh", "primary", credentials);
+    submitConnectForm(ctx, SSH_ID, "primary", credentials);
 
   const importFields = async (credentials: Record<string, unknown>) =>
-    app.request("/api/integrations/@myorg/ssh/auths/primary/connect/fields", {
+    app.request(`/api/integrations/${SSH_ID}/auths/primary/connect/fields`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ credentials }),
@@ -736,7 +741,7 @@ describe("hosted connect portal — credential provisioning", () => {
    * the one place that answer reaches the browser.
    */
   it("serves a schema the form can render verbatim, minus what it mints", async () => {
-    const { cookie } = await openConnectForm(ctx, "@myorg/ssh", "primary");
+    const { cookie } = await openConnectForm(ctx, SSH_ID, "primary");
     const res = await app.request("/api/integrations/connect/context", {
       headers: { Cookie: cookie },
     });
@@ -836,7 +841,7 @@ describe("hosted connect portal — credential provisioning", () => {
       handoff_steps: Array<{ shell?: string }>;
     };
 
-    const reconnected = await submitConnectForm(ctx, "@myorg/ssh", "primary", SSH_FORM_FIELDS, {
+    const reconnected = await submitConnectForm(ctx, SSH_ID, "primary", SSH_FORM_FIELDS, {
       connection_id: created.connection.id,
     });
     expect(reconnected.status).toBe(200);
@@ -855,44 +860,36 @@ describe("hosted connect portal — credential provisioning", () => {
 });
 
 /**
- * The same manifest seeded as an ordinary org package. Declaring provisioning
- * has the platform mint a key and author a block pasted as root, so only a
- * package the platform ships may do it: anywhere else the declaration is
- * refused on every door, never read as "provisions nothing" — that would ask
- * the user to type a key the manifest expects to be minted.
+ * The same manifest seeded under another package id. Provisioning is keyed by
+ * package id and auth key in code, never read off the manifest, so a copy of
+ * `@appstrate/ssh` gets no minted key and no root install block: its
+ * `private_key` is an ordinary field the user must supply.
  */
-describe("hosted connect portal — provisioning outside a system package", () => {
+describe("hosted connect portal — the same manifest under another package id", () => {
   let ctx: TestContext;
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
-    await seedIntegration(ctx.orgId, await provisionedManifest("@myorg/ssh-fork"));
+    await seedIntegration(ctx.orgId, await sshManifest("@myorg/ssh-fork"));
   });
 
-  it("refuses the hosted form's render context", async () => {
-    const token = await mintSession(ctx, "@myorg/ssh-fork", "primary");
-    const start = await app.request(
-      `/api/integrations/connect/start?token=${encodeURIComponent(token)}`,
-      { redirect: "manual" },
-    );
+  it("serves the schema with private_key still asked for", async () => {
+    const { cookie } = await openConnectForm(ctx, "@myorg/ssh-fork", "primary");
     const res = await app.request("/api/integrations/connect/context", {
-      headers: { Cookie: `appstrate_connect=${readSetCookie(start)}` },
+      headers: { Cookie: cookie },
     });
-    expect(res.status).toBe(400);
-    expect(JSON.stringify(await res.json())).toMatch(/only system packages may/);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      auth: { credentials: { schema: { properties: Record<string, unknown> } } };
+    };
+    expect(Object.keys(body.auth.credentials.schema.properties)).toContain("private_key");
   });
 
-  it("refuses the programmatic import, even without a minted name in the body", async () => {
-    const res = await app.request(
-      "/api/integrations/@myorg/ssh-fork/auths/primary/connect/fields",
-      {
-        method: "POST",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ credentials: SSH_FORM_FIELDS }),
-      },
-    );
+  it("mints nothing on the hosted form: the missing private_key is refused", async () => {
+    // The bag the SSH package's form accepts (see the positive control above):
+    // here nothing fills `private_key`, so `required` refuses it.
+    const res = await submitConnectForm(ctx, "@myorg/ssh-fork", "primary", SSH_FORM_FIELDS);
     expect(res.status).toBe(400);
-    expect(JSON.stringify(await res.json())).toMatch(/only system packages may/);
 
     const rows = await db.select().from(integrationConnections);
     expect(rows).toHaveLength(0);
@@ -947,18 +944,18 @@ const boundApp = getTestApp({ modules: [orgBoundDelegate] });
  * the clear and a stored copy could drift from the key it claims to remove.
  */
 describe("me/connections/:id/handoff — the teardown half, derived", () => {
-  registerAsSystemPackage("@myorg/ssh");
+  registerSshAsSystemPackage();
   let ctx: TestContext;
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
-    await seedIntegration(ctx.orgId, await provisionedManifest("@myorg/ssh"));
+    await seedIntegration(ctx.orgId, await sshManifest());
     await seedIntegration(ctx.orgId, apiKeyManifest("@myorg/gmail"));
   });
 
   /** The only door onto a provisioning auth: the hosted form, which mints the key. */
   const connectSsh = async () => {
-    const res = await submitConnectForm(ctx, "@myorg/ssh", "primary", SSH_FORM_FIELDS);
+    const res = await submitConnectForm(ctx, SSH_ID, "primary", SSH_FORM_FIELDS);
     expect(res.status).toBe(200);
     return (await res.json()) as {
       connection: { id: string };
