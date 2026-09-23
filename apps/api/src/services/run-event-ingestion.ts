@@ -30,6 +30,7 @@ import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
+import { toPgSafe } from "@appstrate/db/pg-safe";
 import { getCache, getEventBuffer } from "../infra/index.ts";
 import type { EventBuffer } from "../infra/event-buffer/interface.ts";
 import { getEnv } from "@appstrate/env";
@@ -334,7 +335,9 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
 }
 
 async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
-  const { run, result } = input;
+  const { run } = input;
+  // Single choke point for the runner's finalize body and every synthesised one.
+  const result = toPgSafe(input.result);
   const scope = { orgId: run.orgId, spaceId: run.spaceId };
 
   // 1. Flush any buffered events before we close the sink.
