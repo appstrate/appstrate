@@ -939,13 +939,16 @@ describeRequiresDocker("runEphemeralCommand", () => {
 //
 // Pin containers are what stop a host-level `docker image prune -a` from
 // deleting the runtime images between runs (the deletion that puts a
-// multi-hundred-MB pull back on the run-boot critical path). Two invariants
-// matter and are both load-bearing:
+// multi-hundred-MB pull back on the run-boot critical path). Three invariants
+// matter and are all load-bearing:
 //   1. the pin converges — same image is a no-op, a drifted image is replaced
 //      (releases bump the tag, pins must follow or they protect nothing);
 //   2. the pin is NOT reaped by the per-run orphan sweep — it is durable
 //      infra, and the sweep force-removes everything labelled
-//      `appstrate.managed=true`.
+//      `appstrate.managed=true`;
+//   3. the pin never inherits the image HEALTHCHECK (#1521) — it runs
+//      `sleep`, not the image's process, so an inherited probe (the sidecar's
+//      wget :8080/health) marks every pin permanently unhealthy.
 
 describeRequiresDocker("ensureImagePin", () => {
   const SLOT = `test-${uid()}`;
@@ -955,14 +958,21 @@ describeRequiresDocker("ensureImagePin", () => {
   async function inspectPin(): Promise<{
     running: boolean;
     labels: Record<string, string>;
+    healthcheck: { Test?: string[] } | undefined;
+    health: unknown;
   } | null> {
     const res = await fetch(`${DOCKER_URL}/containers/${PIN_NAME}/json`);
     if (res.status === 404) return null;
     const data = (await res.json()) as {
-      State?: { Running?: boolean };
-      Config?: { Labels?: Record<string, string> };
+      State?: { Running?: boolean; Health?: unknown };
+      Config?: { Labels?: Record<string, string>; Healthcheck?: { Test?: string[] } };
     };
-    return { running: data.State?.Running === true, labels: data.Config?.Labels ?? {} };
+    return {
+      running: data.State?.Running === true,
+      labels: data.Config?.Labels ?? {},
+      healthcheck: data.Config?.Healthcheck,
+      health: data.State?.Health,
+    };
   }
 
   afterEach(async () => {
@@ -983,6 +993,9 @@ describeRequiresDocker("ensureImagePin", () => {
       expect(pin?.labels["appstrate.pin.image"]).toBe(IMAGE);
       // Durable infra must not carry the per-run reaper's label.
       expect(pin?.labels["appstrate.managed"]).toBeUndefined();
+      // No inherited HEALTHCHECK (#1521): Docker reports no health at all.
+      expect(pin?.healthcheck?.Test).toEqual(["NONE"]);
+      expect(pin?.health).toBeUndefined();
 
       // Converged — a second pass must not churn the container.
       expect(await ensureImagePin(IMAGE, SLOT)).toBe("unchanged");

@@ -211,9 +211,12 @@ export const IMAGE_PIN_PREFIX = "appstrate-imagepin-";
 /** Label carrying the image reference a pin container currently holds. */
 const IMAGE_PIN_IMAGE_LABEL = "appstrate.pin.image";
 
+/** Label carrying the fingerprint of the container config a pin was created from. */
+const IMAGE_PIN_SPEC_LABEL = "appstrate.pin.spec";
+
 interface PinInspectResult {
   id: string;
-  image: string;
+  spec: string;
   running: boolean;
 }
 
@@ -228,10 +231,11 @@ async function inspectPinContainer(name: string): Promise<PinInspectResult | nul
   };
   return {
     id: data.Id,
-    // Read the pin's own label, not `Config.Image`: Docker rewrites the
-    // latter to a digest in some versions, which would make every reconcile
-    // pass think the pin drifted and recreate it forever.
-    image: data.Config?.Labels?.[IMAGE_PIN_IMAGE_LABEL] ?? "",
+    // Read the pin's own label, not the inspected config: Docker rewrites
+    // `Config.Image` to a digest in some versions and fills in defaults
+    // elsewhere, which would make every reconcile pass think the pin drifted
+    // and recreate it forever.
+    spec: data.Config?.Labels?.[IMAGE_PIN_SPEC_LABEL] ?? "",
     running: data.State?.Running === true,
   };
 }
@@ -239,9 +243,10 @@ async function inspectPinContainer(name: string): Promise<PinInspectResult | nul
 /**
  * Reconcile one pin container for `image` under the stable slot name
  * `${IMAGE_PIN_PREFIX}${slot}`. Idempotent and convergent: a pin already
- * holding this exact reference and running is left alone; one holding a stale
- * reference (the usual case — a release bumped the image tag) is replaced, so
- * pins can never drift behind the images the platform actually launches.
+ * created from this exact spec and running is left alone; one whose spec
+ * drifted — image reference or container config, e.g. a release bumped the
+ * tag or changed the pin's config — is replaced, so pins can never drift
+ * behind the images the platform actually launches.
  *
  * Returns what the pass did, for the caller's log line.
  */
@@ -250,18 +255,8 @@ export async function ensureImagePin(
   slot: string,
 ): Promise<"unchanged" | "created" | "replaced"> {
   const name = `${IMAGE_PIN_PREFIX}${slot}`;
-  const existing = await inspectPinContainer(name);
 
-  if (existing && existing.image === image && existing.running) return "unchanged";
-
-  if (existing) {
-    // Wrong image, or right image but not running. Not-running still pins the
-    // image against `image prune`, but NOT against `container prune`, which
-    // reaps stopped containers wholesale — so converge on "running" either way.
-    await removeContainer(existing.id).catch(() => {});
-  }
-
-  const body = {
+  const config = {
     Image: image,
     // Override whatever the image declares — a pin must never run the real
     // runtime. `sleep infinity` is available in every runtime image we ship
@@ -269,6 +264,9 @@ export async function ensureImagePin(
     // reference, so a missing `sleep` degrades rather than breaks.
     Entrypoint: ["sleep"],
     Cmd: ["infinity"],
+    // A pin runs `sleep`, not the image's process, so the image's HEALTHCHECK
+    // can only lie (the sidecar's probes a port nothing listens on here).
+    Healthcheck: { Test: ["NONE"] },
     HostConfig: {
       // No network, no privileges, minimal resources: this process must be
       // incapable of doing anything except existing.
@@ -282,10 +280,29 @@ export async function ensureImagePin(
       // exactly when a nightly janitor would strike.
       RestartPolicy: { Name: "unless-stopped" },
     },
+  };
+  // Fingerprint the whole config (image included) so any change to what a pin
+  // should be — not just its tag — converges on the next pass.
+  const spec = new Bun.CryptoHasher("sha256").update(JSON.stringify(config)).digest("hex");
+
+  const existing = await inspectPinContainer(name);
+
+  if (existing && existing.spec === spec && existing.running) return "unchanged";
+
+  if (existing) {
+    // Stale spec, or right spec but not running. Not-running still pins the
+    // image against `image prune`, but NOT against `container prune`, which
+    // reaps stopped containers wholesale — so converge on "running" either way.
+    await removeContainer(existing.id).catch(() => {});
+  }
+
+  const body = {
+    ...config,
     Labels: {
       "appstrate.role": "image-pin",
       "appstrate.pin.slot": slot,
       [IMAGE_PIN_IMAGE_LABEL]: image,
+      [IMAGE_PIN_SPEC_LABEL]: spec,
     },
   };
 
