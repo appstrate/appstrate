@@ -1823,9 +1823,22 @@ in Découvrir, which is where you switch it back on.
   otherwise), and EVERY line of text to its right — title, description, then a
   muted meta line (provenance, and "Partagé par …" when a share waits). Nothing
   runs under the tile, and there is no footer rule.
-- **The card's state is top right**, where a store puts its "+" or its tick:
-  "✓ Actif ici" in the success tint, or "+ Ajouter" when the reader may add it
-  here, nothing when they may not. `CardItem` gained `icon`, `status` and
+- **The card's state is top right, in a column of its own**, where a store
+  puts its "+" or its tick, so the text wraps before it instead of running
+  underneath: "✓ Actif ici" in the success tint, or the deed that adds it.
+- **Adding always names the space** (`CatalogueAddButton`). One possible space
+  is one click, "+ Ajouter à Default"; several open "+ Ajouter ▾", the spaces
+  where it is not running and where the reader may add it, their own first and
+  marked "ici". Two deeds share the word, and the menu tells them apart: where
+  a share already waits ("Partage en attente"), adding takes it up and the
+  activation right there suffices; anywhere else, adding makes the READER
+  share it first, which their share right in the package's home allows — so a
+  member without that right sees only the spaces where a share waits. The mark
+  is a STATE on purpose: "Partagé par Julie" read as the condition for adding,
+  and the other spaces then looked forbidden. One space per click: checkboxes in a menu are heavier
+  for a rare gesture, and "Par espace" sets several at once. It used to read
+  "Ajouter" alone and mean "in the space the app is in", which the card never
+  said. `CardItem` gained `icon`, `status` and
   `meta`, all optional: lists that pass none keep their card as it was.
 - **No reserved second line under a description.** A grid row stretches every
   card to the tallest, so rows stay aligned without the empty line a one-line

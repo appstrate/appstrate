@@ -84,11 +84,6 @@ export function PackageCard({
                 </span>
               )}
               {type === "agent" && !!runningRuns && runningRuns > 0 && <Badge status="running" />}
-              {status && (
-                <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
-                  {status}
-                </div>
-              )}
               {type === "agent" && showRun && (
                 <div onClick={(e) => e.stopPropagation()}>
                   {/* Listed here IS runnable here: the index and the launch routes
@@ -114,11 +109,18 @@ export function PackageCard({
           {/* Under the description and still right of the icon: the text column
               never runs under the tile. */}
           {meta && (
-            <div className="text-muted-foreground mt-2 flex min-w-0 items-center gap-2 text-xs">
+            <div className="text-muted-foreground/80 mt-2 flex min-w-0 items-center gap-2 text-xs">
               {meta}
             </div>
           )}
         </div>
+        {/* Its own column, top-aligned with the title, the way a store's "+"
+            sits: the text wraps before it instead of running underneath. */}
+        {status && (
+          <div className="shrink-0 self-start" onClick={(e) => e.stopPropagation()}>
+            {status}
+          </div>
+        )}
       </div>
       {keywords?.length || (type !== "agent" && (usedByAgents ?? 0) > 0) ? (
         <ScrollArea className="mt-2 w-full">

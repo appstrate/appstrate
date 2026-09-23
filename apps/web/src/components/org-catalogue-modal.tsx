@@ -49,7 +49,6 @@ import {
   Inbox,
   Layers,
   LibraryBig,
-  Plus,
   Wrench,
 } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -101,6 +100,7 @@ import type { CardItem } from "../pages/package-list";
 import { CataloguePreview } from "./catalogue-preview";
 import { CatalogueMenuItems } from "./catalogue-row";
 import { CatalogueShared } from "./catalogue-shared";
+import { CatalogueAddButton } from "./catalogue-add-button";
 import { PageActionsMenu } from "./page-actions-menu";
 import { PanelDialog } from "./panel-dialog";
 import { PackageCollection } from "./package-collection";
@@ -479,7 +479,19 @@ export function OrgCatalogueModal({
           <Wrench className="size-5" aria-hidden />
         </span>
       );
-    const mayAddHere = spaceId ? mayActivateIn(item, spaceId) : false;
+    // Where this reader could still add it: not running it, and holding what
+    // adding there asks (`mayActivateIn`). The reader's own space comes first,
+    // as everywhere; a space where a share waits says so.
+    const addable = spaces
+      .filter(
+        (space) =>
+          !(placement?.activeIn.includes(space.id) ?? false) && mayActivateIn(item, space.id),
+      )
+      .map((space) => ({
+        id: space.id,
+        name: space.name,
+        pending: placement?.offeredIn.includes(space.id) ?? false,
+      }));
     // A share waiting on one of the reader's spaces is said on the card too:
     // browsing must not be the one reading where a decision stays invisible.
     const sharer = placement ? Object.values(placement.offeredBy).find(Boolean) : undefined;
@@ -494,18 +506,14 @@ export function OrgCatalogueModal({
           <Check className="size-3.5" aria-hidden />
           {t("catalogue.activeHere")}
         </span>
-      ) : mayAddHere && spaceId ? (
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-7 gap-1 px-2 text-xs"
-          disabled={activate.isPending}
-          onClick={() => void onSetActive(row, spaceId, true)}
-        >
-          <Plus className="size-3.5" aria-hidden />
-          {t("catalogue.addToSpace")}
-        </Button>
-      ) : null,
+      ) : (
+        <CatalogueAddButton
+          spaces={addable}
+          currentSpaceId={spaceId}
+          busy={activate.isPending}
+          onAdd={(targetSpaceId) => void onSetActive(row, targetSpaceId, true)}
+        />
+      ),
       meta: (
         <>
           <span className="truncate">
