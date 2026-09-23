@@ -83,9 +83,12 @@ jobs:
 
       - name: Resolve publish version
         id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            VERSION="$DISPATCH_VERSION"
           else
             VERSION="${GITHUB_REF_NAME#cli@}"
           fi
@@ -99,8 +102,9 @@ jobs:
           echo "tarball=appstrate-$VERSION.tgz" >> "$GITHUB_OUTPUT"
 
       - name: Write tag version into package.json
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
           jq --arg v "$VERSION" '.version = $v' package.json > package.json.tmp
           mv package.json.tmp package.json
           echo "Publishing appstrate@$VERSION"
@@ -183,8 +187,8 @@ jobs:
         # case. Retrying bunx is the wrong loop: in run 35872274810 each of its
         # 6 attempts failed within ~35 ms, i.e. likely without a fresh registry
         # read. So poll what bun sees (same URL and Accept header, no cache
-        # buster) for up to 12 min, the worst case plus slack; a curl error
-        # counts as "not yet".
+        # buster) for up to 12 min, the worst case plus slack; a curl error or
+        # a request hung past 30 s counts as "not yet".
         env:
           VERSION: ${{ steps.version.outputs.version }}
           WAIT_MINUTES: 12
@@ -192,7 +196,7 @@ jobs:
         run: |
           PACKUMENT_URL="https://registry.npmjs.org/appstrate"
           polls=0
-          until curl -fsS -H "Accept: application/vnd.npm.install-v1+json" "$PACKUMENT_URL" \
+          until curl -fsS --max-time 30 -H "Accept: application/vnd.npm.install-v1+json" "$PACKUMENT_URL" \
             | jq -e --arg v "$VERSION" '.versions[$v]' >/dev/null; do
             if [ "$SECONDS" -ge $((WAIT_MINUTES * 60)) ]; then
               echo "::error::npm publish succeeded, but appstrate@$VERSION was still not visible in the registry packument after $WAIT_MINUTES minutes. Do NOT republish or re-run this job (npm refuses an existing version): once the version appears, check it with 'bunx appstrate@$VERSION __install-source'."
