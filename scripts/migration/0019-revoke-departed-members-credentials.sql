@@ -86,8 +86,9 @@
 --                                          AND m.org_id::text = substr(r.uri, length(p.mcp_prefix) + 1))))
 --     ) AS access_tokens;
 --
--- Rows: UNMEASURED — not rehearsed against a restored dump. Do that first
--- (README requirement 4) and record the three counts the script prints.
+-- Rows: the pre-flight above COUNTED 0 / 0 / 0 on production read-only
+-- (2026-09-23). NOT rehearsed against a restored dump. Ran on production
+-- 2026-09-23 as a witness: before 0 / 0 / 0, after 0 / 0 / 0, COMMIT.
 
 BEGIN;
 SET LOCAL lock_timeout = '3s';
