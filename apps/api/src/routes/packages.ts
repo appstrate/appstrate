@@ -303,11 +303,8 @@ const packageFileOperationsSchema = z
         .strict(),
     ]),
   )
-  // No count ceiling: a client writes a whole working folder in ONE batch,
-  // under one `lock_version`, or not atomically at all. The real bounds are
-  // bytes and they are enforced where the bytes are — the global request body
-  // limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`file_too_large`)
-  // and the resulting tree (`tree_too_large`).
+  // No count ceiling, so a working folder is written in ONE batch; bytes are
+  // bounded by the body limit, `file_too_large` and `tree_too_large`.
   .min(1);
 
 export const packageJsonCreateSchema = z
@@ -355,7 +352,9 @@ export const packageJsonUpdateSchema = z
   })
   .strict();
 
-export const createVersionBodySchema = z.object({ version: z.string().min(1).optional() }).strict();
+export const createVersionBodySchema = z
+  .object({ version: z.string().min(1).optional(), lock_version: z.number().int().optional() })
+  .strict();
 
 /**
  * Body of `PUT /api/packages/{scope}/{name}/home` — the package's home space,
@@ -562,12 +561,8 @@ async function createVersionSafe(params: {
 interface PackageRouteConfig<T extends PackageType = PackageType> {
   cfg: PackageTypeConfig;
   /**
-   * URL path segment used for routing (e.g. "skills", "integrations"). Written
-   * as a literal because `verify:openapi` reads the routes this table mounts
-   * statically and resolves only literals; TYPED as the type's entry of
-   * `PACKAGE_TYPE_ROUTE_SEGMENT` (`@appstrate/core/package-files`), the map the
-   * SPA and the CLI address these routes through, so a segment that drifts
-   * from it does not compile.
+   * URL path segment. A literal, because `verify:openapi` resolves routes
+   * statically; typed as `PACKAGE_TYPE_ROUTE_SEGMENT`'s entry so it cannot drift.
    */
   path: (typeof PACKAGE_TYPE_ROUTE_SEGMENT)[T];
   /** Storage entry for the content field: primary text or the portable manifest. */
@@ -1374,9 +1369,11 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     // entirely when no override is chosen), so only read it when present;
     // a present-but-malformed body is a 400, not a silent no-override.
     let versionOverride: string | undefined;
+    let expectedLock: number | undefined;
     if (c.req.raw.body !== null) {
       const body = await readJsonBody(c, createVersionBodySchema);
       versionOverride = body.version;
+      expectedLock = body.lock_version;
     }
 
     const result = await createVersionFromDraft({
@@ -1384,6 +1381,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       orgId,
       userId: user.id,
       version: versionOverride,
+      lockVersion: expectedLock,
       // Validate the exact snapshot that will be published, including its
       // version override. The route's earlier read is not a coherent snapshot.
       // Stored manifests may carry retired tools; empty callable selections
@@ -1395,6 +1393,12 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     });
 
     if ("error" in result) {
+      if (result.error === "conflict") {
+        throw conflict(
+          "conflict",
+          "The draft changed since you read it. Reload it before publishing.",
+        );
+      }
       if (result.error === "no_changes") {
         throw conflict("no_changes", "No changes since the last version");
       }
@@ -2221,15 +2225,21 @@ export function createPackagesRouter() {
     return c.json(detail);
   });
 
-  // --- Where a package lives, read from anywhere the caller reaches ---
-  //
-  // The symmetric read of the move above. Every other package read answers
-  // from `X-Space-Id` alone, so a package homed in the caller's personal space
-  // and offered nowhere is invisible from every team space; this one resolves
-  // across `packageAccessSpaces(c)` and names the spaces to address instead.
-  // The 404 is `assertCatalogPackageAccess`'s, from the same predicate.
+  // --- Where a package lives: the read of the move above (`resolvePackageHome`) ---
   router.get(`/${SCOPED_PACKAGE_ROUTE}/home`, rowAuthority(), async (c) => {
-    return c.json(await resolvePackageHome(c, getItemId(c)));
+    const packageId = getItemId(c);
+    const home = await resolvePackageHome(c, packageId);
+    // A code of its own, so a client tells "no such package" from a route this
+    // instance does not serve (the `/api/*` fallback answers `not_found`).
+    if (!home) {
+      throw new ApiError({
+        status: 404,
+        code: "package_not_found",
+        title: "Not Found",
+        detail: `Package '${packageId}' not found`,
+      });
+    }
+    return c.json(home);
   });
 
   // --- Fork route ---
@@ -3082,11 +3092,7 @@ export function createPackagesRouter() {
       // as sensitive as the detail route — it needs the same `<type>:read`.
       await requirePackageReadPermission(c, pkg.type);
 
-      // The DRAFT is the author's working copy, and an author edits it here and
-      // through `…/files` byte for byte: fetching it whole is editing, not
-      // taking a copy away, so the copy restriction below does not stand
-      // between an author and their own draft. `downloadDraftArchive` asks the
-      // stricter question — write authority in the home.
+      // Before the copy restriction: see `downloadDraftArchive`.
       if (versionSpec === VERSION_SELECTOR_DRAFT) {
         return downloadDraftArchive(c, pkg);
       }

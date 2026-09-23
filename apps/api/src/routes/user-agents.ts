@@ -2,7 +2,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
@@ -18,6 +18,7 @@ import { logger } from "../lib/logger.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
+import { withPackageDraftLock } from "../services/package-draft-lock.ts";
 export const updateSkillsSchema = z
   .object({
     skillIds: z.array(z.string()).max(50),
@@ -47,24 +48,36 @@ async function resolveCaretRanges(orgId: string, ids: string[]): Promise<Record<
   return result;
 }
 
-/** Update the skills dep section in the manifest. */
+/**
+ * Update the skills dep section in the manifest. A write to the DRAFT like any
+ * other, so it takes the draft lock and moves `lock_version`: a client holding
+ * the previous token (the editor, `appstrate packages push`) must be refused,
+ * not allowed to write its stale manifest back over this change.
+ */
 async function updateManifestDeps(orgId: string, packageId: string, ids: string[]): Promise<void> {
-  const [row] = await db
-    .select({ draftManifest: packages.draftManifest })
-    .from(packages)
-    .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId)))
-    .limit(1);
-  if (!row) return;
+  const skills = await resolveCaretRanges(orgId, ids);
+  await withPackageDraftLock(packageId, async (tx) => {
+    const [row] = await tx
+      .select({ draftManifest: packages.draftManifest })
+      .from(packages)
+      .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId)))
+      .limit(1);
+    if (!row) return;
 
-  const manifest = asRecord(row.draftManifest);
-  const deps = asRecord(manifest.dependencies);
-  deps.skills = await resolveCaretRanges(orgId, ids);
-  manifest.dependencies = deps;
+    const manifest = asRecord(row.draftManifest);
+    const deps = asRecord(manifest.dependencies);
+    deps.skills = skills;
+    manifest.dependencies = deps;
 
-  await db
-    .update(packages)
-    .set({ draftManifest: manifest, updatedAt: new Date() })
-    .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
+    await tx
+      .update(packages)
+      .set({
+        draftManifest: manifest,
+        updatedAt: new Date(),
+        lockVersion: sql`${packages.lockVersion} + 1`,
+      })
+      .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
+  });
 }
 
 export function createUserAgentsRouter() {

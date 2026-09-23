@@ -516,11 +516,7 @@ function assertPackageIsReachable(
  * Every space of the caller's reach this package is READ from — the type's
  * read permission held there ({@link packageReadPermissions}) and the placement
  * granting it there ({@link placementGrantsRead}); every such space for a
- * system package, which the platform places everywhere.
- *
- * The reachability rule is "this set is not empty", so the refusal above and
- * the listing {@link resolvePackageHome} publishes cannot disagree about a
- * single space.
+ * system package, which the platform places everywhere. Reachable = non-empty.
  */
 function packageReadSpaces(
   pkg: PackageAccessRow,
@@ -544,8 +540,8 @@ function packageReadSpaces(
  * offered nowhere is a 404 from every team space. A client holding only an id
  * — the CLI, pointed at a working folder — asks here which space to address.
  *
- * 404 exactly when {@link assertCatalogPackageAccess} would refuse, from the
- * same three reads. `home_*` is {@link homeWireForCaller}, so a home the caller
+ * `null` exactly when {@link assertCatalogPackageAccess} would refuse, from the
+ * same predicate. `home_*` is {@link homeWireForCaller}, so a home the caller
  * does not reach stays `null` even when a share makes the package readable;
  * `read_space_ids` puts the home first when it is one of them, then sorts by
  * id so the answer does not depend on row order.
@@ -553,16 +549,18 @@ function packageReadSpaces(
 export async function resolvePackageHome(
   c: Context<AppEnv>,
   packageId: string,
-): Promise<PackageHome> {
+): Promise<PackageHome | null> {
   const orgId = c.get("orgId");
   const [pkg, accessible, sharedIn] = await Promise.all([
-    loadPackageRow(packageId, orgId),
+    findPackageRow(packageId, orgId),
     packageAccessSpaces(c),
     loadPackageShares(packageId, orgId),
   ]);
-  assertPackageIsReachable(packageId, pkg, sharedIn, accessible);
+  if (!pkg) return null;
+  const readSpaces = packageReadSpaces(pkg, sharedIn, accessible);
+  if (readSpaces.length === 0) return null;
   const rank = (id: string) => (id === pkg.homeSpaceId ? 0 : 1);
-  const readSpaceIds = packageReadSpaces(pkg, sharedIn, accessible)
+  const readSpaceIds = readSpaces
     .map((space) => space.id)
     .sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0));
   return {

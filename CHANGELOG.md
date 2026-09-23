@@ -20,11 +20,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   never sent, never deleted from the draft and never written by a pull.
   `push --create` creates a package through the import route and says it
   publishes the first version. `publish` picks the version exactly as the
-  dashboard's dialog does (`--bump patch|minor|major`, or `--version`).
+  dashboard's dialog does (`--bump patch|minor|major`).
 - **`GET /api/packages/{scope}/{name}/home`** — a package's type, home space and
   the spaces the caller reads it from, resolved by id alone across every space
   the caller reaches. A package homed in a personal space is found from a team
-  space; an id the caller cannot read is a 404, exactly as in the catalog.
+  space; an id the caller cannot read is `404 package_not_found`, exactly
+  where the catalog refuses it.
 - **`GET /api/packages/{scope}/{name}/draft/download`** — the draft as one
   archive, for whoever may write the package (`403 draft_not_writable`
   otherwise). An author fetching their own draft is editing it, so
@@ -37,14 +38,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   operations used to accept at most 200, so a large edit had to be split into
   several non-atomic writes. The real bounds are unchanged: the request body
   limit, 1 MiB per written file and the tree limits.
-- **Publishing identical content under a new version number is refused.** A
-  version bump (the publish dialog's patch/minor/major, or a `version` edited
-  into the manifest) with no other change now answers `409 no_changes`, in the
-  dashboard as in the CLI. Before, the new number alone changed the archive's
-  digest and the same content was published again under every bump.
+- **A bumped version of unchanged content is refused.** The publish dialog's
+  patch/minor/major bump (and `appstrate packages publish --bump`) with nothing
+  else changed now answers `409 no_changes`. Before, the bumped number alone
+  changed the archive's digest and the same content was published again under
+  every bump. A version the author writes into the manifest (promoting
+  `1.0.0-rc.1` to `1.0.0`, say) is still theirs to cut.
+- **Publishing can be pinned to the draft the caller read.** The versions
+  endpoint accepts `lock_version`; a draft that moved since is refused with
+  `409 conflict` instead of being published unseen. The dashboard's publish
+  dialog and `appstrate packages publish` both send it.
 
 ### Fixed
 
+- **Setting an agent's skills moves the draft's lock.** The agent skills
+  endpoint rewrote the draft manifest without the draft lock or a new
+  `lock_version`, so a client holding the previous token could write its stale
+  manifest back over the change.
 - **A change to a package's annex files alone can be published from the
   dashboard.** Its publish button compared only the manifest and the main
   content file, so an edit to any other file left it disabled. It now follows

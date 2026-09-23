@@ -202,7 +202,7 @@ export function SharePackageDialog({
     const offer = needsVersion;
     if (!offer) return;
     try {
-      const created = await publish.mutateAsync(undefined);
+      const created = await publish.mutateAsync({});
       toast.success(t("packages.sharePublished", { version: created.version }));
       setNeedsVersion(null);
       submit(offer);

@@ -662,14 +662,12 @@ packagesGroup
     "--bump <segment>",
     "patch, minor or major: bumped from the latest version when the draft still carries it (default: patch)",
   )
-  .option("--version <version>", "Exact version to cut, bypassing the version rule")
-  .action(async (target: string, opts: { bump?: string; version?: string }) => {
+  .action(async (target: string, opts: { bump?: string }) => {
     const globalOpts = program.opts<{ profile?: string }>();
     await packagesPublishCommand({
       profile: globalOpts.profile,
       package: target,
       bump: opts.bump,
-      version: opts.version,
     });
   });
 

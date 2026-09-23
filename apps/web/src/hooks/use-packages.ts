@@ -33,10 +33,8 @@ import type {
 
 // --- Packages — one factory over the four types ---
 //
-// Each type's URL segment is `PACKAGE_TYPE_ROUTE_SEGMENT`
-// (`@appstrate/core/package-files`), the declaration the API mounts its routes
-// from. It is `as const`, so the template paths below stay literal and the typed
-// client still resolves each one to its operation.
+// `PACKAGE_TYPE_ROUTE_SEGMENT` is `as const`, so the template paths below stay
+// literal and the typed client still resolves each one to its operation.
 
 type PackageDetailMap = {
   agent: AgentDetail;
@@ -413,11 +411,26 @@ export function useCreateVersion(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
-    mutationFn: async (version?: string): Promise<{ id: number; version: string }> => {
+    /**
+     * `version` overrides the draft manifest's; `lockVersion` is the draft the
+     * caller looked at — a draft moved since is refused (`409 conflict`) rather
+     * than published unseen.
+     */
+    mutationFn: async ({
+      version,
+      lockVersion,
+    }: { version?: string; lockVersion?: number } = {}): Promise<{
+      id: number;
+      version: string;
+    }> => {
       // 201 → the created version resource, bare (issue #657).
+      const body = {
+        ...(version ? { version } : {}),
+        ...(lockVersion !== undefined ? { lock_version: lockVersion } : {}),
+      };
       const { data } = await client.POST(`/api/packages/${segment}/{scope}/{name}/versions`, {
         params: { path: splitPackageRef(packageId) },
-        body: version ? { version } : undefined,
+        body: Object.keys(body).length > 0 ? body : undefined,
       });
       return { id: data!.id, version: data!.version };
     },

@@ -687,7 +687,7 @@ describe("package-versions service", () => {
       expect(await downloadVersionZip(pkg.id, "2.0.0", row!.integrity)).not.toBeNull();
     });
 
-    it("createVersionFromDraft answers no_changes to a new number over unchanged content", async () => {
+    it("createVersionFromDraft answers no_changes to a bump over an unchanged draft", async () => {
       const id = `@${orgSlug}/bump-only`;
       const pkg = await seedPackage({
         orgId,
@@ -708,14 +708,6 @@ describe("package-versions service", () => {
       });
       expect(bumped).toEqual({ error: "no_changes" });
 
-      // Nor under a number edited into the draft manifest itself.
-      await db
-        .update(packages)
-        .set({ draftManifest: { name: id, version: "1.0.1", type: "agent" } })
-        .where(eq(packages.id, pkg.id));
-      const edited = await createVersionFromDraft({ packageId: pkg.id, orgId, userId });
-      expect(edited).toEqual({ error: "no_changes" });
-
       // With a real change, the bump publishes.
       await db
         .update(packages)
@@ -728,6 +720,55 @@ describe("package-versions service", () => {
         version: "1.0.1",
       });
       expect(changed).toMatchObject({ version: "1.0.1" });
+    });
+
+    it("createVersionFromDraft cuts nothing when the draft moved past the caller's lock", async () => {
+      const id = `@${orgSlug}/locked-publish`;
+      const pkg = await seedPackage({
+        orgId,
+        id,
+        draftManifest: { name: id, version: "1.0.0", type: "agent" },
+        draftContent: "prompt",
+      });
+      const [row] = await db
+        .select({ lockVersion: packages.lockVersion })
+        .from(packages)
+        .where(eq(packages.id, pkg.id));
+      const stale = await createVersionFromDraft({
+        packageId: pkg.id,
+        orgId,
+        userId,
+        lockVersion: row!.lockVersion - 1,
+      });
+      expect(stale).toEqual({ error: "conflict" });
+      const current = await createVersionFromDraft({
+        packageId: pkg.id,
+        orgId,
+        userId,
+        lockVersion: row!.lockVersion,
+      });
+      expect(current).toMatchObject({ version: "1.0.0" });
+    });
+
+    it("createVersionFromDraft cuts a version the author wrote, even over unchanged content", async () => {
+      // Promoting a prerelease is a number, not a content change — and the
+      // author's own act, which the bump dedup must not refuse.
+      const id = `@${orgSlug}/promoted`;
+      const pkg = await seedPackage({
+        orgId,
+        id,
+        draftManifest: { name: id, version: "1.0.0-rc.1", type: "agent" },
+        draftContent: "prompt",
+      });
+      expect("error" in (await createVersionFromDraft({ packageId: pkg.id, orgId, userId }))).toBe(
+        false,
+      );
+      await db
+        .update(packages)
+        .set({ draftManifest: { name: id, version: "1.0.0", type: "agent" } })
+        .where(eq(packages.id, pkg.id));
+      const promoted = await createVersionFromDraft({ packageId: pkg.id, orgId, userId });
+      expect(promoted).toMatchObject({ version: "1.0.0" });
     });
 
     it("createVersionFromDraft answers version_exists when content changed without a version bump", async () => {

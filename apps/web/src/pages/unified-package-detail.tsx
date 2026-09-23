@@ -614,6 +614,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         type={type}
         packageId={packageId}
         hasUnarchivedChanges={hasTimestampChanges}
+        lockVersion={(agentDetail ?? pkgDetail)?.lock_version}
       />
 
       <ForkPackageModal

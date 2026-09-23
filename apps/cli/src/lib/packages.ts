@@ -20,7 +20,7 @@ import {
 import { decodePackageFileText } from "@appstrate/core/package-file-operations";
 import { packageTypeEnum, type PackageType } from "@appstrate/core/validation";
 import { isSafeArchivePath } from "@appstrate/core/zip";
-import { apiFetch, ApiError } from "./api.ts";
+import { apiFetch, ApiError, problemFields } from "./api.ts";
 import { getDataDir } from "./config.ts";
 import { withFileLock } from "./file-lock.ts";
 import { SIGNATURE_RECORD } from "./package-definition.ts";
@@ -52,7 +52,13 @@ export async function resolvePackage(
       `/api/packages/${encodePackageIdPath(packageId)}/home`,
     );
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return null;
+    if (err instanceof ApiError && err.status === 404) {
+      if (problemFields(err.body).code === "package_not_found") return null;
+      throw new Error(
+        "This instance does not serve GET /api/packages/{scope}/{name}/home: it is older than this CLI. Update the instance, or use a CLI of its version.",
+        { cause: err },
+      );
+    }
     throw err;
   }
 }
@@ -97,13 +103,19 @@ export async function readDraftState(profileName: string, home: PackageHome): Pr
 
 /** A detail or update response, narrowed to what the loop needs from it. */
 export function draftStateOf(packageId: string, detail: DraftDetail): DraftState {
-  if (typeof detail.lock_version !== "number" || !detail.manifest) {
-    throw new Error(`${packageId}: the draft detail carries no lock_version or manifest.`);
+  if (
+    typeof detail.lock_version !== "number" ||
+    !detail.manifest ||
+    typeof detail.has_unarchived_changes !== "boolean"
+  ) {
+    throw new Error(
+      `${packageId}: the draft detail carries no lock_version, manifest or has_unarchived_changes.`,
+    );
   }
   return {
     lockVersion: detail.lock_version,
     manifest: detail.manifest,
-    hasUnpublishedChanges: detail.has_unarchived_changes !== false,
+    hasUnpublishedChanges: detail.has_unarchived_changes,
   };
 }
 
@@ -122,10 +134,8 @@ export function isIgnoredPath(path: string): boolean {
 
 /**
  * Every non-ignored file under `dir` → its path on disk, keyed by its NFC,
- * `/`-joined path, as the archive would name it. A symlink is refused, naming
- * it: what it points at is not the folder's to send, and silently skipping it
- * would push a package missing a file its author sees. `ignored`, when given,
- * collects each ignored entry left out (a folder once, not its contents).
+ * `/`-joined archive path. A symlink is refused by name, never skipped.
+ * `ignored`, when given, collects each ignored entry left out.
  */
 export async function listFolderFiles(
   dir: string,
@@ -172,11 +182,8 @@ export async function listFolderFiles(
 }
 
 /**
- * {@link listFolderFiles}, read — after refusing, naming the file and before
- * any byte leaves the machine, a path no package can carry. Size is not judged
- * here: a draft may hold a file over the per-file write limit (an import is
- * bounded by the archive only), and only a file the folder WRITES must fit it
- * ({@link toOperations}).
+ * {@link listFolderFiles}, read, after refusing a path no package can carry.
+ * Size is judged only on what a push writes ({@link toOperations}).
  */
 export async function readPackageFolder(dir: string): Promise<PackageFiles> {
   const found = await listFolderFiles(dir);
@@ -238,15 +245,10 @@ export function byCodeUnit(a: string, b: string): number {
 }
 
 /**
- * File-by-file comparison of a folder to a definition. Ignored paths are out of
- * it on both sides, so a dotfile in the draft is neither deleted nor reported.
- * Paths are matched in NFC, the form the folder is read in, so a draft path in
- * another normalization is the same file, not a removal plus an addition; a
- * change keeps the draft's own spelling, so a write replaces that entry and a
- * delete names it. `manifest.json` counts — an agent's, an integration's or an
- * MCP server's configuration lives there — compared as JSON, so formatting
- * alone is not a change; a folder without one does not author its manifest,
- * and the draft's is then not compared at all.
+ * File-by-file comparison of a folder to a definition. Ignored paths are out on
+ * both sides. Paths match in NFC but a change keeps the draft's own spelling, so
+ * writes and deletes name the entry the draft holds. `manifest.json` is compared
+ * as JSON, and not at all when the folder has none (it does not author it).
  */
 export function diffFiles(local: PackageFiles, remote: PackageFiles): FileChange[] {
   const authorsManifest = PACKAGE_MANIFEST_FILE in local;
@@ -405,14 +407,14 @@ async function readLockTable(profileName: string): Promise<LockTable> {
 
 async function updateLockTable(
   profileName: string,
-  mutate: (table: LockTable) => void,
+  mutate: (table: LockTable) => void | Promise<void>,
 ): Promise<void> {
   await withFileLock(
     locksMutexPath(profileName),
     "packages lock update",
     async () => {
       const table = await readLockTable(profileName);
-      mutate(table);
+      await mutate(table);
       const path = locksPath(profileName);
       await mkdir(join(path, ".."), { recursive: true, mode: 0o700 });
       await writeFileAtomic(path, `${JSON.stringify(table, null, 2)}\n`, { mode: 0o600 });
@@ -452,21 +454,24 @@ export async function forgetLock(profileName: string, dir: string): Promise<void
 }
 
 /**
- * Move every folder of `packageId` that saw the draft at `from` to `to`, and
- * return those folders. For a draft change the platform made itself (a publish
- * rewriting the manifest's version) that every folder current with it has
- * therefore seen.
+ * Move every folder of `packageId` that saw the draft at `from` to `to` — for
+ * a draft change the platform made itself (a publish rewriting the manifest's
+ * version) — once `carry` has brought the folder along. A folder `carry` could
+ * not update keeps its lock, so its next push is refused rather than silently
+ * undoing the change. Returns the folders moved.
  */
 export async function advanceLocks(
   profileName: string,
   packageId: string,
   from: number,
   to: number,
+  carry: (dir: string) => Promise<boolean>,
 ): Promise<string[]> {
   const moved: string[] = [];
-  await updateLockTable(profileName, (table) => {
+  await updateLockTable(profileName, async (table) => {
     for (const [dir, entry] of Object.entries(table)) {
       if (entry.packageId !== packageId || entry.lock !== from) continue;
+      if (!(await carry(dir))) continue;
       table[dir] = { packageId, lock: to };
       moved.push(dir);
     }

@@ -1006,6 +1006,11 @@ export const packagesPaths = {
                   minLength: 1,
                   description: "Optional semver version override (e.g. from bump selector)",
                 },
+                lock_version: {
+                  type: "integer",
+                  description:
+                    "Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at.",
+                },
               },
               additionalProperties: false,
             },
@@ -1606,6 +1611,11 @@ export const packagesPaths = {
                   minLength: 1,
                   description: "Optional semver version override (e.g. from bump selector)",
                 },
+                lock_version: {
+                  type: "integer",
+                  description:
+                    "Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at.",
+                },
               },
               additionalProperties: false,
             },
@@ -1763,7 +1773,11 @@ export const packagesPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description:
+            "`package_not_found`: no package with this id that the caller can read. (An unknown route answers `not_found`.)",
+        },
       },
     },
     put: {
@@ -2275,6 +2289,11 @@ export const packagesPaths = {
                   minLength: 1,
                   description: "Optional semver version override (e.g. from bump selector)",
                 },
+                lock_version: {
+                  type: "integer",
+                  description:
+                    "Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at.",
+                },
               },
               additionalProperties: false,
             },
@@ -2715,6 +2734,11 @@ export const packagesPaths = {
                   type: "string",
                   minLength: 1,
                   description: "Optional semver version override (e.g. from bump selector)",
+                },
+                lock_version: {
+                  type: "integer",
+                  description:
+                    "Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at.",
                 },
               },
               additionalProperties: false,

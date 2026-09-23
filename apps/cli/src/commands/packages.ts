@@ -474,8 +474,10 @@ async function pruneEmptyParents(from: string, root: string): Promise<void> {
   while (current !== root && current.startsWith(root)) {
     try {
       await rmdir(current);
-    } catch {
-      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOTEMPTY" || code === "EEXIST" || code === "ENOENT") return;
+      throw err;
     }
     current = dirname(current);
   }
@@ -803,7 +805,10 @@ async function createPackage(
     }
     throw err;
   }
-  const createdId = typeof created.packageId === "string" ? created.packageId : packageId;
+  if (typeof created.packageId !== "string") {
+    throw new Error(`${packageId}: the import response carries no packageId.`);
+  }
+  const createdId = created.packageId;
   const home = await resolvePackage(session.profileName, createdId);
   if (!home) throw new Error(`${createdId} was created, but it cannot be read back.`);
   const state = await readDraftState(session.profileName, home);
@@ -829,8 +834,6 @@ export interface PackagesPublishOptions {
   package: string;
   /** Segment bumped when the draft still carries the published version. Default `patch`, as in the dashboard. */
   bump?: string;
-  /** Exact version to cut, bypassing the version rule. */
-  version?: string;
 }
 
 const BUMPS: readonly VersionBump[] = ["patch", "minor", "major"];
@@ -869,9 +872,6 @@ export async function packagesPublishCommand(
   try {
     const bump = opts.bump ?? "patch";
     if (!isBump(bump)) throw new Error(`--bump must be one of ${BUMPS.join(", ")}.`);
-    if (opts.bump !== undefined && opts.version !== undefined) {
-      throw new Error("Pass --bump or --version, not both.");
-    }
     const { packageId, folder } = await publishTarget(session, opts.package);
     const home = await resolvePackage(session.profileName, packageId);
     if (!home) throw new Error(`${packageId}: no package with this id that you can read.`);
@@ -912,59 +912,57 @@ export async function packagesPublishCommand(
       );
     }
 
-    let override = opts.version;
-    let target = opts.version;
-    if (override === undefined) {
-      const info = await apiFetch<PackageVersionInfoResponse>(
-        session.profileName,
-        `${route}/versions/info`,
-        inHome,
+    const info = await apiFetch<PackageVersionInfoResponse>(
+      session.profileName,
+      `${route}/versions/info`,
+      inHome,
+    );
+    const plan = planPublishVersion(info.active_version, info.latest_published_version, bump);
+    if (plan.kind === "none") {
+      throw new Error(
+        `The draft manifest of ${packageId} has no valid \`version\`${info.active_version ? ` ("${info.active_version}")` : ""}. Set one in manifest.json and push.`,
       );
-      const plan = planPublishVersion(info.active_version, info.latest_published_version, bump);
-      if (plan.kind === "none") {
-        throw new Error(
-          `The draft manifest of ${packageId} has no valid \`version\`${info.active_version ? ` ("${info.active_version}")` : ""}. Set one in manifest.json and push, or pass --version.`,
-        );
-      }
-      if (plan.kind === "blocked") {
-        throw new Error(
-          `The draft of ${packageId} is at ${info.active_version}, behind the latest published ${info.latest_published_version}, and versions only move forward. Set a \`version\` above ${info.latest_published_version} in manifest.json and push, or pass --version.`,
-        );
-      }
-      override = plan.override;
-      target = plan.target;
     }
+    if (plan.kind === "blocked") {
+      throw new Error(
+        `The draft of ${packageId} is at ${info.active_version}, behind the latest published ${info.latest_published_version}, and versions only move forward. Set a \`version\` above ${info.latest_published_version} in manifest.json and push.`,
+      );
+    }
+    const { override, target } = plan;
 
+    // `lock_version`: the version cut is the draft read above — a draft moved
+    // since (a push landing in between) is refused, never published unseen.
     let created: { version?: unknown };
     try {
       created = await apiFetch<{ version?: unknown }>(session.profileName, `${route}/versions`, {
         method: "POST",
-        body: JSON.stringify(override !== undefined ? { version: override } : {}),
+        body: JSON.stringify({
+          ...(override !== undefined ? { version: override } : {}),
+          lock_version: before.lockVersion,
+        }),
         ...inHome,
       });
     } catch (err) {
       if (err instanceof ApiError) throw publishRefusal(err, packageId, target);
       throw err;
     }
-    const version = typeof created.version === "string" ? created.version : (target ?? "?");
+    if (typeof created.version !== "string") {
+      throw new Error(`${packageId}: the publish response carries no version.`);
+    }
+    const version = created.version;
 
-    // An override rewrites the draft manifest's version — only when nobody
-    // wrote the draft in between — which moves its lock by one: every folder
-    // current with the draft still is, once its manifest carries the new
-    // version too. A lock that moved for any other reason (a concurrent push is
-    // ALSO one step) is an edit those folders never saw, so they stay behind.
+    // The server rewrote the draft's version only if the lock moved by exactly
+    // one AND the draft now carries it; anything else is an edit folders never saw.
     if (override !== undefined && before.manifest.version !== version) {
       const after = await readDraftState(session.profileName, home);
       if (after.lockVersion === before.lockVersion + 1 && after.manifest.version === version) {
-        const folders = await advanceLocks(
+        await advanceLocks(
           session.profileName,
           packageId,
           before.lockVersion,
           after.lockVersion,
+          (dir) => carryVersion(dir, before.manifest.version, version, io),
         );
-        for (const dir of folders) {
-          await carryVersion(dir, before.manifest.version, version, io);
-        }
       }
     }
     io.stdout.write(`Published ${packageId}@${version}\n`);
@@ -981,24 +979,31 @@ export async function packagesPublishCommand(
  * without a manifest has none to carry. Any other failure is a warning: the
  * version is published, and that is not undone by a folder it could not update.
  */
-async function carryVersion(dir: string, from: unknown, to: string, io: CommandIO): Promise<void> {
+async function carryVersion(
+  dir: string,
+  from: unknown,
+  to: string,
+  io: CommandIO,
+): Promise<boolean> {
   const path = join(dir, PACKAGE_MANIFEST_FILE);
   try {
     let raw: Uint8Array;
     try {
       raw = new Uint8Array(await readFile(path));
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return true;
       throw err;
     }
     const manifest = folderManifest({ [PACKAGE_MANIFEST_FILE]: raw });
-    if (!manifest || manifest.version !== from) return;
+    if (!manifest || manifest.version !== from) return true;
     await writeFile(path, manifestFileText({ ...manifest, version: to }));
     io.stderr.write(`Updated the version in ${path} to ${to}.\n`);
+    return true;
   } catch (err) {
     io.stderr.write(
-      `warning: could not carry version ${to} into ${dir}: ${formatError(err)}. Set it in ${PACKAGE_MANIFEST_FILE} by hand.\n`,
+      `warning: could not carry version ${to} into ${dir}: ${formatError(err)}. Pull it again before pushing from it.\n`,
     );
+    return false;
   }
 }
 
@@ -1008,12 +1013,17 @@ function publishRefusal(err: ApiError, packageId: string, target: string | undef
   switch (code) {
     case "version_exists":
       return new Error(
-        `Version${cut} of ${packageId} is already published. Set a higher \`version\` in manifest.json and push, or pass --version.`,
+        `Version${cut} of ${packageId} is already published. Set a higher \`version\` in manifest.json and push.`,
         { cause: err },
       );
     case "no_changes":
       return new Error(
         `Nothing changed in the draft of ${packageId} since its latest version: there is nothing to publish.`,
+        { cause: err },
+      );
+    case "conflict":
+      return new Error(
+        `The draft of ${packageId} changed while this command read it (a push or an edit landed in between): nothing was published. Check it and publish again.`,
         { cause: err },
       );
     case "agent_in_use":

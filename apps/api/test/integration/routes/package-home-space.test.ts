@@ -1306,8 +1306,10 @@ describe("GET /api/packages/{scope}/{name}/home", () => {
     // Gamma's builder reaches Gamma alone, and the package is placed in Alpha
     // and Beta: an existing id answers what a missing one does.
     const gamma = await memberIn(gammaId, "builder");
-    await expectProblem(await locate(gamma), 404);
-    await expectProblem(await locate(owner(), "@homes/missing"), 404);
+    await expectProblem(await locate(gamma), 404, { code: "package_not_found" });
+    await expectProblem(await locate(owner(), "@homes/missing"), 404, {
+      code: "package_not_found",
+    });
   });
 
   it("reads a system package from every space the caller holds the type's read in", async () => {

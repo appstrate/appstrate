@@ -72,6 +72,8 @@ interface FakePackage {
    * the server, seeing the draft written in between, leaves its version alone.
    */
   concurrentPushOnPublish?: boolean;
+  /** A push lands after the CLI read the draft and before it publishes. */
+  pushBetweenReadAndPublish?: boolean;
 }
 
 interface Seen {
@@ -98,7 +100,8 @@ function zipOf(files: Tree): Uint8Array {
   );
 }
 
-function createPackageServer(packages: FakePackage[]) {
+/** `homeRoute: false` is an instance older than `GET …/home`: its `/api/*` fallback answers. */
+function createPackageServer(packages: FakePackage[], { homeRoute = true } = {}) {
   const seen: Seen[] = [];
   const byId = (scope: string, name: string) =>
     packages.find((p) => p.id === `${decodeURIComponent(scope)}/${decodeURIComponent(name)}`);
@@ -151,6 +154,7 @@ function createPackageServer(packages: FakePackage[]) {
 
     const home = path.match(/^\/api\/packages\/(@[^/]+)\/([^/]+)\/home$/);
     if (home) {
+      if (!homeRoute) return problem(404, "not_found", `API endpoint not found: GET ${path}`);
       const p = byId(home[1]!, home[2]!);
       if (!p) return problem(404, "package_not_found", "Package not found");
       return json({
@@ -203,12 +207,17 @@ function createPackageServer(packages: FakePackage[]) {
       }
       const tail = typed[4];
       if (!tail && method === "GET") {
-        return json({
+        const read = json({
           id: p.id,
           lock_version: p.draft.lock,
           manifest: p.draft.manifest,
           has_unarchived_changes: p.draft.unpublished ?? true,
         });
+        if (p.pushBetweenReadAndPublish) {
+          p.pushBetweenReadAndPublish = false;
+          p.draft.lock += 1;
+        }
+        return read;
       }
       if (!tail && method === "PUT") {
         const body = JSON.parse(init!.body as string) as {
@@ -243,7 +252,12 @@ function createPackageServer(packages: FakePackage[]) {
           p.concurrentWriteAfterPut = false;
           p.draft.lock += 1;
         }
-        return json({ id: p.id, lock_version: p.draft.lock, manifest: p.draft.manifest });
+        return json({
+          id: p.id,
+          lock_version: p.draft.lock,
+          manifest: p.draft.manifest,
+          has_unarchived_changes: true,
+        });
       }
       if (tail === "/versions/info") {
         return json({
@@ -252,8 +266,14 @@ function createPackageServer(packages: FakePackage[]) {
         });
       }
       if (tail === "/versions" && method === "POST") {
-        const body = JSON.parse(init!.body as string) as { version?: string };
+        const body = JSON.parse(init!.body as string) as {
+          version?: string;
+          lock_version?: number;
+        };
         entry.body = body;
+        if (body.lock_version !== undefined && body.lock_version !== p.draft.lock) {
+          return problem(409, "conflict", "The draft changed since you read it.");
+        }
         if (p.publishError) {
           return problem(p.publishError.status, p.publishError.code, "Refused by the stand-in");
         }
@@ -736,6 +756,20 @@ describe("packages push", () => {
     expect(await readLock("default", dir, "@acme/pdf")).toBe(4);
   });
 
+  it("does not take an instance older than GET …/home for a missing package", async () => {
+    const server = createPackageServer([], { homeRoute: false });
+    server.install();
+    const dir = join(root, "fresh");
+    await mkdir(dir);
+    await writeFile(join(dir, "SKILL.md"), "---\nname: fresh\ndescription: New.\n---\nBody.\n");
+    const { io, stderr } = createMemoryIO();
+
+    await expect(packagesPushCommand({ dir, create: true }, io)).rejects.toBeInstanceOf(ExitError);
+
+    expect(stderr()).toContain("older than this CLI");
+    expect(server.seen.some((s) => s.path === "/api/packages/import")).toBe(false);
+  });
+
   it("creates a missing package through the import route only with --create", async () => {
     const server = createPackageServer([]);
     server.install();
@@ -779,7 +813,7 @@ describe("packages publish", () => {
 
     expect(
       server.seen.find((s) => s.path.endsWith("/versions") && s.method === "POST")?.body,
-    ).toEqual({ version: "1.1.0" });
+    ).toEqual({ version: "1.1.0", lock_version: 3 });
     expect(stdout()).toContain("Published @acme/pdf@1.1.0");
     expect(JSON.parse(await text(join(dir, "manifest.json"))).version).toBe("1.1.0");
     expect(await readLock("default", dir, "@acme/pdf")).toBe(4);
@@ -828,15 +862,33 @@ describe("packages publish", () => {
     const dir = join(root, "pdf");
     await pulled(pkg, dir);
     await writeFile(join(dir, "manifest.json"), "{ not json");
+    const seen = await readLock("default", dir, "@acme/pdf");
     const { io, stdout, stderr } = createMemoryIO();
 
     await packagesPublishCommand({ package: "@acme/pdf" }, io);
+
+    // Not carried, so not advanced: its next push is refused, not a silent revert.
+    expect(await readLock("default", dir, "@acme/pdf")).toBe(seen);
 
     expect(stdout()).toContain("Published @acme/pdf@1.0.1");
     // Lock records are keyed by real path: that is the folder the warning names.
     expect(stderr()).toContain(
       `warning: could not carry version 1.0.1 into ${await realpath(dir)}`,
     );
+  });
+
+  it("publishes nothing when a push lands between reading the draft and publishing it", async () => {
+    const pkg = skill({ pushBetweenReadAndPublish: true });
+    const server = createPackageServer([pkg]);
+    server.install();
+    const { io, stderr } = createMemoryIO();
+
+    await expect(packagesPublishCommand({ package: "@acme/pdf" }, io)).rejects.toBeInstanceOf(
+      ExitError,
+    );
+
+    expect(stderr()).toContain("changed while this command read it");
+    expect(pkg.published).toHaveLength(1);
   });
 
   it("refuses to publish from a folder holding changes the draft does not have", async () => {
@@ -877,7 +929,7 @@ describe("packages publish", () => {
 
     expect(
       server.seen.find((s) => s.path.endsWith("/versions") && s.method === "POST")?.body,
-    ).toEqual({});
+    ).toEqual({ lock_version: 3 });
     expect(stdout()).toContain("Published @acme/pdf@2.0.0");
     expect(pkg.draft.lock).toBe(3);
   });

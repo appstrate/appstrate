@@ -16309,6 +16309,8 @@ export interface operations {
                 "application/json": {
                     /** @description Optional semver version override (e.g. from bump selector) */
                     version?: string;
+                    /** @description Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at. */
+                    lock_version?: number;
                 };
             };
         };
@@ -17023,6 +17025,8 @@ export interface operations {
                 "application/json": {
                     /** @description Optional semver version override (e.g. from bump selector) */
                     version?: string;
+                    /** @description Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at. */
+                    lock_version?: number;
                 };
             };
         };
@@ -17491,6 +17495,8 @@ export interface operations {
                 "application/json": {
                     /** @description Optional semver version override (e.g. from bump selector) */
                     version?: string;
+                    /** @description Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at. */
+                    lock_version?: number;
                 };
             };
         };
@@ -18012,6 +18018,8 @@ export interface operations {
                 "application/json": {
                     /** @description Optional semver version override (e.g. from bump selector) */
                     version?: string;
+                    /** @description Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at. */
+                    lock_version?: number;
                 };
             };
         };
@@ -18455,6 +18463,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description `package_not_found`: no package with this id that the caller can read. (An unknown route answers `not_found`.) */
             404: components["responses"]["NotFound"];
         };
     };

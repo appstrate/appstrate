@@ -18,6 +18,8 @@ interface CreateVersionModalProps {
   type: PackageType;
   packageId: string;
   hasUnarchivedChanges?: boolean;
+  /** The draft's `lock_version` as displayed: publishing refuses a draft moved since. */
+  lockVersion?: number;
 }
 
 type FormData = { selectedBump: VersionBump };
@@ -28,6 +30,7 @@ export function CreateVersionModal({
   type,
   packageId,
   hasUnarchivedChanges = true,
+  lockVersion,
 }: CreateVersionModalProps) {
   const { t } = useTranslation("agents");
   const { data: versionInfo } = useVersionInfo(type, packageId);
@@ -47,10 +50,6 @@ export function CreateVersionModal({
   const latestVersion = versionInfo?.latest_published_version ?? null;
   const activeVersion = versionInfo?.active_version ?? null;
 
-  // The CLI's `publish` asks the same function, so the two surfaces cannot
-  // disagree on which version a publish creates: a draft equal to the latest
-  // needs a bump, one ahead of it (or with nothing published) is created as is,
-  // one behind it is blocked.
   const plan = planPublishVersion(activeVersion, latestVersion, selectedBump);
   const needsBump = plan.kind === "bump";
   const isBlocked = plan.kind === "blocked";
@@ -62,18 +61,21 @@ export function CreateVersionModal({
 
   const handleFormSubmit = () => {
     setError("root", { message: "" });
-    createVersion.mutate(plan.override, {
-      onSuccess: () => {
-        onClose();
+    createVersion.mutate(
+      { version: plan.override, lockVersion },
+      {
+        onSuccess: () => {
+          onClose();
+        },
+        onError: (err) => {
+          // The publish gate re-checks the stored SKILL.md, so a frontmatter
+          // code arrives here too.
+          setError("root", {
+            message: translateSkillFrontmatterError(err, t) ?? getErrorMessage(err),
+          });
+        },
       },
-      onError: (err) => {
-        // The publish gate re-checks the stored SKILL.md, so a frontmatter
-        // code arrives here too.
-        setError("root", {
-          message: translateSkillFrontmatterError(err, t) ?? getErrorMessage(err),
-        });
-      },
-    });
+    );
   };
 
   const bumpOptions: { type: VersionBump; label: string }[] = [

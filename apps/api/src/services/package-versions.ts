@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { PackageVersionInfoResponse } from "@appstrate/shared-types";
 import { eq, and, desc, count, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
@@ -493,7 +494,7 @@ export async function getMatchingDistTags(packageId: string, version: string): P
 export async function getVersionInfo(
   packageId: string,
   orgId: string,
-): Promise<{ latest_published_version: string | null; active_version: string | null }> {
+): Promise<PackageVersionInfoResponse> {
   const [[pkg], [latestTag]] = await Promise.all([
     db
       .select({ draftManifest: packages.draftManifest })
@@ -556,19 +557,18 @@ export async function getLatestVersionCreatedAt(packageId: string): Promise<Date
 }
 
 /** Get the integrity hash of the latest version. Returns null if no versions exist. */
-async function getLatestVersionSnapshot(
-  packageId: string,
-): Promise<{ version: string; integrity: string } | null> {
+async function getLatestVersionIntegrity(packageId: string): Promise<string | null> {
   const [row] = await db
-    .select({ version: packageVersions.version, integrity: packageVersions.integrity })
+    .select({ integrity: packageVersions.integrity })
     .from(packageVersions)
     .where(eq(packageVersions.packageId, packageId))
     .orderBy(desc(packageVersions.createdAt))
     .limit(1);
-  return row ?? null;
+  return row?.integrity ?? null;
 }
 
-type CreateVersionError = "invalid_version" | "invalid_bundle" | "no_changes" | "version_exists";
+type CreateVersionError =
+  "invalid_version" | "invalid_bundle" | "no_changes" | "version_exists" | "conflict";
 type CreateVersionResult =
   { id: number; version: string } | { error: CreateVersionError; detail?: string };
 
@@ -583,6 +583,11 @@ export async function createVersionFromDraft(params: {
   orgId: string;
   userId: string;
   version?: string;
+  /**
+   * The draft `lock_version` the caller read. When set and the draft has moved
+   * since, nothing is cut (`conflict`): the version is the draft they saw.
+   */
+  lockVersion?: number;
   /** Context-dependent publish gates must validate the captured manifest. */
   validateManifest?: (manifest: Record<string, unknown>, type: PackageType) => Promise<unknown>;
 }): Promise<CreateVersionResult> {
@@ -612,6 +617,9 @@ export async function createVersionFromDraft(params: {
   });
   if (!snapshot) return { error: "invalid_version" };
   const { pkg, storedFiles } = snapshot;
+  if (params.lockVersion !== undefined && params.lockVersion !== pkg.lockVersion) {
+    return { error: "conflict" };
+  }
 
   const baseManifest = asRecord(pkg.draftManifest);
   const content = (pkg.draftContent ?? "") as string;
@@ -721,19 +729,18 @@ export async function createVersionFromDraft(params: {
   }
 
   // Check for duplicate content — reject if identical to the latest version.
-  // A new NUMBER is not new content: whether it came as an override (the
-  // publish dialog's bump, `appstrate packages publish --bump`) or as an edit
-  // of the draft manifest's `version`, it changes the archive's digest by
-  // itself, and the same content was cut again under every number. So the
-  // draft is frozen a second time under the latest version's number and
-  // compared to it — the bytes an unchanged draft would reproduce exactly.
-  const latest = await getLatestVersionSnapshot(packageId);
+  // An OVERRIDE is a number the publish surface picks for a draft still at
+  // the published version (the dialog's bump, `packages publish --bump`); it
+  // is not a change, so the draft is compared under its OWN version. A
+  // version the author wrote into the manifest is compared as is: promoting
+  // `1.0.0-rc.1` to `1.0.0`, or deliberately re-cutting content, is theirs.
+  const ownVersion = baseManifest.version;
   const comparable =
-    latest && latest.version !== version
-      ? buildArtifact({ ...finalManifest, version: latest.version }).zip
+    params.version !== undefined && params.version !== ownVersion
+      ? buildArtifact({ ...finalManifest, version: ownVersion }).zip
       : zipBuffer;
   const newIntegrity = computeIntegrity(new Uint8Array(comparable));
-  const latestIntegrity = latest?.integrity;
+  const latestIntegrity = await getLatestVersionIntegrity(packageId);
   if (latestIntegrity && newIntegrity === latestIntegrity) {
     return { error: "no_changes" };
   }
