@@ -49,6 +49,7 @@ import {
   Inbox,
   Layers,
   LibraryBig,
+  Plus,
   Wrench,
 } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -70,6 +71,9 @@ import { maySetPackageActive } from "../lib/package-permissions";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useRevokePackageShare } from "../hooks/use-package-shares";
 import { useAllIntegrations } from "../hooks/use-integrations";
+import { useAgents } from "../hooks/use-packages";
+import { AgentIdentityTile } from "./agent-identity";
+import { IntegrationIcon } from "./integration-icon";
 import {
   useCatalogueLibrary,
   useSetPackageActive,
@@ -199,6 +203,11 @@ export function OrgCatalogueModal({
   // Integrations resolve their activation server-side, and only their view
   // pays for the request.
   const { data: integrations } = useAllIntegrations({ enabled: active === "integration" });
+  // The library carries no icon. The agents this space runs do (their index
+  // reads the manifest), and so do integrations (`/api/integrations`); any
+  // other package gets its kind's tile, the way the package page draws one.
+  const { data: agentsHere } = useAgents();
+  const agentLook = new Map((agentsHere ?? []).map((agent) => [agent.id, agent] as const));
   const integrationById = new Map((integrations ?? []).map((row) => [row.id, row] as const));
   const librarySpaces = library?.spaces ?? [];
   /**
@@ -454,6 +463,22 @@ export function OrgCatalogueModal({
     // other spaces?") is the matrix, one tab away.
     const placement = placementById.get(item.id);
     const activeHere = placement?.here === "active";
+    const look = agentLook.get(item.id);
+    const icon =
+      active === "agent" ? (
+        <AgentIdentityTile
+          agentId={item.id}
+          icon={look?.icon}
+          color={look?.color}
+          className="size-10 rounded-[10px]"
+        />
+      ) : active === "integration" ? (
+        <IntegrationIcon src={integrationById.get(item.id)?.manifest.icon} />
+      ) : (
+        <span className="bg-muted text-muted-foreground flex size-10 shrink-0 items-center justify-center rounded-[10px]">
+          <Wrench className="size-5" aria-hidden />
+        </span>
+      );
     const mayAddHere = spaceId ? mayActivateIn(item, spaceId) : false;
     // A share waiting on one of the reader's spaces is said on the card too:
     // browsing must not be the one reading where a decision stays invisible.
@@ -461,37 +486,37 @@ export function OrgCatalogueModal({
     const shared = (placement?.offeredIn.length ?? 0) > 0;
     return {
       ...row,
-      actions: (
+      icon,
+      // The state leads, top right, where a store puts its "+" or its tick:
+      // it is the one thing a browsing reader looks for on every card.
+      status: activeHere ? (
+        <span className="bg-success/10 text-success flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium">
+          <Check className="size-3.5" aria-hidden />
+          {t("catalogue.activeHere")}
+        </span>
+      ) : mayAddHere && spaceId ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 gap-1 px-2 text-xs"
+          disabled={activate.isPending}
+          onClick={() => void onSetActive(row, spaceId, true)}
+        >
+          <Plus className="size-3.5" aria-hidden />
+          {t("catalogue.addToSpace")}
+        </Button>
+      ) : null,
+      meta: (
         <>
-          <span className="flex min-w-0 items-center gap-2">
-            <span className="text-muted-foreground truncate text-xs">
-              {item.source === "system" ? t("catalogue.sourceSystem") : orgName}
-            </span>
-            {shared && (
-              <span className="bg-primary/10 text-primary shrink-0 truncate rounded px-1.5 text-[11px] leading-5 font-medium">
-                {sharer
-                  ? t("catalogue.sheet.offeredBy", { name: sharer })
-                  : t("catalogue.offeredHere")}
-              </span>
-            )}
+          <span className="truncate">
+            {item.source === "system" ? t("catalogue.sourceSystem") : orgName}
           </span>
-          {activeHere ? (
-            <span className="text-success flex shrink-0 items-center gap-1.5 text-xs font-medium">
-              <Check className="size-3.5" aria-hidden />
-              {t("catalogue.activeHere")}
+          {shared && (
+            <span className="bg-primary/10 text-primary shrink-0 truncate rounded px-1.5 text-[11px] leading-5 font-medium">
+              {sharer
+                ? t("catalogue.sheet.offeredBy", { name: sharer })
+                : t("catalogue.offeredHere")}
             </span>
-          ) : (
-            mayAddHere &&
-            spaceId && (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={activate.isPending}
-                onClick={() => void onSetActive(row, spaceId, true)}
-              >
-                {t("catalogue.addToSpace")}
-              </Button>
-            )
           )}
         </>
       ),
@@ -674,8 +699,11 @@ export function OrgCatalogueModal({
     <div className="flex h-full flex-col">
       <RailHeader icon={LibraryBig} title={t("catalogue.title")} />
       <div className="flex-1">
-        {sharedRow && <div className="px-3 pt-3">{sharedRow}</div>}
-        <RailGroup title={t("catalogue.kinds")}>
+        {/* The decisions waiting come first, alone and untitled — a group
+            heading over one transient row is noise — and a rule sets them
+            apart from the kinds, the way settings separates its scopes. */}
+        {sharedRow && <div className="px-3 py-3">{sharedRow}</div>}
+        <RailGroup title={t("catalogue.kinds")} separated={Boolean(sharedRow)}>
           <nav className="flex flex-col gap-0.5" aria-label={t("catalogue.kinds")}>
             {kindRows}
           </nav>

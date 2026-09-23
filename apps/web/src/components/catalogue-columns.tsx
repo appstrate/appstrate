@@ -292,17 +292,11 @@ export function useCatalogueSpaceColumns({
             onCheckedChange={(next) => onSetActive(item, space.id, next === true)}
           />
           {state === "offered" && (
-            // Two short lines rather than one that truncates: in a 104px column
-            // "Proposé par Julie" lost the name, which is the part that matters.
-            <span className="text-muted-foreground flex min-w-0 flex-col text-[0.7rem] leading-tight">
-              <span>{t("catalogue.offeredHere")}</span>
-              {/* Who made the offer, when somebody did: a decision reads
-                  differently coming from a colleague than from nowhere. */}
-              {placement.offeredBy[space.id] && (
-                <span className="truncate">
-                  {t("catalogue.offeredByShort", { name: placement.offeredBy[space.id] })}
-                </span>
-              )}
+            // One word, not "Partagé par Julie" on two lines: who shared it is
+            // on the sheet and in "Partages en attente", where the decision is
+            // taken; here the cell only has to tell shared-and-off from off.
+            <span className="text-primary text-[0.7rem] font-medium">
+              {t("catalogue.offeredHere")}
             </span>
           )}
         </span>

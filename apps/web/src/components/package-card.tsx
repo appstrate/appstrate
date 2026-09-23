@@ -21,6 +21,9 @@ export function PackageCard({
   unreadCount,
   actions,
   autoInstalled,
+  icon,
+  status,
+  meta,
   showRun = true,
   onOpen,
 }: CardItem & {
@@ -55,73 +58,94 @@ export function PackageCard({
       className="border-border bg-card hover:border-foreground/20 hover:bg-accent/50 flex h-full w-full cursor-pointer flex-col rounded-lg border p-4 transition-colors"
       onClick={handleCardClick}
     >
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <h2 className="text-foreground truncate text-sm font-medium">{displayName}</h2>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {source === "system" && (
-            <span title={t("list.badgeBuiltIn")}>
-              <ShieldCheck className="text-muted-foreground h-4 w-4" />
-            </span>
-          )}
-          {autoInstalled && (
-            <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[0.65rem] font-medium uppercase">
-              {t("list.badgeAutoInstalled")}
-            </span>
-          )}
-          {!!unreadCount && unreadCount > 0 && (
-            <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
-              {unreadCount > 99 ? "99+" : unreadCount}
-            </span>
-          )}
-          {type === "agent" && !!runningRuns && runningRuns > 0 && <Badge status="running" />}
-          {type === "agent" && showRun && (
-            <div onClick={(e) => e.stopPropagation()}>
-              {/* Listed here IS runnable here: the index and the launch routes
+      {/* The icon tile sits LEFT of the title and its description, the way a
+          store's card reads: what it is, then what it does. */}
+      <div className="flex min-w-0 gap-3">
+        {icon}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <h2 className="text-foreground truncate text-sm font-medium">{displayName}</h2>
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              {source === "system" && (
+                <span title={t("list.badgeBuiltIn")}>
+                  <ShieldCheck className="text-muted-foreground h-4 w-4" />
+                </span>
+              )}
+              {autoInstalled && (
+                <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[0.65rem] font-medium uppercase">
+                  {t("list.badgeAutoInstalled")}
+                </span>
+              )}
+              {!!unreadCount && unreadCount > 0 && (
+                <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
+                  {unreadCount > 99 ? "99+" : unreadCount}
+                </span>
+              )}
+              {type === "agent" && !!runningRuns && runningRuns > 0 && <Badge status="running" />}
+              {status && (
+                <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                  {status}
+                </div>
+              )}
+              {type === "agent" && showRun && (
+                <div onClick={(e) => e.stopPropagation()}>
+                  {/* Listed here IS runnable here: the index and the launch routes
                   read the same rule (placed in this space and switched on), so
                   the card never has to explain an activation the row could not
                   carry. A package placed here but switched off is not on this
                   list at all — it is in the space library, with its switch. */}
-              <RunAgentButton
-                packageId={id}
-                variant="ghost"
-                size="icon"
-                className="text-muted-foreground hover:text-primary size-7"
-              />
+                  <RunAgentButton
+                    packageId={id}
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted-foreground hover:text-primary size-7"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+          {/* Up to two lines, no reserved second one: the grid stretches every
+          card of a row to the tallest and the footer sits at the bottom
+          (`mt-auto`), so rows stay aligned without an empty line under a
+          short description. */}
+          <p className="text-muted-foreground mt-0.5 line-clamp-2 text-xs">{description || ""}</p>
+          {/* Under the description and still right of the icon: the text column
+              never runs under the tile. */}
+          {meta && (
+            <div className="text-muted-foreground mt-2 flex min-w-0 items-center gap-2 text-xs">
+              {meta}
             </div>
           )}
         </div>
       </div>
-      {/* Two lines RESERVED, not "up to two": a grid whose rows are a line
-          taller here and a line shorter there reads as broken, and the cost is
-          one empty line on the shortest card. */}
-      <p className="text-muted-foreground mt-1 line-clamp-2 min-h-8 flex-1 text-xs">
-        {description || ""}
-      </p>
-      <ScrollArea className="mt-2 w-full">
-        <div className="flex gap-1">
-          {keywords?.map((kw) => (
-            <span
-              key={kw}
-              className="bg-background text-muted-foreground border-border shrink-0 rounded-full border px-2 py-0.5 text-[0.7rem]"
-            >
-              {kw}
-            </span>
-          ))}
-          {type !== "agent" && usedByAgents !== undefined && usedByAgents > 0 && (
-            <span className="bg-background text-muted-foreground border-border shrink-0 rounded-full border px-2 py-0.5 text-[0.7rem]">
-              {t("list.usedByAgents", { count: usedByAgents, ns: "agents" })}
-            </span>
-          )}
-        </div>
-        <ScrollBar orientation="horizontal" className="h-0 opacity-0" />
-      </ScrollArea>
+      {keywords?.length || (type !== "agent" && (usedByAgents ?? 0) > 0) ? (
+        <ScrollArea className="mt-2 w-full">
+          <div className="flex gap-1">
+            {keywords?.map((kw) => (
+              <span
+                key={kw}
+                className="bg-background text-muted-foreground border-border shrink-0 rounded-full border px-2 py-0.5 text-[0.7rem]"
+              >
+                {kw}
+              </span>
+            ))}
+            {type !== "agent" && usedByAgents !== undefined && usedByAgents > 0 && (
+              <span className="bg-background text-muted-foreground border-border shrink-0 rounded-full border px-2 py-0.5 text-[0.7rem]">
+                {t("list.usedByAgents", { count: usedByAgents, ns: "agents" })}
+              </span>
+            )}
+          </div>
+          <ScrollBar orientation="horizontal" className="h-0 opacity-0" />
+        </ScrollArea>
+      ) : null}
+      {actions && <div className="min-h-3" aria-hidden />}
       {actions && (
         <div
           // `min-h-8` so a footer carrying a button and one carrying a line of
           // text are the same height, which is what kept the rows ragged.
-          className="border-border mt-3 flex min-h-8 items-center justify-between gap-2 border-t pt-3"
+          className="border-border mt-auto flex min-h-8 items-center justify-between gap-2 border-t pt-3"
           onClick={(e) => e.stopPropagation()}
         >
           {actions}

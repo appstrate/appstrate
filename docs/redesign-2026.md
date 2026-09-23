@@ -1605,7 +1605,7 @@ response only ever carries the spaces the caller can enter.
 - **Three placement states**, the third being the one the model added: active,
   switched off, and SHARED — a placement somebody made and nobody switched on.
   Turning the switch on IS accepting it; there is nothing else to accept.
-- **"Partagés avec vous" heads the rail** while any share waits: one list
+- **"Partages en attente" heads the rail** while any share waits: one list
   across kinds, one row per decision (a package and one space — shared with
   two of your spaces is two rows), with "Activer dans {espace}" on the line, or
   "Demandez à un administrateur de {espace}" when the reader holds no right
@@ -1613,7 +1613,7 @@ response only ever carries the spaces the caller can enter.
   history. Before it, several shares were scattered over the kind tabs, and a
   skill waiting behind an agent was found by nobody.
 - **One rule for every way in** (`usePendingSharesHref`): one share waiting →
-  that package's sheet; several, whatever their kinds → "Partagés avec vous";
+  that package's sheet; several, whatever their kinds → "Partages en attente";
   none → the catalogue's default. The navigation entry and the bell follow it,
   and the per-kind alert above the lists is gone — it counted one kind while
   the badge counted all, two numbers for one question.
@@ -1814,6 +1814,37 @@ switch is on by default, and turning it off writes the opt-out. Its second
 consequence is the one that makes Découvrir honest for agents and skills: a
 built-in switched off in every space you reach is placed nowhere, so it lands
 in Découvrir, which is where you switch it back on.
+
+**Cards with their icon, a matrix cell of one word, one way of titling a group (22 September)**
+
+- **A Découvrir card reads like a store's**: the package's tile on the left
+  (the agent's own icon on its tint, read off the agents this space runs since
+  the library carries no icon; an integration's logo; the kind's tile
+  otherwise), and EVERY line of text to its right — title, description, then a
+  muted meta line (provenance, and "Partagé par …" when a share waits). Nothing
+  runs under the tile, and there is no footer rule.
+- **The card's state is top right**, where a store puts its "+" or its tick:
+  "✓ Actif ici" in the success tint, or "+ Ajouter" when the reader may add it
+  here, nothing when they may not. `CardItem` gained `icon`, `status` and
+  `meta`, all optional: lists that pass none keep their card as it was.
+- **No reserved second line under a description.** A grid row stretches every
+  card to the tallest, so rows stay aligned without the empty line a one-line
+  description used to leave, and the keyword strip is drawn only when it has
+  something to show.
+- **The matrix cell says "Partagé", one word, in the share colour.** Who shared
+  it is on the sheet and in "Partages en attente", where the decision is taken;
+  the cell only has to tell shared-and-off from off, and "Proposé / par Julie …"
+  on two lines was truncating in a 104px column.
+- **Rail groups are titled the way the main navigation titles them**: shadcn's
+  `SidebarGroupLabel` look (sentence case, `text-xs font-medium`, muted) in
+  `RailGroup`, for the settings panel and the catalogue alike. The spaced
+  uppercase the two panels had was a second way of titling a group of rows.
+- **"Partages en attente" stands alone at the top of the rail** (renamed from
+  "Partagés avec vous": a share targets a SPACE, not the reader, and what the
+  entry holds is the shares still waiting on a decision), untitled, with
+  the rule settings draws between its scopes below it. A group heading over one
+  transient row is noise, and the bottom of the rail is where a decision would
+  be found last.
 
 **Why Découvrir stopped being the complement of the other half**
 

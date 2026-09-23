@@ -129,7 +129,7 @@ export interface PendingShare {
 }
 
 /**
- * Every decision waiting, across kinds — what "Partagés avec vous" lists.
+ * Every decision waiting, across kinds — what "Partages en attente" lists.
  *
  * One entry per PLACEMENT, for the reason the count above gives: a package
  * shared with two of the reader's spaces asks two spaces to decide, and each

@@ -37,7 +37,10 @@ export function RailGroup({
     <section className={cn("px-3 py-3", separated && "border-t-sidebar-border border-t")} {...rest}>
       <div
         data-settings-scope-title
-        className="text-muted-foreground mb-1.5 text-[0.7rem] font-semibold tracking-[0.06em] uppercase"
+        // The main navigation's group label (shadcn `SidebarGroupLabel`:
+        // sentence case, `text-xs font-medium`, muted) rather than a spaced
+        // uppercase of the rails' own: one way of titling a group of rows.
+        className="text-sidebar-foreground/70 mb-0.5 flex h-8 items-center px-2 text-xs font-medium"
       >
         {title}
       </div>

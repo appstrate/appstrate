@@ -34,6 +34,12 @@ export interface CardItem {
   unreadCount?: number;
   actions?: ReactNode;
   autoInstalled?: boolean;
+  /** A tile drawn left of the title: the package's icon on its tinted ground. */
+  icon?: ReactNode;
+  /** The card's state, top right: what a browsing reader looks for first. */
+  status?: ReactNode;
+  /** One muted line under the description: who provides it, what it carries. */
+  meta?: ReactNode;
 }
 
 interface PackageTabProps {

@@ -33,7 +33,7 @@ export function usePendingOfferCount(): number {
  * the bell and the alert, so no two of them disagree:
  *
  * - one share waiting → that package's sheet, where the decision is taken;
- * - several, whatever their kinds → "Partagés avec vous", one list of them all;
+ * - several, whatever their kinds → "Partages en attente", one list of them all;
  * - none → `null`, and the caller links wherever it links by default.
  */
 export function usePendingSharesHref(): string | null {

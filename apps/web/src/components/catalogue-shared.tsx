@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * "Partagés avec vous": every decision a colleague's share left waiting, one
+ * "Partages en attente": every decision a colleague's share left waiting, one
  * list across kinds.
  *
  * With one share, every link goes straight to that package's sheet. With
