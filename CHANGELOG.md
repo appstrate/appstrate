@@ -30,6 +30,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`…or push --force to replace it.`) is printed alone, not followed by the
   server's own wording of it, and any other error chain starts its cause as a
   new sentence after a full stop.
+- **The npm `appstrate` CLI knows it was installed from npm** (#1518). Every
+  npm release up to 1.0.0-beta.61 shipped a bundle stamped with install source
+  `unknown` instead of `bun`: the publish step rebuilt it without the stamp, so
+  `appstrate self-update` reported a binary with no install-source stamp
+  instead of pointing to the npm upgrade command. The release now publishes the
+  exact tarball it tested, and both smoke tests check its stamp and version. A
+  good release no longer fails while npm propagates it (the check waits up to
+  12 minutes on what bun resolves), and its GitHub Release is created whenever
+  the npm publish succeeded.
 
 ## [1.0.0-beta.61] - 2026-09-23
 
