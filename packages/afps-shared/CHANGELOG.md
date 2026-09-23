@@ -12,10 +12,15 @@ consumer that raises its range — `scripts/verify-package-resolves.ts` installs
 the real tarball outside the monorepo, so an unpublished leaf fails the
 consumer's publish rather than the first user's `npm install`.
 
-## [Unreleased]
+## [0.9.0] — unreleased
 
-Not additive: `normaliseMcpToolBody` changes behaviour (see Changed). Under the
-0.x convention that is breaking, so the next release is **0.9.0**.
+Not yet on npm. `@appstrate/core` declares `^0.9.0` at HEAD, so **this version
+must be published (`git tag afps-shared@0.9.0`) before the next
+`@appstrate/core` release**, and `bun scripts/verify-package-resolves.ts
+packages/core` stays red until it is.
+
+Not additive: `normaliseMcpToolBody` changes behaviour (see Changed), which the
+0.x convention makes a minor bump.
 
 ### Added
 
@@ -31,7 +36,8 @@ Not additive: `normaliseMcpToolBody` changes behaviour (see Changed). Under the
 - **`isValidMcpToolName`**, **`allocateMcpToolName`** and **`fnv1a64Hex`**
   (`./mcp-naming`) — the exposed-name grammar (`{namespace}__{body}`, body in
   `[A-Za-z0-9_-]+`, at most `MCP_TOOL_NAME_MAX_LENGTH`), the allocator that
-  truncates and hash-suffixes a name that is too long or taken, and the digest
+  truncates and hash-suffixes a name that is too long or taken (one salted
+  re-hash when the hashed name is taken too, then it throws), and the digest
   it uses.
 
 ### Changed
@@ -43,11 +49,6 @@ Not additive: `normaliseMcpToolBody` changes behaviour (see Changed). Under the
   not `api_upload`).
 
 ## [0.8.0] — 2026-09-03
-
-Not yet on npm. `@appstrate/core` declares `^0.8.0` at HEAD, so **this version
-must be published (`git tag afps-shared@0.8.0`) before the next
-`@appstrate/core` release**, and `bun scripts/verify-package-resolves.ts
-packages/core` stays red until it is.
 
 Additive only: no existing export changes behaviour, so a 0.7.0 consumer that
 upgrades and calls nothing new sees no difference. The minor bump is the 0.x

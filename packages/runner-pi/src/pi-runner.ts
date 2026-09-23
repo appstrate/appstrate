@@ -65,7 +65,7 @@ import {
   type TerminalRunResult,
   type TokenUsage,
 } from "@appstrate/afps-runtime/runner";
-import { formatLogLine } from "./log-line.ts";
+import { formatLogLine } from "@appstrate/core/log-line";
 
 /**
  * Pi model configuration. Mirrors the Pi SDK's `Model<Api>` shape so

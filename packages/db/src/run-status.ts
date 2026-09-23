@@ -2,7 +2,8 @@
 
 /**
  * Run-status sets, derived from the canonical tuples in
- * `@appstrate/core/run-status` (same pattern as `orgRoleValues = ORG_ROLES`).
+ * `@appstrate/core/run-status`. Import the tuples and types from core itself;
+ * this module holds only what db derives from them.
  *
  * **This module MUST stay import-free** apart from that one import-free core
  * module. It is the one piece of the DB package the browser bundle is allowed
@@ -15,15 +16,10 @@
  */
 
 import {
-  runStatusValues,
   terminalRunStatusValues,
   activeRunStatusValues,
   type RunStatus,
-  type TerminalRunStatus,
 } from "@appstrate/core/run-status";
-
-export { runStatusValues, terminalRunStatusValues, activeRunStatusValues };
-export type { RunStatus, TerminalRunStatus };
 
 /**
  * Terminal run statuses — used by event-ingestion ordering, SSE invalidation,

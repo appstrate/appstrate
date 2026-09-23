@@ -24,7 +24,8 @@
 
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, TERMINAL_RUN_EVENT_TYPES, type RunResultPayload } from "@appstrate/db/schema";
+import { runs, type RunResultPayload } from "@appstrate/db/schema";
+import { TERMINAL_RUN_EVENT_TYPES } from "@appstrate/db/run-status";
 import { type CloudEventEnvelope } from "@appstrate/afps-runtime/events";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import {
@@ -33,6 +34,7 @@ import {
   type TerminalRunResult,
 } from "@appstrate/afps-runtime/runner";
 import { getErrorMessage } from "@appstrate/core/errors";
+import type { TerminalRunStatus } from "@appstrate/core/run-status";
 import { logger } from "../lib/logger.ts";
 import { toPgSafe } from "@appstrate/db/pg-safe";
 import { rowValueErrorCode, type Tx } from "../lib/db-helpers.ts";
@@ -457,7 +459,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // The other half is ordering, and is unchanged: the CAS on `sink_closed_at`
   // guarantees a terminal usage arriving after this finalize can never re-open
   // the run.
-  let validatedUsage = validateFinalizeUsage(result.usage, run.id);
+  let validatedUsage: TokenUsage | null = result.usage ?? null;
   // Non-success without runner-posted usage: the run-row column must keep
   // whatever cumulative snapshot the `appstrate.metric` side-channel last
   // wrote. The COLUMN preservation happens atomically in the CAS below
@@ -866,7 +868,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
 export async function synthesiseFinalize(
   runId: string,
   terminal: {
-    status: "success" | "failed" | "timeout" | "cancelled";
+    status: TerminalRunStatus;
     error?: { message: string; stack?: string };
     durationMs?: number;
   },
@@ -974,31 +976,10 @@ function tokenUsageIsNonZero(usage: TokenUsage): boolean {
 }
 
 /**
- * Tolerant Zod boundary on the runner-supplied finalize `usage`: known numeric
- * fields validated, unknown keys stripped. The route already rejects a
- * malformed value; this guards the non-HTTP callers. Absent/invalid shapes
- * return `null` (+ warn log for the malformed case) so the caller decides the
- * fallback — zero usage on a success terminal, last-known snapshot on a
- * non-success one.
- */
-function validateFinalizeUsage(usage: unknown, runId: string): TokenUsage | null {
-  if (usage === null || usage === undefined) return null;
-  const parsed = tokenUsageSchema.safeParse(usage);
-  if (!parsed.success) {
-    logger.warn("finalize: malformed result.usage; ignoring terminal usage field", {
-      runId,
-      reason: parsed.error.issues[0]?.message ?? "validation failed",
-    });
-    return null;
-  }
-  return parsed.data;
-}
-
-/**
  * Last-known cumulative usage snapshot for a run — the value the
  * `appstrate.metric` side-channel wrote onto `runs.tokenUsage` during the
- * run. Parsed through the same tolerant Zod boundary as the finalize body so
- * a corrupt JSONB value degrades to `null`, never a throw. Used by finalize
+ * run. Parsed through the token-usage schema so a corrupt JSONB value
+ * degrades to `null`, never a throw. Used by finalize
  * to avoid erasing real usage when a run dies without posting a terminal
  * `result.usage`, and by {@link synthesiseFinalize} to reconstruct the
  * terminal usage for platform-synthesised closures.

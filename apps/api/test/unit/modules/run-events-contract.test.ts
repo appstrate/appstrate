@@ -21,7 +21,7 @@
 import { describe, it, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { terminalRunStatusValues } from "@appstrate/db/run-status";
+import { terminalRunStatusValues } from "@appstrate/core/run-status";
 
 const SOURCE_FILES = [
   resolve(import.meta.dir, "../../../src/routes/runs.ts"),

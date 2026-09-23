@@ -47,7 +47,8 @@
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 import { db, type Db } from "@appstrate/db/client";
-import { llmUsage, runs, terminalRunStatusValues } from "@appstrate/db/schema";
+import { llmUsage, runs } from "@appstrate/db/schema";
+import { terminalRunStatusValues } from "@appstrate/core/run-status";
 import { and, eq, sql, type SQL } from "drizzle-orm";
 import { logger } from "../lib/logger.ts";
 

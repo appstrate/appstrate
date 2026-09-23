@@ -31,7 +31,7 @@
  */
 
 import { sign } from "@appstrate/afps-runtime/events";
-import { formatLogLine } from "./log-line.ts";
+import { formatLogLine } from "@appstrate/core/log-line";
 
 export interface StartSinkHeartbeatOptions {
   /**

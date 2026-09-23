@@ -801,18 +801,17 @@ describe("packages push", () => {
     expect(next.stderr()).toContain("edited elsewhere since this folder last saw it.");
   });
 
-  it("refuses a lock table of numeric locks from an older CLI, naming the fix", async () => {
+  it("refuses an entry without an ETag, naming the steps to rebuild the table", async () => {
     const pkg = skill();
     const dir = join(root, "pdf");
     await pulled(pkg, dir);
     const table = join(root, "data", "appstrate", "packages", "default-locks.json");
-    await writeFile(table, JSON.stringify({ [dir]: { packageId: "@acme/pdf", lock: 3 } }));
+    await writeFile(table, JSON.stringify({ [dir]: { packageId: "@acme/pdf" } }));
     const { io, stderr } = createMemoryIO();
 
     await expect(packagesPushCommand({ dir }, io)).rejects.toBeInstanceOf(ExitError);
 
-    expect(stderr()).toContain("numeric draft locks written by an older appstrate CLI");
-    expect(stderr()).toContain(`Delete ${table}`);
+    expect(stderr()).toContain(`${table} is not a valid packages lock table. Delete it`);
     expect(stderr()).toContain("appstrate packages pull <package> <folder> --force");
     expect(pkg.draft.lock).toBe(3);
   });

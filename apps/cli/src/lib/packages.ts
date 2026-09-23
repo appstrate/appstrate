@@ -389,7 +389,10 @@ async function readLockTable(profileName: string): Promise<LockTable> {
     throw new Error(`Cannot read the packages lock table ${path}.`, { cause: err });
   }
   const invalid = (cause?: unknown) =>
-    new Error(`${path} is not a valid packages lock table: repair or delete it.`, { cause });
+    new Error(
+      `${path} is not a valid packages lock table. Delete it, then for each working folder either re-pull it (appstrate packages pull <package> <folder> --force — discards its unpushed edits) or push it over the draft (appstrate packages push <folder> --force).`,
+      { cause },
+    );
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -399,14 +402,7 @@ async function readLockTable(profileName: string): Promise<LockTable> {
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw invalid();
   const table: LockTable = {};
   for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-    const entry = value as (Partial<LockEntry> & { lock?: unknown }) | null;
-    // A numeric `lock` is what a CLI before ETag-versioned drafts recorded. It
-    // cannot be turned into an ETag: the folder must read its draft again.
-    if (entry && typeof entry.lock === "number") {
-      throw new Error(
-        `${path} holds numeric draft locks written by an older appstrate CLI (first: ${key}); drafts are now versioned by ETag and those locks cannot be carried over. Delete ${path}, then for each working folder either re-pull it (appstrate packages pull <package> <folder> --force — discards its unpushed edits) or push it over the draft (appstrate packages push <folder> --force).`,
-      );
-    }
+    const entry = value as Partial<LockEntry> | null;
     if (!entry || typeof entry.packageId !== "string" || typeof entry.etag !== "string") {
       throw invalid();
     }

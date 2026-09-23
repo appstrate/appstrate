@@ -8,19 +8,23 @@ describe("piLoopOptionsFromShell", () => {
     expect(piLoopOptionsFromShell({})).toEqual({ modelRetry: true, modelCompaction: true });
   });
 
-  it('turns a loop off only on exactly "false"', () => {
+  it('turns a loop off on "false" and passes a valid byte cap', () => {
     expect(
-      piLoopOptionsFromShell({ MODEL_RETRY_ENABLED: "false", MODEL_COMPACTION_ENABLED: "0" }),
-    ).toEqual({ modelRetry: false, modelCompaction: true });
+      piLoopOptionsFromShell({
+        MODEL_RETRY_ENABLED: "false",
+        MODEL_COMPACTION_ENABLED: "true",
+        TOOL_RESULT_BYTE_LIMIT: "8192",
+      }),
+    ).toEqual({ modelRetry: false, modelCompaction: true, toolResultByteLimit: 8192 });
   });
 
-  it("passes a valid byte cap and ignores an invalid one", () => {
-    expect(piLoopOptionsFromShell({ TOOL_RESULT_BYTE_LIMIT: "8192" }).toolResultByteLimit).toBe(
-      8192,
+  it("refuses a malformed value, as the container does", () => {
+    expect(() => piLoopOptionsFromShell({ MODEL_COMPACTION_ENABLED: "0" })).toThrow(
+      /MODEL_COMPACTION_ENABLED: must be "true" or "false"/,
     );
-    for (const bad of ["abc", "-1", "0", "12.5", ""]) {
-      expect(piLoopOptionsFromShell({ TOOL_RESULT_BYTE_LIMIT: bad }).toolResultByteLimit).toBe(
-        undefined,
+    for (const bad of ["abc", "-1", "0", "12.5"]) {
+      expect(() => piLoopOptionsFromShell({ TOOL_RESULT_BYTE_LIMIT: bad })).toThrow(
+        /TOOL_RESULT_BYTE_LIMIT: must be a positive integer/,
       );
     }
   });

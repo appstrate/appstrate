@@ -45,12 +45,8 @@
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { TerminalRunResult } from "@appstrate/afps-runtime/runner";
-import {
-  TERMINAL_RUN_STATUSES,
-  type RunStatus,
-  type TerminalRunStatus,
-  type TokenUsage,
-} from "@appstrate/shared-types";
+import { TERMINAL_RUN_STATUSES, type TokenUsage } from "@appstrate/shared-types";
+import type { RunStatus, TerminalRunStatus } from "@appstrate/core/run-status";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { createConsoleSink } from "./sink.ts";
 import type { Verbosity } from "./format.ts";

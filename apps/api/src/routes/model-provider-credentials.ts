@@ -46,7 +46,8 @@ import {
 } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { recordAuditFromContext } from "../services/audit.ts";
-import { assertIfMatch, setEtag } from "../lib/conditional-request.ts";
+import { ifMatchWhere, preconditionFailed, setEtag } from "../lib/conditional-request.ts";
+import { modelProviderCredentials } from "@appstrate/db/schema";
 
 export const createSchema = z
   .object({
@@ -512,11 +513,15 @@ export function createModelProviderCredentialsRouter() {
     if (isSystemModelProviderCredential(id)) {
       throw systemEntityForbidden("model provider credential", id);
     }
-    const before = await getOrgModelProviderCredential(orgId, id);
-    if (before) assertIfMatch(c, before.updatedAt);
     const data = await readJsonBody(c, updateSchema);
     try {
-      await updateModelProviderCredential(orgId, id, data);
+      const ifMatch = ifMatchWhere(c, modelProviderCredentials.updatedAt);
+      if (!(await updateModelProviderCredential(orgId, id, data, ifMatch))) {
+        const stale = await getOrgModelProviderCredential(orgId, id);
+        throw stale
+          ? preconditionFailed(stale.updatedAt)
+          : notFound("Model provider credential not found");
+      }
       const { apiKey: _apiKey, ...auditData } = data;
       await recordAuditFromContext(c, {
         action: "model_provider_credential.updated",

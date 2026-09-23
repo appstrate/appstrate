@@ -13,7 +13,6 @@ export const MCP_TOOL_NAMESPACE_BASE_MAX_LENGTH = 20;
  * snake-case namespace capped before collision suffixing.
  */
 export function normaliseMcpToolNamespace(raw: string): string {
-  if (typeof raw !== "string") return "";
   const out = trimUnderscores(
     raw
       .replace(/^@/, "")
@@ -32,9 +31,7 @@ export function normaliseMcpToolNamespace(raw: string): string {
 const MCP_TOOL_NAME_PATTERN = /^[a-z0-9][a-z0-9_]*__[A-Za-z0-9_-]+$/;
 
 export function isValidMcpToolName(name: string): boolean {
-  if (typeof name !== "string") return false;
-  if (name.length === 0 || name.length > MCP_TOOL_NAME_MAX_LENGTH) return false;
-  return MCP_TOOL_NAME_PATTERN.test(name);
+  return name.length <= MCP_TOOL_NAME_MAX_LENGTH && MCP_TOOL_NAME_PATTERN.test(name);
 }
 
 /**
@@ -43,7 +40,6 @@ export function isValidMcpToolName(name: string): boolean {
  * lowercased, collapsed, trimmed or stripped.
  */
 export function normaliseMcpToolBody(raw: string): string {
-  if (typeof raw !== "string") return "";
   return raw.replace(/[^A-Za-z0-9_-]/gu, "_");
 }
 
@@ -53,7 +49,8 @@ const MCP_TOOL_HASH_LENGTH = 8;
  * Exposed name for an untrusted upstream tool. The plain `{namespace}__{body}`
  * when it fits and is free; otherwise the body is cut to fit and suffixed with
  * a hash of the ORIGINAL upstream name, so the result depends on that name
- * alone — never on registration order the way a `tool_N` counter did.
+ * alone — never on registration order the way a `tool_N` counter did. When the
+ * hashed name is taken too, one salted re-hash; if that is taken, it throws.
  */
 export function allocateMcpToolName(
   namespace: string,
@@ -65,14 +62,12 @@ export function allocateMcpToolName(
   if (isValidMcpToolName(plain) && !taken(plain)) return plain;
   const budget = MCP_TOOL_NAME_MAX_LENGTH - namespace.length - 2 - MCP_TOOL_HASH_LENGTH - 1;
   const head = body.slice(0, Math.max(0, budget));
-  // An upstream advertising the same name twice needs a second digest.
-  for (let attempt = 0; attempt < 1000; attempt += 1) {
-    const seed = attempt === 0 ? upstreamName : `${upstreamName}\0${attempt}`;
+  for (const seed of [upstreamName, `${upstreamName}\0`]) {
     const hash = fnv1a64Hex(seed).slice(0, MCP_TOOL_HASH_LENGTH);
     const candidate = head ? `${namespace}__${head}_${hash}` : `${namespace}__${hash}`;
     if (!taken(candidate)) return candidate;
   }
-  throw new Error(`exhausted MCP tool names for ${JSON.stringify(upstreamName)}`);
+  throw new Error(`MCP tool name ${JSON.stringify(upstreamName)} collides after re-hashing`);
 }
 
 /** 64-bit FNV-1a over the UTF-8 bytes, as 16 lowercase hex digits. */

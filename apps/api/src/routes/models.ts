@@ -2,6 +2,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { orgModels } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
@@ -46,7 +47,7 @@ import {
 } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { recordAuditFromContext } from "../services/audit.ts";
-import { assertIfMatch, setEtag } from "../lib/conditional-request.ts";
+import { ifMatchWhere, preconditionFailed, setEtag } from "../lib/conditional-request.ts";
 
 export const createModelSchema = z
   .object({
@@ -644,8 +645,6 @@ export function createModelsRouter() {
     if (isSystemModel(modelId)) {
       throw systemEntityForbidden("model", modelId);
     }
-    const before = await getOrgModel(orgId, modelId);
-    if (before) assertIfMatch(c, before.updatedAt);
     // Same FK constraint applies to updates that re-point a model to a
     // different credential. Catch the same case here.
     if (data.credentialId && getSystemModelProviderCredentials().has(data.credentialId)) {
@@ -736,7 +735,10 @@ export function createModelsRouter() {
     }
 
     try {
-      await updateOrgModel(orgId, modelId, data);
+      if (!(await updateOrgModel(orgId, modelId, data, ifMatchWhere(c, orgModels.updatedAt)))) {
+        const stale = await getOrgModel(orgId, modelId);
+        throw stale ? preconditionFailed(stale.updatedAt) : notFound("Model not found");
+      }
       await recordAuditFromContext(c, {
         action: "model.updated",
         resourceType: "model",

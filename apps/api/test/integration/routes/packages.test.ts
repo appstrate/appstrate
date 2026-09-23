@@ -16,6 +16,7 @@ import {
   seedAgent,
   seedPackage,
   seedPackageVersion,
+  seedPublishedVersion,
   seedSpace,
   seedSpaceMember,
   seedSpacePackage,
@@ -320,6 +321,27 @@ describe("Packages API", () => {
       expect(body.has_unarchived_changes).toBe(false);
     });
 
+    it("stamps the draft's ETag only when the served definition is the draft", async () => {
+      const id = "@pkgorg/etag-published-agent";
+      await seedAgent({
+        id,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
+      await seedPublishedVersion(id, "1.0.0");
+      const url = `/api/packages/agents/${id}`;
+
+      const draft = await app.request(url, { headers: authHeaders(ctx) });
+      expect(((await draft.json()) as any).definition).toBe("draft");
+      expect(draft.headers.get("ETag")).toMatch(/^"\d+"$/);
+
+      const published = await app.request(`${url}?version=1.0.0`, { headers: authHeaders(ctx) });
+      expect(((await published.json()) as any).definition).toBe("published");
+      expect(published.headers.get("ETag")).toBeNull();
+    });
+
     it("returns 404 for non-existent package", async () => {
       const res = await app.request("/api/packages/agents/@pkgorg/does-not-exist", {
         headers: authHeaders(ctx),
@@ -620,6 +642,19 @@ describe("Packages API", () => {
       expect(status).toBe(200);
       expect(body.definition).toBe("published");
       expect(body.content).toBe(PUBLISHED_BODY);
+    });
+
+    it("stamps the draft's ETag only on a body that IS the draft", async () => {
+      // A published body carrying the draft's version would let a client
+      // PATCH the draft with an `If-Match` it never read the draft under.
+      await publish();
+      const writer = await memberIn("builder");
+      const draft = await detail(writer);
+      expect(draft.body.definition).toBe("draft");
+      expect(draft.etag).toMatch(/^"\d+"$/);
+      const published = await detail(writer, "?version=0.1.0");
+      expect(published.body.definition).toBe("published");
+      expect(published.etag).toBeNull();
     });
 
     it("404s a version spec that resolves to nothing", async () => {

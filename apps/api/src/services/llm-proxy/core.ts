@@ -35,11 +35,7 @@ import { checkEgressUrl, egressGuardedFetch } from "../../lib/egress-host-guard.
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import { getModelProvider } from "../model-providers/registry.ts";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
-import { getEnv } from "@appstrate/env";
-import {
-  clearModelCredentialFailureStreak,
-  recordModelCredentialAuthFailure,
-} from "../model-providers/credentials.ts";
+import { recordModelCredentialOutcome } from "../model-providers/credentials.ts";
 
 /** Maximum request body the proxy will accept before refusing up-front. */
 const DEFAULT_MAX_REQUEST_BYTES = 10 * 1024 * 1024;
@@ -365,18 +361,15 @@ async function trackCredentialHealth(
   status: number,
 ): Promise<void> {
   const credentialId = resolved.credentialId;
-  if (!credentialId) return;
+  const outcome = status === 401 ? "rejected" : status >= 200 && status < 300 ? "accepted" : null;
+  if (!credentialId || !outcome) return;
   try {
-    if (status === 401) {
-      await recordModelCredentialAuthFailure(
-        orgId,
-        credentialId,
-        (storedKey) => storedKey === resolved.apiKey,
-        getEnv().INTEGRATION_REFRESH_MAX_FAILURES,
-      );
-    } else if (status >= 200 && status < 300) {
-      await clearModelCredentialFailureStreak(orgId, credentialId);
-    }
+    await recordModelCredentialOutcome(
+      orgId,
+      credentialId,
+      outcome,
+      (storedKey) => storedKey === resolved.apiKey,
+    );
   } catch (err) {
     logger.warn("llm-proxy: credential health update failed", {
       credentialId,

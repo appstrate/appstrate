@@ -151,7 +151,7 @@ export async function drainAudits(
  * enters through `enterSpaceContext`, which sets `space` but leaves `spaceId`
  * (the credential's) alone — hence `space` first. No per-call override.
  *
- * Under a role preview the persona goes into `after.view_as`; the actor stays
+ * Under a role preview the persona goes into `after.viewAs`; the actor stays
  * the administrator, which is who they were.
  */
 export async function recordAuditFromContext(

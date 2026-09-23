@@ -25,9 +25,9 @@ import {
   buildRuntimeToolExtensions,
   emitRuntimeReady,
   startSinkHeartbeat,
-  type PiRunnerOptions,
   type SinkHeartbeatHandle,
 } from "@appstrate/runner-pi";
+import { parsePiLoopEnv, type PiLoopOptions } from "@appstrate/runner-pi/loop-env";
 import { getErrorMessage } from "@appstrate/core/errors";
 import {
   readBundleFromBuffer,
@@ -202,6 +202,7 @@ export async function runCommand(opts: RunCommandOptions): Promise<void> {
 }
 
 async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
+  const piLoopOptions = piLoopOptionsFromShell(process.env);
   // ─── 1. Resolve integration mode + profile state ──────────────────
   const mode: IntegrationMode = parseIntegrationMode(opts.integrations);
   const target = parseRunTarget(opts.bundle);
@@ -528,7 +529,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       agentDir: path.join(workspaceDir, ".pi-agent"),
       extensionFactories: [...apiCallFactories, ...runtimeToolFactories],
       authStoragePath: path.join(workspaceDir, ".pi-auth.json"),
-      ...piLoopOptionsFromShell(process.env),
+      ...piLoopOptions,
     });
 
     // Emit the "runtime ready" heartbeat through the same sink that
@@ -1223,20 +1224,11 @@ export function _raceFinalizeAgainstTimeoutForTesting(
 }
 
 /**
- * The Pi loop knobs a local run takes from the user's shell — the same three
- * variables, with the same lenient reading, `PiRunner` used to take from
- * `process.env` itself: only `"false"` turns a loop off, and an invalid byte
- * cap falls back to the runner's default.
+ * The Pi loop knobs a local run takes from the user's shell, read by the same
+ * strict parser as the container: a malformed value stops the run.
  */
-export function piLoopOptionsFromShell(
-  env: Record<string, string | undefined>,
-): Pick<PiRunnerOptions, "modelRetry" | "modelCompaction" | "toolResultByteLimit"> {
-  const limit = Number(env.TOOL_RESULT_BYTE_LIMIT);
-  return {
-    modelRetry: env.MODEL_RETRY_ENABLED !== "false",
-    modelCompaction: env.MODEL_COMPACTION_ENABLED !== "false",
-    ...(env.TOOL_RESULT_BYTE_LIMIT && Number.isInteger(limit) && limit > 0
-      ? { toolResultByteLimit: limit }
-      : {}),
-  };
+export function piLoopOptionsFromShell(env: Record<string, string | undefined>): PiLoopOptions {
+  const { options, issues } = parsePiLoopEnv(env);
+  if (issues.length > 0) throw new Error(`Invalid environment: ${issues.join("; ")}`);
+  return options;
 }

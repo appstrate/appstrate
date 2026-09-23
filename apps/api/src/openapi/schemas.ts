@@ -5,8 +5,8 @@ import {
   packageSourceValues,
   packageTypeValues,
   runOriginValues,
-  runStatusValues,
 } from "@appstrate/db/schema";
+import { runStatusValues } from "@appstrate/core/run-status";
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
 import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
 import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
@@ -1440,8 +1440,7 @@ export const schemas = {
       name: { type: "string" },
       keyPrefix: {
         type: "string",
-        description:
-          "The first characters of the key, for identification: `apst_` + 8. A key created before the checksummed format shows `ask_` + 4 and no longer authenticates.",
+        description: "The first characters of the key, for identification: `apst_` + 8.",
       },
       scopes: {
         type: "array",

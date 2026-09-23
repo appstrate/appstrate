@@ -10,8 +10,11 @@
 import { describe, it, expect } from "bun:test";
 import { Hono } from "hono";
 import type { ApiError } from "@appstrate/core/api-errors";
+import { PgDialect } from "drizzle-orm/pg-core";
+import { schedules } from "@appstrate/db/schema";
 import {
   assertIfMatch,
+  ifMatchWhere,
   ifNoneMatchSatisfied,
   setEtag,
   versionEtag,
@@ -123,5 +126,36 @@ describe("assertIfMatch", () => {
       status: 428,
       code: "precondition_required",
     });
+  });
+});
+
+describe("ifMatchWhere", () => {
+  // The predicate the request's header yields, rendered as SQL (or undefined).
+  async function predicate(ifMatch: string | undefined) {
+    let where: ReturnType<typeof ifMatchWhere>;
+    const app = new Hono().patch("/", (c) => {
+      where = ifMatchWhere(c, schedules.updatedAt);
+      return c.body(null, 204);
+    });
+    await app.request("/", {
+      method: "PATCH",
+      headers: ifMatch === undefined ? {} : { "If-Match": ifMatch },
+    });
+    return where && new PgDialect().sqlToQuery(where);
+  }
+
+  it("adds nothing without the header, or for `*`", async () => {
+    expect(await predicate(undefined)).toBeUndefined();
+    expect(await predicate('"1", *')).toBeUndefined();
+  });
+
+  it("compares the listed strong tags at the millisecond the ETag keeps", async () => {
+    const query = (await predicate('"1767225600123", "7"'))!;
+    expect(query.sql).toContain("floor(extract(epoch from");
+    expect(query.params).toEqual(["1767225600123", "7"]);
+  });
+
+  it("matches nothing for weak or foreign tags", async () => {
+    expect((await predicate('W/"1", "abc"'))!.sql).toBe("false");
   });
 });

@@ -578,6 +578,22 @@ describe("invoke_operation", () => {
     expect(calls[1]!.headers.get("If-Match")).toBe('"5"');
   });
 
+  it("answers an `if_match` carrying CR/LF with a tool error, not a throw", async () => {
+    const { byName, calls } = makeTools(["mcp:invoke"]);
+    const res = await byName.get("invoke_operation")!.handler(
+      {
+        operation_id: "updateAgent",
+        path_params: { scope: "@acme", name: "a" },
+        if_match: '"5"\r\nX-Injected: 1',
+        body: { content: "edited" },
+      },
+      noExtra,
+    );
+    expect(res.isError).toBe(true);
+    expect(parseResult(res).error).toContain("If-Match");
+    expect(calls).toHaveLength(0);
+  });
+
   it("auto-maps a declared header param supplied in query onto a real header", async () => {
     const op = firstOp((o) => o.headerParams.includes("X-Integration-Id"));
     const values: Record<string, string> = {};

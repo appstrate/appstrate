@@ -1009,14 +1009,16 @@ async function buildPackageDetailDto(
       latestVersionDate,
     ),
   };
-  return { body, lockVersion: item.source === "system" ? null : lockVersion };
+  // The ETag names the DRAFT's version, so it rides only on a body that IS the
+  // draft: a published body stamped with it would pass a later `If-Match`.
+  return { body, lockVersion: definition === "draft" ? lockVersion : null };
 }
 
 /**
  * A package detail and the draft version it was read at. The version never
  * rides in the body: it is the response's `ETag`, and a draft write sends it
- * back in `If-Match`. `null` for a package nobody can write (a system one) or a
- * read that withholds authoring state.
+ * back in `If-Match`. `null` whenever the body is not the draft (a published
+ * version, a system package) or the read withholds authoring state.
  */
 export interface PackageDetail {
   body: Record<string, unknown>;

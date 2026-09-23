@@ -39,11 +39,15 @@ describe("allocateMcpToolName", () => {
     expect(allocateMcpToolName("gh", "list_issues", taken)).toBe(a);
   });
 
-  it("gives a name advertised twice a second distinct digest", () => {
+  it("gives a name advertised twice one salted digest, then throws", () => {
     const first = allocateMcpToolName("gh", "x", (n) => n === "gh__x");
     const second = allocateMcpToolName("gh", "x", (n) => n === "gh__x" || n === first);
     expect(second).not.toBe(first);
     expect(isValidMcpToolName(second)).toBe(true);
+    expect(allocateMcpToolName("gh", "x", (n) => n === "gh__x" || n === first)).toBe(second);
+    expect(() =>
+      allocateMcpToolName("gh", "x", (n) => n === "gh__x" || n === first || n === second),
+    ).toThrow(/collides after re-hashing/);
   });
 
   it("truncates within the ceiling and keeps names that differ only past the cut apart", () => {

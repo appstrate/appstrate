@@ -7,7 +7,7 @@ import { and, eq, asc, inArray, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { schedules, endUsers, runs, notifications } from "@appstrate/db/schema";
-import { activeRunStatusValues } from "@appstrate/db/run-status";
+import { activeRunStatusValues } from "@appstrate/core/run-status";
 import { resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
 import { loadSpaceAccess } from "../lib/space-lookup.ts";
 import { batchLoadUserNames } from "../lib/user-helpers.ts";
@@ -325,25 +325,27 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
       dependencyOverrides,
     });
 
-    // Update schedule timestamps. `enabled` is re-read here because the
-    // trigger may have just disabled the schedule (invalid actor) — a
-    // disabled schedule must not get a fresh nextRunAt re-armed onto it.
-    const schedule = await loadSchedule(scheduleId, { orgId, spaceId });
-    const nextRun = schedule?.enabled
-      ? computeNextRun(schedule.cron_expression, schedule.timezone ?? "UTC")
-      : null;
-
-    await db
-      .update(schedules)
-      .set({
-        lastRunAt: new Date(),
-        nextRunAt: nextRun ?? null,
-        updatedAt: new Date(),
-      })
-      .where(eq(schedules.id, scheduleId));
+    await recordScheduleFire(scheduleId, { orgId, spaceId });
   } finally {
     inFlightFires.delete(fireKey);
   }
+}
+
+/**
+ * Stamp a fire on its schedule. `enabled` is re-read because the trigger may
+ * have just disabled the schedule (invalid actor) — a disabled schedule must
+ * not get a fresh nextRunAt re-armed onto it. `updatedAt` is left alone: a
+ * fire is not an edit, and `updatedAt` is the schedule's ETag.
+ */
+export async function recordScheduleFire(scheduleId: string, scope: SpaceScope): Promise<void> {
+  const schedule = await loadSchedule(scheduleId, scope);
+  const nextRun = schedule?.enabled
+    ? computeNextRun(schedule.cron_expression, schedule.timezone ?? "UTC")
+    : null;
+  await db
+    .update(schedules)
+    .set({ lastRunAt: new Date(), nextRunAt: nextRun ?? null })
+    .where(eq(schedules.id, scheduleId));
 }
 
 // ---------------------------------------------------------------------------
@@ -1042,6 +1044,8 @@ export async function updateSchedule(
   viewer: Actor | null,
   /** Caller's run-read predicate — scopes the run counters of the echoed row. */
   visibility: SQL | undefined,
+  /** `If-Match` predicate (`ifMatchWhere`): a stale row updates nothing and yields `null`. */
+  ifMatch?: SQL,
 ): Promise<EnrichedSchedule | null> {
   const existing = await loadSchedule(id, scope);
   if (!existing) return null;
@@ -1084,14 +1088,12 @@ export async function updateSchedule(
       scopedWhere(schedules, {
         orgId: scope.orgId,
         spaceId: scope.spaceId,
-        extra: [eq(schedules.id, id)],
+        extra: [eq(schedules.id, id), ifMatch],
       }),
     )
     .returning();
 
-  if (!row) {
-    throw internalError();
-  }
+  if (!row) return null;
   const schedule = toSchedule(row);
 
   if (row.enabled) {

@@ -20,6 +20,10 @@ import {
 } from "../../helpers/seed.ts";
 import { publishAndInstall, seedDivergedAgent } from "../../helpers/schedule-fixtures.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
+import { recordScheduleFire } from "../../../src/services/scheduler.ts";
+import { db } from "@appstrate/db/client";
+import { schedules } from "@appstrate/db/schema";
+import { eq, sql } from "drizzle-orm";
 import { schedulesPaths } from "../../../src/openapi/paths/schedules.ts";
 import { responses } from "../../../src/openapi/responses.ts";
 
@@ -548,6 +552,55 @@ describe("Schedules API", () => {
 
       // Optional: without the header the write is last-write-wins.
       expect((await patch("Unconditional")).status).toBe(200);
+    });
+
+    it("lets exactly one of two concurrent writers holding the same ETag through", async () => {
+      const fid = agentId("etag-race");
+      const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
+      await publish(fid);
+      const schedule = await seedSchedule({
+        packageId: agent.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+      });
+      // Sub-millisecond precision in the row, truncated in the ETag: still a match.
+      await db
+        .update(schedules)
+        .set({ updatedAt: sql`'2026-01-01 00:00:00.123789+00'::timestamptz` })
+        .where(eq(schedules.id, schedule.id));
+      const etag = (
+        await app.request(`/api/schedules/${schedule.id}`, { headers: authHeaders(ctx) })
+      ).headers.get("ETag")!;
+      expect(etag).toBe('"1767225600123"');
+
+      const patch = (name: string) =>
+        app.request(`/api/schedules/${schedule.id}`, {
+          method: "PATCH",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json", "If-Match": etag },
+          body: JSON.stringify({ name }),
+        });
+      const statuses = (await Promise.all([patch("A"), patch("B")])).map((r) => r.status);
+      expect(statuses.sort()).toEqual([200, 412]);
+    });
+
+    it("keeps the ETag across a fire — a fire is not an edit", async () => {
+      const fid = agentId("etag-fire");
+      const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
+      const schedule = await seedSchedule({
+        packageId: agent.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+      });
+      const read = () =>
+        app.request(`/api/schedules/${schedule.id}`, { headers: authHeaders(ctx) });
+      const before = await read();
+      await Bun.sleep(5);
+      await recordScheduleFire(schedule.id, { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+      const after = await read();
+      expect(after.headers.get("ETag")).toBe(before.headers.get("ETag"));
+      expect(((await after.json()) as { last_run_at: string | null }).last_run_at).not.toBeNull();
     });
 
     it("is not served on PUT", async () => {

@@ -42,8 +42,8 @@ import {
   runStatusLineKey,
   visibleLogEntries,
   type ChatRunFile,
-  type RunStatus,
 } from "./run-events.ts";
+import type { RunStatus } from "@appstrate/core/run-status";
 import { FileAttachment } from "./file-attachment.tsx";
 import type { ToolPhase } from "./tool-result.ts";
 

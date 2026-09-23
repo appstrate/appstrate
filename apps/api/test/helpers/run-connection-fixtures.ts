@@ -18,7 +18,8 @@
  */
 
 import { db } from "./db.ts";
-import { integrationConnections, runs, TERMINAL_RUN_STATUSES } from "@appstrate/db/schema";
+import { integrationConnections, runs } from "@appstrate/db/schema";
+import { TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { seedPackage, seedPackageVersion } from "./seed.ts";
 import { localIntegrationManifest, httpHeaderDelivery } from "./integration-manifests.ts";

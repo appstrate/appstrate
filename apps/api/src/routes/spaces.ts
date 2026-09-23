@@ -83,7 +83,8 @@ import {
 import type { PackageType } from "@appstrate/core/validation";
 import type { SpaceSweepResult } from "@appstrate/shared-types";
 import { recordAuditFromContext } from "../services/audit.ts";
-import { assertIfMatch, setEtag } from "../lib/conditional-request.ts";
+import { ifMatchWhere, setEtag } from "../lib/conditional-request.ts";
+import { spacePackages, spaces as spacesTable } from "@appstrate/db/schema";
 import { listSpaceRoles } from "../services/space-roles.ts";
 import { assertCanGrantSpaceRole, canGrantSpaceRole } from "../lib/space-role-policy.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
@@ -494,7 +495,6 @@ export function createSpacesRouter() {
       const spaceId = c.req.param("id")!;
       const data = await readJsonBody(c, updateSpaceSchema);
       const current = c.get("space")!;
-      assertIfMatch(c, (await getSpace(orgId, spaceId)).updatedAt);
       // A stored default can become effective later. Opening also grants the
       // existing default to every implicit member, even when it is not edited.
       if (
@@ -519,6 +519,7 @@ export function createSpacesRouter() {
           spaceId,
           { ...rest, defaultRole: default_role },
           current,
+          ifMatchWhere(c, spacesTable.updatedAt),
         );
         await recordAuditFromContext(c, {
           action: "space.updated",
@@ -911,7 +912,6 @@ export function createSpacesRouter() {
     const data = await readJsonBody(c, updatePackageSchema);
 
     const placement = await getSpacePackage(scope, packageId);
-    if (placement) assertIfMatch(c, placement.updatedAt);
     let generationConfig = data.generationConfig;
     if (placement && (data.modelId !== undefined || generationConfig !== undefined)) {
       const effectiveModelId = data.modelId !== undefined ? data.modelId : placement.modelId;
@@ -953,7 +953,7 @@ export function createSpacesRouter() {
       scope,
       packageId,
       { ...rest, ...(generationConfig !== undefined ? { generationConfig } : {}) },
-      { requirePlacement: true },
+      { requirePlacement: true, ifMatch: ifMatchWhere(c, spacePackages.updatedAt) },
     );
     const updated = await getSpacePackage(scope, packageId);
     if (updated) setEtag(c, updated.updatedAt);

@@ -72,7 +72,7 @@ import {
 import { provisionWorkspace, provisionFiles, type ProvisionDeps } from "./provision.ts";
 import { createRunFileUploader, sweepOutputs, summarizeArtifacts } from "./publish.ts";
 import type { SweepResult } from "./publish.ts";
-import { formatLogLine } from "@appstrate/runner-pi/log-line";
+import { formatLogLine } from "@appstrate/core/log-line";
 
 /**
  * The entrypoint's structured diagnostics, on stdout in the shared pino shape.

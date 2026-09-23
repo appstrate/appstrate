@@ -101,8 +101,8 @@ const CHAT_MESSAGE_ROLES = new Set(["user", "assistant"]);
 export const CHAT_MESSAGE_MAX_BYTES = 256 * 1024;
 
 // The client (assistant-ui / useChat) posts the full thread plus optional
-// session/model/context extras. `messages` are UIMessages: their shape is the
-// AI SDK's, checked by `safeValidateUIMessages` in the handler. This schema adds
+// session/model/context extras. `messages` are UIMessages: the last one's shape
+// is the AI SDK's, checked by `safeValidateUIMessages` in the handler. This schema adds
 // what that check cannot know:
 //   - `role` MUST be one of {@link CHAT_MESSAGE_ROLES}. Nothing legitimate
 //     sends another: the composer only produces user turns, and a reload
@@ -225,11 +225,14 @@ export async function handleChatStream(
   const persona = c.get("viewAs");
   const orgRole = persona?.orgRole ?? c.get("orgRole") ?? "member";
   const body = parseBody(chatStreamSchema, await c.req.json().catch(() => null));
-  const validated = await safeValidateUIMessages({ messages: body.messages });
+  // Only the new message is validated: it is the one persisted. Earlier turns are
+  // the server's own rows replayed, and a row written under an older AI SDK shape
+  // must not turn every later turn of its conversation into a 400.
+  const validated = await safeValidateUIMessages({ messages: body.messages.slice(-1) });
   if (!validated.success) {
     throw invalidRequest(`Invalid chat message: ${validated.error.message}`, "messages");
   }
-  const messages = validated.data;
+  const messages = [...(body.messages.slice(0, -1) as UIMessage[]), ...validated.data];
   logger.info("chat turn", { turns: messages.length });
 
   const sessionId = body.id;

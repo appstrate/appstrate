@@ -9,8 +9,8 @@
  * `@appstrate/db/run-status` derives its sets and its `pgEnum` from these
  * tuples, never the other way round.
  *
- * **This module MUST stay import-free**: it reaches the browser bundle through
- * `@appstrate/db/run-status` → `@appstrate/shared-types`.
+ * **This module MUST stay import-free**: the SPA imports it, directly and
+ * through `@appstrate/db/run-status` → `@appstrate/shared-types`.
  */
 
 export const runStatusValues = [

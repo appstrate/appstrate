@@ -33,6 +33,7 @@ import {
   or,
   count,
   sql,
+  type SQL,
 } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
 import { scopedWhere, type DbOrTx, type Tx } from "../lib/db-helpers.ts";
@@ -148,15 +149,16 @@ export async function getOrgById(orgId: string): Promise<OrgResult | null> {
 export async function updateOrganization(
   orgId: string,
   updates: { name?: string; slug?: string },
-): Promise<OrgResult> {
+  /** `If-Match` predicate (`ifMatchWhere`); null when nothing was updated. */
+  ifMatch?: SQL,
+): Promise<OrgResult | null> {
   const [row] = await db
     .update(organizations)
     .set({ ...updates, updatedAt: new Date() })
-    .where(eq(organizations.id, orgId))
+    .where(and(eq(organizations.id, orgId), ifMatch))
     .returning();
 
-  if (!row) throw new Error("Failed to update organization");
-  return toOrgResult(row);
+  return row ? toOrgResult(row) : null;
 }
 
 // Re-exporting `orgSettingsSchema` from here died with the second
@@ -245,7 +247,9 @@ export async function listOrgsWithUnsupportedApiVersion(
 export async function updateOrgSettings(
   orgId: string,
   updates: Partial<OrgSettings>,
-): Promise<OrgSettings> {
+  /** `If-Match` predicate (`ifMatchWhere`); null when nothing was updated. */
+  ifMatch?: SQL,
+): Promise<OrgSettings | null> {
   // Merge server-side via JSONB concatenation so concurrent admins toggling
   // different keys don't clobber each other (read-modify-write would race).
   const [row] = await db
@@ -254,7 +258,7 @@ export async function updateOrgSettings(
       orgSettings: sql`COALESCE(${organizations.orgSettings}, '{}'::jsonb) || ${JSON.stringify(updates)}::jsonb`,
       updatedAt: new Date(),
     })
-    .where(eq(organizations.id, orgId))
+    .where(and(eq(organizations.id, orgId), ifMatch))
     .returning({ orgSettings: organizations.orgSettings });
 
   // The statement above is auto-committed (no enclosing transaction), so the
@@ -262,7 +266,7 @@ export async function updateOrgSettings(
   // read cannot re-cache the pre-update value.
   orgApiVersionCache.invalidate(orgId);
 
-  return (row?.orgSettings as OrgSettings) ?? {};
+  return row ? ((row.orgSettings as OrgSettings) ?? {}) : null;
 }
 
 export async function getOrgMembers(orgId: string) {

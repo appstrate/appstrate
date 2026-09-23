@@ -60,6 +60,8 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 #   - @appstrate/core/{errors,ssrf}           getErrorMessage + isBlockedHost/Url,
 #                                             imported by credential-proxy.ts /
 #                                             mcp.ts / ssrf.ts
+#   - @appstrate/core/{url,log-line}          env.ts's URL check and logger.ts's
+#                                             pino-compatible line (import-free)
 #   - @earendil-works/pi-ai (npm, via     re-originates an aliased run's call against
 #     the `pi-sdk.ts` barrel)             the real backing, so pi-ai keeps deriving
 #                                         every vendor quirk itself. Only the five
@@ -74,9 +76,6 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 #                                             subpath is pi-free (no pi-ai /
 #                                             pi-coding-agent imports) so the
 #                                             compiled binary stays minimal.
-#   - @appstrate/runner-pi/log-line           the shared pino-compatible JSON
-#                                             log line written by logger.ts
-#                                             (import-free, no pino).
 COPY packages/connect/src        packages/connect/src
 COPY packages/afps-runtime/src   packages/afps-runtime/src
 COPY packages/afps-shared/src    packages/afps-shared/src

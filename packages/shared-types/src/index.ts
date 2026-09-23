@@ -59,7 +59,7 @@ export interface ListEnvelope<T> {
   limit?: number;
 }
 
-import type { RunStatus as _RunStatus } from "@appstrate/db/run-status";
+import type { RunStatus as _RunStatus } from "@appstrate/core/run-status";
 import type { PricingStatus as _PricingStatus } from "@appstrate/db/pricing-status";
 
 /**
@@ -300,10 +300,10 @@ export interface ResourceEntry {
 // barrel: this module is consumed by the SPA, and a value import from
 // `@appstrate/db/schema` cannot be elided by the bundler — it shipped
 // drizzle-orm plus all 18 schema files (table + column names included) to
-// the browser. `run-status.ts` is import-free and is what `runStatusEnum`
-// itself derives from, so there is still exactly one list of statuses.
+// the browser. `run-status.ts` is import-free and derives from the tuples of
+// `@appstrate/core/run-status` (import `RunStatus` from there), as does
+// `runStatusEnum`, so there is still exactly one list of statuses.
 export { TERMINAL_RUN_STATUSES, ACTIVE_RUN_STATUSES } from "@appstrate/db/run-status";
-export type { RunStatus, TerminalRunStatus } from "@appstrate/db/run-status";
 
 // --- Auth policy ---
 

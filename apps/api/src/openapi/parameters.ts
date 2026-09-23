@@ -147,7 +147,7 @@ export const parameters = {
       "The persona is enforced server-side: `permissions`, the space role and every listing are " +
       "the persona's, and a write the persona cannot make is refused exactly as it would be for a " +
       "real holder of that role. The authenticated identity and the audit actor stay the real " +
-      "caller; audit rows carry the persona under `after.view_as`.\n\n" +
+      "caller; audit rows carry the persona under `after.viewAs`.\n\n" +
       "Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` " +
       "(header does not parse), `400 view_as_unsupported` (the credential is not one that can " +
       "carry a persona — only a cookie session and the CLI/instance token, which authenticate the " +

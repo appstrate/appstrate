@@ -38,13 +38,13 @@ sole route to anything read only through that subpath. `RUN_HISTORY_INJECTED_TOO
 and `RECALL_MEMORY_INJECTED_TOOL` are the live example — the sidecar takes them
 from `./runtime-tools`, and they are deliberately absent from `.`.
 
-| Subpath           | Contents                                                                            |
-| ----------------- | ----------------------------------------------------------------------------------- |
-| `.`               | The clusters listed below.                                                          |
-| `./runtime-tools` | The built-in runtime tools the agent can call during a run, with their descriptors. |
-| `./provider-map`  | Provider mapping on its own, for callers that want it without the barrel.           |
-| `./model-compat`  | The pi-ai `model.compat` flag bag and its pricing invariants.                       |
-| `./log-line`      | The pino-compatible JSON log line (numeric level) for pino-free processes.          |
+| Subpath           | Contents                                                                               |
+| ----------------- | -------------------------------------------------------------------------------------- |
+| `.`               | The clusters listed below.                                                             |
+| `./runtime-tools` | The built-in runtime tools the agent can call during a run, with their descriptors.    |
+| `./provider-map`  | Provider mapping on its own, for callers that want it without the barrel.              |
+| `./model-compat`  | The pi-ai `model.compat` flag bag and its pricing invariants.                          |
+| `./loop-env`      | `parsePiLoopEnv`: the strict env reader of the Pi loop knobs (retry, compaction, cap). |
 
 From `.`:
 

@@ -2,12 +2,12 @@
 
 /**
  * Minimal structured JSON logger for the sidecar, writing the shared
- * pino-compatible line (`@appstrate/runner-pi/log-line`). Kept pino-free so
+ * pino-compatible line (`@appstrate/core/log-line`). Kept pino-free so
  * the compiled binary stays lean — pulling `@appstrate/core/logger` would
  * transitively bring in pino + node:async_hooks, which the sidecar doesn't need.
  */
 
-import { PINO_LEVELS, formatLogLine, type LogLevel } from "@appstrate/runner-pi/log-line";
+import { PINO_LEVELS, formatLogLine, type LogLevel } from "@appstrate/core/log-line";
 
 function envLevel(): LogLevel {
   const raw = (process.env.LOG_LEVEL ?? "info").toLowerCase();

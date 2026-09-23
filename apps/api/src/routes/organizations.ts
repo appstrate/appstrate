@@ -53,7 +53,8 @@ import { createDefaultSpace } from "../services/spaces.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { logger } from "../lib/logger.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
-import { assertIfMatch, setEtag } from "../lib/conditional-request.ts";
+import { ifMatchWhere, preconditionFailed, setEtag } from "../lib/conditional-request.ts";
+import { organizations } from "@appstrate/db/schema";
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 import { ORG_ROLES } from "@appstrate/core/permissions";
 
@@ -216,9 +217,10 @@ router.post("/", async (c) => {
 // --- Routes below require org context (orgId from params, verified via membership) ---
 
 // The org row's `updatedAt` versions both its detail and its settings.
-async function assertOrgIfMatch(c: Context<AppEnv>, orgId: string) {
+// Nothing updated under `If-Match`: the org is gone (404) or stale (412).
+async function staleOrgError(orgId: string) {
   const org = await getOrgById(orgId);
-  if (org) assertIfMatch(c, org.updatedAt);
+  return org ? preconditionFailed(org.updatedAt) : notFound("Organization not found");
 }
 
 async function stampOrgEtag(c: Context<AppEnv>, orgId: string) {
@@ -295,7 +297,6 @@ router.get("/:orgId", async (c) => {
 // PATCH /api/orgs/:orgId — update name/slug (owner only — org routes skip org context)
 router.patch("/:orgId", requirePermission("org", "update"), async (c) => {
   const orgId = c.req.param("orgId")!;
-  await assertOrgIfMatch(c, orgId);
   const data = await readJsonBody(c, updateOrgSchema);
 
   if (data.slug) {
@@ -309,10 +310,15 @@ router.patch("/:orgId", requirePermission("org", "update"), async (c) => {
     }
   }
 
-  await updateOrganization(orgId, {
-    ...(data.name?.trim() ? { name: data.name.trim() } : {}),
-    ...(data.slug ? { slug: data.slug } : {}),
-  });
+  const updated = await updateOrganization(
+    orgId,
+    {
+      ...(data.name?.trim() ? { name: data.name.trim() } : {}),
+      ...(data.slug ? { slug: data.slug } : {}),
+    },
+    ifMatchWhere(c, organizations.updatedAt),
+  );
+  if (!updated) throw await staleOrgError(orgId);
 
   await recordAuditFromContext(c, {
     action: "org.updated",
@@ -635,7 +641,6 @@ router.get("/:orgId/settings", async (c) => {
 // PATCH /api/orgs/:orgId/settings — update org settings (owner/admin)
 router.patch("/:orgId/settings", requirePermission("org", "settings"), async (c) => {
   const orgId = c.req.param("orgId")!;
-  await assertOrgIfMatch(c, orgId);
   const data = await readJsonBody(c, orgSettingsPatchSchema);
 
   // Write-side counterpart of the read-side check in `middleware/api-version.ts`.
@@ -670,7 +675,8 @@ router.patch("/:orgId/settings", requirePermission("org", "settings"), async (c)
     );
   }
 
-  const settings = await updateOrgSettings(orgId, data);
+  const settings = await updateOrgSettings(orgId, data, ifMatchWhere(c, organizations.updatedAt));
+  if (!settings) throw await staleOrgError(orgId);
   await recordAuditFromContext(c, {
     action: "org.settings_updated",
     resourceType: "org",

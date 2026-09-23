@@ -264,6 +264,8 @@ describe("handleChatStream", () => {
       principalKind?: PrincipalKind;
       /** The composer's agent-authoring switch for this turn; omitted = on. */
       agentAuthoring?: boolean;
+      /** Earlier turns replayed ahead of the new user message. */
+      history?: unknown[];
     },
   ): Promise<Response> {
     // Real platform deps (the same context `init()` gets), with dispatch
@@ -287,6 +289,7 @@ describe("handleChatStream", () => {
       body: JSON.stringify({
         id: sessionId,
         messages: [
+          ...(overrides?.history ?? []),
           {
             id: "u1",
             role: "user",
@@ -399,6 +402,29 @@ describe("handleChatStream", () => {
     expect(calls).toEqual([]);
     const sessions = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
     expect(sessions).toEqual([]);
+  });
+
+  it("does not validate earlier turns: a row in an older AI SDK shape still lets the turn run", async () => {
+    const sessionId = mintSessionId();
+    const { engine, calls } = scriptedEngine();
+    // An AI SDK v4 `tool-invocation` part: `safeValidateUIMessages` rejects it.
+    const legacy = {
+      id: "a0",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-invocation",
+          toolInvocation: { state: "result", toolCallId: "c1", toolName: "x", args: {}, result: 1 },
+        },
+      ],
+    };
+    const res = await postChat(sessionId, undefined, engine, { history: [legacy] });
+
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.messages.map((m) => m.id)).toEqual(["a0", "u1"]);
+    await waitForAssistantPersist(sessionId);
   });
 
   it("rejects a last message over the persisted-content cap, before any persistence", async () => {

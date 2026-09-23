@@ -102,11 +102,12 @@
     "./url": "./src/url.ts",
     "./run-and-wait-client": "./src/run-and-wait-client.ts",
     "./run-status": "./src/run-status.ts",
+    "./log-line": "./src/log-line.ts",
     "./connect-handshake": "./src/connect-handshake.ts"
   },
   "dependencies": {
     "@afps-spec/schema": "^0.7.0",
-    "@appstrate/afps-shared": "^0.8.0",
+    "@appstrate/afps-shared": "^0.9.0",
     "@types/json-schema": "7.0.15",
     "@types/semver": "^7.8.0",
     "ajv": "^8.20.0",

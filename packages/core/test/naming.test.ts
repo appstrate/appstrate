@@ -195,9 +195,8 @@ describe("isValidToolName", () => {
     expect(isValidToolName(long)).toBe(false);
   });
 
-  it("rejects empty / non-string input", () => {
+  it("rejects an empty name", () => {
     expect(isValidToolName("")).toBe(false);
-    expect(isValidToolName(undefined as unknown as string)).toBe(false);
   });
 });
 

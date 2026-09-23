@@ -973,7 +973,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
   // sidecar/MCP path) made the strict `RunResultSchema` reject the whole POST
   // with a 400, and the runner's HttpSink flipped a successful run to failed.
   // The schema now degrades malformed cosmetic fields instead of rejecting.
-  it("tolerates malformed cosmetic fields — log without timestamp, degenerate usage/cost", async () => {
+  it("tolerates malformed cosmetic fields — log without timestamp, degenerate cost", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent", {
       tokenUsage: { input_tokens: 10, output_tokens: 5 },
     });
@@ -984,8 +984,8 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
       durationMs: 100,
       // log line with NO timestamp — the exact shape the sidecar path emitted.
       logs: [{ level: "info", message: "done" }],
-      // present-but-malformed billing fields degrade to "absent" rather than 400.
-      usage: { input_tokens: 7 },
+      usage: { input_tokens: 7, output_tokens: 2 },
+      // a present-but-malformed cost degrades to "absent" rather than 400.
       cost: -1,
     });
     expect(res.status).toBe(200);
@@ -996,29 +996,41 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.sinkClosedAt).not.toBeNull();
   });
 
-  // Service-level Zod boundary on `result.usage` — the HTTP route already
-  // rejects malformed usage with a 400, but `finalizeRun` is also reached by
-  // non-HTTP callers (platform synthesis, the stall watchdog).
-  // Invalid shape becomes explicit zero usage; finalize never falls back to
-  // the side-channel column.
-  it("service-level finalize treats malformed usage as zero terminal usage", async () => {
+  // A failed run has already failed: a malformed `usage` on it degrades to
+  // absent — keeping the side-channel snapshot (B2) — or the 400 would leave
+  // it `running` until the watchdog.
+  it("tolerates a degenerate usage on a non-success finalize", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent", {
-      tokenUsage: { input_tokens: 50, output_tokens: 25 },
+      tokenUsage: { input_tokens: 7, output_tokens: 2 },
     });
 
-    const run = await getRunSinkContext(runId);
-    expect(run).not.toBeNull();
-    const result: TerminalRunResult = { ...emptyRunResult(), status: "success" };
-    result.output = { ok: true };
-    // Bypass the route schema deliberately — exercise the service boundary.
-    (result as { usage?: unknown }).usage = { input_tokens: "lots", bogus: true };
-
-    await finalizeRun({ run: run!, result });
+    const res = await postFinalize(runId, {
+      status: "failed",
+      error: { message: "boom" },
+      usage: { input_tokens: "lots", output_tokens: -3 },
+    });
+    expect(res.status).toBe(200);
 
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(row?.status).toBe("failed");
-    expect(row?.error).toMatch(/could not reach the LLM API/);
-    expect(row?.tokenUsage).toMatchObject({ input_tokens: 0, output_tokens: 0 });
+    expect(row?.sinkClosedAt).not.toBeNull();
+    expect(row?.tokenUsage).toEqual({ input_tokens: 7, output_tokens: 2 });
+  });
+
+  // ...but a success is only a success with valid usage: degenerate usage
+  // there is the same 400 as none at all.
+  it("rejects a success finalize whose usage is degenerate", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      output: { ok: true },
+      usage: { input_tokens: "lots" },
+    });
+    expect(res.status).toBe(400);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("running");
   });
 
   // The metric broadcaster keeps a per-run throttle entry in module memory.
@@ -1089,25 +1101,6 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.sinkClosedAt).not.toBeNull();
     // The side-channel snapshot survives — never masked by zeros.
     expect(row?.tokenUsage).toEqual({ input_tokens: 50, output_tokens: 25 });
-  });
-
-  it("malformed usage on a NON-success finalize also preserves the snapshot (B2)", async () => {
-    const runId = await seedRunWithSink(ctx, "@test/final-agent", {
-      tokenUsage: { input_tokens: 7, output_tokens: 2 },
-    });
-
-    const run = await getRunSinkContext(runId);
-    expect(run).not.toBeNull();
-    const result: TerminalRunResult = { ...emptyRunResult(), status: "failed" };
-    result.error = { message: "boom", code: "crash" };
-    // Bypass the route schema deliberately — exercise the service boundary.
-    (result as { usage?: unknown }).usage = { input_tokens: "lots", bogus: true };
-
-    await finalizeRun({ run: run!, result });
-
-    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
-    expect(row?.status).toBe("failed");
-    expect(row?.tokenUsage).toEqual({ input_tokens: 7, output_tokens: 2 });
   });
 
   it("zero-fills a non-success finalize when NO usage was ever recorded", async () => {

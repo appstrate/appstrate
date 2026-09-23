@@ -206,6 +206,17 @@ const PROTECTED_HEADERS = new Set<string>([
 // Cap the buffered response body so a large list endpoint can't dump
 // unbounded text into the model context. Truncation is flagged in the result.
 const MAX_RESPONSE_CHARS = 100_000;
+
+/** `Headers.set`, answering `false` where it would throw on an invalid name/value. */
+function trySetHeader(headers: Headers, name: string, value: string): boolean {
+  try {
+    headers.set(name, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -731,29 +742,28 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
 
     const query = asRecord(args.query) ?? {};
 
+    // A model-supplied header name/value may be syntactically invalid (CR/LF
+    // makes `Headers.set` throw). Surface a tool error instead of a 500 so the
+    // model can self-correct.
+    const rejectHeader = (name: string): CallToolResult => {
+      emit(ctx, {
+        tool: "invoke_operation",
+        durationMs: performance.now() - start,
+        operationId,
+        method: op.method,
+        outcome: "rejected",
+      });
+      return textResult({ error: `Invalid header name or value: ${name}` }, true);
+    };
     const headers = new Headers(ctx.authHeaders);
     const ifMatch = asString(args.if_match);
-    if (ifMatch) headers.set("If-Match", ifMatch);
+    if (ifMatch && !trySetHeader(headers, "If-Match", ifMatch)) return rejectHeader("If-Match");
     const extraHeaders = asRecord(args.headers);
     if (extraHeaders) {
       for (const [name, value] of Object.entries(extraHeaders)) {
         if (PROTECTED_HEADERS.has(name.toLowerCase())) continue;
         if (typeof value !== "string") continue;
-        // A model-supplied header name/value may be syntactically invalid
-        // (`Headers.set` throws a TypeError). Surface a graceful tool error
-        // instead of a 500 so the model can self-correct.
-        try {
-          headers.set(name, value);
-        } catch {
-          emit(ctx, {
-            tool: "invoke_operation",
-            durationMs: performance.now() - start,
-            operationId,
-            method: op.method,
-            outcome: "rejected",
-          });
-          return textResult({ error: `Invalid header name or value: ${name}` }, true);
-        }
+        if (!trySetHeader(headers, name, value)) return rejectHeader(name);
       }
     }
     // Auto-map OpenAPI `in: header` parameters: a model often supplies a
@@ -768,7 +778,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
       if (queryKey === undefined) continue;
       const value = query[queryKey];
       if (typeof value === "string" || typeof value === "number") {
-        headers.set(headerName, String(value));
+        if (!trySetHeader(headers, headerName, String(value))) return rejectHeader(headerName);
         delete query[queryKey];
       }
     }

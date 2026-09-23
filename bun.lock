@@ -201,7 +201,7 @@
     },
     "packages/afps-shared": {
       "name": "@appstrate/afps-shared",
-      "version": "0.8.0",
+      "version": "0.9.0",
       "dependencies": {
         "@types/semver": "^7.8.0",
         "fflate": "^0.8.3",
@@ -227,7 +227,7 @@
       "version": "11.1.0",
       "dependencies": {
         "@afps-spec/schema": "^0.7.0",
-        "@appstrate/afps-shared": "^0.8.0",
+        "@appstrate/afps-shared": "^0.9.0",
         "@types/json-schema": "7.0.15",
         "@types/semver": "^7.8.0",
         "ajv": "^8.20.0",
@@ -339,18 +339,12 @@
       "dependencies": {
         "@appstrate/core": "workspace:*",
       },
-      "devDependencies": {
-        "@earendil-works/pi-ai": "0.86.1",
-      },
     },
     "packages/module-codex": {
       "name": "@appstrate/module-codex",
       "version": "0.0.0",
       "dependencies": {
         "@appstrate/core": "workspace:*",
-      },
-      "devDependencies": {
-        "@earendil-works/pi-ai": "0.86.1",
       },
     },
     "packages/module-ee": {

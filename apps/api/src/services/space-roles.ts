@@ -9,12 +9,13 @@
  * un-addressable by the write routes.
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgInvitations, spaceMembers, spaceRoles } from "@appstrate/db/schema";
 import { SPACE_ROLE_PRESETS, type SpaceRolePreset } from "@appstrate/core/permissions";
 import { isForeignKeyViolation, isUniqueViolation } from "../lib/db-helpers.ts";
 import { conflict, invalidRequest, notFound } from "../lib/errors.ts";
+import { preconditionFailed } from "../lib/conditional-request.ts";
 import { prefixedId } from "@appstrate/db/ids";
 import {
   describeMissingRead,
@@ -218,8 +219,10 @@ export async function updateSpaceRole(params: {
   orgId: string;
   id: string;
   patch: Partial<SpaceRoleInput>;
+  /** `If-Match` predicate (`ifMatchWhere`): a stale row is refused with `412`. */
+  ifMatch?: SQL;
 }): Promise<SpaceRoleWire> {
-  const { orgId, id, patch } = params;
+  const { orgId, id, patch, ifMatch } = params;
   if (patch.key !== undefined) {
     assertNotPresetKey(patch.key);
     await assertKeyFree(orgId, patch.key, id);
@@ -236,11 +239,18 @@ export async function updateSpaceRole(params: {
       ...(permissions !== undefined ? { permissions } : {}),
       updatedAt: new Date(),
     })
-    .where(and(eq(spaceRoles.id, id), eq(spaceRoles.orgId, orgId)))
+    .where(and(eq(spaceRoles.id, id), eq(spaceRoles.orgId, orgId), ifMatch))
     .returning()
     .catch((err: unknown) => asKeyConflict(err, patch.key));
-  if (!row) throw notFound(`Role '${id}' not found in this organization`);
-  return toWire(row);
+  if (row) return toWire(row);
+  const [stale] = ifMatch
+    ? await db
+        .select({ updatedAt: spaceRoles.updatedAt })
+        .from(spaceRoles)
+        .where(and(eq(spaceRoles.id, id), eq(spaceRoles.orgId, orgId)))
+    : [];
+  if (stale) throw preconditionFailed(stale.updatedAt);
+  throw notFound(`Role '${id}' not found in this organization`);
 }
 
 /**

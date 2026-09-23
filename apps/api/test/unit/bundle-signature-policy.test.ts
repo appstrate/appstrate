@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, afterAll, spyOn } from "bun:test";
-import { zipArtifact } from "@appstrate/core/zip";
+import { unzipArtifact, zipArtifact } from "@appstrate/core/zip";
 import {
   buildBundleFromAfps,
   canonicalBundleDigest,
@@ -173,10 +173,10 @@ describe("BundleSignaturePolicy", () => {
   });
 
   describe("default policy", () => {
-    it("is warn: an unsigned bundle loads (verified, not skipped)", async () => {
+    it("is warn: a signed bundle is verified", async () => {
       setEnv({ AFPS_SIGNATURE_POLICY: undefined });
-      const bundle = await loadAndVerifyBundle(await buildBundleBytes(), "@testorg/sig-test");
-      expect(bundle).not.toBeNull();
+      const bytes = await buildBundleBytes({ sign: keypair });
+      expect(await loadAndVerifyBundle(bytes, "@testorg/sig-test")).not.toBeNull();
     });
   });
 
@@ -226,13 +226,34 @@ describe("BundleSignaturePolicy", () => {
       }
     });
 
-    it("accepts an unsigned bundle (warn only)", async () => {
-      const bytes = await buildBundleBytes();
-      const bundle = await loadAndVerifyBundle(bytes, "@testorg/sig-test");
-      expect(bundle).not.toBeNull();
-      expect((bundle!.packages.get(bundle!.root)!.manifest as Record<string, unknown>).name).toBe(
-        "@testorg/sig-test",
+    it("skips parsing an unsigned archive: the central directory has no signature entry", async () => {
+      // A manifest the loader would refuse proves no parse happened: parsed,
+      // it would be logged at warn as "could not be checked".
+      const warn = spyOn(logger, "warn");
+      try {
+        const bytes = await buildBundleBytes({ manifest: "{ not json" });
+        expect(await loadAndVerifyBundle(bytes, "@testorg/sig-test")).toBeNull();
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it("finds a signature under a wrapper folder", async () => {
+      const foreign = await buildBundleBytes({ sign: generateKeyPair() });
+      const wrapped = zipArtifact(
+        Object.fromEntries(
+          Object.entries(unzipArtifact(foreign)).map(([name, bytes]) => [`pkg/${name}`, bytes]),
+        ),
+        6,
       );
+      const warn = spyOn(logger, "warn");
+      try {
+        expect(await loadAndVerifyBundle(wrapped, "@testorg/sig-test")).not.toBeNull();
+        expect(warn).toHaveBeenCalledWith("AFPS bundle signature invalid", expect.anything());
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     it("accepts a signed bundle with an invalid signature (warn only)", async () => {

@@ -3,7 +3,6 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
-import { getEnv } from "@appstrate/env";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
@@ -53,10 +52,7 @@ import {
   forceRefreshOAuthModelProviderToken,
   resolveOAuthTokenForSidecar,
 } from "../services/model-providers/token-resolver.ts";
-import {
-  clearModelCredentialFailureStreak,
-  recordModelCredentialAuthFailure,
-} from "../services/model-providers/credentials.ts";
+import { recordModelCredentialOutcome } from "../services/model-providers/credentials.ts";
 import {
   resolveLiveIntegrationCredentials,
   serializeIntegrationCredentialsWire,
@@ -481,19 +477,14 @@ export function createInternalRouter() {
   router.post("/model-credential/outcome", async (c) => {
     const { run } = await verifyRunToken(c);
     const body = await readJsonBody(c, modelCredentialOutcomeSchema);
-    const credentialId = run.modelCredentialId;
-    if (credentialId) {
-      if (body.outcome === "rejected") {
-        await recordModelCredentialAuthFailure(
-          run.orgId,
-          credentialId,
-          (storedKey) =>
-            new Bun.CryptoHasher("sha256").update(storedKey).digest("hex") === body.key_sha256,
-          getEnv().INTEGRATION_REFRESH_MAX_FAILURES,
-        );
-      } else {
-        await clearModelCredentialFailureStreak(run.orgId, credentialId);
-      }
+    if (run.modelCredentialId) {
+      await recordModelCredentialOutcome(
+        run.orgId,
+        run.modelCredentialId,
+        body.outcome,
+        (storedKey) =>
+          new Bun.CryptoHasher("sha256").update(storedKey).digest("hex") === body.key_sha256,
+      );
     }
     return c.body(null, 204);
   });

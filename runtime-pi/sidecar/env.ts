@@ -12,6 +12,8 @@
  * failed later with an error naming the symptom instead of the cause.
  */
 
+import { normalizeHttpUrl } from "@appstrate/core/url";
+
 export interface SidecarEnv {
   platformApiUrl: string;
   runToken: string;
@@ -32,22 +34,13 @@ export class SidecarEnvError extends Error {
   }
 }
 
-function isHttpUrl(value: string): boolean {
-  try {
-    const u = new URL(value);
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
 /** Parse the sidecar env, throwing {@link SidecarEnvError} listing every issue at once. */
 export function parseSidecarEnv(source: NodeJS.ProcessEnv = process.env): SidecarEnv {
   const issues: string[] = [];
 
   const platformApiUrl = source.PLATFORM_API_URL;
   if (!platformApiUrl) issues.push("PLATFORM_API_URL: required");
-  else if (!isHttpUrl(platformApiUrl))
+  else if (normalizeHttpUrl(platformApiUrl) === null)
     issues.push(`PLATFORM_API_URL: must be an http(s) URL (got "${platformApiUrl}")`);
 
   const runToken = source.RUN_TOKEN;

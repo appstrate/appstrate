@@ -16,7 +16,9 @@
  */
 
 import { getErrorMessage } from "@appstrate/core/errors";
+import { normalizeHttpUrl } from "@appstrate/core/url";
 import { derivePiProvider } from "@appstrate/runner-pi/provider-map";
+import { parsePiLoopEnv } from "@appstrate/runner-pi/loop-env";
 import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import type { Api, Model } from "./pi-sdk.ts";
 import { MODEL_API_SHAPES, SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
@@ -169,15 +171,6 @@ export class RuntimeEnvError extends Error {
   }
 }
 
-function isHttpUrl(value: string): boolean {
-  try {
-    const u = new URL(value);
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
 function parseJsonRecord(name: string, raw: string, issues: string[]): Record<string, unknown> {
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -320,13 +313,6 @@ function parsePositiveNumber(
 }
 
 /** `"true"` / `"false"`, absent meaning `true`; anything else is a launcher bug. */
-function parseOptionalBool(name: string, raw: string | undefined, issues: string[]): boolean {
-  if (raw === undefined || raw === "true") return true;
-  if (raw === "false") return false;
-  issues.push(`${name}: must be "true" or "false" (got "${raw}")`);
-  return true;
-}
-
 /**
  * Parse + validate the runtime-pi env vars from a source object.
  *
@@ -345,12 +331,12 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
 
   const sinkUrl = source.APPSTRATE_SINK_URL;
   if (!sinkUrl) issues.push("APPSTRATE_SINK_URL: required");
-  else if (!isHttpUrl(sinkUrl))
+  else if (normalizeHttpUrl(sinkUrl) === null)
     issues.push(`APPSTRATE_SINK_URL: must be an http(s) URL (got "${sinkUrl}")`);
 
   const sinkFinalizeUrl = source.APPSTRATE_SINK_FINALIZE_URL;
   if (!sinkFinalizeUrl) issues.push("APPSTRATE_SINK_FINALIZE_URL: required");
-  else if (!isHttpUrl(sinkFinalizeUrl))
+  else if (normalizeHttpUrl(sinkFinalizeUrl) === null)
     issues.push(`APPSTRATE_SINK_FINALIZE_URL: must be an http(s) URL (got "${sinkFinalizeUrl}")`);
 
   const sinkSecret = source.APPSTRATE_SINK_SECRET;
@@ -372,7 +358,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
   if (!agentPrompt) issues.push("AGENT_PROMPT: required");
 
   const sidecarUrl = source.SIDECAR_URL;
-  if (sidecarUrl !== undefined && sidecarUrl !== "" && !isHttpUrl(sidecarUrl)) {
+  if (sidecarUrl !== undefined && sidecarUrl !== "" && normalizeHttpUrl(sidecarUrl) === null) {
     issues.push(`SIDECAR_URL: must be an http(s) URL when set (got "${sidecarUrl}")`);
   }
 
@@ -385,7 +371,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
   }
 
   const modelBaseUrl = source.MODEL_BASE_URL;
-  if (modelBaseUrl && !isHttpUrl(modelBaseUrl))
+  if (modelBaseUrl && normalizeHttpUrl(modelBaseUrl) === null)
     issues.push(`MODEL_BASE_URL: must be an http(s) URL when set (got "${modelBaseUrl}")`);
 
   const agentInput = source.AGENT_INPUT
@@ -446,18 +432,8 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
 
   // Pi loop knobs — `buildRuntimePiEnv` emits them only to depart from the
   // runner's defaults.
-  const modelRetry = parseOptionalBool("MODEL_RETRY_ENABLED", source.MODEL_RETRY_ENABLED, issues);
-  const modelCompaction = parseOptionalBool(
-    "MODEL_COMPACTION_ENABLED",
-    source.MODEL_COMPACTION_ENABLED,
-    issues,
-  );
-  const toolResultByteLimit = parsePositiveInt(
-    "TOOL_RESULT_BYTE_LIMIT",
-    source.TOOL_RESULT_BYTE_LIMIT,
-    0,
-    issues,
-  );
+  const piLoop = parsePiLoopEnv(source);
+  issues.push(...piLoop.issues);
 
   if (issues.length > 0) throw new RuntimeEnvError(issues);
 
@@ -487,9 +463,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     timeoutSeconds: agentTimeoutSeconds > 0 ? agentTimeoutSeconds : undefined,
     ...(mcpToolTimeoutMs > 0 ? { mcpToolTimeoutMs } : {}),
     traceparent: source.TRACEPARENT || undefined,
-    modelRetry,
-    modelCompaction,
-    ...(toolResultByteLimit > 0 ? { toolResultByteLimit } : {}),
+    ...piLoop.options,
     warnings,
   };
 }

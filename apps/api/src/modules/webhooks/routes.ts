@@ -40,7 +40,8 @@ import { assertSpaceId } from "../../lib/ids.ts";
 import { validateSpaceInOrg } from "../../lib/space-lookup.ts";
 import { parseListPagination } from "../../lib/list-query.ts";
 import { setCursorLinkHeader } from "../../lib/pagination-link.ts";
-import { assertIfMatch, setEtag } from "../../lib/conditional-request.ts";
+import { ifMatchWhere, setEtag } from "../../lib/conditional-request.ts";
+import { webhooks } from "@appstrate/db/schema";
 
 /**
  * Assert that a space belongs to the given org.
@@ -323,11 +324,15 @@ export function createWebhooksRouter() {
   // PATCH /api/webhooks/:id — update webhook (url, events, filters — not secret/level)
   router.patch("/api/webhooks/:id", rateLimit(10), async (c) => {
     // Permission check must still precede reading the body.
-    const existing = await loadWebhookForAction(c, "write");
-    assertIfMatch(c, existing.updatedAt);
+    await loadWebhookForAction(c, "write");
     const data = await readJsonBody(c, updateWebhookSchema);
 
-    const result = await updateWebhook(webhookScope(c), c.req.param("id")!, data);
+    const result = await updateWebhook(
+      webhookScope(c),
+      c.req.param("id")!,
+      data,
+      ifMatchWhere(c, webhooks.updatedAt),
+    );
     await recordAuditFromContext(c, {
       action: "webhook.updated",
       resourceType: "webhook",

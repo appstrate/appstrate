@@ -360,9 +360,28 @@ export class McpHost {
         });
         continue;
       }
-      const finalName = upstream.trusted
-        ? plainName
-        : allocateMcpToolName(normalisedNs, tool.name, (name) => this.toolToNamespace.has(name));
+      let finalName = plainName;
+      if (!upstream.trusted) {
+        try {
+          finalName = allocateMcpToolName(normalisedNs, tool.name, (name) =>
+            this.toolToNamespace.has(name),
+          );
+        } catch {
+          // A third server-side duplicate (or an unlucky hash collision) costs
+          // that one tool, never the whole upstream's registration.
+          this.options.onLog?.({
+            source: `host:${normalisedNs}`,
+            level: "warn",
+            data: {
+              event: "tool_rejected",
+              reason: "name_collision",
+              namespace: normalisedNs,
+              originalName: tool.name,
+            },
+          });
+          continue;
+        }
+      }
       let descriptor: Tool = { ...sanitised, name: finalName };
       if (finalName !== `${normalisedNs}__${tool.name}`) {
         // The model only sees the exposed name; give it the upstream one so it

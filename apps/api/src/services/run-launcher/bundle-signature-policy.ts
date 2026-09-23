@@ -13,6 +13,7 @@
  */
 
 import { z } from "zod";
+import { unzipSync } from "fflate";
 import {
   buildBundleFromAfps,
   emptyPackageCatalog,
@@ -113,9 +114,10 @@ export function _resetTrustRootCacheForTesting(): void {
  * EXECUTED (see `downloadVersionZipForExecution`).
  *
  * Returns the loaded bundle, or `null` when nothing was verified (policy
- * `off`, a system package, or any failure under `warn`). Only `required`
- * throws: {@link BundleSignatureError} for an unsigned / unverifiable bundle,
- * the loader's own error for an archive that cannot be read. `warn` never
+ * `off`, a system package, an unsigned archive or any failure under `warn`).
+ * Only `required` throws: {@link BundleSignatureError} for an unsigned /
+ * unverifiable bundle, the loader's own error for an archive that cannot be
+ * read. `warn` never
  * throws — it is an observation mode and must add no failure to a run.
  */
 export async function loadAndVerifyBundle(
@@ -129,6 +131,12 @@ export async function loadAndVerifyBundle(
   // system integration under `required`.
   if (policy === "off" || isSystemPackage(packageId)) return null;
   if (policy === "required") return verifyOrThrow(buffer, packageId, policy);
+  // Nothing signs on publish, so under `warn` nearly every archive is unsigned:
+  // the zip central directory answers that without building the bundle.
+  if (!mayCarrySignature(buffer)) {
+    logger.debug("AFPS bundle is unsigned", { packageId });
+    return null;
+  }
   try {
     return await verifyOrThrow(buffer, packageId, policy);
   } catch (err) {
@@ -138,6 +146,29 @@ export async function loadAndVerifyBundle(
     });
     return null;
   }
+}
+
+const SIGNATURE_ENTRY = "signature.sig";
+
+/**
+ * Whether the archive has a `signature.sig` entry (at its root or under a
+ * wrapper folder), read from the central directory only — the filter declines
+ * every entry, so nothing is inflated. An unreadable archive answers `true`:
+ * the full load is what reports it.
+ */
+function mayCarrySignature(buffer: Uint8Array): boolean {
+  let found = false;
+  try {
+    unzipSync(buffer, {
+      filter: (f) => {
+        if (f.name === SIGNATURE_ENTRY || f.name.endsWith(`/${SIGNATURE_ENTRY}`)) found = true;
+        return false;
+      },
+    });
+  } catch {
+    return true;
+  }
+  return found;
 }
 
 async function verifyOrThrow(

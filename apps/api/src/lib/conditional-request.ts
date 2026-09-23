@@ -9,6 +9,8 @@
  */
 
 import type { Context } from "hono";
+import { inArray, sql, type SQL } from "drizzle-orm";
+import type { PgColumn } from "drizzle-orm/pg-core";
 import { ApiError } from "@appstrate/core/api-errors";
 
 interface IfNoneMatchOptions {
@@ -70,14 +72,42 @@ export function setEtag(c: Context, version: ResourceVersion): void {
 }
 
 /**
+ * `If-Match` as a predicate on the row's `updatedAt`, for the write's own
+ * UPDATE: compare and write are one statement, so two writers holding the same
+ * ETag cannot both pass. Compared at the millisecond {@link versionEtag} keeps.
+ * Undefined when there is nothing to compare — no header, or `*`, which any
+ * existing row satisfies. A weak or foreign tag matches nothing (strong
+ * comparison). Zero rows updated under it: the row is gone (404) or stale
+ * ({@link preconditionFailed}).
+ */
+export function ifMatchWhere(c: Context, updatedAt: PgColumn): SQL | undefined {
+  const header = c.req.header("If-Match");
+  if (header === undefined) return undefined;
+  const tags = header.split(",").map((tag) => tag.trim());
+  if (tags.includes("*")) return undefined;
+  const versions = tags.flatMap((tag) => /^"(\d+)"$/.exec(tag)?.[1] ?? []);
+  if (versions.length === 0) return sql`false`;
+  return inArray(sql`floor(extract(epoch from ${updatedAt}) * 1000)::bigint`, versions);
+}
+
+/** The `412` for a write whose `If-Match` no longer names `current`. */
+export function preconditionFailed(current: ResourceVersion): ApiError {
+  return new ApiError({
+    status: 412,
+    code: "precondition_failed",
+    title: "Precondition Failed",
+    detail:
+      "The resource changed since you read it: If-Match does not match its current ETag. Re-read it, reapply your change, and send the new ETag.",
+    headers: { ETag: versionEtag(current) },
+  });
+}
+
+/**
  * Evaluate `If-Match` (RFC 9110 §13.1.1) against the resource's CURRENT
- * version. Strong comparison, so a weak `W/` tag never matches; `*` matches
- * any existing representation. Absent header: a no-op, or `428` when the
- * route makes the precondition mandatory (RFC 6585 §3). A mismatch is `412`,
- * carrying the current `ETag` so the client can re-read and retry.
- *
- * Call it where the version is read under the same lock as the write, when
- * the route has one — the draft save passes it into the service for that.
+ * version, read under the same lock as the write (the draft save passes it into
+ * the service for that). Strong comparison, so a weak `W/` tag never matches;
+ * `*` matches any existing representation. Absent header: a no-op, or `428`
+ * when the route makes the precondition mandatory (RFC 6585 §3).
  */
 export function assertIfMatch(
   c: Context,
@@ -97,12 +127,5 @@ export function assertIfMatch(
   }
   const etag = versionEtag(current);
   if (header.split(",").some((tag) => tag.trim() === "*" || tag.trim() === etag)) return;
-  throw new ApiError({
-    status: 412,
-    code: "precondition_failed",
-    title: "Precondition Failed",
-    detail:
-      "The resource changed since you read it: If-Match does not match its current ETag. Re-read it, reapply your change, and send the new ETag.",
-    headers: { ETag: etag },
-  });
+  throw preconditionFailed(current);
 }

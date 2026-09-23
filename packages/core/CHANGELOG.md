@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`formatLogLine`**, **`PINO_LEVELS`** and **`LogLevel`**
+  (`@appstrate/core/log-line`, new import-free subpath) — one pino-compatible
+  JSON log line (numeric `level`, epoch-ms `time`, `msg`, fields) for the
+  processes that must not carry pino: the Pi runner, the agent entrypoint and
+  the sidecar. Moved from `@appstrate/runner-pi/log-line`, which is removed.
+
 - **`runStatusValues`**, **`terminalRunStatusValues`**, **`activeRunStatusValues`**,
   **`RunStatus`** and **`TerminalRunStatus`** (`@appstrate/core/run-status`, new
   import-free subpath) — the canonical run-status tuples, moved here from
@@ -63,6 +69,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`@appstrate/afps-shared` dependency range moved to `^0.9.0`** (from
+  `^0.8.0`): core imports its new `./jsonpath` subpath and
+  `allocateMcpToolName`. **Requires `@appstrate/afps-shared@0.9.0` on npm before
+  this release is published.**
 - **`integrationManifestSchema`** (`@appstrate/core/integration`) refuses an
   `auths.{key}.identity_claims` value outside the manifest JSONPath subset of
   `@appstrate/afps-shared/jsonpath` (`$`, `.name`, `['name']`, `[0]`, `[-1]`).

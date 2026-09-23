@@ -2,6 +2,7 @@
 // Copyright 2026 Appstrate
 
 import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
+import type { TerminalRunStatus } from "@appstrate/core/run-status";
 
 /**
  * Severity levels carried by `log.written` run events. Mirrored on the
@@ -77,7 +78,7 @@ export interface RunResult {
 }
 
 /** Terminal outcome of a run — the `runs.status` values a runner can report. */
-export type RunTerminalStatus = "success" | "failed" | "timeout" | "cancelled";
+export type RunTerminalStatus = TerminalRunStatus;
 
 /**
  * A {@link RunResult} with its terminal `status` stamped — the payload

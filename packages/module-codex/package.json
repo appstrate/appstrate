@@ -15,8 +15,5 @@
   },
   "dependencies": {
     "@appstrate/core": "workspace:*"
-  },
-  "devDependencies": {
-    "@earendil-works/pi-ai": "0.86.1"
   }
 }

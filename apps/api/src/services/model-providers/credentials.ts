@@ -31,6 +31,7 @@ import type { ModelProviderDefinition, ModelProviderIdentity } from "@appstrate/
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { getSystemModelProviderCredentials, getSystemModels } from "../model-registry.ts";
 import { logger } from "../../lib/logger.ts";
+import { getEnv } from "@appstrate/env";
 import type { ModelProviderCredentialInfo } from "@appstrate/shared-types";
 import { clearResolvedModelCache } from "../resolved-model-cache.ts";
 
@@ -396,7 +397,9 @@ export async function updateModelProviderCredential(
   orgId: string,
   id: string,
   patch: UpdateModelProviderCredentialPatch,
-): Promise<void> {
+  /** `If-Match` predicate (`ifMatchWhere`); false when nothing was updated. */
+  ifMatch?: import("drizzle-orm").SQL,
+): Promise<boolean> {
   const updates: Record<string, unknown> = {};
   if (patch.label !== undefined) updates.label = patch.label;
   if (patch.baseUrlOverride !== undefined) updates.baseUrlOverride = patch.baseUrlOverride;
@@ -416,7 +419,7 @@ export async function updateModelProviderCredential(
         }),
       )
       .limit(1);
-    if (!row) return;
+    if (!row) return false;
     const existing = decryptBlob(row.credentialsEncrypted);
     if (existing?.kind !== "api_key") {
       throw new Error(
@@ -430,21 +433,24 @@ export async function updateModelProviderCredential(
     updates.refreshFailureCount = 0;
   }
 
-  if (Object.keys(updates).length === 0) return;
+  // Written even when empty, as every other PATCH: the precondition is judged
+  // by this statement.
   updates.updatedAt = new Date();
 
-  await db
+  const updated = await db
     .update(modelProviderCredentials)
     .set(updates)
     .where(
       scopedWhere(modelProviderCredentials, {
         orgId,
-        extra: [eq(modelProviderCredentials.id, id)],
+        extra: [eq(modelProviderCredentials.id, id), ifMatch],
       }),
-    );
+    )
+    .returning({ id: modelProviderCredentials.id });
   // Models backed by this credential may have a cached resolution carrying the
   // old key/baseUrl — drop it so the rotation takes effect immediately.
   clearResolvedModelCache();
+  return updated.length > 0;
 }
 
 // ─── Label derivation ──────────────────────────────────────────────────────
@@ -673,7 +679,7 @@ export async function recordModelCredentialRefreshFailure(
  * still holding the key the user has since rotated — is dropped before it
  * counts, and the flag is re-checked against the stored key when applied.
  */
-export async function recordModelCredentialAuthFailure(
+async function recordModelCredentialAuthFailure(
   orgId: string,
   id: string,
   isRejectedKey: (storedKey: string) => boolean,
@@ -700,7 +706,7 @@ export async function recordModelCredentialAuthFailure(
  * Reset the failure streak after the upstream accepted the credential. The
  * `> 0` predicate keeps the common (healthy) case a read-only index hit.
  */
-export async function clearModelCredentialFailureStreak(orgId: string, id: string): Promise<void> {
+async function clearModelCredentialFailureStreak(orgId: string, id: string): Promise<void> {
   await db
     .update(modelProviderCredentials)
     .set({ refreshFailureCount: 0 })
@@ -713,6 +719,27 @@ export async function clearModelCredentialFailureStreak(orgId: string, id: strin
         ],
       }),
     );
+}
+
+/**
+ * What an upstream said about an org-owned API key — the ONE entry both
+ * reporters use (the platform LLM proxy, and a run's sidecar via
+ * `/internal/model-credential/outcome`). `rejected` extends the failure streak
+ * that flags a revoked key `needs_reconnection`; `accepted` resets it.
+ */
+export async function recordModelCredentialOutcome(
+  orgId: string,
+  id: string,
+  outcome: "accepted" | "rejected",
+  isRejectedKey: (storedKey: string) => boolean,
+): Promise<void> {
+  if (outcome === "accepted") return clearModelCredentialFailureStreak(orgId, id);
+  await recordModelCredentialAuthFailure(
+    orgId,
+    id,
+    isRejectedKey,
+    getEnv().INTEGRATION_REFRESH_MAX_FAILURES,
+  );
 }
 
 /** Atomic `+1` on the streak (concurrent failures cannot lose a count). */

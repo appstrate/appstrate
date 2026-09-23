@@ -44,7 +44,7 @@ import {
 } from "../services/run-workspace-storage.ts";
 import { assertUniqueWorkspaceNames } from "../services/run-file-naming.ts";
 import { tokenUsageSchema } from "@appstrate/core/token-usage";
-import { terminalRunStatusValues } from "@appstrate/db/run-status";
+import { terminalRunStatusValues } from "@appstrate/core/run-status";
 import type { TerminalRunResult } from "@appstrate/afps-runtime/runner";
 import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
@@ -171,7 +171,7 @@ export const RunResultSchema = z
     durationMs: z.number().int().nonnegative().optional().catch(undefined),
     // Authoritative token usage for finalize liveness and the terminal
     // `runs.tokenUsage` write. Required on a success (refinement below).
-    usage: tokenUsageSchema.optional(),
+    usage: tokenUsageSchema.optional().catch(undefined),
     // Authoritative LLM cost in USD for the runner-source contribution.
     // When present, finalize synthesises a runner-source `llm_usage`
     // ledger row from this value if no metric event has landed yet, so

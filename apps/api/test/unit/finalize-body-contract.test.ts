@@ -31,10 +31,9 @@ describe("finalize body contract", () => {
     expect(issuePaths({ status: "success", usage: USAGE })).toEqual([]);
   });
 
-  it("rejects a malformed usage instead of dropping it", () => {
-    expect(issuePaths({ status: "success", usage: { input_tokens: -1 } })).toEqual([
-      "usage.input_tokens",
-    ]);
+  it("drops a malformed usage, so a success without valid usage is refused", () => {
+    expect(issuePaths({ status: "success", usage: { input_tokens: -1 } })).toEqual(["usage"]);
+    expect(issuePaths({ status: "failed", usage: { input_tokens: -1 } })).toEqual([]);
   });
 
   it("accepts a non-success status without usage", () => {

@@ -35,11 +35,13 @@ import {
   files,
   fileLinks,
   chatSessions,
+  type PricingStatus,
+} from "@appstrate/db/schema";
+import {
   activeRunStatusValues,
   terminalRunStatusValues,
   type RunStatus,
-  type PricingStatus,
-} from "@appstrate/db/schema";
+} from "@appstrate/core/run-status";
 import { extractFileIds } from "@appstrate/core/file-uri";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../../lib/logger.ts";

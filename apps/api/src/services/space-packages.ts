@@ -19,10 +19,11 @@
  * too, but only UPDATES a column in place on a row already placed.
  */
 
-import { eq, and, exists, sql } from "drizzle-orm";
+import { eq, and, exists, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { spacePackages, packages, packageShares, packageDistTags } from "@appstrate/db/schema";
 import { notFound, parseBody } from "../lib/errors.ts";
+import { preconditionFailed } from "../lib/conditional-request.ts";
 import { inputSettingsSchema } from "../lib/jsonb-schemas.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
@@ -1076,7 +1077,8 @@ export async function updateSpacePackage(
     generationConfig?: import("@appstrate/core/model-generation").ModelGenerationSettings | null;
     proxyId?: string | null;
   },
-  opts?: { requirePlacement?: boolean },
+  /** `ifMatch`: the `If-Match` predicate (`ifMatchWhere`), `requirePlacement` mode only. */
+  opts?: { requirePlacement?: boolean; ifMatch?: SQL },
 ): Promise<void> {
   const set: Partial<{
     updatedAt: Date;
@@ -1119,18 +1121,24 @@ export async function updateSpacePackage(
       // landed and the 200 body was `{"object":"space_package"}`. The
       // `EXISTS` makes the UPDATE match nothing instead, so the refusal below
       // states the truth.
+      const placedHere = and(
+        eq(spacePackages.spaceId, scope.spaceId),
+        eq(spacePackages.packageId, packageId),
+        placedRowFilter(tx, scope.spaceId, packageId),
+      );
       const updated = await tx
         .update(spacePackages)
         .set(set)
-        .where(
-          and(
-            eq(spacePackages.spaceId, scope.spaceId),
-            eq(spacePackages.packageId, packageId),
-            placedRowFilter(tx, scope.spaceId, packageId),
-          ),
-        )
+        .where(and(placedHere, opts.ifMatch))
         .returning({ packageId: spacePackages.packageId });
       if (updated.length === 0) {
+        const [stale] = opts.ifMatch
+          ? await tx
+              .select({ updatedAt: spacePackages.updatedAt })
+              .from(spacePackages)
+              .where(placedHere)
+          : [];
+        if (stale) throw preconditionFailed(stale.updatedAt);
         throw notFound(`Package '${packageId}' is not placed in this space`);
       }
       return;

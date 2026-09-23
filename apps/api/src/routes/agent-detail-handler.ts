@@ -318,7 +318,7 @@ export async function buildAgentDetailDto(
         }
       : {}),
   };
-  return { body, lockVersion: authoring ? rawItem.lockVersion : null };
+  return { body, lockVersion: authoring && definition === "draft" ? rawItem.lockVersion : null };
 }
 
 export async function agentDetailHandler(c: Context<AppEnv>) {
