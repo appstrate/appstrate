@@ -33,9 +33,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `MODULES` list; it declares `- MODULES=${MODULES:?}`** (#1528). Set `MODULES`
   explicitly, on the Coolify resource or in `.env` for a raw `docker compose`
   run, and include `@appstrate/module-ee` for the deployment to bill. Unset or
-  empty, Coolify refuses to deploy and `docker compose` refuses to start,
-  instead of silently falling back to the code default, which has no billing.
-  Production already sets `MODULES` on its resource. The gate code that only
+  empty, a raw `docker compose` refuses to start and Coolify documents
+  `${VAR:?}` as blocking the deploy until a value is set, instead of silently
+  falling back to the code default, which has no billing. Production already
+  sets `MODULES` on its resource. The gate code that only
   read the pinned list back is removed (`scripts/lib/compose-modules.ts`,
   `verify:compose-defaults`'s unrouted-module class, `verify:env-docs`'s
   per-file required sets); the bare-name class is renumbered from 6 to 5. The

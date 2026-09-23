@@ -46,7 +46,9 @@ Facts worth writing down, because each one is easy to break:
 
 - **A bare name in an `environment:` block is materialised as the empty string.** Coolify rewrites `- FOO` into `FOO: ''` in the compose it generates, so "unset, let the schema default apply" is a state that file cannot express. `verify:compose-defaults` (class 5) refuses one, and `env_file` is what delivers the operator's variables instead.
 
-- **`MODULES` is required, not defaulted.** `docker-compose.yml` reads it as `${MODULES:?}`, so an unset or empty value makes Coolify flag the variable and refuse to deploy, and a raw `docker compose` refuse to start. There is no fallback list: the code default names no billing module, and a list pinned in this file would be a second copy of the operator's choice. Set it on the resource, and include `@appstrate/module-ee` — this is the deployment that bills. The module's Stripe keys are required once it is named; `.env.example` lists them, and the module refuses to boot without them.
+- **`MODULES` is required, not defaulted.** `docker-compose.yml` reads it as `${MODULES:?}`: a raw `docker compose` refuses to start without it, and Coolify documents that form as flagging the variable and blocking the deploy until a value is entered. There is no fallback list, and the code default names no billing module. Set it on the resource with `@appstrate/module-ee` included; its Stripe keys are then required (`.env.example` lists them).
+
+- **Check what Coolify actually ran, not this file.** Coolify rewrites the compose before running it, so after a deploy read `/data/coolify/applications/<uuid>/docker-compose.yaml` on the server: `MODULES` must appear there with the resource's value, `@appstrate/module-ee` included.
 
 - **Coolify regenerates `.env` from the resource's own environment configuration on every deploy.** A value written into the file on the server is gone at the next one. Edit the variables in Coolify, never the file.
 

@@ -219,11 +219,9 @@ services:
       # deployment must run agents in Docker.
       - RUN_ADAPTER=${RUN_ADAPTER:-docker}
       # ── Required, no fallback ──
-      # MODULES: this deployment bills, so MODULES must be set on the
-      # resource (or in .env) and must name @appstrate/module-ee. `:?` makes an
-      # unset or empty value refuse to deploy (Coolify) or to start (raw
-      # compose) instead of falling back to the code default, which has no
-      # billing. Bare `:?`, no message: it is the form Coolify documents.
+      # MODULES: must be set and must name @appstrate/module-ee; no fallback to
+      # the code default, which has no billing. Bare `:?` is the form Coolify
+      # documents. See deploy/README.md.
       - MODULES=${MODULES:?}
       # ── Bound to ${APPSTRATE_VERSION} ──
       # Without these the sidecar falls back to bare `appstrate-*:latest` tags
