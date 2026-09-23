@@ -25,6 +25,7 @@ import { getDataDir } from "./config.ts";
 import { withFileLock } from "./file-lock.ts";
 import { SIGNATURE_RECORD } from "./package-definition.ts";
 import { SKILL_ENTRY } from "./skills-sync/materialize.ts";
+import { ExplainedError } from "./ui.ts";
 import { canonicalJsonStringify } from "@appstrate/afps-runtime/bundle";
 
 export type PackageFiles = Record<string, Uint8Array>;
@@ -57,7 +58,7 @@ export async function resolvePackage(
       if (code === "package_not_found") return null;
       // The `/api/*` fallback's own wording: the route itself is unknown here.
       if (detail?.startsWith("API endpoint not found")) {
-        throw new Error(
+        throw new ExplainedError(
           "This instance does not serve GET /api/packages/{scope}/{name}/home: it is older than this CLI. Update the instance, or use a CLI of its version.",
           { cause: err },
         );

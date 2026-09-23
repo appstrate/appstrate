@@ -22,6 +22,7 @@
 
 import { CLI_USER_AGENT } from "../../lib/version.ts";
 import { normalizeInstance } from "../../lib/instance-url.ts";
+import { DRAFT_SELECTOR, PUBLISHED_SELECTOR } from "../../lib/package-spec.ts";
 import { verifyArtifactIntegrity } from "@appstrate/core/integrity";
 
 export class BundleFetchError extends Error {
@@ -171,7 +172,7 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
   // explicit `@draft` sends it. We don't trust `versionHeader === "draft"`
   // alone for this — the request shape is the authoritative signal, and the
   // response is a sanity check.
-  const stage: "draft" | "published" = input.spec === "draft" ? "draft" : "published";
+  const stage: "draft" | "published" = input.spec === DRAFT_SELECTOR ? "draft" : "published";
 
   const bytes = new Uint8Array(await res.arrayBuffer());
   // The bytes we just downloaded must match the server-issued integrity.
@@ -223,7 +224,7 @@ function buildBundleUrl(
   // with a real tag.
   const base = `${instance}/api/agents/${scope}/${name}/bundle`;
   if (!spec) return base;
-  if (spec === "draft" || spec === "published") return `${base}?source=${spec}`;
+  if (spec === DRAFT_SELECTOR || spec === PUBLISHED_SELECTOR) return `${base}?source=${spec}`;
   return `${base}?version=${encodeURIComponent(spec)}`;
 }
 

@@ -77,7 +77,8 @@ import {
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
 import { loadSnapshotFile, mergeSnapshotIntoContext } from "./run/snapshot.ts";
-import { parseRunTarget, PackageSpecError } from "./run/package-spec.ts";
+import { DRAFT_SELECTOR, PackageSpecError, PUBLISHED_SELECTOR } from "../lib/package-spec.ts";
+import { parseRunTarget } from "./run/package-spec.ts";
 import { fetchBundleForRun } from "./run/bundle-fetch.ts";
 import {
   fetchRunConfigPayload,
@@ -1176,7 +1177,10 @@ async function resolveBundleSource(
     packageId: target.packageId,
     version: fetched.version,
     registryStage: fetched.stage,
-    spec: target.spec === "draft" || target.spec === "published" ? undefined : target.spec,
+    spec:
+      target.spec === DRAFT_SELECTOR || target.spec === PUBLISHED_SELECTOR
+        ? undefined
+        : target.spec,
     integrity: fetched.integrity,
   };
 }
