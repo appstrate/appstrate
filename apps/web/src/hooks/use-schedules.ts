@@ -6,6 +6,7 @@ import { client, type paths } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
+import { usePermissions } from "./use-permissions";
 import { usePackageDetail } from "./use-packages";
 import { useAgentModel } from "./use-models";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
@@ -22,9 +23,19 @@ import type { AgentDetail, ScheduleWireDto, EnrichedSchedule } from "@appstrate/
 // it through `usePaginatedRuns`. The `scheduleKeys.runs` cache key is still
 // invalidated by `use-global-run-sync` for that list.
 
+// Every schedules read requires `schedules:read`, which some space roles
+// (`runner`, and any custom role without it) do not hold. Gating here rather
+// than at each call site keeps a surface that shows schedules incidentally —
+// the dashboard — from firing a request the server is bound to refuse.
+function useCanReadSchedules(): boolean {
+  const { can } = usePermissions();
+  return can("schedules:read");
+}
+
 export function useAllSchedules() {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  const canRead = useCanReadSchedules();
   return useQuery({
     // Key pinned to the legacy shape: use-global-run-sync invalidates by the
     // ["schedules", orgId, spaceId] prefix on SSE events.
@@ -33,13 +44,14 @@ export function useAllSchedules() {
       const { data } = await client.GET("/api/schedules");
       return data?.data ?? [];
     },
-    enabled: !!orgId && !!spaceId,
+    enabled: canRead && !!orgId && !!spaceId,
   });
 }
 
 export function useScheduleById(id: string | undefined) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  const canRead = useCanReadSchedules();
   return useQuery({
     // Key pinned to the legacy shape: use-global-run-sync invalidates
     // ["schedule", orgId, spaceId, scheduleId] on SSE events.
@@ -51,13 +63,14 @@ export function useScheduleById(id: string | undefined) {
       // Non-2xx throws via the client middleware, so `data` is defined here.
       return data!;
     },
-    enabled: !!id && !!spaceId,
+    enabled: canRead && !!id && !!spaceId,
   });
 }
 
 export function useSchedules(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  const canRead = useCanReadSchedules();
   return useQuery({
     // Key pinned to the legacy shape (under the ["schedules", orgId,
     // spaceId] prefix invalidated by use-global-run-sync).
@@ -69,7 +82,7 @@ export function useSchedules(packageId: string | undefined) {
       });
       return data?.data ?? [];
     },
-    enabled: !!packageId && !!spaceId,
+    enabled: canRead && !!packageId && !!spaceId,
   });
 }
 
