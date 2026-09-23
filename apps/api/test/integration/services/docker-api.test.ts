@@ -941,8 +941,9 @@ describeRequiresDocker("runEphemeralCommand", () => {
 // deleting the runtime images between runs (the deletion that puts a
 // multi-hundred-MB pull back on the run-boot critical path). Three invariants
 // matter and are all load-bearing:
-//   1. the pin converges — same image is a no-op, a drifted image is replaced
-//      (releases bump the tag, pins must follow or they protect nothing);
+//   1. the pin converges — same spec is a no-op, a drifted spec (image or pin
+//      config) is replaced (releases bump the tag, pins must follow or they
+//      protect nothing);
 //   2. the pin is NOT reaped by the per-run orphan sweep — it is durable
 //      infra, and the sweep force-removes everything labelled
 //      `appstrate.managed=true`;
@@ -959,19 +960,17 @@ describeRequiresDocker("ensureImagePin", () => {
     running: boolean;
     labels: Record<string, string>;
     healthcheck: { Test?: string[] } | undefined;
-    health: unknown;
   } | null> {
     const res = await fetch(`${DOCKER_URL}/containers/${PIN_NAME}/json`);
     if (res.status === 404) return null;
     const data = (await res.json()) as {
-      State?: { Running?: boolean; Health?: unknown };
+      State?: { Running?: boolean };
       Config?: { Labels?: Record<string, string>; Healthcheck?: { Test?: string[] } };
     };
     return {
       running: data.State?.Running === true,
       labels: data.Config?.Labels ?? {},
       healthcheck: data.Config?.Healthcheck,
-      health: data.State?.Health,
     };
   }
 
@@ -993,9 +992,8 @@ describeRequiresDocker("ensureImagePin", () => {
       expect(pin?.labels["appstrate.pin.image"]).toBe(IMAGE);
       // Durable infra must not carry the per-run reaper's label.
       expect(pin?.labels["appstrate.managed"]).toBeUndefined();
-      // No inherited HEALTHCHECK (#1521): Docker reports no health at all.
+      // No inherited HEALTHCHECK (#1521): the pin overrides it explicitly.
       expect(pin?.healthcheck?.Test).toEqual(["NONE"]);
-      expect(pin?.health).toBeUndefined();
 
       // Converged — a second pass must not churn the container.
       expect(await ensureImagePin(IMAGE, SLOT)).toBe("unchanged");

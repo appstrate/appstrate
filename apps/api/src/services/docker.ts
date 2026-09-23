@@ -271,7 +271,8 @@ export async function ensureImagePin(
     Entrypoint: ["sleep"],
     Cmd: ["infinity"],
     // A pin runs `sleep`, not the image's process, so the image's HEALTHCHECK
-    // can only lie (the sidecar's probes a port nothing listens on here).
+    // probes something that isn't running (the sidecar's probes a port nothing
+    // listens on here).
     Healthcheck: { Test: ["NONE"] },
     HostConfig: {
       // No network, no privileges, minimal resources: this process must be
