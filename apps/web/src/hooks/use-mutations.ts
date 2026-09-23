@@ -6,9 +6,10 @@ import { toast } from "sonner";
 import { getErrorMessage } from "@appstrate/core/errors";
 import i18n from "../i18n";
 import { ApiError, client, type components } from "../api/client";
-import { PACKAGE_CONFIG, type PackageType } from "./use-packages";
+import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
+import type { PackageType } from "./use-packages";
 import { invalidateIntegrationQueries } from "./use-integrations";
-import { splitPackageRef } from "../lib/package-paths";
+import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
 import {
   packageKeys,
   agentsKeys,
@@ -237,7 +238,7 @@ export function useImportPackage() {
           toast.warning(message);
         }
       }
-      navigate(`/${data.type === "agent" ? "agent" : data.type}s/${data.packageId}`);
+      navigate(packageDetailPath(data.type, data.packageId));
     },
     onError: onMutationError,
   });
@@ -256,7 +257,7 @@ export function useImportFromGithub() {
       qc.invalidateQueries({ queryKey: packageKeys.all });
       // Same reason as `useImportPackage`: the draft artifact was replaced.
       invalidatePackageFiles(qc);
-      navigate(`/${data.type === "agent" ? "agent" : data.type}s/${data.packageId}`);
+      navigate(packageDetailPath(data.type, data.packageId));
     },
     onError: onMutationError,
   });
@@ -404,7 +405,7 @@ export function useCreatePackage(type: PackageType) {
 
 export function useUpdatePackage(type: PackageType, packageId: string) {
   const qc = useQueryClient();
-  const cfg = PACKAGE_CONFIG[type];
+  const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
     mutationFn: async (body: {
       manifest: Record<string, unknown>;
@@ -413,7 +414,7 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
       operations?: import("../lib/package-file-tree").PackageFileWriteOperation[];
       lock_version: number;
     }): Promise<{ id: string; lock_version: number }> => {
-      const { data } = await client.PUT(`/api/packages/${cfg.path}/{scope}/{name}`, {
+      const { data } = await client.PUT(`/api/packages/${segment}/{scope}/{name}`, {
         params: { path: splitPackageRef(packageId) },
         // No cast needed: the body's explicit `{manifest, content,
         // lock_version}` keys satisfy the skill/integration/mcp-server update

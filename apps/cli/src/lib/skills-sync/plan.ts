@@ -6,19 +6,13 @@
  * changed; concurrency is capped because the package routes are rate limited.
  */
 
-import { apiFetch, apiFetchRaw, apiList, ApiError } from "../api.ts";
+import { apiFetch, apiFetchRaw, apiList, ApiError, problemFields } from "../api.ts";
 import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
-import { verifyArtifactIntegrity } from "@appstrate/core/integrity";
-import {
-  PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES,
-  stripWrapperPrefix,
-  unzipArtifact,
-} from "@appstrate/core/zip";
 import { extractSkillMeta } from "@appstrate/core/validation";
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
-import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
-import { collisionSlug, DROPPED_ENTRIES, SKILL_ENTRY, skillSlug } from "./materialize.ts";
+import { draftRefusal, fetchPackageDefinition } from "../package-definition.ts";
+import { collisionSlug, SKILL_ENTRY, skillSlug } from "./materialize.ts";
 import {
   emptyTargetState,
   STATE_VERSION,
@@ -45,31 +39,16 @@ class SkillSyncError extends Error {
 
 /**
  * `--source draft` NAMES the working copy, and every route that honours the
- * selector — the package detail as much as the file index and file content —
- * reserves that act to whoever may write the package: they answer
- * `403 draft_not_writable` to everybody else. "HTTP 403 Forbidden" would send
- * that reader hunting for a permission on the sync itself, so the refusal says
- * whose copy it is and what to run instead. One definition, called from each
- * of the three: a reader who hits the earliest refusal must not get a thinner
- * message than one whose grant is revoked mid-sync.
+ * selector — the package detail, the file index and the draft archive —
+ * reserves that act to whoever may write the package. One remedy for each of
+ * the three refusals: a reader who hits the earliest one must not get a
+ * thinner message than one whose grant is revoked mid-sync.
  */
-function draftRefusal(packageId: string, status: number, what: string): SkillSyncError | null {
-  if (status !== 403) return null;
-  return new SkillSyncError(
-    `The draft of ${packageId} is the author's working copy${what}`,
-    "`--source draft` reads it, which needs `skills:write` on the skill in its home space. Sync the published artifact with `--source published`.",
-  );
-}
+const DRAFT_REMEDY = "Sync the published artifact with `--source published`.";
 
 interface SkillListRow {
   id: string;
   source?: string;
-}
-
-export interface FileIndexEntry {
-  path?: unknown;
-  /** Full text of a small text file, already carried by the index. */
-  inline?: unknown;
 }
 
 export interface ResolvedSkill {
@@ -80,8 +59,6 @@ export interface ResolvedSkill {
   integrity: string;
   /** Frontmatter `name` of the skill's `SKILL.md`, empty when it has none. */
   frontmatterName: string;
-  /** Draft only: the index whose ETag produced `integrity`, kept to avoid a refetch. */
-  draftIndex?: FileIndexEntry[];
 }
 
 export interface PlannedSkill extends ResolvedSkill {
@@ -180,7 +157,10 @@ async function resolveDraft(
       // This request names `?version=draft` as well, so for a non-author it is
       // the FIRST one refused — before `/files` below ever runs. Relaying the
       // raw 403 here is what would lose the actionable refusal entirely.
-      throw draftRefusal(packageId, err.status, ".") ?? err;
+      if (problemFields(err.body).code === "draft_not_writable") {
+        throw draftRefusal(packageId, "skill", DRAFT_REMEDY);
+      }
+      throw err;
     }
     throw err;
   }
@@ -198,26 +178,23 @@ async function resolveDraft(
     { spaceId },
   );
   if (!res.ok) {
-    throw (
-      draftRefusal(packageId, res.status, ".") ??
-      new SkillSyncError(
-        `Draft file index for ${packageId} failed: HTTP ${res.status} ${res.statusText}`,
-        "Re-run without `--source draft`, or check that the skill still exists.",
-      )
+    const problem = problemFields(await res.json().catch(() => undefined));
+    if (problem.code === "draft_not_writable") {
+      throw draftRefusal(packageId, "skill", DRAFT_REMEDY);
+    }
+    throw new SkillSyncError(
+      `Draft file index for ${packageId} failed: ${problem.detail ?? `HTTP ${res.status} ${res.statusText}`}`,
+      "Re-run without `--source draft`, or check that the skill still exists.",
     );
   }
   const etag = res.headers.get("etag") ?? "";
   const lock = typeof detail.lock_version === "number" ? String(detail.lock_version) : "0";
-  const index = (await res.json()) as { entries?: FileIndexEntry[] };
   return {
     packageId,
     ...(spaceId ? { spaceId } : {}),
     version: "draft",
     integrity: `draft:${lock}:${etag}`,
     frontmatterName: frontmatterNameOf(detail.content),
-    // This IS the index the download needs, and its ETag is only meaningful
-    // for the body it came with.
-    draftIndex: index.entries ?? [],
   };
 }
 
@@ -248,105 +225,35 @@ export function assignSlugs(
   return planned;
 }
 
-/** The published path checks `X-Integrity` before anything is unpacked. */
-export async function fetchSkillFiles(
+/**
+ * Both sources are one archive (`../package-definition.ts`); the published one
+ * is checked against `X-Integrity` before anything is unpacked. A draft archive
+ * read after resolution may be newer than the token recorded for it — the next
+ * sync then sees the token move and fetches again, never the reverse.
+ */
+export function fetchSkillFiles(
   profileName: string,
   skill: ResolvedSkill,
   source: SkillSource,
 ): Promise<Record<string, Uint8Array>> {
-  return source === "published"
-    ? fetchPublishedFiles(profileName, skill)
-    : fetchDraftFiles(profileName, skill);
-}
-
-async function fetchPublishedFiles(
-  profileName: string,
-  skill: ResolvedSkill,
-): Promise<Record<string, Uint8Array>> {
-  const res = await apiFetchRaw(
+  return fetchPackageDefinition(
     profileName,
-    `/api/packages/${encodePackageIdPath(skill.packageId)}/${encodeURIComponent(skill.version)}/download`,
-    { spaceId: skill.spaceId },
+    source === "published"
+      ? {
+          packageId: skill.packageId,
+          spaceId: skill.spaceId,
+          source,
+          version: skill.version,
+          integrity: skill.integrity,
+        }
+      : {
+          packageId: skill.packageId,
+          type: "skill",
+          spaceId: skill.spaceId,
+          source,
+          refusalRemedy: DRAFT_REMEDY,
+        },
   );
-  if (!res.ok) {
-    throw new SkillSyncError(
-      `Download of ${skill.packageId}@${skill.version} failed: HTTP ${res.status} ${res.statusText}`,
-    );
-  }
-  // The header is what THIS response claims about THESE bytes; the fallback
-  // keeps the check meaningful on an instance that omits it.
-  const advertised = res.headers.get("x-integrity") ?? skill.integrity;
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  const verdict = verifyArtifactIntegrity(bytes, advertised);
-  if (!verdict.valid) {
-    throw new SkillSyncError(
-      `Integrity mismatch for ${skill.packageId}@${skill.version}: expected ${advertised}, downloaded ${verdict.computed}`,
-      "Retry the sync. If it persists, the instance or a proxy is corrupting artifacts.",
-    );
-  }
-  // `unzipArtifact`, not `parsePackageZip`: the latter re-validates the
-  // manifest with the author-input policy, which would make an old published
-  // artifact unsyncable. Its bounds and wrapper handling are kept explicitly.
-  return stripWrapperPrefix(
-    unzipArtifact(bytes, { maxDecompressedBytes: PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES }),
-  );
-}
-
-async function fetchDraftFiles(
-  profileName: string,
-  skill: ResolvedSkill,
-): Promise<Record<string, Uint8Array>> {
-  const packageId = skill.packageId;
-  const encoded = encodePackageIdPath(packageId);
-  // Resolution already read this index; a second call would describe a
-  // snapshot that may have moved.
-  const entries =
-    skill.draftIndex ??
-    (
-      await apiFetch<{ entries?: FileIndexEntry[] }>(
-        profileName,
-        `/api/packages/${encoded}/files?version=draft`,
-        { spaceId: skill.spaceId },
-      )
-    ).entries ??
-    [];
-
-  const wanted = entries
-    .filter(
-      (entry): entry is FileIndexEntry & { path: string } =>
-        typeof entry.path === "string" && entry.path.length > 0 && !DROPPED_ENTRIES.has(entry.path),
-    )
-    .sort((a, b) => a.path.localeCompare(b.path));
-
-  const files: Record<string, Uint8Array> = {};
-  const encoder = new TextEncoder();
-  // The index already carries the text of every small file.
-  const remaining = wanted.filter((entry) => {
-    if (typeof entry.inline !== "string") return true;
-    files[entry.path] = encoder.encode(entry.inline);
-    return false;
-  });
-
-  const fetched = await mapWithConcurrency(remaining, MAX_CONCURRENCY, async (entry) => {
-    const res = await apiFetchRaw(
-      profileName,
-      `/api/packages/${encoded}/files/content?version=draft&path=${encodeURIComponent(entry.path)}`,
-      { spaceId: skill.spaceId },
-    );
-    if (!res.ok) {
-      throw (
-        draftRefusal(packageId, res.status, `, and "${entry.path}" is part of it.`) ??
-        new SkillSyncError(
-          `Draft file "${entry.path}" of ${packageId} failed: HTTP ${res.status} ${res.statusText}`,
-        )
-      );
-    }
-    return new Uint8Array(await res.arrayBuffer());
-  });
-  remaining.forEach((entry, i) => {
-    files[entry.path] = fetched[i]!;
-  });
-  return files;
 }
 
 function frontmatterNameOf(content: unknown): string {

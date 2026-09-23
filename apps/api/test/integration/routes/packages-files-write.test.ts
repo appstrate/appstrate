@@ -7,9 +7,22 @@ import { and, eq } from "drizzle-orm";
 import { auditEvents, packages } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  addOrgMember,
+  authHeaders,
+  createTestContext,
+  createTestUser,
+  type TestContext,
+} from "../../helpers/auth.ts";
+import { expectProblem } from "../../helpers/assertions.ts";
 import { apiIntegrationManifest, mcpServerManifest } from "../../helpers/integration-manifests.ts";
-import { seedApiKey, seedSpacePackage, seedPackage, seedPackageShare } from "../../helpers/seed.ts";
+import {
+  seedApiKey,
+  seedSpaceMember,
+  seedSpacePackage,
+  seedPackage,
+  seedPackageShare,
+} from "../../helpers/seed.ts";
 import {
   uploadPackageFiles,
   downloadPackageFiles,
@@ -24,7 +37,10 @@ import {
   packageItemKey,
 } from "../../../src/services/package-items/config.ts";
 import { zipArtifact } from "@appstrate/core/zip";
-import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
+import {
+  PACKAGE_FILE_INLINE_MAX_BYTES,
+  PACKAGE_TYPE_ROUTE_SEGMENT,
+} from "@appstrate/core/package-files";
 
 const app = getTestApp();
 const encoder = new TextEncoder();
@@ -113,14 +129,7 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
       .from(packages)
       .where(eq(packages.id, id))
       .limit(1);
-    const path =
-      row?.type === "mcp-server"
-        ? "mcp-servers"
-        : row?.type === "integration"
-          ? "integrations"
-          : row?.type === "agent"
-            ? "agents"
-            : "skills";
+    const path = row ? PACKAGE_TYPE_ROUTE_SEGMENT[row.type] : "skills";
     const version = opts.lockVersion === undefined ? row?.lockVersion : opts.lockVersion;
     return app.request(`/api/packages/${path}/${id}`, {
       method: "PUT",
@@ -397,6 +406,25 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
       ]);
       expect(body.lock_version).toBe((await packageRow()).lockVersion);
     });
+
+    it("writes a whole working folder in ONE batch — no operation count cap", async () => {
+      // A folder pushed file by file across several requests would need a
+      // `lock_version` per request and could stop halfway; the count is not a
+      // bound, the bytes are (body limit, per-file and tree ceilings).
+      const before = await packageRow();
+      const operations: WriteOperation[] = Array.from({ length: 250 }, (_, i) => ({
+        op: "write",
+        path: `docs/n${i}.md`,
+        text: `note ${i}`,
+      }));
+      const res = await saveFiles(operations, { lockVersion: before.lockVersion });
+      expect(res.status, await res.clone().text()).toBe(200);
+
+      const stored = await storedTree();
+      expect(Object.keys(stored).filter((path) => path.startsWith("docs/"))).toHaveLength(250);
+      expect(decoder.decode(stored["docs/n249.md"]!)).toBe("note 249");
+      expect((await packageRow()).lockVersion).toBe(before.lockVersion + 1);
+    });
   });
 
   // ─── The tree this route writes is the tree everything else reads ──────────
@@ -478,6 +506,82 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
 
   // ─── Refusals ──────────────────────────────────────────────────────────────
 
+  // ─── The draft as one archive: what a local checkout starts from ──────────
+
+  describe("GET /api/packages/{scope}/{name}/draft/download", () => {
+    const downloadDraft = (headers: Record<string, string> = authHeaders(ctx)) =>
+      app.request(`/api/packages/${SKILL_ID}/draft/download`, { headers });
+
+    /** A viewer of the home space: reads the skill, may not write it. */
+    async function viewerHeaders(): Promise<Record<string, string>> {
+      const user = await createTestUser();
+      await addOrgMember(ctx.orgId, user.id, "guest");
+      await seedSpaceMember({ spaceId: ctx.defaultSpaceId, userId: user.id, presetRole: "viewer" });
+      return { Cookie: user.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": ctx.defaultSpaceId };
+    }
+
+    it("serves the author the draft tree as a ZIP — manifest, content entry and annexes", async () => {
+      const res = await downloadDraft();
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect(res.headers.get("Content-Type")).toBe("application/afps+zip");
+      expect(res.headers.get("Content-Disposition")).toContain("-edit-skill-draft.afps");
+      expect(res.headers.get("Cache-Control")).toBe("private, no-cache");
+      expect(res.headers.get("X-Integrity")).toBeNull();
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      expect(res.headers.get("Content-Length")).toBe(String(bytes.byteLength));
+
+      const archive = unzipPackageArchive(bytes);
+      expect(Object.keys(archive).sort()).toEqual([
+        "SKILL.md",
+        "assets/logo.bin",
+        "manifest.json",
+        "scripts/run.py",
+      ]);
+      // The manifest and the content entry are the DB-authoritative draft, the
+      // annexes the stored tree — the binary one byte for byte.
+      expect(JSON.parse(decoder.decode(archive["manifest.json"]!))).toEqual(skillManifest());
+      expect(decoder.decode(archive["SKILL.md"]!)).toBe(SKILL_MD);
+      expect(decoder.decode(archive["scripts/run.py"]!)).toBe("print(1)");
+      expect(Array.from(archive["assets/logo.bin"]!)).toEqual(Array.from(LOGO_BYTES));
+
+      // The same tree the file explorer lists for the draft.
+      const { entries } = await listFiles();
+      expect(entries.map((entry) => entry.path)).toEqual(Object.keys(archive).sort());
+    });
+
+    it("refuses a reader who cannot write the package — the draft is an author's", async () => {
+      await expectProblem(await downloadDraft(await viewerHeaders()), 403, {
+        code: "draft_not_writable",
+      });
+    });
+
+    it("refuses a non-writer before any 304, so a validator confirms nothing", async () => {
+      const etag = (await downloadDraft()).headers.get("ETag")!;
+      const headers = { ...(await viewerHeaders()), "If-None-Match": etag };
+      await expectProblem(await downloadDraft(headers), 403, { code: "draft_not_writable" });
+    });
+
+    it("tags the archive with its content, so a save changes the ETag and a match is a 304", async () => {
+      const first = await downloadDraft();
+      expect(first.status).toBe(200);
+      const etag = first.headers.get("ETag")!;
+      expect(etag).toMatch(/^"z-/);
+      // Its own representation: never the index's tag for the same bytes.
+      expect(etag).not.toBe((await listFiles()).etag);
+
+      const unchanged = await downloadDraft(authHeaders(ctx, { "If-None-Match": etag }));
+      expect(unchanged.status).toBe(304);
+
+      const saved = await saveFiles([{ op: "write", path: "docs/notes.md", text: "# Notes" }]);
+      expect(saved.status).toBe(200);
+      const after = await downloadDraft(authHeaders(ctx, { "If-None-Match": etag }));
+      expect(after.status).toBe(200);
+      expect(after.headers.get("ETag")).not.toBe(etag);
+      const archive = unzipPackageArchive(new Uint8Array(await after.arrayBuffer()));
+      expect(decoder.decode(archive["docs/notes.md"]!)).toBe("# Notes");
+    });
+  });
+
   describe("refusals", () => {
     /** Neither store moved: the fixture's tree and draft column, unchanged. */
     async function expectNothingWritten(): Promise<void> {
@@ -555,17 +659,6 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
       ]);
       expect(res.status).toBe(413);
       expect((await problem(res)).code).toBe("file_too_large");
-      await expectNothingWritten();
-    });
-
-    it("refuses more than 200 operations in one request", async () => {
-      const operations: WriteOperation[] = Array.from({ length: 201 }, (_, i) => ({
-        op: "write",
-        path: `docs/n${i}.md`,
-        text: "x",
-      }));
-      const res = await saveFiles(operations);
-      expect(res.status).toBe(400);
       await expectNothingWritten();
     });
 

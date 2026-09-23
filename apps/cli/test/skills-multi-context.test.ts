@@ -148,14 +148,14 @@ async function snapshot(root: string): Promise<Record<string, string>> {
 }
 
 describe("multi-space skill distribution regressions", () => {
-  it("reads draft metadata, file index and non-inline contents in their source space", async () => {
+  it("reads draft metadata, file index and archive in their source space", async () => {
     const seen: string[] = [];
     const server = installSpaces(
       [
         {
           id: "@acme/library",
           skillMd: skillMd("library"),
-          draft: { fetchedFiles: { "references/detail.md": "Library-only draft reference" } },
+          draft: { files: { "references/detail.md": "Library-only draft reference" } },
         },
       ],
       { spc_library: ["@acme/library"] },
@@ -165,10 +165,10 @@ describe("multi-space skill distribution regressions", () => {
     await skillsSyncCommand({ space: ["spc_library"], source: "draft" }, createMemoryIO().io);
 
     expect(server.indexReads()).toBe(1);
-    expect(server.contentReads()).toBe(1);
+    expect(server.draftDownloads()).toBe(1);
     expect(seen).toContain("spc_library:/api/packages/skills/@acme/library");
     expect(seen).toContain("spc_library:/api/packages/@acme/library/files");
-    expect(seen).toContain("spc_library:/api/packages/@acme/library/files/content");
+    expect(seen).toContain("spc_library:/api/packages/@acme/library/draft/download");
     expect(await readFile(join(pluginRoot(), "skills/library/references/detail.md"), "utf8")).toBe(
       "Library-only draft reference",
     );

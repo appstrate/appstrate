@@ -32,6 +32,7 @@ import {
 import { ARCHIVE_MAX_FILES, PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES } from "@appstrate/core/zip";
 import {
   applyFileTreeOperations,
+  decodePackageFileText,
   PackageFileWriteError,
 } from "@appstrate/core/package-file-operations";
 import {
@@ -111,8 +112,8 @@ export const INDEX_JSON_BUDGET_BYTES = 2_097_152;
  * The two inputs cannot disagree: `bytes` is the file's exact UTF-8 length and
  * `text` is its strict-`fatal` decode of those same bytes. The one input for
  * which `JSON.stringify` escapes a NON-ASCII unit — a lone surrogate, emitted
- * as `\uD800` — cannot reach here: it would have thrown in {@link classify} and
- * been called binary.
+ * as `\uD800` — cannot reach here: {@link classify}'s strict decode refuses it
+ * and calls the file binary.
  *
  * Verified by exhaustive comparison against `TextEncoder().encode(...)` over
  * every Unicode code point (surrogates excluded) plus a randomized sweep of
@@ -175,22 +176,19 @@ function extensionOf(path: string): string {
 
 /**
  * Classify by content when the file is small enough to decode, by extension
- * otherwise. A strict (`fatal`) UTF-8 decode is the honest test: it is exactly
- * the question the client asks ("can I render this as text?").
+ * otherwise. The content test is `decodePackageFileText` — strict UTF-8, BOM
+ * kept — the one the editor and the CLI ask too, so a file is text or binary
+ * the same way on every side of the wire.
  */
 function classify(
   path: string,
   bytes: Uint8Array,
-  decoder: TextDecoder,
 ): { kind: PackageFileMediaKind; text: string | null } {
   if (bytes.byteLength > PACKAGE_FILE_INLINE_MAX_BYTES) {
     return { kind: TEXT_EXTENSIONS.has(extensionOf(path)) ? "text" : "binary", text: null };
   }
-  try {
-    return { kind: "text", text: decoder.decode(bytes) };
-  } catch {
-    return { kind: "binary", text: null };
-  }
+  const text = decodePackageFileText(bytes);
+  return { kind: text === null ? "binary" : "text", text };
 }
 
 /**
@@ -237,6 +235,11 @@ export function fileEtag(snapshotId: string, path: string): string {
   // it is not a security boundary (the snapshot id already pins the content).
   const pathDigest = new Bun.CryptoHasher("sha256").update(path).digest("hex").slice(0, 32);
   return `"f-${snapshotId}-${pathDigest}"`;
+}
+
+/** The whole tree as one ZIP (`GET …/draft/download`) — a third representation. */
+export function archiveEtag(snapshotId: string): string {
+  return `"z-${snapshotId}"`;
 }
 
 /**
@@ -439,17 +442,12 @@ export async function readPackageSnapshot(
  * files and the client derives the tree from the paths.
  */
 export function buildFileIndex(snapshot: PackageFileSnapshot): PackageFileEntry[] {
-  // `ignoreBOM: true` = do NOT strip a leading U+FEFF. The default silently
-  // drops it, which would make `inline` neither the full text nor a faithful
-  // rendering of `size` bytes — a client writing the preview back would lose
-  // the BOM.
-  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
   let remaining = INDEX_JSON_BUDGET_BYTES;
   const entries: PackageFileEntry[] = [];
 
   for (const path of Object.keys(snapshot.files).sort()) {
     const bytes = snapshot.files[path]!;
-    const { kind, text } = classify(path, bytes, decoder);
+    const { kind, text } = classify(path, bytes);
     const entry: PackageFileEntry = { path, size: bytes.byteLength, media_kind: kind };
     // `remaining > 0` short-circuits the stringify itself, not just its
     // result: once the budget is spent, every remaining text file would
@@ -523,14 +521,12 @@ export function validateAuthoredPackageFiles(
 ): string {
   const entry = PACKAGE_CONTENT_ENTRY[type];
   const bytes = entry ? files[entry.path] : undefined;
-  let content: string;
-  try {
-    content = bytes
-      ? new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes)
-      : entry
-        ? ""
-        : JSON.stringify(manifest, null, 2);
-  } catch {
+  const content = bytes
+    ? decodePackageFileText(bytes)
+    : entry
+      ? ""
+      : JSON.stringify(manifest, null, 2);
+  if (content === null) {
     throw new PackageFileWriteError(
       "invalid_bundle",
       entry?.path ?? null,

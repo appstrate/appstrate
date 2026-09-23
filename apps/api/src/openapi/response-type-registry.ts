@@ -76,6 +76,7 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     sharedTypeName: "OrgPackageItemDetail",
     description: "OrgPackageItemDetail",
   },
+  { specSchemaName: "PackageHome", sharedTypeName: "PackageHome", description: "PackageHome" },
   {
     specSchemaName: "AgentVersion",
     sharedTypeName: "VersionListItem",

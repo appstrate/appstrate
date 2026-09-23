@@ -121,11 +121,14 @@ describe("User Agents API", () => {
       expect(body.skillIds).toBeUndefined();
       expect(body.message).toBeUndefined();
 
-      // Verify manifest was updated
+      // Verify manifest was updated — and the draft's lock moved with it, so a
+      // client holding the previous token cannot write its stale manifest back.
       const [row] = await db
-        .select({ draftManifest: packages.draftManifest })
+        .select({ draftManifest: packages.draftManifest, lockVersion: packages.lockVersion })
         .from(packages)
         .where(eq(packages.id, "@myorg/skills-agent"));
+      expect(row!.lockVersion).toBe(body.lock_version);
+      expect(body.lock_version).toBeGreaterThan(1);
       const m = asRecord(row!.draftManifest);
       const deps = asRecord(m.dependencies);
       expect(deps.skills).toEqual({ "@myorg/skill-a": "^1.0.0" });

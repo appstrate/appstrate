@@ -8,6 +8,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Edit a package in a local folder with `appstrate packages`** (#1499). `pull`
+  brings a package's draft (or, for someone who cannot write it, its published
+  version, read-only) into a working folder; `status` shows what the folder
+  would change; `push` writes it back to the draft; `publish` cuts a version as
+  a separate step. Skills, agents, integrations and MCP servers alike, with any
+  editor or coding agent. A push is ONE atomic write under the draft's lock: a
+  draft edited elsewhere since the folder last saw it (the dashboard, another
+  machine, a colleague) is refused, never overwritten. Dot-named entries
+  (`.env`, `.git/`, editor state), `__pycache__` and the signature `RECORD` are
+  never sent, never deleted from the draft and never written by a pull.
+  `push --create` creates a package through the import route and says it
+  publishes the first version. `publish` picks the version exactly as the
+  dashboard's dialog does (`--bump patch|minor|major`).
+- **`GET /api/packages/{scope}/{name}/home`** — a package's type, home space and
+  the spaces the caller reads it from, resolved by id alone across every space
+  the caller reaches. A package homed in a personal space is found from a team
+  space; an id the caller cannot read is `404 package_not_found`, exactly
+  where the catalog refuses it.
+- **`GET /api/packages/{scope}/{name}/draft/download`** — the draft as one
+  archive, for whoever may write the package (`403 draft_not_writable`
+  otherwise). An author fetching their own draft is editing it, so
+  `restrict_package_copy` does not apply to it; published versions keep that
+  gate.
+
 - **A member can leave an organization.** New operation
   `POST /api/orgs/{orgId}/leave` (`leaveOrganization`): any member, `204`, no
   RBAC permission beyond membership. It takes the first-party dashboard
@@ -52,6 +76,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Draft writes have no operation-count limit any more.** A `PUT` carrying file
+  operations used to accept at most 200, so a large edit had to be split into
+  several non-atomic writes. The real bounds are unchanged: the request body
+  limit, 1 MiB per written file and the tree limits.
+- **A bumped version of unchanged content is refused.** The publish dialog's
+  patch/minor/major bump (and `appstrate packages publish --bump`) with nothing
+  else changed now answers `409 no_changes`. Before, the bumped number alone
+  changed the archive's digest and the same content was published again under
+  every bump. A version the author writes into the manifest (promoting
+  `1.0.0-rc.1` to `1.0.0`, say) is still theirs to cut.
+- **Publishing can be pinned to the draft the caller read.** The versions
+  endpoint accepts `lock_version`; a draft that moved since is refused with
+  `409 conflict` instead of being published unseen. The dashboard's publish
+  dialog and `appstrate packages publish` both send it.
 - **Removing a member now revokes their credentials in the organization.**
   Removal and leaving share one exit path. Beside what removal already did
   (membership row and notifications deleted, explicit space roles dropped,
@@ -77,6 +115,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Deleting or leaving an organization no longer reloads the page.** The web
   app moves to another organization, or to onboarding when none is left.
+
+### Fixed
+
+- **Setting an agent's skills moves the draft's lock.** The agent skills
+  endpoint rewrote the draft manifest without the draft lock or a new
+  `lock_version`, so a client holding the previous token could write its stale
+  manifest back over the change.
+- **A change to a package's annex files alone can be published from the
+  dashboard.** Its publish button compared only the manifest and the main
+  content file, so an edit to any other file left it disabled. It now follows
+  the server's own change flag, like `appstrate packages publish`, and the
+  server judges the content (annexes included) when the version is cut. A
+  publish refused as `no_changes` (an edit reverted) clears the "modified"
+  marker, so the draft stops offering it.
+- **CLI errors carry the server's explanation.** Error responses were read for
+  a `message` field the API does not send (RFC 9457 carries `detail`), so most
+  refusals printed only `HTTP 404`.
 
 ### Security
 

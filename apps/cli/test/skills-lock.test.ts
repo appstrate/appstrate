@@ -15,12 +15,8 @@ import { lstat, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { closeSync, openSync } from "node:fs";
-import {
-  getLockPath,
-  resolveTryLock,
-  SyncLockBusyError,
-  withSyncLock,
-} from "../src/lib/skills-sync/lock.ts";
+import { getLockPath, SyncLockBusyError, withSyncLock } from "../src/lib/skills-sync/lock.ts";
+import { resolveTryLock } from "../src/lib/file-lock.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
 
 const originalDataHome = process.env.XDG_DATA_HOME;

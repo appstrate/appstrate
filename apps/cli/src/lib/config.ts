@@ -21,7 +21,10 @@
  */
 
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
+import type { PackageType } from "@appstrate/core/validation";
+import { parseScopedName } from "@appstrate/core/naming";
 import { mkdir, readFile, rename, writeFile, unlink } from "node:fs/promises";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import { DEFAULT_IO, type CommandIO } from "./io.ts";
@@ -72,6 +75,15 @@ export function syncSpaceIds(profileName: string, profile: Profile): string[] | 
 export interface Config {
   defaultProfile: string;
   profiles: Record<string, Profile>;
+  /**
+   * Root of the working copies `packages pull` writes and `packages push`
+   * reads: `<workDir>/<org slug>/packages/<type segment>/@<scope>/<name>`. Default
+   * `~/Appstrate Packages`, a visible folder, unlike the regenerable state under
+   * `getDataDir()`. Never `~/Appstrate`: that is `appstrate install`'s default
+   * instance directory (`~/appstrate` on a case-insensitive disk), which
+   * `uninstall --purge` removes wholesale.
+   */
+  workDir?: string;
 }
 
 /** Fresh empty config. Always return a NEW object here — callers mutate
@@ -147,6 +159,8 @@ export async function readConfig(): Promise<Config> {
   const parsed = parseToml(raw) as Record<string, unknown>;
   const defaultProfile =
     typeof parsed.defaultProfile === "string" ? parsed.defaultProfile : "default";
+  const workDir =
+    typeof parsed.workDir === "string" && parsed.workDir.length > 0 ? parsed.workDir : undefined;
   const profilesRaw = (parsed.profile ?? {}) as Record<string, unknown>;
   const profiles: Record<string, Profile> = {};
   for (const [name, value] of Object.entries(profilesRaw)) {
@@ -171,7 +185,48 @@ export async function readConfig(): Promise<Config> {
       ...(row.syncSpaces === undefined ? {} : { syncSpaces: readSyncSpaces(row.syncSpaces) }),
     };
   }
-  return { defaultProfile, profiles };
+  return workDir ? { defaultProfile, profiles, workDir } : { defaultProfile, profiles };
+}
+
+const DEFAULT_WORK_DIR_NAME = "Appstrate Packages";
+
+/**
+ * `~` and `~/…` against {@link homeDir}, the way a shell would have expanded
+ * them had the path not been quoted or read from `config.toml`. Anything else
+ * is returned as given.
+ */
+export function expandHome(path: string): string {
+  if (path === "~") return homeDir();
+  return path.startsWith("~/") ? join(homeDir(), path.slice(2)) : path;
+}
+
+/** `workDir` from the config, absolute, `~/Appstrate Packages` when unset. */
+export function resolveWorkDir(config: Config): string {
+  return resolve(expandHome(config.workDir ?? join("~", DEFAULT_WORK_DIR_NAME)));
+}
+
+/**
+ * One package's working copy:
+ * `<workDir>/<org slug>/packages/<type segment>/@<scope>/<name>`. The scope is
+ * part of the path because one organization reads packages of several scopes,
+ * and `@acme/pdf` and `@other/pdf` must not share a folder.
+ */
+export function packageWorkDir(
+  config: Config,
+  orgSlug: string,
+  type: PackageType,
+  packageId: string,
+): string {
+  const parsed = parseScopedName(packageId);
+  if (!parsed) throw new Error(`Not a package id: ${packageId}`);
+  return join(
+    resolveWorkDir(config),
+    orgSlug,
+    "packages",
+    PACKAGE_TYPE_ROUTE_SEGMENT[type],
+    `@${parsed.scope}`,
+    parsed.name,
+  );
 }
 
 /**
@@ -206,6 +261,7 @@ export async function writeConfig(config: Config): Promise<void> {
   const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
   const payload = stringifyToml({
     defaultProfile: config.defaultProfile,
+    ...(config.workDir ? { workDir: config.workDir } : {}),
     // A malformed `syncSpaces` goes back exactly as it was read: a command that
     // rewrites some other key must not quietly drop the user's typo, because
     // dropping it widens the next sync to every space.

@@ -48,6 +48,7 @@ See [`examples/self-hosting/README.md`](../../examples/self-hosting/README.md#ve
 | `appstrate org`       | List, switch, or create organizations pinned on the active profile.                                         |
 | `appstrate space`     | List, switch, or create spaces pinned on the active profile.                                                |
 | `appstrate skills`    | Sync your spaces' skills to Claude Code and Codex as Agent Skills directories.                              |
+| `appstrate packages`  | Edit a package in a local folder: pull its draft, check what changed, push it back, publish it.             |
 | `appstrate api`       | Authenticated HTTP passthrough to the Appstrate API.                                                        |
 | `appstrate openapi`   | Explore the active profile's OpenAPI schema without flooding stdout.                                        |
 | `appstrate run`       | Execute an agent — a package id runs on the pinned instance, a `.afps`/`.afps-bundle` path runs in-process. |
@@ -551,6 +552,37 @@ Per-skill toggles survive all of this. We never write `~/.codex/config.toml`, an
 
 ---
 
+### `appstrate packages`
+
+Edit a package (skill, agent, integration, MCP server) in a local folder with any tool, then write it back to its **draft** and publish it as a separate, deliberate step. `skills sync` is the other direction: it copies what is published (or, with `--source draft`, your draft) onto your machine and never sends anything back.
+
+```sh
+appstrate packages pull my-skill                 # the draft → <workDir>/<org>/packages/skills/@<org>/my-skill
+appstrate packages status my-skill --diff        # what the folder would change in the draft
+appstrate packages push my-skill                 # the folder → the draft; nobody else sees it yet
+appstrate skills sync --source draft             # test the draft on this machine
+appstrate packages publish my-skill              # the draft → a version every space resolves
+```
+
+**Authority is the package's home space.** A package lives in one space, its home, and only a caller who may write there can read its draft, push or publish. Anyone else who can read the package pulls its latest published version, read-only, and `push` refuses with a pointer to co-editing. The CLI asks the platform where the package lives (`GET /api/packages/{scope}/{name}/home`, across every space you reach), so a package homed in your personal space is found even while a team space is pinned. Sharing and activation are not part of this loop.
+
+**The lock belongs to the folder.** `pull` of a draft records the draft's `lock_version` for that folder (by its real path), and `push` sends it back: a draft edited anywhere else in between (the dashboard, the chat, the API, another folder or machine) is refused with `409` and nothing is written. After a push the folder records the lock its own write produced (one step up), never a later one it did not see, and warns when someone wrote right after it. `status` warns about it before you push. A folder that never read the draft, or that pulled a published version, can only push with `--force`, which replaces the draft with the folder. Lock records are per profile and updated under an `flock(2)`, so two commands never lose each other's entries.
+
+| Subcommand                 | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pull <package> [dir]`     | `@scope/name` or a bare name under the org's slug. `--version <spec>` pulls a published version instead of the draft. Refuses a non-empty folder unless `--force`, which makes the folder mirror the package: files it does not have are deleted, and listed.                                                                                                                                                                                                                                                                                                                |
+| `status <dir>`             | A folder path, or a bare name resolved in the work dir. `manifest.json` counts: a configuration-only edit is a change. `--diff` prints a line diff for each modified text file.                                                                                                                                                                                                                                                                                                                                                                                              |
+| `push <dir>`               | Writes every change in ONE atomic `PUT /api/packages/{type segment}/{scope}/{name}`: all of it lands, or none. Bytes that are not UTF-8 text travel as base64, so binary annexes survive.                                                                                                                                                                                                                                                                                                                                                                                    |
+| `publish <package-or-dir>` | Creates a version from the draft, by the dashboard's rule. Given a folder, refuses when the folder holds anything the draft does not (unpushed edits, or a draft moved since the folder read it); given an id, publishes the draft as it is. The rule: a draft still at the latest version is bumped (`--bump patch\|minor\|major`, default `patch`), a draft ahead of it is cut as is, one behind it is refused. A specific number goes in `manifest.json`, pushed, as in the dashboard. The publish carries the lock it read, so a draft that moved in between is refused. |
+
+**What the folder is.** Dot-named entries (`.git`, `.env`, `.DS_Store`, editor state) and `__pycache__` are tooling state and secrets, not package content: never read, pushed, deleted from the draft or reported — on both sides, so a dotfile the draft holds is left alone — and `pull` never writes them either, so a package cannot plant a `.git/config` or an editor task in your folder (it lists what it skipped). `node_modules` is NOT ignored: an MCP server bundle ships `server/node_modules` as part of the package. A file the folder writes (added or modified) is at most 1 MiB, the platform's per-file write limit, checked before the write is sent; an unchanged larger file the draft already holds (an import is bounded only by the archive) is fine. `pull` refuses a package holding two paths that are one file on a case- or normalization-insensitive disk (`A.md` and `a.md`). a symbolic link is refused rather than followed. A folder without `manifest.json` is a skill (`SKILL.md` alone): its manifest is not compared or sent, and stays the draft's. `push` never changes the version — that is decided when you publish, as in the dashboard; a publish that bumps it carries the new version into the `manifest.json` of every folder current with the draft, leaving the rest of that file alone.
+
+**Creating a package publishes it.** `push` on an id that does not exist yet refuses unless you pass `--create`. It then zips the folder — listing on stderr the ignored entries it leaves out — into `POST /api/packages/import`, the one creation path every type has, which homes the package in `--space <id>` (default: the pinned space) and publishes its first version. The folder records the new draft's lock and gets the manifest the platform stored — a `SKILL.md`-only folder gains the one it derived.
+
+**Work dir.** Default `~/Appstrate Packages`, overridable with a top-level `workDir` in `config.toml`. A package's working copy is `<workDir>/<org slug>/packages/<type segment>/@<scope>/<name>`: a bare name means `@<org slug>/<name>`, a scoped id keeps its scope, and a folder found there that holds another package is refused. An Appstrate instance directory (one holding `.appstrate/project.json`) is refused: `appstrate uninstall --purge` removes it wholesale.
+
+---
+
 ### `appstrate openapi`
 
 Explore the active profile's OpenAPI 3.1 schema without dumping the whole spec to stdout. The platform exposes a few hundred endpoints — `list`, `show`, and `export` subcommands make that corpus explorable at human scale (and agent-ingestable with `--json`).
@@ -861,6 +893,8 @@ $XDG_CONFIG_HOME/appstrate/              (or ~/.config/appstrate/)
 $XDG_DATA_HOME/appstrate/                (or ~/.local/share/appstrate/)
 ├── claude-plugin/                       # generated Claude Code plugin (`appstrate skills sync`)
 ├── skills-sync/state.json               # which skill directory each target owns, and from which artifact
+├── packages/<profile>-locks.json       # working folder → package and the draft lock it last saw (`appstrate packages`)
+├── packages/<profile>-locks.lock       # flock(2) target serializing updates of that file (never removed)
 └── skills-sync/sync.lock                # flock(2) target serializing concurrent syncs (never removed; unlocked where flock(2) is absent)
 ```
 
@@ -872,6 +906,7 @@ Example `config.toml`:
 
 ```toml
 defaultProfile = "prod"
+workDir = "~/Appstrate Packages" # optional: root of `appstrate packages` working copies
 
 [profile.prod]
 instance = "https://app.example.com"

@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`PACKAGE_TYPE_ROUTE_SEGMENT`** (`@appstrate/core/package-files`) — the URL
+  segment of each package type's collection (`skill` → `skills`, …), declared
+  once for the API router, the dashboard and the CLI.
+- **`decodePackageFileText`** (`@appstrate/core/package-file-operations`) — the
+  text a package file's bytes are (strict UTF-8, BOM kept), or `null`: the one
+  test behind a file's `text` vs `bytes_base64` on every end of the wire.
+- **`canonicalPackagePath`** (`@appstrate/core/package-file-operations`) — the
+  NFC, lowercased key two package paths collide on, shared by the tree algebra
+  and by clients writing a tree to a case-insensitive disk.
+- **`planPublishVersion`**, **`PublishVersionPlan`** and **`VersionBump`** (`@appstrate/core/semver`) —
+  what publishing a draft would cut (`bump` | `direct` | `blocked` | `none`)
+  from the draft's version and the latest published one, shared by the
+  dashboard's publish dialog and `appstrate packages publish`.
+- **`buildDownloadHeaders`** takes a DRAFT input (`version: "draft"`, no `integrity`) beside a version input, which still requires its digest. A draft archive has no
+  digest to publish, so it is served without `X-Integrity`.
 - **New event `ModuleEvents.onOrgMemberRemove(orgId, userId)`
   (`@appstrate/core/module`)** — broadcast after a member left or was removed
   from an organization, once the removal has committed. A module that granted

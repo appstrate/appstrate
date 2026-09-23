@@ -69,8 +69,9 @@ Writes retain the existing package mutation authority, including write access
 in every space sharing the draft, and refuse system packages. Reads remain
 permission checked and use representation-specific ETags only for caching.
 
-A batch accepts at most 200 operations, 1 MiB per written file, and a resulting
-tree of at most 50 MB / 10,000 entries. The global HTTP body limit also applies.
+A batch has no operation count cap, so a whole working folder is written in one
+atomic request. It accepts 1 MiB per written file and a resulting tree of at
+most 50 MB / 10,000 entries; the global HTTP body limit also applies.
 Larger binaries can be imported in an archive. Binary content is never decoded
 and re-encoded for storage; staged binaries have no server download until saved.
 Buffered S3 GET/PUT operations have a 30-second deadline spanning retries and

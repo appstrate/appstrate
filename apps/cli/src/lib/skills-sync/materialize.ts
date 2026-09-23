@@ -10,14 +10,13 @@ import { isValidSkillName, SKILL_NAME_MAX_LENGTH } from "@appstrate/afps-shared/
 import { extractSkillMeta } from "@appstrate/core/validation";
 import { toSlug } from "@appstrate/core/naming";
 import { isSafeArchivePath } from "@appstrate/core/zip";
+import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
+import { SIGNATURE_RECORD } from "../package-definition.ts";
 
-/**
- * Appstrate packaging, not skill content. Exported because the draft path must
- * know the same set BEFORE fetching: each file there is its own request.
- */
-export const DROPPED_ENTRIES: ReadonlySet<string> = new Set(["manifest.json", "RECORD"]);
+/** Appstrate packaging, not skill content: both archives carry them, no skill directory does. */
+const DROPPED_ENTRIES: ReadonlySet<string> = new Set([PACKAGE_MANIFEST_FILE, SIGNATURE_RECORD]);
 
-export const SKILL_ENTRY = "SKILL.md";
+export const SKILL_ENTRY = PACKAGE_CONTENT_ENTRY.skill!.path;
 
 const FRONTMATTER_RE = /^---[^\S\n]*\n([\s\S]*?)\n---/;
 

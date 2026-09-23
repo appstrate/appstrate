@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { applyFileTreeOperations } from "@appstrate/core/package-file-operations";
+import {
+  applyFileTreeOperations,
+  decodePackageFileText,
+} from "@appstrate/core/package-file-operations";
 import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import type { PackageType } from "@appstrate/core/validation";
 import type { PackageFileEntry, PackageFileWriteOperation } from "./package-file-tree";
@@ -15,16 +18,12 @@ function writtenEntry(operation: Extract<PackageFileWriteOperation, { op: "write
     operation.text !== undefined
       ? new TextEncoder().encode(operation.text)
       : Uint8Array.from(atob(operation.bytes_base64!), (char) => char.charCodeAt(0));
-  try {
-    return {
-      path: operation.path,
-      size: bytes.byteLength,
-      media_kind: "text",
-      inline: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes),
-    };
-  } catch {
-    return { path: operation.path, size: bytes.byteLength, media_kind: "binary" };
-  }
+  // The server's own test (`buildFileIndex`), so a staged file is projected as
+  // the kind the index will list once it is saved.
+  const text = decodePackageFileText(bytes);
+  return text === null
+    ? { path: operation.path, size: bytes.byteLength, media_kind: "binary" }
+    : { path: operation.path, size: bytes.byteLength, media_kind: "text", inline: text };
 }
 
 /** Project staged operations without a network write or a second tree reducer. */

@@ -6,12 +6,14 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { stripScope } from "@appstrate/core/naming";
+import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { client, type components } from "../api/client";
 import { triggerBlobDownload } from "../lib/blob-download";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
+import { ApiError } from "../api/errors";
 import { packageKeys, agentsKeys, invalidatePackageFiles } from "../lib/query-keys";
 import type {
   OrgPackageItem,
@@ -30,14 +32,10 @@ import type {
 // invalidate them after writes, and use-current-space resets them on
 // space switch. Only the fetch layer is migrated to the typed client.
 
-// --- Packages — config-driven factory ---
-
-const PACKAGE_CONFIG = {
-  agent: { path: "agents" },
-  skill: { path: "skills" },
-  "mcp-server": { path: "mcp-servers" },
-  integration: { path: "integrations" },
-} as const;
+// --- Packages — one factory over the four types ---
+//
+// `PACKAGE_TYPE_ROUTE_SEGMENT` is `as const`, so the template paths below stay
+// literal and the typed client still resolves each one to its operation.
 
 type PackageDetailMap = {
   agent: AgentDetail;
@@ -123,9 +121,12 @@ async function fetchPackageDetail(
     });
     return normalizeAgentDetail(data!);
   }
-  const { data } = await client.GET(`/api/packages/${PACKAGE_CONFIG[type].path}/{scope}/{name}`, {
-    params: { path, ...query },
-  });
+  const { data } = await client.GET(
+    `/api/packages/${PACKAGE_TYPE_ROUTE_SEGMENT[type]}/{scope}/{name}`,
+    {
+      params: { path, ...query },
+    },
+  );
   return normalizePackageItemDetail(data!);
 }
 
@@ -142,11 +143,11 @@ async function fetchPackageDetail(
 function usePackageList(type: PackageType) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
-  const cfg = PACKAGE_CONFIG[type];
+  const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useQuery({
-    queryKey: packageKeys.list(cfg.path, orgId, spaceId),
+    queryKey: packageKeys.list(segment, orgId, spaceId),
     queryFn: async (): Promise<OrgPackageItem[]> => {
-      const { data } = await client.GET(`/api/packages/${cfg.path}`);
+      const { data } = await client.GET(`/api/packages/${segment}`);
       // The spec marks most item fields optional — normalize to the
       // non-optional shape consumers have always used. `scope` is not
       // returned by the list endpoints.
@@ -178,13 +179,13 @@ function usePackageDetail<T extends PackageType>(
 ) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
-  const cfg = PACKAGE_CONFIG[type];
+  const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   // The server's default projection and an explicit `draft` are two different
   // answers and must never share a cache entry.
   const version = opts?.version;
 
   return useQuery({
-    queryKey: packageKeys.detail(cfg.path, orgId, spaceId, id!, version ?? null),
+    queryKey: packageKeys.detail(segment, orgId, spaceId, id!, version ?? null),
     queryFn: () => fetchPackageDetail(type, id!, version),
     enabled: !!orgId && !!spaceId && !!id && (opts?.enabled ?? true),
   });
@@ -192,7 +193,7 @@ function usePackageDetail<T extends PackageType>(
 
 function useUploadPackage(type: PackageType) {
   const qc = useQueryClient();
-  const cfg = PACKAGE_CONFIG[type];
+  const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
     mutationFn: async (file: File): Promise<{ id: string; version: string | null }> => {
       const fd = new FormData();
@@ -212,7 +213,7 @@ function useUploadPackage(type: PackageType) {
       return { id: data!.packageId, version: data!.version ?? null };
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: packageKeys.family(cfg.path) });
+      qc.invalidateQueries({ queryKey: packageKeys.family(segment) });
     },
   });
 }
@@ -220,15 +221,15 @@ function useUploadPackage(type: PackageType) {
 function useDeletePackage(type: PackageType) {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const cfg = PACKAGE_CONFIG[type];
+  const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
     mutationFn: async (id: string) => {
-      await client.DELETE(`/api/packages/${cfg.path}/{scope}/{name}`, {
+      await client.DELETE(`/api/packages/${segment}/{scope}/{name}`, {
         params: { path: splitPackageRef(id) },
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: packageKeys.family(cfg.path) });
+      qc.invalidateQueries({ queryKey: packageKeys.family(segment) });
       navigate("/");
     },
   });
@@ -244,7 +245,7 @@ function useDeletePackage(type: PackageType) {
  */
 function useMovePackageHome(type: PackageType) {
   const qc = useQueryClient();
-  const cfg = PACKAGE_CONFIG[type];
+  const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
     mutationFn: async ({
       id,
@@ -262,7 +263,7 @@ function useMovePackageHome(type: PackageType) {
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: packageKeys.family(cfg.path) });
+      qc.invalidateQueries({ queryKey: packageKeys.family(segment) });
       qc.invalidateQueries({ queryKey: agentsKeys.all });
       void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
       // The space being left may have lost the package (`keepInPreviousHome:
@@ -281,7 +282,6 @@ export {
   useDeletePackage,
   useMovePackageHome,
   type PackageType,
-  PACKAGE_CONFIG,
 };
 
 // --- Agents ---
@@ -381,7 +381,7 @@ export function useVersionDetail(
     queryKey: ["version-detail", orgId, spaceId, type, packageId, version],
     queryFn: async (): Promise<VersionDetailResponse> => {
       const { data } = await client.GET(
-        `/api/packages/${PACKAGE_CONFIG[type].path}/{scope}/{name}/versions/{version}`,
+        `/api/packages/${PACKAGE_TYPE_ROUTE_SEGMENT[type]}/{scope}/{name}/versions/{version}`,
         { params: { path: { ...splitPackageRef(packageId!), version: version! } } },
       );
       return data!;
@@ -397,7 +397,7 @@ export function usePackageVersions(type: PackageType, packageId: string | undefi
     queryKey: ["package-versions", orgId, spaceId, type, packageId],
     queryFn: async (): Promise<VersionListItem[]> => {
       const { data } = await client.GET(
-        `/api/packages/${PACKAGE_CONFIG[type].path}/{scope}/{name}/versions`,
+        `/api/packages/${PACKAGE_TYPE_ROUTE_SEGMENT[type]}/{scope}/{name}/versions`,
         { params: { path: splitPackageRef(packageId!) } },
       );
       return data!.versions;
@@ -410,13 +410,28 @@ export function usePackageVersions(type: PackageType, packageId: string | undefi
 
 export function useCreateVersion(type: PackageType, packageId: string) {
   const qc = useQueryClient();
-  const cfg = PACKAGE_CONFIG[type];
+  const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
-    mutationFn: async (version?: string): Promise<{ id: number; version: string }> => {
+    /**
+     * `version` overrides the draft manifest's; `lockVersion` is the draft the
+     * caller looked at — a draft moved since is refused (`409 conflict`) rather
+     * than published unseen.
+     */
+    mutationFn: async ({
+      version,
+      lockVersion,
+    }: { version?: string; lockVersion?: number } = {}): Promise<{
+      id: number;
+      version: string;
+    }> => {
       // 201 → the created version resource, bare (issue #657).
-      const { data } = await client.POST(`/api/packages/${cfg.path}/{scope}/{name}/versions`, {
+      const body = {
+        ...(version ? { version } : {}),
+        ...(lockVersion !== undefined ? { lock_version: lockVersion } : {}),
+      };
+      const { data } = await client.POST(`/api/packages/${segment}/{scope}/{name}/versions`, {
         params: { path: splitPackageRef(packageId) },
-        body: version ? { version } : undefined,
+        body: Object.keys(body).length > 0 ? body : undefined,
       });
       return { id: data!.id, version: data!.version };
     },
@@ -430,15 +445,24 @@ export function useCreateVersion(type: PackageType, packageId: string) {
       // dist-tag-resolved read of it are now wrong.
       invalidatePackageFiles(qc);
     },
+    // A refusal that moved or settled the draft (`conflict`: someone wrote it;
+    // `no_changes`: the server cleared its dirty marker) leaves the page stale.
+    onError: (err) => {
+      if (err instanceof ApiError && (err.code === "conflict" || err.code === "no_changes")) {
+        qc.invalidateQueries({ queryKey: ["version-info"] });
+        qc.invalidateQueries({ queryKey: agentsKeys.all });
+        qc.invalidateQueries({ queryKey: packageKeys.all });
+      }
+    },
   });
 }
 
 export function useDeleteVersion(type: PackageType, packageId: string) {
   const qc = useQueryClient();
-  const cfg = PACKAGE_CONFIG[type];
+  const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
     mutationFn: async (version: string) => {
-      await client.DELETE(`/api/packages/${cfg.path}/{scope}/{name}/versions/{version}`, {
+      await client.DELETE(`/api/packages/${segment}/{scope}/{name}/versions/{version}`, {
         params: { path: { ...splitPackageRef(packageId), version } },
       });
     },
@@ -457,7 +481,7 @@ export function useDeleteVersion(type: PackageType, packageId: string) {
 
 export function useRestoreVersion(type: PackageType, packageId: string) {
   const qc = useQueryClient();
-  const cfg = PACKAGE_CONFIG[type];
+  const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
     mutationFn: async (
       version: string,
@@ -466,7 +490,7 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
       // reflected in `version`/`manifest`/`content` and the resource carries
       // the package's NEW `lock_version`.
       const { data } = await client.POST(
-        `/api/packages/${cfg.path}/{scope}/{name}/versions/{version}/restore`,
+        `/api/packages/${segment}/{scope}/{name}/versions/{version}/restore`,
         { params: { path: { ...splitPackageRef(packageId), version } } },
       );
       return {
@@ -494,7 +518,7 @@ export function useVersionInfo(type: PackageType, packageId: string | undefined)
       active_version: string | null;
     }> => {
       const { data } = await client.GET(
-        `/api/packages/${PACKAGE_CONFIG[type].path}/{scope}/{name}/versions/info`,
+        `/api/packages/${PACKAGE_TYPE_ROUTE_SEGMENT[type]}/{scope}/{name}/versions/info`,
         { params: { path: splitPackageRef(packageId!) } },
       );
       return {

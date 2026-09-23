@@ -769,6 +769,37 @@ export interface OrgPackageItemDetail extends Omit<
   has_unarchived_changes?: boolean;
 }
 
+/**
+ * `GET /api/packages/{scope}/{name}/home` — where a package lives, asked by id
+ * alone: its type, its home, and the spaces this caller reads it from.
+ *
+ * The per-type detail answers only inside a space the package is placed in, and
+ * only for the type in its path; a package homed in a personal space is
+ * invisible from every team space it was never offered to. This is the one read
+ * that needs neither, across every space the caller reaches.
+ *
+ * `home_*` are {@link OrgPackageItem}'s fields, from the same computation
+ * (`homeWireForCaller`). `read_space_ids` are the spaces where the caller holds
+ * the type's read AND the placement grants it (home or offer) — every such space
+ * for a system package — the home first when it is one of them.
+ */
+export interface PackageHome {
+  id: string;
+  type: PackageType;
+  home_space_id: string | null;
+  home_writable: boolean;
+  home_deletable: boolean;
+  home_shareable: boolean;
+  read_space_ids: string[];
+}
+
+/** `GET /api/packages/{type}/{scope}/{name}/versions/info`. */
+export interface PackageVersionInfoResponse {
+  latest_published_version: string | null;
+  /** The draft manifest's `version`. */
+  active_version: string | null;
+}
+
 // --- Token Usage Types ---
 
 export type { TokenUsage };
