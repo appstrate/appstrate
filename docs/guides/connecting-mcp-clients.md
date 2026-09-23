@@ -180,8 +180,8 @@ mixed into `operations`) and
 **not shown** rather than shown and refused — but an operation your permission
 set alone cannot decide stays listed: either the loaded row decides it (a file
 ACL, a draft's home space), or a guard on it is enforced in the space the path
-names rather than the one you are calling from. Neither is announced in advance;
-the route's own refusal says which it was.
+names rather than the one you are calling from. A row decision is not announced
+in advance; the route's own refusal names it.
 The two are separate fields: `required_permissions` carries the guards read in
 the space you are calling from — the only ones filtering tests — and
 `target_space_permissions` carries those enforced in the space the path names,

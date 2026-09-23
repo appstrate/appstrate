@@ -23,7 +23,8 @@ export interface RouteRequirement {
   readonly targetSpaceRequirements: readonly string[];
 }
 
-/** A route no guard narrows — granted to anyone who reached the transport. */
+/** A route whose mounts state no permission string — the handler, or a guard
+ *  that names none, may still refuse. */
 const UNGUARDED: RouteRequirement = Object.freeze({
   requirements: Object.freeze([]) as readonly string[],
   targetSpaceRequirements: Object.freeze([]) as readonly string[],
