@@ -40,9 +40,30 @@ exported subpath in a clean npm project outside the monorepo, so a leaf that is
 not on npm yet fails there — right before publish — rather than for the first
 consumer to install.
 
-**For a non-major release, bump the consumers first.** There is no carve-out and
-no ordering question: every consumer must already be on `^X` before you tag, or
-the gate fails hard.
+**For a non-major release, bring the consumers within one minor first.** Being
+on `^X` is not enough: the gate fails on a consumer two or more minors behind
+and only warns at exactly one minor behind — and a consumer cannot declare the
+minor you are about to publish before it exists. So before tagging `X.Y.0`, every
+consumer must declare at least `^X.(Y-1).0` (`core@11.1.0` published with
+`connect-helper` on `^11.0.0`: one warning, no failure; a `core@11.2.0` would
+fail until it moves to `^11.1.0`).
+
+**The bump PR carries four things**, each checked in CI:
+
+- `packages/core/package.json` `version`, **and** `CORE_VERSION` in
+  `packages/core/src/module.ts` — `packages/core/test/core-version.test.ts`
+  asserts they are equal, in the PR's unit tests and in `publish-core.yml`'s
+  `bun test`.
+- The CHANGELOG entry under `## [Unreleased]`, heading **kept**:
+  `packages/core/test/export-surface.test.ts` diffs the exports against the npm
+  baseline and requires every change since it to be named there. Date the
+  section only in the post-publish PR of §4, together with the baseline.
+- `bun run generate:schemas` in `packages/core` when schemas changed.
+- `bun.lock`, refreshed by `bun install` after the version edit: it records
+  every workspace's version, and `check.yml` runs `git diff --exit-code bun.lock`.
+
+A breaking entry under `[Unreleased]` makes the next publish a major, whatever
+else it carries.
 
 ## 2. Tag and publish — for a MAJOR, the tag comes FIRST
 
@@ -91,6 +112,7 @@ tree) and therefore never reports a core export as unused.
 Regenerate it from the TARBALL, after the publish lands:
 
 ```sh
+export REPO="$(git rev-parse --show-toplevel)"   # from this checkout, before leaving it
 cd "$(mktemp -d)" && npm pack @appstrate/core@X.Y.Z --silent && tar -xzf ./*.tgz
 bun -e 'const {exportedNames}=await import(process.env.REPO+"/packages/core/test/helpers/export-surface.ts");
   const n=await exportedNames("package/src");
@@ -110,8 +132,9 @@ that already shipped.
 ## What the gate actually checks
 
 `scripts/check-consumer-versions.ts` compares each consumer's declared
-`@appstrate/core` range (from `dependencies`, `devDependencies` **and**
-`peerDependencies`) against the version being published. The verdicts below
+`@appstrate/core` range (from `dependencies` and `devDependencies` — not
+`peerDependencies`, which no consumer uses for core) against the version being
+published. The verdicts below
 block the publish under the default `fail` policy; `warn` reports them without
 blocking, `off` skips the check entirely.
 
@@ -127,7 +150,9 @@ blocking, `off` skips the check entirely.
 | No `@appstrate/core` in the merged deps         | informational log; not counted          |
 | Unparsable range                                | fail under `fail`; warning under `warn` |
 
-A clean run prints `Summary: 0 failure(s), 0 warning(s)`. It no longer hides a
+A clean run prints `Summary: 0 failure(s)`; warnings count the consumers one
+minor behind (or one major behind at an `X.0.0`) — `core@11.1.0` printed
+`Summary: 0 failure(s), 1 warning(s)`. It no longer hides a
 failed fetch or an unparsable range: both are counted. It can still include an
 informational "does not depend on `@appstrate/core`" line, so read the
 per-consumer output too.
