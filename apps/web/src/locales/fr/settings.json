@@ -1069,6 +1069,7 @@
   "roles.unavailableGroup": "Indisponible",
   "roles.unavailableHint": "La plateforme ne reconnaît pas ces permissions (module retiré). Elles restent enregistrées sur le rôle mais n'accordent rien ici, et enregistrer le rôle les supprime.",
   "roles.sessionOnly": "Session uniquement — non délégable à une clé API.",
+  "roles.requiredBy": "Requis par {{actions}}.",
   "roles.formIncomplete": "Indiquez un nom et au moins une permission.",
   "roles.deleted": "Rôle « {{name}} » supprimé.",
   "roles.deleteConfirm": "Supprimer le rôle « {{name}} » ?",

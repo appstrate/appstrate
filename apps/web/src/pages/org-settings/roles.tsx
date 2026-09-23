@@ -10,6 +10,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { cn } from "@appstrate/ui/cn";
 import {
   Collapsible,
   CollapsibleContent,
@@ -18,6 +19,11 @@ import {
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { ApiError } from "../../api/client";
+import {
+  lockedReads,
+  togglePermission,
+  type RoleVocabularyEntry,
+} from "../../lib/role-permission-dependencies";
 import { useCanPreviewRole, usePermissions } from "../../hooks/use-permissions";
 import {
   spaceRoleDescription,
@@ -238,6 +244,76 @@ function RoleCard({
   );
 }
 
+/** The picker's resource groups; a read a selected action still depends on is locked and names it. */
+export function PermissionGroups({
+  groups,
+  selected,
+  locked,
+  disabled,
+  onToggle,
+}: {
+  groups: { resource: string; permissions: RoleVocabularyEntry[] }[];
+  selected: ReadonlySet<string>;
+  locked: ReadonlyMap<string, RoleVocabularyEntry[]>;
+  disabled: boolean;
+  onToggle: (entry: RoleVocabularyEntry) => void;
+}) {
+  const { t } = useTranslation(["settings", "common"]);
+  return groups.map((group) => (
+    <div key={group.resource} className="border-border rounded-lg border p-3">
+      <p className="mb-2 font-mono text-xs font-semibold">{group.resource}</p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {group.permissions.map((entry) => {
+          const dependents = locked.get(entry.permission);
+          // A locked read stays focusable (aria-disabled, not disabled) so keyboard and
+          // screen-reader users reach the hint that explains it; `disabled` is the pending save.
+          const isLocked = !disabled && !!dependents;
+          const hintId = `perm-${entry.permission}-required-by`;
+          return (
+            <label
+              key={entry.permission}
+              className={cn("flex items-start gap-2 text-sm", isLocked && "cursor-not-allowed")}
+              htmlFor={`perm-${entry.permission}`}
+            >
+              <Checkbox
+                id={`perm-${entry.permission}`}
+                disabled={disabled}
+                aria-disabled={isLocked || undefined}
+                aria-describedby={dependents ? hintId : undefined}
+                checked={selected.has(entry.permission)}
+                onCheckedChange={() => {
+                  if (!isLocked) onToggle(entry);
+                }}
+                className="mt-0.5 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+              />
+              <span className="flex flex-col">
+                <span className="font-mono text-xs">{entry.action}</span>
+                {dependents && (
+                  <span id={hintId} className="text-muted-foreground text-xs">
+                    {t("roles.requiredBy", {
+                      // Another resource's dependent (`agents:run` on a runs read) is named in full.
+                      actions: dependents
+                        .map((dependent) =>
+                          dependent.permission.startsWith(`${group.resource}:`)
+                            ? dependent.action
+                            : dependent.permission,
+                        )
+                        .join(", "),
+                    })}
+                  </span>
+                )}
+                {!entry.api_key_grantable && (
+                  <span className="text-muted-foreground text-xs">{t("roles.sessionOnly")}</span>
+                )}
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  ));
+}
+
 /** The unavailable half of the picker: what the row spells and this deployment cannot grant. */
 export function UnavailablePermissions({ permissions }: { permissions: readonly string[] }) {
   const { t } = useTranslation(["settings", "common"]);
@@ -280,13 +356,8 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
 
   const isPending = createRole.isPending || updateRole.isPending;
 
-  const toggle = (permission: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(permission)) next.delete(permission);
-      else next.add(permission);
-      return next;
-    });
+  const toggle = (entry: RoleVocabularyEntry) =>
+    setSelected((prev) => togglePermission(prev, entry));
 
   const submit = (data: { key: string; name: string; description: string }) => {
     setFormError(null);
@@ -313,6 +384,11 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
     createRole.mutate({ body: { ...body, key: trimmedKey } }, { onSuccess: onClose, onError });
   };
 
+  // Judged over the whole vocabulary: an action hidden by the search still holds its read.
+  const locked = lockedReads(
+    selected,
+    (vocabulary ?? []).flatMap((group) => group.permissions),
+  );
   const query = search.trim().toLowerCase();
   const groups = (vocabulary ?? [])
     .map((group) => ({
@@ -437,36 +513,13 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
           ) : (
             <>
               <UnavailablePermissions permissions={unavailable} />
-              {groups.map((group) => (
-                <div key={group.resource} className="border-border rounded-lg border p-3">
-                  <p className="mb-2 font-mono text-xs font-semibold">{group.resource}</p>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {group.permissions.map((entry) => (
-                      <label
-                        key={entry.permission}
-                        className="flex items-start gap-2 text-sm"
-                        htmlFor={`perm-${entry.permission}`}
-                      >
-                        <Checkbox
-                          id={`perm-${entry.permission}`}
-                          disabled={isPending}
-                          checked={selected.has(entry.permission)}
-                          onCheckedChange={() => toggle(entry.permission)}
-                          className="mt-0.5"
-                        />
-                        <span className="flex flex-col">
-                          <span className="font-mono text-xs">{entry.action}</span>
-                          {!entry.api_key_grantable && (
-                            <span className="text-muted-foreground text-xs">
-                              {t("roles.sessionOnly")}
-                            </span>
-                          )}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              ))}
+              <PermissionGroups
+                groups={groups}
+                selected={selected}
+                locked={locked}
+                disabled={isPending}
+                onToggle={toggle}
+              />
             </>
           )}
         </fieldset>
