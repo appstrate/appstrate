@@ -431,10 +431,11 @@ describe("describe_operation", () => {
       // only, so the operation stays describable and reports itself denied.
       const body = await describeOp(RUNNER, "runInline");
       expect(body.required_permissions).toEqual(["agents:write", "agents:run"]);
-      // The other half of the split: both stamped guards sit in the caller's own space, yet the handler still judges the posted manifest's dependencies on the row — hence conditional.
+      // The other half of the split: both stamped guards sit in the caller's own space.
       expect(body.target_space_permissions).toEqual([]);
-      expect(body.conditional).toBe(true);
       expect(body.granted).toBe(false);
+      // The route's own refusal names a row decision; no field pre-announces one.
+      expect(body).not.toHaveProperty("conditional");
     });
 
     it("reports a granted operation as granted for the same caller", async () => {
@@ -456,7 +457,6 @@ describe("describe_operation", () => {
       const body = await describeOp(["mcp:read"], "listSpaceMembers");
       expect(body.target_space_permissions).toContain("space-members:read");
       expect(body.required_permissions).toEqual([]);
-      expect(body.conditional).toBe(true);
       expect(body.granted).toBe(true);
     });
   });

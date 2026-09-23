@@ -59,7 +59,6 @@ import {
   deleteIntegrationConnection,
   getIntegrationConnectionCredentialFields,
   listUsableIntegrationsForActor,
-  readIntegrationAuth,
 } from "../services/integration-connections.ts";
 import { handoffStepsFor } from "../services/connect/provisioning.ts";
 import { logger } from "../lib/logger.ts";
@@ -418,14 +417,9 @@ router.get("/connections/:connectionId/handoff", async (c) => {
   }
 
   try {
-    const { auth } = await readIntegrationAuth(
-      { orgId: row.orgId, spaceId: row.spaceId },
-      row.integrationId,
-      row.authKey,
-    );
     const credentials = await getIntegrationConnectionCredentialFields(connectionId);
     if (!credentials) return empty();
-    const removal = handoffStepsFor(row.integrationId, auth, credentials)
+    const removal = handoffStepsFor(row.integrationId, row.authKey, credentials)
       .flatMap((step) => (step.kind === "command" && step.deferred ? [step] : []))
       .map(({ deferred: _deferred, ...step }) => step);
     return c.json(listResponse(removal));

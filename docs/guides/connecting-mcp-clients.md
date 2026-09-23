@@ -176,11 +176,12 @@ operation index in the server instructions, `search_operations` (matches you
 cannot invoke come back under `denied` with their `required_permissions`, never
 mixed into `operations`) and
 `describe_operation` (`granted`, `required_permissions`,
-`target_space_permissions`, `conditional`). What your role makes impossible is
+`target_space_permissions`). What your role makes impossible is
 **not shown** rather than shown and refused — but an operation your permission
-set alone cannot decide stays listed and is marked `conditional`: either the
-loaded row decides it (a file ACL, a draft's home space), or a guard on it is
-enforced in the space the path names rather than the one you are calling from.
+set alone cannot decide stays listed: either the loaded row decides it (a file
+ACL, a draft's home space), or a guard on it is enforced in the space the path
+names rather than the one you are calling from. A row decision is not announced
+in advance; the route's own refusal names it.
 The two are separate fields: `required_permissions` carries the guards read in
 the space you are calling from — the only ones filtering tests — and
 `target_space_permissions` carries those enforced in the space the path names,

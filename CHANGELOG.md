@@ -43,6 +43,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   not aliased: `--version` after a command is now refused as an unknown option.
   `<package>@draft` pulls the draft explicitly, and is refused to someone who
   cannot write the package instead of falling back to the published version.
+- **Credential provisioning is a platform table, not a manifest declaration**
+  (#1528). `_meta["dev.appstrate/provisioning"]` is no longer read; the platform
+  mints `@appstrate/ssh`'s `primary` key only for the system package, so the
+  400s for provisioning on a non-system package are gone and a copy of the SSH
+  manifest is an ordinary custom auth whose `private_key` the user supplies.
+  `POST …/connect/fields` still refuses a caller-supplied key for
+  `@appstrate/ssh`. The published `@appstrate/ssh` 1.0.0 still carries the
+  now-ignored key until its next version.
+- **BREAKING (operators): `deploy/docker-compose.yml` declares
+  `- MODULES=${MODULES:?}` instead of pinning a default list** (#1528). Set
+  `MODULES` on the Coolify resource, or in `.env` for a raw `docker compose`,
+  with `@appstrate/module-ee` for the deployment to bill. Unset or empty, a raw
+  `docker compose` refuses to start and Coolify documents `${VAR:?}` as
+  blocking the deploy, instead of falling back to the code default, which has
+  no billing. Production already sets `MODULES` on its resource. See
+  `deploy/README.md`.
+
+### Removed
+
+- **BREAKING (MCP): `describe_operation` no longer returns `conditional`**
+  (#1528). `granted`, `required_permissions` and `target_space_permissions` are
+  unchanged; an operation refused on the record it loads answers with its own
+  problem+json reason (RBAC spec §13.10, §13.13), so clients learn it from the
+  call.
 
 ### Fixed
 

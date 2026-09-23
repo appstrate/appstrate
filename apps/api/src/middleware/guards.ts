@@ -11,7 +11,7 @@ import {
 import { getRunningRunsForPackage } from "../services/state/runs.ts";
 import { ApiError, forbidden, conflict, invalidRequest } from "../lib/errors.ts";
 import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
-import { markRowAuthority, PERMISSION_GUARD } from "./require-permission.ts";
+import { PERMISSION_GUARD } from "./require-permission.ts";
 
 /** Stamped on middleware that resolves an agent and 404s on an unreachable one.
  *  Mounting it ahead of the permission guard turns 403-vs-404 into a catalog
@@ -177,12 +177,11 @@ function extractPackageId(c: Context<AppEnv>): string {
  * deliberately have no second permission guard against the current space.
  */
 export function requirePackageInOrg(action: "write" | "delete" = "write") {
-  const guard = markHandler(async (c: Context<AppEnv>, next: Next) => {
+  return markHandler(async (c: Context<AppEnv>, next: Next) => {
     const packageId = extractPackageId(c);
     await assertPackageMutationAccess(c, packageId, action);
     return next();
   }, PERMISSION_GUARD);
-  return markRowAuthority(guard);
 }
 
 /** Middleware: for API key callers, reject with 403 when the `:orgId` route

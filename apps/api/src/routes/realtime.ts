@@ -25,7 +25,6 @@ import {
 } from "../lib/view-as.ts";
 import { principalGrants } from "../lib/principal-permissions.ts";
 import { canReadEveryRun, ownsRun } from "../lib/run-visibility.ts";
-import { rowAuthority } from "../middleware/require-permission.ts";
 import {
   canReadRuns,
   reportPermissionDenial,
@@ -596,14 +595,12 @@ async function sendInitialRunSnapshot(
 export function createRealtimeRouter() {
   const router = new Hono<AppEnv>();
 
-  // `rowAuthority()` on all three: these streams are pipeline-exempt and mount
-  // no guard at all — `validateSSEAuth` resolves the principal, its grants in
-  // the space and the run-read disjunction from inside the handler. Without the
-  // marker the route table reads them as unguarded, i.e. granted to anyone who
-  // reached the transport.
+  // These streams are pipeline-exempt and mount no guard at all —
+  // `validateSSEAuth` resolves the principal, its grants in the space and the
+  // run-read disjunction from inside the handler.
 
   // GET /api/realtime/runs/:id — stream run status + log changes
-  router.get("/runs/:id", rowAuthority(), async (c) => {
+  router.get("/runs/:id", async (c) => {
     const validated = await validateSSEAuth(c);
     if (!validated) throw unauthorized("Invalid session or org");
 
@@ -648,7 +645,7 @@ export function createRealtimeRouter() {
   });
 
   // GET /api/realtime/agents/:packageId/runs — stream run changes for an agent
-  router.get("/agents/:packageId/runs", rowAuthority(), async (c) => {
+  router.get("/agents/:packageId/runs", async (c) => {
     const validated = await validateSSEAuth(c);
     if (!validated) throw unauthorized("Invalid session or org");
 
@@ -673,7 +670,7 @@ export function createRealtimeRouter() {
   });
 
   // GET /api/realtime/runs — stream all run changes (for agent list)
-  router.get("/runs", rowAuthority(), async (c) => {
+  router.get("/runs", async (c) => {
     const validated = await validateSSEAuth(c);
     if (!validated) throw unauthorized("Invalid session or org");
 

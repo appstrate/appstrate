@@ -39,14 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already quotes as a whole word — a wrapper that quoted it printed it twice
   (`"gone: gone"` is now `"gone"`), and an empty cause message adds nothing.
   An error with no cause renders exactly as before.
-- **A guard carrying the boolean `appstrate.permissionGuard` marker but no
-  `PERMISSION_REQUIREMENT_MARKER` requirement is no longer read as row-aware**
-  — the platform now reads it as naming no requirement, where 11.1.0 read it as
-  conditional. A middleware whose verdict comes from the row it loads declares
-  that with the registry symbol `Symbol.for("appstrate.rowAuthority")` set to
-  `true` on the mounted function
-  (`Object.defineProperty(mw, Symbol.for("appstrate.rowAuthority"), { value: true })`);
-  being a registry symbol, a module stamps it without importing the platform.
+- **BREAKING: a guard carrying the boolean `appstrate.permissionGuard` marker
+  but no `PERMISSION_REQUIREMENT_MARKER` requirement names no requirement**;
+  11.1.0 read it as conditional. The platform reports no per-operation
+  `conditional` flag, so a module declares nothing for a route that decides on
+  the row it loads: the route's own refusal is what the caller sees.
 - **BREAKING: every operation a module's `openApiPaths()` documents must be
   served by a terminal route handler, or the platform refuses to boot.** A
   documented operation no route served used to fail only in the MCP tool

@@ -9,32 +9,18 @@
 
 import { join } from "node:path";
 import { getDataDir } from "../config.ts";
-import { FileLockBusyError, withFileLock, type FileLockOptions } from "../file-lock.ts";
-
-type SyncLockOptions = Omit<FileLockOptions, "busyError">;
-
-const LABEL = "packages sync";
-
-export class SyncLockBusyError extends FileLockBusyError {
-  constructor() {
-    super(LABEL);
-    this.name = "SyncLockBusyError";
-  }
-}
+import { withFileLock, type FileLockOptions } from "../file-lock.ts";
 
 export function getLockPath(): string {
   return join(getDataDir(), "skills-sync", "sync.lock");
 }
 
 /**
- * Released in a `finally`. Throws {@link SyncLockBusyError} past `timeoutMs`
+ * Released in a `finally`. Throws `FileLockBusyError` past `timeoutMs`
  * (default 60 s — fits a large org's first sync, inside a marketplace
  * command's timeout) while another process holds the lock; runs `body`
  * unlocked, after a warning on stderr, where `flock(2)` does not work.
  */
-export function withSyncLock<T>(body: () => Promise<T>, options: SyncLockOptions = {}): Promise<T> {
-  return withFileLock(getLockPath(), LABEL, body, {
-    ...options,
-    busyError: () => new SyncLockBusyError(),
-  });
+export function withSyncLock<T>(body: () => Promise<T>, options: FileLockOptions = {}): Promise<T> {
+  return withFileLock(getLockPath(), "packages sync", body, options);
 }

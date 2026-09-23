@@ -108,7 +108,7 @@ describe("HandoffSteps — prose keyed on the step id", () => {
   });
 
   it("falls back to the server's own text for an id it does not know", () => {
-    // What a second provisioning kind looks like before anyone writes it a key.
+    // A step another provisioner could emit before anyone writes it a key.
     const unknown: HandoffStep = {
       id: "mtls_install",
       kind: "command",

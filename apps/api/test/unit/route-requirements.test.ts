@@ -22,15 +22,12 @@ import {
   type RouteRequirement,
   type RouteRequirementLookup,
 } from "../../src/lib/route-requirements.ts";
-import { markHandler, readHandlerMarker } from "../../src/middleware/handler-marker.ts";
+import { readHandlerMarker } from "../../src/middleware/handler-marker.ts";
 import { requirePackageInOrg } from "../../src/middleware/guards.ts";
 import {
-  isRowAuthority,
   markSpaceRescope,
-  PERMISSION_GUARD,
   requireAnyPermission,
   requirePermission,
-  rowAuthority,
 } from "../../src/middleware/require-permission.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
 import type { AppEnv } from "../../src/types/index.ts";
@@ -122,7 +119,6 @@ describe("lookup — exact mounts", () => {
     );
     expect(requirement.requirements).toEqual(["agents:run"]);
     expect(requirement.targetSpaceRequirements).toEqual([]);
-    expect(requirement.conditional).toBe(false);
   });
 
   it("records two guards on one route as two entries, in mount order", () => {
@@ -149,46 +145,17 @@ describe("lookup — exact mounts", () => {
       "/api/runs",
     );
     expect(requirement.requirements).toEqual(["runs:read|runs:read-all"]);
-    expect(requirement.conditional).toBe(false);
   });
 
-  it("reads a row-aware guard as conditional, naming no permission", () => {
+  it("reads a guard stamping no requirement string as naming none", () => {
+    // `requirePackageInOrg` asks the package's HOME space from inside, so no
+    // string describes it; the route's own refusal is what the caller sees.
     const requirement = served(
       tableOf((sub) => sub.delete("/packages/:scope/:name", requirePackageInOrg("delete"), ok)),
       "DELETE",
       "/api/packages/{scope}/{name}",
     );
-    expect(requirement.requirements).toEqual([]);
-    expect(requirement.conditional).toBe(true);
-  });
-
-  it("takes the row-authority marker, not a bare guard stamp, for the row deciding", () => {
-    // One way to say it: `requirePackageInOrg` carries the marker itself, and a
-    // permission guard naming no requirement is not read as row-aware.
-    expect(isRowAuthority(requirePackageInOrg())).toBe(true);
-    const bareGuard = markHandler(
-      async (_c: Context<AppEnv>, next: Next) => next(),
-      PERMISSION_GUARD,
-    );
-    const requirement = served(
-      tableOf((sub) => sub.delete("/things/:id", bareGuard, ok)),
-      "DELETE",
-      "/api/things/{id}",
-    );
-    expect(requirement.conditional).toBe(false);
-  });
-
-  it("reads an explicit `rowAuthority()` the same way — the handler decides", () => {
-    // No guard runs before the handler at all: the row it loads is the only
-    // authority, and nothing static describes it.
-    const requirement = served(
-      tableOf((sub) => sub.delete("/files/:id", rowAuthority(), ok)),
-      "DELETE",
-      "/api/files/{id}",
-    );
-    expect(requirement.requirements).toEqual([]);
-    expect(requirement.targetSpaceRequirements).toEqual([]);
-    expect(requirement.conditional).toBe(true);
+    expect(requirement).toEqual({ requirements: [], targetSpaceRequirements: [] });
   });
 
   it("serves an unguarded route with no requirement, rather than not at all", () => {
@@ -199,7 +166,7 @@ describe("lookup — exact mounts", () => {
       "/api/welcome/setup",
     );
     expect(requirement.requirements).toEqual([]);
-    expect(requirement.conditional).toBe(false);
+    expect(requirement.targetSpaceRequirements).toEqual([]);
   });
 
   it("serves every method from one `router.all`, carrying its guard", () => {
@@ -224,7 +191,6 @@ describe("lookup — prefix mounts", () => {
       "/api/auth/sign-in/email",
     );
     expect(requirement.requirements).toEqual([]);
-    expect(requirement.conditional).toBe(false);
   });
 
   it("folds a prefix guard into the requirement of an exact route beneath it", () => {
@@ -276,10 +242,10 @@ describe("lookup — prefix mounts", () => {
 
   it("decorates but does not serve, for an `ALL /*` mount", () => {
     const table = tableOf((sub) => {
-      sub.use("/*", requirePackageInOrg());
+      sub.use("/*", requirePermission("agents", "read"));
       sub.get("/kept", ok);
     });
-    expect(served(table, "GET", "/api/kept").conditional).toBe(true);
+    expect(served(table, "GET", "/api/kept").requirements).toEqual(["agents:read"]);
     expect(table("GET", "/api/never-mounted")).toBeUndefined();
   });
 
@@ -350,14 +316,13 @@ describe("lookup — a terminal handler serves, middleware never does", () => {
   });
 
   it("stops at the first terminal handler — nothing matching after it is reported", async () => {
-    // Hono answers with the first terminal handler; a guard or marker mounted
-    // after it never runs, so reporting it would hide a reachable operation.
+    // Hono answers with the first terminal handler; a guard mounted after it
+    // never runs, so reporting it would hide a reachable operation.
     const app = new Hono<AppEnv>();
     app.get("/api/things/:id", ok);
-    app.use("/api/things/*", requireAnyPermission(["agents:write"]), rowAuthority());
+    app.use("/api/things/*", requireAnyPermission(["agents:write"]));
     const requirement = served(deriveRouteRequirements(app.routes), "GET", "/api/things/{id}");
     expect(requirement.requirements).toEqual([]);
-    expect(requirement.conditional).toBe(false);
     // The control: Hono answers without running the late guard.
     expect((await app.request("/api/things/1")).status).toBe(200);
   });
@@ -475,10 +440,6 @@ describe("lookup — space re-scope", () => {
     expect(requirement.requirements).toEqual([]);
   });
 
-  it("marks the route conditional — the target space is what decides", () => {
-    expect(requirement.conditional).toBe(true);
-  });
-
   it("keeps a guard mounted BEFORE the re-scope in the caller's own space", () => {
     const early = served(
       rootTableOf((app) => {
@@ -534,31 +495,22 @@ describe("readHandlerMarker", () => {
 describe("isGranted", () => {
   // `isGranted` is a pure function of a `RouteRequirement`, so these are
   // literals: how each shape is DERIVED is pinned by the blocks above, and
-  // building five Hono apps here would only re-test that.
+  // building four Hono apps here would only re-test that.
   const conjunction: RouteRequirement = {
     requirements: ["agents:write", "agents:run"],
     targetSpaceRequirements: [],
-    conditional: false,
   };
   const disjunction: RouteRequirement = {
     requirements: ["runs:read|runs:read-all"],
     targetSpaceRequirements: [],
-    conditional: false,
-  };
-  const rowAware: RouteRequirement = {
-    requirements: [],
-    targetSpaceRequirements: [],
-    conditional: true,
   };
   const unguarded: RouteRequirement = {
     requirements: [],
     targetSpaceRequirements: [],
-    conditional: false,
   };
   const targetSpace: RouteRequirement = {
     requirements: [],
     targetSpaceRequirements: ["members:read"],
-    conditional: true,
   };
 
   it("needs every entry — two guards mean both", () => {
@@ -575,12 +527,6 @@ describe("isGranted", () => {
 
   it("grants an unguarded route to a caller holding nothing", () => {
     expect(isGranted(unguarded, new Set())).toBe(true);
-  });
-
-  it("grants a row-aware-only requirement — the row refuses, not the catalog", () => {
-    // Plan rule 2: a row-dependent act stays visible and is described as
-    // conditional; hiding it hides the page that explains the refusal.
-    expect(isGranted(rowAware, new Set())).toBe(true);
   });
 
   it("ignores target-space requirements — they are shown, never filtered", () => {
