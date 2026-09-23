@@ -44,22 +44,58 @@ describe("keepAvailable", () => {
 describe("canApplyConnectionSet", () => {
   const a = { id: "conn_a", label: "work" };
   const b = { id: "conn_b", label: "perso" };
+  const candidateIds = ["conn_a", "conn_b"];
+  const conns = (ids: string[]) => [a, b].filter((c) => ids.includes(c.id));
 
   it("refuses a set whose labels collide — the server would 400 it", () => {
     // Control: the same two ids with distinct labels are writable.
-    expect(canApplyConnectionSet([a, b], [])).toBe(true);
-    expect(canApplyConnectionSet([a, { ...b, label: "work" }], [])).toBe(false);
+    expect(canApplyConnectionSet([a, b], [], true)).toBe(true);
+    expect(canApplyConnectionSet([a, { ...b, label: "work" }], [], true)).toBe(false);
   });
 
   it("refuses the empty set and the stored pick, in any order", () => {
-    expect(canApplyConnectionSet([], [])).toBe(false);
-    expect(canApplyConnectionSet([b, a], ["conn_a", "conn_b"])).toBe(false);
+    expect(canApplyConnectionSet([], [], true)).toBe(false);
+    expect(canApplyConnectionSet([b, a], ["conn_a", "conn_b"], true)).toBe(false);
+  });
+
+  it("refuses an untouched menu ticked from the cascade's resolved default", () => {
+    // Writing it would pin {a, b} and detach the member from later org-default
+    // changes. Control: the same ticks after an actual edit are writable.
+    const input = { explicitIds: [], resolvedIds: candidateIds, candidateIds };
+    const untouched = checkedConnectionIds({ ...input, draft: null });
+    expect(untouched).toEqual(candidateIds);
+    expect(canApplyConnectionSet(conns(untouched), [], false)).toBe(false);
+    expect(canApplyConnectionSet(conns(untouched), [], true)).toBe(true);
+  });
+
+  it("refuses an untouched override that inherits — it would freeze the cascade", () => {
+    const explicitIds: string[] = [];
+    expect(
+      displayedConnectionIds({ overrideMode: true, explicitIds, resolvedIds: ["conn_a"] }),
+    ).toEqual([]);
+    const untouched = checkedConnectionIds({
+      draft: null,
+      explicitIds,
+      resolvedIds: ["conn_a"],
+      candidateIds,
+    });
+    expect(canApplyConnectionSet(conns(untouched), explicitIds, false)).toBe(false);
   });
 
   it("lets the actor rewrite a stored pick that names an unavailable connection", () => {
     // Nothing was ticked or unticked, yet the stored set differs from what a
     // write would send: without this the ghost id could never be dropped.
-    expect(canApplyConnectionSet([a], ["conn_a", "conn_unshared"])).toBe(true);
+    const explicitIds = ["conn_a", "conn_unshared"];
+    const cleaned = checkedConnectionIds({
+      draft: null,
+      explicitIds,
+      resolvedIds: [],
+      candidateIds,
+    });
+    expect(cleaned).toEqual(["conn_a"]);
+    expect(canApplyConnectionSet(conns(cleaned), explicitIds, false)).toBe(true);
+    // Control: an untouched pick with no ghost has nothing to rewrite.
+    expect(canApplyConnectionSet([a], ["conn_a"], false)).toBe(false);
   });
 });
 

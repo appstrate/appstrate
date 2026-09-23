@@ -10,7 +10,7 @@ import { usePackageDetail } from "./use-packages";
 import { useAgentModel } from "./use-models";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { useAgentProxy } from "./use-proxies";
-import { onMutationError } from "./use-mutations";
+import { onMutationError } from "../lib/mutation-error";
 import { scheduleKeys } from "../lib/query-keys";
 import type { AgentDetail, ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
 

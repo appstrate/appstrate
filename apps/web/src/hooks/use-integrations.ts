@@ -58,6 +58,7 @@ export type IntegrationClient = NonNullable<
   paths["/api/integrations/{packageId}/auths/{authKey}/clients"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
 >[number];
 import { useCurrentOrgId } from "./use-org";
+import { onMutationError } from "../lib/mutation-error";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgScope } from "./use-org-scope";
 
@@ -545,6 +546,8 @@ export function useUpdateIntegrationConnection() {
       // refresh the whole integration subtree, readiness included.
       void invalidateIntegrationQueries(qc);
     },
+    // Unsharing a connection a pin or an org default binds is refused (409 `connection_pinned`).
+    onError: onMutationError,
   });
 }
 

@@ -21,7 +21,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { client } from "../api/client";
-import { onMutationError } from "./use-mutations";
+import { onMutationError } from "../lib/mutation-error";
 
 interface UpsertMemberPinInput {
   agentPackageId: string;

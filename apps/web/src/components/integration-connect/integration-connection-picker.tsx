@@ -252,7 +252,7 @@ export function IntegrationConnectionPicker({
   const underScoped = underScopedConns.length > 0;
   const collidingLabels = sharedLabels(verdictConns);
   const hasCandidates = candidates.length > 0;
-  const canApply = canApplyConnectionSet(checkedConns, explicitIds) && !upsertPin.isPending;
+  const canApply = canApplyConnectionSet(checkedConns, explicitIds, dirty) && !upsertPin.isPending;
 
   // An empty set clears the pick. False = refused; the mutation already toasted why.
   const persist = async (connectionIds: string[]): Promise<boolean> => {

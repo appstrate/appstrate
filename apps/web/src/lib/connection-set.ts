@@ -22,12 +22,17 @@ function sameConnectionSet(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((id) => b.includes(id));
 }
 
-/** "Valider" writes only a non-empty, addressable set that differs from the stored pick. */
+/**
+ * "Valider" writes a non-empty, addressable set that differs from the stored pick. Untouched,
+ * that is only a stored pick naming an id no longer a candidate — never the cascade's fallback.
+ */
 export function canApplyConnectionSet(
   checked: readonly { id: string; label: string }[],
   explicitIds: string[],
+  touched: boolean,
 ): boolean {
   if (checked.length === 0 || sharedLabels(checked).length > 0) return false;
+  if (!touched && explicitIds.length === 0) return false;
   return !sameConnectionSet(
     checked.map((c) => c.id),
     explicitIds,

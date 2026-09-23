@@ -16,7 +16,7 @@ import { toast } from "sonner";
 import { getErrorMessage } from "@appstrate/core/errors";
 import i18n from "../i18n";
 import { $api, client } from "../api/client";
-import { onMutationError } from "./use-mutations";
+import { onMutationError } from "../lib/mutation-error";
 import { invalidateIntegrationQueries } from "./use-integrations";
 
 /**

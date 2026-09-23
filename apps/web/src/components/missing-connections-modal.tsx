@@ -58,6 +58,7 @@ export interface MissingIntegrationFieldError {
     | "must_choose_connection"
     | "duplicate_connection_label"
     | "auth_key_mismatch"
+    | "auth_serves_no_selected_tool"
     | "pinned_connection_unavailable"
     | "override_connection_unavailable"
     | "integration_not_found"
