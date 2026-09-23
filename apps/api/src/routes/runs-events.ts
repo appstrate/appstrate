@@ -82,10 +82,8 @@ export const CloudEventEnvelopeSchema = z
  * value degrades gracefully (defaulted or dropped) instead of rejecting the
  * whole payload with a 400 that the runner can't recover from.
  *
- * The outcome fields stay strict, because the platform infers none of them:
- * `status` is required, and `usage` is required on a `success` — it is what
- * tells a real success from a run that never reached the LLM (zero input and
- * output tokens → `failed`, see `finalizeRun`).
+ * The outcome fields stay strict: `status` is required, and so is `usage` on
+ * a `success` (zero tokens → `failed`, see `finalizeRun`).
  */
 /** Ingest bounds for the artifacts summary — mirror runtime-pi/publish.ts. */
 const MAX_ARTIFACTS_FAILED = 1000;

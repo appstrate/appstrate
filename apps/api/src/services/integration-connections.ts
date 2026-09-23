@@ -1867,11 +1867,9 @@ export async function deleteIntegrationOAuthClient(
 // ─────────────────────────────────────────────
 
 /**
- * Apply the AFPS `identity_claims` JSONPaths (`@appstrate/afps-shared/jsonpath`)
- * to a token response (or a credentials bag for non-OAuth auths). A claim whose
- * path selects nothing is left out of the bag — an optional claim the provider
- * did not return is normal. A path outside the supported subset is the
- * manifest's defect and fails the connect with `invalid_config`.
+ * Apply the AFPS `identity_claims` JSONPaths to a token response (or a
+ * credentials bag). A path selecting nothing is omitted; an unsupported path
+ * fails the connect with `invalid_config`.
  *
  * `accountId` is the declared `accountId` / `account_id` claim, else the
  * source's `email` / `account_email` / `sub`, else `null`: no provider identity.
@@ -1958,10 +1956,7 @@ export function assertRequiredIdentityClaims(
 
   const mapping = auth.identity_claims ?? {};
   // Build a reverse index OIDC-claim-name → AFPS keys that reference it.
-  // Only a single-member path (`"$.sub"`, `"$['sub']"`) names an OIDC claim;
-  // a deeper path like `"$.user.email"` is by definition not one, so it is
-  // not indexed (the spec example in §7.4 line 931 shows OIDC standard
-  // claims only). `extractIdentity` has already refused an invalid path.
+  // Only a single-member path (`"$.sub"`) names an OIDC claim.
   const oidcToAfpsKeys = new Map<string, string[]>();
   for (const [afpsKey, path] of Object.entries(mapping)) {
     const segments = parseJsonPath(path);
@@ -2351,26 +2346,15 @@ export async function markIntegrationConnectionNeedsReconnection(
 }
 
 /**
- * Record a failure on a connection's credential and escalate once the streak
- * is long enough. Two callers, one counter:
- *   - a *transient* OAuth token-refresh failure (network / 5xx / parse — NOT
- *     `invalid_grant`, which flips `needsReconnection` immediately via
- *     {@link markIntegrationConnectionNeedsReconnection}), with `graceSeconds`;
- *   - an upstream rejection of a credential that cannot be refreshed
- *     (api_key / basic / custom), with `graceSeconds: null`.
- * Atomic, race-safe: the increment and the escalation decision happen in one
- * SQL statement so concurrent failures on the same row (overlapping runs)
- * cannot lose a count.
+ * Record a failure on a connection's credential: a transient OAuth refresh
+ * failure (with `graceSeconds`; `invalid_grant` goes through
+ * {@link markIntegrationConnectionNeedsReconnection}) or an upstream rejection
+ * of an unrefreshable credential (`graceSeconds: null`). Increment and
+ * escalation are one statement, so concurrent failures cannot lose a count.
  *
- * Escalation gate — `needsReconnection` is set to `true` only when this
- * failure brings the streak to `>= maxFailures` AND, when `graceSeconds` is
- * given, the token is genuinely dead: `expires_at` is set AND already older
- * than `graceSeconds` ago. That expiry gate is what keeps a transient outage
- * on a still-valid OAuth token from bricking the connection; an unrefreshable
- * credential has no expiry to prove it dead, so the streak alone decides.
- * Any successful credential write (a refresh, a reconnect) clears the streak
- * via `persistCredentialBundle`. `needsReconnection` is OR'd so a
- * concurrently-set `true` (revoke / scope-shrink) is never cleared here.
+ * Escalates once the streak reaches `maxFailures` AND, with `graceSeconds`,
+ * the token expired more than `graceSeconds` ago — so an outage on a valid
+ * token never bricks the connection. `needsReconnection` is OR'd, never cleared.
  */
 export async function recordIntegrationRefreshFailure(
   connectionId: string,

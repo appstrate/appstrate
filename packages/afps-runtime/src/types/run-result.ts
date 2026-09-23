@@ -39,21 +39,16 @@ export interface RunResult {
   logs: LogEntry[];
   error?: RunError;
   /**
-   * Terminal status. Unset on a mid-run aggregate — events alone cannot tell
-   * "success" from "cancelled by signal" — and stamped by the runner, which is
-   * the only party that knows the outcome. {@link TerminalRunResult} is the
-   * stamped shape {@link EventSink.finalize} accepts.
+   * Terminal status, stamped by the runner (events alone cannot tell "success"
+   * from "cancelled by signal"). See {@link TerminalRunResult}.
    */
   status?: RunTerminalStatus;
   /** Elapsed wall-clock time in milliseconds. Runners populate this. */
   durationMs?: number;
   /**
-   * Authoritative token usage for the run. Consumers MUST treat this as the
-   * source of truth — the field exists so finalize is self-contained and does
-   * not race with the side-channel `appstrate.metric` event whose POST may not
-   * have landed yet. The platform's finalize endpoint requires it when
-   * `status` is `"success"`, and fails a success that reports zero input and
-   * output tokens: the LLM was never reached.
+   * Authoritative token usage for the run — finalize is self-contained and
+   * does not race the side-channel `appstrate.metric` event. Required on a
+   * `"success"` finalize; zero input and output tokens fails the run.
    */
   usage?: TokenUsage;
   /**
@@ -80,11 +75,7 @@ export interface RunResult {
 /** Terminal outcome of a run — the `runs.status` values a runner can report. */
 export type RunTerminalStatus = TerminalRunStatus;
 
-/**
- * A {@link RunResult} with its terminal `status` stamped — the payload
- * {@link EventSink.finalize} accepts. The platform infers nothing from a
- * missing status: a finalize without one is rejected.
- */
+/** A {@link RunResult} with its terminal `status` stamped — what {@link EventSink.finalize} accepts. */
 export interface TerminalRunResult extends RunResult {
   status: RunTerminalStatus;
 }

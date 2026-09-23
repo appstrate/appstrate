@@ -211,9 +211,8 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       }
     }
 
-    // (1f) §7.4 install gate — every `identity_claims` value is read with the
-    // one manifest JSONPath dialect (`@appstrate/afps-shared/jsonpath`). A path
-    // outside its subset would only fail at connect time, in the user's face.
+    // (1f) §7.4 install gate — an `identity_claims` path outside the manifest
+    // JSONPath subset would otherwise only fail at connect time.
     const identityClaims = (auth as { identity_claims?: Record<string, string> }).identity_claims;
     for (const [claim, path] of Object.entries(identityClaims ?? {})) {
       try {
@@ -1221,8 +1220,7 @@ export type ConnectionResolutionErrorCode =
  * the rows, so denormalizing the three distinguishing fields costs no query.
  *
  * `label` is user-given and may be null; `accountId` is the connect flow's own
- * discriminator, `null` when the provider exposed no identity — the connect
- * flow then labels the row "Connexion N", so one of the two is always set.
+ * discriminator, `null` when the provider exposed no identity.
  */
 export interface ConnectionCandidate {
   id: string;

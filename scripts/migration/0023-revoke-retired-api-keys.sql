@@ -1,33 +1,10 @@
--- 0023 — revoke the stored API keys minted in the retired `ask_` format.
---
--- Run once, AFTER deploying the release that introduced the checksummed
--- `apst_` format. `scripts/migration/README.md` → "Detail — Retired API-key
--- format".
---
--- ═══ WHAT IT REPAIRS ═══
---
--- From that release on, `validateApiKey` refuses an `ask_` key with 401
--- `api_key_format_retired` before any lookup, so such a row can never
--- authenticate again. Keys are stored hashed and cannot be converted. Left in
--- place, those rows would still be listed in Settings → API keys as active
--- keys that do nothing; revoked, they leave the listing like any other
--- revoked key, and the audit trail keeps pointing at their ids.
---
--- ═══ WHAT IT DOES ═══
---
--- Sets `revoked_at` = now() on every key whose `key_prefix` starts with
--- `ask_` and is not revoked yet. `revoked_at` is the column the platform's own
--- revoke writes, so no row is deleted: `runs.api_key_id` and the audit trail
--- keep resolving. Idempotent without a marker: the predicate is the condition
--- the write removes. One transaction, fenced, one `UPDATE`.
---
--- ═══ PRE-FLIGHT (read-only) ═══
---
---   SELECT count(*) FROM api_keys
---   WHERE starts_with(key_prefix, 'ask_') AND revoked_at IS NULL;
---
--- Rows: UNMEASURED — not rehearsed against a restored dump. Do that first
--- (README requirement 4) and record the count the script prints.
+-- 0023 — revoke the unrevoked API keys in the retired `ask_` format, which
+-- `validateApiKey` refuses (401 `api_key_format_retired`) and which cannot be
+-- converted (only the hash is stored), so Settings stops listing them as active.
+-- Run once, AFTER deploying the release carrying the `apst_` format.
+-- Cost: one UPDATE setting `revoked_at`, no row deleted (`runs.api_key_id` and
+-- the audit trail keep resolving); idempotent. Rows: UNMEASURED — rehearse on
+-- a restored dump first (README requirement 4).
 
 BEGIN;
 SET LOCAL lock_timeout = '3s';

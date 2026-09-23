@@ -1,19 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The one JSONPath dialect of AFPS integration manifests — the single-value
- * RFC 9535 subset read by `identity_claims` and by the login engine's
- * `jsonpath` selectors and success criteria:
- *
- *   `$`                     the root
- *   `.name`                 a member (any characters but `.` and `[`, not
- *                           starting with a digit — RFC 9535 shorthand)
- *   `['name']` `["name"]`   a quoted member
- *   `[0]` `[-1]`            an array index, negative from the end
- *
- * Filters, slices, wildcards and recursive descent throw
- * {@link JsonPathSyntaxError}: an unsupported query must fail loudly, never
- * evaluate to a silent miss.
+ * The JSONPath dialect of AFPS integration manifests — a single-value RFC 9535
+ * subset: `$`, `.name` (not digit-leading), `['name']` / `["name"]`, `[0]` /
+ * `[-1]`. Anything else throws {@link JsonPathSyntaxError} rather than
+ * silently missing.
  */
 
 export class JsonPathSyntaxError extends Error {

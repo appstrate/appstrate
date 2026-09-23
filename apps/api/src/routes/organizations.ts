@@ -217,7 +217,6 @@ router.post("/", async (c) => {
 // --- Routes below require org context (orgId from params, verified via membership) ---
 
 // The org row's `updatedAt` versions both its detail and its settings.
-// Nothing updated under `If-Match`: the org is gone (404) or stale (412).
 async function staleOrgError(orgId: string) {
   const org = await getOrgById(orgId);
   return org ? preconditionFailed(org.updatedAt) : notFound("Organization not found");

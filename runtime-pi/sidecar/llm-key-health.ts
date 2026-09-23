@@ -1,15 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Report the upstream's verdict on the run's model API key to the platform,
- * so a revoked BYOK key is flagged `needs_reconnection` from runs as it is
- * from the platform LLM proxy (`POST /internal/model-credential/outcome`).
- *
- * Cost on the hot path: every 401 is reported (the streak needs each one), but
- * a 2xx is reported only when a reset can matter — the first of the run (a
- * streak left by an earlier run or chat) and the first after a rejection.
- * A healthy run therefore makes exactly one extra call. Fire-and-forget: the
- * LLM response never waits on it.
+ * Report the upstream's verdict on the run's model API key so a revoked BYOK
+ * key is flagged `needs_reconnection`. Every 401 is reported (the streak needs
+ * each one); a 2xx only when it can reset a streak (first of the run, first
+ * after a rejection). Fire-and-forget.
  */
 
 import { logger } from "./logger.ts";

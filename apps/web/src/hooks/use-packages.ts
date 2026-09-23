@@ -37,11 +37,7 @@ import type {
 // `PACKAGE_TYPE_ROUTE_SEGMENT` is `as const`, so the template paths below stay
 // literal and the typed client still resolves each one to its operation.
 
-/**
- * A detail with the draft version it was read at: the response's `ETag`,
- * which a draft write sends back as `If-Match`. `null` where the server
- * sends none (a system package, a summary read).
- */
+/** A detail plus the response's `ETag` (sent back as `If-Match`); `null` when absent. */
 export type Versioned<T> = T & { etag: string | null };
 
 type PackageDetailMap = {
@@ -418,11 +414,7 @@ export function useCreateVersion(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
-    /**
-     * `version` overrides the draft manifest's; `etag` is the draft the caller
-     * looked at, sent as `If-Match` — a draft moved since is refused
-     * (`412 precondition_failed`) rather than published unseen.
-     */
+    /** `version` overrides the manifest's; `etag` refuses (412) a draft moved since it was read. */
     mutationFn: async ({
       version,
       etag,
@@ -495,8 +487,7 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
       version: string,
     ): Promise<{ id: string; version: string | null; etag: string | null }> => {
       // 200 → the updated PACKAGE resource, bare (issue #657): the restore is
-      // reflected in `version`/`manifest`/`content`, and its `ETag` is the
-      // draft's NEW version.
+      // reflected in `version`/`manifest`/`content`; its `ETag` is the new draft version.
       const { data, response } = await client.POST(
         `/api/packages/${segment}/{scope}/{name}/versions/{version}/restore`,
         { params: { path: { ...splitPackageRef(packageId), version } } },

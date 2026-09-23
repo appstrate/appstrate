@@ -392,8 +392,7 @@ export type SpaceVisibility = (typeof SPACE_VISIBILITIES)[number];
 
 /**
  * One space membership applied when an invitation is accepted (RBAC spec §5); the shape
- * `org_invitations.space_assignments` stores and the wire carries, so wire casing:
- * `spaceId` is the universal-id carve-out, the role keys are snake_case. Exactly one of
+ * `org_invitations.space_assignments` stores, in wire casing. Exactly one of
  * `preset_role` / `custom_role_id` is set (validated at invite time, not by the type).
  */
 export interface SpaceAssignment {

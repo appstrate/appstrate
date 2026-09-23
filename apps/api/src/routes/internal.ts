@@ -469,11 +469,9 @@ export function createInternalRouter() {
     return c.json(await forceRefreshOAuthModelProviderToken(credentialId, run.orgId));
   });
 
-  // POST /internal/model-credential/outcome — the sidecar's `/llm/*` API-key
-  // path reports what the upstream said about the run's key, feeding the same
-  // failure streak the platform LLM proxy feeds (a revoked BYOK key ends up
-  // flagged). The credential is the run's own pin, never a caller-supplied id;
-  // a run with none (system key, alias, remote origin) has nothing to report on.
+  // POST /internal/model-credential/outcome — the sidecar reports what the
+  // upstream said about the run's API key. The credential is the run's own
+  // pin, never a caller-supplied id.
   router.post("/model-credential/outcome", async (c) => {
     const { run } = await verifyRunToken(c);
     const body = await readJsonBody(c, modelCredentialOutcomeSchema);

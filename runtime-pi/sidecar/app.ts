@@ -416,11 +416,7 @@ function llmFetchErrorResponse(targetUrl: string, err: unknown): Response {
   return llmProxyError(502, "api_error", `LLM request failed${suffix}${domainHint}`);
 }
 
-/**
- * A refusal the `/llm/*` proxy answers itself, in the provider-shaped envelope
- * the in-container SDK parses (`llmProxyErrorBody`). Types follow Anthropic's
- * error vocabulary, which OpenAI's `invalid_request_error`/`api_error` overlap.
- */
+/** A `/llm/*` refusal in the provider-shaped envelope, typed in Anthropic's error vocabulary. */
 function llmProxyError(
   status: number,
   type: string,
@@ -439,9 +435,8 @@ function stringifyError(err: unknown): string {
 }
 
 /**
- * The `/llm` 413. `error.code` mirrors the mcp.ts oversize error so a caller
- * sees one `PAYLOAD_TOO_LARGE` discriminator on both the MCP envelope cap and
- * this request-body cap.
+ * The `/llm` 413, with the same `PAYLOAD_TOO_LARGE` `error.code` as the mcp.ts
+ * envelope cap.
  */
 function llmBodyOversizeError(actual: number | null): Response {
   return llmProxyError(

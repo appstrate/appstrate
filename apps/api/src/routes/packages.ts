@@ -1009,17 +1009,11 @@ async function buildPackageDetailDto(
       latestVersionDate,
     ),
   };
-  // The ETag names the DRAFT's version, so it rides only on a body that IS the
-  // draft: a published body stamped with it would pass a later `If-Match`.
+  // Only a draft body carries the draft's ETag, or a later `If-Match` would pass on it.
   return { body, lockVersion: definition === "draft" ? lockVersion : null };
 }
 
-/**
- * A package detail and the draft version it was read at. The version never
- * rides in the body: it is the response's `ETag`, and a draft write sends it
- * back in `If-Match`. `null` whenever the body is not the draft (a published
- * version, a system package) or the read withholds authoring state.
- */
+/** A package detail and the draft version it was read at (its `ETag`; `null` when not the draft). */
 export interface PackageDetail {
   body: Record<string, unknown>;
   lockVersion: number | null;
@@ -1211,9 +1205,8 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       },
     });
 
-    // Return the updated package resource bare — same serializer as the GET
-    // detail (issue #657). The `ETag` is the version THIS write produced, not
-    // the re-read's: a write landing in between must still refuse the caller's next.
+    // Same serializer as the GET detail (issue #657). The `ETag` is the version
+    // THIS write produced, so a write landing in between refuses the caller's next.
     const detail = await loadPackageDetailDto(c, rcfg, itemId, orgId);
     if (!detail) {
       logger.error("Updated package could not be re-read", { packageId: itemId, orgId });
@@ -1388,7 +1381,6 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       orgId,
       userId: user.id,
       version: versionOverride,
-      // Optional: with it the version cut is the draft the caller read.
       assertVersion: (current) => assertIfMatch(c, current),
       // Validate the exact snapshot that will be published, including its
       // version override. The route's earlier read is not a coherent snapshot.

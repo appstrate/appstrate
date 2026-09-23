@@ -378,11 +378,7 @@ export function createCredentialProxyRouter() {
   return router;
 }
 
-/**
- * The one encoding of every boolean control header: `1` / `0`, absent = `0`.
- * Anything else is a 400 — a silently-false `true` is how a caller once lost
- * body substitution without noticing.
- */
+/** Boolean control headers: `1` / `0`, absent = `0`, anything else a 400. */
 function readFlagHeader(c: Context<AppEnv>, name: string): boolean {
   const value = c.req.header(name);
   if (value === undefined || value === "0") return false;

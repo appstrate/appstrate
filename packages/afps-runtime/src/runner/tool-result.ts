@@ -15,10 +15,8 @@
  * Default ceiling (bytes) on a forwarded tool-result payload. Sized for the
  * typical "tail of a stack trace + a few JSON blobs": large enough to keep
  * useful detail, small enough that 100 tool calls × 2 KB stays well under the
- * platform's `run_logs.data` 32 KB write boundary. Tool results carrying the
- * run's actual output are truncated at WRITE time — no read-side knob recovers
- * them — so a runner exposes its own cap (Appstrate: `TOOL_RESULT_BYTE_LIMIT`,
- * parsed by the embedding process and passed in; this library reads no env).
+ * platform's `run_logs.data` 32 KB write boundary. Truncation happens at WRITE
+ * time, so a runner that needs more exposes its own cap (this library reads no env).
  */
 export const DEFAULT_TOOL_RESULT_BYTE_LIMIT = 2048;
 

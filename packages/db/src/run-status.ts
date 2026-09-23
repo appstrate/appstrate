@@ -1,18 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Run-status sets, derived from the canonical tuples in
- * `@appstrate/core/run-status`. Import the tuples and types from core itself;
- * this module holds only what db derives from them.
- *
- * **This module MUST stay import-free** apart from that one import-free core
- * module. It is the one piece of the DB package the browser bundle is allowed
- * to reach: `@appstrate/shared-types` re-exports these values to the SPA, and
- * any other import (drizzle-orm, zod, another schema file) would drag the
- * schema barrel — and its table/column names — into a public asset.
- *
- * The Drizzle `pgEnum` and the Zod validator (`schema/enums.ts`) derive from
- * the same tuples, so the DB enum, the validator and the client cannot drift.
+ * Run-status sets derived from `@appstrate/core/run-status`. MUST stay otherwise
+ * import-free: the SPA reaches it, and any other import leaks the schema barrel.
  */
 
 import {

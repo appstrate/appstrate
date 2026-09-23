@@ -72,11 +72,8 @@ export async function downloadVersionZip(
 }
 
 /**
- * {@link downloadVersionZip} for bytes about to be EXECUTED — a run's agent
- * version, its skills, an mcp-server the sidecar spawns — plus the AFPS
- * signature policy. The policy gates what runs; reads that only display,
- * copy or export a package (file explorer, fork, export, import dedupe) use
- * the plain download and are never refused by it.
+ * {@link downloadVersionZip} plus the AFPS signature policy, for bytes about
+ * to be EXECUTED. Display/copy/export reads use the plain download.
  */
 export async function downloadVersionZipForExecution(
   packageId: string,

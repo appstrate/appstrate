@@ -152,9 +152,8 @@ export class DbPackageCatalog implements PackageCatalog {
       );
     }
 
-    // Both downloads enforce the expected integrity (raw ZIP SRI stored in
-    // package_versions.integrity); only a bundle that will run also goes
-    // through the signature policy.
+    // Both downloads enforce the stored integrity; only a bundle that will run
+    // also goes through the signature policy.
     const download = this.opts.forExecution ? downloadVersionZipForExecution : downloadVersionZip;
     const zip = await download(parsed.packageId, parsed.version, versionRow.integrity);
     if (!zip) {

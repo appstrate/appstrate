@@ -108,11 +108,7 @@ export interface RuntimePiEnvOptions {
   timeoutSeconds?: number;
   /** Per-file cap for the outputs sweep; must match the server's `publish_file` ceiling. */
   maxFileBytes?: number;
-  /**
-   * Operator knobs for the container's Pi loops (`MODEL_RETRY_ENABLED`,
-   * `MODEL_COMPACTION_ENABLED`, `TOOL_RESULT_BYTE_LIMIT` in the platform env).
-   * Only a departure from the runner's default is emitted.
-   */
+  /** Operator knobs for the container's Pi loops; only non-defaults are emitted. */
   modelRetry?: boolean;
   modelCompaction?: boolean;
   toolResultByteLimit?: number;

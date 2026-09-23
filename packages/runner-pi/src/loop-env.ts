@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The environment form of the Pi loop knobs, read by every process that builds
- * a {@link PiRunnerOptions} from env: the container entrypoint (written by
- * `buildRuntimePiEnv`) and the CLI's local run (the user's shell). One reader,
- * so both refuse the same malformed values. The platform validates its own
- * copy of these keys with Zod in `@appstrate/env`.
+ * The environment form of the Pi loop knobs, shared by the container entrypoint
+ * and the CLI's local run so both refuse the same malformed values.
  */
 
 import type { PiRunnerOptions } from "./pi-runner.ts";
@@ -20,12 +17,7 @@ function parseBool(name: string, raw: string | undefined, issues: string[]): boo
   return true;
 }
 
-/**
- * `MODEL_RETRY_ENABLED` / `MODEL_COMPACTION_ENABLED` accept exactly `"true"` or
- * `"false"` (absent = on); `TOOL_RESULT_BYTE_LIMIT` a positive integer (absent
- * or empty = the runner's default). Every malformed value adds one entry to
- * `issues`.
- */
+/** Booleans accept exactly `"true"` / `"false"` (absent = on); each malformed value adds an issue. */
 export function parsePiLoopEnv(env: Record<string, string | undefined>): {
   options: PiLoopOptions;
   issues: string[];

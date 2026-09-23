@@ -331,12 +331,9 @@ export function syntheticAliasErrorBody(swap: ModelSwap, status?: number): strin
 }
 
 /**
- * The error envelope every refusal the sidecar's `/llm/*` proxy answers itself
- * carries. The sidecar does not know a non-aliased run's API dialect (only its
- * base URL), so one body serves them all: Anthropic's SDK keys on
- * `type: "error"` + `error.{type,message}`, the OpenAI family (chat and
- * responses) reads `error.{message,type}`. A flat `{ error: "…" }` parses in
- * neither and surfaced as an opaque status.
+ * Error envelope for refusals the sidecar's `/llm/*` proxy answers itself. One
+ * body parses in every dialect: Anthropic's SDK keys on `type: "error"` +
+ * `error.{type,message}`, the OpenAI family reads `error.{message,type}`.
  */
 export function llmProxyErrorBody(
   type: string,

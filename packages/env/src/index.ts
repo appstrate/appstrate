@@ -565,10 +565,7 @@ export const envSchema = z
     PI_IMAGE: z.string().default("appstrate-pi:latest"),
     SIDECAR_IMAGE: z.string().default("appstrate-sidecar:latest"),
 
-    // Agent-container Pi loops, handed to every run via `buildRuntimePiEnv`
-    // (the container parses them in `runtime-pi/env.ts`). Retry and compaction
-    // are on unless turned off; the tool-result cap (bytes per tool result
-    // written to `run_logs`) falls back to the runner's 2048 when unset.
+    // Agent-container Pi loops (unset byte limit = the runner's 2048 default).
     MODEL_RETRY_ENABLED: boolEnv("true"),
     MODEL_COMPACTION_ENABLED: boolEnv("true"),
     TOOL_RESULT_BYTE_LIMIT: z.coerce.number().int().positive().optional(),

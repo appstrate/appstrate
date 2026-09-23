@@ -428,13 +428,11 @@ export async function updateModelProviderCredential(
     }
     const next: ApiKeyBlob = { kind: "api_key", apiKey: patch.apiKey };
     updates.credentialsEncrypted = encryptCredentials(next as unknown as Record<string, unknown>);
-    // A new key starts healthy: the blob above carries no death flag, and the
-    // rejection streak of the old key must not carry over to it.
+    // The old key's rejection streak must not carry over to the new one.
     updates.refreshFailureCount = 0;
   }
 
-  // Written even when empty, as every other PATCH: the precondition is judged
-  // by this statement.
+  // Always written: the If-Match precondition is judged by this statement.
   updates.updatedAt = new Date();
 
   const updated = await db
@@ -501,14 +499,10 @@ interface UpdateOAuthCredentialTokensInput {
 }
 
 /**
- * Shared blob read-modify-write: select → decrypt → apply `mutate` →
- * re-encrypt → update (org-scoped). `mutate` returns the next blob, or `null`
- * to leave the row alone (wrong kind, stale precondition). A missing or
- * undecryptable row is a no-op. The denormalized `expiresAt` column is mirrored
- * ONLY when an OAuth blob's `expiresAt` changes — so callers that don't touch
- * expiry (e.g. {@link markCredentialNeedsReconnection}) leave the column
- * untouched. `extraColumns` lets a caller piggyback plain column writes (e.g.
- * the refresh-failure streak reset) onto the same UPDATE.
+ * Shared blob read-modify-write (org-scoped). `mutate` returns the next blob,
+ * or `null` to leave the row alone. A missing or undecryptable row is a no-op.
+ * The denormalized `expiresAt` column is mirrored only when an OAuth blob's
+ * expiry changes. `extraColumns` piggybacks plain column writes on the UPDATE.
  */
 async function updateCredentialBlob(
   orgId: string,
@@ -668,16 +662,9 @@ export async function recordModelCredentialRefreshFailure(
 }
 
 /**
- * Record an upstream 401 on an API-key credential — the api-key counterpart of
- * {@link recordModelCredentialRefreshFailure}, on the same streak column and
- * threshold. A key has no expiry to prove it dead, so the streak alone
- * escalates; {@link clearModelCredentialFailureStreak} resets it on every
- * accepted call, so only CONSECUTIVE rejections count.
- *
- * `isRejectedKey` identifies the key the upstream refused (the proxy compares
- * it directly, a run by fingerprint). A report about any other key — a run
- * still holding the key the user has since rotated — is dropped before it
- * counts, and the flag is re-checked against the stored key when applied.
+ * Record an upstream 401 on an API-key credential. With no expiry to prove the
+ * key dead, CONSECUTIVE rejections alone escalate. A report about a key other
+ * than the stored one (a run still holding a rotated key) is dropped.
  */
 async function recordModelCredentialAuthFailure(
   orgId: string,
@@ -702,10 +689,7 @@ async function recordModelCredentialAuthFailure(
   );
 }
 
-/**
- * Reset the failure streak after the upstream accepted the credential. The
- * `> 0` predicate keeps the common (healthy) case a read-only index hit.
- */
+/** Reset the failure streak; `> 0` keeps the healthy case write-free. */
 async function clearModelCredentialFailureStreak(orgId: string, id: string): Promise<void> {
   await db
     .update(modelProviderCredentials)
@@ -722,10 +706,9 @@ async function clearModelCredentialFailureStreak(orgId: string, id: string): Pro
 }
 
 /**
- * What an upstream said about an org-owned API key — the ONE entry both
- * reporters use (the platform LLM proxy, and a run's sidecar via
- * `/internal/model-credential/outcome`). `rejected` extends the failure streak
- * that flags a revoked key `needs_reconnection`; `accepted` resets it.
+ * What an upstream said about an org-owned API key, reported by the LLM proxy
+ * and by a run's sidecar. `rejected` extends the streak that flags the key
+ * `needs_reconnection`; `accepted` resets it.
  */
 export async function recordModelCredentialOutcome(
   orgId: string,
@@ -892,10 +875,7 @@ export async function listOrgModelProviderCredentials(
         authMode: cfg?.authMode ?? "api_key",
         providerId: r.providerId,
         oauth_email: isOauth ? (blob.email ?? null) : null,
-        // Dead for inference, by either route: a blob flagged dead (an OAuth
-        // grant revoked, or an API key the upstream kept rejecting), or a blob
-        // that no longer decrypts. The model list badges its rows on the same
-        // cases and points the user at THIS tab to fix them.
+        // Dead for inference: flagged dead (either auth mode) or undecryptable.
         needs_reconnection: blob === null || !!blob.needsReconnection,
         // Single read-time resolution point for the whole platform: the seed
         // gate, the refresh-models response and the credentials list all read

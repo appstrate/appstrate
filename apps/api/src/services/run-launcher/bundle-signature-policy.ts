@@ -111,28 +111,19 @@ export function _resetTrustRootCacheForTesting(): void {
 
 /**
  * Apply the configured signature policy to one stored package about to be
- * EXECUTED (see `downloadVersionZipForExecution`).
- *
- * Returns the loaded bundle, or `null` when nothing was verified (policy
- * `off`, a system package, an unsigned archive or any failure under `warn`).
- * Only `required` throws: {@link BundleSignatureError} for an unsigned /
- * unverifiable bundle, the loader's own error for an archive that cannot be
- * read. `warn` never
- * throws — it is an observation mode and must add no failure to a run.
+ * executed. Returns the loaded bundle, or `null` when nothing was verified.
+ * Only `required` throws; `warn` is observation-only and never fails a run.
  */
 export async function loadAndVerifyBundle(
   buffer: Uint8Array,
   packageId: string,
 ): Promise<Bundle | null> {
   const policy = getEnv().AFPS_SIGNATURE_POLICY;
-  // System packages are read from the image at boot and their ids are
-  // write-protected, so the image is their trust root. None ships signed:
-  // verifying them would log on every run under `warn` and reject every
-  // system integration under `required`.
+  // System packages are write-protected and ship unsigned: the image is their
+  // trust root.
   if (policy === "off" || isSystemPackage(packageId)) return null;
   if (policy === "required") return verifyOrThrow(buffer, packageId, policy);
-  // Nothing signs on publish, so under `warn` nearly every archive is unsigned:
-  // the zip central directory answers that without building the bundle.
+  // Most archives are unsigned: the zip central directory answers that cheaply.
   if (!mayCarrySignature(buffer)) {
     logger.debug("AFPS bundle is unsigned", { packageId });
     return null;
@@ -151,10 +142,9 @@ export async function loadAndVerifyBundle(
 const SIGNATURE_ENTRY = "signature.sig";
 
 /**
- * Whether the archive has a `signature.sig` entry (at its root or under a
- * wrapper folder), read from the central directory only — the filter declines
- * every entry, so nothing is inflated. An unreadable archive answers `true`:
- * the full load is what reports it.
+ * Whether the archive has a `signature.sig` entry, read from the central
+ * directory only (nothing is inflated). An unreadable archive answers `true`
+ * so the full load reports it.
  */
 function mayCarrySignature(buffer: Uint8Array): boolean {
   let found = false;
@@ -176,9 +166,7 @@ async function verifyOrThrow(
   packageId: string,
   policy: "warn" | "required",
 ): Promise<Bundle> {
-  // `buffer` is ONE stored package: its dependencies are separate objects,
-  // each verified when it is loaded. Walking them here against an empty
-  // catalog would reject every package that declares one.
+  // Dependencies are separate objects, each verified when loaded.
   const bundle = await buildBundleFromAfps(buffer, emptyPackageCatalog, { depTypes: [] });
 
   try {
@@ -186,8 +174,6 @@ async function verifyOrThrow(
       policy,
       trustRoot: getTrustRoot(),
       onWarn: (reason, detail) => {
-        // The platform signs nothing on publish, so "unsigned" is the normal
-        // case; a signature that is present but fails is the signal.
         if (reason === "unsigned") {
           logger.debug("AFPS bundle is unsigned", { packageId });
         } else {

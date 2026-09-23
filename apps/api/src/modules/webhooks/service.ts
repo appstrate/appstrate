@@ -478,11 +478,9 @@ export async function rotateSecret(
 }
 
 /**
- * One page of a webhook's delivery history, newest first, keyset-paginated on
- * `(createdAt, id)` — `createdAt` never changes, so the order is stable across
- * page loads. The cursor is compared in SQL against the cursor ROW rather than
- * a value read back into JS: `created_at` carries microseconds a JS `Date`
- * would truncate, and a truncated bound would skip rows sharing its millisecond.
+ * One page of a webhook's deliveries, newest first, keyset-paginated on
+ * `(createdAt, id)`. The cursor row is compared in SQL: a JS `Date` would
+ * truncate `created_at`'s microseconds and skip rows.
  */
 export async function listDeliveries(
   scope: OrgScope | SpaceScope,

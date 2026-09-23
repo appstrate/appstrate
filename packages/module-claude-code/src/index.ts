@@ -118,8 +118,7 @@ const claudeCodeProvider: ModelProviderDefinition = {
     authorizationUrl: "https://claude.ai/oauth/authorize",
     tokenUrl: "https://platform.claude.com/v1/oauth/token",
     refreshUrl: "https://platform.claude.com/v1/oauth/token",
-    // The scopes pi-ai requests at /authorize when connect-helper mints the
-    // token; `test/unit/pi-ai-oauth-parity.test.ts` pins the whole block.
+    // Must match pi-ai's /authorize scopes (pinned by the pi-ai-oauth-parity test).
     scopes: [
       "org:create_api_key",
       "user:profile",

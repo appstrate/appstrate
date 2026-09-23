@@ -162,12 +162,11 @@ export const managersBodySchema = z.object({ user_ids: z.array(z.string().min(1)
 /** Org roles that already hold `billing:*` — see the PUT handler's refusal. */
 const ROLES_WITH_BILLING_MANAGE: ReadonlySet<string> = new Set(ORG_ROLES_WITH_FULL_ACCESS);
 
-/** Wire projection — snake_case, with the universal `userId` / `createdAt` carve-out. */
+/** Wire projection — snake_case, per the platform casing policy. */
 function managerDetail(m: BillingManager) {
   return { userId: m.userId, added_by: m.addedBy, createdAt: m.createdAt.toISOString() };
 }
 
-/** The platform's list envelope; the set is small and never paginated. */
 function managerList(managers: BillingManager[]) {
   return { object: "list" as const, data: managers.map(managerDetail), hasMore: false };
 }
@@ -220,11 +219,6 @@ async function billingSnapshot(orgId: string) {
   };
 }
 
-/**
- * Render the failure of a Stripe-facing billing call. `ApiError` first: the refusals this
- * module raises itself are decisions, and a generic 503 would invite a pointless retry.
- */
-/** Audit a billing mutation on the platform trail; the account is keyed by its org. */
 function auditBilling(
   c: Context<EeEnv>,
   action: string,
@@ -238,6 +232,10 @@ function auditBilling(
   });
 }
 
+/**
+ * Render the failure of a Stripe-facing billing call. `ApiError` first: the refusals this
+ * module raises itself are decisions, and a generic 503 would invite a pointless retry.
+ */
 function stripeCallFailure(
   c: Context<EeEnv>,
   err: unknown,

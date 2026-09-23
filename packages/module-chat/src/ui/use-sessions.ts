@@ -54,12 +54,7 @@ export function sessionsRefetchInterval(query: {
     : SAFETY_NET_REFETCH_MS;
 }
 
-/**
- * The ONE definition of the session-list query, shared by the list and the nav
- * badge so both observers agree on key, fetcher and paging. Keyset pages
- * (`startingAfter` = the last row's id); a refetch re-walks every loaded page
- * from the head, so an invalidation leaves no stale page behind.
- */
+/** The session-list query, shared by the list and the nav badge (one key, one request). */
 function sessionsQuery(getHeaders: GetHeaders | null | undefined, enabled: boolean) {
   const spaceId = spaceIdFromHeaders(getHeaders);
   return infiniteQueryOptions({
@@ -89,10 +84,9 @@ export function useSessions(headers?: GetHeaders) {
  * Count of conversations with an unread reply, for the app-shell nav badge.
  * `unread` is server-computed per session; this shares the sessions query (same
  * key → one request) with the in-chat list, so the badge and the sidebar dots
- * stay consistent. It counts the LOADED pages: an unread reply bumps its
- * session to the head of the list, so it is on the first one. The conversation
- * the user is currently viewing is kept read by ChatPage (server mark-read), so
- * it is not counted. Pass `enabled: false` when the chat feature is off.
+ * stay consistent (loaded pages only: an unread reply bumps its session to the head).
+ * The viewed conversation is kept read by ChatPage, so it is not counted. Pass
+ * `enabled: false` when the chat feature is off.
  */
 export function useChatUnreadCount(getHeaders?: GetHeaders, enabled = true): number {
   // The badge is mounted on every page, including before a space is picked.

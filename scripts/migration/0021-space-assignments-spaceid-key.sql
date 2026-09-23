@@ -1,42 +1,10 @@
--- 0021 — rename the `space_id` key of every stored space assignment to
--- `spaceId`.
---
--- Run INSIDE the deploy window: after the old application stops, before the
--- new one starts. Either side of the window reads only its own spelling — the
--- old build reads `space_id`, the new one `spaceId` — so an assignment in the
--- other spelling is a pending invitation or an SSO signup policy that grants
--- nothing.
---
--- ═══ WHAT IT REPAIRS ═══
---
--- `SpaceAssignment` (`@appstrate/core/permissions`) is the wire shape of
--- `space_assignments` on invitations and `signupSpaceAssignments` on org-level
--- OAuth clients, and both columns store that shape verbatim:
---
---   org_invitations.space_assignments          jsonb  [{ space_id, preset_role | custom_role_id }]
---   oauth_clients.signup_space_assignments     jsonb  (same)
---
--- Its space id is now `spaceId`, the universal-id carve-out of
--- `docs/CASING_CONVENTIONS.md` (4b). The role keys are unchanged.
---
--- ═══ WHAT IT DOES ═══
---
--- Rewrites each array element that carries `space_id` into the same element
--- with the key renamed, keeping element order. Only `UPDATE`s, on the rows
--- whose array still holds a `space_id` key: a second run matches nothing.
--- Every row is rewritten, not only pending invitations — history is read back
--- by the same code.
---
--- ═══ PRE-FLIGHT (read-only) ═══
---
---   SELECT
---     (SELECT count(*) FROM org_invitations
---       WHERE jsonb_path_exists(space_assignments, '$[*].space_id')) AS invitations,
---     (SELECT count(*) FROM oauth_clients
---       WHERE jsonb_path_exists(signup_space_assignments, '$[*].space_id')) AS clients;
---
--- Rows: UNMEASURED — not rehearsed against a restored dump. Do that first
--- (README requirement 4) and record the counts the script prints.
+-- 0021 — rename the `space_id` key to `spaceId` in every element of
+-- `org_invitations.space_assignments` and `oauth_clients.signup_space_assignments`
+-- (the `SpaceAssignment` shape, CASING_CONVENTIONS 4b), keeping element order.
+-- Run INSIDE the deploy window (old app stopped, new one not started): each
+-- build reads only its own spelling, so a row in the other one grants nothing.
+-- Cost: UPDATEs only the rows still holding `space_id`; idempotent. Rows:
+-- UNMEASURED — rehearse on a restored dump first (README requirement 4).
 
 BEGIN;
 SET LOCAL lock_timeout = '3s';

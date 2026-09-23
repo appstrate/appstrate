@@ -13,10 +13,8 @@
  * (see {@link chatCapacityError}) and the client backs off instead of piling
  * on more sessions.
  *
- * The cap is `CHAT_PI_MAX_CONCURRENCY` (positive integer, default 6), parsed
- * once by the module's env schema. Higher limits used by the performance
- * harness must remain explicit until replica resources and cloud concurrency
- * have been validated.
+ * The cap is `CHAT_PI_MAX_CONCURRENCY` (default 6); raise it only from
+ * validated replica capacity.
  */
 
 import { ApiError } from "@appstrate/core/api-errors";
@@ -35,7 +33,6 @@ let active = 0;
 let highWaterMark = 0;
 let rejected = 0;
 
-/** The configured cap, or the default when the operator set none. */
 export const piChatMaxConcurrency = (): number =>
   getChatEnv().piMaxConcurrency ?? DEFAULT_MAX_CONCURRENCY;
 
@@ -146,9 +143,7 @@ export function releaseOnClose<T>(
  * chat is refused. The default of 6 is a conservative product value, not a
  * sizing decision, and the only measurements that exist are local. An operator
  * who never saw this line would discover the ceiling from user reports.
- * Returns whether it warned, so the decision is assertable without a logger
- * spy (this repo forbids `mock.module()`). An invalid value never reaches
- * here: the env schema fails boot on it.
+ * Returns whether it warned, so the decision is assertable without a logger spy.
  */
 export function warnIfDefaultChatConcurrency(): boolean {
   if (getChatEnv().piMaxConcurrency !== undefined) return false;

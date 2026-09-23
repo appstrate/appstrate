@@ -4,10 +4,8 @@ import { cors } from "hono/cors";
 import { VIEW_AS_ACTIVE_HEADER } from "@appstrate/core/permissions";
 
 /**
- * Every non-safelisted response header a browser client (SPA or embedded app)
- * reads. A browser hides any header missing from `Access-Control-Expose-Headers`
- * from a cross-origin caller. Server-to-server surfaces (credential proxy, LLM
- * proxy) are left out: no browser calls them.
+ * Every non-safelisted response header a browser client reads; a cross-origin
+ * browser hides any header not in `Access-Control-Expose-Headers`.
  */
 export const CORS_EXPOSED_HEADERS: readonly string[] = [
   "Request-Id",

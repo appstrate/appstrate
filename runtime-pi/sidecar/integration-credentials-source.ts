@@ -533,10 +533,8 @@ export function createIntegrationCredentialsSource(
 }
 
 /**
- * POST the platform's forced-refresh endpoint for one integration. The ONE
- * report path for "the upstream rejected this credential": the platform
- * refreshes what it can and counts the rejection toward flagging the
- * connection for reconnect (410) when it cannot.
+ * The single report path for "the upstream rejected this credential": the
+ * platform refreshes what it can, else counts it toward a reconnect flag (410).
  */
 export function postIntegrationCredentialsRefresh(
   integrationId: string,
@@ -559,7 +557,6 @@ export function postIntegrationCredentialsRefresh(
  */
 export const CREDENTIAL_META_KEY = "dev.appstrate/credential";
 
-/** Whether a tool result carries the {@link CREDENTIAL_META_KEY} rejection signal. */
 export function isCredentialRejectedResult(result: {
   isError?: unknown;
   _meta?: Record<string, unknown>;

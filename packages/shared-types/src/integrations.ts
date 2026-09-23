@@ -39,7 +39,7 @@ export interface IntegrationConnection {
   id: string;
   packageId: string;
   auth_key: string;
-  /** Multi-account discriminator extracted at connect time; `null` when the provider exposed no identity. */
+  /** Multi-account discriminator extracted at connect time; `null` = no identity. */
   account_id: string | null;
   /** Identity claims extracted via `extractTokenIdentity` (e.g. `sub`, `email`). */
   identity_claims: Record<string, unknown> | null;

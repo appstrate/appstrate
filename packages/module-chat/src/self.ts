@@ -19,7 +19,6 @@ import type { Context } from "hono";
 import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
 import { getChatEnv } from "./env.ts";
 
-/** Loopback origin of the running platform — see {@link getChatEnv}. */
 export function selfOrigin(): string {
   return getChatEnv().selfOrigin;
 }

@@ -23,10 +23,8 @@ export function normaliseMcpToolNamespace(raw: string): string {
 }
 
 /**
- * The exposed tool-name grammar: `{namespace}__{body}`. The namespace is our
- * snake-case package slug; the body keeps the upstream name's case, `-` and
- * any inner `__`, because LLM providers accept `^[a-zA-Z0-9_-]{1,64}$`. The
- * 56-char ceiling leaves headroom under 64 for hosts that re-prefix names.
+ * Exposed tool-name grammar: `{snake_namespace}__{body}`, the body in the LLM
+ * providers' `^[a-zA-Z0-9_-]{1,64}$` alphabet (56-char ceiling: re-prefix headroom).
  */
 const MCP_TOOL_NAME_PATTERN = /^[a-z0-9][a-z0-9_]*__[A-Za-z0-9_-]+$/;
 
@@ -35,9 +33,8 @@ export function isValidMcpToolName(name: string): boolean {
 }
 
 /**
- * Map an untrusted upstream tool name onto the body alphabet. Only the code
- * points providers reject change (each one becomes `_`, e.g. `.`): nothing is
- * lowercased, collapsed, trimmed or stripped.
+ * Map an untrusted upstream tool name onto the body alphabet: each rejected
+ * code point becomes `_`; nothing else changes.
  */
 export function normaliseMcpToolBody(raw: string): string {
   return raw.replace(/[^A-Za-z0-9_-]/gu, "_");
@@ -46,11 +43,10 @@ export function normaliseMcpToolBody(raw: string): string {
 const MCP_TOOL_HASH_LENGTH = 8;
 
 /**
- * Exposed name for an untrusted upstream tool. The plain `{namespace}__{body}`
- * when it fits and is free; otherwise the body is cut to fit and suffixed with
- * a hash of the ORIGINAL upstream name, so the result depends on that name
- * alone — never on registration order the way a `tool_N` counter did. When the
- * hashed name is taken too, one salted re-hash; if that is taken, it throws.
+ * Exposed name for an untrusted upstream tool: `{namespace}__{body}` when it
+ * fits and is free, else the body cut to fit plus a hash of the ORIGINAL
+ * upstream name (stable regardless of registration order). One salted re-hash
+ * on collision, then it throws.
  */
 export function allocateMcpToolName(
   namespace: string,

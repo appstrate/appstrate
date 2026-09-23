@@ -604,11 +604,7 @@ function scratchPath(prefix: string): string {
   );
 }
 
-/**
- * The target refused the connection's credential itself — only a reconnect
- * fixes it. The tool result carries it as a machine-readable signal the
- * sidecar reports to the platform; a network or timeout failure never does.
- */
+/** The target refused the credential itself (only a reconnect fixes it), unlike a network failure. */
 class CredentialRejected extends Error {
   constructor(
     message: string,

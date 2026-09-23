@@ -351,9 +351,7 @@ function encodeExtValue(name: string): string {
 }
 
 /**
- * MCP tool name ceiling. The grammar itself (`isValidToolName`, re-exported
- * above) lives in `@appstrate/afps-shared/mcp-naming` beside the normaliser
- * that must produce names it accepts.
+ * MCP tool name ceiling (grammar: `isValidToolName`, re-exported above).
  */
 export const TOOL_NAME_MAX_LEN = MCP_TOOL_NAME_MAX_LENGTH;
 

@@ -331,11 +331,8 @@ export class McpHost {
         continue;
       }
       // Trusted first-party tools are already emitted in the canonical body
-      // form, so they keep it verbatim (auth-scoped names such as
-      // `api_call__primary` included) and a malformed one fails loudly: an
-      // opaque fallback would diverge from the platform catalog. Both halves
-      // are platform-produced, so the throw guards future emitters, not user
-      // input. The trusted-vs-trusted collision was refused atomically above.
+      // form (e.g. `api_call__primary`), kept verbatim; a malformed one fails
+      // loudly since a fallback name would diverge from the platform catalog.
       const plainName = `${normalisedNs}__${
         upstream.trusted ? sanitised.name : normaliseMcpToolBody(sanitised.name)
       }`;
@@ -344,10 +341,8 @@ export class McpHost {
           `McpHost: trusted tool ${JSON.stringify(sanitised.name)} produces invalid namespaced name ${JSON.stringify(plainName)}`,
         );
       }
-      // Trusted platform capabilities always own their canonical name,
-      // independent of registration order: an untrusted tool landing on one is
-      // dropped rather than renamed into a capability the catalog never listed.
-      // The reverse order is handled by `trustedReplacements` above.
+      // Trusted capabilities own their canonical name in either registration
+      // order (the reverse order is handled by `trustedReplacements` above).
       if (!upstream.trusted && this.toolTrusted.get(plainName) === true) {
         this.options.onLog?.({
           source: `host:${normalisedNs}`,
@@ -367,8 +362,7 @@ export class McpHost {
             this.toolToNamespace.has(name),
           );
         } catch {
-          // A third server-side duplicate (or an unlucky hash collision) costs
-          // that one tool, never the whole upstream's registration.
+          // An unresolvable collision costs that one tool, not the upstream.
           this.options.onLog?.({
             source: `host:${normalisedNs}`,
             level: "warn",

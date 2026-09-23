@@ -19,10 +19,9 @@ import { toISO, toISORequired } from "../lib/date-helpers.ts";
 import type { SpaceScope, OrgScope } from "../lib/scope.ts";
 
 /**
- * Key wire format: `apst_` + 30 base62 random chars (~178 bits) + 6 base62
- * chars of CRC32 over the random part. The distinctive prefix and checksum let
- * a secret scanner recognise and validate a leaked key offline, and let the
- * auth pipeline drop a mistyped or forged key without a database round-trip.
+ * `apst_` + 30 base62 random chars (~178 bits) + 6 base62 chars of CRC32: a
+ * secret scanner can validate a leaked key offline, and auth drops a malformed
+ * one without a database round-trip.
  */
 export const API_KEY_PREFIX = "apst_";
 /** Pre-checksum format. Keys are stored hashed and cannot be converted: refused, never looked up. */

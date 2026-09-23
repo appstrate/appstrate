@@ -739,9 +739,7 @@ export async function packagesPushCommand(
       }
       throw err;
     }
-    // The response's ETag is the version THIS write produced (the server stamps
-    // it from the write, not from the re-read body), so a later write by someone
-    // else still refuses this folder's next push.
+    // This write's own ETag: a later foreign write still refuses the next push.
     const after = draftStateOf(packageId, written.body, written.headers);
     await recordLock(session.profileName, dir, packageId, after.etag);
     // The server stores the VALIDATED manifest, which may normalize what the
@@ -937,8 +935,7 @@ export async function packagesPublishCommand(
     }
     const { override, target } = plan;
 
-    // `If-Match`: the version cut is the draft read above — a draft moved since
-    // (a push landing in between) is refused with 412, never published unseen.
+    // `If-Match`: a draft moved since the read above is refused (412), never published unseen.
     let created: { version?: unknown };
     try {
       created = await apiFetch<{ version?: unknown }>(session.profileName, `${route}/versions`, {
@@ -956,8 +953,7 @@ export async function packagesPublishCommand(
     }
     const version = created.version;
 
-    // The draft is exactly the version just cut (nothing unpublished) and carries
-    // its number: the publish's own rewrite, not an edit folders never saw.
+    // Only the publish's own rewrite advances folder locks, never a foreign edit.
     if (override !== undefined && before.manifest.version !== version) {
       const after = await readDraftState(session.profileName, home);
       if (!after.hasUnpublishedChanges && after.manifest.version === version) {

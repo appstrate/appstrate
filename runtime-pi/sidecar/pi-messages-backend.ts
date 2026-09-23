@@ -329,9 +329,8 @@ export function buildBackingModel(deps: PiMessagesBackendDeps): Model<Api> {
 }
 
 /**
- * Narrow the `PI_MODEL_SWAP_JSON` modalities (env text, so still strings) onto
- * the platform's closed set, with the `["text"]` floor `runtime-pi/env.ts`
- * applies: an empty list disables text too.
+ * Narrow the `PI_MODEL_SWAP_JSON` modalities onto the platform's closed set,
+ * with the same `["text"]` floor as `runtime-pi/env.ts`.
  */
 function narrowInputModalities(input: ReadonlyArray<string>): ModelInputModality[] {
   const known = MODEL_INPUT_MODALITIES.filter((m) => input.includes(m));

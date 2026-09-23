@@ -1,15 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Validated env contract for `runtime-pi/sidecar/server.ts` — the base block
- * every orchestrator writes through `buildBaseSidecarEnv`
- * (`apps/api/src/services/orchestrator/sidecar-env.ts`), in every mode (agent
- * run and connect-run alike). Same hand-rolled idiom as `runtime-pi/env.ts`:
- * the sidecar carries no validation dependency.
- *
- * A missing value is a launcher bug. Defaulting it (`RUN_TOKEN` to `""`,
- * `PLATFORM_API_URL` to localhost) booted a sidecar whose every platform call
- * failed later with an error naming the symptom instead of the cause.
+ * Validated env contract for the sidecar: the base block every orchestrator
+ * writes through `buildBaseSidecarEnv`. A missing value is a launcher bug, so
+ * it fails at boot rather than on the first platform call.
  */
 
 import { normalizeHttpUrl } from "@appstrate/core/url";
@@ -34,7 +28,6 @@ export class SidecarEnvError extends Error {
   }
 }
 
-/** Parse the sidecar env, throwing {@link SidecarEnvError} listing every issue at once. */
 export function parseSidecarEnv(source: NodeJS.ProcessEnv = process.env): SidecarEnv {
   const issues: string[] = [];
 

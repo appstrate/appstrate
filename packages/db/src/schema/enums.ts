@@ -34,9 +34,8 @@ export type OrgRole = (typeof orgRoleValues)[number];
 
 /**
  * Run statuses are the one enum whose literals live OUTSIDE this file, in the
- * import-free `@appstrate/core/run-status`, which the SPA reads without the
- * Drizzle object. The `pgEnum` below derives from that tuple, so the DB enum
- * can never drift from what the client ships.
+ * import-free `@appstrate/core/run-status`, so the DB enum cannot drift from
+ * what the client ships.
  */
 export const runStatusEnum = pgEnum("run_status", runStatusValues);
 

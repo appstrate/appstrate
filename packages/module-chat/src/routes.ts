@@ -42,13 +42,11 @@ import { notifySessionUpdate } from "./realtime.ts";
 import { logger } from "./logger.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 
-/** Session-list page size (default = max): one row past it is fetched to derive `hasMore`. */
 const SESSIONS_PAGE_SIZE = 100;
-/** Message page bounds for the history read; the SPA asks for the max and follows `since`. */
 const MESSAGES_DEFAULT_LIMIT = 100;
 export const MESSAGES_MAX_LIMIT = 500;
 
-/** `?limit=` with the platform's lenient idiom: out-of-range or unparseable → default. */
+/** Lenient `?limit=`: out-of-range or unparseable → default. */
 function pageLimit(c: Context, defaultLimit: number, maxLimit: number): number {
   return z.coerce
     .number()
@@ -175,14 +173,8 @@ export function createChatRouter(deps: ChatPlatformDeps) {
   // traffic). The platform always supplies it via deps — no unlimited fallback.
   const rateLimited = (limitPerMinute: number): MiddlewareHandler => deps.rateLimit(limitPerMinute);
 
-  // GET /api/chat/sessions — the caller's sessions in this space, most recent
-  // activity first, keyset-paginated on `(updatedAt, id)` via
-  // `?startingAfter=<session id>` (the platform's cursor idiom, so a body-only
-  // reader can page). The bound is the cursor ROW, compared in SQL at full
-  // precision. A session whose activity moves it mid-walk leaves the unseen
-  // tail and reappears at the head — inherent to an activity-ordered list, and
-  // the SPA re-walks on every `chat_session_update`. If the moved row is the
-  // cursor itself, the walk resumes from the head: duplicates, never a skip.
+  // GET /api/chat/sessions — most recent activity first, keyset on `(updatedAt, id)`;
+  // the bound is the cursor ROW, compared in SQL at full precision.
   router.get("/api/chat/sessions", requireModulePermission("chat", "read"), async (c) => {
     const scope = sessionScope(c);
     const limit = pageLimit(c, SESSIONS_PAGE_SIZE, SESSIONS_PAGE_SIZE);
@@ -238,10 +230,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     },
   );
 
-  // GET /api/chat/sessions/:id — the conversation with a page of its messages
-  // in `seq` order. Bounded like run logs: `?since=<seq>` returns messages past
-  // that cursor, `hasMore` + `Link: rel="next"` say another page follows. A
-  // malformed `since` is ignored rather than 400'd, as on run logs.
+  // GET /api/chat/sessions/:id — messages paged by `?since=<seq>` like run logs.
   router.get("/api/chat/sessions/:id", requireModulePermission("chat", "read"), async (c) => {
     const session = await getOwnedSession(c.req.param("id"), sessionScope(c));
     const since = Number(c.req.query("since") || Number.NaN);

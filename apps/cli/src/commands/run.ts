@@ -1223,10 +1223,7 @@ export function _raceFinalizeAgainstTimeoutForTesting(
   return raceFinalizeAgainstTimeout(p, timeoutMs);
 }
 
-/**
- * The Pi loop knobs a local run takes from the user's shell, read by the same
- * strict parser as the container: a malformed value stops the run.
- */
+/** Pi loop knobs from the user's shell, strictly parsed like the container's. */
 export function piLoopOptionsFromShell(env: Record<string, string | undefined>): PiLoopOptions {
   const { options, issues } = parsePiLoopEnv(env);
   if (issues.length > 0) throw new Error(`Invalid environment: ${issues.join("; ")}`);

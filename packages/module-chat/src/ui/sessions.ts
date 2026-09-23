@@ -60,13 +60,11 @@ function headers(getHeaders: GetHeaders | null | undefined, json = false): Recor
   return { ...(json ? { "Content-Type": "application/json" } : {}), ...getHeaders?.() };
 }
 
-/** One page of `GET /api/chat/sessions`. */
 export interface SessionsPage {
   data: SessionSummary[];
   hasMore: boolean;
 }
 
-/** The session-list cache: the pages loaded so far, keyed by their `startingAfter` cursor. */
 export type SessionsCache = InfiniteData<SessionsPage, string | null>;
 
 export async function fetchSessionsPage(
@@ -83,10 +81,7 @@ export async function fetchSessionsPage(
   return { data: body.data ?? [], hasMore: body.hasMore ?? false };
 }
 
-/**
- * Patch the loaded rows of a session-list cache in place, page by page (`first`
- * marks the head page). An absent cache stays absent unless `seed` is given.
- */
+/** Patch every loaded page (`first` = head page); an absent cache stays absent unless seeded. */
 export function patchSessionsCache(
   prev: SessionsCache | undefined,
   fn: (rows: SessionSummary[], first: boolean) => SessionSummary[],
@@ -96,12 +91,7 @@ export function patchSessionsCache(
   return { ...prev, pages: prev.pages.map((p, i) => ({ ...p, data: fn(p.data, i === 0) })) };
 }
 
-/**
- * Flatten the loaded pages. A row can appear twice when the cursor session was
- * bumped between two page loads (the server then resumes the walk from the
- * head); the first occurrence wins, and the refetch that same change pushes
- * re-walks the list in order.
- */
+/** Flatten the loaded pages; a row seen twice (bumped mid-walk) keeps its first occurrence. */
 export function flattenSessions(cache: SessionsCache): SessionSummary[] {
   const seen = new Set<string>();
   return cache.pages.flatMap((p) => p.data.filter((s) => !seen.has(s.id) && seen.add(s.id)));
@@ -166,14 +156,11 @@ interface StoredMessage {
   content: Record<string, unknown>;
 }
 
-/** The route's maximum page size (`MESSAGES_MAX_LIMIT` in `routes.ts`). */
 const HISTORY_PAGE_SIZE = 500;
 
 /**
  * Session history as `UIMessage[]`, ready to seed `useChat({ messages })`.
- * The route pages its messages; this walks every page (`?since=<seq>`) so the
- * thread opens whole — the runtime is seeded once and has no "prepend older"
- * path, and the server's bound holds per request.
+ * Walks every page (`?since=<seq>`): the runtime is seeded once, whole.
  * Stored `content` is the ai-sdk/v6 UIMessage minus its id (the id rides in the
  * row), so we reconstruct `{ id, ...content }`. A not-yet-persisted session
  * (a freshly-minted id whose first message hasn't been sent) 404s → empty.

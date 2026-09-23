@@ -26,11 +26,7 @@ export function isPlainObject(val: unknown): val is Record<string, unknown> {
   return typeof val === "object" && val !== null && !Array.isArray(val);
 }
 
-/**
- * Zod refinement capping the UTF-8 size of a value's JSON serialization — the
- * one byte-cap idiom for JSONB written from outside, so every cap words its
- * refusal the same way.
- */
+/** Zod refinement capping the UTF-8 byte size of a value's JSON serialization. */
 export function withByteCap(maxBytes: number) {
   return (value: unknown, ctx: z.RefinementCtx): void => {
     const size = new TextEncoder().encode(JSON.stringify(value)).byteLength;

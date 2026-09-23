@@ -191,11 +191,7 @@ export async function recordAuditFromContext(
   });
 }
 
-/**
- * For session-less doors (the integration OAuth callback, the hosted connect
- * form): the principal rides signed state rather than the auth middleware, so
- * the context holds no org or actor and the caller names them.
- */
+/** For session-less doors (OAuth callback, hosted connect): the caller names the principal. */
 export async function recordAuditAs(
   c: Context<AppEnv>,
   principal: { orgId: string; spaceId: string | null; actorType: AuditActorType; actorId: string },

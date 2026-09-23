@@ -422,13 +422,9 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
     }): Promise<{ id: string; etag: string | null }> => {
       const { data, response } = await client.PATCH(`/api/packages/${segment}/{scope}/{name}`, {
         params: { path: splitPackageRef(packageId), header: { "If-Match": etag } },
-        // No cast needed: the body's explicit `{manifest, content}` keys
-        // satisfy the skill/integration/mcp-server update operations
-        // (generic-object manifest) in the dynamic-path union.
         body,
       });
-      // 200 → the updated package resource, bare (issue #657); its `ETag` is
-      // the version THIS save produced, the base of the next one.
+      // 200 → the updated package resource, bare (issue #657); its `ETag` bases the next save.
       return { id: data!.id, etag: response.headers.get("ETag") };
     },
     onSuccess: () => {

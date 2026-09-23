@@ -345,8 +345,8 @@ export function toOperations(changes: FileChange[], local: PackageFiles): FileOp
 
 /**
  * `<data dir>/packages/<profile>-locks.json`: working folder (its real path) →
- * the package it holds and the draft `ETag` that folder last read from a pull or
- * wrote with a push — sent back as `If-Match` on its next push. Keyed by FOLDER, not by package: two folders of one
+ * the package it holds and the draft `ETag` that folder last read or wrote,
+ * sent back as `If-Match` on its next push. Keyed by FOLDER: two folders of one
  * package are two authors, and the second push must not ride the lock the
  * first one moved. Only a DRAFT read records a lock: a published version says
  * nothing about the draft. Every write is a read-modify-write under an flock

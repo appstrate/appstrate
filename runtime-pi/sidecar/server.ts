@@ -124,10 +124,8 @@ function readPositiveIntFromEnv(name: string): number | undefined {
  * so every connect-run failure — env included — must land on it.
  */
 function failConnectRun(err: unknown): never {
-  // `runConnectOnce` surfaces the third-party login tool's own error prose
-  // verbatim (see `parseLoginToolResult`), and this line goes to stdout,
-  // which the platform reads and stores. Scrub credential shapes out of it —
-  // the diagnostic value is in the wording, never in a token it echoed.
+  // The login tool's own error prose lands on stdout, which the platform
+  // stores: keep its wording, scrub any token it echoed.
   const message = scrubSecretMaterial(err instanceof Error ? err.message : String(err));
   process.stdout.write(`APPSTRATE_CONNECT_ERROR:${message}\n`);
   process.exit(1);

@@ -742,9 +742,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
 
     const query = asRecord(args.query) ?? {};
 
-    // A model-supplied header name/value may be syntactically invalid (CR/LF
-    // makes `Headers.set` throw). Surface a tool error instead of a 500 so the
-    // model can self-correct.
+    // An invalid model-supplied header is a tool error, not a 500.
     const rejectHeader = (name: string): CallToolResult => {
       emit(ctx, {
         tool: "invoke_operation",

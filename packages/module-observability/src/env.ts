@@ -15,7 +15,7 @@
 import { z } from "zod";
 
 /** `"true"`/`"1"` (case-insensitive) → true, anything else → false — same
- * parse semantics as `@appstrate/env`'s `boolEnv`. Never rejects: fail-open. */
+ * parse semantics as `@appstrate/env`'s `boolEnv`. */
 const boolEnv = z
   .string()
   .optional()
@@ -27,14 +27,8 @@ const optionalString = z
   .optional()
   .transform((raw) => raw || undefined);
 
-/**
- * This module's environment contract. Exported for the platform's env gates
- * (`scripts/verify-env-docs.ts`, `scripts/verify-compose-defaults.ts`), which
- * glob `packages/module-<id>/src/env.ts`.
- */
 export const otelEnvSchema = z.object({
   OTEL_ENABLED: boolEnv,
-  /** Base OTLP collector endpoint. */
   OTEL_EXPORTER_OTLP_ENDPOINT: optionalString,
   /** `service.name` resource attribute. */
   OTEL_SERVICE_NAME: optionalString.transform((v) => v ?? "appstrate-api"),

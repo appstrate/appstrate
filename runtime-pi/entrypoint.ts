@@ -79,9 +79,8 @@ import { formatLogLine } from "@appstrate/core/log-line";
  *
  * Reach: the platform ring-buffers container stdout but only emits it when the
  * container exits NON-ZERO (`run-launcher/pi.ts`), so on a successful run this
- * line lives in the docker/Firecracker log only. Enough for an operator reading
- * container logs; it is NOT the run's audit trail. The queryable record of a
- * pricing gap is `llm_usage.pricing_status`, written server-side.
+ * line lives in the docker/Firecracker log only: not an audit trail (a pricing
+ * gap's record is `llm_usage.pricing_status`).
  */
 function logLine(level: "warn" | "error", msg: string, data?: Record<string, unknown>): void {
   process.stdout.write(formatLogLine(level, msg, data));

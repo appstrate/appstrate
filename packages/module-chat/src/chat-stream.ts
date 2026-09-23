@@ -93,17 +93,12 @@ export type ChatEngine = (input: PiChatInput) => Response;
  */
 const CHAT_MESSAGE_ROLES = new Set(["user", "assistant"]);
 
-/**
- * Ceiling on the turn's last message — the one this route persists into
- * `chat_messages.content`. Attachments ride as `appfile://` references, so only
- * typed text and part metadata count against it.
- */
+/** Ceiling on the turn's last (persisted) message; attachments ride as references. */
 export const CHAT_MESSAGE_MAX_BYTES = 256 * 1024;
 
 // The client (assistant-ui / useChat) posts the full thread plus optional
-// session/model/context extras. `messages` are UIMessages: the last one's shape
-// is the AI SDK's, checked by `safeValidateUIMessages` in the handler. This schema adds
-// what that check cannot know:
+// session/model/context extras. The last message's UIMessage shape is checked by
+// `safeValidateUIMessages` in the handler; this schema adds:
 //   - `role` MUST be one of {@link CHAT_MESSAGE_ROLES}. Nothing legitimate
 //     sends another: the composer only produces user turns, and a reload
 //     replays what the server persisted — user or assistant, a server-authored
@@ -111,7 +106,6 @@ export const CHAT_MESSAGE_MAX_BYTES = 256 * 1024;
 //   - any `file` part MUST reference an `upload://` or `appfile://` URI. That
 //     rejects inline `data:` bytes and arbitrary URLs in the chat channel
 //     (attachments flow only through the file store, never inline).
-//   - the last message, the one persisted, fits {@link CHAT_MESSAGE_MAX_BYTES}.
 export const chatStreamSchema = z.object({
   id: z.string().optional(),
   messages: z
@@ -225,9 +219,7 @@ export async function handleChatStream(
   const persona = c.get("viewAs");
   const orgRole = persona?.orgRole ?? c.get("orgRole") ?? "member";
   const body = parseBody(chatStreamSchema, await c.req.json().catch(() => null));
-  // Only the new message is validated: it is the one persisted. Earlier turns are
-  // the server's own rows replayed, and a row written under an older AI SDK shape
-  // must not turn every later turn of its conversation into a 400.
+  // Only the new message is validated: earlier turns are the server's own rows.
   const validated = await safeValidateUIMessages({ messages: body.messages.slice(-1) });
   if (!validated.success) {
     throw invalidRequest(`Invalid chat message: ${validated.error.message}`, "messages");
@@ -482,9 +474,7 @@ export async function handleChatStream(
   });
   if (resolution.status === "needs-reconnection") {
     // The oauth credential is dead → tell the client to reconnect rather than
-    // launching a session that would 401 upstream. 409, not 401: the dead
-    // credential is the MODEL's, never the caller's — a 401 would draw a
-    // `WWW-Authenticate: invalid_token` challenge against a valid token.
+    // launching a session that would 401 upstream (409: the model's, not the caller's).
     throw conflict(
       "needs_reconnection",
       "The selected model's subscription credential expired or was revoked.",

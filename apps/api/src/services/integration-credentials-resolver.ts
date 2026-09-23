@@ -224,12 +224,8 @@ export async function resolveLiveIntegrationCredentials(
     );
   }
 
-  // The credential is terminally unusable and the connection must be re-made:
-  // flag it for re-connect and surface 410 so the sidecar stops retrying and
-  // the next-launch readiness gate fires. Reached by a credential nobody can
-  // decrypt (below), on ANY read, and by `rejectUnrefreshable` once its streak
-  // is spent. (A revoked refresh token is handled inline further down, with
-  // the same flag + status.)
+  // Terminally unusable: flag for re-connect and surface 410 so the sidecar
+  // stops retrying and the next-launch readiness gate fires.
   const flagTerminalAndThrow = async (reason: string): Promise<never> => {
     await markIntegrationConnectionNeedsReconnection(connection.id);
     logger.warn("Integration credential terminally unusable — flagging needsReconnection", {
@@ -248,14 +244,10 @@ export async function resolveLiveIntegrationCredentials(
     );
   };
 
-  // A FORCED refresh (the sidecar already saw an upstream 401, or a server
-  // reported the credential rejected) that nothing can recover: an oauth2 auth
-  // with no refresh client, or a non-oauth2 auth with nothing to refresh. One
-  // rejection can be a transient upstream fault (a rate limit or clock skew
-  // misreported as 401), so it only counts toward the same streak the OAuth
-  // refresh path escalates on: 502 until INTEGRATION_REFRESH_MAX_FAILURES, then
-  // terminal. A reconnect resets the streak (`persistCredentialBundle`).
-  // Trade-off: nothing else resets it, so rare isolated 401s add up over time.
+  // A forced refresh nothing can recover (no refresh client, or not oauth2).
+  // One 401 can be a transient upstream fault, so it counts toward the refresh
+  // streak: 502 until INTEGRATION_REFRESH_MAX_FAILURES, then terminal. Only a
+  // reconnect resets it, so rare isolated 401s add up over time.
   const rejectUnrefreshable = async (reason: string): Promise<never> => {
     const maxFailures = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
     const { failures, needsReconnection } = await recordIntegrationRefreshFailure(

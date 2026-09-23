@@ -276,12 +276,7 @@ export interface PiRunnerOptions {
    * Default: none (external consumers keep the SDK's natural stop).
    */
   terminalTools?: string[];
-  /**
-   * Pi SDK built-in retry on transient 429/5xx. Default `true`. Turn it off
-   * when an outer layer already retries — the sidecar's aliased `/llm` path
-   * does, `ALIAS_UPSTREAM_MAX_RETRIES` attempts per call, which multiplies
-   * with this loop rather than replacing it.
-   */
+  /** Pi SDK retry on transient 429/5xx. Default `true`; off when an outer layer retries. */
   modelRetry?: boolean;
   /** Pi SDK context compaction. Default `true`; see {@link derivePiCompactionSettings}. */
   modelCompaction?: boolean;
@@ -316,9 +311,7 @@ const KEEP_RECENT_FRACTION = 0.1;
  * | `keepRecentTokens` | `max(20000, 10% × contextWindow)`      | Preserves the ratio across model sizes: 20k on Claude 200k, ~100k on GPT-4.1 1M, ~200k on Gemini 2M. The floor stops small windows from over-compacting away recent context.    |
  *
  * `enabled: false` turns compaction off entirely — useful when stacking
- * external compaction middleware (appstrate#445). The caller decides; for a
- * platform-launched run that is the operator's `MODEL_COMPACTION_ENABLED`,
- * parsed by `runtime-pi/env.ts`.
+ * external compaction middleware (appstrate#445).
  *
  * Returns TWO members, and the split is load-bearing. `compaction` is exactly
  * the Pi SDK's `CompactionSettings` and is what gets handed to it. `contextWindow`
@@ -444,9 +437,7 @@ export class PiRunner {
       // having been ingested first. The metric event is now purely a
       // live-UI signal whose POST may be aborted by `process.exit(0)`
       // after `run()` returns — finalize body covers persistence and
-      // cost accounting on its own. Usage is always stamped — the platform
-      // requires it on a success — and a session that never started reports
-      // zero, as the thrown paths below do.
+      // cost accounting on its own; usage is always stamped (zero if no session).
       const bridge = bridgeRef.current;
       result.usage = bridge?.getUsage() ?? { input_tokens: 0, output_tokens: 0 };
       if (bridge) result.cost = bridge.getCost();
@@ -565,8 +556,8 @@ export class PiRunner {
       }
       // Shared thrown-failure epilogue (abort-rethrow → emit appstrate.error →
       // best-effort drain → reduce → stamp status/usage/cost → finalize). Usage
-      // + cost come from the session bridge — both only when the bridge was
-      // captured; a very early throw stamps explicit zero usage. The "drain" here converges the bridge's pending fire-and-forget emits
+      // + cost come from the session bridge when captured; a very early throw
+      // stamps explicit zero usage. The "drain" here converges the bridge's pending fire-and-forget emits
       // (`drainPending`) before finalize closes the sink, not a runtime-event
       // journal; it emits nothing new, so reducing before vs after it is
       // equivalent.
@@ -1341,8 +1332,7 @@ interface PiToolExecutionEndEvent {
 }
 type PiSubscribedEvent = { type: string } & Record<string, unknown>;
 
-// Tool-result truncation (byte-aware, capped by the bridge's
-// `toolResultByteLimit`) lives in `@appstrate/afps-runtime/runner` (imported above for the bridge's
+// Tool-result truncation (byte-aware) lives in `@appstrate/afps-runtime/runner` (imported above for the bridge's
 // own use). Re-exported here for this package's existing test imports + public
 // surface.
 export { truncateToolResult };

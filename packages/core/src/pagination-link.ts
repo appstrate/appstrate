@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * RFC 5988 `Link` headers for cursor-paginated lists.
- *
- * In core so module routers (which cannot import the platform's source tree)
- * page with the same header as core routes. The request URL is re-rooted on
- * the caller-supplied public origin (`ModuleInitContext.appUrl`, `APP_URL` in
- * the platform) so the link stays dereferenceable behind a reverse proxy.
- * No header is set when there is no relation to announce.
+ * RFC 8288 `Link` headers for cursor-paginated lists, shared by core and module
+ * routers. URLs are re-rooted on the public origin so they stay dereferenceable
+ * behind a reverse proxy.
  */
 
 import type { Context } from "hono";
@@ -16,7 +12,6 @@ interface LinkBase {
   c: Context;
   /** Public origin every emitted URL is rooted on. */
   publicOrigin: string;
-  /** True when another page follows. */
   hasMore: boolean;
 }
 
@@ -58,10 +53,7 @@ export function setCursorLinkHeader({
   if (links.length > 0) c.header("Link", links.join(", "));
 }
 
-/**
- * Append-only sequence: `next` → `?since=<lastId>`, the same parameter as the
- * endpoint's polling-tail cursor, so the two contracts cannot drift.
- */
+/** Append-only sequence: `next` → `?since=<lastId>` (the polling-tail cursor). */
 export function setSinceLinkHeader({
   c,
   publicOrigin,

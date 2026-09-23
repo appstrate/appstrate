@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Minimal structured JSON logger for the sidecar, writing the shared
- * pino-compatible line (`@appstrate/core/log-line`). Kept pino-free so
- * the compiled binary stays lean — pulling `@appstrate/core/logger` would
- * transitively bring in pino + node:async_hooks, which the sidecar doesn't need.
+ * Sidecar logger writing the shared pino-shaped line (`@appstrate/core/log-line`),
+ * pino-free so the compiled binary stays lean.
  */
 
 import { PINO_LEVELS, formatLogLine, type LogLevel } from "@appstrate/core/log-line";

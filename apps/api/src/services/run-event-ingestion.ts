@@ -428,10 +428,8 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // Terminal usage — required on a success by the route, which 400s without
   // it. The fallback semantics for an absent/invalid value split on the status:
   //
-  //   - SUCCESS: reachable only from a non-HTTP caller (`synthesiseFinalize`
-  //     with no snapshot on the row). It becomes explicit zero usage so the
-  //     zero-token liveness rule below cannot be defeated by a late
-  //     side-channel metric event.
+  //   - SUCCESS (only via `synthesiseFinalize` with no snapshot): explicit zero
+  //     usage, so a late metric event cannot defeat the zero-token rule.
   //   - NON-SUCCESS (watchdog kill, container crash, runner-declared
   //     failure without a billing block): the run died before it could
   //     post terminal usage. Coercing to zeros here would ERASE the

@@ -12,8 +12,7 @@ import type { TerminalRunResult } from "../types/run-result.ts";
  *   (unknown to the runtime) — sinks MUST forward events they do not
  *   recognise without failing.
  * - `finalize`: called exactly once at the end of the run with the
- *   aggregated result, its terminal `status` stamped
- *   ({@link TerminalRunResult}). Sinks may persist the result, close
+ *   aggregated {@link TerminalRunResult}. Sinks may persist the result, close
  *   connections, flush buffers, etc.
  *
  * Implementations MUST be safe under back-pressure — the runtime awaits

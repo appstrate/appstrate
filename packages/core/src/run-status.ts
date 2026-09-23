@@ -1,17 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Run-status literals — the single source of truth for the `run_status`
- * value set.
- *
- * Lives in core, not in `@appstrate/db`, because db depends on core and core
- * needs the set too (`run-and-wait-client.ts`, the module event contract).
- * `@appstrate/db/run-status` derives its sets and its `pgEnum` from these
- * tuples, never the other way round.
- *
- * **This module MUST stay import-free**: the SPA imports it, directly and
- * through `@appstrate/db/run-status` → `@appstrate/shared-types`.
- */
+/** Run-status literals, the single source of truth. MUST stay import-free (the SPA imports it). */
 
 export const runStatusValues = [
   "pending",
@@ -28,9 +17,5 @@ export type RunStatus = (typeof runStatusValues)[number];
 export const terminalRunStatusValues = ["success", "failed", "timeout", "cancelled"] as const;
 export type TerminalRunStatus = (typeof terminalRunStatusValues)[number];
 
-/**
- * Active (non-terminal) run statuses. Kept as its own tuple so adding a status
- * to {@link runStatusValues} forces an explicit decision about which set it
- * belongs to.
- */
+/** Active (non-terminal) run statuses. */
 export const activeRunStatusValues = ["pending", "running"] as const;

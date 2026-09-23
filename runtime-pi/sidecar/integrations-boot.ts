@@ -810,10 +810,7 @@ async function spawnAndConnectLocalIntegration(params: {
   hiddenTools?: readonly string[];
   /** Log-message prefix: `"integration"` (agent-run) | `"connect-run"`. */
   logLabel: string;
-  /**
-   * Called when a tool result carries the credential-rejected signal. Set on
-   * the agent-run path only: a connect-run has no run to attribute it to.
-   */
+  /** Credential-rejected signal hook; agent-run only (a connect-run has no run to attribute it to). */
   onCredentialRejected?: () => void;
   /** Caller-owned teardown collectors — appended to as resources are built. */
   clients: AppstrateMcpClient[];
@@ -1047,10 +1044,9 @@ async function spawnAndConnectLocalIntegration(params: {
 }
 
 /**
- * Decorate a client so a tool result signalling a rejected credential (a
- * server whose credential never crosses the MITM — SSH, env-delivered keys —
- * has no HTTP 401 to observe) triggers `onRejected`. The result itself is
- * returned untouched: the agent still sees the server's error.
+ * Fire `onRejected` on a credential-rejected tool result: servers whose
+ * credential never crosses the MITM (SSH, env keys) have no 401 to observe.
+ * The result is returned untouched.
  */
 export function reportCredentialRejections(
   client: AppstrateMcpClient,
@@ -1066,11 +1062,7 @@ export function reportCredentialRejections(
   };
 }
 
-/**
- * Route a credential rejection to the platform's forced-refresh endpoint — the
- * same call the MITM makes on an upstream 401 — which counts it toward
- * flagging the connection for reconnect. Fire-and-forget: never fails the tool.
- */
+/** Report a rejection like the MITM does on a 401 (forced refresh); fire-and-forget. */
 function reportRejectedCredential(integrationId: string, opts: BundleFetchOptions): void {
   postIntegrationCredentialsRefresh(integrationId, opts).then(
     (res) =>

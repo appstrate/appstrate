@@ -590,9 +590,8 @@ export async function createVersionFromDraft(params: {
   userId: string;
   version?: string;
   /**
-   * Asserts the draft version the caller read (the route's `If-Match`), against
-   * the snapshot captured under the draft lock: when it throws, nothing is cut
-   * — the version is the draft they saw.
+   * Asserts the draft version the caller read (the route's `If-Match`) against
+   * the snapshot taken under the draft lock; when it throws, nothing is cut.
    */
   assertVersion?: (current: number) => void;
   /** Context-dependent publish gates must validate the captured manifest. */

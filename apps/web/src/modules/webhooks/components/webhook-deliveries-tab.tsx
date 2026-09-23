@@ -50,8 +50,7 @@ function DeliveryPages({ webhookId }: { webhookId: string }) {
   const currentPage = useMemo(() => data?.data ?? [], [data?.data]);
   const hasMore = data?.hasMore ?? false;
 
-  // Merge accumulated pages with the current one, deduping by id (the current
-  // page briefly overlaps the accumulator between "Load more" and the fetch).
+  // Dedup by id: the current page briefly overlaps the accumulated ones.
   const deliveries = useMemo(() => {
     const seen = new Set<string>();
     return [...loadedPages, ...currentPage].filter((d) => !seen.has(d.id) && seen.add(d.id));

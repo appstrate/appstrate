@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * pi-ai's OAuth login constants, read from its shipped source. connect-helper
- * mints subscription tokens through that login; the model-provider modules
- * refresh them, and a refresh under another `client_id` or token endpoint is
- * rejected upstream. pi-ai keeps the constants module-private, so each module's
- * parity test reads them here. pi-ai resolves from the repo root, so no module
- * needs it as a dependency.
+ * pi-ai's module-private OAuth constants, read from its shipped source for the
+ * model-provider parity tests: connect-helper logs in through pi-ai, and a
+ * refresh under another `client_id` or token endpoint is rejected upstream.
  */
 
 import { dirname, join } from "node:path";
@@ -28,10 +25,7 @@ function piConst(src: string, name: string): string {
   throw new Error(`unrecognised pi-ai expression for ${name}: ${expr}`);
 }
 
-/**
- * The OAuth config pi-ai logs in with, from `auth/oauth/<providerFile>`, in the
- * shape a module declares under `modelProviders()[].oauth`.
- */
+/** pi-ai's OAuth config from `auth/oauth/<providerFile>`, shaped as `modelProviders()[].oauth`. */
 export async function piAiOAuthConfig(providerFile: string, scopeConst: string) {
   const src = await Bun.file(join(PI_AI_DIR, "auth/oauth", providerFile)).text();
   return {

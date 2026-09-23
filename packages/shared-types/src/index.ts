@@ -300,9 +300,7 @@ export interface ResourceEntry {
 // barrel: this module is consumed by the SPA, and a value import from
 // `@appstrate/db/schema` cannot be elided by the bundler — it shipped
 // drizzle-orm plus all 18 schema files (table + column names included) to
-// the browser. `run-status.ts` is import-free and derives from the tuples of
-// `@appstrate/core/run-status` (import `RunStatus` from there), as does
-// `runStatusEnum`, so there is still exactly one list of statuses.
+// the browser. `run-status.ts` is import-free, so there is one list of statuses.
 export { TERMINAL_RUN_STATUSES, ACTIVE_RUN_STATUSES } from "@appstrate/db/run-status";
 
 // --- Auth policy ---
@@ -461,7 +459,7 @@ export interface MeConnectionEntry {
   connected_at: string;
   needs_reconnection: boolean;
   expiresAt: string | null;
-  /** Human-friendly identity (accountEmail, sub claim); `null` when the provider exposed none. */
+  /** Human-friendly identity (accountEmail, sub claim); `null` = none exposed. */
   identity: string | null;
   /** Which auth slot this connection satisfies. */
   auth_key: string;
@@ -941,11 +939,10 @@ export interface OrgModelInfo extends ModelMetadata {
   is_default: boolean;
   /**
    * True when the model's stored credential can no longer be used for
-   * inference — a credential flagged `needsReconnection` (an OAuth refresh
-   * token revoked, or an API key the upstream rejected on consecutive calls),
-   * or a stored blob that no longer decrypts (e.g. a key rotation that
-   * retired a kid still in use). The model is listed (so it can be
-   * inspected/detached/deleted) but must never be selectable for inference. Always false for built-in/system models, which
+   * inference — flagged `needsReconnection` (revoked OAuth refresh token, or
+   * an API key repeatedly rejected) or a blob that no longer decrypts. The
+   * model is listed (inspect/detach/delete) but never selectable for
+   * inference. Always false for built-in/system models, which
    * read their key from the environment and have no stored blob.
    *
    * snake_case on purpose: mirrors {@link ModelProviderCredentialInfo.needs_reconnection}
@@ -1003,7 +1000,7 @@ export interface ModelProviderCredentialInfo {
   providerId?: string | null;
   /** Surface email of the OAuth account (extracted from the access-token identity claim). UI shows it as transparency hint. */
   oauth_email?: string | null;
-  /** True when the credential is dead: an OAuth `invalid_grant`, an API key rejected (401) on consecutive calls, or a blob that no longer decrypts. UI surfaces a "Reconnect" (OAuth) or "unavailable" + Edit (API key) badge. */
+  /** True when the credential is dead (`invalid_grant`, repeated 401, or undecryptable). */
   needs_reconnection?: boolean;
   /**
    * Model ids empirically verified against this credential by the

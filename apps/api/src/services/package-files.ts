@@ -574,10 +574,8 @@ export function createPackageDraft(
 
 export type MutateDraftFilesInput = {
   /**
-   * An authored write asserts the draft version it was based on — evaluated
-   * here, under the draft lock, so the check and the write are one step (the
-   * route passes its `If-Match` evaluation). Imports may deliberately replace
-   * a draft, optionally pinned to the version the importer read.
+   * The draft-version assertion (the route's `If-Match`), evaluated under the
+   * draft lock so check and write are one step. Imports may omit it.
    */
   precondition:
     { assertVersion: (current: number) => void } | { imported: true; lockVersion?: number };

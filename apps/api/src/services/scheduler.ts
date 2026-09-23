@@ -332,10 +332,8 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
 }
 
 /**
- * Stamp a fire on its schedule. `enabled` is re-read because the trigger may
- * have just disabled the schedule (invalid actor) — a disabled schedule must
- * not get a fresh nextRunAt re-armed onto it. `updatedAt` is left alone: a
- * fire is not an edit, and `updatedAt` is the schedule's ETag.
+ * Stamp a fire on its schedule. `enabled` is re-read (the trigger may have just
+ * disabled it); `updatedAt` is left alone since it is the schedule's ETag.
  */
 export async function recordScheduleFire(scheduleId: string, scope: SpaceScope): Promise<void> {
   const schedule = await loadSchedule(scheduleId, scope);

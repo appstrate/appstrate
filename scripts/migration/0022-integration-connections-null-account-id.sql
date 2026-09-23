@@ -1,32 +1,10 @@
--- 0022 — `integration_connections.account_id`: the sentinel 'default' → NULL.
---
--- Run right after deploying the release that carries drizzle `0071`: before
--- that migration the column is NOT NULL and this script fails; after it, until
--- this runs, an identity-less connection reads as an account literally named
--- 'default', so reconnecting it with a real identity is refused with 409
--- `identity_mismatch` instead of upgrading it.
---
--- ═══ WHAT IT REPAIRS ═══
---
--- The connect flow used to store the string 'default' when the provider
--- exposed no identity (an API key, a login secret, a token response with no
--- identity claim), and special-cased it everywhere as "no identity". NULL now
--- carries that meaning and 'default' is an ordinary account id. Every stored
--- 'default' was written by the sentinel: the identity chain reads an email, a
--- login or a `sub`, none of which a provider spells `default`.
---
--- ═══ WHAT IT DOES ═══
---
--- One `UPDATE`, on the rows that still read 'default': a second run matches
--- nothing. `label` is untouched — it was fixed at creation ("Connexion N" for
--- these rows) and never read the account id again.
---
--- ═══ PRE-FLIGHT (read-only) ═══
---
---   SELECT count(*) FROM integration_connections WHERE account_id = 'default';
---
--- Rows: UNMEASURED — not rehearsed against a restored dump. Do that first
--- (README requirement 4) and record the count the script prints.
+-- 0022 — `integration_connections.account_id`: the old no-identity sentinel
+-- 'default' → NULL (every stored 'default' was written by the sentinel).
+-- Run right after deploying the release carrying drizzle `0071` (before it the
+-- column is NOT NULL and this fails; until this runs, reconnecting such a row
+-- with a real identity answers 409 `identity_mismatch`).
+-- Cost: one UPDATE on the matching rows; idempotent; `label` untouched. Rows:
+-- UNMEASURED — rehearse on a restored dump first (README requirement 4).
 
 BEGIN;
 SET LOCAL lock_timeout = '3s';

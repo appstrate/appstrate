@@ -593,10 +593,7 @@ export const modelCostSchema = z.object({
   cacheWrite: z.number().nonnegative().optional(),
 });
 
-/**
- * Input modalities a model can declare — exactly what the Pi runtime accepts
- * at container boot, so a value it would refuse is refused at the API instead.
- */
+/** Input modalities a model can declare — exactly what the Pi runtime accepts. */
 export const MODEL_INPUT_MODALITIES = ["text", "image"] as const;
 
 export const modelInputModalitySchema = z.enum(MODEL_INPUT_MODALITIES);
@@ -1613,16 +1610,9 @@ export interface PlatformServices {
    */
   setFileStorageLimit(orgId: string, bytes: number | null): Promise<void>;
   /**
-   * Append one row to the platform's `audit_events` trail for a state change a
-   * module route made. The table is platform-owned and a module may not write
-   * platform tables, so without this seam a module mutation cannot be audited.
-   *
-   * The org, space, actor, IP, user agent and request id are derived from the
-   * request context `c`, exactly as for a core route, so a module can neither
-   * forge nor forget them. `action` follows the platform vocabulary (a verb
-   * scoped by resource, `billing.plan_changed`); `before` / `after` take
-   * camelCase keys and never a secret. Best-effort like every audit write: a
-   * failed insert is logged and the promise still resolves.
+   * Append one `audit_events` row for a module route's state change; org, space,
+   * actor and request metadata come from `c`. `action` e.g. `billing.plan_changed`;
+   * `before` / `after` use camelCase keys, never a secret. Best-effort (never throws).
    */
   audit: {
     record(

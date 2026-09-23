@@ -108,11 +108,7 @@ export const chatSessions = pgTable(
  * down exactly as before, it is simply no longer stored. Do not "simplify" that
  * argument away — every `gen_…` id already persisted was derived with it.
  */
-/**
- * `chat_messages.content` — an AI SDK `UIMessage` without its `id`, validated by
- * `safeValidateUIMessages` before it is written. Declared structurally because
- * this package does not depend on `ai`.
- */
+/** An AI SDK `UIMessage` without its `id`, declared structurally (no `ai` dep here). */
 export interface ChatMessageContent {
   role: string;
   parts: unknown[];

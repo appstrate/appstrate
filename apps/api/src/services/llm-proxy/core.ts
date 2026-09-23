@@ -348,12 +348,8 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
 }
 
 /**
- * Feed the upstream's verdict on an org-owned API key into the credential's
- * failure streak, so a revoked key ends up flagged `needs_reconnection` like a
- * dead OAuth grant. Only 401 counts: providers answer 403 for a key that is
- * valid but not entitled to this model or region, which re-entering the key
- * would not fix. Platform keys (`credentialId` unset) are the operator's.
- * Never fails the call — the caller gets the upstream response either way.
+ * Feed the upstream's verdict on an org-owned API key into its failure streak.
+ * Only 401 counts (403 means valid but not entitled). Never fails the call.
  */
 async function trackCredentialHealth(
   orgId: string,

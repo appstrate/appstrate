@@ -757,38 +757,23 @@ rule, the dated catalog snapshot, dry run/apply, rollback — in the file header
 
 ## Detail — Space-assignment key casing (script `0021`)
 
-**Not a runbook.** `SpaceAssignment` spells its space id `spaceId`, the
-universal-id carve-out of `docs/CASING_CONVENTIONS.md`; it used to be
-`space_id`. Two columns store that shape verbatim —
-`org_invitations.space_assignments` and `oauth_clients.signup_space_assignments`
-— so their rows move with it. `0021` renames the key in every array element that
-still carries `space_id`, keeping element order, and aborts if any row still
-carries it afterwards. Run it inside the deploy window, old application stopped,
-new one not yet started: each build reads only its own spelling, so a row in the
-other one grants nothing on accept or on SSO signup. Idempotent without a marker.
+**Not a runbook.** `SpaceAssignment` spells its space id `spaceId`; `0021`
+renames the stored `space_id` keys. Run it inside the deploy window — each build
+reads only its own spelling. Details in the file header.
 
 ## Detail — Identity-less connections (drizzle `0071`, script `0022`)
 
-**Not a runbook.** `integration_connections.account_id` is NULL when the
-provider exposed no identity; it used to hold the string `'default'`, which the
-connect flow special-cased and which made a real account named `default`
-indistinguishable from none. `0071` drops the column's `NOT NULL` and writes
-nothing (a `DROP NOT NULL` scans no row, so it licenses no repair). `0022`
-rewrites the stored `'default'` rows to NULL and aborts if any remains. Run it
-right after the deploy: until it has, such a row reads as an account named
-`default`, and reconnecting it with a real identity answers 409
-`identity_mismatch` instead of upgrading it. Idempotent without a marker.
+**Not a runbook.** A connection with no provider identity has a NULL
+`account_id`. `0071` drops `NOT NULL` and writes nothing; `0022` rewrites the
+stored `'default'` sentinel rows to NULL. Run it right after the deploy. Details
+in the file header.
 
 ## Detail — Retired API-key format (script `0023`)
 
 **Not a runbook.** API keys are `apst_` + 30 base62 characters + a base62
-CRC32; an `ask_` key is refused with 401 `api_key_format_retired` before any
-lookup, and cannot be converted since only its hash is stored. `0023` sets
-`revoked_at` on every unrevoked key whose `key_prefix` starts with `ask_`, so
-Settings → API keys stops listing keys that can no longer authenticate. It
-revokes rather than deletes: `runs.api_key_id` and the audit trail keep
-resolving. Run it once, after the deploy. Idempotent without a marker; aborts
-if any `ask_` key is left unrevoked.
+CRC32; `ask_` keys are refused and cannot be converted. `0023` revokes (never
+deletes) the unrevoked `ask_` keys. Run it once, after the deploy. Details in
+the file header.
 
 ## Log
 

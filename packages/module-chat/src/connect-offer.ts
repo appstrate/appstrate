@@ -91,9 +91,7 @@ type OfferSink = ConnectOffer[] | null;
 
 /**
  * Optional offer fields, read under their wire spelling only — same reason as
- * {@link CONNECT_URL_KEYS}. `expiresAt` and `packageId` are the universal
- * DB-convention spellings (carve-out 4b of `docs/CASING_CONVENTIONS.md`), so
- * they sit camelCase beside the snake_case `connect_url`.
+ * {@link CONNECT_URL_KEYS} (`expiresAt` / `packageId`: casing carve-out 4b).
  */
 function pickOfferFields(obj: Record<string, unknown>): Omit<ConnectOffer, "connect_url"> {
   return {

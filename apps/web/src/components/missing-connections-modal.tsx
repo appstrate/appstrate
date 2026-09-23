@@ -28,10 +28,7 @@ import { useIntegrationDetail, useIntegrationAgentResolution } from "../hooks/us
  *
  * Reusing the picker keeps this modal in lockstep with the dropdown — same
  * candidate list, scope/lock verdicts and connect orchestration — instead of
- * re-deriving an affordance from the static 409 payload (the previous code
- * filtered must_choose candidates down to the 409's `candidate_connections`,
- * which dropped connections needing reconnection and so disagreed with the tab
- * dropdown). Only structural failures — the integration is not active here, or
+ * re-deriving an affordance from the static 409 payload. Only structural failures — the integration is not active here, or
  * its package is missing, mistyped or unloadable — keep a plain message: no
  * connection pick can fix them.
  */

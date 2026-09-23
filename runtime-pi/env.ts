@@ -430,8 +430,6 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     issues,
   );
 
-  // Pi loop knobs — `buildRuntimePiEnv` emits them only to depart from the
-  // runner's defaults.
   const piLoop = parsePiLoopEnv(source);
   issues.push(...piLoop.issues);
 
