@@ -340,28 +340,23 @@ interface Provisioning {
   handoff: (credentials: Record<string, unknown>) => HandoffStep[];
 }
 
-/** Package id → auth key → provisioner. */
-const PROVISIONING: ReadonlyMap<string, ReadonlyMap<string, Provisioning>> = new Map([
+/** `${packageId} ${authKey}` → provisioner; neither half can contain a space. */
+const PROVISIONING: ReadonlyMap<string, Provisioning> = new Map([
   [
-    "@appstrate/ssh",
-    new Map([
-      [
-        "primary",
-        {
-          // NOT `host_key`: the user supplies that.
-          provides: ["private_key"],
-          mint: provisionSshKeyPair,
-          handoff: sshHandoffSteps,
-        },
-      ],
-    ]),
+    "@appstrate/ssh primary",
+    {
+      // NOT `host_key`: the user supplies that.
+      provides: ["private_key"],
+      mint: provisionSshKeyPair,
+      handoff: sshHandoffSteps,
+    },
   ],
 ]);
 
 /** The provisioner of this system package's auth, or null. */
 export function readProvisioning(packageId: string, authKey: string): Provisioning | null {
   if (!isSystemPackage(packageId)) return null;
-  return PROVISIONING.get(packageId)?.get(authKey) ?? null;
+  return PROVISIONING.get(`${packageId} ${authKey}`) ?? null;
 }
 
 /** The steps a connection's credentials imply; `[]` when there are none. */

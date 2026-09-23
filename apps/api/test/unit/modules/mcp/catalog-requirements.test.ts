@@ -160,6 +160,14 @@ const TERMINAL_CATCH_ALLS: ReadonlyArray<{ route: string; why: string }> = [
 /** Without `methods`, every method at the path. */
 type AllowlistEntry = { methods?: readonly string[]; path: string; why: string };
 
+/** One entry per `[methods, path]`, all standing on the same authority. */
+function rowDecided(
+  why: string,
+  routes: ReadonlyArray<readonly [readonly string[], string]>,
+): AllowlistEntry[] {
+  return routes.map(([methods, path]) => ({ methods, path, why }));
+}
+
 /**
  * `/api/` operations with no permission guard — an unguarded route, GET
  * included, is advertised to every caller — each with the authority that
@@ -228,114 +236,52 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
 
   // ── The row the handler loads decides, and refuses with the route's own error.
   // Method-precise: the other methods at these paths carry a mounted guard.
-  {
-    methods: ["GET"],
-    path: "/api/library",
-    why: "the caller's own org role (owner/admin), read in the handler",
-  },
-  {
-    methods: ["POST"],
-    path: "/api/spaces/{spaceId}/packages",
-    why: "`gateSpacePackageWrite`: the per-type permission in the path's space, then the package's rows",
-  },
-  {
-    methods: ["PUT", "DELETE"],
-    path: "/api/spaces/{spaceId}/packages/{scope}/{name}",
-    why: "`gateSpacePackageWrite`: the per-type permission in the path's space, then the package's rows",
-  },
-  {
-    methods: ["GET"],
-    path: "/api/realtime/runs",
-    why: "SSE: `validateSSEAuth`, then the run-read disjunction",
-  },
-  {
-    methods: ["GET"],
-    path: "/api/realtime/runs/{id}",
-    why: "SSE: `validateSSEAuth`, then the run's own visibility",
-  },
-  {
-    methods: ["GET"],
-    path: "/api/realtime/agents/{packageId}/runs",
-    why: "SSE: `validateSSEAuth`, then the run-read disjunction",
-  },
-  {
-    methods: ["DELETE"],
-    path: "/api/files/{id}",
-    why: "`files:delete` OR the file's own creator",
-  },
-  {
-    methods: ["POST"],
-    path: "/api/files/{id}/keep",
-    why: "`files:delete` OR the file's own creator",
-  },
-  {
-    methods: ["GET", "PUT", "DELETE"],
-    path: "/api/webhooks/{id}",
-    why: "`loadWebhookForAction`, judged in the webhook's space",
-  },
-  {
-    methods: ["POST"],
-    path: "/api/webhooks/{id}/test",
-    why: "`loadWebhookForAction`, judged in the webhook's space",
-  },
-  {
-    methods: ["POST"],
-    path: "/api/webhooks/{id}/rotate",
-    why: "`loadWebhookForAction`, judged in the webhook's space",
-  },
-  {
-    methods: ["GET"],
-    path: "/api/webhooks/{id}/deliveries",
-    why: "`loadWebhookForAction`, judged in the webhook's space",
-  },
-  {
-    methods: ["GET", "PUT"],
-    path: "/api/packages/{scope}/{name}/home",
-    why: "the package's home space",
-  },
-  {
-    methods: ["GET", "POST"],
-    path: "/api/packages/{scope}/{name}/shares",
-    why: "`assertPackageShareAccess`: `<type>:share` in the package's home",
-  },
-  {
-    methods: ["DELETE"],
-    path: "/api/packages/{scope}/{name}/shares/{target}",
-    why: "`assertPackageShareAccess`: `<type>:share` in the package's home",
-  },
-  {
-    methods: ["GET"],
-    path: "/api/packages/{scope}/{name}/files",
-    why: "`loadFileExplorerPackage`: placement and `<type>:read`; a draft asks its home",
-  },
-  {
-    methods: ["GET"],
-    path: "/api/packages/{scope}/{name}/files/content",
-    why: "`loadFileExplorerPackage`: placement and `<type>:read`; a draft asks its home",
-  },
-  {
-    methods: ["GET"],
-    path: "/api/packages/{scope}/{name}/{version}/download",
-    why: "placement, `<type>:read` and the org's copy restriction; a draft asks its home",
-  },
-  {
-    methods: ["PUT"],
-    path: "/api/agents/{scope}/{name}/skills",
-    why: "`requirePackageInOrg()`: `agents:write` in the agent's home space",
-  },
+  ...rowDecided("the caller's own org role (owner/admin), read in the handler", [
+    [["GET"], "/api/library"],
+  ]),
+  ...rowDecided("`gateSpacePackageWrite`: the per-type permission in the path's space", [
+    [["POST"], "/api/spaces/{spaceId}/packages"],
+    [["PUT", "DELETE"], "/api/spaces/{spaceId}/packages/{scope}/{name}"],
+  ]),
+  ...rowDecided("SSE: `validateSSEAuth`, then which runs the caller may read", [
+    [["GET"], "/api/realtime/runs"],
+    [["GET"], "/api/realtime/runs/{id}"],
+    [["GET"], "/api/realtime/agents/{packageId}/runs"],
+  ]),
+  ...rowDecided("`files:delete` OR the file's own creator", [
+    [["DELETE"], "/api/files/{id}"],
+    [["POST"], "/api/files/{id}/keep"],
+  ]),
+  ...rowDecided("`loadWebhookForAction`, judged in the webhook's space", [
+    [["GET", "PUT", "DELETE"], "/api/webhooks/{id}"],
+    [["POST"], "/api/webhooks/{id}/test"],
+    [["POST"], "/api/webhooks/{id}/rotate"],
+    [["GET"], "/api/webhooks/{id}/deliveries"],
+  ]),
+  ...rowDecided("the package's home space", [
+    [["GET", "PUT"], "/api/packages/{scope}/{name}/home"],
+  ]),
+  ...rowDecided("`assertPackageShareAccess`: `<type>:share` in the package's home", [
+    [["GET", "POST"], "/api/packages/{scope}/{name}/shares"],
+    [["DELETE"], "/api/packages/{scope}/{name}/shares/{target}"],
+  ]),
+  ...rowDecided("`loadFileExplorerPackage`: placement and `<type>:read`; a draft asks its home", [
+    [["GET"], "/api/packages/{scope}/{name}/files"],
+    [["GET"], "/api/packages/{scope}/{name}/files/content"],
+  ]),
+  ...rowDecided("placement, `<type>:read` and the org's copy restriction; a draft asks its home", [
+    [["GET"], "/api/packages/{scope}/{name}/{version}/download"],
+  ]),
+  ...rowDecided("`requirePackageInOrg()`: `agents:write` in the agent's home space", [
+    [["PUT"], "/api/agents/{scope}/{name}/skills"],
+  ]),
   ...Object.values(PACKAGE_TYPE_ROUTE_SEGMENT).flatMap((segment) =>
-    (
-      [
-        [["PUT", "DELETE"], ""],
-        [["POST"], "/versions"],
-        [["DELETE"], "/versions/{version}"],
-        [["POST"], "/versions/{version}/restore"],
-      ] as const
-    ).map(([methods, suffix]) => ({
-      methods,
-      path: `/api/packages/${segment}/{scope}/{name}${suffix}`,
-      why: "`requirePackageInOrg()`: the type's write/delete permission in the package's home",
-    })),
+    rowDecided("`requirePackageInOrg()`: the type's write/delete permission in its home", [
+      [["PUT", "DELETE"], `/api/packages/${segment}/{scope}/{name}`],
+      [["POST"], `/api/packages/${segment}/{scope}/{name}/versions`],
+      [["DELETE"], `/api/packages/${segment}/{scope}/{name}/versions/{version}`],
+      [["POST"], `/api/packages/${segment}/{scope}/{name}/versions/{version}/restore`],
+    ]),
   ),
 
   // ── Platform-operator authority, outside org RBAC entirely.
