@@ -153,33 +153,17 @@ export function canComposeInline(has: (permission: CorePermission) => boolean): 
   return has("agents:write") && has("agents:run");
 }
 
-/**
- * The two permissions that open a run read surface: `runs:read` (the runs the
- * caller launched) and `runs:read-all` (every run in the space), which implies
- * it — requiring `read` alone would make `read-all` inert on its own.
- *
- * The one spelling of that disjunction: {@link canReadRuns} tests it on a
- * permission set, and the platform's `requireRunsRead` builds its route guard
- * from this same tuple, so the guard and the predicate cannot drift.
- */
+/** `runs:read-all` implies `runs:read`; the platform's `requireRunsRead` guards on this tuple. */
 export const RUNS_READ_PERMISSIONS = [
   "runs:read",
   "runs:read-all",
 ] as const satisfies readonly CorePermission[];
 
-/**
- * Whether a caller may read runs at all — {@link RUNS_READ_PERMISSIONS} on a
- * permission set rather than on a route; a route keeps asking its guard.
- */
 export function canReadRuns(has: (permission: CorePermission) => boolean): boolean {
   return RUNS_READ_PERMISSIONS.some((permission) => has(permission));
 }
 
-/**
- * Whether a caller may launch an agent AND read the run back: a launch nobody
- * can poll still provisions a container and bills the spend. The MCP
- * `run_and_wait` declaration and the chat access chip both ask this.
- */
+/** Launch AND read back: a run nobody can poll still bills. */
 export function canRunAgents(has: (permission: CorePermission) => boolean): boolean {
   return has("agents:run") && canReadRuns(has);
 }
@@ -189,24 +173,15 @@ export type RunLevel = "none" | "read" | "run" | "compose";
 
 const RUN_LEVELS: readonly RunLevel[] = ["none", "read", "run", "compose"];
 
-/** Whether `level` reaches at least `floor` on the ordered scale. */
 export function reaches(level: RunLevel, floor: RunLevel): boolean {
   return RUN_LEVELS.indexOf(level) >= RUN_LEVELS.indexOf(floor);
 }
 
-/**
- * Run level and authoring for a caller, given whether it can dispatch at all
- * (`invokes` is the transport/module half core does not know). The MCP server's
- * tool set, its `instructions`, the chat persona and the web access chip all
- * read this one derivation, so "authors" cannot mean a different conjunction in
- * each of the four.
- */
+/** For surfaces with no route table. `invokes` (can it dispatch at all) gates every level. */
 export function agentCapabilities(
   has: (permission: CorePermission) => boolean,
   invokes: boolean,
 ): { runLevel: RunLevel; authors: boolean } {
-  // `invokes` is a conjunct of every level: a grant the caller cannot dispatch
-  // is a grant it cannot use, and claiming it buys a refusal nobody can explain.
   const runLevel: RunLevel = !invokes
     ? "none"
     : canRunAgents(has)
@@ -755,12 +730,7 @@ export function setPermissionDenialHandler(handler: PermissionDenialHandler | nu
   _denialHandler = handler;
 }
 
-/**
- * Registry symbol carrying the requirement a guard checks: one
- * `resource:action`, or several joined with `|` for a disjunction. A row-aware
- * guard carries none — only the row it loads decides. Read back off Hono's
- * route table via `apps/api/src/middleware/handler-marker.ts`.
- */
+/** A guard's requirement: `a:b`, or `a:b|c:d` for a disjunction. Read off the route table. */
 export const PERMISSION_REQUIREMENT_MARKER = Symbol.for("appstrate.permissionRequirement");
 
 /**
@@ -796,7 +766,6 @@ export function makePermissionGuard(
   // it resolves a row (`apps/api/src/middleware/handler-marker.ts`). A registry
   // symbol, so neither side imports the other.
   Object.defineProperty(guard, Symbol.for("appstrate.permissionGuard"), { value: true });
-  // Read by the same route-table walk — see PERMISSION_REQUIREMENT_MARKER.
   Object.defineProperty(guard, PERMISSION_REQUIREMENT_MARKER, { value: required });
   return guard;
 }

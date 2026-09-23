@@ -187,7 +187,9 @@ const INDEX_TS = readFileSync(
 describe("SPA fallback wiring in index.ts", () => {
   it("mounts the SPA fallback via createSpaFallbackHandler", () => {
     expect(INDEX_TS).toContain(`import { createSpaFallbackHandler } from "./routes/spa.ts"`);
-    expect(INDEX_TS).toContain(`app.get("/*", createSpaFallbackHandler(buildAppConfigScript))`);
+    expect(INDEX_TS).toContain(
+      `app.get("/*", markFallback(createSpaFallbackHandler(buildAppConfigScript)))`,
+    );
   });
 
   it("does not serve the SPA shell from an inline handler (the CSP would vanish)", () => {

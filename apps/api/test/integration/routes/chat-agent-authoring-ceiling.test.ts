@@ -15,7 +15,6 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, memberContext } from "../../helpers/auth.ts";
 import { mcpRpc } from "../../helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
-import { resetCatalog } from "../../../src/modules/mcp/catalog.ts";
 // By path, as `view-as.test.ts` does: the minting secret is process-local to
 // that file, and this is the module instance the chat module registered its
 // auth strategy from.
@@ -35,7 +34,6 @@ let bearer: (authoring: boolean) => Record<string, string>;
 
 beforeEach(async () => {
   await truncateAll();
-  resetCatalog();
   const owner = await createTestContext({ orgSlug: "chat-authoring-ceiling" });
   const builder = await memberContext(owner, "member", "builder");
 

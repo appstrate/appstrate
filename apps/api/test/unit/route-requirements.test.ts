@@ -18,13 +18,16 @@ import { PERMISSION_REQUIREMENT_MARKER } from "@appstrate/core/permissions";
 import {
   deriveRouteRequirements,
   isGranted,
+  markFallback,
   type RouteRequirement,
   type RouteRequirementLookup,
 } from "../../src/lib/route-requirements.ts";
-import { readHandlerMarker } from "../../src/middleware/handler-marker.ts";
+import { markHandler, readHandlerMarker } from "../../src/middleware/handler-marker.ts";
 import { requirePackageInOrg } from "../../src/middleware/guards.ts";
 import {
+  isRowAuthority,
   markSpaceRescope,
+  PERMISSION_GUARD,
   requireAnyPermission,
   requirePermission,
   rowAuthority,
@@ -33,6 +36,9 @@ import { errorHandler } from "../../src/middleware/error-handler.ts";
 import type { AppEnv } from "../../src/types/index.ts";
 
 const ok = () => new Response("ok");
+
+/** A catch-all fallback, fresh each call: the marker is stamped on the function itself. */
+const fallback = () => markFallback(() => new Response("fallback"));
 
 /** A space re-scope, mounted the way `routes/spaces.ts` mounts one. */
 const rescope = () => markSpaceRescope(async (_c: Context<AppEnv>, next: Next) => next());
@@ -156,6 +162,22 @@ describe("lookup — exact mounts", () => {
     expect(requirement.conditional).toBe(true);
   });
 
+  it("takes the row-authority marker, not a bare guard stamp, for the row deciding", () => {
+    // One way to say it: `requirePackageInOrg` carries the marker itself, and a
+    // permission guard naming no requirement is not read as row-aware.
+    expect(isRowAuthority(requirePackageInOrg())).toBe(true);
+    const bareGuard = markHandler(
+      async (_c: Context<AppEnv>, next: Next) => next(),
+      PERMISSION_GUARD,
+    );
+    const requirement = served(
+      tableOf((sub) => sub.delete("/things/:id", bareGuard, ok)),
+      "DELETE",
+      "/api/things/{id}",
+    );
+    expect(requirement.conditional).toBe(false);
+  });
+
   it("reads an explicit `rowAuthority()` the same way — the handler decides", () => {
     // No guard runs before the handler at all: the row it loads is the only
     // authority, and nothing static describes it.
@@ -219,8 +241,7 @@ describe("lookup — prefix mounts", () => {
 
   it("folds a prefix guard onto the prefix's own template", () => {
     // Hono runs `app.use("/api/x/*")` for `/api/x` itself, so a guard mounted
-    // that way gates the collection route too — which is why `spaces.ts`
-    // mounts both forms side by side.
+    // that way gates the collection route too.
     const requirement = served(
       tableOf(
         (sub) => sub.get("/x", ok),
@@ -268,9 +289,9 @@ describe("lookup — prefix mounts", () => {
     expect(table("DELETE", "/api/kept")).toBeUndefined();
   });
 
-  it("keeps a guard mounted as `ALL /*`, which the SPA catch-all rule once ate", () => {
+  it("keeps a guard mounted as `ALL /*`, the SPA catch-all's path", () => {
     // `app.use("/*", …)` and the SPA fallback share a path and nothing else:
-    // discarding both dropped a guard covering the whole app.
+    // discarding both would drop a guard covering the whole app.
     const table = rootTableOf((app) => {
       app.use("/*", requirePermission("agents", "read"));
       app.post("/api/kept", ok);
@@ -280,19 +301,159 @@ describe("lookup — prefix mounts", () => {
     expect(table("GET", "/api/never-mounted")).toBeUndefined();
   });
 
-  it("never serves anything from the root catch-all", () => {
-    // `index.ts` mounts the SPA fallback as `app.get("/*")`, after the `ALL
-    // /api/*` 404. Reading it as a route would answer every GET template ever
-    // spelled, publishing a ghost operation as real and unguarded.
+  it("never serves anything from the root catch-alls", () => {
+    // `index.ts` mounts the `ALL /api/*` 404 and the SPA `GET /*` shell as
+    // marked fallbacks. Reading either as a route would answer every template
+    // ever spelled, publishing a ghost operation as real and unguarded.
     const table = rootTableOf((app) => {
       app.on(["POST", "GET"], "/api/auth/*", ok);
-      app.all("/api/*", ok);
-      app.get("/*", ok);
+      app.all("/api/*", fallback());
+      app.get("/*", fallback());
     });
     expect(table("GET", "/api/ghost")).toBeUndefined();
     expect(table("POST", "/api/ghost")).toBeUndefined();
+    expect(table("GET", "/ghost")).toBeUndefined();
     // The control: a real prefix mount beneath the same catch-all still serves.
     expect(served(table, "POST", "/api/auth/sign-in/email").requirements).toEqual([]);
+  });
+});
+
+describe("lookup — a terminal handler serves, middleware never does", () => {
+  // Hono's route table spells `use("/x", mw)` and `all("/x", handler)` the same
+  // (`ALL /x`); only the handler tells them apart. Each case was checked
+  // against Hono itself: 404 exactly where the table answers `undefined`.
+  it("serves no other method from an exact-path `use`", () => {
+    const table = rootTableOf((app) => {
+      app.use("/api/things/:id", requirePermission("agents", "read"));
+      app.get("/api/things/:id", ok);
+    });
+    expect(served(table, "GET", "/api/things/{id}").requirements).toEqual(["agents:read"]);
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+      expect(table(method, "/api/things/{id}")).toBeUndefined();
+    }
+  });
+
+  it("serves the whole subtree of an `all` prefix mount with a terminal handler", () => {
+    // A proxy: one mount answers every method beneath it, bare prefix included.
+    const table = rootTableOf((app) => app.all("/api/proxy/*", ok));
+    for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE"]) {
+      expect(served(table, method, "/api/proxy/{path}").requirements).toEqual([]);
+    }
+    expect(served(table, "GET", "/api/proxy").requirements).toEqual([]);
+  });
+
+  it("serves from an unmarked catch-all — the marker, not the path, excludes a fallback", () => {
+    const unmarked = rootTableOf((app) => app.all("/api/*", ok));
+    expect(served(unmarked, "POST", "/api/ghost").requirements).toEqual([]);
+    const marked = rootTableOf((app) => app.get("/api/*", fallback()));
+    expect(marked("GET", "/api/ghost")).toBeUndefined();
+  });
+
+  it("stops at the first terminal handler — nothing matching after it is reported", async () => {
+    // Hono answers with the first terminal handler; a guard or marker mounted
+    // after it never runs, so reporting it would hide a reachable operation.
+    const app = new Hono<AppEnv>();
+    app.get("/api/things/:id", ok);
+    app.use("/api/things/*", requireAnyPermission(["agents:write"]), rowAuthority());
+    const requirement = served(deriveRouteRequirements(app.routes), "GET", "/api/things/{id}");
+    expect(requirement.requirements).toEqual([]);
+    expect(requirement.conditional).toBe(false);
+    // The control: Hono answers without running the late guard.
+    expect((await app.request("/api/things/1")).status).toBe(200);
+  });
+
+  it("walks past a constrained route that serves only some values of a `{param}`", async () => {
+    // `{name}` also names `abc`, which the regex refuses: Hono answers it from
+    // the guarded route below, so the walk must reach that guard.
+    const app = new Hono<AppEnv>();
+    app.onError(errorHandler);
+    app.get("/api/things/:id{[0-9]+}", ok);
+    app.get("/api/things/:name", requirePermission("agents", "write"), ok);
+    const table = deriveRouteRequirements(app.routes);
+    expect(served(table, "GET", "/api/things/{name}").requirements).toEqual(["agents:write"]);
+    // A literal the constraint accepts is served in full before the guard.
+    expect(served(table, "GET", "/api/things/42").requirements).toEqual([]);
+    // The control: Hono agrees on both.
+    expect((await app.request("/api/things/abc")).status).toBe(403);
+    expect((await app.request("/api/things/42")).status).toBe(200);
+  });
+
+  it("does not serve a sub-app attached with `mount()` — its handler declares `next`", async () => {
+    const external = (request: Request) => new Response(new URL(request.url).pathname);
+    const app = new Hono<AppEnv>();
+    app.mount("/api/ext", external);
+    expect(deriveRouteRequirements(app.routes)("GET", "/api/ext/{path}")).toBeUndefined();
+    // Hono does answer it: the table refuses on purpose, so boot names the gap.
+    expect((await app.request("/api/ext/a")).status).toBe(200);
+    // The spelling that counts: a route handler forwarding the raw request.
+    const routed = rootTableOf((root) => root.all("/api/ext/*", (c) => external(c.req.raw)));
+    expect(served(routed, "GET", "/api/ext/{path}").requirements).toEqual([]);
+  });
+
+  it("classifies through the wrapper `app.route()` adds for a sub-app's `onError`", () => {
+    const app = mounted((sub) => {
+      sub.use("/things/:id", requirePermission("agents", "read"));
+      sub.get("/things/:id", ok);
+      sub.all("/proxy/*", ok);
+    });
+    const table = deriveRouteRequirements(app.routes);
+    expect(served(table, "GET", "/api/things/{id}").requirements).toEqual(["agents:read"]);
+    expect(table("PUT", "/api/things/{id}")).toBeUndefined();
+    expect(served(table, "DELETE", "/api/proxy/{path}").requirements).toEqual([]);
+    // Fixture check: every handler copied here is a `(c, next)` wrapper, so
+    // an arity read on the wrapper would take the proxy for middleware.
+    const proxy = app.routes.find((route) => route.path === "/api/proxy/*")!;
+    expect(proxy.handler.length).toBe(2);
+  });
+});
+
+describe("lookup — segment by segment, as Hono matches", () => {
+  // Each case below was checked against Hono itself: the guard answers 403 on
+  // a concrete request exactly where the table reports it.
+  const table = tableOf((sub) => {
+    sub.use("/spaces/:spaceId/*", requirePermission("spaces", "read"));
+    sub.get("/spaces/:id/members", ok);
+    sub.get("/spaces/current/members", ok);
+    sub.get("/spaces/:id", ok);
+  });
+
+  it("matches a mount param whatever the template names it", () => {
+    expect(served(table, "GET", "/api/spaces/{id}/members").requirements).toEqual(["spaces:read"]);
+  });
+
+  it("covers a literal template segment with a mount param", () => {
+    expect(served(table, "GET", "/api/spaces/current/members").requirements).toEqual([
+      "spaces:read",
+    ]);
+  });
+
+  it("covers the bare prefix of a param wildcard, and serves it from a param route", () => {
+    expect(served(table, "GET", "/api/spaces/{id}").requirements).toEqual(["spaces:read"]);
+    expect(served(table, "GET", "/api/spaces/x").requirements).toEqual(["spaces:read"]);
+  });
+
+  it("never covers a `{param}` template with a mount literal", () => {
+    // The guard runs for `current` only; `{id}` also names every value it
+    // skips, so attributing it would filter operations it never gates.
+    const literalMount = tableOf((sub) => {
+      sub.use("/spaces/current/*", requirePermission("spaces", "write"));
+      sub.get("/spaces/:id/members", ok);
+    });
+    expect(served(literalMount, "GET", "/api/spaces/{id}/members").requirements).toEqual([]);
+  });
+
+  it("tests a constrained mount param against a literal, and covers a template param", () => {
+    const constrained = tableOf((sub) => {
+      sub.use("/things/:thingId{[0-9]+}/*", requirePermission("agents", "read"));
+      sub.get("/things/42/logs", ok);
+      sub.get("/things/latest/logs", ok);
+      sub.get("/things/:id/logs", ok);
+    });
+    expect(served(constrained, "GET", "/api/things/42/logs").requirements).toEqual(["agents:read"]);
+    expect(served(constrained, "GET", "/api/things/latest/logs").requirements).toEqual([]);
+    expect(served(constrained, "GET", "/api/things/{id}/logs").requirements).toEqual([
+      "agents:read",
+    ]);
   });
 });
 

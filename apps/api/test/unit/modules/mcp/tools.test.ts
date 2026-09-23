@@ -6,22 +6,24 @@
  * request the platform would receive without booting the full app.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import type { Actor } from "@appstrate/connect";
 import {
   getCatalog,
-  resetCatalog,
   buildOperationIndex,
   operationGranted,
+  operationIdGranted,
   type CatalogOperation,
 } from "../../../../src/modules/mcp/catalog.ts";
-import { buildMcpTools, type Dispatch } from "../../../../src/modules/mcp/tools.ts";
+import type { Dispatch } from "../../../../src/modules/mcp/tools.ts";
 import { internalDispatchHeader } from "../../../../src/lib/internal-dispatch.ts";
 import { validateManifest } from "@appstrate/core/validation";
+import { orgPermissions, presetPermissions } from "../../../../src/lib/permissions.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
+import { toolsFor } from "./helpers.ts";
 
 // The tools read the mounted route table (what each operation's guard requires)
 // to decide what this caller is shown.
@@ -60,7 +62,7 @@ function makeTools(
     calls.push(req);
     return respond();
   };
-  const tools = buildMcpTools({
+  const tools = toolsFor({
     origin: "https://test.local",
     authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
     permissions: new Set(permissions),
@@ -82,8 +84,6 @@ function firstOp(predicate: (op: CatalogOperation) => boolean): CatalogOperation
 }
 
 describe("mcp catalog", () => {
-  beforeEach(() => resetCatalog());
-
   it("indexes core operations from the live spec", () => {
     const { operations } = getCatalog();
     expect(operations.size).toBeGreaterThan(50);
@@ -105,8 +105,6 @@ describe("mcp catalog", () => {
  * case here goes red the moment its gate is dropped from `buildMcpTools`.
  */
 describe("buildMcpTools declarations", () => {
-  beforeEach(() => resetCatalog());
-
   const names = (permissions: string[]): string[] => [...makeTools(permissions).byName.keys()];
 
   it("shows a read-only caller neither invoke, run nor files", () => {
@@ -141,11 +139,114 @@ describe("buildMcpTools declarations", () => {
     expect(names(["mcp:read"])).not.toContain("list_files");
     expect(names(["mcp:read", "files:read"])).toContain("list_files");
   });
+
+  // The whole surface, per preset-shaped set: each flag is read off the guard of
+  // the route its tool dispatches to (`runAgent`+`getRun`, `runInline`,
+  // `listFiles`, `importBundle`), so any drift between the two is a diff here.
+  const ALWAYS = [
+    "describe_operation",
+    "get_me",
+    "get_runtime_capabilities",
+    "read_file",
+    "search_operations",
+    "validate_package_file",
+  ];
+  const cases: Array<{
+    who: string;
+    permissions: string[];
+    extra: string[];
+    kinds: string[] | null;
+  }> = [
+    {
+      who: "an admin-like caller",
+      permissions: [
+        "mcp:read",
+        "mcp:invoke",
+        "agents:read",
+        "agents:write",
+        "agents:run",
+        "runs:read-all",
+        "files:read",
+      ],
+      extra: ["import_package_file", "invoke_operation", "list_files", "run_and_wait"],
+      kinds: ["agent", "inline"],
+    },
+    {
+      who: "a runner that cannot read runs back",
+      permissions: ["mcp:read", "mcp:invoke", "agents:read", "agents:run"],
+      extra: ["invoke_operation"],
+      kinds: null,
+    },
+    {
+      who: "a viewer holding `mcp:read` only",
+      permissions: ["mcp:read"],
+      extra: [],
+      kinds: null,
+    },
+    {
+      who: "a launcher that may not author",
+      permissions: ["mcp:read", "mcp:invoke", "agents:run", "runs:read"],
+      extra: ["invoke_operation", "run_and_wait"],
+      kinds: ["agent"],
+    },
+    {
+      // Any package type's `write` opens `POST /api/packages/import-bundle`.
+      who: "a skill author who launches nothing",
+      permissions: ["mcp:read", "mcp:invoke", "skills:write"],
+      extra: ["import_package_file", "invoke_operation"],
+      kinds: null,
+    },
+  ];
+  for (const { who, permissions, extra, kinds } of cases) {
+    it(`declares exactly what the routes grant ${who}`, () => {
+      const { byName } = makeTools(permissions);
+      expect([...byName.keys()].sort()).toEqual([...ALWAYS, ...extra].sort());
+      const properties = byName.get("run_and_wait")?.descriptor.inputSchema.properties as
+        Record<string, { enum?: string[] }> | undefined;
+      expect(properties?.kind?.enum ?? null).toEqual(kinds);
+    });
+  }
+});
+
+/**
+ * `import_package_file` calls the import service directly. The service re-checks
+ * each package's `write`, but nothing after the declaration checks `mcp:invoke`
+ * or that the caller is a user — so each of those, dropped from the gate, lets
+ * a caller import who could not over REST.
+ */
+describe("import_package_file declaration", () => {
+  const imports = (permissions: Iterable<string>, actor?: Actor): boolean =>
+    makeTools([...permissions], false, actor).byName.has("import_package_file");
+
+  it("withholds it from a package writer without `mcp:invoke`", () => {
+    expect(imports(["mcp:read", "agents:write"])).toBe(false);
+    // The control: the same writer with `mcp:invoke` is offered it.
+    expect(imports(["mcp:read", "mcp:invoke", "agents:write"])).toBe(true);
+  });
+
+  it("withholds it from an end-user whatever it holds", () => {
+    const everything = new Set([
+      ...orgPermissions("owner"),
+      ...presetPermissions("admin"),
+      "mcp:read",
+      "mcp:invoke",
+    ]);
+    expect(imports(everything, { type: "end_user", id: "eu_1" })).toBe(false);
+    // The control: the same grants on a user are enough.
+    expect(imports(everything)).toBe(true);
+  });
+});
+
+describe("operationIdGranted", () => {
+  it("answers from the route table and refuses an id the catalog does not know", () => {
+    expect(operationIdGranted("runInline", new Set(["agents:run"]))).toBe(false);
+    expect(operationIdGranted("runInline", new Set(["agents:run", "agents:write"]))).toBe(true);
+    // A rename, not a denial: `false` here would silently hide a tool.
+    expect(() => operationIdGranted("noSuchOperation", new Set())).toThrow(/noSuchOperation/);
+  });
 });
 
 describe("pre-#1177 argument vocabulary", () => {
-  beforeEach(() => resetCatalog());
-
   it("does not rename a retired document_uri argument", async () => {
     const { byName } = makeTools(["mcp:read", "mcp:invoke", "agents:write"]);
     // `validate_package_file` reads `file_uri`. A caller pinned to the old
@@ -158,8 +259,6 @@ describe("pre-#1177 argument vocabulary", () => {
 });
 
 describe("search_operations", () => {
-  beforeEach(() => resetCatalog());
-
   it("returns keyword matches with method/path/summary", async () => {
     const { byName } = makeTools(["mcp:read"]);
     const res = await byName.get("search_operations")!.handler({ query: "agent" }, noExtra);
@@ -284,8 +383,6 @@ describe("search_operations", () => {
 });
 
 describe("describe_operation", () => {
-  beforeEach(() => resetCatalog());
-
   it("returns the operation definition", async () => {
     const op = firstOp(() => true);
     const { byName } = makeTools(["mcp:read"]);
@@ -391,8 +488,6 @@ describe("describe_operation", () => {
 });
 
 describe("invoke_operation", () => {
-  beforeEach(() => resetCatalog());
-
   it("dispatches a GET operation in-process and forwards auth headers", async () => {
     const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
     const { byName, calls } = makeTools(["mcp:read", "mcp:invoke"]);
@@ -684,8 +779,6 @@ describe("invoke_operation", () => {
 });
 
 describe("buildOperationIndex", () => {
-  beforeEach(() => resetCatalog());
-
   /**
    * The ids a rendered index actually lists. Substring matching would lie
    * here: `createAgent` is a substring of `createAgentVersion`, a DIFFERENT
@@ -755,8 +848,6 @@ describe("buildOperationIndex", () => {
 });
 
 describe("buildMcpTools contextInjected", () => {
-  beforeEach(() => resetCatalog());
-
   it("exposes get_me by default (external MCP clients have no injected context)", () => {
     const { byName } = makeTools(["mcp:read"]);
     expect(byName.has("get_me")).toBe(true);
@@ -765,7 +856,7 @@ describe("buildMcpTools contextInjected", () => {
   it("drops get_me when the caller already injected its context, keeping the rest", () => {
     const dispatch: Dispatch = async () =>
       new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
-    const tools = buildMcpTools({
+    const tools = toolsFor({
       origin: "https://test.local",
       authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
       // The full surface, so this asserts on get_me's absence and nothing
@@ -794,19 +885,6 @@ describe("buildMcpTools contextInjected", () => {
       "search_operations",
       "validate_package_file",
     ]);
-  });
-
-  it("exposes package import only to authorized organization users", () => {
-    expect(makeTools(["mcp:read", "mcp:invoke"]).byName.has("import_package_file")).toBe(false);
-    expect(
-      makeTools(["mcp:read", "mcp:invoke", "agents:write"]).byName.has("import_package_file"),
-    ).toBe(true);
-    expect(
-      makeTools(["mcp:read", "mcp:invoke", "agents:write"], false, {
-        type: "end_user",
-        id: "eu_1",
-      }).byName.has("import_package_file"),
-    ).toBe(false);
   });
 
   it("exposes the runtime registry used by package authoring and adapters", async () => {

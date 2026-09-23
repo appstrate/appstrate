@@ -57,11 +57,7 @@ export type ChatEnv = {
      * payload is wider than what is read here. `orgRole` above stays REAL.
      */
     viewAs?: { orgRole: string } & Record<string, unknown>;
-    /**
-     * Role the caller holds in `space`, already resolved UNDER any persona by
-     * `applySpacePermissions` — and for THIS space, which a persona's own
-     * `space` half need not be.
-     */
+    /** Role in THIS space, under any persona (whose own `space` half may name another). */
     spaceRole?: SpaceRoleRefLike;
     orgName?: string;
     orgSlug?: string;
@@ -79,12 +75,9 @@ export type ChatEnv = {
 };
 
 /**
- * Assemble the chat persona from the turn's capabilities. Instructions for an
- * act the turn cannot perform are ABSENT rather than contradicted, so the
- * persona agrees with the tool set the turn's own token is shown; the platform,
- * not this text, refuses the act. The conjunctions themselves are not spelled
- * here — `turnCapabilities` owns them, and the web access chip reads the same
- * derivation.
+ * Instructions for an act the turn cannot perform are ABSENT rather than
+ * contradicted, so the persona agrees with the tools the turn's token is shown;
+ * the platform, not this text, refuses the act.
  */
 export function buildSystemPrompt(capabilities: TurnCapabilities): string {
   const { invokes, authors } = capabilities;
@@ -96,14 +89,11 @@ export function buildSystemPrompt(capabilities: TurnCapabilities): string {
   const inline = (yes: string, no = "") => (mayCompose ? yes : no);
   const author = (yes: string, no = "") => (authors ? yes : no);
   const invoke = (yes: string, no = "") => (invokes ? yes : no);
-  // The id-verbatim bullet has two halves and is dropped whole when neither
-  // applies — a bullet naming no target is worse than no bullet.
+  // Dropped whole when neither half applies: a bullet naming no target misleads.
   const idVerbatimBullet = authors
     ? `- Use every \`@scope/name\` id verbatim: ${runs("in `dependencies.integrations`, in `run_and_wait`'s `scope`/`name`, and in `dependencies.skills`", "in `dependencies.integrations` and in `dependencies.skills`")}.\n`
     : runs("- Use every `@scope/name` id verbatim: in `run_and_wait`'s `scope`/`name`.\n");
-  // Each truncatable list is named under the gate that renders it (agents on
-  // running, skills on authoring): an operation for a list the context never
-  // shows is one its route need not grant. Neither rendered, no bullet.
+  // Only the lists the context renders: the route of one never shown may refuse.
   const fullListOps = [...(mayRun ? ["listAgents"] : []), ...(authors ? ["listSkills"] : [])];
   const truncatedListBullet =
     fullListOps.length > 0
@@ -251,12 +241,8 @@ export function normalizeChatLocale(raw: string | undefined): string {
 }
 
 /**
- * Why a draft-only agent is (or is not) runnable this turn. `home_writable`
- * comes from `/api/me/context`, dispatched with `x-view-as` forwarded, so it
- * FOLLOWS the role preview; only the authoring toggle is invisible to it, that
- * one narrowing the minted token, not these headers. So the not-writable branch
- * names the preview rather than telling the same person they do not author
- * their own agent, and the writable one states the effect alone.
+ * `home_writable` follows the role preview (`/api/me/context` gets `x-view-as`)
+ * but not the authoring toggle, which narrows only the minted token.
  */
 function draftOnlyHint(input: {
   homeWritable: boolean;
@@ -281,15 +267,11 @@ export function formatCallerContext(
   opts: {
     locale?: string;
     now?: Date;
-    /** What the turn may do, as `turnCapabilities` derived it. */
     capabilities: TurnCapabilities;
-    /** Whether a role preview (`X-View-As`) narrowed this turn. */
     rolePreview: boolean;
-    /** Rendered role in the current space, or `null` when there is none to name. */
     spaceRole: string | null;
-    /** The space the turn acts in: path parameter of space-scoped operations. */
     spaceId?: string;
-    /** The TURN's permission set, post-`turnPermissions`. */
+    /** The TURN's set (post-`turnPermissions`): the authoring toggle narrows it. */
     permissions: readonly string[];
   },
 ): string {
@@ -320,13 +302,8 @@ export function formatCallerContext(
     "## Your context",
     `You are assisting ${who}${role ? `, whose role is "${role}"` : ""}${orgLabel}.`,
   ];
-  // Role and permissions as DATA, in the `resource:action` vocabulary an
-  // operation's `required_permissions` and the 403 hint use, so the model joins
-  // the two itself instead of guessing what it may call. The TURN's set, never
-  // the caller's raw one: the authoring toggle narrows the token, and a block
-  // naming what that token cannot do is a lie the platform then refuses.
-  // Space-scoped operations take the space in their PATH; the model has no
-  // other way to learn which one this turn acts in.
+  // Permissions in the vocabulary of `required_permissions` and the 403 hint, so
+  // the model joins the two; space-scoped operations take the space in their PATH.
   if (opts.spaceId) lines.push(`Current space: \`${opts.spaceId}\``);
   if (opts.spaceRole) {
     lines.push(
@@ -388,8 +365,7 @@ export function formatCallerContext(
   } else {
     lines.push("The user has no connected integrations yet.");
   }
-  // A turn that cannot launch has no runnable agent to be shown one; the
-  // section is absent rather than listed with every entry marked unreachable.
+  // No launch, no section: better absent than every entry marked unreachable.
   if (ctx.agents?.length && runnable) {
     lines.push("", "## Existing agents you can run");
     for (const a of ctx.agents) {
@@ -426,15 +402,11 @@ export function formatCallerContext(
   }
   // `/api/me/context` also carries `recent_runs`, deliberately neither read nor rendered here: it
   // rewrites itself on every launch, busting the system prompt's single cache breakpoint.
-  // `buildSystemPrompt` tells the model to call `listRuns` instead — when the turn may read
-  // runs at all; a turn that may not is told nothing about run history either way.
+  // `buildSystemPrompt` tells the model to call `listRuns` instead (when the turn reads runs).
   return lines.join("\n");
 }
 
-/**
- * A space role as the context line names it: the preset, or a custom bundle's
- * own name (its id when unnamed). `null` when there is no role to name.
- */
+/** The preset, or a custom bundle's name (its id when unnamed). */
 function spaceRoleLabel(ref: SpaceRoleRefLike | undefined | null): string | null {
   if (!ref) return null;
   if (ref.kind === "preset") return ref.preset;
@@ -464,9 +436,7 @@ export async function buildCallerContextBlock(
     deps: ChatPlatformDeps;
     /** UI language forwarded by the client (`X-Chat-Locale`); defaults to fr. */
     locale?: string;
-    /** What the turn may do, derived from its post-`turnPermissions` set. */
     capabilities: TurnCapabilities;
-    /** The turn's permission set, post-`turnPermissions`. */
     permissions: readonly string[];
   },
 ): Promise<string> {

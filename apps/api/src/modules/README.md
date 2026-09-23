@@ -34,10 +34,11 @@ apps/api/src/modules/<id>/
 
 Module tests are split by dependency footprint, not by feature:
 
-- **Colocate in `apps/api/src/modules/<id>/test/`** — pure unit tests of module-internal logic that do not need a database, a running Hono app, or the shared `test/helpers/` infrastructure (e.g. envelope builders, signing, cron parsing, schema coercion).
-- **Keep in `apps/api/test/integration/`** — anything that touches the DB, calls the HTTP app via `getTestApp()`, or relies on shared factories (`seedPackage`, `createTestContext`, `truncateAll`). These depend on the global test preload (Docker infra, migrations) and must stay in the top-level test tree so they share one setup cost.
+- **`apps/api/src/modules/<id>/test/`** — pure unit tests of module-internal logic that need no shared `test/helpers/` infrastructure (e.g. envelope builders, signing, cron parsing, schema coercion).
+- **`apps/api/test/unit/modules/<id>/`** — tests that use shared helpers but no data: they read or register the shared test app (`getTestApp()`, `registerTestPlatformApp()`) and stub dispatch, with no seeding, no `truncateAll`, no HTTP request through the app. They run on every PR.
+- **`apps/api/test/integration/`** (or the module's own `src/modules/<id>/test/integration/`) — anything that seeds or reads the DB (`seedPackage`, `createTestContext`, `truncateAll`) or sends requests through the HTTP app. CI excludes `**/test/integration/**` from the PR gate; these run on the `integration` label and post-merge on `main`.
 
-The rule is "colocate tests that can run in isolation, centralize tests that share infrastructure." Don't invent a parallel helper tree inside the module just to avoid an integration import.
+Don't invent a parallel helper tree inside the module just to avoid an integration import.
 
 ## Required manifest shape
 
@@ -503,6 +504,8 @@ Applications embedding Appstrate headlessly that want an "admin dashboard" view 
 ## OpenAPI contributions
 
 Modules that expose HTTP routes should also provide `openApiPaths()` (path items) and, if they use shared response/request shapes, `openApiComponentSchemas()` (component schemas) plus `openApiSchemas()` (Zod → OpenAPI registry entries for request-body validation). The loader merges contributions from every loaded module into the final spec; `scripts/verify-openapi.ts` replays the same merge at check time and flags any mismatch between declared paths and the baseline.
+
+Every operation `openApiPaths()` documents must be served by a terminal handler on a route your router mounts — a middleware alone does not serve, while an `ALL` prefix proxy (`router.all("/x/*", handler)`) serves everything beneath it. A sub-app attached with `mount()` does not serve (its handler is middleware to the route table): forward to it from a route handler instead, `router.all("/x/*", (c) => handler(c.req.raw))`. `registerPlatformApp()` (`apps/api/src/lib/platform-app.ts`) joins each documented operation onto its route's guards at boot and refuses to boot on one no route serves, since it would otherwise be published as needing no permission.
 
 Because discovery is filesystem-based, adding a new endpoint only requires touching the module's own `openapi/` directory — no central list to update.
 
