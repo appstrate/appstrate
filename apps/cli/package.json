@@ -45,13 +45,13 @@
   },
   "dependencies": {
     "@apidevtools/swagger-parser": "^13.0.0",
-    "@clack/prompts": "^1.7.0",
-    "@earendil-works/pi-ai": "0.85.1",
-    "@earendil-works/pi-coding-agent": "0.85.1",
-    "@napi-rs/keyring": "^2.0.0",
+    "@clack/prompts": "^1.8.1",
+    "@earendil-works/pi-ai": "0.86.1",
+    "@earendil-works/pi-coding-agent": "0.86.1",
+    "@napi-rs/keyring": "^2.1.0",
     "async-mutex": "^0.5.0",
     "commander": "^15.0.0",
-    "open": "^11.0.2",
+    "open": "^11.0.4",
     "smol-toml": "^1.7.1",
     "write-file-atomic": "^8.0.0"
   },
