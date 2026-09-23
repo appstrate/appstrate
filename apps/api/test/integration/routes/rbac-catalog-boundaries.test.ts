@@ -516,6 +516,7 @@ describe("shared package authority", () => {
     await db.update(packages).set({ type: "integration" }).where(eq(packages.id, ID));
     await placeIn(privateId);
     const role = await assignGuestCustomRole([
+      "skills:read",
       "skills:write",
       "integrations:write",
       "integrations:read",
