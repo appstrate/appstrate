@@ -20,3 +20,9 @@ export function catalogueHref(type: PackageType, options: { packageId?: string }
   const base = `/catalogue/discover/${kind}`;
   return options.packageId ? `${base}?package=${encodeURIComponent(options.packageId)}` : base;
 }
+
+/**
+ * "Partagés avec vous": every share waiting, across kinds. The route's `type`
+ * segment carries no kind here — the list holds them all.
+ */
+export const CATALOGUE_SHARED_HREF = "/catalogue/shared/all";

@@ -1605,9 +1605,23 @@ response only ever carries the spaces the caller can enter.
 - **Three placement states**, the third being the one the model added: active,
   switched off, and SHARED — a placement somebody made and nobody switched on.
   Turning the switch on IS accepting it; there is nothing else to accept.
-- **A share is one click from its decision.** The alert above the list, the
-  navigation's badge and the bell all open THE package's sheet when exactly one
-  share waits, and the list filtered on shares when several do.
+- **"Partagés avec vous" heads the rail** while any share waits: one list
+  across kinds, one row per decision (a package and one space — shared with
+  two of your spaces is two rows), with "Activer dans {espace}" on the line, or
+  "Demandez à un administrateur de {espace}" when the reader holds no right
+  there. Activating removes the row: it is a queue of decisions, not a
+  history. Before it, several shares were scattered over the kind tabs, and a
+  skill waiting behind an agent was found by nobody.
+- **One rule for every way in** (`usePendingSharesHref`): one share waiting →
+  that package's sheet; several, whatever their kinds → "Partagés avec vous";
+  none → the catalogue's default. The navigation entry and the bell follow it,
+  and the per-kind alert above the lists is gone — it counted one kind while
+  the badge counted all, two numbers for one question.
+- **"Ajouter" asks both rights it needs.** Activating a package not yet placed
+  in the target space makes the route SHARE it first, which needs `<type>:share`
+  in its home as well as the activation right in the target. The card, the
+  sheet's switches and the matrix's cells asked only the second, so a member
+  could be offered a deed the server refused (`mayActivateIn`).
 - **The navigation carries the shares**, because nothing else does: the share
   route notifies a PERSON and says nothing when the target is a team space
   (`createPackageShareNotification`, gated on `recipientUserId`). The count is

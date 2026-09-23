@@ -117,5 +117,30 @@ export function inPlacedTab(placement: CataloguePlacement): boolean {
  * three decisions, taken by three different people.
  */
 export function pendingOfferCount(packages: readonly LibraryPackageItem[]): number {
-  return packages.reduce((total, pkg) => total + pkg.placements.filter(isPendingOffer).length, 0);
+  return pendingShares(packages).length;
+}
+
+/** One decision waiting: this package, shared with this space, by this person. */
+export interface PendingShare {
+  pkg: LibraryPackageItem;
+  spaceId: string;
+  /** `null` for a share nobody authored (the one a home move leaves behind). */
+  sharedBy: string | null;
+}
+
+/**
+ * Every decision waiting, across kinds — what "Partagés avec vous" lists.
+ *
+ * One entry per PLACEMENT, for the reason the count above gives: a package
+ * shared with two of the reader's spaces asks two spaces to decide, and each
+ * answer is its own switch.
+ */
+export function pendingShares(packages: readonly LibraryPackageItem[]): PendingShare[] {
+  return packages.flatMap((pkg) =>
+    pkg.placements.filter(isPendingOffer).map((placement) => ({
+      pkg,
+      spaceId: placement.space_id,
+      sharedBy: placement.shared_by?.name ?? null,
+    })),
+  );
 }

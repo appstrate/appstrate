@@ -52,7 +52,6 @@ import {
   Wrench,
 } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { Alert } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import type { PackageType } from "@appstrate/core/validation";
@@ -61,6 +60,7 @@ import { MoveHomeSpaceDialog } from "./package-detail/move-home-space-dialog";
 import { SharePackageDialog } from "./package-detail/share-package-dialog";
 import { ActivationClosureDialog } from "./catalogue-activation-dialog";
 import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
+import { catalogueHref } from "../lib/catalogue-link";
 import { useOrg } from "../hooks/use-org";
 import { useSpaces } from "../hooks/use-spaces";
 import { fetchPackageDetail } from "../hooks/use-packages";
@@ -78,6 +78,7 @@ import {
 import {
   cataloguePlacement,
   inPlacedTab,
+  pendingShares,
   type CataloguePlacement,
   type PlacementState,
 } from "../lib/catalogue-placement";
@@ -95,6 +96,7 @@ import { CollectionTabs } from "./collection-tabs";
 import type { CardItem } from "../pages/package-list";
 import { CataloguePreview } from "./catalogue-preview";
 import { CatalogueMenuItems } from "./catalogue-row";
+import { CatalogueShared } from "./catalogue-shared";
 import { PageActionsMenu } from "./page-actions-menu";
 import { PanelDialog } from "./panel-dialog";
 import { PackageCollection } from "./package-collection";
@@ -125,10 +127,11 @@ import { Spinner } from "./spinner";
  * The old spellings (`org`, `appstrate`) still resolve — they are in links,
  * in the navigation and in bookmarks — and land on the placed tab.
  */
-export type CatalogueScope = "placed" | "discover";
+export type CatalogueScope = "placed" | "discover" | "shared";
 
 function catalogueScope(raw: string): CatalogueScope {
-  return raw === "discover" ? "discover" : "placed";
+  if (raw === "discover" || raw === "shared") return raw;
+  return "placed";
 }
 
 const KINDS: Array<{ type: PackageType; icon: typeof Layers; titleKey: string }> = [
@@ -276,6 +279,19 @@ export function OrgCatalogueModal({
     };
   };
   const canActivate = (item: CardItem) => canInstall(item, stateOf(item));
+  /**
+   * May this reader switch the package ON in that space?
+   *
+   * Two verdicts, and the card used to ask only the first: the activation
+   * right in the target space, and — when the package is not placed there
+   * yet — the SHARE right in its home, since the route shares it before it
+   * activates it (`routes/spaces.ts`). Without the second, a member saw an
+   * "Ajouter" the server refused.
+   */
+  const mayActivateIn = (pkg: LibraryPackageItem, targetSpaceId: string) =>
+    maySetPackageActive(grantById.get(targetSpaceId), pkg.type, true) &&
+    (pkg.placements.some((placement) => placement.space_id === targetSpaceId) ||
+      pkg.home_shareable === true);
   const rowOf = (item: CardItem) => ofKind.find((row) => row.id === item.id);
   const writableOf = (item: CardItem) => rowOf(item)?.home_writable === true;
   const shareableOf = (item: CardItem) => rowOf(item)?.home_shareable === true;
@@ -369,16 +385,6 @@ export function OrgCatalogueModal({
     if (states.length === 0) return true;
     return statesIn(placement).some((state) => states.includes(state));
   });
-  /** Shares waiting for a decision, in every space this caller reaches. */
-  const pendingAll = ofKind.reduce((total, item) => {
-    const placement = placementById.get(item.id);
-    return total + (placement?.offeredIn.length ?? 0);
-  }, 0);
-  /** The one package waiting, when there is exactly one: its sheet is the answer. */
-  const pendingOne =
-    pendingAll === 1
-      ? ofKind.find((item) => (placementById.get(item.id)?.offeredIn.length ?? 0) > 0)?.id
-      : undefined;
   const stateFilter: FilterSpec = {
     id: "state",
     label: t("catalogue.filter.state"),
@@ -448,7 +454,7 @@ export function OrgCatalogueModal({
     // other spaces?") is the matrix, one tab away.
     const placement = placementById.get(item.id);
     const activeHere = placement?.here === "active";
-    const mayAddHere = maySetPackageActive(grantById.get(spaceId ?? ""), active, true);
+    const mayAddHere = spaceId ? mayActivateIn(item, spaceId) : false;
     // A share waiting on one of the reader's spaces is said on the card too:
     // browsing must not be the one reading where a decision stays invisible.
     const sharer = placement ? Object.values(placement.offeredBy).find(Boolean) : undefined;
@@ -540,7 +546,7 @@ export function OrgCatalogueModal({
    * turning a switch on is rare, and holding a detail per row is not.
    */
   const onSetActive = async (item: CardItem, targetSpaceId: string, next: boolean) => {
-    if (!next || active !== "agent") return setActive(item, targetSpaceId, next);
+    if (!next || item.type !== "agent") return setActive(item, targetSpaceId, next);
     let declared: { id: string }[];
     try {
       const detail = await qc.fetchQuery({
@@ -572,6 +578,7 @@ export function OrgCatalogueModal({
     currentSpaceId: spaceId,
     type: active,
     placementOf: (item) => placementById.get(item.id),
+    shareableOf,
     busy: activate.isPending,
     onSetActive: (item, targetSpaceId, next) => void onSetActive(item, targetSpaceId, next),
   });
@@ -642,10 +649,24 @@ export function OrgCatalogueModal({
       icon={entry.icon}
       label={t(entry.titleKey)}
       count={library?.packages[entry.type]?.length}
-      active={entry.type === active}
-      onClick={() => show(scope, entry.type)}
+      active={scope !== "shared" && entry.type === active}
+      onClick={() => show(scope === "shared" ? "discover" : scope, entry.type)}
     />
   ));
+  // Every share waiting, across kinds: the list a decision is taken from when
+  // there is more than one. Shown while any waits, and while it is open, so
+  // the last activation leaves the reader on its empty state, not elsewhere.
+  const shares = pendingShares(Object.values(library?.packages ?? {}).flat());
+  const showShared = shares.length > 0 || scope === "shared";
+  const sharedRow = showShared ? (
+    <RailButton
+      icon={Inbox}
+      label={t("catalogue.shared.title")}
+      count={shares.length}
+      active={scope === "shared"}
+      onClick={() => show("shared", active)}
+    />
+  ) : null;
 
   // The settings rail, to the pixel: same header, same titled group, same rows.
   // The two readings left it for the bar; the kinds are its only axis.
@@ -653,6 +674,7 @@ export function OrgCatalogueModal({
     <div className="flex h-full flex-col">
       <RailHeader icon={LibraryBig} title={t("catalogue.title")} />
       <div className="flex-1">
+        {sharedRow && <div className="px-3 pt-3">{sharedRow}</div>}
         <RailGroup title={t("catalogue.kinds")}>
           <nav className="flex flex-col gap-0.5" aria-label={t("catalogue.kinds")}>
             {kindRows}
@@ -665,15 +687,28 @@ export function OrgCatalogueModal({
   const mobileNav = (
     <div>
       <nav aria-label={t("catalogue.kinds")} className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1">
+        {showShared && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-pressed={scope === "shared"}
+            className="aria-pressed:bg-accent shrink-0 gap-2 px-3"
+            onClick={() => show("shared", active)}
+          >
+            <Inbox className="size-4 shrink-0" />
+            {t("catalogue.shared.title")}
+          </Button>
+        )}
         {visibleKinds.map((entry) => (
           <Button
             key={entry.type}
             type="button"
             variant="ghost"
             size="sm"
-            aria-pressed={entry.type === active}
+            aria-pressed={scope !== "shared" && entry.type === active}
             className="aria-pressed:bg-accent shrink-0 gap-2 px-3"
-            onClick={() => show(scope, entry.type)}
+            onClick={() => show(scope === "shared" ? "discover" : scope, entry.type)}
           >
             <entry.icon className="size-4 shrink-0" />
             {t(entry.titleKey)}
@@ -729,14 +764,38 @@ export function OrgCatalogueModal({
       }
       onClose={onClose}
     >
-      {reading ? (
+      {scope === "shared" ? (
+        <CatalogueShared
+          shares={shares}
+          spaceNameOf={spaceNameOf}
+          mayActivateIn={mayActivateIn}
+          busy={activate.isPending}
+          onActivate={(pkg, targetSpaceId) =>
+            void onSetActive(
+              {
+                id: pkg.id,
+                displayName: pkg.name || pkg.id,
+                type: pkg.type,
+                source: pkg.source as CardItem["source"],
+              },
+              targetSpaceId,
+              true,
+            )
+          }
+          // The sheet belongs to the package's own kind, so it opens there;
+          // Back returns to that kind's list.
+          onOpen={(pkg) => navigate(catalogueHref(pkg.type, { packageId: pkg.id }))}
+        />
+      ) : reading ? (
         <CataloguePreview
           item={reading}
           type={active}
           spaces={library?.spaces ?? []}
           placement={placementOf(reading)}
           grantOf={(targetSpaceId, next) =>
-            maySetPackageActive(grantById.get(targetSpaceId), active, next)
+            next
+              ? mayActivateIn(reading, targetSpaceId)
+              : maySetPackageActive(grantById.get(targetSpaceId), active, false)
           }
           integrations={library?.packages.integration ?? []}
           agents={library?.packages.agent ?? []}
@@ -789,30 +848,6 @@ export function OrgCatalogueModal({
           view={view}
           header={
             <>
-              {/* Above the title, where every alert in the product sits: it is
-                  the one line asking the reader for a decision, and it must not
-                  wait behind the heading of the list it concerns. */}
-              {pendingAll > 0 && !states.includes("offered") && (
-                <Alert variant="info" className="mb-4">
-                  <Inbox className="h-4 w-4" />
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <span>{t("catalogue.pendingLine", { count: pendingAll })}</span>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      // ONE share means one decision: open that package, where
-                      // the alert names the space and the button activates it.
-                      // Several keep the list, narrowed to them — in either
-                      // reading, since both know the "offered" state.
-                      onClick={() =>
-                        pendingOne ? preview.open(pendingOne) : setStates(["offered"])
-                      }
-                    >
-                      {t("catalogue.pendingShow")}
-                    </Button>
-                  </div>
-                </Alert>
-              )}
               <SettingsHeading className="mb-4" title={t(kind.titleKey)} />
             </>
           }

@@ -19,8 +19,8 @@
  * with the rest of the screen's reading of that model.
  */
 
-import { pendingOfferCount } from "../lib/catalogue-placement";
-import type { PackageType } from "@appstrate/core/validation";
+import { pendingOfferCount, pendingShares } from "../lib/catalogue-placement";
+import { CATALOGUE_SHARED_HREF, catalogueHref } from "../lib/catalogue-link";
 import { useCatalogueLibrary } from "./use-library";
 
 export function usePendingOfferCount(): number {
@@ -29,18 +29,19 @@ export function usePendingOfferCount(): number {
 }
 
 /**
- * Where the navigation's entry should land while offers wait: the first kind
- * holding one, and — when exactly ONE package waits — that package, so the
- * first click opens the decision itself rather than a list to search.
+ * Where a "go to the shares" link lands — ONE rule for the navigation entry,
+ * the bell and the alert, so no two of them disagree:
+ *
+ * - one share waiting → that package's sheet, where the decision is taken;
+ * - several, whatever their kinds → "Partagés avec vous", one list of them all;
+ * - none → `null`, and the caller links wherever it links by default.
  */
-export function usePendingOfferTarget(): { kind: PackageType; packageId: string | null } | null {
+export function usePendingSharesHref(): string | null {
   const { data } = useCatalogueLibrary();
   if (!data) return null;
-  const kinds = ["agent", "skill", "integration", "mcp-server"] as const;
-  const kind = kinds.find((candidate) => pendingOfferCount(data.packages[candidate] ?? []) > 0);
-  if (!kind) return null;
-  const waiting = Object.values(data.packages)
-    .flat()
-    .filter((pkg) => pendingOfferCount([pkg]) > 0);
-  return { kind, packageId: waiting.length === 1 ? waiting[0]!.id : null };
+  const shares = pendingShares(Object.values(data.packages).flat());
+  if (shares.length === 0) return null;
+  if (shares.length > 1) return CATALOGUE_SHARED_HREF;
+  const only = shares[0]!.pkg;
+  return catalogueHref(only.type, { packageId: only.id });
 }

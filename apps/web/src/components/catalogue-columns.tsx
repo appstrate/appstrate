@@ -31,10 +31,6 @@ export interface CatalogueRowState {
   placedHere?: boolean;
   /** Offered here and switched on by nobody — a placement whose state is `none`. */
   offeredHere?: boolean;
-  /**
-   * Available in every space without being switched on at all — what a system
-   * agent, skill or MCP server is. An integration is not: it has a real switch.
-   */
 }
 
 export function useCatalogueSelectColumn({
@@ -162,8 +158,8 @@ export function useCatalogueActionsColumn({
     cell: (item) => (
       <CatalogueRowMenu
         item={item}
-        // A system package has no home to move and no audience to offer: it is
-        // shipped into every space rather than living in one.
+        // A system package has no home to move and no audience to offer: the
+        // server answers `false` for both, so the menu offers neither.
         homeWritable={writableOf(item)}
         homeShareable={shareableOf(item)}
         sharedSpaces={sharedSpacesOf(item)}
@@ -223,6 +219,7 @@ export function useCatalogueSpaceColumns({
   currentSpaceId,
   type,
   placementOf,
+  shareableOf,
   busy,
   onSetActive,
 }: {
@@ -231,6 +228,8 @@ export function useCatalogueSpaceColumns({
   currentSpaceId: string | null;
   type: PackageType;
   placementOf: (item: CardItem) => CataloguePlacement | undefined;
+  /** `home_shareable`: needed to switch a package on where it is not placed yet. */
+  shareableOf?: (item: CardItem) => boolean;
   busy: boolean;
   onSetActive: (item: CardItem, spaceId: string, next: boolean) => void;
 }): DataColumn<CardItem>[] {
@@ -264,8 +263,6 @@ export function useCatalogueSpaceColumns({
     cell: (item) => {
       const placement = placementOf(item);
       if (!placement) return <span className="text-muted-foreground/50">—</span>;
-      // A system agent, skill or MCP server is readable in every space without
-      // a row of its own: there is no switch to offer.
       const state = placement.activeIn.includes(space.id)
         ? "active"
         : placement.offeredIn.includes(space.id)
@@ -273,7 +270,12 @@ export function useCatalogueSpaceColumns({
           : placement.inactiveIn.includes(space.id)
             ? "inactive"
             : null;
-      const mayWrite = maySetPackageActive(space.grant, type, state !== "active");
+      // Switching ON where the package is not placed yet makes the route share
+      // it first, which asks the SHARE right in its home as well: without it
+      // the switch would be one the server refuses.
+      const mayWrite =
+        maySetPackageActive(space.grant, type, state !== "active") &&
+        (state !== null || (shareableOf?.(item) ?? true));
       return (
         // `relative z-10`: the row link paints an overlay over every cell, and
         // anything that answers to the pointer has to sit above it or the row

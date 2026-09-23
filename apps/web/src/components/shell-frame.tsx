@@ -22,7 +22,7 @@ import { ProductTabs } from "@/components/product-tabs";
 import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
 import { openAsModal } from "@/lib/modal-route";
 import { useCatalogueKinds } from "@/hooks/use-catalogue-kinds";
-import { usePendingOfferCount, usePendingOfferTarget } from "@/hooks/use-pending-offers";
+import { usePendingOfferCount, usePendingSharesHref } from "@/hooks/use-pending-offers";
 import { catalogueHref } from "@/lib/catalogue-link";
 import { useSettingsSections } from "@/pages/settings/use-settings-sections";
 import { cn } from "@appstrate/ui/cn";
@@ -55,7 +55,7 @@ export function ShellSidebar({
   const settingsSections = useSettingsSections();
   const catalogueKinds = useCatalogueKinds();
   const pendingOffers = usePendingOfferCount();
-  const pendingTarget = usePendingOfferTarget();
+  const pendingHref = usePendingSharesHref();
   // The page route tree deliberately renders the modal's background location.
   // The address bar is therefore the source of truth for this one global
   // destination while settings are open.
@@ -97,16 +97,10 @@ export function ShellSidebar({
                 </button>
               ) : (
                 <Link
-                  // With offers waiting, the entry opens ON them: the count is a
-                  // promise, and the first click keeps it — on the package
-                  // itself when one alone waits, on the shared ones otherwise.
-                  to={
-                    pendingOffers > 0 && pendingTarget
-                      ? pendingTarget.packageId
-                        ? catalogueHref(pendingTarget.kind, { packageId: pendingTarget.packageId })
-                        : `${catalogueHref(pendingTarget.kind)}?state=offered`
-                      : catalogueHref(catalogueKinds[0] ?? "agent")
-                  }
+                  // With shares waiting, the entry opens ON them: the count is a
+                  // promise, and the first click keeps it (one rule, in
+                  // `usePendingSharesHref`).
+                  to={pendingHref ?? catalogueHref(catalogueKinds[0] ?? "agent")}
                   state={openAsModal(location)}
                 >
                   <LibraryBig />
