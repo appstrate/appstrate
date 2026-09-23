@@ -1478,6 +1478,8 @@
   "catalogue.addTo": "Add to {{space}}",
   "catalogue.addToMenu": "Add to…",
   "catalogue.pendingHere": "Share waiting",
+  "catalogue.nowActiveIn": "{{name}} is now active in {{space}}.",
+  "catalogue.noLongerActiveIn": "{{name}} is no longer active in {{space}}.",
   "catalogue.homeSpace": "Home space",
   "catalogue.sheet.type.agent": "Agent",
   "catalogue.sheet.type.skill": "Skill",

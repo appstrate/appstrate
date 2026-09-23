@@ -21,7 +21,8 @@
  * the matrix ("Par espace") is where several spaces are set at once.
  */
 import { useTranslation } from "react-i18next";
-import { ChevronDown, Plus } from "lucide-react";
+import { Check, ChevronDown, Plus } from "lucide-react";
+import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import {
   DropdownMenu,
@@ -34,6 +35,8 @@ import {
 export interface AddableSpace {
   id: string;
   name: string;
+  /** Already running there: shown ticked, not offered again. */
+  active: boolean;
   /** A share already waits there: adding it is taking that share up. */
   pending: boolean;
 }
@@ -50,10 +53,12 @@ export function CatalogueAddButton({
   onAdd: (spaceId: string) => void;
 }) {
   const { t } = useTranslation("settings");
-  if (spaces.length === 0) return null;
+  const toAdd = spaces.filter((space) => !space.active);
+  if (toAdd.length === 0) return null;
 
+  // One space, and nothing elsewhere to show beside it: one click, named.
   if (spaces.length === 1) {
-    const only = spaces[0]!;
+    const only = toAdd[0]!;
     return (
       <Button
         size="sm"
@@ -82,7 +87,13 @@ export function CatalogueAddButton({
           {t("catalogue.addToMenu")}
         </DropdownMenuLabel>
         {spaces.map((space) => (
-          <DropdownMenuItem key={space.id} onSelect={() => onAdd(space.id)}>
+          // Where it already runs stays in the menu, ticked and inert: the
+          // picture is whole, and a space does not vanish after a click.
+          <DropdownMenuItem key={space.id} disabled={space.active} onSelect={() => onAdd(space.id)}>
+            <Check
+              className={cn("size-3.5 shrink-0", space.active ? "text-success" : "invisible")}
+              aria-hidden
+            />
             <span className="flex min-w-0 flex-1 items-center gap-1.5">
               <span className="truncate">{space.name}</span>
               {space.id === currentSpaceId && (
@@ -91,8 +102,14 @@ export function CatalogueAddButton({
                 </span>
               )}
             </span>
-            {space.pending && (
-              <span className="text-primary shrink-0 text-xs">{t("catalogue.pendingHere")}</span>
+            {space.active ? (
+              <span className="text-muted-foreground shrink-0 text-xs">
+                {t("catalogue.filter.active")}
+              </span>
+            ) : (
+              space.pending && (
+                <span className="text-primary shrink-0 text-xs">{t("catalogue.pendingHere")}</span>
+              )
             )}
           </DropdownMenuItem>
         ))}

@@ -479,19 +479,18 @@ export function OrgCatalogueModal({
           <Wrench className="size-5" aria-hidden />
         </span>
       );
-    // Where this reader could still add it: not running it, and holding what
-    // adding there asks (`mayActivateIn`). The reader's own space comes first,
-    // as everywhere; a space where a share waits says so.
+    // The spaces the add menu shows: where it already runs (ticked, so the
+    // picture is whole and nothing vanishes after a click) and where this
+    // reader could still add it (`mayActivateIn`). Their own space comes
+    // first, as everywhere; a space where a share waits says so.
     const addable = spaces
-      .filter(
-        (space) =>
-          !(placement?.activeIn.includes(space.id) ?? false) && mayActivateIn(item, space.id),
-      )
       .map((space) => ({
         id: space.id,
         name: space.name,
+        active: placement?.activeIn.includes(space.id) ?? false,
         pending: placement?.offeredIn.includes(space.id) ?? false,
-      }));
+      }))
+      .filter((space) => space.active || mayActivateIn(item, space.id));
     // A share waiting on one of the reader's spaces is said on the card too:
     // browsing must not be the one reading where a decision stays invisible.
     const sharer = placement ? Object.values(placement.offeredBy).find(Boolean) : undefined;
@@ -564,10 +563,25 @@ export function OrgCatalogueModal({
     // id rather than naming a space they cannot enter (RBAC spec §6.9).
     return home ? spaceNameOf(home) : null;
   });
+  /**
+   * Every switch, menu item and button that changes where a package runs
+   * lands here, and each one SAYS what it did: a switch that flips is its own
+   * feedback, but a menu that closes on a click, or a row that leaves a list,
+   * is not — the reader was left wondering whether anything happened.
+   */
   const setActive = (item: CardItem, targetSpaceId: string, next: boolean) =>
     activate.mutate(
       { spaceId: targetSpaceId, packageId: item.id, active: next },
-      { onError: (err: unknown) => toast.error(getErrorMessage(err)) },
+      {
+        onSuccess: () =>
+          toast.success(
+            t(next ? "catalogue.nowActiveIn" : "catalogue.noLongerActiveIn", {
+              name: item.displayName,
+              space: spaceNameOf(targetSpaceId),
+            }),
+          ),
+        onError: (err: unknown) => toast.error(getErrorMessage(err)),
+      },
     );
 
   /**

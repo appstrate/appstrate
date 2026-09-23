@@ -1835,11 +1835,18 @@ in Découvrir, which is where you switch it back on.
   share it first, which their share right in the package's home allows — so a
   member without that right sees only the spaces where a share waits. The mark
   is a STATE on purpose: "Partagé par Julie" read as the condition for adding,
-  and the other spaces then looked forbidden. One space per click: checkboxes in a menu are heavier
+  and the other spaces then looked forbidden. The menu also lists the spaces
+  where it ALREADY runs, ticked and inert, so a space does not vanish after a
+  click and the picture stays whole. One space per click: checkboxes in a menu are heavier
   for a rare gesture, and "Par espace" sets several at once. It used to read
   "Ajouter" alone and mean "in the space the app is in", which the card never
   said. `CardItem` gained `icon`, `status` and
   `meta`, all optional: lists that pass none keep their card as it was.
+- **Every change of where a package runs says what it did**, in one place
+  (`setActive`): "Débrief d'appel est maintenant actif dans Bac à sable", or
+  "n'est plus actif dans". A switch is its own feedback, but a menu that closes
+  on a click, or a row that leaves "Partages en attente", is not — the reader
+  was left wondering whether anything had happened.
 - **No reserved second line under a description.** A grid row stretches every
   card to the tallest, so rows stay aligned without the empty line a one-line
   description used to leave, and the keyword strip is drawn only when it has
