@@ -21,7 +21,7 @@
  *   - URI restrictions: `authorized_uris`, `allow_all_uris`.
  */
 
-import type { IntegrationManifest } from "@appstrate/core/integration";
+import { expandScopesGranted, type IntegrationManifest } from "@appstrate/core/integration";
 import type { ManifestDeliveryHttp } from "@appstrate/core/sidecar-types";
 import type { TokenEndpointAuthMethod } from "@appstrate/connect";
 import { renderCredentialTemplate as renderCredentialTemplateCore } from "@appstrate/afps-shared/credential-template";
@@ -352,4 +352,20 @@ export function getAppstrateConnectMeta(
 ): AppstrateConnectMeta | undefined {
   const meta = connect?._meta?.[APPSTRATE_CONNECT_META_KEY];
   return meta && typeof meta === "object" ? (meta as AppstrateConnectMeta) : undefined;
+}
+
+/**
+ * Requested OAuth scopes the provider did not grant, after expanding the grant
+ * through the manifest's `scope_catalog[].implies` — so a provider that echoes
+ * a scope under another name (Google: `email` → `…/auth/userinfo.email`) is
+ * not reported as narrowing the request.
+ */
+export function oauthScopeShortfall(
+  requested: readonly string[],
+  granted: readonly string[],
+  manifest: IntegrationManifest,
+  authKey: string,
+): string[] {
+  const expanded = new Set(expandScopesGranted(granted, manifest, authKey));
+  return requested.filter((s) => !expanded.has(s));
 }

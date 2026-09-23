@@ -4,7 +4,8 @@
  * Unit tests for the pure AFPS integration-manifest accessors — the
  * `source` discriminant narrowing (`local` | `remote` | `none`), the
  * orchestrated-connect `_meta` extension reader, and the
- * `{$credential.<field>}` value-template renderer. Pure functions, no DB.
+ * `{$credential.<field>}` value-template renderer, and the OAuth scope
+ * shortfall diff. Pure functions, no DB.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -15,6 +16,7 @@ import {
   getLocalServerRef,
   getRemoteSource,
   getAppstrateConnectMeta,
+  oauthScopeShortfall,
   type AfpsManifestConnect,
 } from "../../../src/services/integration-manifest-helpers.ts";
 
@@ -175,5 +177,41 @@ describe("getAppstrateConnectMeta", () => {
   it("returns undefined when the connect block or meta is absent", () => {
     expect(getAppstrateConnectMeta(undefined)).toBeUndefined();
     expect(getAppstrateConnectMeta({ tool: {} })).toBeUndefined();
+  });
+});
+
+describe("oauthScopeShortfall", () => {
+  const USERINFO_EMAIL = "https://www.googleapis.com/auth/userinfo.email";
+  const google = manifest(undefined, {
+    oauth: {
+      type: "oauth2",
+      scope_catalog: [
+        { value: USERINFO_EMAIL, implies: ["email"] },
+        { value: "email" },
+        { value: "https://www.googleapis.com/auth/gmail.readonly" },
+      ],
+    },
+  });
+
+  it("reports nothing when the provider echoes an alias the catalog declares", () => {
+    // Google returns `userinfo.email` for a requested `email` (issue #1131).
+    expect(
+      oauthScopeShortfall(["openid", "email"], ["openid", USERINFO_EMAIL], google, "oauth"),
+    ).toEqual([]);
+  });
+
+  it("reports a requested scope the provider genuinely dropped", () => {
+    expect(
+      oauthScopeShortfall(
+        ["email", "https://www.googleapis.com/auth/gmail.readonly"],
+        [USERINFO_EMAIL],
+        google,
+        "oauth",
+      ),
+    ).toEqual(["https://www.googleapis.com/auth/gmail.readonly"]);
+  });
+
+  it("compares verbatim when the auth declares no implies", () => {
+    expect(oauthScopeShortfall(["email"], [USERINFO_EMAIL], google, "other")).toEqual(["email"]);
   });
 });

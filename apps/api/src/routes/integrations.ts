@@ -105,6 +105,7 @@ import { isUserConnectionCreationBlocked } from "../services/integration-connect
 import {
   CLIENT_SECRET_REQUIRED_MESSAGE,
   PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
+  oauthScopeShortfall,
 } from "../services/integration-manifest-helpers.ts";
 import { partitionScopesByAuthCatalog } from "@appstrate/core/integration";
 import {
@@ -509,7 +510,7 @@ export function createIntegrationsRouter() {
     // single credential writer.
     try {
       const scope = { orgId: result.orgId, spaceId: result.spaceId };
-      const { auth } = await readIntegrationAuth(scope, result.packageId, result.authKey);
+      const { manifest, auth } = await readIntegrationAuth(scope, result.packageId, result.authKey);
       const strategy = resolveStrategy(auth);
       await strategy.complete(
         {
@@ -524,7 +525,12 @@ export function createIntegrationsRouter() {
       logger.info("Integration OAuth callback success", {
         packageId: result.packageId,
         authKey: result.authKey,
-        scopeShortfall: result.scopeShortfall,
+        scopeShortfall: oauthScopeShortfall(
+          result.scopesRequested,
+          result.scopesGranted,
+          manifest,
+          result.authKey,
+        ),
       });
     } catch (err) {
       logger.error("Integration OAuth callback persistence failed", {
