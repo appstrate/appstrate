@@ -8,11 +8,7 @@ import { logger } from "../lib/logger.ts";
 import { ApiError, conflict, internalError, notFound } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../lib/list-response.ts";
-import {
-  assertPermission,
-  requirePermission,
-  rowAuthority,
-} from "../middleware/require-permission.ts";
+import { assertPermission, requirePermission } from "../middleware/require-permission.ts";
 import { validateScopes, getApiKeyAllowedScopes } from "../lib/permissions.ts";
 import {
   generateApiKey,
@@ -136,9 +132,7 @@ export function createApiKeysRouter() {
   });
 
   // DELETE /api/api-keys/:id — revoke a key (soft-delete)
-  // `rowAuthority()`: the guard above reads the space the REQUEST entered, and
-  // the key may live in another — the row is what decides.
-  router.delete("/:id", requirePermission("api-keys", "revoke"), rowAuthority(), async (c) => {
+  router.delete("/:id", requirePermission("api-keys", "revoke"), async (c) => {
     const keyId = c.req.param("id")!;
     // `api-keys:revoke` is held PER SPACE (spec §3.4) and the key may live in a
     // different space from the one this request entered, so authority is decided

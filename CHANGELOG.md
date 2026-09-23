@@ -30,6 +30,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   manifest still carries the key, now ignored; it goes at the package's next
   version.
 
+### Removed
+
+- **MCP `describe_operation` no longer returns `conditional`** (#1528). The
+  flag told a client in advance that a granted operation might still be refused
+  on the record it loads; it is gone with the no-op route markers that fed it.
+  `granted`, `required_permissions` and `target_space_permissions` are
+  unchanged. A route that decides on its record still answers with its own
+  problem+json refusal naming the reason (RBAC spec §13.10): MCP clients and
+  models learn of such a refusal from the call, not from the description.
+
 ### Fixed
 
 - **`appstrate … --version` after a command no longer prints the CLI's version

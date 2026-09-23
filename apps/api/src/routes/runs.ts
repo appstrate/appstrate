@@ -34,7 +34,7 @@ import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.
 import { parseListPagination } from "../lib/list-query.ts";
 import { connectionOverridesSchema } from "../lib/launch-schemas.ts";
 import { requireActiveAgent, requireAgent } from "../middleware/guards.ts";
-import { requirePermission, rowAuthority } from "../middleware/require-permission.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
 import { stopWorkloadAndWait } from "../services/stop-workload.ts";
 import { logger } from "../lib/logger.ts";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
@@ -232,7 +232,7 @@ export function createRunsRouter() {
   const router = new Hono<AppEnv>();
 
   // POST /api/agents/:scope/:name/run — execute an agent (fire-and-forget, returns JSON)
-  // `rowAuthority()`: `agents:run` launches a PUBLISHED version. Asking for the
+  // `agents:run` launches a PUBLISHED version. Asking for the
   // working copy — `version=draft`, or a draft `dependency_overrides` key — is
   // judged in the handler against the package's home space, and refused there
   // with `403 draft_not_writable`.
@@ -240,7 +240,6 @@ export function createRunsRouter() {
     `/agents/${SCOPED_PACKAGE_ROUTE}/run`,
     rateLimit(20),
     requirePermission("agents", "run"),
-    rowAuthority(),
     requireAgent(),
     // The execution gate, and only here: an agent placed in this space but
     // switched off does not run, a rerun of one of its past runs included —
@@ -727,7 +726,6 @@ export function createRunsRouter() {
     // The two guards say the caller may compose; every package the posted
     // manifest DEPENDS on is then judged one by one in the handler
     // (`assertPackageDependenciesAccessible`).
-    rowAuthority(),
     idempotency(replayRun),
     async (c) => {
       const orgId = c.get("orgId");
@@ -863,7 +861,6 @@ export function createRunsRouter() {
     // the same per-dependency authority behind it.
     requirePermission("agents", "write"),
     requirePermission("agents", "run"),
-    rowAuthority(),
     async (c) => {
       const orgId = c.get("orgId");
       const spaceId = c.get("spaceId");
