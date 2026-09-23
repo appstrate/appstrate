@@ -76,6 +76,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING (CLI): `appstrate skills sync` is now `appstrate packages sync`.**
+  A skill is a package, and every package command lives under one noun —
+  `packages sync` next to `pull`, `status`, `push` and `publish`. Same flags,
+  same targets, same on-disk state: a machine that synced before keeps its
+  plugin and the skill directories it owns. `appstrate skills` no longer
+  exists. What users do once:
+  - **Claude Code plugin:** the marketplace (`appstrate/claude-plugins`) now
+    runs the new command. Claude Code stops re-running a changed command in the
+    background until it is accepted again: run
+    `claude plugin update appstrate@appstrate` and accept it once.
+  - **CLI older than this release:** the new command is unknown to it; update
+    with `appstrate self-update` (curl install) or
+    `npm i -g appstrate@latest` (npm install).
+  - **Scripts:** a cron or launchd entry running `skills sync` (e.g.
+    `--target claude-user`) must be edited to `packages sync`.
 - **Draft writes have no operation-count limit any more.** A `PUT` carrying file
   operations used to accept at most 200, so a large edit had to be split into
   several non-atomic writes. The real bounds are unchanged: the request body
