@@ -96,12 +96,12 @@ _appstrate_bootstrap() {
   esac
 
   # Default version pinned by `publish-installer.yml` at publish time —
-  # rewriting `v1.0.0-beta.59` so `curl get.appstrate.dev | bash`
+  # rewriting `v1.0.0-beta.60` so `curl get.appstrate.dev | bash`
   # downloads the binary matching the release that published this script.
   # Users can override via APPSTRATE_VERSION env var (e.g. to pin an older
   # release). When the placeholder is still present (local dev / unrendered
   # copy), fall back to `latest` so the script stays runnable out of tree.
-  _DEFAULT_VERSION="v1.0.0-beta.59"
+  _DEFAULT_VERSION="v1.0.0-beta.60"
   if [[ "$_DEFAULT_VERSION" == __* ]]; then _DEFAULT_VERSION="latest"; fi
   VERSION="${APPSTRATE_VERSION:-$_DEFAULT_VERSION}"
   # Rootless default: install into $HOME/.local/bin (XDG user-space equivalent
@@ -141,7 +141,7 @@ _appstrate_bootstrap() {
   # payload) and awk decides once it holds all three. Creation order within a
   # page, unlike the CLI's highest-semver pick: BSD sort has no -V and a
   # semver comparator in awk is not worth it for a path the rendered installer
-  # never takes (it pins `v1.0.0-beta.59`).
+  # never takes (it pins `v1.0.0-beta.60`).
   resolve_latest_platform_release() {
     local page fields tag
     for page in 1 2 3 4 5; do
