@@ -12,7 +12,6 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  canonicalJson,
   diffFiles,
   isIgnoredPath,
   readLock,
@@ -34,7 +33,6 @@ describe("isIgnoredPath", () => {
       ".env",
       "docs/.DS_Store",
       "src/.vscode/settings.json",
-      "node_modules/x/index.js",
       "tools/__pycache__/a.pyc",
       "RECORD",
     ]) {
@@ -43,7 +41,14 @@ describe("isIgnoredPath", () => {
   });
 
   it("keeps ordinary files, including a RECORD that is not the root one", () => {
-    for (const path of ["SKILL.md", "docs/RECORD", "a.b.md", "references/x.md"]) {
+    // `node_modules` is package content: an MCP server bundle ships `server/node_modules`.
+    for (const path of [
+      "SKILL.md",
+      "docs/RECORD",
+      "a.b.md",
+      "references/x.md",
+      "server/node_modules/x/index.js",
+    ]) {
       expect(isIgnoredPath(path)).toBe(false);
     }
   });
@@ -103,14 +108,6 @@ describe("diffFiles", () => {
     const local = { "manifest.json": utf8('{\n  "version": "1.0.0",\n  "name": "@a/b"\n}\n') };
     const remote = { "manifest.json": utf8('{"name":"@a/b","version":"1.0.0"}') };
     expect(diffFiles(local, remote)).toEqual([]);
-  });
-});
-
-describe("canonicalJson", () => {
-  it("sorts keys by code unit at every depth", () => {
-    expect(canonicalJson({ b: 1, B: { z: 1, a: 2 }, a: [3] })).toBe(
-      '{"B":{"a":2,"z":1},"a":[3],"b":1}',
-    );
   });
 });
 
@@ -210,7 +207,7 @@ describe("working folders", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("reads files by NFC path and never reads ignored entries", async () => {
+  it("reads files by NFC path, node_modules included, and never reads ignored entries", async () => {
     await writeFile(join(dir, "SKILL.md"), "x");
     await writeFile(join(dir, "Cafe\u0301.md"), "decomposed");
     await mkdir(join(dir, ".git"));
@@ -221,7 +218,7 @@ describe("working folders", () => {
 
     const files = await readPackageFolder(dir);
 
-    expect(Object.keys(files).sort()).toEqual(["Caf\u00e9.md", "SKILL.md"]);
+    expect(Object.keys(files).sort()).toEqual(["Caf\u00e9.md", "SKILL.md", "node_modules/x/i.js"]);
   });
 
   it("refuses a path no package can carry, naming it", async () => {
@@ -230,10 +227,18 @@ describe("working folders", () => {
     await expect(readPackageFolder(dir)).rejects.toThrow("sales,2024.csv");
   });
 
-  it("refuses a file over the per-file limit before reading it, naming it", async () => {
+  it("reads a file over the per-file write limit: only a write of it is refused", async () => {
     await writeFile(join(dir, "SKILL.md"), "x");
     await writeFile(join(dir, "big.bin"), new Uint8Array(1_048_577));
-    await expect(readPackageFolder(dir)).rejects.toThrow(/big\.bin.*1 MiB/);
+    const files = await readPackageFolder(dir);
+    expect(files["big.bin"]?.byteLength).toBe(1_048_577);
+
+    expect(() => toOperations([{ path: "big.bin", kind: "modified" }], files)).toThrow(
+      /big\.bin.*1 MiB/,
+    );
+    expect(toOperations([{ path: "big.bin", kind: "removed" }], files)).toEqual([
+      { op: "delete", path: "big.bin" },
+    ]);
   });
 
   it("refuses a symbolic link instead of skipping it", async () => {

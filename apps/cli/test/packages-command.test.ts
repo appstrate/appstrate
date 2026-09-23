@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { unzipArtifact, zipArtifact } from "@appstrate/core/zip";
+import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import type { PackageType } from "@appstrate/core/validation";
 import {
   packagesPublishCommand,
@@ -38,13 +39,6 @@ import { ExitError } from "./helpers/process-exit.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-
-const SEGMENT: Record<PackageType, string> = {
-  skill: "skills",
-  agent: "agents",
-  integration: "integrations",
-  "mcp-server": "mcp-servers",
-};
 
 /** Path → text, or bytes for what a push sent as base64. */
 type Tree = Record<string, string | Uint8Array>;
@@ -68,6 +62,11 @@ interface FakePackage {
   publishError?: { status: number; code: string };
   /** Problem the draft PUT answers with instead of writing. */
   putError?: { status: number; code: string };
+  /**
+   * Someone else writes the draft between the PUT's write and its read-back:
+   * the response then carries a lock two steps ahead of the one it was sent.
+   */
+  concurrentWriteAfterPut?: boolean;
   /**
    * Someone else pushes while the version POST runs: the lock moves by one and
    * the server, seeing the draft written in between, leaves its version alone.
@@ -199,7 +198,7 @@ function createPackageServer(packages: FakePackage[]) {
     );
     if (typed) {
       const p = byId(typed[2]!, typed[3]!);
-      if (!p || SEGMENT[p.type] !== typed[1] || spaceId !== p.homeSpaceId) {
+      if (!p || PACKAGE_TYPE_ROUTE_SEGMENT[p.type] !== typed[1] || spaceId !== p.homeSpaceId) {
         return problem(404, "package_not_found", "Not here");
       }
       const tail = typed[4];
@@ -240,6 +239,10 @@ function createPackageServer(packages: FakePackage[]) {
         // The route stores the VALIDATED manifest, which may differ from the one sent.
         if (body.manifest) p.draft.manifest = { ...body.manifest, schema_version: "1.0" };
         p.draft.lock += 1;
+        if (p.concurrentWriteAfterPut) {
+          p.concurrentWriteAfterPut = false;
+          p.draft.lock += 1;
+        }
         return json({ id: p.id, lock_version: p.draft.lock, manifest: p.draft.manifest });
       }
       if (tail === "/versions/info") {
@@ -395,6 +398,22 @@ describe("packages pull", () => {
     expect(stderr()).toContain(
       "Not written (ignored by the authoring loop): .git/config, .vscode/tasks.json",
     );
+  });
+
+  it("refuses, before writing anything, two paths that are one file on an insensitive disk", async () => {
+    const pkg = skill();
+    pkg.draft.files["A.md"] = "upper";
+    pkg.draft.files["a.md"] = "lower";
+    createPackageServer([pkg]).install();
+    const dir = join(root, "pdf");
+    const { io, stderr } = createMemoryIO();
+
+    await expect(packagesPullCommand({ package: "@acme/pdf", dir }, io)).rejects.toBeInstanceOf(
+      ExitError,
+    );
+
+    expect(stderr()).toContain('"A.md" and "a.md"');
+    expect(await readdir(dir).catch(() => null)).toBeNull();
   });
 
   it("matches a draft path in another Unicode normalization to the folder's file", async () => {
@@ -582,6 +601,74 @@ describe("packages push", () => {
     expect(pkg.draft.files["SKILL.md"]).toContain("Draft.");
   });
 
+  it("accepts an unchanged file over the write limit, and refuses to write one", async () => {
+    const pkg = skill();
+    pkg.draft.files["big.bin"] = new Uint8Array(2 * 1_048_576);
+    const dir = join(root, "pdf");
+    const server = await pulled(pkg, dir);
+
+    const status = createMemoryIO();
+    await packagesStatusCommand({ dir }, status.io);
+    expect(status.stdout()).toContain("clean");
+
+    await writeFile(join(dir, "SKILL.md"), "---\nname: pdf\ndescription: PDFs.\n---\nEdited.\n");
+    await packagesPushCommand({ dir }, createMemoryIO().io);
+    const puts = server.seen.filter((s) => s.method === "PUT");
+    expect(puts).toHaveLength(1);
+    expect((puts[0]!.body as { operations: unknown[] }).operations).toEqual([
+      { op: "write", path: "SKILL.md", text: "---\nname: pdf\ndescription: PDFs.\n---\nEdited.\n" },
+    ]);
+
+    const edited = new Uint8Array(2 * 1_048_576);
+    edited[0] = 1;
+    await writeFile(join(dir, "big.bin"), edited);
+    const { io, stderr } = createMemoryIO();
+    await expect(packagesPushCommand({ dir }, io)).rejects.toBeInstanceOf(ExitError);
+    expect(stderr()).toMatch(/big\.bin: 2097152 bytes, over the 1 MiB limit/);
+    expect(server.seen.filter((s) => s.method === "PUT")).toHaveLength(1);
+  });
+
+  it("pushes node_modules: an MCP server bundle ships it", async () => {
+    const pkg = skill();
+    const dir = join(root, "pdf");
+    const server = await pulled(pkg, dir);
+    await mkdir(join(dir, "server", "node_modules", "dep"), { recursive: true });
+    await writeFile(join(dir, "server", "node_modules", "dep", "index.js"), "module.exports = 1;");
+
+    await packagesPushCommand({ dir }, createMemoryIO().io);
+
+    const put = server.seen.find((s) => s.method === "PUT");
+    expect((put?.body as { operations: unknown[] }).operations).toEqual([
+      { op: "write", path: "server/node_modules/dep/index.js", text: "module.exports = 1;" },
+    ]);
+  });
+
+  it("records the lock its own write produced, not a later one the read-back shows", async () => {
+    const pkg = skill();
+    const dir = join(root, "pdf");
+    await pulled(pkg, dir);
+    const manifest = JSON.parse(await text(join(dir, "manifest.json")));
+    await writeFile(join(dir, "manifest.json"), JSON.stringify({ ...manifest, description: "M" }));
+    pkg.concurrentWriteAfterPut = true;
+    const { io, stderr } = createMemoryIO();
+
+    await packagesPushCommand({ dir }, io);
+
+    expect(pkg.draft.lock).toBe(5);
+    expect(await readLock("default", dir, "@acme/pdf")).toBe(4);
+    expect(stderr()).toContain("moved again right after this push (lock 4 → 5)");
+    // Not rewritten from the read-back: it may already hold the other author's write.
+    expect(JSON.parse(await text(join(dir, "manifest.json")))).toEqual({
+      ...manifest,
+      description: "M",
+    });
+
+    await writeFile(join(dir, "SKILL.md"), "---\nname: pdf\ndescription: PDFs.\n---\nNext.\n");
+    const next = createMemoryIO();
+    await expect(packagesPushCommand({ dir }, next.io)).rejects.toBeInstanceOf(ExitError);
+    expect(next.stderr()).toContain("edited elsewhere since this folder last saw it (lock 4 → 5)");
+  });
+
   it("reports a 409 that is not a stale lock as the problem it names", async () => {
     const pkg = skill();
     const dir = join(root, "pdf");
@@ -660,10 +747,12 @@ describe("packages push", () => {
     const refused = createMemoryIO();
     await expect(packagesPushCommand({ dir }, refused.io)).rejects.toBeInstanceOf(ExitError);
     expect(refused.stderr()).toContain("--create");
+    expect(refused.stderr()).not.toContain("Not sent");
 
-    const { io, stdout } = createMemoryIO();
+    const { io, stdout, stderr } = createMemoryIO();
     await packagesPushCommand({ dir, create: true, space: "spc_mine" }, io);
 
+    expect(stderr()).toContain("Not sent (ignored by the authoring loop): .env");
     const imported = server.seen.find((s) => s.path === "/api/packages/import");
     expect(imported?.spaceId).toBe("spc_mine");
     expect(imported?.body).toEqual({ fileName: "fresh.zip" });

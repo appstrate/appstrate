@@ -7,13 +7,12 @@
  * through `./package-definition.ts`, the path `skills sync` reads them through.
  */
 
-import { lstat, mkdir, readdir, readFile, realpath, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import writeFileAtomic from "write-file-atomic";
 import type { AgentDetail, OrgPackageItemDetail, PackageHome } from "@appstrate/shared-types";
 import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
 import {
-  PACKAGE_CONTENT_ENTRY,
   PACKAGE_FILE_INLINE_MAX_BYTES,
   PACKAGE_MANIFEST_FILE,
   PACKAGE_TYPE_ROUTE_SEGMENT,
@@ -25,14 +24,16 @@ import { apiFetch, ApiError } from "./api.ts";
 import { getDataDir } from "./config.ts";
 import { withFileLock } from "./file-lock.ts";
 import { SIGNATURE_RECORD } from "./package-definition.ts";
+import { SKILL_ENTRY } from "./skills-sync/materialize.ts";
+import { canonicalJsonStringify } from "@appstrate/afps-runtime/bundle";
 
 export type PackageFiles = Record<string, Uint8Array>;
 
-/** The skill entry, which alone makes a folder without a manifest a package folder. */
-export const SKILL_ENTRY = PACKAGE_CONTENT_ENTRY.skill!.path;
-
-/** Tooling residue by name, on top of every dot-named entry. */
-const IGNORED_NAMES: ReadonlySet<string> = new Set(["node_modules", "__pycache__"]);
+/**
+ * Tooling residue by name, on top of every dot-named entry. `node_modules` is
+ * NOT one: an MCP server bundle ships `server/node_modules` as package content.
+ */
+const IGNORED_NAMES: ReadonlySet<string> = new Set(["__pycache__"]);
 
 /** `/api/packages/<segment>/@scope/name`: the per-type detail, update and versions root. */
 export function packageRoute(type: PackageType, packageId: string): string {
@@ -111,8 +112,8 @@ export function draftStateOf(packageId: string, detail: DraftDetail): DraftState
 /**
  * Whether the loop leaves a path alone on BOTH sides: never read, never pushed,
  * never deleted from the draft, never reported. Any dot-named segment (`.git`,
- * `.env`, `.DS_Store`, editor state), `node_modules`, `__pycache__`, and the
- * root `RECORD` a published archive is signed with.
+ * `.env`, `.DS_Store`, editor state), `__pycache__`, and the root `RECORD` a
+ * published archive is signed with.
  */
 export function isIgnoredPath(path: string): boolean {
   if (path === SIGNATURE_RECORD) return true;
@@ -123,14 +124,21 @@ export function isIgnoredPath(path: string): boolean {
  * Every non-ignored file under `dir` → its path on disk, keyed by its NFC,
  * `/`-joined path, as the archive would name it. A symlink is refused, naming
  * it: what it points at is not the folder's to send, and silently skipping it
- * would push a package missing a file its author sees.
+ * would push a package missing a file its author sees. `ignored`, when given,
+ * collects each ignored entry left out (a folder once, not its contents).
  */
-export async function listFolderFiles(dir: string): Promise<Map<string, string>> {
+export async function listFolderFiles(
+  dir: string,
+  ignored?: string[],
+): Promise<Map<string, string>> {
   let info: Awaited<ReturnType<typeof stat>>;
   try {
     info = await stat(dir);
-  } catch {
-    throw new Error(`${dir}: no such directory.`);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`${dir}: no such directory.`, { cause: err });
+    }
+    throw new Error(`${dir}: cannot be read.`, { cause: err });
   }
   if (!info.isDirectory()) throw new Error(`${dir}: not a directory.`);
 
@@ -139,7 +147,10 @@ export async function listFolderFiles(dir: string): Promise<Map<string, string>>
     for (const entry of await readdir(current, { withFileTypes: true })) {
       const name = entry.name.normalize("NFC");
       const path = prefix ? `${prefix}/${name}` : name;
-      if (isIgnoredPath(path)) continue;
+      if (isIgnoredPath(path)) {
+        ignored?.push(path);
+        continue;
+      }
       const full = join(current, entry.name);
       if (entry.isSymbolicLink()) {
         throw new Error(`${path}: a symbolic link. Replace it with the file itself.`);
@@ -156,25 +167,24 @@ export async function listFolderFiles(dir: string): Promise<Map<string, string>>
     }
   };
   await walk(dir, "");
+  ignored?.sort(byCodeUnit);
   return found;
 }
 
 /**
  * {@link listFolderFiles}, read — after refusing, naming the file and before
- * any byte leaves the machine, what the draft write would refuse anyway: a
- * path no package can carry, a file over the per-file ceiling.
+ * any byte leaves the machine, a path no package can carry. Size is not judged
+ * here: a draft may hold a file over the per-file write limit (an import is
+ * bounded by the archive only), and only a file the folder WRITES must fit it
+ * ({@link toOperations}).
  */
 export async function readPackageFolder(dir: string): Promise<PackageFiles> {
   const found = await listFolderFiles(dir);
-  for (const [path, full] of found) {
+  for (const path of found.keys()) {
     if (!isSafeArchivePath(path)) {
       throw new Error(
         `${path}: not a path a package can carry (no commas, line breaks or backslashes).`,
       );
-    }
-    const { size } = await lstat(full);
-    if (size > PACKAGE_FILE_INLINE_MAX_BYTES) {
-      throw new Error(`${path}: ${size} bytes, over the 1 MiB limit of a package file.`);
     }
   }
   const files: PackageFiles = {};
@@ -194,8 +204,8 @@ export function folderManifest(files: PackageFiles): Record<string, unknown> | u
   let parsed: unknown;
   try {
     parsed = JSON.parse(new TextDecoder().decode(raw));
-  } catch {
-    throw new Error(`${PACKAGE_MANIFEST_FILE} is not valid JSON.`);
+  } catch (err) {
+    throw new Error(`${PACKAGE_MANIFEST_FILE} is not valid JSON.`, { cause: err });
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new Error(`${PACKAGE_MANIFEST_FILE} is not a JSON object.`);
@@ -273,7 +283,7 @@ function sameContent(path: string, a: Uint8Array, b: Uint8Array): boolean {
     const left = parseJson(a);
     const right = parseJson(b);
     if (left !== undefined && right !== undefined) {
-      return canonicalJson(left) === canonicalJson(right);
+      return canonicalJsonStringify(left) === canonicalJsonStringify(right);
     }
   }
   return Buffer.from(a).equals(Buffer.from(b));
@@ -285,17 +295,6 @@ function parseJson(bytes: Uint8Array): unknown {
   } catch {
     return undefined;
   }
-}
-
-/** JSON with object keys sorted by code unit, so two equal manifests serialize identically. */
-export function canonicalJson(value: unknown): string {
-  return JSON.stringify(value, (_key, v: unknown) =>
-    v && typeof v === "object" && !Array.isArray(v)
-      ? Object.fromEntries(
-          Object.entries(v as Record<string, unknown>).sort(([a], [b]) => byCodeUnit(a, b)),
-        )
-      : v,
-  );
 }
 
 /** The manifest as a folder stores it: what `pull` writes and `push` rewrites. */
@@ -317,15 +316,24 @@ export function writeOperation(path: string, bytes: Uint8Array): FileOperation {
     : { op: "write", path, bytes_base64: Buffer.from(bytes).toString("base64") };
 }
 
-/** The operations that turn the draft into the folder. `manifest.json` travels as `manifest`, never as a file. */
+/**
+ * The operations that turn the draft into the folder. `manifest.json` travels
+ * as `manifest`, never as a file. A file the folder writes must fit the
+ * platform's per-file write limit — refused here, naming it, before any request.
+ */
 export function toOperations(changes: FileChange[], local: PackageFiles): FileOperation[] {
   return changes
     .filter((change) => change.path !== PACKAGE_MANIFEST_FILE)
-    .map((change) =>
-      change.kind === "removed"
-        ? { op: "delete" as const, path: change.path }
-        : writeOperation(change.path, local[change.localPath ?? change.path]!),
-    );
+    .map((change) => {
+      if (change.kind === "removed") return { op: "delete" as const, path: change.path };
+      const bytes = local[change.localPath ?? change.path]!;
+      if (bytes.byteLength > PACKAGE_FILE_INLINE_MAX_BYTES) {
+        throw new Error(
+          `${change.path}: ${bytes.byteLength} bytes, over the 1 MiB limit of a package file write.`,
+        );
+      }
+      return writeOperation(change.path, bytes);
+    });
 }
 
 // ─── draft locks per working folder ──────────────────────────────────────
@@ -354,8 +362,10 @@ type LockTable = Record<string, LockEntry>;
 async function folderKey(dir: string): Promise<string> {
   try {
     return await realpath(dir);
-  } catch {
-    return resolve(dir);
+  } catch (err) {
+    // A folder that does not exist yet can only be spelled as given.
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return resolve(dir);
+    throw new Error(`${dir}: cannot be resolved.`, { cause: err });
   }
 }
 

@@ -25,7 +25,10 @@ import {
   PACKAGE_MANIFEST_FILE,
   PACKAGE_TYPE_ROUTE_SEGMENT,
 } from "@appstrate/core/package-files";
-import { decodePackageFileText } from "@appstrate/core/package-file-operations";
+import {
+  canonicalPackagePath,
+  decodePackageFileText,
+} from "@appstrate/core/package-file-operations";
 import { planPublishVersion, type VersionBump } from "@appstrate/core/semver";
 import { extractSkillMeta, packageTypeEnum, type PackageType } from "@appstrate/core/validation";
 import { isSafeArchivePath, zipArtifact } from "@appstrate/core/zip";
@@ -64,13 +67,13 @@ import {
   readSpaceOf,
   recordLock,
   resolvePackage,
-  SKILL_ENTRY,
   toOperations,
   typeOfFolder,
   type DraftDetail,
   type FileChange,
   type PackageFiles,
 } from "../lib/packages.ts";
+import { SKILL_ENTRY } from "../lib/skills-sync/materialize.ts";
 
 interface Session {
   profileName: string;
@@ -127,21 +130,30 @@ const PACKAGE_TYPES: readonly PackageType[] = packageTypeEnum.options;
 
 /** `~/Appstrate` is an instance directory that `uninstall --purge` removes: never a work dir. */
 async function assertNotInstallDir(workDir: string): Promise<void> {
+  const marker = join(workDir, PROJECT_FILE_RELPATH);
   try {
-    await stat(join(workDir, PROJECT_FILE_RELPATH));
-  } catch {
-    return;
+    await stat(marker);
+  } catch (err) {
+    if (isAbsent(err)) return;
+    throw new Error(`${marker}: cannot be read.`, { cause: err });
   }
   throw new Error(
     `${workDir} is an Appstrate instance directory (it has ${PROJECT_FILE_RELPATH}); \`appstrate uninstall --purge\` would delete your working copies. Set workDir in config.toml to another folder.`,
   );
 }
 
+/** ENOENT, or ENOTDIR — a parent that is a file: the path does not exist. Anything else is a real failure. */
+function isAbsent(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
 async function isDirectory(path: string): Promise<boolean> {
   try {
     return (await stat(path)).isDirectory();
-  } catch {
-    return false;
+  } catch (err) {
+    if (isAbsent(err)) return false;
+    throw new Error(`${path}: cannot be read.`, { cause: err });
   }
 }
 
@@ -394,8 +406,9 @@ async function prepareDestination(
   let info: Awaited<ReturnType<typeof stat>>;
   try {
     info = await stat(dir);
-  } catch {
-    return null;
+  } catch (err) {
+    if (isAbsent(err)) return null;
+    throw new Error(`${dir}: cannot be read.`, { cause: err });
   }
   if (!info.isDirectory()) throw new Error(`${dir}: not a directory.`);
   const entries = (await readdir(dir)).filter((entry) => !isIgnoredPath(entry));
@@ -424,8 +437,18 @@ async function writeDefinition(
   const paths = all.filter((path) => !isIgnoredPath(path));
   const skipped = all.filter((path) => isIgnoredPath(path) && path !== SIGNATURE_RECORD);
   // All checked before the first change: a refused entry leaves the folder as it was.
+  const byCanonical = new Map<string, string>();
   for (const path of paths) {
     if (!isSafeArchivePath(path)) throw new Error(`Refusing archive entry "${path}".`);
+    // A case- or normalization-insensitive disk (macOS, Windows) holds one of
+    // the two, and the second write would silently replace the first.
+    const twin = byCanonical.get(canonicalPackagePath(path));
+    if (twin !== undefined) {
+      throw new Error(
+        `Refusing to pull: "${twin}" and "${path}" are one file on a case- or normalization-insensitive disk. Rename one of them in the package first.`,
+      );
+    }
+    byCanonical.set(canonicalPackagePath(path), path);
   }
   const incoming = new Set(paths.map((path) => path.normalize("NFC")));
   const removed = [...(existing?.keys() ?? [])]
@@ -699,11 +722,22 @@ export async function packagesPushCommand(
       }
       throw err;
     }
+    // The write moved the lock by exactly one: that is the draft this folder
+    // now holds. The response is read back AFTER the write, so a later write by
+    // someone else can already show in it — recording its lock would let this
+    // folder's next push overwrite an edit it never saw.
+    const ours = lock + 1;
     const after = draftStateOf(packageId, written);
-    await recordLock(session.profileName, dir, packageId, after.lockVersion);
-    // The server stores the VALIDATED manifest, which may normalize what the
-    // author wrote: writing it back keeps the next status clean.
-    if (PACKAGE_MANIFEST_FILE in files) await rewriteManifest(dir, after.manifest);
+    await recordLock(session.profileName, dir, packageId, ours);
+    if (after.lockVersion === ours) {
+      // The server stores the VALIDATED manifest, which may normalize what the
+      // author wrote: writing it back keeps the next status clean.
+      if (PACKAGE_MANIFEST_FILE in files) await rewriteManifest(dir, after.manifest);
+    } else {
+      io.stderr.write(
+        `warning: the draft of ${packageId} moved again right after this push (lock ${ours} → ${after.lockVersion}): someone else wrote it. Pull it into another folder to compare.\n`,
+      );
+    }
 
     io.stdout.write(`Pushed ${summary} to the draft of ${packageId}.\n`);
     io.stderr.write(
@@ -741,6 +775,11 @@ async function createPackage(
   if (opts.dryRun) {
     io.stdout.write(`Would create ${packageId}${where} and publish its first version (dry run).\n`);
     return;
+  }
+  const ignored: string[] = [];
+  await listFolderFiles(dir, ignored);
+  if (ignored.length > 0) {
+    io.stderr.write(`Not sent (ignored by the authoring loop): ${ignored.join(", ")}\n`);
   }
   const form = new FormData();
   const name = parseScopedName(packageId)!.name;
