@@ -3,7 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { useForm, useWatch } from "react-hook-form";
 import type { PackageType } from "@appstrate/core/validation";
-import { compareVersionsDesc, bumpVersion } from "@appstrate/core/semver";
+import { bumpVersion, planPublishVersion, type VersionBump } from "@appstrate/core/semver";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
@@ -11,12 +11,6 @@ import { Spinner } from "./spinner";
 import { useCreateVersion, useVersionInfo } from "../hooks/use-packages";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { translateSkillFrontmatterError } from "../lib/skill-frontmatter";
-
-type BumpType = "patch" | "minor" | "major";
-
-/** a > b — full semver precedence (prerelease/build aware), matching the publish gate. */
-const semverGt = (a: string, b: string): boolean => compareVersionsDesc(a, b) < 0;
-const semverEq = (a: string, b: string): boolean => compareVersionsDesc(a, b) === 0;
 
 interface CreateVersionModalProps {
   open: boolean;
@@ -26,7 +20,7 @@ interface CreateVersionModalProps {
   hasUnarchivedChanges?: boolean;
 }
 
-type FormData = { selectedBump: BumpType };
+type FormData = { selectedBump: VersionBump };
 
 export function CreateVersionModal({
   open,
@@ -53,24 +47,22 @@ export function CreateVersionModal({
   const latestVersion = versionInfo?.latest_published_version ?? null;
   const activeVersion = versionInfo?.active_version ?? null;
 
-  // Mode A: active === latest -> show bump selector
-  const needsBump = !!activeVersion && !!latestVersion && semverEq(activeVersion, latestVersion);
-  // Mode B: active > latest or no latest -> direct create
-  const canCreateDirect =
-    !!activeVersion && (!latestVersion || semverGt(activeVersion, latestVersion));
-  // Mode C: active < latest (but not equal) -> blocked
-  const isBlocked = !!activeVersion && !!latestVersion && !needsBump && !canCreateDirect;
+  // The CLI's `publish` asks the same function, so the two surfaces cannot
+  // disagree on which version a publish creates: a draft equal to the latest
+  // needs a bump, one ahead of it (or with nothing published) is created as is,
+  // one behind it is blocked.
+  const plan = planPublishVersion(activeVersion, latestVersion, selectedBump);
+  const needsBump = plan.kind === "bump";
+  const isBlocked = plan.kind === "blocked";
+  // The button names the draft's own version when no bump applies — a blocked
+  // draft included, so the author sees which version was refused.
+  const targetVersion = plan.target ?? activeVersion;
 
-  const targetVersion = needsBump
-    ? (bumpVersion(latestVersion, selectedBump) ?? activeVersion)
-    : activeVersion;
-
-  const canCreate = (needsBump || canCreateDirect) && hasUnarchivedChanges;
+  const canCreate = (needsBump || plan.kind === "direct") && hasUnarchivedChanges;
 
   const handleFormSubmit = () => {
     setError("root", { message: "" });
-    const versionArg = needsBump ? (targetVersion ?? undefined) : undefined;
-    createVersion.mutate(versionArg, {
+    createVersion.mutate(plan.override, {
       onSuccess: () => {
         onClose();
       },
@@ -84,7 +76,7 @@ export function CreateVersionModal({
     });
   };
 
-  const bumpOptions: { type: BumpType; label: string }[] = [
+  const bumpOptions: { type: VersionBump; label: string }[] = [
     { type: "patch", label: t("version.bumpPatch") },
     { type: "minor", label: t("version.bumpMinor") },
     { type: "major", label: t("version.bumpMajor") },
@@ -119,7 +111,7 @@ export function CreateVersionModal({
           )}
         </div>
 
-        {needsBump && (
+        {needsBump && latestVersion && (
           <div className="space-y-2">
             <Label className="block text-sm font-medium">{t("version.bumpLabel")}</Label>
             <div className="flex gap-2">

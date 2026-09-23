@@ -2158,7 +2158,7 @@
         "operationId": "runInline",
         "tags": ["Runs"],
         "summary": "Execute an inline agent (no persisted package)",
-        "description": "Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. The body is closed: an unknown field is a `400`, never a silently dropped value — `dependency_overrides` in particular is NOT honoured on this surface and is refused rather than ignored. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.",
+        "description": "Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. The body is closed: an unknown field is a `400`, never a silently dropped value — `dependency_overrides` in particular is NOT honoured on this surface and is refused rather than ignored. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors. **Permission:** `agents:write` and `agents:run` — composing a manifest is authoring, launching it is running. A caller holding `agents:run` without `agents:write` — the `operator` and `runner` presets, an API key scoped to `agents:run` — is refused.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -2430,7 +2430,7 @@
         "operationId": "validateInlineRun",
         "tags": ["Runs"],
         "summary": "Validate an inline manifest without firing a run",
-        "description": "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, input against the manifest schema, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json for validation failures (with the accumulated validation errors). Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.",
+        "description": "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, input against the manifest schema, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json for validation failures (with the accumulated validation errors). Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors. **Permission:** `agents:write` and `agents:run` — composing a manifest is authoring, launching it is running. A caller holding `agents:run` without `agents:write` — the `operator` and `runner` presets, an API key scoped to `agents:run` — is refused.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -3106,7 +3106,7 @@
         "operationId": "createRemoteRun",
         "tags": ["Runs"],
         "summary": "Create a remote-backed run (caller executes the agent)",
-        "description": "Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.",
+        "description": "Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply.\n\n**Permission:** `agents:run`; an `inline` source (a manifest the body carries) also requires `agents:write`. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -14569,8 +14569,8 @@
       "get": {
         "operationId": "downloadPackageVersion",
         "tags": ["Packages"],
-        "summary": "Download a versioned package ZIP",
-        "description": "Download a specific version of a package as a ZIP file. Supports exact version, dist-tag, or semver range resolution. Rate-limited to 50 requests/minute.",
+        "summary": "Download a package ZIP — a published version, or the draft",
+        "description": "Download a specific version of a package as a ZIP file. Supports exact version, dist-tag, or semver range resolution. The literal `draft` downloads the author's working copy instead — the same tree `GET /api/packages/{scope}/{name}/files?version=draft` lists (the stored draft archive overlaid with the authoritative `manifest.json` and primary content from the database), zipped. Naming the draft is an author's act: it is reserved to callers who may WRITE the package (`403 draft_not_writable` otherwise, a system package included), on top of the visibility, `<type>:read` and `restrict_package_copy` checks every download applies. A draft archive has no integrity hash, so it carries no `X-Integrity`; it carries a strong `ETag` instead and answers `If-None-Match` with `304`. Rate-limited to 50 requests/minute.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -14588,7 +14588,16 @@
             "name": "version",
             "in": "path",
             "required": true,
-            "description": "Exact version, dist-tag (e.g. 'latest'), or semver range (e.g. '^1.0.0')",
+            "description": "Exact version, dist-tag (e.g. 'latest'), semver range (e.g. '^1.0.0'), or the literal `draft` for the author's working copy.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Entity-tag of a cached draft archive (`draft` only). A match yields `304 Not Modified`.",
             "schema": {
               "type": "string"
             }
@@ -14596,10 +14605,10 @@
         ],
         "responses": {
           "200": {
-            "description": "ZIP file with integrity and disposition headers",
+            "description": "ZIP file. A published version carries `X-Integrity`; the draft carries `ETag`, `Cache-Control` and `Vary` instead.",
             "headers": {
               "X-Integrity": {
-                "description": "SHA256 SRI hash of the artifact",
+                "description": "SHA256 SRI hash of the artifact. Published versions only.",
                 "schema": {
                   "type": "string"
                 }
@@ -14611,17 +14620,64 @@
                 }
               },
               "Content-Disposition": {
-                "description": "Attachment filename in scope-name-version.zip format",
+                "description": "Attachment filename: `<scope>-<name>-<version>.afps`, with `draft` as the version for the draft.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "description": "Archive size in bytes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "Draft only. Strong entity-tag of the draft archive (`\"z-…\"`), a content digest of the overlaid tree: it changes with every save that changes a byte, and never matches a file-index or file-content tag.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Draft only. Always `private, no-cache` — the archive is tenant-scoped and RBAC-gated, so every reuse revalidates.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Draft only. Always `X-Org-Id, X-Space-Id`.",
                 "schema": {
                   "type": "string"
                 }
               }
             },
             "content": {
-              "application/zip": {
+              "application/afps+zip": {
                 "schema": {
                   "type": "string",
                   "format": "binary"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The cached draft archive is still current (`If-None-Match` matched). No body. Reached only after every refusal, `draft_not_writable` included.",
+            "headers": {
+              "ETag": {
+                "description": "Strong entity-tag of the draft archive.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always `private, no-cache`, as on the `200`.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always `X-Org-Id, X-Space-Id`, as on the `200`.",
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -14631,10 +14687,13 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden",
-            "description": "Insufficient permissions — the package type's `read`, or `package_copy_restricted` under `restrict_package_copy`, which narrows this route to callers holding the package type's `share` in its HOME space. That is what the setting means — the ZIP is a COPY leaving the platform, so reading the package and taking it away are two different permissions here, exactly as on `fork` and on the agent `bundle` route. Skills and system packages are exempt."
+            "description": "Insufficient permissions — the package type's `read`; `draft_not_writable` when `draft` is asked by a caller who cannot WRITE the package; or `package_copy_restricted` under `restrict_package_copy`, which narrows this route to callers holding the package type's `share` in its HOME space. That is what the setting means — the ZIP is a COPY leaving the platform, so reading the package and taking it away are two different permissions here, exactly as on `fork` and on the agent `bundle` route. Skills and system packages are exempt from that setting, for the draft as for a version."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/PackageArchiveUnreadable"
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -14758,11 +14817,10 @@
                   "operations": {
                     "type": "array",
                     "minItems": 1,
-                    "maxItems": 200,
                     "items": {
                       "$ref": "#/components/schemas/PackageFileWriteOperation"
                     },
-                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations."
                   },
                   "manifest": {
                     "type": "object",
@@ -15320,11 +15378,10 @@
                   "operations": {
                     "type": "array",
                     "minItems": 1,
-                    "maxItems": 200,
                     "items": {
                       "$ref": "#/components/schemas/PackageFileWriteOperation"
                     },
-                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations."
                   },
                   "lock_version": {
                     "type": "integer",
@@ -15522,11 +15579,10 @@
                   "operations": {
                     "type": "array",
                     "minItems": 1,
-                    "maxItems": 200,
                     "items": {
                       "$ref": "#/components/schemas/PackageFileWriteOperation"
                     },
-                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations."
                   },
                   "manifest": {
                     "$ref": "#/components/schemas/AgentManifest"
@@ -15696,11 +15752,10 @@
                   "operations": {
                     "type": "array",
                     "minItems": 1,
-                    "maxItems": 200,
                     "items": {
                       "$ref": "#/components/schemas/PackageFileWriteOperation"
                     },
-                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations."
                   },
                   "lock_version": {
                     "type": "integer",
@@ -16200,6 +16255,55 @@
       }
     },
     "/api/packages/{scope}/{name}/home": {
+      "get": {
+        "operationId": "getPackageHome",
+        "tags": ["Packages"],
+        "summary": "Locate a package: its type, its home and the spaces you read it from",
+        "description": "Resolve a package by id alone, across EVERY space the caller reaches — not only the one in `X-Space-Id`, which is what every other package read answers from. A package homed in the caller's personal space and offered nowhere is invisible from each team space's detail route; this is where a client that holds only the id (a CLI pointed at a working folder, for instance) learns the package's `type`, whether it may author it (`home_writable`, `home_deletable`, `home_shareable`), and which space to send its next request from (`read_space_ids`). `home_space_id` follows the same projection as on every package shape: `null` when the home is not a space the caller reaches, even when an offer makes the package readable. Answers 404 exactly when the package is not reachable: no space where the caller holds the type's read and the placement (home or offer) grants it — a system package is readable wherever that read is held. Read-only.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The package's type, home and reach for this caller.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PackageHome"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
       "put": {
         "operationId": "movePackageHome",
         "tags": ["Packages"],
@@ -16693,11 +16797,10 @@
                   "operations": {
                     "type": "array",
                     "minItems": 1,
-                    "maxItems": 200,
                     "items": {
                       "$ref": "#/components/schemas/PackageFileWriteOperation"
                     },
-                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations."
                   },
                   "manifest": {
                     "type": "object",
@@ -17249,11 +17352,10 @@
                   "operations": {
                     "type": "array",
                     "minItems": 1,
-                    "maxItems": 200,
                     "items": {
                       "$ref": "#/components/schemas/PackageFileWriteOperation"
                     },
-                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations."
                   },
                   "lock_version": {
                     "type": "integer",
@@ -17972,11 +18074,10 @@
                   "operations": {
                     "type": "array",
                     "minItems": 1,
-                    "maxItems": 200,
                     "items": {
                       "$ref": "#/components/schemas/PackageFileWriteOperation"
                     },
-                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations."
                   },
                   "lock_version": {
                     "type": "integer",
@@ -26661,6 +26762,52 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "PackageHome": {
+        "type": "object",
+        "description": "Where a package lives and where this caller reads it from, resolved across EVERY space the caller reaches rather than the one in `X-Space-Id` — the answer a client holding only a package id needs to know which space to address.",
+        "required": [
+          "id",
+          "type",
+          "home_space_id",
+          "home_writable",
+          "home_deletable",
+          "home_shareable",
+          "read_space_ids"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Package id (`@scope/name`)."
+          },
+          "type": {
+            "type": "string",
+            "enum": ["agent", "skill", "mcp-server", "integration"]
+          },
+          "home_space_id": {
+            "type": ["string", "null"],
+            "description": "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: a colleague's personal space, for instance, which is readable through a placement but never nameable, or a system package, which the platform ships into every space instead of housing in one. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority."
+          },
+          "home_writable": {
+            "type": "boolean",
+            "description": "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that."
+          },
+          "home_deletable": {
+            "type": "boolean",
+            "description": "Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete."
+          },
+          "home_shareable": {
+            "type": "boolean",
+            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
+          },
+          "read_space_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Spaces (`spc_…`) where this caller holds the package type's read AND the placement grants it — the home, or a space it is offered to; every reachable space holding that read for a system package. The home comes first when it is one of them, the rest sorted by id. Never empty: a package readable from nowhere is a 404."
           }
         }
       }

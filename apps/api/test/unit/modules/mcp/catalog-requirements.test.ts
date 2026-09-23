@@ -287,6 +287,7 @@ describe("requirement anchors", () => {
     const unconditional = [
       "deleteFile",
       "keepFile",
+      "getPackageHome",
       "movePackageHome",
       "sharePackage",
       "listPackageShares",

@@ -1190,3 +1190,126 @@ describe("what becomes of the space the move LEAVES", () => {
     expect(await homeOf()).toBe(alphaId);
   });
 });
+
+/**
+ * `GET …/home` — the one package read that does not answer from `X-Space-Id`.
+ * A client holding only an id asks it which space to address, so it has to
+ * find a package the current space cannot see, and refuse exactly the ids the
+ * catalog refuses.
+ */
+describe("GET /api/packages/{scope}/{name}/home", () => {
+  type PackageHomeBody = {
+    id: string;
+    type: string;
+    home_space_id: string | null;
+    home_writable: boolean;
+    home_deletable: boolean;
+    home_shareable: boolean;
+    read_space_ids: string[];
+  };
+
+  const locate = (headers: Record<string, string>, id = ID) =>
+    app.request(`/api/packages/${id}/home`, { headers });
+
+  async function located(headers: Record<string, string>, id = ID): Promise<PackageHomeBody> {
+    const res = await locate(headers, id);
+    expect(res.status, await res.clone().text()).toBe(200);
+    return (await res.json()) as PackageHomeBody;
+  }
+
+  it("finds a package homed in the caller's personal space from a team space", async () => {
+    const personal = await ensurePersonalSpaceFor(ctx.orgId, ctx.user.id);
+    const OWN = "@homes/private";
+    await seedPackage({
+      id: OWN,
+      orgId: ctx.orgId,
+      type: "skill",
+      homeSpaceId: personal.id,
+      createdBy: ctx.user.id,
+      draftManifest: { ...MANIFEST, name: OWN },
+      draftContent: CONTENT,
+    });
+    // The per-type detail answers from Alpha alone, where nothing places it —
+    // the gap this route exists to close.
+    expect((await app.request(`/api/packages/skills/${OWN}`, { headers: owner() })).status).toBe(
+      404,
+    );
+
+    expect(await located(owner(), OWN)).toEqual({
+      id: OWN,
+      type: "skill",
+      home_space_id: personal.id,
+      home_writable: true,
+      home_deletable: true,
+      home_shareable: true,
+      read_space_ids: [personal.id],
+    });
+  });
+
+  it("puts the home first, then every other space the placement opens", async () => {
+    const body = await located(owner());
+    expect(body.home_space_id).toBe(alphaId);
+    // Gamma and Hidden are reached too, and place nothing: they are not listed.
+    expect(body.read_space_ids).toEqual([alphaId, betaId]);
+  });
+
+  it("returns the row's own type — the path names none", async () => {
+    await seedAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      homeSpaceId: alphaId,
+      draftManifest: { name: AGENT, version: "0.1.0", type: "agent", description: "d" },
+      draftContent: "Do the thing.",
+    });
+    expect(await located(alpha, AGENT)).toMatchObject({
+      id: AGENT,
+      type: "agent",
+      home_space_id: alphaId,
+      home_writable: true,
+      read_space_ids: [alphaId],
+    });
+  });
+
+  it("withholds a home the caller does not reach, and names the space an offer reads it from", async () => {
+    const viewer = await memberIn(betaId, "viewer");
+    expect(await located(viewer)).toEqual({
+      id: ID,
+      type: "skill",
+      home_space_id: null,
+      home_writable: false,
+      home_deletable: false,
+      home_shareable: false,
+      read_space_ids: [betaId],
+    });
+  });
+
+  it("404s an id the caller cannot reach, exactly as the catalog does", async () => {
+    // Gamma's builder reaches Gamma alone, and the package is placed in Alpha
+    // and Beta: an existing id answers what a missing one does.
+    const gamma = await memberIn(gammaId, "builder");
+    await expectProblem(await locate(gamma), 404);
+    await expectProblem(await locate(owner(), "@homes/missing"), 404);
+  });
+
+  it("reads a system package from every space the caller holds the type's read in", async () => {
+    const SYS = "@system/located-skill";
+    await seedPackage({
+      id: SYS,
+      orgId: null,
+      type: "skill",
+      source: "system",
+      draftManifest: { name: SYS, version: "1.0.0", type: "skill", description: "d" },
+      draftContent: "---\nname: located-skill\ndescription: d\n---\n\nBody",
+    });
+    expect(await located(alpha, SYS)).toEqual({
+      id: SYS,
+      type: "skill",
+      home_space_id: null,
+      home_writable: false,
+      home_deletable: false,
+      home_shareable: false,
+      read_space_ids: [alphaId],
+    });
+  });
+});

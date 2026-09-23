@@ -69,4 +69,15 @@ describe("buildDownloadHeaders", () => {
     });
     expect("X-Yanked" in headers).toBe(false);
   });
+
+  it("carries no X-Integrity for a draft archive, which has no digest", () => {
+    const headers = buildDownloadHeaders({
+      yanked: false,
+      scope: "@test",
+      name: "lib",
+      version: "draft",
+    });
+    expect("X-Integrity" in headers).toBe(false);
+    expect(headers["Content-Disposition"]).toBe('attachment; filename="test-lib-draft.afps"');
+  });
 });

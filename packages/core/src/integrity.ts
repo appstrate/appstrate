@@ -38,15 +38,18 @@ function buildDownloadFilename(scope: string, name: string, version: string): st
 
 /** Input for building standard package download response headers. */
 export interface DownloadHeadersInput {
-  /** SRI integrity hash of the artifact. */
-  integrity: string;
+  /**
+   * SRI integrity hash of the artifact — absent for a DRAFT archive, which is
+   * no immutable artifact and has no digest to publish.
+   */
+  integrity?: string;
   /** Whether the version has been yanked. */
   yanked: boolean;
   /** Package scope (e.g. "@myorg"). */
   scope: string;
   /** Package name without scope. */
   name: string;
-  /** Semver version string. */
+  /** Semver version string, or `draft`. */
   version: string;
 }
 
@@ -54,9 +57,11 @@ export interface DownloadHeadersInput {
 export function buildDownloadHeaders(meta: DownloadHeadersInput): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": "application/afps+zip",
-    "X-Integrity": meta.integrity,
     "Content-Disposition": `attachment; filename="${buildDownloadFilename(meta.scope, meta.name, meta.version)}"`,
   };
+  if (meta.integrity !== undefined) {
+    headers["X-Integrity"] = meta.integrity;
+  }
   if (meta.yanked) {
     headers["X-Yanked"] = "true";
   }

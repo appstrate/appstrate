@@ -88,6 +88,7 @@ import {
   holdsHomeAuthority,
   packagePermission,
   requireAgentRead,
+  resolvePackageHome,
 } from "../lib/package-access.ts";
 import { requirePackageInOrg } from "../middleware/guards.ts";
 import {
@@ -112,6 +113,7 @@ import {
   buildFileIndex,
   indexEtag,
   fileEtag,
+  archiveEtag,
   applyFileOperations,
   validateAuthoredPackageFiles,
   createPackageDraft,
@@ -122,7 +124,11 @@ import {
   PackageFileWriteError,
   type PackageFileWriteErrorCode,
 } from "@appstrate/core/package-file-operations";
-import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
+import {
+  PACKAGE_CONTENT_ENTRY,
+  PACKAGE_MANIFEST_FILE,
+  PACKAGE_TYPE_ROUTE_SEGMENT,
+} from "@appstrate/core/package-files";
 import {
   collectConnectLoginWarnings,
   collectMetaWarnings,
@@ -297,8 +303,12 @@ const packageFileOperationsSchema = z
         .strict(),
     ]),
   )
-  .min(1)
-  .max(200);
+  // No count ceiling: a client writes a whole working folder in ONE batch,
+  // under one `lock_version`, or not atomically at all. The real bounds are
+  // bytes and they are enforced where the bytes are — the global request body
+  // limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`file_too_large`)
+  // and the resulting tree (`tree_too_large`).
+  .min(1);
 
 export const packageJsonCreateSchema = z
   .object({
@@ -549,10 +559,17 @@ async function createVersionSafe(params: {
 
 // --- Route configuration per package type ---
 
-interface PackageRouteConfig {
+interface PackageRouteConfig<T extends PackageType = PackageType> {
   cfg: PackageTypeConfig;
-  /** URL path segment used for routing (e.g. "skills", "integrations"). */
-  path: string;
+  /**
+   * URL path segment used for routing (e.g. "skills", "integrations"). Written
+   * as a literal because `verify:openapi` reads the routes this table mounts
+   * statically and resolves only literals; TYPED as the type's entry of
+   * `PACKAGE_TYPE_ROUTE_SEGMENT` (`@appstrate/core/package-files`), the map the
+   * SPA and the CLI address these routes through, so a segment that drifts
+   * from it does not compile.
+   */
+  path: (typeof PACKAGE_TYPE_ROUTE_SEGMENT)[T];
   /** Storage entry for the content field: primary text or the portable manifest. */
   storageFileName: string;
   /** If true, version create/restore require no running runs (agents). */
@@ -583,7 +600,7 @@ interface PackageRouteConfig {
 }
 
 // Three types have JSON creation forms; MCP server creation accepts an archive.
-const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
+const ROUTE_CONFIGS: { [T in PackageType]: PackageRouteConfig<T> } = {
   skill: {
     cfg: CONFIG_BY_TYPE.skill,
     path: "skills",
@@ -1691,7 +1708,8 @@ async function resolveFileExplorerVersion(
 }
 
 /**
- * One policy for every response on both routes: `private, no-cache`.
+ * One policy for every response on both routes — and on the draft archive
+ * ({@link downloadDraftArchive}), which serves the same bytes: `private, no-cache`.
  *
  * `private` is mandatory: these are authenticated, tenant-scoped bytes and a
  * shared cache must never hold them. `no-cache` is mandatory for the same
@@ -1723,6 +1741,50 @@ function fileCacheHeaders(etag: string, yanked: boolean): Record<string, string>
   };
   if (yanked) headers["X-Yanked"] = "true";
   return headers;
+}
+
+/**
+ * `GET …/draft/download` — the DRAFT as one archive, the tree an author's
+ * local checkout starts from.
+ *
+ * The caller has already cleared everything the versioned download asks
+ * (visibility, `<type>:read`, `restrict_package_copy`). Naming the working copy
+ * adds the one rule every other surface applies to it: an author's act,
+ * `403 draft_not_writable` for anyone else — a system package included, since
+ * nobody writes one.
+ *
+ * The bytes are the file explorer's, from its own reader, so the archive and
+ * `GET …/files` can never describe two different drafts. A draft has no SRI,
+ * hence no `X-Integrity`; its validator is the content digest, under a prefix
+ * of its own so it never matches an index or a file tag. The `304` comes after
+ * the read — a draft's identity IS its bytes — and after the refusal, so it
+ * confirms nothing to a caller the refusal keeps out.
+ */
+async function downloadDraftArchive(c: Context<AppEnv>, pkg: PackageFileSource): Promise<Response> {
+  await assertDraftSelectorAllowed(c, pkg.id, VERSION_SELECTOR_DRAFT);
+  const snapshot = await readPackageSnapshot(
+    pkg,
+    await resolvePackageFileValidator(pkg, VERSION_SELECTOR_DRAFT),
+  );
+  const etag = archiveEtag(snapshot.snapshotId);
+  const headers = fileCacheHeaders(etag, false);
+  if (ifNoneMatchSatisfied(c.req.header("if-none-match"), etag)) {
+    return new Response(null, { status: 304, headers });
+  }
+  const archive = zipArtifact(snapshot.files);
+  return new Response(new Uint8Array(archive), {
+    status: 200,
+    headers: {
+      ...headers,
+      ...buildDownloadHeaders({
+        yanked: false,
+        scope: c.req.param("scope")!,
+        name: c.req.param("name")!,
+        version: VERSION_SELECTOR_DRAFT,
+      }),
+      "Content-Length": String(archive.byteLength),
+    },
+  });
 }
 
 // ═══════════════════════════════════════════════
@@ -2157,6 +2219,17 @@ export function createPackagesRouter() {
       throw internalError();
     }
     return c.json(detail);
+  });
+
+  // --- Where a package lives, read from anywhere the caller reaches ---
+  //
+  // The symmetric read of the move above. Every other package read answers
+  // from `X-Space-Id` alone, so a package homed in the caller's personal space
+  // and offered nowhere is invisible from every team space; this one resolves
+  // across `packageAccessSpaces(c)` and names the spaces to address instead.
+  // The 404 is `assertCatalogPackageAccess`'s, from the same predicate.
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/home`, rowAuthority(), async (c) => {
+    return c.json(await resolvePackageHome(c, getItemId(c)));
   });
 
   // --- Fork route ---
@@ -2965,7 +3038,8 @@ export function createPackagesRouter() {
     });
   });
 
-  // GET /api/packages/:scope/:name/:version/download — download a versioned package ZIP
+  // GET /api/packages/:scope/:name/:version/download — download a package ZIP:
+  // a published version, or the DRAFT when `:version` is `draft`.
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/:version/download`,
     rateLimit(50),
@@ -2985,12 +3059,17 @@ export function createPackagesRouter() {
       }
 
       // Verify org ownership (or system package). Ephemeral shadows are hidden.
+      // The draft columns ride along for the `draft` branch below, which reads
+      // them through the file explorer's own snapshot reader.
       const [pkg] = await db
         .select({
           id: packages.id,
           type: packages.type,
           source: packages.source,
           homeSpaceId: packages.homeSpaceId,
+          orgId: packages.orgId,
+          draftManifest: packages.draftManifest,
+          draftContent: packages.draftContent,
         })
         .from(packages)
         .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
@@ -3014,6 +3093,10 @@ export function createPackagesRouter() {
         { ...pkg, type: pkg.type as PackageType },
         { orgId, accessible: await packageAccessSpaces(c) },
       );
+
+      if (versionSpec === VERSION_SELECTOR_DRAFT) {
+        return downloadDraftArchive(c, pkg);
+      }
 
       const ver = await getVersionForDownload(packageId, versionSpec);
       if (!ver) {

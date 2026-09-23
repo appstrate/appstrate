@@ -31,6 +31,10 @@ export class PackageFileWriteError extends Error {
   }
 }
 
+// A non-streaming `decode()` carries no state between calls, so one instance
+// serves every caller — the file index decodes each file of a tree through it.
+const STRICT_UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
 /**
  * The text a package file's bytes ARE, or `null` when they are not text.
  *
@@ -43,7 +47,7 @@ export class PackageFileWriteError extends Error {
  */
 export function decodePackageFileText(bytes: Uint8Array): string | null {
   try {
-    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+    return STRICT_UTF8.decode(bytes);
   } catch {
     return null;
   }
