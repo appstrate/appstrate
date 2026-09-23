@@ -5,7 +5,7 @@
  * `MitmCredentialSource`. Backs both `GET /internal/integration-credentials/
  * {scope}/{name}` (read-current) and `POST .../refresh` (force-refresh-then-read).
  *
- * For each declared auth on the integration's manifest:
+ * For the ONE bound connection the caller names (`connection_id`):
  *
  *   1. Find the connection row for the run's actor.
  *   2. If the auth is OAuth2 AND (forced OR within the lead window),
@@ -42,7 +42,7 @@ import {
 } from "./integration-token-refresh.ts";
 import {
   assertIntegrationActive,
-  selectAccessibleConnection,
+  loadAccessibleConnectionById,
   markIntegrationConnectionNeedsReconnection,
 } from "./integration-connections.ts";
 import { computeRequiredScopes } from "./integration-scope-resolver.ts";
@@ -64,18 +64,13 @@ interface ResolveLiveCredentialsOptions {
 }
 
 /**
- * An EMPTY payload from this function means exactly one thing: the integration
- * declares no auth at all. Every state in which a credential was expected but
- * could not be produced throws — because the sidecar reads an empty payload as
- * "no `delivery.http` auths, skip the MITM listener entirely" and boots the run
- * anyway, so a silent empty return turns a broken connection into an agent
- * reporting "the API is unavailable" against a fleet of uncredentialed 401s.
+ * NEVER returns an empty payload — the sidecar would read it as "skip the MITM
+ * listener" and boot uncredentialed — so every unproducible credential throws.
  *
  * Throws ApiError on:
- *   - 404: integration not declared by the agent, not active, or no
- *     connection for the actor (including a run-pinned connection that has
- *     since been deleted or unshared). Nothing exists to flag, so this is
- *     deliberately NOT the 410 below.
+ *   - 404: integration not declared by the agent, not active, or the named
+ *     connection is no longer reachable by the actor. Nothing exists to flag,
+ *     so this is deliberately NOT the 410 below.
  *   - 409 `integration_auth_undeclared`: the connection's `auth_key` is not
  *     declared by the manifest VERSION this run is pinned to (auth renamed or
  *     removed since the connection was made). The credential is intact and may
@@ -98,16 +93,9 @@ export async function resolveLiveIntegrationCredentials(
     spaceId: string;
     agentPackageId: string;
     actor: Actor | null;
-    /**
-     * Snapshot from `runs.resolved_connections`. When present, the
-     * `[integrationId].connectionId` entry pins which row the MITM listener
-     * decrypts — so the cascade's pick (admin pin / run override /
-     * schedule override / member pin / auto fallback) survives past
-     * kickoff into the live credential surface. One connection per
-     * integration; its authKey drives which `manifest.auths[X]`
-     * declaration is materialised.
-     */
-    resolvedConnections?: Record<string, { connectionId: string; source: string }> | null;
+    /** A member of the run's bound set (the route checked it), and its cascade layer. */
+    connectionId: string;
+    connectionSource: string;
     /**
      * Snapshot from `runs.resolved_integration_versions` (#686). When present,
      * `[integrationId]` pins the manifest VERSION this resolver reads — so the
@@ -131,15 +119,6 @@ export async function resolveLiveIntegrationCredentials(
   await assertIntegrationActive(integrationId, context.spaceId);
 
   const auths = (manifest.auths ?? {}) as Record<string, AfpsManifestAuth>;
-  if (Object.keys(auths).length === 0) {
-    // The ONLY legitimate empty payload on this endpoint: the integration
-    // genuinely declares no auth, so there is nothing to inject and nothing
-    // has failed. Every other empty-looking state below is a broken one and
-    // throws — an empty payload tells the sidecar "no `delivery.http` auths,
-    // skip the MITM listener", which for a broken state means the run boots
-    // and every upstream call goes out uncredentialed.
-    return { auths: [], deliveryPlans: {}, expiresAtEpochMs: {} };
-  }
 
   const out: MutableCredentialsWire = {
     auths: [],
@@ -147,43 +126,24 @@ export async function resolveLiveIntegrationCredentials(
     expiresAtEpochMs: {},
   };
 
-  // Flat model: one connection per integration, chosen by the cascade
-  // at kickoff. The snapshot pins which row to load; without a snapshot
-  // (legacy/manual paths) fall back to the actor's accessible connections
-  // (first-found across declared auths — matches the spawn resolver).
-  const snapshotEntry = context.resolvedConnections?.[integrationId] ?? null;
-  const connection = await selectAccessibleConnection(
-    integrationId,
-    Object.keys(auths),
-    snapshotEntry?.connectionId ?? null,
-    { spaceId: context.spaceId, actor: context.actor },
-  );
+  const connection = await loadAccessibleConnectionById(context.connectionId, integrationId, null, {
+    spaceId: context.spaceId,
+    actor: context.actor,
+  });
   if (!connection) {
-    // STATE A — nothing to decrypt. Either the row the run PINNED at kickoff is
-    // no longer reachable (deleted, unshared, moved to another space), or
-    // the actor never connected this integration at all. Both are 404: the
-    // doc comment above already promises "no connection for the actor", there
-    // is no row to flag `needsReconnection` on, and 410 would lie about one
-    // having been flagged. Returning the empty payload here (the old
-    // behaviour) was indistinguishable from "declares no auth" — the sidecar
-    // skipped the MITM listener, every upstream call left uncredentialed, and
-    // the agent reported a generic "the API is unavailable".
+    // STATE A — 404 and not 410: no row is left to flag `needsReconnection` on.
     logger.warn("Integration credentials unavailable — no accessible connection", {
       runId: context.runId,
       integrationId,
+      connectionId: context.connectionId,
       declaredAuthKeys: Object.keys(auths),
-      ...(snapshotEntry ? { pinnedConnectionId: snapshotEntry.connectionId } : {}),
-      ...(snapshotEntry ? { pinnedSource: snapshotEntry.source } : {}),
+      pinnedSource: context.connectionSource,
     });
     throw notFound(
-      snapshotEntry
-        ? `Integration '${integrationId}': the connection pinned for this run ` +
-            `(${snapshotEntry.connectionId}, source '${snapshotEntry.source}') is no longer ` +
-            `reachable — it was deleted, unshared, or moved to another space after the ` +
-            `run started. Re-connect '${integrationId}' and relaunch the run.`
-        : `Integration '${integrationId}' has no connection for this run's actor ` +
-            `(declared auths: ${Object.keys(auths).join(", ")}). Connect '${integrationId}' ` +
-            `for this user, then relaunch the run.`,
+      `Integration '${integrationId}': the connection bound to this run ` +
+        `(${context.connectionId}, source '${context.connectionSource}') ` +
+        `is no longer reachable — it was deleted, unshared, or moved to another space after ` +
+        `the run started. Re-connect '${integrationId}' and relaunch the run.`,
     );
   }
 

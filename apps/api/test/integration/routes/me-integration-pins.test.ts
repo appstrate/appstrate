@@ -8,7 +8,7 @@
  *
  *   1. Auth: cookie-or-API-key required (no Appstrate-User end-user surface).
  *   2. Wire shape: PUT body is snake_case `{ agent_package_id,
- *      integration_package_id, connection_id }`. The frontend serialiser was
+ *      integration_package_id, connection_ids }`. The frontend serialiser was
  *      just fixed to match this — this file pins the backend gate so a future
  *      drift back to camelCase is caught.
  *   3. End-user 401 on PUT + DELETE (impersonated callers can't pin); end-user
@@ -32,6 +32,7 @@ import {
   localIntegrationManifest,
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 
 const app = getTestApp();
 
@@ -88,6 +89,7 @@ describe("/api/me/integration-pins", () => {
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
         scopesGranted: [],
+        label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -131,14 +133,74 @@ describe("/api/me/integration-pins", () => {
         body: JSON.stringify({
           agent_package_id: AGENT,
           integration_package_id: INTEGRATION,
-          connection_id: connectionId,
+          connection_ids: [connectionId],
         }),
       });
 
       expect(res.status).toBe(200);
       // PUT response is the IntegrationPin wire shape (snake_case fields).
-      const body = (await res.json()) as { connection_id: string };
-      expect(body.connection_id).toBe(connectionId);
+      const body = (await res.json()) as { connection_ids: string[] };
+      expect(body.connection_ids).toEqual([connectionId]);
+    });
+
+    it("ALLOW: pins a SET of connections, replaced wholesale by the next PUT", async () => {
+      const connA = await seedConnectionFor(ctx.user.id);
+      const connB = await seedConnectionFor(ctx.user.id);
+      const put = (ids: string[]) =>
+        app.request("/api/me/integration-pins", {
+          method: "PUT",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({
+            agent_package_id: AGENT,
+            integration_package_id: INTEGRATION,
+            connection_ids: ids,
+          }),
+        });
+
+      const both = await put([connA, connB]);
+      expect(both.status).toBe(200);
+      expect(
+        [...((await both.json()) as { connection_ids: string[] }).connection_ids].sort(),
+      ).toEqual([connA, connB].sort());
+
+      const listed = await app.request(
+        `/api/me/integration-pins?agent_package_id=${encodeURIComponent(AGENT)}`,
+        { headers: authHeaders(ctx) },
+      );
+      const body = (await listed.json()) as { data: Array<{ connection_ids: string[] }> };
+      expect(body.data).toHaveLength(1);
+      expect([...body.data[0]!.connection_ids].sort()).toEqual([connA, connB].sort());
+
+      // A PUT is a replacement, never a merge.
+      await put([connB]);
+      const after = await app.request(
+        `/api/me/integration-pins?agent_package_id=${encodeURIComponent(AGENT)}`,
+        { headers: authHeaders(ctx) },
+      );
+      const afterBody = (await after.json()) as { data: Array<{ connection_ids: string[] }> };
+      expect(afterBody.data[0]!.connection_ids).toEqual([connB]);
+    });
+
+    it("DENY: 400 on an empty set and on a set over the cap", async () => {
+      const put = (ids: string[]) =>
+        app.request("/api/me/integration-pins", {
+          method: "PUT",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({
+            agent_package_id: AGENT,
+            integration_package_id: INTEGRATION,
+            connection_ids: ids,
+          }),
+        });
+
+      expect((await put([])).status).toBe(400);
+      const over = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION + 1 }, () =>
+        crypto.randomUUID(),
+      );
+      expect((await put(over)).status).toBe(400);
+      // Control: a legal singleton reaches the service and lands.
+      const connId = await seedConnectionFor(ctx.user.id);
+      expect((await put([connId])).status).toBe(200);
     });
 
     it("DENY: 400 when body uses camelCase keys (regression guard — frontend was just fixed)", async () => {
@@ -160,17 +222,17 @@ describe("/api/me/integration-pins", () => {
       const fieldPaths = (body.errors ?? []).map((e) => e.field);
       expect(fieldPaths).toContain("agent_package_id");
       expect(fieldPaths).toContain("integration_package_id");
-      expect(fieldPaths).toContain("connection_id");
+      expect(fieldPaths).toContain("connection_ids");
     });
 
-    it("DENY: 400 when connection_id is not a UUID", async () => {
+    it("DENY: 400 when a connection id is not a UUID", async () => {
       const res = await app.request("/api/me/integration-pins", {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           agent_package_id: AGENT,
           integration_package_id: INTEGRATION,
-          connection_id: "not-a-uuid",
+          connection_ids: ["not-a-uuid"],
         }),
       });
 
@@ -184,7 +246,7 @@ describe("/api/me/integration-pins", () => {
         body: JSON.stringify({
           agent_package_id: AGENT,
           integration_package_id: INTEGRATION,
-          connection_id: "00000000-0000-0000-0000-000000000000",
+          connection_ids: ["00000000-0000-0000-0000-000000000000"],
         }),
       });
 
@@ -204,7 +266,7 @@ describe("/api/me/integration-pins", () => {
         body: JSON.stringify({
           agent_package_id: AGENT,
           integration_package_id: INTEGRATION,
-          connection_id: connectionId,
+          connection_ids: [connectionId],
         }),
       });
       expect(putRes.status).toBe(200);
@@ -215,9 +277,9 @@ describe("/api/me/integration-pins", () => {
       );
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: Array<{ connection_id: string }> };
+      const body = (await res.json()) as { data: Array<{ connection_ids: string[] }> };
       expect(body.data).toHaveLength(1);
-      expect(body.data[0]!.connection_id).toBe(connectionId);
+      expect(body.data[0]!.connection_ids).toEqual([connectionId]);
     });
 
     it("returns an empty list when no agentPackageId query param is given", async () => {
@@ -248,7 +310,7 @@ describe("/api/me/integration-pins", () => {
         body: JSON.stringify({
           agent_package_id: AGENT,
           integration_package_id: INTEGRATION,
-          connection_id: connectionId,
+          connection_ids: [connectionId],
         }),
       });
 
@@ -312,7 +374,7 @@ describe("/api/me/integration-pins", () => {
         body: JSON.stringify({
           agent_package_id: AGENT,
           integration_package_id: INTEGRATION,
-          connection_id: connectionId,
+          connection_ids: [connectionId],
         }),
       });
 

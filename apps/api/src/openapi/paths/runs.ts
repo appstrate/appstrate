@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 
 const inlineDependencyAuthorization =
   " Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.";
@@ -119,9 +120,13 @@ const canonicalRunsPaths = {
                 },
                 connection_overrides: {
                   type: "object",
-                  description:
-                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
-                  additionalProperties: { type: "string", minLength: 1 },
+                  description: `Per-integration connection sets for THIS run (the run-override layer). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 1..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (at most one connection). Resolved at kickoff, persisted on \`runs.connection_overrides\` and snapshotted into \`runs.resolved_connections\` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED \`connection\` argument on each of its tools, enumerating the connection labels. Empty arrays and empty ids are refused at the write (\`lib/launch-schemas.ts\`): either would be skipped in silence by the connection resolver. A set that cannot bind answers 412 \`missing_integration_connection\`, whose per-integration \`errors[].code\` is \`override_connection_unavailable\` (an id not accessible to the actor) or \`duplicate_connection_label\` (two bound connections share a label).`,
+                  additionalProperties: {
+                    type: "array",
+                    items: { type: "string", minLength: 1 },
+                    minItems: 1,
+                    maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+                  },
                 },
                 dependency_overrides: {
                   type: "object",
@@ -472,9 +477,13 @@ const canonicalRunsPaths = {
                 },
                 connection_overrides: {
                   type: "object",
-                  description:
-                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
-                  additionalProperties: { type: "string", minLength: 1 },
+                  description: `Per-integration connection sets for THIS run (the run-override layer). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 1..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (at most one connection). Resolved at kickoff, persisted on \`runs.connection_overrides\` and snapshotted into \`runs.resolved_connections\` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED \`connection\` argument on each of its tools, enumerating the connection labels. Empty arrays and empty ids are refused at the write (\`lib/launch-schemas.ts\`): either would be skipped in silence by the connection resolver. A set that cannot bind answers 412 \`missing_integration_connection\`, whose per-integration \`errors[].code\` is \`override_connection_unavailable\` (an id not accessible to the actor) or \`duplicate_connection_label\` (two bound connections share a label).`,
+                  additionalProperties: {
+                    type: "array",
+                    items: { type: "string", minLength: 1 },
+                    minItems: 1,
+                    maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+                  },
                 },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
@@ -704,12 +713,17 @@ const canonicalRunsPaths = {
                 },
                 connection_overrides: {
                   type: "object",
-                  additionalProperties: { type: "string", minLength: 1 },
+                  additionalProperties: {
+                    type: "array",
+                    items: { type: "string", minLength: 1 },
+                    minItems: 1,
+                    maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+                  },
                   description:
                     "Same field as `POST /api/runs/inline` — applied to the integration readiness " +
                     "check so a pick that clears `must_choose_connection` here clears it on the " +
-                    "real launch too. Never persisted; no run is created. Values must be " +
-                    "non-empty, same rule and same reason as on the launch surfaces.",
+                    "real launch too. Never persisted; no run is created. Same array shape and " +
+                    "same bounds as on the launch surfaces.",
                 },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },

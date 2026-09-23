@@ -132,13 +132,14 @@ const inlineRunBodySchema = z
      */
     context_files: z.array(z.unknown()).optional(),
     /**
-     * Per-integration connection picks for this run (resolver mechanism #2).
+     * Per-integration connection picks for this run (cascade layer 3, the run override).
      * Declared here so the parse keeps the field for the preflight's readiness
      * gate, which runs BEFORE `parseRequestInput` and would otherwise never see
      * it.
      *
-     * `.min(1)` and the reason it is owned at the schema rather than in
-     * `parseRequestInput` live with the rule itself, in `lib/launch-schemas.ts`.
+     * The bounds (non-empty id, non-empty set, cap) and the reason they are
+     * owned at the schema rather than in `parseRequestInput` live with the
+     * rule itself, in `lib/launch-schemas.ts`.
      */
     connection_overrides: connectionOverridesSchema.optional(),
     /**

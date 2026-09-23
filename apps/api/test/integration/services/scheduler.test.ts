@@ -679,6 +679,33 @@ describeRequiresRedis("scheduler service", () => {
     });
   });
 
+  // ── triggerScheduledRun — job data the write path would refuse ──
+  //
+  // BullMQ job data is a COPY of the schedule row, and a delayed job can outlive
+  // a rewrite of that row. A bare connection id where a set belongs must fail
+  // the fire loudly, never be read as a set of its characters.
+
+  describe("triggerScheduledRun connection_overrides shape", () => {
+    it("fails the fire when the job's connection_overrides value is a bare id, not a set", async () => {
+      const schedule = await createSchedule({ orgId, spaceId: defaultSpaceId }, packageId, actor, {
+        cronExpression: "0 * * * *",
+      });
+
+      await triggerScheduledRun(schedule.id, packageId, actor, orgId, defaultSpaceId, undefined, {
+        connectionOverrides: {
+          "@vendor/ssh": "0b7e4f4e-1c1f-4d7e-9c63-9a7b1f0e2d11",
+        } as unknown as Record<string, string[]>,
+      });
+
+      const fired = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+      expect(fired).toHaveLength(1);
+      expect(fired[0]!.status).toBe("failed");
+      // Before the version resolution: without the guard this same fire fails
+      // on "no published version" and never mentions the malformed payload.
+      expect(fired[0]!.error ?? "").toContain("connection_overrides");
+    });
+  });
+
   // ── triggerScheduledRun — declared-but-unspawnable integration (#737) ──
   //
   // The schedule has an actor, but the agent declares an integration whose

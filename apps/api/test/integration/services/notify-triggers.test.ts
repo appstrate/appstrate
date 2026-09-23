@@ -434,6 +434,7 @@ describe("NOTIFY triggers (regression)", () => {
         integrationId: INTEG,
         authKey: "primary",
         accountId: `acct-${ctx.user.id.slice(0, 6)}`,
+        label: `acct-${ctx.user.id.slice(0, 6)}`,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         endUserId: null,

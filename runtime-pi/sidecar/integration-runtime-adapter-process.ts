@@ -48,6 +48,18 @@ import {
 } from "./integration-runtime-adapter.ts";
 
 /**
+ * True when `value` names `path` inside a longer string (`-i /run/secrets/key`).
+ * An occurrence followed by a path character names another file
+ * (`/run/secrets/key.pub`), not this one.
+ */
+function embedsMountPath(value: string, path: string): boolean {
+  for (let at = value.indexOf(path); at !== -1; at = value.indexOf(path, at + 1)) {
+    if (!/[A-Za-z0-9._-]/.test(value.charAt(at + path.length))) return true;
+  }
+  return false;
+}
+
+/**
  * Subprocess-mode interpreter mapping. Symmetric with
  * RUNNER_IMAGE_BY_TYPE in the docker adapter — adding a new runtime
  * requires updating both.
@@ -198,19 +210,6 @@ function planSubprocess(spec: IntegrationSpawnSpec, bundleRoot: string): Subproc
 }
 
 /**
- * AFPS §7.6 (CC-5) — materialise `delivery.files` for the process
- * adapter. Subprocesses share the host filesystem, so we attempt to write
- * each entry at the manifest-declared absolute path with the requested
- * mode. When that fails (typically a dev machine without write permission
- * to `/run/`, `/etc/`, …), we fall back to a per-run scratch dir under the
- * sidecar's tmp space and surface the actual path via an env var
- * `APPSTRATE_FILE_MOUNT_<sanitized-path>` so the integration code can pick
- * it up. Pure-Docker deployments don't hit the fallback (the runner image
- * always permits writes to `/tmp` and `/run/`).
- *
- * Returns the set of created paths so `shutdown()` can clean them up.
- */
-/**
  * R8a — safe-path floor for `delivery.files` on the process adapter.
  *
  * ENTIRELY the shared floor: {@link isPathSafeForMount} refuses every surface
@@ -239,12 +238,56 @@ export function isHostPathSafeForMount(hostPath: string): boolean {
   return isPathSafeForMount(hostPath);
 }
 
+/** Where {@link materializeFileMountsOnHost} places one spec's files. */
+export interface FileMountPlacement {
+  /** Scopes the scratch dir, so two connections of a run never share it. */
+  connectionId?: string;
+  /** Canonical declared paths another connection of the run already holds. */
+  relocate?: ReadonlySet<string>;
+}
+
+async function writeMountFile(path: string, bytes: Buffer, mode: number): Promise<void> {
+  // Best-effort `mkdir -p`: a parent we may not create makes the write throw.
+  const parent = dirname(path);
+  if (parent !== "/" && parent !== ".") await mkdir(parent, { recursive: true });
+  await writeFile(path, bytes, { mode });
+  await chmod(path, mode);
+}
+
+/**
+ * AFPS §7.6 (CC-5) — materialise `delivery.files` for the process
+ * adapter. Subprocesses share the host filesystem, so we attempt to write
+ * each entry at the manifest-declared absolute path with the requested
+ * mode. When that fails (typically a dev machine without write permission
+ * to `/run/`, `/etc/`, …), we fall back to a per-run (per-connection when
+ * the spec binds one) scratch dir under the sidecar's tmp space and surface
+ * the actual path via an env var `APPSTRATE_FILE_MOUNT_<sanitized-path>` so
+ * the integration code can pick it up. Pure-Docker deployments don't hit the
+ * fallback (the runner image always permits writes to `/tmp` and `/run/`).
+ *
+ * A path in `placement.relocate` (another connection of the run holds it)
+ * goes straight to the scratch dir.
+ *
+ * Returns the set of created paths so `shutdown()` can clean them up.
+ */
 export async function materializeFileMountsOnHost(
   runId: string,
   fileMounts: Record<string, { content_b64: string; mode: string }>,
-): Promise<{ createdPaths: string[]; envOverrides: Record<string, string> }> {
+  placement: FileMountPlacement = {},
+): Promise<{
+  createdPaths: string[];
+  envOverrides: Record<string, string>;
+  /** Canonical declared path → where its bytes were written. */
+  locations: Map<string, string>;
+}> {
   const createdPaths: string[] = [];
   const envOverrides: Record<string, string> = {};
+  const locations = new Map<string, string>();
+  const scratchRoot = join(
+    tmpdir(),
+    `appstrate-mounts-${runId}`,
+    ...(placement.connectionId ? [placement.connectionId.replace(/[^A-Za-z0-9_-]+/g, "_")] : []),
+  );
 
   for (const [declaredPath, entry] of Object.entries(fileMounts)) {
     // The path is canonicalized ONCE, and everything downstream — the safety
@@ -267,31 +310,27 @@ export async function materializeFileMountsOnHost(
     const bytes = Buffer.from(entry.content_b64, "base64");
     const modeOctal = parseInt(entry.mode, 8);
     const finalMode = Number.isNaN(modeOctal) ? 0o400 : modeOctal;
+    const relocated = placement.relocate?.has(containerPath) ?? false;
 
     let writtenAt: string | null = null;
-    try {
-      // Try the manifest-declared path first. Best-effort `mkdir -p` for
-      // the parent: deeper-than-existing paths get created if we have
-      // permission, otherwise the writeFile catches and we fall back.
-      const parent = dirname(containerPath);
-      if (parent && parent !== "/" && parent !== ".") {
-        await mkdir(parent, { recursive: true });
+    let declaredError: unknown = null;
+    if (!relocated) {
+      try {
+        await writeMountFile(containerPath, bytes, finalMode);
+        writtenAt = containerPath;
+      } catch (err) {
+        declaredError = err;
       }
-      await writeFile(containerPath, bytes, { mode: finalMode });
-      await chmod(containerPath, finalMode);
-      writtenAt = containerPath;
-    } catch (err) {
-      // Fall back to a per-run scratch dir. Mirror the manifest path
-      // structure so two files with the same basename don't collide.
-      const scratchRoot = join(tmpdir(), `appstrate-mounts-${runId}`);
+    }
+    if (writtenAt === null) {
+      // Mirror the manifest path structure so two files with the same
+      // basename don't collide.
       const scratchPath = join(
         scratchRoot,
         containerPath.replace(/^\/+/, "").replace(/[^A-Za-z0-9._/-]+/g, "_"),
       );
       try {
-        await mkdir(dirname(scratchPath), { recursive: true });
-        await writeFile(scratchPath, bytes, { mode: finalMode });
-        await chmod(scratchPath, finalMode);
+        await writeMountFile(scratchPath, bytes, finalMode);
         writtenAt = scratchPath;
         // Sanitise the manifest path into a valid env-var name fragment.
         const envSuffix = containerPath
@@ -300,20 +339,38 @@ export async function materializeFileMountsOnHost(
           .toUpperCase();
         envOverrides[`APPSTRATE_FILE_MOUNT_${envSuffix}`] = scratchPath;
         logger.info(
-          "delivery.files: fell back to scratch path (process adapter could not write manifest path)",
-          { manifestPath: containerPath, scratchPath, error: String(err) },
+          relocated
+            ? "delivery.files: declared path holds another connection's file; wrote to a per-connection path"
+            : "delivery.files: fell back to scratch path (process adapter could not write manifest path)",
+          {
+            manifestPath: containerPath,
+            scratchPath,
+            ...(declaredError === null ? {} : { error: String(declaredError) }),
+          },
         );
       } catch (fallbackErr) {
+        // Skipping a relocated entry would leave the runner reading the
+        // declared path — another connection's credential.
+        if (relocated) {
+          await Promise.all(createdPaths.map((p) => rm(p, { force: true }).catch(() => {})));
+          throw new Error(
+            `delivery.files: could not write the per-connection copy of "${containerPath}"`,
+            { cause: fallbackErr },
+          );
+        }
         logger.warn("delivery.files: both manifest and scratch write failed; skipping entry", {
           manifestPath: containerPath,
           error: String(fallbackErr),
         });
       }
     }
-    if (writtenAt) createdPaths.push(writtenAt);
+    if (writtenAt) {
+      createdPaths.push(writtenAt);
+      locations.set(containerPath, writtenAt);
+    }
   }
 
-  return { createdPaths, envOverrides };
+  return { createdPaths, envOverrides, locations };
 }
 
 export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
@@ -322,6 +379,8 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
    * shutdown so per-run credential material doesn't outlive the run.
    */
   const createdPaths: string[] = [];
+  /** Declared `delivery.files` path → connection whose bytes sit there (`null`: connect run). */
+  const declaredPathHolders = new Map<string, string | null>();
 
   return {
     id: "process",
@@ -387,12 +446,44 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
       // AFPS §7.6 (CC-5) — materialise `delivery.files` entries
       // before the subprocess starts so the entrypoint sees them at boot.
       if (spec.fileMounts && Object.keys(spec.fileMounts).length > 0) {
-        const { createdPaths: paths, envOverrides } = await materializeFileMountsOnHost(
-          runId,
-          spec.fileMounts,
-        );
+        const holder = spec.connection?.id ?? null;
+        const pointsAt = (path: string) =>
+          Object.keys(procEnv).filter((key) => normalizeMountPath(procEnv[key]!) === path);
+        const declaredPaths = new Set(Object.keys(spec.fileMounts).map(normalizeMountPath));
+        const relocate = new Set<string>();
+        for (const path of declaredPaths) {
+          const current = declaredPathHolders.get(path);
+          if (current === undefined || current === holder) continue;
+          // Relocating is only sound when an env var names the file exactly;
+          // a hardcoded or embedded path would read the other connection's.
+          const embeds = Object.values(procEnv).some(
+            (value) =>
+              !declaredPaths.has(normalizeMountPath(value)) && embedsMountPath(value, path),
+          );
+          if (pointsAt(path).length === 0 || embeds) {
+            throw new Error(
+              `${spec.integrationId} [${spec.connection?.label ?? "connect"}]: refusing to spawn — ` +
+                `delivery.files path "${path}" already holds another connection's credential ` +
+                `in this run, and no env var of this runner names it exactly, so the runner ` +
+                `cannot be pointed at its own copy and would read the other connection's file.`,
+            );
+          }
+          relocate.add(path);
+        }
+        const {
+          createdPaths: paths,
+          envOverrides,
+          locations,
+        } = await materializeFileMountsOnHost(runId, spec.fileMounts, {
+          connectionId: spec.connection?.id,
+          relocate,
+        });
         createdPaths.push(...paths);
         Object.assign(procEnv, envOverrides);
+        for (const [path, writtenAt] of locations) {
+          if (writtenAt === path) declaredPathHolders.set(path, holder);
+          else for (const key of pointsAt(path)) procEnv[key] = writtenAt;
+        }
       }
       // Privilege-drop wrapper (Firecracker guest): the supervisor provides
       // APPSTRATE_RUNNER_EXEC, so every runner execs through the setuid

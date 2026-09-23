@@ -63,6 +63,7 @@ import { Badge } from "@appstrate/ui/components/badge";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
 import {
   Table,
@@ -85,6 +86,7 @@ import { VersionHistory } from "../components/version-history";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { ConnectionTeardownSteps } from "../components/integration-connect/connection-teardown-steps";
+import { keepAvailable, sharedLabels, toggleCapped } from "../lib/connection-set";
 import { Modal } from "../components/modal";
 import { SourceBadge } from "../components/source-badge";
 import { DefaultCell } from "../components/default-cell";
@@ -121,10 +123,7 @@ import { useAuth } from "../hooks/use-auth";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useSetPackageActive } from "../hooks/use-library";
 import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
-import {
-  connectionDisplayLabel,
-  isConnectionOwnedBy,
-} from "../components/integration-connect/connection-label";
+import { isConnectionOwnedBy } from "../components/integration-connect/connection-ownership";
 import { isOauthAuthConnectable } from "../components/integration-connect/connectable-auth-keys";
 import { ConnectionStatusBadge } from "../components/integration-connect/connection-status-badge";
 
@@ -840,7 +839,7 @@ function BlockUserConnectionsToggle({
  * information as a badge instead, where a suffix would fight the rename UI.
  */
 function connectionOptionLabel(c: IntegrationConnection): string {
-  const base = connectionDisplayLabel(c);
+  const base = c.label;
   return c.owner_name ? `${base} — ${c.owner_name}` : base;
 }
 
@@ -852,23 +851,26 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
   const remove = useDeleteIntegrationOrgDefault();
 
   const shared = (connections ?? []).filter((c) => c.shared_with_org === true);
-  const connectionDisplay = (id: string): string => {
-    const c = (connections ?? []).find((x) => x.id === id);
-    if (!c) return id;
-    return connectionOptionLabel(c);
-  };
 
-  const [connectionId, setConnectionId] = useState("");
+  const [connectionIds, setConnectionIds] = useState<string[]>([]);
   const [enforce, setEnforce] = useState(false);
 
-  // Seed the form from the persisted default once loaded.
-  const seededFor = orgDefault?.connection_id ?? null;
+  // Seeded with only what is still shared, so the form shows what a save writes.
+  const seedIds = keepAvailable(
+    orgDefault?.connection_ids ?? [],
+    shared.map((c) => c.id),
+  );
+  // Order carries no meaning in a set — sort so a server reordering does not
+  // read as a change and wipe the admin's in-progress edit.
+  const seededFor = orgDefault ? [...seedIds].sort().join(",") : null;
   const [seeded, setSeeded] = useState<string | null>(null);
   if (seededFor !== seeded) {
     setSeeded(seededFor);
-    setConnectionId(orgDefault?.connection_id ?? "");
+    setConnectionIds(seedIds);
     setEnforce(orgDefault?.enforce ?? false);
   }
+
+  const colliding = sharedLabels(shared.filter((c) => connectionIds.includes(c.id)));
 
   return (
     <div
@@ -890,40 +892,36 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
         <div className="border-border bg-background flex flex-wrap items-end gap-3 rounded-md border p-3">
           <div className="min-w-[14rem] flex-1">
             <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
-              {t("integration.admin.orgDefault.connection")}
+              {t("integration.admin.orgDefault.connections")}
             </Label>
-            <select
-              className="border-border bg-background w-full rounded border px-2 py-1 text-xs"
-              value={connectionId}
-              onChange={(e) => setConnectionId(e.target.value)}
-              data-testid="org-default-connection"
-            >
-              <option value="">{t("integration.admin.orgDefault.none")}</option>
-              {shared.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {connectionDisplay(c.id)}
-                </option>
-              ))}
-            </select>
+            <ConnectionSetChecklist
+              connections={shared}
+              value={connectionIds}
+              onChange={setConnectionIds}
+              idPrefix="org-default-connection"
+            />
           </div>
-          <label className="flex items-center gap-2 pb-1 text-xs">
+          <div className="flex items-center gap-2 pb-1 text-xs">
             <Checkbox
+              id="org-default-enforce"
               checked={enforce}
               onCheckedChange={(v) => setEnforce(v === true)}
+              aria-label={t("integration.admin.orgDefault.enforce")}
               data-testid="org-default-enforce"
             />
-            {t("integration.admin.orgDefault.enforce")}
-          </label>
+            <label htmlFor="org-default-enforce">{t("integration.admin.orgDefault.enforce")}</label>
+          </div>
           <Button
             size="sm"
             onClick={() =>
-              connectionId &&
+              connectionIds.length > 0 &&
+              colliding.length === 0 &&
               upsert.mutate({
                 params: { path: { packageId } },
-                body: { connection_id: connectionId, enforce },
+                body: { connection_ids: connectionIds, enforce },
               })
             }
-            disabled={!connectionId || upsert.isPending}
+            disabled={connectionIds.length === 0 || colliding.length > 0 || upsert.isPending}
             data-testid="org-default-save"
           >
             {t("integration.admin.orgDefault.save")}
@@ -946,10 +944,59 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
 }
 
 /**
- * Centralised pin management. One pin per (agent, integration) — admin
- * picks which shared connection a given agent uses. Flat model: no
- * authKey to disambiguate (the connection's own authKey is implicit).
- * With an org default in place, this surface is for per-agent EXCEPTIONS.
+ * One checkbox per connection composing a set (the write replaces the whole
+ * set), capped at {@link MAX_CONNECTIONS_PER_INTEGRATION}; flags colliding labels.
+ */
+function ConnectionSetChecklist({
+  connections,
+  value,
+  onChange,
+  idPrefix,
+}: {
+  connections: IntegrationConnection[];
+  value: string[];
+  onChange: (next: string[]) => void;
+  idPrefix: string;
+}) {
+  const { t } = useTranslation("settings");
+  const colliding = sharedLabels(connections.filter((c) => value.includes(c.id)));
+  return (
+    <>
+      <div className="flex flex-col gap-1" data-testid={`${idPrefix}s`}>
+        {connections.map((c) => {
+          const id = `${idPrefix}-${c.id}`;
+          const isChecked = value.includes(c.id);
+          return (
+            <div key={c.id} className="flex items-center gap-2 text-xs">
+              <Checkbox
+                id={id}
+                checked={isChecked}
+                disabled={!isChecked && value.length >= MAX_CONNECTIONS_PER_INTEGRATION}
+                onCheckedChange={() =>
+                  onChange(toggleCapped(value, c.id, MAX_CONNECTIONS_PER_INTEGRATION))
+                }
+                data-testid={id}
+              />
+              <label htmlFor={id}>{connectionOptionLabel(c)}</label>
+            </div>
+          );
+        })}
+      </div>
+      {colliding.length > 0 && (
+        <p className="mt-1 text-[0.7rem] text-amber-600 dark:text-amber-400">
+          {t("integration.admin.duplicateLabel", { labels: colliding.join(", ") })}
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
+ * Centralised pin management. One pin per (agent, integration), holding the
+ * whole bound SET — admin picks which shared connections a given agent uses,
+ * and a write replaces the set. Flat model: no authKey to disambiguate (each
+ * connection's own authKey is implicit). With an org default in place, this
+ * surface is for per-agent EXCEPTIONS.
  */
 function PinManagementSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation("settings");
@@ -960,7 +1007,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
   const deletePin = useDeleteIntegrationPin();
 
   const [newAgent, setNewAgent] = useState("");
-  const [newConnectionId, setNewConnectionId] = useState("");
+  const [newConnectionIds, setNewConnectionIds] = useState<string[]>([]);
 
   const pinnableConnections = (connections ?? []).filter((c) => c.shared_with_org === true);
 
@@ -973,17 +1020,21 @@ function PinManagementSection({ packageId }: { packageId: string }) {
     return connectionOptionLabel(c);
   };
 
+  const colliding = sharedLabels(
+    pinnableConnections.filter((c) => newConnectionIds.includes(c.id)),
+  );
+
   const onSubmitNewPin = () => {
-    if (!newAgent || !newConnectionId) return;
+    if (!newAgent || newConnectionIds.length === 0 || colliding.length > 0) return;
     upsertPin.mutate(
       {
         params: { path: { packageId, agentPackageId: newAgent } },
-        body: { connection_id: newConnectionId },
+        body: { connection_ids: newConnectionIds },
       },
       {
         onSuccess: () => {
           setNewAgent("");
-          setNewConnectionId("");
+          setNewConnectionIds([]);
         },
       },
     );
@@ -1019,27 +1070,18 @@ function PinManagementSection({ packageId }: { packageId: string }) {
                   {t("integration.admin.pinManagement.colAgent")}
                 </TableHead>
                 <TableHead className="h-auto px-3 py-2">
-                  {t("integration.admin.pinManagement.colAuth")}
-                </TableHead>
-                <TableHead className="h-auto px-3 py-2">
-                  {t("integration.admin.pinManagement.colConnection")}
+                  {t("integration.admin.pinManagement.colConnections")}
                 </TableHead>
                 <TableHead className="h-auto w-12 px-3 py-2" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {(pins ?? []).map((p) => (
-                <TableRow
-                  key={`${p.packageId}-${p.auth_key}`}
-                  data-testid={`pin-row-${p.packageId}-${p.auth_key}`}
-                >
+                <TableRow key={p.packageId} data-testid={`pin-row-${p.packageId}`}>
                   <TableCell className="px-3 py-2">{agentDisplayName(p.packageId)}</TableCell>
                   <TableCell className="px-3 py-2">
-                    <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
-                      {p.auth_key}
-                    </span>
+                    {p.connection_ids.map(connectionDisplay).join(" · ")}
                   </TableCell>
-                  <TableCell className="px-3 py-2">{connectionDisplay(p.connection_id)}</TableCell>
                   <TableCell className="px-3 py-2">
                     <Button
                       size="icon"
@@ -1098,26 +1140,24 @@ function PinManagementSection({ packageId }: { packageId: string }) {
           </div>
           <div className="min-w-[12rem] flex-1">
             <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
-              {t("integration.admin.pinManagement.colConnection")}
+              {t("integration.admin.pinManagement.colConnections")}
             </Label>
-            <select
-              className="border-border bg-background w-full rounded border px-2 py-1 text-xs"
-              value={newConnectionId}
-              onChange={(e) => setNewConnectionId(e.target.value)}
-              data-testid="pin-add-connection"
-            >
-              <option value="">—</option>
-              {pinnableConnections.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {connectionDisplay(c.id)}
-                </option>
-              ))}
-            </select>
+            <ConnectionSetChecklist
+              connections={pinnableConnections}
+              value={newConnectionIds}
+              onChange={setNewConnectionIds}
+              idPrefix="pin-add-connection"
+            />
           </div>
           <Button
             size="sm"
             onClick={onSubmitNewPin}
-            disabled={!newAgent || !newConnectionId || upsertPin.isPending}
+            disabled={
+              !newAgent ||
+              newConnectionIds.length === 0 ||
+              colliding.length > 0 ||
+              upsertPin.isPending
+            }
             data-testid="pin-add-submit"
           >
             {t("integration.admin.pinManagement.add")}
@@ -1205,11 +1245,11 @@ function ConnectionTableRow({
   const { user } = useAuth();
   const { can } = usePermissions();
   const [editing, setEditing] = useState(false);
-  const [draftLabel, setDraftLabel] = useState(connection.label ?? "");
+  const [draftLabel, setDraftLabel] = useState(connection.label);
   const [confirmDelete, setConfirmDelete] = useState(false);
   // `label` is the single source of truth (set at creation to the identity or
   // "Connexion N"); render it verbatim.
-  const name = connectionDisplayLabel(connection);
+  const name = connection.label;
   const isShared = connection.shared_with_org === true;
   // The list now returns org-shared connections owned by OTHER members, so
   // every per-row control has to be gated on the same rule the API enforces —
@@ -1222,23 +1262,25 @@ function ConnectionTableRow({
   const isOwn = isConnectionOwnedBy(connection, user?.id);
   const canRename = isOwn || can("integrations:configure");
   const startEdit = () => {
-    setDraftLabel(connection.label ?? "");
+    setDraftLabel(connection.label);
     setEditing(true);
   };
   const cancelEdit = () => {
     setEditing(false);
-    setDraftLabel(connection.label ?? "");
+    setDraftLabel(connection.label);
   };
   const submitLabel = () => {
     const next = draftLabel.trim();
-    if (next === (connection.label ?? "")) {
+    // A run addresses each bound connection by its label, so the label cannot
+    // be cleared: an empty field cancels the edit.
+    if (next === "" || next === connection.label) {
       setEditing(false);
       return;
     }
     updateConnection.mutate(
       {
         params: { path: { packageId, connectionId: connection.id } },
-        body: { label: next === "" ? null : next },
+        body: { label: next },
       },
       { onSuccess: () => setEditing(false) },
     );

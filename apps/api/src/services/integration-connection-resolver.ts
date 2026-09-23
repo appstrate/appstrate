@@ -2,7 +2,8 @@
 
 /**
  * Integration connection resolver — single source of truth for "which
- * connection does this run use for each (integration, authKey)?".
+ * connections does this run use for each integration?". Every layer yields a
+ * SET; the first set wins whole, and every member must pass `checkHealth`.
  *
  * Flat resolution cascade (highest precedence first):
  *
@@ -15,9 +16,9 @@
  *      explicitly picks via the agent-page picker; a server-side record
  *      the resolver sees on every run.
  *   6. integration_org_defaults (soft)         → org-wide default, all agents
- *   7. fallback: actor's accessible connections
- *      = own + (shared_with_org AND space match)
- *      → 1 match → auto, 0 → not_connected, N → must_choose
+ *   7. fallback: actor's accessible connections on an auth serving the
+ *      selected tools = own + (shared_with_org AND space match)
+ *      → 1 match → auto, 0 → not_connected, N → must_choose (never binds N)
  *
  * The exported `resolveConnections()` is pure — no DB access — so it can
  * be unit-tested with mock arrays. The `resolveConnectionsForRun()`
@@ -48,6 +49,7 @@ import {
   requiredScopesForAgent,
   manifestAuthKeySet,
   manifestHasRequiredAuth,
+  labelsSharedBy,
   type IntegrationManifest,
   type ConnectionCandidate,
   type ConnectionOverrides,
@@ -57,11 +59,19 @@ import {
   type ResolvedConnectionMap,
 } from "@appstrate/core/integration";
 import type { ResolutionFieldError } from "../lib/errors.ts";
+import { logger } from "../lib/logger.ts";
 import type { Actor } from "../lib/actor.ts";
 import { actorOrSharedFilter } from "../lib/actor.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "./integration-service.ts";
-import { listOrgDefaultsForResolver } from "./integration-org-defaults-service.ts";
+import {
+  authKeysServingSelection,
+  pinnedAuthServingNoSelectedTool,
+} from "./integration-manifest-helpers.ts";
+import {
+  listOrgDefaultsForResolver,
+  type OrgDefaultPick,
+} from "./integration-org-defaults-service.ts";
 import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
 
 // ─────────────────────────────────── Types ────────────────────────────────────
@@ -117,6 +127,8 @@ export interface IntegrationRequirement {
    * semantics (any connection on the integration is a valid pick).
    */
   requiredAuthKey?: string;
+  /** Effective selection (`tools[]`, else `default_tools`); absent → any auth serves it. */
+  effectiveTools?: readonly string[] | "*";
 }
 
 interface ResolveConnectionsInput {
@@ -142,16 +154,16 @@ interface ResolveConnectionsInput {
   /** Schedule's frozen override map (package_schedules row). */
   scheduleOverrides?: ConnectionOverrides | null;
   /**
-   * Org-wide default connection per integration (space-scoped, all
+   * Org-wide default connection set per integration (space-scoped, all
    * agents). `enforce: true` locks every actor (layer 2, just below the
    * per-agent admin pin); `enforce: false` is a soft default (layer 6,
    * just above the fallback — a member pin still wins). Absent in OSS
-   * until an admin sets one; the resolver then behaves exactly as before.
+   * until an admin sets one.
    */
-  orgDefaults?: Record<string, { connectionId: string; enforce: boolean }> | null;
+  orgDefaults?: Record<string, OrgDefaultPick> | null;
   /**
    * Actor's `user.id` — used to match member pins (`pins.userId === actorUserId`)
-   * in the cascade's layer 4. Null for end-users (they don't have member
+   * in the cascade's layer 5. Null for end-users (they don't have member
    * pins; their connection is selected by the API caller via run overrides).
    */
   actorUserId?: string | null;
@@ -175,8 +187,8 @@ interface ResolveConnectionsInput {
 // ─────────────────────────── Pure resolver (unit-tested) ──────────────────────
 
 /**
- * Walks the cascade per integration. One connection per integration,
- * regardless of authKey — the chosen connection carries its own authKey,
+ * Walks the cascade per integration and binds a SET of connections,
+ * regardless of authKey — each chosen connection carries its own authKey,
  * which drives credential injection downstream.
  *
  * Cascade per integration:
@@ -198,7 +210,13 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
   const resolved: ResolvedConnectionMap = {};
   const errors: ConnectionResolutionError[] = [];
 
-  const { adminPins, memberPins } = indexPins(input.pins, input.actorUserId ?? null);
+  const actorUserId = input.actorUserId ?? null;
+  // Member pins of OTHER users are ignored — each actor sees only their own.
+  const pinIds = (integrationId: string, userId: string | null) =>
+    nonEmpty(
+      input.pins.find((p) => p.integrationId === integrationId && p.userId === userId)
+        ?.connectionIds,
+    );
 
   for (const req of input.requirements) {
     // Inert only when the EFFECTIVE selection (agent's `tools[]`, else the
@@ -239,6 +257,23 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
           );
     const liveIndex = new Map<string, ConnectionRow>();
     for (const c of liveConnections) liveIndex.set(c.id, c);
+
+    // An agent configuration error, answered before any connection, pin or
+    // override is looked at: none of them can make the pinned auth serve a tool.
+    const pinnedMisfit = pinnedAuthServingNoSelectedTool(
+      req.manifest,
+      req.requiredAuthKey,
+      req.effectiveTools,
+    );
+    if (pinnedMisfit !== null) {
+      errors.push({
+        integrationId: req.integrationId,
+        code: "pinned_auth_serves_no_selected_tool",
+        requiredAuthKey: pinnedMisfit.authKey,
+        message: `The agent pins auth '${pinnedMisfit.authKey}' for ${req.integrationId}, which exposes none of its selected tools (auths that do: ${pinnedMisfit.servingAuthKeys.join(", ")}) — the agent's auth_key or its tool selection must change.`,
+      });
+      continue;
+    }
 
     // AFPS §4.1 `auth_key`: when the agent dep pins an auth method,
     // restrict the candidate connection set to rows on that auth BEFORE
@@ -283,15 +318,16 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       manifest: req.manifest,
       agentTools: req.agentTools,
       agentScopes: req.agentScopes,
-      adminPinId: adminPins.get(req.integrationId) ?? null,
+      adminPinIds: pinIds(req.integrationId, null),
       orgDefault: input.orgDefaults?.[req.integrationId] ?? null,
-      runOverrideId: input.runOverrides?.[req.integrationId] ?? null,
-      scheduleOverrideId: input.scheduleOverrides?.[req.integrationId] ?? null,
-      memberPinId: memberPins.get(req.integrationId) ?? null,
+      runOverrideIds: nonEmpty(input.runOverrides?.[req.integrationId]),
+      scheduleOverrideIds: nonEmpty(input.scheduleOverrides?.[req.integrationId]),
+      memberPinIds: actorUserId === null ? null : pinIds(req.integrationId, actorUserId),
       accessibleConnections: filteredConnections,
       connectionIndex: filteredIndex,
-      actorUserId: input.actorUserId ?? null,
+      actorUserId,
       actorEndUserId: input.actorEndUserId ?? null,
+      servingAuthKeys: authKeysServingSelection(req.manifest, req.effectiveTools),
       ...(req.requiredAuthKey !== undefined ? { requiredAuthKey: req.requiredAuthKey } : {}),
     });
 
@@ -307,20 +343,27 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
 
 // ─────────────────────────── Per-integration core ─────────────────────────────
 
+/** An empty set is "this layer has no opinion"; every write refuses one. */
+function nonEmpty(ids: readonly string[] | null | undefined): readonly string[] | null {
+  return ids && ids.length > 0 ? ids : null;
+}
+
 interface ResolveOneArgs {
   integrationId: string;
   manifest: IntegrationManifest;
   agentTools: readonly string[] | "*";
   agentScopes: readonly string[];
-  adminPinId: string | null;
-  orgDefault: { connectionId: string; enforce: boolean } | null;
-  runOverrideId: string | null;
-  scheduleOverrideId: string | null;
-  memberPinId: string | null;
+  adminPinIds: readonly string[] | null;
+  orgDefault: OrgDefaultPick | null;
+  runOverrideIds: readonly string[] | null;
+  scheduleOverrideIds: readonly string[] | null;
+  memberPinIds: readonly string[] | null;
   accessibleConnections: ConnectionRow[];
   connectionIndex: Map<string, ConnectionRow>;
   actorUserId: string | null;
   actorEndUserId: string | null;
+  /** Auths whose connection exposes a selected tool; `null` = any auth does. */
+  servingAuthKeys: ReadonlySet<string> | null;
   /**
    * AFPS §4.1 `auth_key` from the agent dep — already applied as a candidate
    * filter by {@link resolveConnections}. Threaded in so the `not_connected`
@@ -331,111 +374,159 @@ interface ResolveOneArgs {
 }
 
 type ResolveOneResult =
-  | { kind: "resolved"; value: ResolvedConnection }
+  | { kind: "resolved"; value: ResolvedConnection[] }
   | { kind: "error"; error: ConnectionResolutionError };
 
 /**
- * Look up a connection by id in the index, treating a row that belongs to a
- * DIFFERENT integration as not-found. Pins/overrides (cascade layers 1-6)
- * carry a caller-supplied connection id; without this guard a run/schedule
- * override (or pin) pointing at an accessible connection of another
- * integration would be accepted and its credentials injected under the wrong
- * integration's auth — an intra-tenant confused-deputy. Layer 7 (fallback)
- * already filters by integrationId, so it does not need this.
+ * Look up a SET of caller-supplied ids (layers 1-6), a row of ANOTHER
+ * integration counting as not-found — else its credentials would be injected
+ * under this integration's auth. Reports the first id it cannot resolve.
  */
-function ownedConn(args: ResolveOneArgs, id: string): ConnectionRow | undefined {
-  const conn = args.connectionIndex.get(id);
-  return conn && conn.integrationId === args.integrationId ? conn : undefined;
+function ownedConns(
+  args: ResolveOneArgs,
+  ids: readonly string[],
+): { rows: ConnectionRow[] } | { missingId: string } {
+  const rows: ConnectionRow[] = [];
+  for (const id of ids) {
+    const conn = args.connectionIndex.get(id);
+    if (!conn || conn.integrationId !== args.integrationId) return { missingId: id };
+    rows.push(conn);
+  }
+  return { rows };
+}
+
+/** Every member must pass `checkHealth`, then carry a distinct label (the sidecar's address). */
+function bindSet(
+  args: ResolveOneArgs,
+  rows: ConnectionRow[],
+  source: ResolvedConnection["source"],
+): ResolveOneResult {
+  const boundConnectionIds = rows.map((c) => c.id);
+  const value: ResolvedConnection[] = [];
+  for (const conn of rows) {
+    const health = checkHealth(args, conn, source);
+    if (health.kind === "error") {
+      return { kind: "error", error: { ...health.error, boundConnectionIds } };
+    }
+    value.push(health.value);
+  }
+
+  const colliding = labelsSharedBy(rows);
+  if (colliding.length > 0) {
+    return errorOf(args, {
+      code: "duplicate_connection_label",
+      message: duplicateLabelMessage(args.integrationId, colliding),
+      candidateConnections: colliding.map((c) => candidateOf(args, c)),
+      boundConnectionIds,
+    });
+  }
+
+  return { kind: "resolved", value };
+}
+
+/** The one wording for a colliding set (rule: `labelsSharedBy`), shared by the resolver and the writes. */
+export function duplicateLabelMessage(
+  integrationId: string,
+  colliding: readonly ConnectionRow[],
+): string {
+  const labels = [...new Set(colliding.map((c) => c.label))].join(", ");
+  return `Connections bound to ${integrationId} must have distinct labels — rename one of: ${labels}.`;
+}
+
+interface ExplicitLayer {
+  ids: readonly string[] | null;
+  source: ResolvedConnection["source"];
+  code: "pinned_connection_unavailable" | "override_connection_unavailable";
+  noun: string;
 }
 
 function resolveOne(args: ResolveOneArgs): ResolveOneResult {
-  // 1. Admin pin (highest precedence — locks the choice for every actor).
-  if (args.adminPinId) {
-    const conn = ownedConn(args, args.adminPinId);
-    if (!conn) {
+  // Layers 1-5: an explicit pick binds whole, or fails loudly naming the
+  // first member it cannot reach — never falls through.
+  const explicit: ExplicitLayer[] = [
+    {
+      ids: args.adminPinIds,
+      source: "admin_pin",
+      code: "pinned_connection_unavailable",
+      noun: "Pinned connection",
+    },
+    {
+      ids: args.orgDefault?.enforce ? nonEmpty(args.orgDefault.connectionIds) : null,
+      source: "org_default_enforced",
+      code: "pinned_connection_unavailable",
+      noun: "Org default connection",
+    },
+    {
+      ids: args.runOverrideIds,
+      source: "run_override",
+      code: "override_connection_unavailable",
+      noun: "Run-override connection",
+    },
+    {
+      ids: args.scheduleOverrideIds,
+      source: "schedule_override",
+      code: "override_connection_unavailable",
+      noun: "Schedule-override connection",
+    },
+    {
+      ids: args.memberPinIds,
+      source: "member_pin",
+      code: "pinned_connection_unavailable",
+      noun: "Your pinned connection",
+    },
+  ];
+  for (const layer of explicit) {
+    if (!layer.ids) continue;
+    const owned = ownedConns(args, layer.ids);
+    if ("missingId" in owned) {
+      const hint =
+        layer.code === "pinned_connection_unavailable"
+          ? " — it may have been deleted or unshared"
+          : "";
       return errorOf(args, {
-        code: "pinned_connection_unavailable",
-        message: `Pinned connection for ${args.integrationId} is not accessible — it may have been deleted or unshared.`,
+        code: layer.code,
+        message: `${layer.noun} '${owned.missingId}' for ${args.integrationId} is not accessible${hint}.`,
       });
     }
-    return checkHealth(args, conn, "admin_pin");
+    return bindSet(args, owned.rows, layer.source);
   }
 
-  // 2. Org default ENFORCE — org-wide force, locks every actor on every
-  // agent. Beaten only by the per-agent admin pin above.
-  if (args.orgDefault?.enforce) {
-    const conn = ownedConn(args, args.orgDefault.connectionId);
-    if (!conn) {
-      return errorOf(args, {
-        code: "pinned_connection_unavailable",
-        message: `Org default connection for ${args.integrationId} is not accessible — it may have been deleted or unshared.`,
-      });
-    }
-    return checkHealth(args, conn, "org_default_enforced");
+  // 6. Org default SOFT — an unreachable member falls through to the fallback,
+  // logged since the admin has no other signal.
+  const softIds = args.orgDefault?.enforce ? null : nonEmpty(args.orgDefault?.connectionIds);
+  if (softIds) {
+    const owned = ownedConns(args, softIds);
+    if (!("missingId" in owned)) return bindSet(args, owned.rows, "org_default");
+    logger.warn("Soft org default skipped — a member connection is not accessible", {
+      integrationId: args.integrationId,
+      missingConnectionId: owned.missingId,
+    });
   }
 
-  // 3. Run override.
-  if (args.runOverrideId) {
-    const conn = ownedConn(args, args.runOverrideId);
-    if (!conn) {
-      return errorOf(args, {
-        code: "override_connection_unavailable",
-        message: `Run-override connection for ${args.integrationId} is not accessible.`,
-      });
-    }
-    return checkHealth(args, conn, "run_override");
-  }
-
-  // 4. Schedule override.
-  if (args.scheduleOverrideId) {
-    const conn = ownedConn(args, args.scheduleOverrideId);
-    if (!conn) {
-      return errorOf(args, {
-        code: "override_connection_unavailable",
-        message: `Schedule-override connection for ${args.integrationId} is not accessible.`,
-      });
-    }
-    return checkHealth(args, conn, "schedule_override");
-  }
-
-  // 5. Member pin — actor's persisted preference for this agent.
-  if (args.memberPinId) {
-    const conn = ownedConn(args, args.memberPinId);
-    if (!conn) {
-      return errorOf(args, {
-        code: "pinned_connection_unavailable",
-        message: `Your pinned connection for ${args.integrationId} is no longer accessible — it may have been deleted or unshared.`,
-      });
-    }
-    return checkHealth(args, conn, "member_pin");
-  }
-
-  // 6. Org default SOFT — org-wide baseline, just above the fallback. A
-  // missing connection (deleted/unshared) silently falls through to the
-  // fallback rather than erroring, since the default is non-binding.
-  if (args.orgDefault) {
-    const conn = ownedConn(args, args.orgDefault.connectionId);
-    if (conn) return checkHealth(args, conn, "org_default");
-  }
-
-  // 7. Fallback — actor's accessible connections on this integration,
-  // any auth shape. The chosen connection carries its own authKey.
+  // 7. Fallback — actor's accessible connections on this integration, on an
+  // auth serving the selection. The chosen connection carries its own authKey.
   const candidates = args.accessibleConnections.filter(
     (c) => c.integrationId === args.integrationId,
   );
 
-  if (candidates.length === 0) {
-    // Nothing connected, so nothing carries an `authKey` — name the auth the
-    // connect flow must target and the scopes that consent has to cover, or
-    // the user connects with `default_scopes` only and the very next
-    // resolution fails with `insufficient_scopes` on the tools that need more.
+  // A connection whose auth serves none of the selected tools is never a
+  // candidate: with only those, the remedy is connecting on an auth that does.
+  const serving = candidates.filter((c) => servesSelection(args, c));
+  if (serving.length === 0) {
+    // Nothing usable carries an `authKey` — name the auth the connect flow must
+    // target and the scopes that consent has to cover, or the user connects
+    // with `default_scopes` only and the very next resolution fails with
+    // `insufficient_scopes` on the tools that need more.
     const authKey = connectTargetAuthKey(args);
     const requiredScopes = authKey === null ? [] : oauthScopesForAuth(args, authKey);
     return errorOf(args, {
       code: "not_connected",
       ...(authKey !== null ? { authKey } : {}),
       ...(requiredScopes.length > 0 ? { requiredScopes } : {}),
-      message: `Integration '${args.integrationId}' has no connection accessible to this actor.`,
+      message:
+        candidates.length === 0
+          ? `Integration '${args.integrationId}' has no connection accessible to this actor.`
+          : `Integration '${args.integrationId}' has no connection accessible to this actor on an auth that exposes the agent's selected tools.`,
     });
   }
 
@@ -444,10 +535,10 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   // picker should not offer a dead option as a valid choice. So: a single
   // healthy connection auto-resolves even if dead siblings exist, and the
   // must_choose picker lists only live candidates.
-  const healthy = candidates.filter((c) => !c.needsReconnection);
+  const healthy = serving.filter((c) => !c.needsReconnection);
 
   if (healthy.length === 1) {
-    return checkHealth(args, healthy[0]!, "fallback_auto");
+    return bindSet(args, [healthy[0]!], "fallback_auto");
   }
 
   if (healthy.length > 1) {
@@ -471,14 +562,23 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   // flagged needsReconnection. Surface needs_reconnection (with one id for the
   // reconnect CTA to UPDATE in place) rather than must_choose, which would only
   // offer dead options. checkHealth on the first emits the canonical shape.
-  return checkHealth(args, candidates[0]!, "fallback_auto");
+  return bindSet(args, [serving[0]!], "fallback_auto");
+}
+
+function servesSelection(args: ResolveOneArgs, conn: ConnectionRow): boolean {
+  return servesAuth(args, conn.authKey);
+}
+
+function servesAuth(args: ResolveOneArgs, authKey: string): boolean {
+  return args.servingAuthKeys === null || args.servingAuthKeys.has(authKey);
 }
 
 /**
  * Which manifest auth a fresh connect flow must target when the actor has NO
- * connection on the integration. In order: the agent dep's pinned `auth_key`
- * (AFPS §4.1), else the integration's single `oauth2` auth. `null` when the
- * manifest declares several oauth2 auths (or none) and the dep pins nothing —
+ * connection on an auth serving the selection. Only a serving auth qualifies
+ * (`servesAuth`); among those, in order: the agent dep's pinned `auth_key`
+ * (AFPS §4.1), else the single `oauth2` auth. `null` when the manifest
+ * declares several serving oauth2 auths (or none) and the dep pins nothing —
  * the resolver refuses to guess and the caller lets the user choose.
  *
  * A pin naming an auth the manifest no longer declares is `null` too — see
@@ -486,10 +586,11 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
  */
 function connectTargetAuthKey(args: ResolveOneArgs): string | null {
   if (args.requiredAuthKey !== undefined) {
-    return declaredAuthKey(args.manifest, args.requiredAuthKey);
+    const key = declaredAuthKey(args.manifest, args.requiredAuthKey);
+    return key !== null && servesAuth(args, key) ? key : null;
   }
   const oauthKeys = Object.entries(args.manifest.auths ?? {})
-    .filter(([, auth]) => auth.type === "oauth2")
+    .filter(([key, auth]) => auth.type === "oauth2" && servesAuth(args, key))
     .map(([key]) => key);
   return oauthKeys.length === 1 ? oauthKeys[0]! : null;
 }
@@ -563,12 +664,27 @@ function candidateOf(args: ResolveOneArgs, conn: ConnectionRow): ConnectionCandi
   };
 }
 
+type CheckHealthResult =
+  | { kind: "resolved"; value: ResolvedConnection }
+  | { kind: "error"; error: ConnectionResolutionError };
+
 function checkHealth(
   args: ResolveOneArgs,
   conn: ConnectionRow,
   source: ResolvedConnection["source"],
-): ResolveOneResult {
+): CheckHealthResult {
   const ownedByActor = isOwnedByActor(args, conn);
+
+  // Checked first: neither a reconnect nor a scope upgrade gives this auth a tool.
+  if (!servesSelection(args, conn)) {
+    const serving = [...args.servingAuthKeys!].join(", ");
+    return errorOf(args, {
+      code: "auth_serves_no_selected_tool",
+      connectionId: conn.id,
+      source,
+      message: `Connection '${conn.label}' for ${args.integrationId} uses auth '${conn.authKey}', which exposes none of the agent's selected tools (auths that do: ${serving}) — remove it from the set.`,
+    });
+  }
 
   if (conn.needsReconnection) {
     // A reconnect is a connect flow, so it carries the same relay as the other
@@ -631,7 +747,7 @@ function checkHealth(
 function errorOf(
   args: { integrationId: string },
   partial: Omit<ConnectionResolutionError, "integrationId">,
-): ResolveOneResult {
+): { kind: "error"; error: ConnectionResolutionError } {
   return {
     kind: "error",
     error: {
@@ -639,28 +755,6 @@ function errorOf(
       ...partial,
     },
   };
-}
-
-/**
- * Partition pins into admin (`userId IS NULL`) and member (matching the
- * actor) buckets. Member pins for OTHER users are silently ignored —
- * each actor sees only their own pin. Keyed by integrationId only — one
- * pin per (agent, integration, scope).
- */
-function indexPins(
-  pins: PinRow[],
-  actorUserId: string | null,
-): { adminPins: Map<string, string>; memberPins: Map<string, string> } {
-  const adminPins = new Map<string, string>();
-  const memberPins = new Map<string, string>();
-  for (const p of pins) {
-    if (p.userId === null) {
-      adminPins.set(p.integrationId, p.connectionId);
-    } else if (actorUserId !== null && p.userId === actorUserId) {
-      memberPins.set(p.integrationId, p.connectionId);
-    }
-  }
-  return { adminPins, memberPins };
 }
 
 // ─────────────────────────── DB orchestrator ──────────────────────────────────
@@ -823,7 +917,8 @@ export function translateResolutionError(e: ConnectionResolutionError): Resoluti
     // Smuggle the candidates on must_choose_connection so a caller with no
     // picker of its own names its choice straight from the error, without a
     // second round-trip through the connection list to learn which uuid is
-    // which.
+    // which. Same field on duplicate_connection_label, where it names the
+    // rows to rename rather than the rows to pick from.
     ...(e.candidateConnections && e.candidateConnections.length > 0
       ? {
           candidate_connections: e.candidateConnections.map((c) => ({
@@ -862,6 +957,9 @@ export function translateResolutionError(e: ConnectionResolutionError): Resoluti
           ...(e.ownedByActor !== undefined ? { owned_by_actor: e.ownedByActor } : {}),
         }
       : {}),
+    ...(e.code === "auth_serves_no_selected_tool" && e.connectionId
+      ? { connection_id: e.connectionId }
+      : {}),
     // Surface the dead connection id on needs_reconnection so the modal's
     // reconnect CTA can UPDATE the existing row in place. Omitting it makes
     // the OAuth callback INSERT a duplicate (single-writer contract in
@@ -873,6 +971,10 @@ export function translateResolutionError(e: ConnectionResolutionError): Resoluti
           ...(e.connectionId ? { connection_id: e.connectionId } : {}),
           ...(e.ownedByActor !== undefined ? { owned_by_actor: e.ownedByActor } : {}),
         }
+      : {}),
+    // The agent's own `auth_key`, named so the caller knows what to change.
+    ...(e.code === "pinned_auth_serves_no_selected_tool" && e.requiredAuthKey
+      ? { required_auth_key: e.requiredAuthKey }
       : {}),
     // AFPS §4.1 — surface the pinned `auth_key` (the agent dep's choice)
     // and which auth_keys the actor's existing connections use, so the UI
@@ -894,8 +996,11 @@ const TITLE_BY_CODE: Record<ConnectionResolutionError["code"], string> = {
   pinned_connection_unavailable: "Pinned Connection Unavailable",
   override_connection_unavailable: "Override Connection Unavailable",
   must_choose_connection: "Multiple Connections Available — Pick One",
+  duplicate_connection_label: "Duplicate Connection Label",
   insufficient_scopes: "Insufficient Permissions",
   auth_key_mismatch: "Connection Auth Method Mismatch",
+  auth_serves_no_selected_tool: "Connection Auth Serves No Selected Tool",
+  pinned_auth_serves_no_selected_tool: "Agent Auth Key Serves No Selected Tool",
 };
 
 async function buildRequirement(
@@ -941,6 +1046,7 @@ async function buildRequirement(
     // Activeness (above) and scope requirements are different questions.
     agentTools: wildcard ? "*" : (entry.tools ?? []),
     agentScopes: entry.scopes ?? [],
+    ...(effectiveTools !== undefined ? { effectiveTools } : {}),
     ...(entry.auth_key !== undefined ? { requiredAuthKey: entry.auth_key } : {}),
   };
 }

@@ -122,6 +122,7 @@ describe("POST /api/agents/:scope/:name/run — preflight reads the PINNED integ
       integrationId: INTEG,
       authKey: "primary",
       accountId: "acct-pinrun",
+      label: "acct-pinrun",
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,

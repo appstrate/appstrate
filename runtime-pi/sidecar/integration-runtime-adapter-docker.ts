@@ -3,7 +3,7 @@
 /**
  * Docker-backed integration runtime adapter.
  *
- * One runner container per integration, on the per-run user-defined
+ * One runner container per bound connection, on the per-run user-defined
  * bridge network (`appstrate-exec-<runId>`, created by the platform
  * launcher with the sidecar joined under the `sidecar` DNS alias).
  * MITM listeners bind 0.0.0.0 so the runner reaches them via
@@ -794,7 +794,9 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
       const { runId, spec, bundleRoot, egress, workspaceHandle, onStderrLine } = options;
       const plan = planContainer(spec, bundleRoot);
       const safeNs = spec.namespace.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
-      const containerName = `appstrate-integ-${safeNs}-${runId.slice(0, 8)}-${Date.now()}`;
+      // Every connection of one integration shares `namespace`; its uuid prefix does not.
+      const safeConn = spec.connection ? `${spec.connection.id.slice(0, 8)}-` : "";
+      const containerName = `appstrate-integ-${safeNs}-${safeConn}${runId.slice(0, 8)}-${Date.now()}`;
 
       // Only NON-secret routing env rides `-e` on the command line. The
       // integration credentials (`spec.spawnEnv`) are delivered via a 0600

@@ -58,6 +58,7 @@ export type IntegrationClient = NonNullable<
   paths["/api/integrations/{packageId}/auths/{authKey}/clients"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
 >[number];
 import { useCurrentOrgId } from "./use-org";
+import { onMutationError } from "../lib/mutation-error";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgScope } from "./use-org-scope";
 
@@ -429,7 +430,8 @@ export function useUpsertIntegrationPin() {
   return useMutation({
     mutationFn: async (vars: {
       params: { path: { packageId: string; agentPackageId: string } };
-      body: { connection_id: string };
+      /** The WHOLE pinned set — this write replaces it. */
+      body: { connection_ids: string[] };
     }) => {
       const { data } = await client.PUT("/api/integrations/{packageId}/pins/{agentPackageId}", {
         ...vars,
@@ -438,7 +440,9 @@ export function useUpsertIntegrationPin() {
     },
     onSuccess: () => {
       toast.success(t("integration.admin.pin.upserted"));
-      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}/pins"] });
+      // An admin pin sits at the TOP of the resolver cascade — every agent's
+      // readiness verdict changes with it, not just the pins list.
+      void invalidateIntegrationQueries(qc);
     },
   });
 }
@@ -456,7 +460,7 @@ export function useDeleteIntegrationPin() {
     },
     onSuccess: () => {
       toast.success(t("integration.admin.pin.deleted"));
-      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}/pins"] });
+      void invalidateIntegrationQueries(qc);
     },
   });
 }
@@ -486,7 +490,8 @@ export function useUpsertIntegrationOrgDefault() {
   return useMutation({
     mutationFn: async (vars: {
       params: { path: { packageId: string } };
-      body: { connection_id: string; enforce: boolean };
+      /** The WHOLE default set — this write replaces it. */
+      body: { connection_ids: string[]; enforce: boolean };
     }) => {
       const { data } = await client.PUT("/api/integrations/{packageId}/default", {
         ...vars,
@@ -526,7 +531,7 @@ export function useUpdateIntegrationConnection() {
     // connections list.
     mutationFn: async (vars: {
       params: { path: { packageId: string; connectionId: string } };
-      body: { label?: string | null; shared_with_org?: boolean };
+      body: { label?: string; shared_with_org?: boolean };
     }) => {
       const { data } = await client.PATCH(
         "/api/integrations/{packageId}/connections/{connectionId}",
@@ -536,11 +541,13 @@ export function useUpdateIntegrationConnection() {
     },
     onSuccess: () => {
       toast.success(t("integration.connection.updated"));
-      void qc.invalidateQueries({
-        queryKey: ["get", "/api/integrations/{packageId}/connections"],
-      });
-      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}"] });
+      // A rename moves the label the agent addresses a bound connection by,
+      // so it can clear (or create) a `duplicate_connection_label` verdict —
+      // refresh the whole integration subtree, readiness included.
+      void invalidateIntegrationQueries(qc);
     },
+    // Unsharing a connection an admin pin or an org default names is refused (409 `connection_pinned`).
+    onError: onMutationError,
   });
 }
 
@@ -553,5 +560,8 @@ export function useDeleteIntegrationOAuthClient() {
       toast.success(t("integration.oauthClient.delete.success"));
       invalidate();
     },
+    // Refused (409 `connection_pinned`) while an admin pin or an org default names a connection it
+    // minted. The spec types the problem body; the client middleware throws it as an `ApiError`.
+    onError: (err: unknown) => onMutationError(err as Error),
   });
 }

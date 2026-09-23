@@ -76,13 +76,12 @@ interface ScheduleSaveData {
   version_override?: string | null;
   /**
    * Per-integration connection picks frozen on the schedule row
-   * (`package_schedules.connection_overrides`). Flat map keyed by
-   * integration id: `{ "@scope/integration": "<connection_id>" }`. Same
-   * wire shape as the run-route's `connection_overrides` (validated by
-   * `routes/schedules.ts`'s `z.record(z.string(), z.string())`); `null`
-   * clears on edit.
+   * (`package_schedules.connection_overrides`). Map of SETS keyed by
+   * integration id: `{ "@scope/integration": ["<connection_id>", ...] }`, up
+   * to `MAX_CONNECTIONS_PER_INTEGRATION` per key. Same wire shape as the
+   * run-route's `connection_overrides`; `null` clears on edit.
    */
-  connection_overrides?: Record<string, string> | null;
+  connection_overrides?: Record<string, string[]> | null;
   /**
    * Schedule execution identity (#738). Omitted on create → server defaults to
    * the caller. Omitted on edit → actor left unchanged (never cleared).
@@ -102,7 +101,7 @@ interface ScheduleFormProps {
     generation_config_override?: ModelGenerationSettings | null;
     proxy_id_override?: string | null;
     version_override?: string | null;
-    connection_overrides?: Record<string, string> | null;
+    connection_overrides?: Record<string, string[]> | null;
     actor?: ActorValue;
   };
   /** The schedule's current actor (edit mode) — used to detect a real change. */

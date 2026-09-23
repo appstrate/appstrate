@@ -58,7 +58,7 @@ export interface InlineRunPreflightResult {
   modelIdOverride: string | null;
   proxyIdOverride: string | null;
   /**
-   * Caller's per-integration connection picks (resolver mechanism #2), read off
+   * Caller's per-integration connection picks (cascade layer 3, the run override), read off
    * the body ONCE below and carried here. Nothing else on the inline path feeds
    * them to the readiness gate, so without this a `must_choose_connection` 412
    * is inescapable here; and every consumer — both readiness branches and
@@ -158,8 +158,9 @@ export async function runInlinePreflight(params: {
   // selections (`requiredScopesForAgent`), so a caller could name arbitrary
   // scopes and have the platform relay them as the consent to request.
   //
-  // `requireCallableTools` stays OFF: it is the freeze-point rule (publish /
-  // import), and an inline agent freezes nothing. The subset checks below are
+  // `requireCallableTools` stays OFF: its rules are freeze-point rules (publish /
+  // import), and an inline agent freezes nothing — readiness below answers an
+  // `auth_key` misfit as the resolver's 412. The subset checks below are
   // the whole point here.
   //
   // The memo below is what makes those checks judge the PINNED integration

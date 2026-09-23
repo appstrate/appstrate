@@ -60,6 +60,7 @@ async function installAndConnect(
     integrationId: packageId,
     authKey,
     accountId: "acct-1",
+    label: "acct-1",
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: fields }),

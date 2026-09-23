@@ -124,6 +124,7 @@ function makeExtension(
           metadata?: Record<string, unknown>;
           sourceMimeType?: string;
           partSizeBytes?: number;
+          connection?: string;
         };
 
         const protocol = args.uploadProtocol;
@@ -167,6 +168,7 @@ function makeExtension(
         const result = await resolver.executeUpload(
           {
             apiCallToolName: apiCallTool,
+            ...(args.connection !== undefined ? { connection: args.connection } : {}),
             target: args.target,
             fromFile: args.fromFile,
             uploadProtocol: protocol as UploadProtocol,

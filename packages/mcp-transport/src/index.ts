@@ -302,6 +302,7 @@ export { SubprocessTransport } from "./transports/subprocess.ts";
 // lengths, defeat Full-Schema Poisoning before any third-party tool
 // descriptor reaches the agent's LLM.
 export {
+  isHiddenCodePoint,
   sanitiseTextField,
   sanitiseToolDescriptor,
   MAX_TOOL_DESCRIPTION_BYTES,

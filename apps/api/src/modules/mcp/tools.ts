@@ -42,6 +42,7 @@ import {
   type RunAndWaitFile,
 } from "@appstrate/core/run-and-wait-client";
 import { parseFileUri, fileUri } from "@appstrate/core/file-uri";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/afps-runtime/bundle";
 import type { Actor } from "@appstrate/connect";
 import {
@@ -992,19 +993,30 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
         ...(inline ? INLINE_ONLY_RUN_AND_WAIT_PROPERTIES : {}),
         connection_overrides: {
           type: "object",
-          additionalProperties: { type: "string" },
+          additionalProperties: {
+            type: "array",
+            items: { type: "string" },
+            minItems: 1,
+            maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+          },
           description:
-            "Which connection to use per integration" +
+            "Which connections to use per integration" +
             (inline ? " (either kind)" : "") +
             ': `{ "@scope/integration": ' +
-            '"<connection_id>" }`, exactly one connection id per integration. This is the retry ' +
-            "path for a `412 must_choose_connection` launch error — that error lists the " +
+            `["<connection_id>", ...] }\`, 1 to ${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per ` +
+            "integration — always an ARRAY, even for a single one (a bare string is a 400). " +
+            "Naming several binds them all: the run's tools then take a " +
+            "required `connection` argument carrying the connection's label. This is also the " +
+            "retry path for a `412 must_choose_connection` launch error — that error lists the " +
             "ambiguous integration and its `candidate_connections`, each with a `label`, an " +
-            "`account_id` and `owned_by_actor`; pick one candidate's `id` and retry the SAME " +
-            "call with it here. Those fields are what tells the candidates apart, so read them " +
-            "rather than listing connections separately. Each key is the integration id itself " +
-            "(`@scope/integration`) — NOT the `integrations.<id>` field path the error reports " +
-            "it under, which matches no integration and is ignored. TOP-LEVEL argument, " +
+            "`account_id` and `owned_by_actor`; pick the candidates the task needs and retry " +
+            "the SAME call with their `id`s here. Those fields are what tells the candidates " +
+            "apart, so read them rather than listing connections separately. A `412 " +
+            "duplicate_connection_label` instead means two bound connections share a label: " +
+            "that one is NOT fixable here — ask the user to rename one, never rename or pick " +
+            "for them. Each key is the integration id itself (`@scope/integration`) — NOT the " +
+            "`integrations.<id>` field path the error reports it under, which matches no " +
+            "integration and is ignored. TOP-LEVEL argument, " +
             (inline ? "alongside `manifest`/`input`" : "alongside `input`") +
             " — pass the object itself; JSON-encoding it is " +
             "refused before the launch.",

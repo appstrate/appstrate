@@ -119,8 +119,8 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   // branch runs it inside `runInlinePreflight`. Neither passes
   // `runOverrides`, and neither can: `CreateRemoteRunBodySchema` is
   // `.strict()` and declares no `connection_overrides` field, so a remote run
-  // carries no per-run connection picks at all (mechanism #2 is a
-  // platform-run feature).
+  // carries no per-run connection picks at all (the run-override layer, 3 of
+  // the cascade's 7, is a platform-run feature).
   //
   // Both call sites let the original `ApiError` escape to the route, which
   // preserves the 412 `missing_integration_connection` envelope (with its
@@ -200,7 +200,8 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       scope: { orgId, spaceId },
       runOverrides: null,
       // Remote runs are never scheduled, so there is no frozen schedule
-      // override on this path (mechanism #3 applies to platform runs only).
+      // override on this path (the schedule-override layer, 4 of 7, applies to
+      // platform runs only).
       scheduleOverrides: null,
       // Reads the pinned manifests frozen just above (auth keys / scopes match
       // what the spawn will use).

@@ -5,12 +5,9 @@
  * `block_user_connections` toggle + connection metadata edits
  * (label, sharedWithOrg). Consumed by the routes in `routes/integrations.ts`.
  *
- * Pin model (flat): one pin per (space, agent, integration, scope).
+ * Pin model (flat): one row per (space, agent, integration, scope), carrying
+ * the bound set in `connection_ids`.
  * Scope = admin (`user_id IS NULL`) OR member (`user_id = caller.id`).
- * The pin row carries a `connection_id`; the connection's own `auth_key`
- * is denormalised on the PinSummary for display but never part of the
- * uniqueness key — OAuth and api_key connections are interchangeable at
- * runtime.
  *
  * All governance operations — the route layer enforces
  * `requirePermission("integrations", "configure")`; this layer assumes the
@@ -18,13 +15,12 @@
  */
 
 import { and, eq, isNull, sql } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
+import { db, toRows } from "@appstrate/db/client";
 import {
   spacePackages,
   packageShares,
   integrationConnections,
   integrationPins,
-  integrationOrgDefaults,
   packages,
 } from "@appstrate/db/schema";
 import type {
@@ -42,6 +38,7 @@ import type {
 import {
   missingScopesForConnection,
   manifestAuthKeySet,
+  labelsSharedBy,
   type ConnectionResolutionSource,
 } from "@appstrate/core/integration";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
@@ -52,7 +49,7 @@ import {
   notEphemeralFilter,
   orgOrSystemFilter,
 } from "../lib/package-helpers.ts";
-import { conflict, notFound, invalidRequest } from "../lib/errors.ts";
+import { notFound, invalidRequest } from "../lib/errors.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { actorOrSharedFilter, type Actor } from "../lib/actor.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
@@ -61,10 +58,12 @@ import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
 import { fetchIntegrationManifest, resolveRunIntegrationVersions } from "./integration-service.ts";
 import { getOrgDefault } from "./integration-org-defaults-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
+import { assertConnectionsUnpinned } from "./integration-connections.ts";
 import {
   resolveConnectionsForRun,
   translateResolutionError,
   isUserConnectionCreationBlocked,
+  duplicateLabelMessage,
 } from "./integration-connection-resolver.ts";
 import type { ConnectionResolutionResult } from "@appstrate/core/integration";
 import type { IntegrationManifestCache } from "./integration-service.ts";
@@ -137,19 +136,24 @@ export async function setBlockUserConnections(
 
 // ─────────────────────────── Pin CRUD ─────────────────────────────────────────
 
-interface PinJoinRow {
-  pin: PinRow;
-  conn: ConnectionRow | null;
+/** Refuse a colliding set here; the resolver re-checks for a LATER rename. */
+export function assertDistinctConnectionLabels(
+  integrationId: string,
+  rows: readonly ConnectionRow[],
+): void {
+  const colliding = labelsSharedBy(rows);
+  if (colliding.length > 0) {
+    throw invalidRequest(duplicateLabelMessage(integrationId, colliding));
+  }
 }
 
-function toPinSummary(row: PinJoinRow): PinSummary {
+function toPinSummary(pin: PinRow): PinSummary {
   return {
-    packageId: row.pin.packageId,
-    integration_package_id: row.pin.integrationId,
-    auth_key: row.conn?.authKey ?? "",
-    connection_id: row.pin.connectionId,
-    createdAt: row.pin.createdAt.toISOString(),
-    updatedAt: row.pin.updatedAt.toISOString(),
+    packageId: pin.packageId,
+    integration_package_id: pin.integrationId,
+    connection_ids: pin.connectionIds,
+    createdAt: pin.createdAt.toISOString(),
+    updatedAt: pin.updatedAt.toISOString(),
   };
 }
 
@@ -164,16 +168,16 @@ export async function listIntegrationPins(
   integrationId: string,
 ): Promise<PinSummary[]> {
   const rows = await db
-    .select({ pin: integrationPins, conn: integrationConnections })
+    .select()
     .from(integrationPins)
-    .leftJoin(integrationConnections, eq(integrationConnections.id, integrationPins.connectionId))
     .where(
       and(
         eq(integrationPins.spaceId, scope.spaceId),
         eq(integrationPins.integrationId, integrationId),
         isNull(integrationPins.userId),
       ),
-    );
+    )
+    .orderBy(integrationPins.packageId);
   return rows.map(toPinSummary);
 }
 
@@ -218,21 +222,16 @@ export async function listAgentsConsumingIntegration(
 
 interface SetPinInput {
   agentPackageId: string;
-  connectionId: string;
+  connectionIds: string[];
   createdBy: string | null;
 }
 
 /**
- * Upsert an admin pin. Validates that the pinned connection:
+ * Replace the admin pin set. Validates that EVERY pinned connection:
  *   1. exists in the same space,
  *   2. references the integration this pin governs,
  *   3. is `sharedWithOrg=true` (pinning a personal connection would
  *      leak the admin's identity to other members at run time).
- *
- * Flat model: one pin per (space, agent, integration, admin-scope).
- * The connection carries its own authKey — pinning a PAT connection
- * overrides the agent's oauth-by-default just by virtue of being the
- * picked connection.
  */
 export async function upsertIntegrationPin(
   scope: SpaceScope,
@@ -243,84 +242,66 @@ export async function upsertIntegrationPin(
     scope,
     agentPackageId: input.agentPackageId,
     integrationId,
-    connectionId: input.connectionId,
+    connectionIds: input.connectionIds,
     userIdValue: null,
     validateOpts: { requireShared: true },
     createdBy: input.createdBy,
-    updateCreatedBy: true,
   });
 }
 
 /**
- * Shared upsert for admin (`userId IS NULL`) and member (`userId = actor`)
- * pins. Both scopes select-then-update/insert on the same flat key
- * `(space, agent, integration, scope)`, differing only by the userId
- * predicate, the connection validation opts, and `createdBy`.
+ * Raw SQL: `onConflictDoUpdate` cannot target the index's `coalesce`. One
+ * statement writes and returns, mapped by drizzle's column mappers (drivers differ).
  */
 async function upsertPin(args: {
   scope: SpaceScope;
   agentPackageId: string;
   integrationId: string;
-  connectionId: string;
+  connectionIds: string[];
   userIdValue: string | null;
   validateOpts: { requireShared?: boolean; allowOwnedBy?: string };
   createdBy: string | null;
-  /**
-   * Whether to write `createdBy` on the UPDATE branch. Admin pins re-stamp
-   * the admin who last set the pin; member pins leave it untouched on
-   * update (the row's `createdBy` is the member, set once at insert).
-   */
-  updateCreatedBy: boolean;
 }): Promise<PinSummary> {
-  const { scope, agentPackageId, integrationId, connectionId, userIdValue, createdBy } = args;
-  const conn = await validatePinTarget(scope, integrationId, connectionId, args.validateOpts);
+  const { scope, agentPackageId, integrationId, connectionIds, userIdValue, createdBy } = args;
+  const conns = await Promise.all(
+    connectionIds.map((id) => validatePinTarget(scope, integrationId, id, args.validateOpts)),
+  );
+  assertDistinctConnectionLabels(integrationId, conns);
   await assertAgentActiveHere(scope, agentPackageId);
 
-  const now = new Date();
-  const userPredicate =
-    userIdValue === null ? isNull(integrationPins.userId) : eq(integrationPins.userId, userIdValue);
-  const [existing] = await db
-    .select({ id: integrationPins.id })
-    .from(integrationPins)
-    .where(
-      and(
-        eq(integrationPins.spaceId, scope.spaceId),
-        eq(integrationPins.packageId, agentPackageId),
-        eq(integrationPins.integrationId, integrationId),
-        userPredicate,
-      ),
-    )
-    .limit(1);
-
-  if (existing) {
-    await db
-      .update(integrationPins)
-      .set({
-        connectionId,
-        updatedAt: now,
-        ...(args.updateCreatedBy ? { createdBy } : {}),
-      })
-      .where(eq(integrationPins.id, existing.id));
-  } else {
-    await db.insert(integrationPins).values({
-      spaceId: scope.spaceId,
-      packageId: agentPackageId,
-      integrationId,
-      userId: userIdValue,
-      connectionId,
-      createdBy,
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-
+  const ids = sql`ARRAY[${sql.join(
+    connectionIds.map((id) => sql`${id}`),
+    sql`, `,
+  )}]::uuid[]`;
+  const [row] = toRows<{
+    connection_ids: string | unknown[];
+    created_at: string | Date;
+    updated_at: string | Date;
+  }>(
+    await db.execute(sql`
+      INSERT INTO ${integrationPins}
+        (space_id, package_id, integration_package_id, user_id, connection_ids, created_by)
+      VALUES (${scope.spaceId}, ${agentPackageId}, ${integrationId}, ${userIdValue}, ${ids}, ${createdBy})
+      ON CONFLICT (space_id, package_id, integration_package_id, (coalesce(user_id, '')))
+      DO UPDATE SET
+        connection_ids = EXCLUDED.connection_ids,
+        created_by = EXCLUDED.created_by,
+        updated_at = now()
+      RETURNING connection_ids, created_at, updated_at
+    `),
+  );
   return {
     packageId: agentPackageId,
     integration_package_id: integrationId,
-    auth_key: conn.authKey,
-    connection_id: connectionId,
-    createdAt: now.toISOString(),
-    updatedAt: now.toISOString(),
+    connection_ids: integrationPins.connectionIds.mapFromDriverValue(
+      row!.connection_ids,
+    ) as string[],
+    createdAt: (
+      integrationPins.createdAt.mapFromDriverValue(row!.created_at) as Date
+    ).toISOString(),
+    updatedAt: (
+      integrationPins.updatedAt.mapFromDriverValue(row!.updated_at) as Date
+    ).toISOString(),
   };
 }
 
@@ -398,15 +379,15 @@ export async function validatePinTarget(
 interface UpsertMemberPinInput {
   agentPackageId: string;
   integrationId: string;
-  connectionId: string;
+  connectionIds: string[];
   userId: string;
 }
 
 /**
- * Upsert a member-scope pin (`integration_pins` row with `user_id` set).
+ * Replace the member-scope pin set (`integration_pins` row with `user_id`).
  *
  * Member writes their own preference for this (agent, integration) —
- * the persisted row the resolver sees on every run (layer 4 of the
+ * the persisted row the resolver sees on every run (layer 5 of the
  * cascade).
  */
 export async function upsertMemberPin(
@@ -417,11 +398,10 @@ export async function upsertMemberPin(
     scope,
     agentPackageId: input.agentPackageId,
     integrationId: input.integrationId,
-    connectionId: input.connectionId,
+    connectionIds: input.connectionIds,
     userIdValue: input.userId,
     validateOpts: { allowOwnedBy: input.userId },
     createdBy: input.userId,
-    updateCreatedBy: false,
   });
 }
 
@@ -448,11 +428,11 @@ export async function deleteMemberPin(
 /**
  * List the caller's own member pins for an agent. Drives the agent-page
  * picker — UI checks "is this integration already pinned by me?" and
- * renders the collapsed "Using: X" row pointing at the pinned connection.
+ * renders the collapsed "Using: X" row pointing at the pinned connections.
  */
 interface MemberPinSummary {
   integration_package_id: string;
-  connection_id: string;
+  connection_ids: string[];
 }
 
 export async function listMemberPinsForAgent(
@@ -460,10 +440,10 @@ export async function listMemberPinsForAgent(
   agentPackageId: string,
   userId: string,
 ): Promise<MemberPinSummary[]> {
-  const rows = await db
+  return db
     .select({
       integration_package_id: integrationPins.integrationId,
-      connection_id: integrationPins.connectionId,
+      connection_ids: integrationPins.connectionIds,
     })
     .from(integrationPins)
     .where(
@@ -472,14 +452,15 @@ export async function listMemberPinsForAgent(
         eq(integrationPins.packageId, agentPackageId),
         eq(integrationPins.userId, userId),
       ),
-    );
-  return rows;
+    )
+    .orderBy(integrationPins.integrationId);
 }
 
 // ─────────────────────────── Connection metadata edits ────────────────────────
 
 interface UpdateConnectionMetadataInput {
-  label?: string | null;
+  /** A rename, never a clear — the column is NOT NULL. */
+  label?: string;
   sharedWithOrg?: boolean;
 }
 
@@ -489,43 +470,19 @@ interface UpdateConnectionMetadataInput {
  * (only the owner OR an admin can mutate metadata; sharedWithOrg
  * specifically requires the owner since sharing is consent).
  *
- * Refuses turning sharedWithOrg=false when the connection is referenced
- * by ≥1 pin — admins must remove the pin first, otherwise the pinned
- * resolution would silently break for every member at the next run.
+ * Refuses turning sharedWithOrg=false while an admin pin or an org default
+ * names the connection (see `assertConnectionsUnpinned`); a member pin does
+ * not block — that member's next run reports `pinned_connection_unavailable`.
  */
 export async function updateConnectionMetadata(
   connectionId: string,
   input: UpdateConnectionMetadataInput,
 ): Promise<ConnectionRow> {
   if (input.sharedWithOrg === false) {
-    const [pins, orgDefaults] = await Promise.all([
-      db
-        .select({ packageId: integrationPins.packageId })
-        .from(integrationPins)
-        .where(eq(integrationPins.connectionId, connectionId))
-        .limit(1),
-      db
-        .select({ id: integrationOrgDefaults.id })
-        .from(integrationOrgDefaults)
-        .where(eq(integrationOrgDefaults.connectionId, connectionId))
-        .limit(1),
-    ]);
-    if (pins.length > 0) {
-      // Existence check only (`.limit(1)`), so don't claim a count.
-      throw conflict(
-        "connection_pinned",
-        "Connection cannot be unshared while it is pinned to one or more agents. Remove the pin(s) first.",
-      );
-    }
-    if (orgDefaults.length > 0) {
-      throw conflict(
-        "connection_pinned",
-        "Connection cannot be unshared while it is the org default for an integration. Remove the default first.",
-      );
-    }
+    await assertConnectionsUnpinned([connectionId], "Connection cannot be unshared");
   }
 
-  const updates: { label?: string | null; sharedWithOrg?: boolean; updatedAt: Date } = {
+  const updates: { label?: string; sharedWithOrg?: boolean; updatedAt: Date } = {
     updatedAt: new Date(),
   };
   if (input.label !== undefined) updates.label = input.label;
@@ -632,11 +589,8 @@ function pickStatusForSource(source: ConnectionResolutionSource): IntegrationPic
  * connection the next run would use for this (agent, integration, actor),
  * plus the candidate list and pin/blocked state the dropdown renders.
  *
- * The "which connection" decision delegates to {@link resolveConnectionsForRun}
- * — the exact cascade (admin pin → run/schedule override → member pin →
- * fallback) + scope check the runtime uses — so the UI never re-implements
- * it. Per-candidate `missingScopes` are an additional display annotation
- * (the resolver only scope-checks the one resolved connection).
+ * The decision is {@link resolveConnectionsForRun}'s, never re-implemented;
+ * per-candidate `missingScopes` are a display annotation on top.
  *
  * `agentManifest` and `resolution` are REQUIRED and caller-supplied, which is
  * load-bearing rather than stylistic. This function used to load the package
@@ -694,11 +648,11 @@ async function resolveAgentIntegrationPick(args: {
     getOrgDefault(scope, integrationId),
   ]);
 
-  const adminPinnedConnectionId =
-    adminPins.find((p) => p.packageId === agentPackageId)?.connection_id ?? null;
-  const memberPinnedConnectionId =
-    memberPins.find((p) => p.integration_package_id === integrationId)?.connection_id ?? null;
-  const orgDefaultConnectionId = orgDefault?.connection_id ?? null;
+  const adminPinnedConnectionIds =
+    adminPins.find((p) => p.packageId === agentPackageId)?.connection_ids ?? [];
+  const memberPinnedConnectionIds =
+    memberPins.find((p) => p.integration_package_id === integrationId)?.connection_ids ?? [];
+  const orgDefaultConnectionIds = orgDefault?.connection_ids ?? [];
   const orgDefaultEnforced = orgDefault?.enforce ?? false;
 
   // Drop orphaned-auth connections: a row whose `auth_key` no longer exists in
@@ -729,30 +683,41 @@ async function resolveAgentIntegrationPick(args: {
   const err = resolution.errors.find((e) => e.integrationId === integrationId) ?? null;
 
   let status: IntegrationPickStatus;
-  let resolvedConnectionId: string | null = null;
+  let resolvedConnectionIds: string[] = [];
   let resolvedMissingScopes: string[] = [];
-  let resolvedOwnedByActor = false;
 
   if (resolved) {
-    resolvedConnectionId = resolved.connectionId;
-    status = pickStatusForSource(resolved.source);
-    resolvedOwnedByActor = candidates.find((c) => c.id === resolved.connectionId)?.is_own ?? false;
+    resolvedConnectionIds = resolved.map((r) => r.connectionId);
+    status = pickStatusForSource(resolved[0]!.source);
   } else if (err) {
     switch (err.code) {
       case "insufficient_scopes":
-        resolvedConnectionId = err.connectionId ?? null;
+        resolvedConnectionIds = err.boundConnectionIds ?? [];
         resolvedMissingScopes = err.missingScopes ?? [];
-        resolvedOwnedByActor = err.ownedByActor ?? false;
         status = err.source ? pickStatusForSource(err.source) : "auto";
         break;
       case "must_choose_connection":
         status = "must_choose";
+        break;
+      case "duplicate_connection_label":
+        resolvedConnectionIds = err.boundConnectionIds ?? [];
+        status = "duplicate_label";
         break;
       case "needs_reconnection":
         status = "needs_reconnection";
         break;
       case "pinned_connection_unavailable":
       case "override_connection_unavailable":
+        status = "stale";
+        break;
+      // Only an explicit set raises it (the fallback says `not_connected`): a pick to change.
+      case "auth_serves_no_selected_tool":
+        resolvedConnectionIds = err.boundConnectionIds ?? [];
+        status = "stale";
+        break;
+      // The agent's configuration, not a connection: `stale` ("needs
+      // reconfiguration"), never `none`, whose remedy is a connect.
+      case "pinned_auth_serves_no_selected_tool":
         status = "stale";
         break;
       default:
@@ -764,17 +729,16 @@ async function resolveAgentIntegrationPick(args: {
     // `includeInert` notwithstanding). The pin cascade can't run without the
     // manifest; fall back to a sane label from the candidate count.
     status = candidates.length === 1 ? "auto" : candidates.length === 0 ? "none" : "must_choose";
-    if (candidates.length === 1) resolvedConnectionId = candidates[0]!.id;
+    if (candidates.length === 1) resolvedConnectionIds = [candidates[0]!.id];
   }
 
   return {
     status,
-    resolved_connection_id: resolvedConnectionId,
+    resolved_connection_ids: resolvedConnectionIds,
     resolved_missing_scopes: resolvedMissingScopes,
-    resolved_owned_by_actor: resolvedOwnedByActor,
-    admin_pinned_connection_id: adminPinnedConnectionId,
-    member_pinned_connection_id: memberPinnedConnectionId,
-    org_default_connection_id: orgDefaultConnectionId,
+    admin_pinned_connection_ids: adminPinnedConnectionIds,
+    member_pinned_connection_ids: memberPinnedConnectionIds,
+    org_default_connection_ids: orgDefaultConnectionIds,
     org_default_enforced: orgDefaultEnforced,
     can_add_connection: canConfigureIntegrations || !blocked,
     candidates,

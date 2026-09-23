@@ -193,7 +193,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret-value" } }),
         scopesGranted: [],
-        ...(overrides?.label !== undefined ? { label: overrides.label } : {}),
+        label: overrides?.label ?? `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -366,8 +366,8 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
 
   it("must_choose retry: posting connection_overrides exits the 412 loop", async () => {
     // The whole UX recovery loop: 412 → modal picks a candidate → retry the
-    // POST with `connection_overrides: { [integ]: connId }` → resolver
-    // honours mechanism #2 (run override) → run kickoff proceeds. A
+    // POST with `connection_overrides: { [integ]: [connId] }` → resolver
+    // honours the run override (layer 3) → run kickoff proceeds. A
     // regression in the override→resolver wiring would silently strand
     // users in the modal even after picking.
     await seedAgent({
@@ -392,11 +392,11 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     });
     expect(first.status).toBe(412);
 
-    // Retry with the picked override (flat wire format).
+    // Retry with the picked override (a SET, even for one id).
     const retry = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ connection_overrides: { [INTEGRATION]: conn1 } }),
+      body: JSON.stringify({ connection_overrides: { [INTEGRATION]: [conn1] } }),
     });
     // 412 is reserved exclusively for the missing_integration_connection
     // envelope, so asserting the retry is NOT 412 directly proves the
@@ -405,6 +405,69 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     // (Downstream model-config errors surface as 400, not 412 — fine.)
     expect(retry.status).not.toBe(412);
     expect(retry.status).toBeLessThan(500);
+  });
+
+  it("binds BOTH candidates when the retry names them both", async () => {
+    // The remedy the 412 offers is a SET, not a choice of one: an agent that
+    // needs every account of an integration says so in the same field.
+    await seedAgent({
+      id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION]),
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await seedIntegration(INTEGRATION);
+    const conn1 = await seedConnection(INTEGRATION, ctx.user.id, { label: "web-1" });
+    const conn2 = await seedConnection(INTEGRATION, ctx.user.id, { label: "db" });
+
+    const retry = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ connection_overrides: { [INTEGRATION]: [conn1, conn2] } }),
+    });
+    expect(retry.status).not.toBe(412);
+    expect(retry.status).toBeLessThan(500);
+  });
+
+  it("emits 412 duplicate_connection_label when the bound set shares a label", async () => {
+    // The label is the agent's handle for a connection, so a set whose labels
+    // collide is unaddressable. The remedy is a rename, not another pick —
+    // which is why the error is its own code and not `must_choose_connection`.
+    await seedAgent({
+      id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION]),
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await seedIntegration(INTEGRATION);
+    const conn1 = await seedConnection(INTEGRATION, ctx.user.id, {
+      label: "same",
+      accountId: "root@web-01",
+    });
+    const conn2 = await seedConnection(INTEGRATION, ctx.user.id, {
+      label: "same",
+      accountId: "root@db-01",
+    });
+
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ connection_overrides: { [INTEGRATION]: [conn1, conn2] } }),
+    });
+
+    expect(res.status).toBe(412);
+    const body = (await res.json()) as ProblemDetails;
+    expect(body.code).toBe("missing_integration_connection");
+    const err = body.errors!.find((e) => e.field === `integrations.${INTEGRATION}`);
+    expect(err!.code).toBe("duplicate_connection_label");
+    // Same payload shape as must_choose_connection — the rows to act on.
+    expect(err!.candidate_connections!.map((c) => c.id).sort()).toEqual([conn1, conn2].sort());
+    // Not a connect problem: no offer is minted for it.
+    expect(err!.connect_url).toBeUndefined();
   });
 
   it("emits 412 with needs_reconnection + connection_id when actor's only candidate is flagged", async () => {
@@ -434,6 +497,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "stale" } }),
         scopesGranted: [],
         needsReconnection: true,
+        label: "Périmée",
       })
       .returning({ id: integrationConnections.id });
     const deadConnectionId = row!.id;
@@ -1055,6 +1119,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
             scopesGranted: ["base", "search.read"],
             needsReconnection: true,
             sharedWithOrg,
+            label: `Morte ${crypto.randomUUID().slice(0, 8)}`,
           })
           .returning({ id: integrationConnections.id });
         return row!.id;
@@ -1132,6 +1197,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
             }),
             scopesGranted: ["base"],
             sharedWithOrg,
+            label: `Étroite ${crypto.randomUUID().slice(0, 8)}`,
           })
           .returning({ id: integrationConnections.id });
         return row!.id;

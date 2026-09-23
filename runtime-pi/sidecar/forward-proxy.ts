@@ -96,7 +96,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
   }
 
   // Tunnel parsing / connect-with-timeout / relay live in connect-tunnel.ts —
-  // shared verbatim with the per-integration egress listener (#543). Local
+  // shared verbatim with the per-connection egress listener (#543). Local
   // alias keeps the call sites below unchanged.
   const relay = (s1: Socket, s2: Socket) => relaySockets(s1, s2, TUNNEL_IDLE_TIMEOUT_MS);
 

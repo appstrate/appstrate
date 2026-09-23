@@ -15,6 +15,7 @@ import {
   getLocalServerRef,
   getRemoteSource,
   getAppstrateConnectMeta,
+  authKeysServingSelection,
   type AfpsManifestConnect,
 } from "../../../src/services/integration-manifest-helpers.ts";
 
@@ -175,5 +176,33 @@ describe("getAppstrateConnectMeta", () => {
   it("returns undefined when the connect block or meta is absent", () => {
     expect(getAppstrateConnectMeta(undefined)).toBeUndefined();
     expect(getAppstrateConnectMeta({ tool: {} })).toBeUndefined();
+  });
+});
+
+describe("authKeysServingSelection", () => {
+  const AUTHS = { oauth: { type: "oauth2" }, pat: { type: "api_key" } };
+  function serverless(apiAuths?: Record<string, unknown>): IntegrationManifest {
+    const m = manifest({ kind: "none" }, AUTHS) as unknown as Record<string, unknown>;
+    if (apiAuths) m._meta = { "dev.appstrate/api": { auths: apiAuths } };
+    return m as unknown as IntegrationManifest;
+  }
+
+  it("names the auths whose api_call tool is selected", () => {
+    const m = serverless({ oauth: {}, pat: {} });
+    expect(authKeysServingSelection(m, ["api_call__pat"])).toEqual(new Set(["pat"]));
+    expect(authKeysServingSelection(m, "*")).toEqual(new Set(["oauth", "pat"]));
+  });
+
+  // No auth serving is not a connection problem: refusing every connection
+  // for it would name a remedy (another connection) that cannot exist.
+  it("is null, not empty, when the manifest exposes no api_call tool", () => {
+    expect(authKeysServingSelection(serverless(), "*")).toBeNull();
+    expect(authKeysServingSelection(serverless(), ["search"])).toBeNull();
+  });
+
+  it("is null, not empty, when the selection names no current api_call tool", () => {
+    expect(
+      authKeysServingSelection(serverless({ oauth: {}, pat: {} }), ["api_call__gone"]),
+    ).toBeNull();
   });
 });

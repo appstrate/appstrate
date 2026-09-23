@@ -6,7 +6,7 @@
  * endpoints (GET = read-current-with-proactive-refresh, POST /refresh =
  * force-refresh).
  *
- * The factory is one-shot per (run × integration): it fetches the
+ * The factory is one-shot per (run × bound connection): it fetches the
  * initial payload at sidecar boot, caches it in memory, and exposes the
  * `MitmCredentialSource` contract that
  * {@link createIntegrationMitmListener} consumes. The cache is updated
@@ -14,14 +14,12 @@
  * `refreshOnUnauthorized` hook calls back into this module rather than
  * tracking state itself.
  *
- * Why a per-integration source instead of a shared one: each integration
- * has its own MITM listener (per the existing 1.2d design — proxyUrl is
- * per-integration in `IntegrationToSpawn.credentialSource`), so the
- * source's `current()` already scopes naturally to one integration's
- * auths.
+ * Why a per-connection source instead of a shared one: each spawn spec
+ * (one per bound connection) has its own MITM listener, so the source's
+ * `current()` scopes naturally to that connection's auth.
  *
  * Source/Sink model (design principle — do NOT violate):
- *   - ONE canonical credentials Source per (integration × run). It owns the
+ *   - ONE canonical credentials Source per (bound connection × run). It owns the
  *     cache, the refresh/re-login lifecycle, the substitution window, and
  *     `setSessionOutputs`. `bootIntegrations` creates it once and threads the
  *     SAME instance into every consumer.
@@ -129,9 +127,15 @@ function normalizeIntegrationCredentialsWire(raw: unknown): IntegrationCredentia
   return { auths, deliveryPlans, expiresAtEpochMs };
 }
 
+function connectionQuery(connectionId: string | undefined): string {
+  return connectionId === undefined ? "" : `?connection_id=${encodeURIComponent(connectionId)}`;
+}
+
 interface CreateIntegrationCredentialsSourceOptions {
   /** Package id (e.g. `@vendor/integration`). */
   integrationId: string;
+  /** Bound connection this source serves, sent as `?connection_id=` on every call. */
+  connectionId?: string;
   /** Platform base URL (e.g. `http://appstrate-api:3000`). */
   platformApiUrl: string;
   /** Run token used as `Bearer` for both endpoints. */
@@ -338,11 +342,10 @@ export function createIntegrationCredentialsSource(
 
   const refreshOnUnauthorized = async (authKey: string): Promise<boolean> => {
     // Cheap dedup against retry storms. We don't track per-authKey
-    // separately on the network side — the platform refreshes ALL auths
-    // on this integration in one call — but we DO want to suppress
-    // duplicates per authKey because the listener can fire concurrent
-    // refresh calls if multiple requests racing on different SNI hosts
-    // each see 401.
+    // separately on the network side — the platform refreshes the named
+    // connection in one call — but we DO want to suppress duplicates per
+    // authKey because the listener can fire concurrent refresh calls if
+    // multiple requests racing on different SNI hosts each see 401.
     const now = Date.now();
     const last = lastRefreshAt.get(authKey) ?? 0;
     if (now - last < minRefreshIntervalMs) {
@@ -397,7 +400,7 @@ export function createIntegrationCredentialsSource(
   }
 
   async function doRefresh(authKey: string): Promise<boolean> {
-    const url = `${options.platformApiUrl}/internal/integration-credentials/${options.integrationId}/refresh`;
+    const url = `${options.platformApiUrl}/internal/integration-credentials/${options.integrationId}/refresh${connectionQuery(options.connectionId)}`;
     let res: Response;
     try {
       res = await fetchFn(url, {
@@ -554,10 +557,11 @@ export function createIntegrationCredentialsSource(
  */
 export async function fetchInitialIntegrationCredentials(
   integrationId: string,
+  connectionId: string | undefined,
   opts: { platformApiUrl: string; runToken: string; fetchFn?: typeof fetch },
 ): Promise<IntegrationCredentialsWire> {
   const fetchFn = opts.fetchFn ?? fetch;
-  const url = `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}`;
+  const url = `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}${connectionQuery(connectionId)}`;
   const res = await fetchFn(url, {
     headers: { Authorization: `Bearer ${opts.runToken}` },
   });

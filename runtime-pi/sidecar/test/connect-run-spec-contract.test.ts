@@ -240,6 +240,10 @@ describe("runConnectOnce — the connect spec the platform builder must emit", (
     expect(internalCalls).toEqual([
       {
         method: "GET",
+        // No `?connection_id=`: a connect run is MINTING the credential that
+        // becomes a connection, so there is no row to name. The platform
+        // answers this from its grant-authorised branch, which returns an
+        // empty payload before it ever looks at the query.
         path: `/internal/integration-credentials/${INTEGRATION_ID}`,
         authorization: "Bearer connect-token",
       },

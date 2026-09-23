@@ -173,7 +173,7 @@ describe("mcp run_and_wait — connection_overrides", () => {
       kind: "inline",
       manifest: inlineAgentManifest([INTEGRATION]),
       prompt: "do the thing",
-      connection_overrides: { [INTEGRATION]: picked },
+      connection_overrides: { [INTEGRATION]: [picked] },
     });
 
     // No 412 this time: the tool waited on a real run instead of reporting a
@@ -192,11 +192,58 @@ describe("mcp run_and_wait — connection_overrides", () => {
     expect(row).toBeDefined();
     // The audit trail of what the MODEL asked for — this is the field that was
     // silently dropped somewhere between the tool schema and the route.
-    expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: picked });
+    expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [picked] });
     // …and the resolver snapshot the spawn loader + MITM refresh read back,
     // proving the pick was honoured rather than merely stored.
     expect(row!.resolvedConnections).toMatchObject({
-      [INTEGRATION]: { connectionId: picked },
+      [INTEGRATION]: [{ connectionId: picked }],
     });
   }, 60_000);
+
+  // The array is not decoration: two ids bind two connections, and the whole
+  // chain — tool schema, launch client, route, resolver — has to carry both.
+  // The single-id launch above is the control; a layer that kept only the first
+  // id would pass it and fail here.
+  it("binds every connection the override names, in the run's snapshot", async () => {
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
+    await seedDefaultOrgModel(ctx);
+    const first = await seedIntegrationConnection(ctx, INTEGRATION, { label: "compte-a" });
+    const second = await seedIntegrationConnection(ctx, INTEGRATION, { label: "compte-b" });
+
+    const result = await callTool(headers, "run_and_wait", {
+      kind: "inline",
+      manifest: inlineAgentManifest([INTEGRATION]),
+      prompt: "do the thing",
+      connection_overrides: { [INTEGRATION]: [first, second] },
+    });
+
+    expect(result.data.body).toBeUndefined();
+    const runId = result.data.id as string;
+    expect(runId).toStartWith("run_");
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId));
+    expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [first, second] });
+    const resolved = row!.resolvedConnections![INTEGRATION];
+    expect(resolved!.map((c) => c.connectionId).sort()).toEqual([first, second].sort());
+  }, 60_000);
+
+  // A bare connection id is not a set. The route's 400 names the field, and
+  // nothing wraps it into a one-element set the model never asked for.
+  it("refuses a bare connection id without launching", async () => {
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
+    await seedDefaultOrgModel(ctx);
+    const picked = await seedIntegrationConnection(ctx, INTEGRATION);
+
+    const result = await callTool(headers, "run_and_wait", {
+      kind: "inline",
+      manifest: inlineAgentManifest([INTEGRATION]),
+      prompt: "do the thing",
+      connection_overrides: { [INTEGRATION]: picked },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.data.status).toBe(400);
+    expect(JSON.stringify(result.data.body)).toContain(INTEGRATION);
+    expect(await db.select().from(runs)).toHaveLength(0);
+  });
 });

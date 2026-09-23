@@ -416,6 +416,7 @@ describe("run-launcher — sidecar skip decision", () => {
           {
             integrationId: "@test/gmail-mcp",
             namespace: "gmail",
+            connection: { id: "conn-gmail", label: "Gmail", accountId: null },
             sourceKind: "local",
             manifest: { name: "@test/gmail-mcp", version: "1.0.0" },
             spawnEnv: {},

@@ -10,7 +10,7 @@
  * 4. Zod ↔ OpenAPI schema comparison — compares Zod-derived JSON Schemas (pre-converted
  *    in the registry via z.toJSONSchema()) against hand-written OpenAPI requestBody schemas.
  *    Covers both the DECLARED fields (required, property names, types, nullability, scalar
- *    constraints, items, minItems) and the body's STRICTNESS — the Zod schema's `.strict()`
+ *    constraints, items, minItems/maxItems) and the body's STRICTNESS — the Zod schema's `.strict()`
  *    and the spec's top-level `additionalProperties` must agree in BOTH directions, per
  *    `oneOf` branch for a discriminated union.
  * 4b. Step 4 coverage — every endpoint whose spec declares an application/json request body
@@ -505,7 +505,8 @@ function asSchemaObject(value: unknown): Record<string, unknown> | undefined {
  * first.
  *
  * `label` is the reported position — `field`, `field[]` for array items, or
- * `field[*]` for a record's values.
+ * `field[*]` for a record's values. Recurses into `items`, so an array nested
+ * as a record's value (`connection_overrides`) is checked all the way down.
  */
 function compareValueConstraints(
   label: string,
@@ -558,6 +559,28 @@ function compareValueConstraints(
     const oaEnumStr = JSON.stringify([...(oaProp.enum as unknown[])].sort());
     if (zodEnumStr !== oaEnumStr) {
       issues.push(`Property "${label}" enum: Zod=${zodEnumStr}, OpenAPI=${oaEnumStr}`);
+    }
+  }
+
+  // Both-sides-set only: two bodies still omit a Zod array bound from the spec.
+  for (const keyword of ["minItems", "maxItems"] as const) {
+    const zodValue = zodProp[keyword];
+    const oaValue = oaProp[keyword];
+    if (zodValue !== undefined && oaValue !== undefined && zodValue !== oaValue) {
+      issues.push(`Property "${label}" ${keyword}: Zod=${zodValue}, OpenAPI=${oaValue}`);
+    }
+  }
+
+  if (zodProp.type === "array" && oaProp.type === "array") {
+    const zodItems = asSchemaObject(zodProp.items);
+    const oaItems = asSchemaObject(oaProp.items);
+    if (zodItems?.type && oaItems?.type && zodItems.type !== oaItems.type) {
+      issues.push(
+        `Property "${label}" array items type: Zod=${zodItems.type}, OpenAPI=${oaItems.type}`,
+      );
+    }
+    if (zodItems && oaItems) {
+      compareValueConstraints(`${label}[]`, zodItems, oaItems, issues);
     }
   }
 }
@@ -954,45 +977,15 @@ for (const entry of zodSchemaRegistry) {
       );
     }
 
-    // The scalar keyword comparison, applied to the property AND to the two
-    // places a constraint can hide one level down.
-    //
-    // This used to be inline, and only the property's own keywords were read.
-    // `connection_overrides` is `z.record(z.string(), z.string().min(1))`: the
-    // `minLength` lives on the record's VALUES, i.e. on `additionalProperties`,
-    // so `zodProp.minLength` was `undefined` on both sides and every branch was
-    // skipped — the gate reported nothing. That is not hypothetical: 875df353f
-    // documents finding and fixing exactly that drift BY HAND, on three run
-    // surfaces, in the same range this gate was written.
+    // The keyword comparison, applied to the property AND to a record's values
+    // (`additionalProperties`), where a constraint hides one level down: the
+    // `connection_overrides` bounds live on its values' arrays and their items.
     compareValueConstraints(field, zodProp, oaProp, issues);
 
     const zodAdditional = asSchemaObject(zodProp.additionalProperties);
     const oaAdditional = asSchemaObject(oaProp.additionalProperties);
     if (zodAdditional && oaAdditional) {
       compareValueConstraints(`${field}[*]`, zodAdditional, oaAdditional, issues);
-    }
-
-    // Array item type
-    if (zodProp.type === "array" && oaProp.type === "array") {
-      const zodItems = asSchemaObject(zodProp.items);
-      const oaItems = asSchemaObject(oaProp.items);
-      if (zodItems?.type && oaItems?.type && zodItems.type !== oaItems.type) {
-        issues.push(
-          `Property "${field}" array items type: Zod=${zodItems.type}, OpenAPI=${oaItems.type}`,
-        );
-      }
-      if (zodItems && oaItems) {
-        compareValueConstraints(`${field}[]`, zodItems, oaItems, issues);
-      }
-    }
-
-    // Array minItems
-    if (zodProp.minItems !== undefined && oaProp.minItems !== undefined) {
-      if (zodProp.minItems !== oaProp.minItems) {
-        issues.push(
-          `Property "${field}" minItems: Zod=${zodProp.minItems}, OpenAPI=${oaProp.minItems}`,
-        );
-      }
     }
   }
 

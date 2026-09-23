@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-(space, integration) default connection — the org-wide baseline
+ * Per-(space, integration) default connection SET — the org-wide baseline
  * the resolver uses for EVERY agent that consumes the integration, unless a
  * more specific layer overrides it.
  *
  * This is the cross-agent governance primitive that `integration_pins` is
- * not: a pin is keyed per `(agent, integration)`, so forcing one connection
+ * not: a pin is keyed per `(agent, integration)`, so forcing a connection
  * across N agents meant N pin rows. An org default is keyed per
  * `(space, integration)` — one row covers every agent.
  *
@@ -22,21 +22,12 @@
  *     beating run/schedule overrides and member pins. A per-agent admin pin
  *     still wins (the agent-specific exception).
  *
- * Resolver cascade (see `apps/api/src/services/integration-connection-resolver.ts`):
+ * Resolver cascade: see `apps/api/src/services/integration-connection-resolver.ts`.
  *
- *   1. admin pin           (integration_pins, user_id IS NULL)   ← per-agent force
- *   2. org default ENFORCE (this table, enforce = true)          ← org-wide force
- *   3. runs.connection_overrides
- *   4. schedules.connection_overrides
- *   5. member pin          (integration_pins, user_id = actor)   ← per-agent preference
- *   6. org default SOFT    (this table, enforce = false)         ← org-wide default
- *   7. fallback: actor's accessible connections (own + shared)
- *
- * Same invariants as admin pins: the referenced connection MUST be
+ * Same invariants as admin pins: every referenced connection MUST be
  * `shared_with_org = true` (validation in the org-defaults service — an
- * admin can't coerce a member's personal connection). FK on connectionId is
- * ON DELETE CASCADE: when the connection vanishes the default disappears and
- * the resolver falls through to the next layer.
+ * admin can't coerce a member's personal connection), and `connection_ids`
+ * carries no FK for the same reason as `integration_pins.connection_ids`.
  */
 
 import {
@@ -47,12 +38,12 @@ import {
   timestamp,
   index,
   uniqueIndex,
-  foreignKey,
+  check,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
 import { spaces } from "./spaces.ts";
 import { packages } from "./packages.ts";
-import { integrationConnections } from "./integrations.ts";
 
 export const integrationOrgDefaults = pgTable(
   "integration_org_defaults",
@@ -65,17 +56,8 @@ export const integrationOrgDefaults = pgTable(
     integrationId: text("integration_package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
-    /**
-     * The connection every agent will use by default. Must be sharedWithOrg=true.
-     *
-     * The FK is declared in the table-config block below with an EXPLICIT name.
-     * Drizzle's generated name for it —
-     * `integration_org_defaults_connection_id_integration_connections_id_fk` —
-     * is 68 bytes, past Postgres' 63-byte identifier limit, so the catalog has
-     * only ever held the silently truncated form. See the block for why that
-     * matters.
-     */
-    connectionId: uuid("connection_id").notNull(),
+    /** The set every agent binds by default. Each member must be sharedWithOrg=true. */
+    connectionIds: uuid("connection_ids").array().notNull(),
     /** true = org-wide force (locks members); false = soft default (members can deviate). */
     enforce: boolean("enforce").notNull().default(false),
     /**
@@ -93,34 +75,13 @@ export const integrationOrgDefaults = pgTable(
   (table) => [
     // One default per (space, integration).
     uniqueIndex("idx_integration_org_defaults_unique").on(table.spaceId, table.integrationId),
-    // Resolver hot path: load all defaults for a space in one query.
-    // Reverse lookup for the unshare / destructive-delete impact guard.
-    index("idx_integration_org_defaults_connection").on(table.connectionId),
-    // EXPLICITLY NAMED (migration 0055), and it has to be.
-    //
-    // Drizzle derives an unnamed FK's name as
-    // `<table>_<cols>_<refTable>_<refCols>_fk`, which here is 68 bytes.
-    // Postgres truncates any identifier past NAMEDATALEN-1 = 63 bytes AT
-    // CREATION, silently — so `0000_init.sql` asked for the 68-byte name and
-    // every database, fresh or ancient, ended up holding
-    // `integration_org_defaults_connection_id_integration_connections_`.
-    //
-    // Nothing notices until something addresses the constraint BY NAME, and
-    // the thing that eventually does is drizzle-kit itself: change this FK's
-    // `onDelete` or its target and `generate` emits
-    // `DROP CONSTRAINT "<the 68-byte name>"`, which matches nothing, errors
-    // 42704, and aborts the whole pending batch — every migration in the
-    // release, on every database. That is a failed deploy discovered at boot,
-    // which is exactly how the `audit_events_org_id_fkey` name drift was found
-    // in beta.24.
-    //
-    // The explicit name below is 41 bytes and is what the catalog now holds,
-    // renamed in place by 0055. Keep any future name here under 63 bytes; the
-    // schema-vs-migrations parity test asserts it for every constraint.
-    foreignKey({
-      columns: [table.connectionId],
-      foreignColumns: [integrationConnections.id],
-      name: "integration_org_defaults_connection_id_fk",
-    }).onDelete("cascade"),
+    // Reverse lookup (`connection_ids @> …`) for the unshare guard.
+    index("idx_integration_org_defaults_connection_ids").using("gin", table.connectionIds),
+    // 10 = `MAX_CONNECTIONS_PER_INTEGRATION`, spelled out: the schema must not
+    // pull `@appstrate/core/integration`'s AFPS graph into drizzle-kit.
+    check(
+      "integration_org_defaults_connection_ids_cardinality",
+      sql`cardinality(connection_ids) BETWEEN 1 AND 10`,
+    ),
   ],
 );

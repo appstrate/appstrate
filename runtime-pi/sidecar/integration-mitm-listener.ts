@@ -435,7 +435,7 @@ async function handleInboundConnection(
   // the untrusted integration MCP code, and the sidecar's egress reaches the
   // host network + cloud metadata — so this must run BEFORE any cert mint.
   // Mirrors the credential-proxy SSRF guard; external egress stays open
-  // (the per-integration MITM model intentionally forwards to external hosts).
+  // (the per-connection MITM model intentionally forwards to external hosts).
   //
   // Literal layer first (cheap, no DNS) …
   if (isBlockedHost(sniHost)) {

@@ -61,7 +61,7 @@ export interface IntegrationConnection {
    * available, else "Connexion N". Stable for the connection's lifetime and
    * user-editable. The UI renders it verbatim.
    */
-  label?: string | null;
+  label: string;
   /** Opt-in: makes this connection selectable by other members of the same space. */
   shared_with_org?: boolean;
   /**
@@ -169,7 +169,7 @@ export interface AccessibleIntegrationConnection {
   id: string;
   auth_key: string;
   account_id: string;
-  label: string | null;
+  label: string;
   owner_user_id: string | null;
   owner_end_user_id: string | null;
   /** Display name of the connection's creator (null if owner row deleted). */
@@ -182,29 +182,25 @@ export interface AccessibleIntegrationConnection {
 
 /**
  * An admin pin (`integration_pins`, `user_id IS NULL`) governing which
- * connection an agent uses for an integration. Wire shape for the
+ * connections an agent uses for an integration. Wire shape for the
  * `/api/integrations/:packageId/pins` surface.
  */
 export interface IntegrationPin {
   packageId: string;
   integration_package_id: string;
-  /** Denormalised from the pinned connection — display hint only. */
-  auth_key: string;
-  connection_id: string;
+  connection_ids: string[];
   createdAt: string;
   updatedAt: string;
 }
 
 /**
- * Org-wide default connection for an integration (all consuming agents).
+ * Org-wide default connection set for an integration (all consuming agents).
  * `enforce: true` locks members; `false` is a soft default they can
  * override with their own pin. See the resolver cascade.
  */
 export interface IntegrationOrgDefault {
   integration_package_id: string;
-  connection_id: string;
-  /** Denormalised from the default connection — display hint only. */
-  auth_key: string;
+  connection_ids: string[];
   enforce: boolean;
   createdAt: string;
   updatedAt: string;
@@ -239,32 +235,45 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  *  - `pinned`       — the actor's own member pin resolves.
  *  - `auto`         — no pin, exactly one accessible connection.
  *  - `must_choose`  — no pin, more than one candidate (member must pick).
- *  - `none`         — no accessible connection.
- *  - `stale`        — a pin points at a connection no longer accessible.
+ *  - `duplicate_label` — the bound set shares a label, so it is unaddressable;
+ *                     the remedy is renaming a connection, not re-picking.
+ *  - `none`         — no accessible connection on an auth serving the selected
+ *                     tools (none at all, or only on auths that serve none).
+ *  - `stale`        — a pin or an org default names a connection the run cannot
+ *                     use: no longer accessible, or on an auth serving none of
+ *                     the selected tools. Also the agent's own `auth_key`
+ *                     naming an auth that serves none of them
+ *                     (`pinned_auth_serves_no_selected_tool`): a
+ *                     reconfiguration, which no connection clears.
  *  - `needs_reconnection` — the resolved connection is flagged for re-consent.
  */
 export type IntegrationPickStatus =
-  "admin_locked" | "pinned" | "auto" | "must_choose" | "none" | "stale" | "needs_reconnection";
+  | "admin_locked"
+  | "pinned"
+  | "auto"
+  | "must_choose"
+  | "duplicate_label"
+  | "none"
+  | "stale"
+  | "needs_reconnection";
 
 export interface IntegrationAgentResolution {
   status: IntegrationPickStatus;
-  /** Connection the next run would use, or null for none/must_choose/stale. */
-  resolved_connection_id: string | null;
-  /** Missing scopes on the resolved connection (empty unless under-scoped). */
+  /** The set the next run binds (the whole failing set on under-scoped / duplicate_label). */
+  resolved_connection_ids: string[];
+  /** Missing scopes on the one connection an under-scoped verdict names; else empty. */
   resolved_missing_scopes: string[];
-  /** True when the resolved connection belongs to the calling actor. */
-  resolved_owned_by_actor: boolean;
-  /** Admin pin connection id (status admin_locked), else null. */
-  admin_pinned_connection_id: string | null;
-  /** The actor's own member pin connection id, else null. */
-  member_pinned_connection_id: string | null;
+  /** Admin pin connection set (status admin_locked), else empty. */
+  admin_pinned_connection_ids: string[];
+  /** The actor's own member pin connection set, else empty. */
+  member_pinned_connection_ids: string[];
   /**
-   * Org-wide default connection id for this integration (all agents), or
-   * null when unset. `orgDefaultEnforced` distinguishes a hard lock
+   * Org-wide default connection set for this integration (all agents),
+   * empty when unset. `orgDefaultEnforced` distinguishes a hard lock
    * (members can't override — surfaced like an admin pin) from a soft
    * default the member can still override with their own pick.
    */
-  org_default_connection_id: string | null;
+  org_default_connection_ids: string[];
   org_default_enforced: boolean;
   /** Whether the actor may add a connection (admin OR not blocked). */
   can_add_connection: boolean;

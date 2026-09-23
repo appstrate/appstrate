@@ -30,6 +30,7 @@ import {
   readDefaultTools,
   resolveEffectiveToolSelection,
   resolveIntegrationToolCatalog,
+  labelsSharedBy,
 } from "../src/integration.ts";
 import { validateManifest, metaSchema } from "../src/validation.ts";
 import { TOOL_NAME_MAX_LEN } from "../src/naming.ts";
@@ -1886,5 +1887,33 @@ describe("resolveEffectiveToolSelection", () => {
   });
   it("an undefined selection with no declared default stays undefined", () => {
     expect(resolveEffectiveToolSelection(undefined, noDefault)).toBeUndefined();
+  });
+});
+
+describe("labelsSharedBy", () => {
+  const row = (id: string, label: string) => ({ id, label });
+
+  it("returns the rows sharing a label, and only those", () => {
+    // Control: `c` has a label of its own and must not be reported.
+    const rows = [row("a", "web"), row("b", "web"), row("c", "db")];
+    expect(labelsSharedBy(rows).map((r) => r.id)).toEqual(["a", "b"]);
+  });
+
+  it("returns nothing when every label is distinct", () => {
+    expect(labelsSharedBy([row("a", "web"), row("b", "db")])).toEqual([]);
+  });
+
+  it("compares verbatim — case and whitespace make two labels distinct", () => {
+    expect(labelsSharedBy([row("a", "Web"), row("b", "web"), row("c", "web ")])).toEqual([]);
+  });
+
+  it("reports every row of a group larger than two", () => {
+    const rows = [row("a", "web"), row("b", "web"), row("c", "web")];
+    expect(labelsSharedBy(rows).map((r) => r.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("a single row is never a collision", () => {
+    expect(labelsSharedBy([row("a", "web")])).toEqual([]);
+    expect(labelsSharedBy([])).toEqual([]);
   });
 });

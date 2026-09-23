@@ -14,7 +14,7 @@
  *   4. Inject the credential header server-side.
  *   5. Forward the request to the upstream API.
  *   6. Retry once on 401 with a refreshed token.
- *   7. Log persistent auth failures locally (once per integration per run).
+ *   7. Log persistent auth failures locally (once per connection per run).
  *
  * The MCP `api_call` tool handler in `runtime-pi/sidecar/mcp.ts`
  * takes typed JSON-RPC arguments and calls this helper directly, then
@@ -96,6 +96,7 @@ export type ApiCallRequestBody =
 
 interface ApiCallArgs {
   integrationId: string;
+  connectionId?: string;
   targetUrl: string;
   method: string;
   /** Hop-by-hop and routing headers must already be filtered out. */
@@ -161,7 +162,7 @@ type ApiCallResult = ApiCallSuccess | ApiCallFailure;
  * The integration-agnostic half of {@link ApiCallDeps}: everything the
  * credential-proxy core needs that is scoped to the RUN rather than to one
  * integration. Built once per sidecar (`buildSidecarRuntimeDeps`) and shared;
- * the credential pair is layered on per integration at tool-build time.
+ * the credential pair is layered on per bound connection at tool-build time.
  */
 export interface ApiCallBaseDeps {
   config: SidecarConfig;
@@ -173,9 +174,9 @@ export interface ApiCallBaseDeps {
   cookieJar: Map<string, string[]>;
   fetchFn: typeof fetch;
   /**
-   * Set tracking which integrations already had a persistent auth
+   * Set tracking which credential scopes already had a persistent auth
    * failure logged in this run. Mutated by the function — shared
-   * across calls so a flapping integration only logs once and so the
+   * across calls so a flapping connection only logs once and so the
    * 401-retry path skips the refresh after the first failure.
    */
   reportedAuthFailures: Set<string>;
@@ -259,24 +260,27 @@ type CookieGate = "allowlist" | "open";
 
 /**
  * Separator for {@link cookieBucketKey}. NUL cannot occur in a package id
- * (`INTEGRATION_ID_RE`) nor in a WHATWG origin, so the three parts of a key are
+ * (`INTEGRATION_ID_RE`), a connection uuid nor a WHATWG origin, so the parts of a key are
  * unambiguous and no integration id can be crafted to forge another's bucket.
  */
 const COOKIE_KEY_SEP = "\u0000";
 
+/** Per-connection key of the cookie jar and 401 verdicts; see SIDECAR.md, cookie jar scoping. */
+function credentialScope(integrationId: string, connectionId?: string): string {
+  return connectionId === undefined
+    ? integrationId
+    : `${integrationId}${COOKIE_KEY_SEP}${connectionId}`;
+}
+
 /**
  * Key of one bucket in the run-wide cookie jar.
  *
- * The jar used to be keyed on `integrationId` alone, with the cookie
- * attributes (Domain, Path, Secure, …) already stripped by
- * `mergeSetCookieIntoJar`. Nothing therefore recorded WHERE a cookie came
- * from, and every later `api_call` for that integration re-attached the whole
- * bucket. Under `allow_all_uris` the agent picks the host, so a live provider
- * session cookie shipped wherever the model named it. The
+ * The key is the only record of WHERE a cookie was captured, so a credential-only key would
+ * replay a live session cookie to any host the model names under `allow_all_uris`. The
  * `substitutesCredential` exfiltration guard does not cover this: it only sees
  * `{{field}}` templating, and a replayed cookie is never templated.
  *
- * So the bucket identity is `(integration, gate, capture origin)`:
+ * So the bucket identity is `(credentialScope, gate, capture origin)`:
  *   - `origin` — WHATWG origin (scheme + host + port) of the call's INITIAL,
  *     policy-checked target. A whole redirect chain shares one bucket on
  *     purpose: #473 exists because the session cookie of an OAuth/CAS flow
@@ -288,8 +292,8 @@ const COOKIE_KEY_SEP = "\u0000";
  *     `allow_all_uris` call created, without having to re-derive the policy
  *     for a URL it no longer has.
  */
-export function cookieBucketKey(integrationId: string, gate: CookieGate, origin: string): string {
-  return `${integrationId}${COOKIE_KEY_SEP}${gate}${COOKIE_KEY_SEP}${origin}`;
+export function cookieBucketKey(scope: string, gate: CookieGate, origin: string): string {
+  return `${scope}${COOKIE_KEY_SEP}${gate}${COOKIE_KEY_SEP}${origin}`;
 }
 
 /** WHATWG origin of `url`, or `"null"` (the opaque origin) when unparseable. */
@@ -327,7 +331,7 @@ function originOf(url: string): string {
  */
 function eligibleCookies(
   cookieJar: Map<string, string[]>,
-  integrationId: string,
+  scope: string,
   gate: CookieGate,
   targetOrigin: string,
 ): Map<string, string> {
@@ -336,13 +340,13 @@ function eligibleCookies(
     for (const ck of cookies ?? []) byName.set(ck.split("=")[0]!, ck);
   };
   if (gate === "allowlist") {
-    const prefix = `${integrationId}${COOKIE_KEY_SEP}allowlist${COOKIE_KEY_SEP}`;
+    const prefix = `${scope}${COOKIE_KEY_SEP}allowlist${COOKIE_KEY_SEP}`;
     for (const [key, cookies] of cookieJar) {
       if (key.startsWith(prefix)) fold(cookies);
     }
   }
-  fold(cookieJar.get(cookieBucketKey(integrationId, "open", targetOrigin)));
-  fold(cookieJar.get(cookieBucketKey(integrationId, "allowlist", targetOrigin)));
+  fold(cookieJar.get(cookieBucketKey(scope, "open", targetOrigin)));
+  fold(cookieJar.get(cookieBucketKey(scope, "allowlist", targetOrigin)));
   return byName;
 }
 
@@ -395,6 +399,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   const { config, cookieJar, fetchFn, fetchCredentials, refreshCredentials, reportedAuthFailures } =
     deps;
   const { integrationId, targetUrl, method, body, substituteBody } = args;
+  const scope = credentialScope(integrationId, args.connectionId);
 
   // Repair `Bearer{{token}}` → `Bearer {{token}}` on the caller TEMPLATES,
   // once, before any substitution runs. Doing it on the resolved value (what
@@ -630,7 +635,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     // (see `eligibleCookies`). Anything captured earlier in THIS call (a 401
     // retry replays after the first attempt's `Set-Cookie`) is fresher, so it
     // is overlaid last.
-    const byName = eligibleCookies(cookieJar, integrationId, cookieGate, targetOrigin);
+    const byName = eligibleCookies(cookieJar, scope, cookieGate, targetOrigin);
     for (const ck of callJar.get(integrationId) ?? []) byName.set(ck.split("=")[0]!, ck);
     if (byName.size) {
       const existing = resolvedHeaders["cookie"] || "";
@@ -773,7 +778,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     config.platformApiUrl &&
     config.runToken &&
     credentialInjection === "inject" &&
-    !reportedAuthFailures.has(integrationId)
+    !reportedAuthFailures.has(scope)
   ) {
     const fresh = await refreshCredentials(integrationId).catch(() => null);
     if (fresh) {
@@ -812,20 +817,20 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     mergeSetCookieIntoJar(
       capturedCookies,
       cookieJar,
-      cookieBucketKey(integrationId, cookieGate, targetOrigin),
+      cookieBucketKey(scope, cookieGate, targetOrigin),
     );
   }
 
-  // 9. Log a persistent auth failure once per integration per run. The flag is
+  // 9. Log a persistent auth failure once per connection per run. The flag is
   //    set platform-side by the `/refresh` call above (which returns null on a
   //    terminal credential); here we only gate the one-refresh-attempt-per-run
   //    behaviour and surface a log line.
   if (
     upstream.status === 401 &&
     credentialInjection === "inject" &&
-    !reportedAuthFailures.has(integrationId)
+    !reportedAuthFailures.has(scope)
   ) {
-    reportedAuthFailures.add(integrationId);
+    reportedAuthFailures.add(scope);
     logger.warn("Upstream returned 401 after refresh attempt", { integrationId });
   }
 

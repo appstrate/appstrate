@@ -54,7 +54,8 @@ import { computeIntegrity } from "@appstrate/core/integrity";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { db } from "../../helpers/db.ts";
-import { integrationConnections } from "@appstrate/db/schema";
+import { integrationConnections, runs } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
 
 const BUCKET = "agent-packages";
 const app = getTestApp();
@@ -154,20 +155,38 @@ describe("/internal/* — connect-run grant authorization", () => {
     await seedServerVersion(id, version, bytes);
   }
 
-  /** A live, decryptable credential for INTEGRATION owned by the test user. */
-  async function seedLiveConnection(integrationId: string) {
-    await db.insert(integrationConnections).values({
-      integrationId,
-      authKey: "primary",
-      accountId: "acct-test",
-      spaceId: ctx.defaultSpaceId,
-      userId: ctx.user.id,
-      endUserId: null,
-      credentialsEncrypted: encryptCredentialEnvelope({
-        outputs: { api_key: "live-secret-value" },
-      }),
-      scopesGranted: [],
-    });
+  /**
+   * A live, decryptable credential for INTEGRATION owned by the test user,
+   * BOUND to the real run — the credentials routes are per-connection, so the
+   * run path needs both the row and the kickoff snapshot naming it.
+   */
+  async function seedLiveConnection(integrationId: string): Promise<string> {
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId,
+        authKey: "primary",
+        accountId: "acct-test",
+        label: "acct-test",
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        endUserId: null,
+        credentialsEncrypted: encryptCredentialEnvelope({
+          outputs: { api_key: "live-secret-value" },
+        }),
+        scopesGranted: [],
+      })
+      .returning({ id: integrationConnections.id });
+    const connectionId = row!.id;
+    await db
+      .update(runs)
+      .set({
+        resolvedConnections: {
+          [integrationId]: [{ connectionId, source: "member_pin" as const }],
+        },
+      })
+      .where(eq(runs.id, runId));
+    return connectionId;
   }
 
   beforeEach(async () => {
@@ -530,10 +549,11 @@ describe("/internal/* — connect-run grant authorization", () => {
     it("REGRESSION: a real run token still gets the LIVE credentials payload", async () => {
       // The acceptance control for the credentials route: proves the empty
       // payload above is a connect-branch decision, not the route going blind.
-      await seedLiveConnection(INTEGRATION);
-      const res = await app.request(`/internal/integration-credentials/${INTEGRATION}`, {
-        headers: { Authorization: `Bearer ${runToken}` },
-      });
+      const connectionId = await seedLiveConnection(INTEGRATION);
+      const res = await app.request(
+        `/internal/integration-credentials/${INTEGRATION}?connection_id=${connectionId}`,
+        { headers: { Authorization: `Bearer ${runToken}` } },
+      );
       expect(res.status).toBe(200);
       const body = (await res.json()) as { auths: { fields: Record<string, string> }[] };
       expect(body.auths).toHaveLength(1);
@@ -559,11 +579,11 @@ describe("/internal/* — connect-run grant authorization", () => {
       // unrefreshable, so the resolver flags the connection and answers 410 —
       // the same terminal answer it gave before this change, reached through
       // the untouched run path.
-      await seedLiveConnection(INTEGRATION);
-      const res = await app.request(`/internal/integration-credentials/${INTEGRATION}/refresh`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${runToken}` },
-      });
+      const connectionId = await seedLiveConnection(INTEGRATION);
+      const res = await app.request(
+        `/internal/integration-credentials/${INTEGRATION}/refresh?connection_id=${connectionId}`,
+        { method: "POST", headers: { Authorization: `Bearer ${runToken}` } },
+      );
       expect(res.status).toBe(410);
     });
   });

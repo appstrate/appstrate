@@ -1650,7 +1650,10 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Update an integration connection's label and/or shared_with_org flag */
+        /**
+         * Update an integration connection's label and/or shared_with_org flag
+         * @description Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin or an org default names the connection. A member pin does not block it; that member's next run fails with `pinned_connection_unavailable` until they pick again.
+         */
         patch: operations["updateIntegrationConnectionMetadata"];
         trace?: never;
     };
@@ -1683,12 +1686,12 @@ export interface paths {
         };
         /**
          * Get the org-wide default connection for this integration
-         * @description The cross-agent governance baseline: one default connection per (space, integration) used by every consuming agent. `enforce: true` locks every member; `enforce: false` is overridable by a member pin. Returns 204 when unset.
+         * @description The cross-agent governance baseline: one default connection set per (space, integration) used by every consuming agent. `enforce: true` locks every member; `enforce: false` is overridable by a member pin. Returns 204 when unset.
          */
         get: operations["getIntegrationOrgDefault"];
         /**
          * Set the org-wide default connection for this integration (admin)
-         * @description Upsert the single (space, integration) default. Keyed per-integration, NOT per-auth: this overwrites the one existing default wholesale (atomic onConflictDoUpdate on [spaceId, integrationId]). Selecting a connection of a different auth type replaces the current default rather than adding a second one. The response `auth_key` reflects the chosen connection's auth (derived).
+         * @description Replace the (space, integration) default connection SET. Keyed per-integration, NOT per-auth: the body carries the WHOLE set and this write replaces it, `enforce` included. Selecting connections of a different auth type replaces the current default rather than adding a second one.
          */
         put: operations["upsertIntegrationOrgDefault"];
         post?: never;
@@ -1715,7 +1718,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a custom OAuth client
-         * @description Deletes one custom client by id. If it was the default, the cascade falls to the system client (no auto-promotion). Requires `integrations:configure`, which is never granted to an API key.
+         * @description Deletes one custom client by id. If it was the default, the cascade falls to the system client (no auto-promotion). The connections it minted are deleted with it, so it is refused with 409 `connection_pinned` while an admin pin or an org default names one of them. A member pin does not block it; that member's next run fails with `pinned_connection_unavailable`. Requires `integrations:configure`, which is never granted to an API key.
          */
         delete: operations["deleteIntegrationOAuthClient"];
         options?: never;
@@ -1748,7 +1751,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Pin an admin-shared connection to an agent for all members (admin) */
+        /** Pin a set of admin-shared connections to an agent for all members (admin) */
         put: operations["upsertIntegrationPin"];
         post?: never;
         /** Remove an admin pin (admin) */
@@ -1921,7 +1924,7 @@ export interface paths {
         post?: never;
         /**
          * Delete one of the caller's own connections (destructive)
-         * @description Removes the `integration_connections` row globally. ON DELETE CASCADE vacates every reference (admin pins, member pins, run snapshots, schedule overrides). Intent is destructive: 'I never want to use this credential anywhere again'. Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins`). With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) can be deleted (204 with no effect otherwise).
+         * @description Removes the `integration_connections` row globally. Intent is destructive: 'I never want to use this credential anywhere again'. Refused with 409 `connection_pinned` while an admin pin or an org default names the connection: those sets carry no foreign key, so the dead id would fail every consuming run. An admin removes it from the pin(s) or default first. A member pin (anyone's, the caller's own included) never blocks the delete: it keeps the id, and that member's next run fails with `pinned_connection_unavailable` until they pick again. Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins`). With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) can be deleted (204 with no effect otherwise).
          */
         delete: operations["deleteMyConnection"];
         options?: never;
@@ -1978,18 +1981,18 @@ export interface paths {
         };
         /**
          * List the caller's member-scope integration pins for an agent
-         * @description Returns the caller's own (integration, authKey) → connectionId pins for the given agent. Used by the agent-page picker to render the collapsed default row. Member-only; end-user callers receive an empty list. Requires `X-Space-Id`.
+         * @description Returns the caller's own integration → connection-set pins for the given agent. Used by the agent-page picker to render the collapsed default row. Member-only; end-user callers receive an empty list. Requires `X-Space-Id`.
          */
         get: operations["listMyIntegrationPins"];
         /**
-         * Pin a connection for the caller's runs of an agent
-         * @description Persists the caller's preference for a (integration, authKey) on this agent. Sits at cascade layer 4 — wins over the fallback ambiguity but loses to admin pins / run / schedule overrides. Replaces the previous R5 localStorage pick. Idempotent — repeated calls update the row in place.
+         * Pin connections for the caller's runs of an agent
+         * @description Persists the caller's preference for an integration on this agent. Sits at cascade layer 5 — wins over a soft org default and the fallback, loses to an admin pin, an enforced org default and run / schedule overrides. The body carries the WHOLE set and this write replaces it; `DELETE` clears it. Idempotent — repeated calls rewrite the same set.
          */
         put: operations["upsertMyIntegrationPin"];
         post?: never;
         /**
          * Clear the caller's pin on a (agent, integration)
-         * @description Removes the caller's member pin so the resolver falls back to layer 5 (accessible connections). Idempotent — 204 even when no row exists.
+         * @description Removes the caller's member pin so the resolver falls back to layers 6-7 (soft org default, then accessible connections). Idempotent — 204 even when no row exists.
          */
         delete: operations["deleteMyIntegrationPin"];
         options?: never;
@@ -4762,7 +4765,7 @@ export interface paths {
         };
         /**
          * Fetch live credentials + HTTP delivery plans for an active integration
-         * @description Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is ACTIVE in the run's space. A `200` with an EMPTY `auths` array means one thing only: the integration declares no auth. Every state where a credential was expected but could not be produced fails instead — `404` when the actor has no connection (or the connection this run pinned at kickoff was deleted/unshared since), `409` when the pinned manifest version no longer declares the connection's auth, `410` when the credential is dead. The sidecar reads an empty payload as *no `delivery.http` auths, skip the MITM listener*, so answering `200` for a broken state boots the run with zero credentials and every upstream call leaves uncredentialed. One caller is authorised differently: an ephemeral CONNECT run (`run_at: "link"` orchestrated `connect.tool` login) has no run row and no agent to walk, so it is authorised against the launcher-published grant naming the single integration it is connecting, and always receives the EMPTY payload — it exists to MINT the credential, its login secret arrives out of band, and the session it captures is installed in-process.
+         * @description Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls for ONE of the connections this run bound to the integration (named by the required `connection_id`) — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations`, that the integration is ACTIVE in the run's space, AND that the run's kickoff snapshot bound this connection. On the RUN path a `200` always carries a usable credential surface — the only EMPTY payload this endpoint serves is the connect-run one described below. Every state where a credential was expected but could not be produced fails instead — `400` when the selector is missing or names a connection outside the run's bound set, `404` when the named connection is no longer reachable by the actor (deleted/unshared since kickoff), `409` when the pinned manifest version no longer declares the connection's auth, `410` when the credential is dead. The sidecar reads an empty payload as *no `delivery.http` auths, skip the MITM listener*, so answering `200` for a broken state boots the run with zero credentials and every upstream call leaves uncredentialed. One caller is authorised differently: an ephemeral CONNECT run (`run_at: "link"` orchestrated `connect.tool` login) has no run row and no agent to walk, so it is authorised against the launcher-published grant naming the single integration it is connecting, and always receives the EMPTY payload — it exists to MINT the credential, its login secret arrives out of band, and the session it captures is installed in-process.
          */
         get: operations["getIntegrationCredentials"];
         put?: never;
@@ -4784,7 +4787,7 @@ export interface paths {
         put?: never;
         /**
          * Force-refresh OAuth2 credentials for an active integration
-         * @description Sidecar-only. Same response shape as the GET endpoint; forces a refresh of every OAuth2 auth on this integration regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. Non-OAuth2 auths are returned unchanged. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.
+         * @description Sidecar-only. Same response shape and same required `connection_id` selector as the GET endpoint; forces a refresh of every OAuth2 auth on the named connection regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. Non-OAuth2 auths are returned unchanged. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.
          */
         post: operations["refreshIntegrationCredentials"];
         delete?: never;
@@ -5415,16 +5418,20 @@ export interface components {
             value: string;
             note?: string;
         };
-        /** @description Per-integration connection verdict for an agent: which connection the next run uses (admin pin → run/schedule override → member pin → fallback + scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses. */
+        /** @description Per-integration connection verdict for an agent: which connections the next run binds (admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback, each layer a set and the fallback binding at most one; then a scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses. */
         IntegrationAgentResolution: {
-            /** @enum {string} */
-            status: "admin_locked" | "pinned" | "auto" | "must_choose" | "none" | "stale" | "needs_reconnection";
-            resolved_connection_id: string | null;
+            /**
+             * @description `stale` = something must be reconfigured, never connected: a pin or org default naming a connection the run cannot use, or the agent's own `auth_key` naming an auth that serves none of its selected tools (`pinned_auth_serves_no_selected_tool`). `none` = no usable connection — the remedy is a connect.
+             * @enum {string}
+             */
+            status: "admin_locked" | "pinned" | "auto" | "must_choose" | "duplicate_label" | "none" | "stale" | "needs_reconnection";
+            /** @description The set the next run binds. On `duplicate_label`, on an `insufficient_scopes` verdict and on an `auth_serves_no_selected_tool` verdict (`stale`), the whole set the winning layer tried to bind. */
+            resolved_connection_ids: string[];
+            /** @description Missing scopes on the one connection an `insufficient_scopes` verdict names; empty otherwise. */
             resolved_missing_scopes: string[];
-            resolved_owned_by_actor: boolean;
-            admin_pinned_connection_id: string | null;
-            member_pinned_connection_id: string | null;
-            org_default_connection_id: string | null;
+            admin_pinned_connection_ids: string[];
+            member_pinned_connection_ids: string[];
+            org_default_connection_ids: string[];
             org_default_enforced: boolean;
             can_add_connection: boolean;
             candidates: {
@@ -5432,7 +5439,8 @@ export interface components {
                 id: string;
                 auth_key: string;
                 account_id: string;
-                label: string | null;
+                /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
+                label: string;
                 owner_user_id: string | null;
                 owner_end_user_id: string | null;
                 owner_name: string | null;
@@ -5473,9 +5481,8 @@ export interface components {
         IntegrationPin: {
             packageId: string;
             integration_package_id: string;
-            auth_key: string;
-            /** Format: uuid */
-            connection_id: string;
+            /** @description The whole pinned set, in the order it was written. A write replaces it. */
+            connection_ids: string[];
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -5965,17 +5972,17 @@ export interface components {
             message: string;
             /** @description Human-readable title; preserved from the underlying error factory. */
             title?: string;
-            /** @description Populated on `must_choose_connection`. The connections the caller may pick from, each carrying the fields that tell them apart; pass one `id` back via the request body's `connection_overrides` map to retry the run. */
+            /** @description Populated on `must_choose_connection` — the connections the caller may pick from, each carrying the fields that tell them apart; pass their `id`s back as the request body's `connection_overrides` array for that integration to retry the run. Populated on `duplicate_connection_label` too, where it names the bound connections that share a label: the remedy is renaming one of them (`PATCH /api/integrations/{packageId}/connections/{connectionId}`), not re-picking. */
             candidate_connections?: {
                 id: string;
-                /** @description User-given name; `null` when the connection was never labelled. */
-                label: string | null;
+                /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections addresses each by its label. */
+                label: string;
                 /** @description The auth's account discriminator (`sub` claim, email, host…). */
                 account_id: string;
                 /** @description True when the connection is the caller's own, false when inherited via org sharing. */
                 owned_by_actor: boolean;
             }[];
-            /** @description Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`). */
+            /** @description Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`). Always populated on `auth_serves_no_selected_tool`, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow. */
             connection_id?: string;
             /** @description Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks; forwarded to the OAuth re-consent prompt. */
             missing_scopes?: string[];
@@ -5985,7 +5992,7 @@ export interface components {
             required_scopes?: string[];
             /** @description Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). Auth key of the integration manifest the connect flow must target (`/auths/{authKey}/connect/...`). */
             auth_key?: string;
-            /** @description Populated on `auth_key_mismatch`. The agent dep's pinned `auth_key` per AFPS §4.1. */
+            /** @description Populated on `auth_key_mismatch` and `pinned_auth_serves_no_selected_tool`. The agent dep's pinned `auth_key` per AFPS §4.1. On `pinned_auth_serves_no_selected_tool` it names an auth that exposes none of the agent's selected tools: an agent configuration error no connection clears — the agent's `auth_key` or its tool selection must change. */
             required_auth_key?: string;
             /** @description Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method. */
             available_auth_keys?: string[];
@@ -6158,15 +6165,15 @@ export interface components {
             } | null;
             /** @description ID of the model_provider_credentials row resolved at run creation (audit + cost-attribution). */
             modelCredentialId: string | null;
-            /** @description Per-integration connection picks for this run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (#1). */
+            /** @description Per-integration connection picks for this run (cascade layer 3). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration; each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats the schedule override, member pins, a soft org default and the fallback. */
             connection_overrides: {
-                [key: string]: string;
+                [key: string]: string[];
             } | null;
             /** @description Per-run dependency version overrides (#666). Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. A `"draft"` value means the run consumed a dependency's mutable working copy — so it is NOT reproducible from `version_ref` alone. Null when the run resolved the manifest pins verbatim against published versions. */
             dependency_overrides: {
                 [key: string]: string;
             } | null;
-            /** @description Connections resolved for this run, projected from the internal snapshot for display. Null when the agent declares no integrations. */
+            /** @description Connections resolved for this run, projected from the internal snapshot for display — one entry per BOUND connection, so an integration bound to several contributes several entries sharing an `integration_id`. Null when the agent declares no integrations. */
             connections_used: {
                 integration_id: string;
                 label: string | null;
@@ -6211,9 +6218,9 @@ export interface components {
             model_id_override: string | null;
             proxy_id_override: string | null;
             version_override: string | null;
-            /** @description Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Flat map: `{ "@scope/integration": "<connection_id>" }`. Replayed on every fire; loses to admin pins (#1), beats actor-fallback (#4). */
+            /** @description Per-integration connection picks frozen on the schedule row (cascade layer 4). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..10 per integration. Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback. */
             connection_overrides: {
-                [key: string]: string;
+                [key: string]: string[];
             } | null;
             /** @description Per-dependency version overrides frozen on the schedule row (#666/#686). Flat map: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run's `dependency_overrides` so a scheduled run resolves its dependencies exactly as the schedule froze them. */
             dependency_overrides: {
@@ -7779,9 +7786,9 @@ export interface operations {
                     generation?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Proxy ID override for this run, or "none" to disable proxying. Takes priority over agent and org defaults. */
                     proxyId?: string;
-                    /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor. */
+                    /** @description Per-integration connection sets for THIS run (the run-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (at most one connection). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and empty ids are refused at the write (`lib/launch-schemas.ts`): either would be skipped in silence by the connection resolver. A set that cannot bind answers 412 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `duplicate_connection_label` (two bound connections share a label). */
                     connection_overrides?: {
-                        [key: string]: string;
+                        [key: string]: string[];
                     };
                     /** @description Per-run dependency version overrides (#666). Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. By default every skill in the agent's closure resolves against PUBLISHED versions honoring its manifest pin; an entry here overrides that for a single run — `"draft"` pulls the dependency's mutable working copy (the skill edit loop: edit → run → observe, no republish) and requires WRITE authority on THAT dependency (`403 draft_not_writable` naming it otherwise: an unpublished definition runs for its author, whichever package declared it), any other value replaces the pin with that spec. Run-scoped only (never stored in the manifest) and recorded on the run object so a run that consumed draft bytes is never mistaken for a reproducible one. An unsatisfiable pin (including a never-published dependency) returns 422 `dependency_unresolved` before the run starts — pass an override or publish the dependency to fix it. A key that names no declared skill or integration of the effective manifest is a `400` naming the key, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant. */
                     dependency_overrides?: {
@@ -8125,9 +8132,9 @@ export interface operations {
                     proxy_id_override?: string;
                     /** @description Which agent definition every run triggered by this schedule executes: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Omitting it is identical to `published` (latest published version; the working copy is opt-in via `draft` only). `draft` requires WRITE authority on the agent at THIS write — `403 draft_not_writable` otherwise — and is not re-checked at fire time, the way `connection_overrides` are frozen here too. The selected definition (manifest + prompt) is resolved at each fire — a schedule inheriting (`published`) on a never-published agent skips the fire and logs a warning until a version is published or `draft` is selected. */
                     version_override?: string;
-                    /** @description Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Shape: `{ "@scope/integration": "<connection_id>" }`. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire. Values must be non-empty: an empty id is falsy at the connection resolver, so it would skip the pin in silence on every fire instead of failing here. */
+                    /** @description Per-integration connection sets frozen on the schedule row (the schedule-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..10 per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (at most one connection). Stored on `package_schedules.connection_overrides` and replayed on every fire. Empty arrays and empty ids are refused here: either would be skipped in silence by the connection resolver on every fire instead of failing at this write. Label distinctness is NOT checked at this write: a set whose connections share a label fails every fire with `duplicate_connection_label` until one is renamed. */
                     connection_overrides?: {
-                        [key: string]: string;
+                        [key: string]: string[];
                     };
                     /** @description Per-dependency version overrides frozen on the schedule row (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run so it resolves dependencies exactly as the schedule froze them. Each value must be `draft` or a resolvable version spec (semver range, exact version, or dist-tag); the protected tags `latest` and `published` are refused at this write rather than failing at every fire. A `draft` entry requires WRITE authority on THAT dependency, proved at THIS write (`403 draft_not_writable` naming it) and never re-checked at fire time — the authority belongs to the principal who wrote the schedule, frozen exactly as `connection_overrides` are. A key that names no declared skill or integration of the effective manifest is a `400` naming the key, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant. */
                     dependency_overrides?: {
@@ -11446,7 +11453,8 @@ export interface operations {
                             owner_id: string;
                             /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
                             owner_name?: string | null;
-                            label?: string | null;
+                            /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
+                            label: string;
                             shared_with_org?: boolean;
                             /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                             client_ref: string | null;
@@ -11560,7 +11568,8 @@ export interface operations {
                                 owner_id: string;
                                 /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
                                 owner_name?: string | null;
-                                label?: string | null;
+                                /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
+                                label: string;
                                 shared_with_org?: boolean;
                                 /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                                 client_ref: string | null;
@@ -11720,7 +11729,8 @@ export interface operations {
                         owner_id: string;
                         /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
                         owner_name?: string | null;
-                        label?: string | null;
+                        /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
+                        label: string;
                         shared_with_org?: boolean;
                         /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                         client_ref: string | null;
@@ -12058,7 +12068,8 @@ export interface operations {
                             owner_id: string;
                             /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
                             owner_name?: string | null;
-                            label?: string | null;
+                            /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
+                            label: string;
                             shared_with_org?: boolean;
                             /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                             client_ref: string | null;
@@ -12094,7 +12105,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    label?: string | null;
+                    /** @description A rename; the label cannot be cleared. It reaches the agent's model verbatim, so a whitespace-only label, or one holding a control character (line breaks and tabs included), a zero-width/invisible character or a bidirectional-override character is refused with 400. */
+                    label?: string;
                     shared_with_org?: boolean;
                 };
             };
@@ -12126,7 +12138,8 @@ export interface operations {
                         owner_id: string;
                         /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
                         owner_name?: string | null;
-                        label?: string | null;
+                        /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
+                        label: string;
                         shared_with_org?: boolean;
                         /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                         client_ref: string | null;
@@ -12140,7 +12153,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Connection is pinned and cannot be unshared */
+            /** @description Connection is named by an admin pin or an org default (`connection_pinned`) */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -12219,10 +12232,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         integration_package_id: string;
-                        /** Format: uuid */
-                        connection_id: string;
-                        /** @description Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (space, integration) regardless of auth_key; this field just tells you which auth the current default connection uses. */
-                        auth_key: string;
+                        connection_ids: string[];
                         enforce: boolean;
                         /** Format: date-time */
                         createdAt: string;
@@ -12261,8 +12271,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** Format: uuid */
-                    connection_id: string;
+                    /** @description The WHOLE default set — this write replaces it. */
+                    connection_ids: string[];
                     /** @default false */
                     enforce?: boolean;
                 };
@@ -12279,10 +12289,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         integration_package_id: string;
-                        /** Format: uuid */
-                        connection_id: string;
-                        /** @description Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (space, integration) regardless of auth_key; this field just tells you which auth the current default connection uses. */
-                        auth_key: string;
+                        connection_ids: string[];
                         enforce: boolean;
                         /** Format: date-time */
                         createdAt: string;
@@ -12291,6 +12298,7 @@ export interface operations {
                     };
                 };
             };
+            /** @description Refused: an empty set, more than 10 ids, a repeated id (compared case-insensitively), or connections whose labels are not distinct (the agent addresses each bound connection by its label); or a connection that is not shared, belongs to another integration or another space. */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -12426,6 +12434,17 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description A connection the client minted is named by an admin pin or an org default */
+            409: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     listIntegrationPins: {
@@ -12484,8 +12503,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** Format: uuid */
-                    connection_id: string;
+                    /** @description The WHOLE pinned set, in the order the run binds it — this write replaces it. Each connection must belong to this integration and be `shared_with_org`. */
+                    connection_ids: string[];
                 };
             };
         };
@@ -12501,6 +12520,7 @@ export interface operations {
                     "application/json": components["schemas"]["IntegrationPin"];
                 };
             };
+            /** @description Refused: an empty set, more than 10 ids, a repeated id (compared case-insensitively), or connections whose labels are not distinct (the agent addresses each bound connection by its label); or a connection that is not shared, belongs to another integration or another space. */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -12601,7 +12621,8 @@ export interface operations {
                                 owner_id: string;
                                 /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
                                 owner_name?: string | null;
-                                label?: string | null;
+                                /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
+                                label: string;
                                 shared_with_org?: boolean;
                                 /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                                 client_ref: string | null;
@@ -13099,7 +13120,7 @@ export interface operations {
                                 connection_id: string;
                                 /** @enum {string} */
                                 kind: "integration";
-                                label: string | null;
+                                label: string;
                                 scopes_granted: string[];
                                 /** Format: date-time */
                                 connected_at: string;
@@ -13145,6 +13166,17 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
+            /** @description Connection is named by an admin pin or an org default (`connection_pinned`) */
+            409: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     getMyConnectionHandoff: {
@@ -13370,8 +13402,7 @@ export interface operations {
                         object: "list";
                         data: {
                             integration_package_id: string;
-                            /** Format: uuid */
-                            connection_id: string;
+                            connection_ids: string[];
                         }[];
                         hasMore: boolean;
                     };
@@ -13399,8 +13430,7 @@ export interface operations {
                 "application/json": {
                     agent_package_id: string;
                     integration_package_id: string;
-                    /** Format: uuid */
-                    connection_id: string;
+                    connection_ids: string[];
                 };
             };
         };
@@ -13414,7 +13444,7 @@ export interface operations {
                     "application/json": components["schemas"]["IntegrationPin"];
                 };
             };
-            /** @description Validation failed (connection wrong integration/auth, or not accessible to caller). */
+            /** @description Refused: an empty set, more than 10 ids, a repeated id (compared case-insensitively), or connections whose labels are not distinct (the agent addresses each bound connection by its label); or a connection of another integration or space, or one neither owned by the caller nor shared. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -19549,9 +19579,9 @@ export interface operations {
                     input?: Record<string, never>;
                     /** @description `appfile://file_xxx` URIs to mount read-only into the run's `files/` directory — fan-in by reference, without declaring a file field in the manifest. The platform declares a reserved `_context_files` input field for them, so they go through the same ACL, byte/count caps and `file_links` chaining as any other file input, and are announced to the agent in its prompt. A manifest (or `input`) that already declares `_context_files` is rejected with a `400` — the name is reserved. */
                     context_files?: string[];
-                    /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor. */
+                    /** @description Per-integration connection sets for THIS run (the run-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → run override → schedule override → member pin → soft org default → fallback (at most one connection). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and empty ids are refused at the write (`lib/launch-schemas.ts`): either would be skipped in silence by the connection resolver. A set that cannot bind answers 412 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `duplicate_connection_label` (two bound connections share a label). */
                     connection_overrides?: {
-                        [key: string]: string;
+                        [key: string]: string[];
                     };
                     modelId?: string | null;
                     proxyId?: string | null;
@@ -19728,9 +19758,9 @@ export interface operations {
                     input?: Record<string, never>;
                     /** @description Same field as `POST /api/runs/inline` — validated here for shape and for the reserved `_context_files` name collision, never mounted. */
                     context_files?: string[];
-                    /** @description Same field as `POST /api/runs/inline` — applied to the integration readiness check so a pick that clears `must_choose_connection` here clears it on the real launch too. Never persisted; no run is created. Values must be non-empty, same rule and same reason as on the launch surfaces. */
+                    /** @description Same field as `POST /api/runs/inline` — applied to the integration readiness check so a pick that clears `must_choose_connection` here clears it on the real launch too. Never persisted; no run is created. Same array shape and same bounds as on the launch surfaces. */
                     connection_overrides?: {
-                        [key: string]: string;
+                        [key: string]: string[];
                     };
                     modelId?: string | null;
                     proxyId?: string | null;
@@ -20836,9 +20866,9 @@ export interface operations {
                     proxy_id_override?: string | null;
                     /** @description Version selector (`draft` | `published` | version spec). Pass `null` to clear (back to the latest published version; the working copy is opt-in via `draft` only). `draft` requires WRITE authority on the agent, but only when this patch MOVES the selector: re-sending the value the row already holds decides nothing and is never refused, so a member editing the cron of someone else's draft schedule is not asked for an authority the request does not exercise. */
                     version_override?: string | null;
-                    /** @description Per-integration connection picks frozen on the schedule. Pass `null` to clear. Values must be non-empty — same rule as on create. */
+                    /** @description Per-integration connection sets frozen on the schedule, one array of 1..10 connection ids per integration. Pass `null` to clear. Same array shape, same bounds and same cascade layer as on create; label distinctness is likewise checked at each fire, not here. */
                     connection_overrides?: {
-                        [key: string]: string;
+                        [key: string]: string[];
                     } | null;
                     /** @description Per-dependency version overrides frozen on the schedule (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; skill or integration ids. Pass `null` to clear. Each value must be `draft` or a resolvable version spec — same rule as on create. WRITE authority is proved per KEY and only for the keys this patch MOVES: a `draft` entry whose value the row already holds was proved at the write that introduced it, and re-sending it decides nothing. */
                     dependency_overrides?: {
@@ -23061,7 +23091,10 @@ export interface operations {
     };
     getIntegrationCredentials: {
         parameters: {
-            query?: never;
+            query: {
+                /** @description Which of the connections this run bound to the integration the credentials are for. REQUIRED: a run may bind up to 10 connections per integration and each has its own credential surface, so there is no "the connection of this integration" to fall back to. Must be a member of `runs.resolved_connections[<integration id>]` — an id the run did not bind is a `400 connection_not_in_run`, because the run token authorises the connections the run's cascade bound and no others. The one caller exempt from it is the ephemeral CONNECT run, which has no run row, no cascade and no bound set — it is authorised by its launcher-published grant and always receives the empty payload. */
+                connection_id: string;
+            };
             header?: never;
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -23080,6 +23113,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IntegrationCredentialsResponse"];
+                };
+            };
+            /** @description The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -23117,7 +23159,10 @@ export interface operations {
     };
     refreshIntegrationCredentials: {
         parameters: {
-            query?: never;
+            query: {
+                /** @description Which of the connections this run bound to the integration the credentials are for. REQUIRED: a run may bind up to 10 connections per integration and each has its own credential surface, so there is no "the connection of this integration" to fall back to. Must be a member of `runs.resolved_connections[<integration id>]` — an id the run did not bind is a `400 connection_not_in_run`, because the run token authorises the connections the run's cascade bound and no others. The one caller exempt from it is the ephemeral CONNECT run, which has no run row, no cascade and no bound set — it is authorised by its launcher-published grant and always receives the empty payload. */
+                connection_id: string;
+            };
             header?: never;
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -23136,6 +23181,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IntegrationCredentialsResponse"];
+                };
+            };
+            /** @description The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             401: components["responses"]["Unauthorized"];

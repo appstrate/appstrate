@@ -10,7 +10,7 @@ import { usePackageDetail } from "./use-packages";
 import { useAgentModel } from "./use-models";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { useAgentProxy } from "./use-proxies";
-import { onMutationError } from "./use-mutations";
+import { onMutationError } from "../lib/mutation-error";
 import { scheduleKeys } from "../lib/query-keys";
 import type { AgentDetail, ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
 
@@ -95,7 +95,7 @@ export function useCreateSchedule(packageId: string) {
       generation_config_override?: ModelGenerationSettings | null;
       proxy_id_override?: string | null;
       version_override?: string | null;
-      connection_overrides?: Record<string, string> | null;
+      connection_overrides?: Record<string, string[]> | null;
       actor?: { user_id?: string; end_user_id?: string };
     }): Promise<ScheduleWireDto> => {
       const { scope, name } = splitPackageRef(packageId);
@@ -128,7 +128,7 @@ export function useUpdateSchedule() {
       generation_config_override?: ModelGenerationSettings | null;
       proxy_id_override?: string | null;
       version_override?: string | null;
-      connection_overrides?: Record<string, string> | null;
+      connection_overrides?: Record<string, string[]> | null;
       actor?: { user_id?: string; end_user_id?: string };
     }): Promise<ScheduleWireDto> => {
       const { data: updated } = await client.PUT("/api/schedules/{id}", {

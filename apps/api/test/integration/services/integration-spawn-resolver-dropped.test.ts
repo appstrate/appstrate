@@ -34,6 +34,7 @@ import {
   INTEGRATION_DROPPED_EVENT,
 } from "../../../src/services/run-context-builder.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
+import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPlacedPackage, seedMcpServer, seedRun } from "../../helpers/seed.ts";
 import { __resetSystemIntegrationsForTest } from "../../../src/services/integration-client-registry.ts";
@@ -88,6 +89,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
       integrationId: INTEG,
       authKey: "primary",
       accountId: "default",
+      label: "default",
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,
@@ -109,6 +111,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
+      resolvedConnections: await bindAllConnections(INTEG),
     });
   }
 
@@ -212,7 +215,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
     expect(dropped[0]!.detail).toContain(MISSING_SERVER);
   });
 
-  it("reports `no_delivery` when the integration is installed but the actor has no connection", async () => {
+  async function seedIntegration() {
     await seedServer();
     await seedPackage({
       id: INTEG,
@@ -222,12 +225,46 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
       draftManifest: integManifest(SERVER),
     });
     await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
-    // No connection seeded.
+  }
 
-    const { specs, dropped } = await resolve();
+  it("reports `no_delivery`, naming the connection, when the bound row is gone", async () => {
+    await seedIntegration();
+    await seedConnection();
+    const snapshot = await bindAllConnections(INTEG);
+    await db.delete(integrationConnections).where(eq(integrationConnections.integrationId, INTEG));
+
+    const { specs, dropped } = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: agentManifest(),
+      resolvedConnections: snapshot,
+    });
 
     expect(specs).toHaveLength(0);
-    expect(dropped).toEqual([{ integrationId: INTEG, reason: "no_delivery" }]);
+    expect(dropped).toEqual([
+      { integrationId: INTEG, reason: "no_delivery", connectionLabel: "default" },
+    ]);
+  });
+
+  it("reports `resolve_error` — never a live pick — when the snapshot binds nothing to an integration that exposes tools", async () => {
+    await seedIntegration();
+    // A connection the actor COULD use: picking it here is exactly what the
+    // resolver must not do behind the cascade's back.
+    await seedConnection();
+
+    const { specs, dropped } = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: agentManifest(),
+      resolvedConnections: null,
+    });
+
+    expect(specs).toHaveLength(0);
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]!.reason).toBe("resolve_error");
+    expect(dropped[0]!.detail).toContain("snapshot");
   });
 
   it("leaves `dropped` empty on the happy path", async () => {

@@ -6,6 +6,153 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **An agent can use several connections of ONE integration in a single run.**
+  Two SSH hosts, two ClickUp workspaces, two mailboxes — one run, up to ten
+  connections per declared integration. **The tools do not change**: no suffixed
+  namespace, no duplicated tool, no second agent. When a namespace receives more
+  than one connection the sidecar injects a **required `connection` parameter**
+  on each of its tools — a string enum of the bound connections' labels, its
+  description pairing each label with that connection's account id — and strips
+  it again before forwarding (`runtime-pi/sidecar/mcp-host.ts`). A namespace
+  with a single connection is untouched: the advertised schema is byte-identical
+  to the one before this release, so an existing agent sees exactly what it saw.
+  A tool that already declares a `connection` property of its own cannot be
+  served by more than one connection — the sidecar fails boot with
+  `connection_param_conflict` rather than shadowing the upstream's parameter.
+  **Isolation is per connection, not per integration**: the platform emits one
+  spawn spec per bound connection (same integration, same namespace) and the
+  sidecar starts one runner for each, so every runner holds exactly one
+  connection's credential and the MITM listener refreshes exactly that one. A
+  spec carries only the `api_call` tools of its own connection's auth, and the
+  `api_call` cookie jar and the persistent-`401` state are keyed per
+  (integration, connection), so nothing captured through one connection is
+  replayed on another. A call is routed by `(tool name, connection label)`. The
+  label is therefore the address, which is why a set whose labels collide is
+  refused (see `### Changed`) and why `integration_connections.label` is now
+  `NOT NULL` and non-empty. A bound set is spawned whole or not at all: when one
+  member of a set of two or more cannot be delivered at kickoff, the whole
+  integration is dropped — the lost member marked `no_delivery`, each survivor
+  `bound_set_incomplete` — because a lone survivor would carry no `connection`
+  selector and silently take the calls meant for the lost one. Binding is a
+  human act at every layer: only the last layer of the cascade auto-binds, and
+  it still binds at most one connection — several accessible connections and no
+  explicit pick remain a `412 must_choose_connection`, never a silent fan-out.
+
+### Changed
+
+- **BREAKING: an integration binds a SET of connections, so every field that
+  names the connections BOUND to an integration is an ARRAY.** There is one
+  shape, not two: a single pick travels as a one-element array and a bare
+  string is refused, because a `string | string[]` union is a shape nobody can
+  read twice the same way. Fields that name ONE connection stay scalar — the
+  `connection_id` of a `412` field error (`ResolutionFieldError`), of a
+  `GET /api/me/connections` entry, and the internal credentials routes'
+  `?connection_id=` selector.
+  - `connection_overrides` is
+    `{ "@scope/integration": ["<connection_id>", …] }` — 1 to 10 ids per
+    integration, on `POST /api/agents/{scope}/{name}/run`,
+    `POST /api/runs/inline` (+ `/inline/validate`), schedule create/update and
+    the platform MCP `run_and_wait` tool, and in the run and schedule responses.
+    An empty array, an empty id and a repeated id are `400` at the write, not a
+    shrug at the next fire (`apps/api/src/lib/launch-schemas.ts`).
+  - The run's `connections_used` carries one entry per BOUND connection, so an
+    integration bound to several contributes several entries and
+    `integration_id` is no longer unique in the list.
+  - Member pins (`PUT /api/me/integration-pins`), admin pins
+    (`PUT /api/integrations/{packageId}/pins/{agentPackageId}`) and org defaults
+    (`PUT /api/integrations/{packageId}/default`) take and return
+    `connection_ids: string[]` where they took `connection_id`, and the pin
+    (`IntegrationPin`) and org-default summaries no longer carry `auth_key` —
+    a set may span several auths. Each write carries the WHOLE set and REPLACES it; `DELETE`
+    clears it. There is no add-one or remove-one endpoint, so the members of an
+    org default share one `enforce` by construction. These writes refuse, with
+    `400`, a set whose connections do not carry distinct labels; run and
+    schedule overrides are not checked at the write — a colliding set is
+    refused when the run kicks off, and at each schedule fire.
+  - The agent connection readiness (`GET /api/agents/{scope}/{name}/connection-readiness`,
+    `integrations[].resolution`): `resolved_connection_id`,
+    `admin_pinned_connection_id`, `member_pinned_connection_id` and
+    `org_default_connection_id` become `resolved_connection_ids`,
+    `admin_pinned_connection_ids`, `member_pinned_connection_ids` and
+    `org_default_connection_ids` (arrays); `resolved_owned_by_actor` is removed;
+    `status` gains `duplicate_label`. On `duplicate_label` and on an
+    `insufficient_scopes` verdict, `resolved_connection_ids` carries the whole
+    set the winning layer tried to bind.
+  - A run whose bound connections share a label is refused with the usual
+    `412 missing_integration_connection`; the new value is the per-integration
+    `errors[].code`, `duplicate_connection_label`, and the field error carries
+    `candidate_connections` — the rows that collide. The remedy is renaming one
+    (`PATCH /api/integrations/{packageId}/connections/{connectionId}`), not
+    re-picking. `candidate_connections[].label` is a `string`, never `null`.
+  - `integration_connections.label` is `NOT NULL` and never empty.
+    `PATCH /api/integrations/{packageId}/connections/{connectionId}` refuses
+    with `400` a `label` that is `null`, empty, whitespace-only, or holds a
+    control character (line breaks and tabs included), a zero-width/invisible
+    character or a bidirectional-override character: the label reaches the
+    agent's model verbatim. A minted label is `Connexion N`, N one past the
+    highest `Connexion <n>` already held in the (space, integration) across
+    every owner, unless the connection's account id or the connect flow's
+    label hint supplies one — sanitised first: line breaks become spaces and
+    the other refused characters are dropped.
+  - Deleting a connection (`DELETE /api/me/connections/{id}`, or deleting the
+    custom OAuth client that minted it) is refused with `409
+connection_pinned` while an admin pin or an org default names it, exactly
+    like unsharing it: the sets carry no foreign key, and those are the
+    references an admin can clear. A member pin — anyone's, the owner's own
+    included — never blocks: only its owner can clear it. It keeps the id, so
+    a member that becomes unreachable (deleted, unshared, its owner gone from
+    the space) stays in the set: an admin pin, an enforced org default or a
+    member pin then fails the run with `pinned_connection_unavailable`, never
+    binds the survivors, until someone picks again; a soft org default is
+    skipped for the fallback, with a server log.
+  - A connection an explicit layer binds (a pin, an org default, a run or
+    schedule override) whose auth exposes none of the agent's selected tools
+    (a multi-auth integration whose `api_call` tools are per auth) is refused:
+    `errors[].code` `auth_serves_no_selected_tool`, carrying that
+    `connection_id`, at kickoff and in the readiness verdict (`stale`). The
+    remedy is taking it out of the set, not a connect flow. The fallback never
+    picks such a connection: with none on a serving auth it reports
+    `not_connected`, its `auth_key` naming an auth that does serve the
+    selection (when one can be named), and readiness says `none`.
+  - An agent whose own `integrations_configuration.<id>.auth_key` names an auth
+    that exposes none of its selected tools is an agent configuration error,
+    answered before any connection, pin or override is looked at: `errors[].code`
+    `pinned_auth_serves_no_selected_tool` (new), with `required_auth_key` and no
+    `connection_id`, where it used to surface as `auth_key_mismatch`,
+    `not_connected` or `auth_serves_no_selected_tool`. Readiness reports it
+    `stale`, the run-kickoff 412 offers no `connect_url`, and the run-kickoff
+    modal shows the message with no connection picker. Publishing or importing
+    such an agent is refused with `400 pinned_auth_serves_no_selected_tool` on
+    `integrations_configuration.<id>.auth_key`; a draft save is not, and an
+    inline run gets the 412.
+  - `GET /internal/integration-credentials/{scope}/{name}` and its `/refresh`
+    sibling REQUIRE `?connection_id=<uuid>`, and it must be one the run's
+    snapshot bound — `400 connection_not_in_run` otherwise, naming the bound
+    ids. There is no "first connection" to fall back to. `/refresh` refreshes
+    that connection only.
+
+  **Operators, one step.** Stop the platform, run
+  `scripts/migration/0018-connection-sets.sql` (rewrites
+  `runs.connection_overrides`, `runs.resolved_connections` and
+  `package_schedules.connection_overrides` from one pick per integration to a
+  set — a shape only the new readers accept), then deploy the new image: drizzle
+  **0069** self-applies at boot. It folds each pin's and org default's
+  `connection_id` into a one-element `connection_ids uuid[]` and drops the
+  column (one row per key, a `CHECK` of 1..10 members, a GIN index for the
+  reverse lookup); it numbers every NULL or empty `label` `Connexion N`
+  counting on from the highest `Connexion <n>` of its (space, integration)
+  across all owners, then sets the column `NOT NULL` with a
+  `CHECK (label <> '')`. `0018` is idempotent and prints its counts before and
+  after; every "after" must read 0. Schedule job data held in Redis needs no
+  rewrite: the scheduler re-syncs every enabled schedule's job from its row
+  before starting its worker, and a fire whose job still carries the old shape
+  records a visible failed run instead of launching. The runbook, with the
+  control query that tells "nothing to rewrite" apart from "nothing at all", is
+  `scripts/migration/README.md`. Existing pins and defaults stay valid: each
+  becomes a set of one.
+
 ## [1.0.0-beta.60] - 2026-09-23
 
 ### Added

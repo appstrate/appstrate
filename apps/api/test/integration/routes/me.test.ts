@@ -52,7 +52,7 @@ async function seedConnectionFor(opts: {
       userId: opts.userId,
       credentialsEncrypted: "x",
       scopesGranted: ["openid", "email"],
-      label: opts.label ?? null,
+      label: opts.label ?? `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       sharedWithOrg: opts.sharedWithOrg ?? false,
     })
     .returning({ id: integrationConnections.id });

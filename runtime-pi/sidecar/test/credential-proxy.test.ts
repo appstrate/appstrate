@@ -1994,3 +1994,60 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     expect(cookiesSeen[1] ?? "").not.toContain("FROM-OPEN-CALL");
   });
 });
+
+describe("executeApiCall — two connections of one integration", () => {
+  // Per-connection tool deps share the run-wide jar and 401 set, exactly as
+  // `integrations-boot.ts` layers one credential pair per connection on them.
+  function sharedRunDeps(fetchFn: typeof fetch) {
+    const shared = {
+      cookieJar: new Map<string, string[]>(),
+      reportedAuthFailures: new Set<string>(),
+    };
+    const refreshA = mock(async () => null);
+    const refreshB = mock(async () => null);
+    return {
+      depsA: makeDeps({ ...shared, fetchFn, refreshCredentials: refreshA }),
+      depsB: makeDeps({ ...shared, fetchFn, refreshCredentials: refreshB }),
+      refreshA,
+      refreshB,
+    };
+  }
+  const call = (connectionId: string) => ({
+    integrationId: "portal",
+    connectionId,
+    targetUrl: "https://api.example.com/x",
+    method: "GET",
+    callerHeaders: {},
+    body: { kind: "none" } as const,
+  });
+
+  it("never replays connection A's session cookie on connection B", async () => {
+    const cookiesSeen: (string | null)[] = [];
+    const fetchFn = mock(async (_url: string | URL, init?: RequestInit) => {
+      cookiesSeen.push(new Headers(init?.headers).get("cookie"));
+      return new Response("ok", {
+        status: 200,
+        headers: cookiesSeen.length === 1 ? { "Set-Cookie": "sess=a-session; Path=/" } : {},
+      });
+    });
+    const { depsA, depsB } = sharedRunDeps(fetchFn as unknown as typeof fetch);
+    await executeApiCall(call("conn-a"), depsA);
+    await executeApiCall(call("conn-b"), depsB);
+    await executeApiCall(call("conn-a"), depsA);
+    expect(cookiesSeen[1]).toBeNull();
+    // CONTROL — the session is still sticky on the connection that earned it.
+    expect(cookiesSeen[2]).toBe("sess=a-session");
+  });
+
+  it("does not let connection A's persistent 401 skip connection B's refresh", async () => {
+    const fetchFn = mock(async () => new Response("expired", { status: 401 }));
+    const { depsA, depsB, refreshA, refreshB } = sharedRunDeps(fetchFn as unknown as typeof fetch);
+    await executeApiCall(call("conn-a"), depsA);
+    expect(refreshA).toHaveBeenCalledTimes(1);
+    await executeApiCall(call("conn-b"), depsB);
+    expect(refreshB).toHaveBeenCalledTimes(1);
+    // CONTROL — A itself is not refreshed a second time.
+    await executeApiCall(call("conn-a"), depsA);
+    expect(refreshA).toHaveBeenCalledTimes(1);
+  });
+});

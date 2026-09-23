@@ -7,12 +7,12 @@
  * a persisted DB row that the resolver sees on every run (cascade layer 4),
  * not an ephemeral browser-local value.
  *
- * One pin per (agent, integration, member-scope). The pin's connection
- * carries its own authKey; OAuth and api_key connections are
- * interchangeable at runtime.
+ * One pin per (agent, integration, member-scope), holding the WHOLE bound
+ * SET: `PUT` replaces it, `DELETE` clears it. Each connection carries its own
+ * authKey; OAuth and api_key connections are interchangeable at runtime.
  *
  * These are write-only mutations: the picker reads pin state off the
- * server-authoritative agent-resolution verdict (`member_pinned_connection_id`)
+ * server-authoritative agent-resolution verdict (`member_pinned_connection_ids`)
  * and refetches it itself after a pick, so the only invalidation needed here is
  * the typed `/api/me/integration-pins` path. Member pins are private per actor —
  * the API endpoint filters by the caller's user_id, so we never see other
@@ -21,11 +21,13 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { client } from "../api/client";
+import { onMutationError } from "../lib/mutation-error";
 
 interface UpsertMemberPinInput {
   agentPackageId: string;
   integrationId: string;
-  connectionId: string;
+  /** The whole set to bind, 1..MAX_CONNECTIONS_PER_INTEGRATION. Replaces the previous one. */
+  connectionIds: string[];
 }
 
 export function useUpsertMemberIntegrationPin() {
@@ -36,7 +38,7 @@ export function useUpsertMemberIntegrationPin() {
         body: {
           agent_package_id: input.agentPackageId,
           integration_package_id: input.integrationId,
-          connection_id: input.connectionId,
+          connection_ids: input.connectionIds,
         },
       });
       return data;
@@ -44,6 +46,7 @@ export function useUpsertMemberIntegrationPin() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["get", "/api/me/integration-pins"] });
     },
+    onError: onMutationError,
   });
 }
 
@@ -68,5 +71,6 @@ export function useDeleteMemberIntegrationPin() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["get", "/api/me/integration-pins"] });
     },
+    onError: onMutationError,
   });
 }

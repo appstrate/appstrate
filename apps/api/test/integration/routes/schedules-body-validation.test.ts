@@ -13,9 +13,9 @@
  * as the only receipt. The three cases below are exactly the three the schema
  * did not gate:
  *
- *  - an empty-string `connection_overrides` value — falsy at the resolver's
- *    `resolveOne`, so the pin is skipped in silence and each fire falls through
- *    to actor-fallback or dies with a 412 `must_choose_connection`;
+ *  - a `connection_overrides` entry that the resolver would silently skip — an
+ *    empty id inside the set, or an empty set — so each fire falls through to
+ *    actor-fallback or dies with a 412 `must_choose_connection`;
  *  - an unknown field — stripped without a trace where the other launch bodies
  *    are `.strict()`;
  *  - a `dependency_overrides` value the resolver rejects (`"latest"`) — the
@@ -49,6 +49,7 @@ const DECLARED_SKILL = "@schedbodyorg/dep-skill";
 /** A second declared skill, for the value cases that need a non-`draft` spec. */
 const DECLARED_OTHER = "@schedbodyorg/dep-other";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { seedDivergedAgent, seedSchedulableAgent } from "../../helpers/schedule-fixtures.ts";
 
 const app = getTestApp();
@@ -112,22 +113,86 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
     await expectRejectedField(res, "config");
   });
 
-  it("rejects an empty connection_overrides value with 400", async () => {
-    // Empty string is falsy at `resolveOne`, so the frozen pin would be skipped
-    // on every fire while this write answered 201.
+  it("rejects an empty connection id inside a connection_overrides set", async () => {
+    // An id that matches no row is refused per fire, not per write, so the
+    // frozen pin would answer 201 here and fail for ever after.
     const res = await post({
       cron_expression: "0 9 * * 1-5",
-      connection_overrides: { "@acme/gmail": "" },
+      connection_overrides: { "@acme/gmail": [""] },
+    });
+    await expectRejectedField(res, "connection_overrides.@acme/gmail[0]");
+  });
+
+  it("rejects an EMPTY connection_overrides set with 400", async () => {
+    // An empty set reads as "this layer has no opinion" at the resolver, so the
+    // frozen pin would be skipped in silence on every fire.
+    const res = await post({
+      cron_expression: "0 9 * * 1-5",
+      connection_overrides: { "@acme/gmail": [] },
     });
     await expectRejectedField(res, "connection_overrides.@acme/gmail");
   });
 
-  it("accepts a non-empty connection_overrides value (control)", async () => {
+  it("rejects a BARE connection id — the retired single-connection shape", async () => {
     const res = await post({
       cron_expression: "0 9 * * 1-5",
       connection_overrides: { "@acme/gmail": "conn_1" },
     });
-    expect(res.status).toBe(201);
+    await expectRejectedField(res, "connection_overrides.@acme/gmail");
+  });
+
+  it("rejects a repeated connection id in a set, in either case", async () => {
+    await expectRejectedField(
+      await post({
+        cron_expression: "0 9 * * 1-5",
+        connection_overrides: { "@acme/gmail": ["conn_1", "conn_1"] },
+      }),
+      "connection_overrides.@acme/gmail",
+    );
+    await expectRejectedField(
+      await post({
+        cron_expression: "0 9 * * 1-5",
+        connection_overrides: { "@acme/gmail": ["conn_a", "CONN_A"] },
+      }),
+      "connection_overrides.@acme/gmail",
+    );
+    // Control: two different ids freeze onto the row.
+    const distinct = await post({
+      cron_expression: "0 9 * * 1-5",
+      connection_overrides: { "@acme/gmail": ["conn_1", "conn_2"] },
+    });
+    expect(distinct.status).toBe(201);
+  });
+
+  it("rejects a connection_overrides set over the cap", async () => {
+    const res = await post({
+      cron_expression: "0 9 * * 1-5",
+      connection_overrides: {
+        "@acme/gmail": Array.from(
+          { length: MAX_CONNECTIONS_PER_INTEGRATION + 1 },
+          (_, i) => `conn_${i}`,
+        ),
+      },
+    });
+    await expectRejectedField(res, "connection_overrides.@acme/gmail");
+  });
+
+  it("accepts a connection_overrides set of 1 and of the cap (control)", async () => {
+    const one = await post({
+      cron_expression: "0 9 * * 1-5",
+      connection_overrides: { "@acme/gmail": ["conn_1"] },
+    });
+    expect(one.status).toBe(201);
+    const capped = await post({
+      cron_expression: "0 9 * * 1-5",
+      connection_overrides: {
+        "@acme/gmail": Array.from(
+          { length: MAX_CONNECTIONS_PER_INTEGRATION },
+          (_, i) => `conn_${i}`,
+        ),
+      },
+    });
+    expect(capped.status).toBe(201);
   });
 
   it('rejects a "latest" dependency_overrides value with 400', async () => {
@@ -213,9 +278,20 @@ describe("PUT /api/schedules/:id — body validation", () => {
     await expectRejectedField(res, "config");
   });
 
-  it("rejects an empty connection_overrides value with 400", async () => {
-    const res = await put({ connection_overrides: { "@acme/gmail": "" } });
-    await expectRejectedField(res, "connection_overrides.@acme/gmail");
+  it("rejects an empty connection id inside a connection_overrides set", async () => {
+    const res = await put({ connection_overrides: { "@acme/gmail": [""] } });
+    await expectRejectedField(res, "connection_overrides.@acme/gmail[0]");
+  });
+
+  it("rejects an EMPTY connection_overrides set and a BARE id", async () => {
+    await expectRejectedField(
+      await put({ connection_overrides: { "@acme/gmail": [] } }),
+      "connection_overrides.@acme/gmail",
+    );
+    await expectRejectedField(
+      await put({ connection_overrides: { "@acme/gmail": "conn_1" } }),
+      "connection_overrides.@acme/gmail",
+    );
   });
 
   it('rejects a "latest" dependency_overrides value with 400', async () => {

@@ -26,6 +26,7 @@ import { encryptCredentialEnvelope } from "@appstrate/connect";
 
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
+import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
@@ -83,6 +84,7 @@ async function seedAll(ctx: TestContext, opts: SeedOpts, credBag: Record<string,
     integrationId: INTEG,
     authKey: "primary",
     accountId: "default",
+    label: "default",
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     endUserId: null,
@@ -133,6 +135,7 @@ describe("resolveIntegrationSpawns — delivery.env.user_config_key (CC-4)", () 
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
+      resolvedConnections: await bindAllConnections(INTEG),
     });
     expect(specs.length).toBe(1);
     const env = specs[0]!.spawnEnv;
@@ -160,6 +163,7 @@ describe("resolveIntegrationSpawns — delivery.env.user_config_key (CC-4)", () 
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
+      resolvedConnections: await bindAllConnections(INTEG),
     });
     expect(specs.length).toBe(1);
     const env = specs[0]!.spawnEnv;
@@ -185,6 +189,7 @@ describe("resolveIntegrationSpawns — delivery.env.user_config_key (CC-4)", () 
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
+      resolvedConnections: await bindAllConnections(INTEG),
     });
     expect(specs.length).toBe(1);
     expect(specs[0]!.spawnEnv.TOKEN).toBe("integration-wins");
@@ -209,6 +214,7 @@ describe("resolveIntegrationSpawns — delivery.env.user_config_key (CC-4)", () 
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
+      resolvedConnections: await bindAllConnections(INTEG),
     });
     expect(specs.length).toBe(1);
     const env = specs[0]!.spawnEnv;
@@ -234,6 +240,7 @@ describe("resolveIntegrationSpawns — delivery.env.user_config_key (CC-4)", () 
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
+      resolvedConnections: await bindAllConnections(INTEG),
     });
     expect(specs.length).toBe(1);
     // Only the integration's direct env entries flow through.

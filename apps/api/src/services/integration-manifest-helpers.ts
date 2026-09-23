@@ -21,7 +21,8 @@
  *   - URI restrictions: `authorized_uris`, `allow_all_uris`.
  */
 
-import type { IntegrationManifest } from "@appstrate/core/integration";
+import { getApiCallConfigs, type IntegrationManifest } from "@appstrate/core/integration";
+import { isToolsWildcard } from "@appstrate/core/dependencies";
 import type { ManifestDeliveryHttp } from "@appstrate/core/sidecar-types";
 import type { TokenEndpointAuthMethod } from "@appstrate/connect";
 import { renderCredentialTemplate as renderCredentialTemplateCore } from "@appstrate/afps-shared/credential-template";
@@ -288,6 +289,62 @@ export function getIntegrationSourceKind(
   const source = (manifest as { source?: { kind?: string } }).source;
   const kind = source?.kind;
   return kind === "local" || kind === "remote" || kind === "none" ? kind : undefined;
+}
+
+/**
+ * The auths whose connection exposes at least one tool of `selection` — `null`
+ * when every auth does, or when none does: an integration exposing no selected
+ * tool is not a connection problem, and spawn/readiness report it as such. A
+ * local/remote server's own tools reach the agent through any connection; an
+ * `api_call` tool only through its own auth's.
+ */
+export function authKeysServingSelection(
+  manifest: IntegrationManifest,
+  selection: readonly string[] | "*" | undefined,
+): ReadonlySet<string> | null {
+  if (selection === undefined || selection.length === 0) return null;
+  const kind = getIntegrationSourceKind(manifest);
+  const hasServer = kind === "local" || kind === "remote";
+  const apiCalls = getApiCallConfigs(manifest);
+  let serving: Set<string>;
+  if (isToolsWildcard(selection)) {
+    if (hasServer) return null;
+    serving = new Set(apiCalls.map((cfg) => cfg.authKey));
+  } else {
+    const picked = new Set(selection);
+    const apiCallNames = new Set(
+      apiCalls.flatMap((cfg) =>
+        cfg.uploadToolName ? [cfg.toolName, cfg.uploadToolName] : [cfg.toolName],
+      ),
+    );
+    if (hasServer && selection.some((name) => !apiCallNames.has(name))) return null;
+    serving = new Set(
+      apiCalls
+        .filter(
+          (cfg) =>
+            picked.has(cfg.toolName) ||
+            (cfg.uploadToolName !== undefined && picked.has(cfg.uploadToolName)),
+        )
+        .map((cfg) => cfg.authKey),
+    );
+  }
+  return serving.size === 0 ? null : serving;
+}
+
+/**
+ * The agent dep's `auth_key` (AFPS §4.1) when it names a declared auth that
+ * serves none of `selection` — an agent configuration no connection can
+ * satisfy — with the auths that do serve it. `null` otherwise.
+ */
+export function pinnedAuthServingNoSelectedTool(
+  manifest: IntegrationManifest,
+  authKey: string | undefined,
+  selection: readonly string[] | "*" | undefined,
+): { authKey: string; servingAuthKeys: string[] } | null {
+  if (authKey === undefined || !manifest.auths?.[authKey]) return null;
+  const serving = authKeysServingSelection(manifest, selection);
+  if (serving === null || serving.has(authKey)) return null;
+  return { authKey, servingAuthKeys: [...serving] };
 }
 
 /** `source.server` reference for a `local`-source integration (the mcp-server package). */

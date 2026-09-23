@@ -94,13 +94,18 @@ describe("GET /health", () => {
 describe("GET /integrations/boot-report", () => {
   const sampleReport = {
     ok: false,
-    declared: 2,
+    declaredConnections: 2,
     adapter: "process",
-    spawned: [{ integrationId: "@scope/a", namespace: "a", toolCount: 3 }],
-    failed: [{ integrationId: "@scope/b", error: "spawn python3 ENOENT" }],
+    spawned: [{ integrationId: "@scope/a", namespace: "a", connectionLabel: "work", toolCount: 3 }],
+    failed: [
+      { integrationId: "@scope/b", connectionLabel: "perso", error: "spawn python3 ENOENT" },
+    ],
     breadcrumbs: [
       { message: "runtime adapter: process", level: "info" as const },
-      { message: "@scope/b: failed after 12ms — spawn python3 ENOENT", level: "error" as const },
+      {
+        message: "@scope/b [perso]: failed after 12ms — spawn python3 ENOENT",
+        level: "error" as const,
+      },
     ],
   };
 
@@ -133,7 +138,7 @@ describe("GET /integrations/boot-report", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       ok: true,
-      declared: 0,
+      declaredConnections: 0,
       adapter: "none",
       spawned: [],
       failed: [],

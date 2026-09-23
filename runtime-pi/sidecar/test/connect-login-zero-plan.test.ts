@@ -26,6 +26,7 @@ function emptyWire(): IntegrationCredentialsWire {
 function makeSource() {
   const fetchFn = (async () => new Response("", { status: 500 })) as unknown as typeof fetch;
   return createIntegrationCredentialsSource({
+    connectionId: "conn-a",
     integrationId: "@test/integ",
     platformApiUrl: "http://api",
     runToken: "run-tok",
@@ -34,12 +35,10 @@ function makeSource() {
   });
 }
 
-function fakeHostReturning(payload: unknown) {
+function fakeClientReturning(payload: unknown) {
   return {
-    getUpstreamClient: (_ns: string) => ({
-      callTool: async () => ({
-        content: [{ type: "text", text: JSON.stringify(payload) }],
-      }),
+    callTool: async () => ({
+      content: [{ type: "text", text: JSON.stringify(payload) }],
     }),
   };
 }
@@ -47,11 +46,11 @@ function fakeHostReturning(payload: unknown) {
 describe("runConnectLogin — zero-plan rejection (R8a)", () => {
   it("throws when delivery.http.name is empty", async () => {
     const source = makeSource();
-    const host = fakeHostReturning({ outputs: { session: "S1" } });
+    const client = fakeClientReturning({ outputs: { session: "S1" } });
 
     await expect(
       runConnectLogin({
-        host: host as any,
+        client: client as any,
         namespace: "ns",
         toolName: "login",
         inputs: {},
@@ -72,11 +71,11 @@ describe("runConnectLogin — zero-plan rejection (R8a)", () => {
     // primary case covers (and matches the AFPS schema
     // `minLength: 1` constraint).
     const source = makeSource();
-    const host = fakeHostReturning({ outputs: { session: "S2" } });
+    const client = fakeClientReturning({ outputs: { session: "S2" } });
 
     await expect(
       runConnectLogin({
-        host: host as any,
+        client: client as any,
         namespace: "ns",
         toolName: "login",
         inputs: {},
@@ -94,10 +93,10 @@ describe("runConnectLogin — zero-plan rejection (R8a)", () => {
     // Sanity: the rejection ONLY fires on the null-plan branch. A
     // well-formed delivery template still produces a concrete header.
     const source = makeSource();
-    const host = fakeHostReturning({ outputs: { access_token: "TOK" } });
+    const client = fakeClientReturning({ outputs: { access_token: "TOK" } });
 
     await runConnectLogin({
-      host: host as any,
+      client: client as any,
       namespace: "ns",
       toolName: "login",
       inputs: {},
@@ -122,11 +121,11 @@ describe("runConnectLogin — zero-plan rejection (R8a)", () => {
     // The injection window MUST close even on the zero-plan reject path —
     // the secret can never linger past the primitive's `finally`.
     const source = makeSource();
-    const host = fakeHostReturning({ outputs: { session: "S3" } });
+    const client = fakeClientReturning({ outputs: { session: "S3" } });
 
     await expect(
       runConnectLogin({
-        host: host as any,
+        client: client as any,
         namespace: "ns",
         toolName: "login",
         inputs: { password: "s3cret" },

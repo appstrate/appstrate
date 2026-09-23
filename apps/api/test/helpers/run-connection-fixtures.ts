@@ -162,10 +162,17 @@ export async function seedConnectionTestIntegration(ctx: TestContext, id: string
   await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
 }
 
-/** Add one connection on the integration's `primary` auth, owned by the ctx user. */
+/**
+ * Add one connection on the integration's `primary` auth, owned by the ctx
+ * user. `label` is NOT NULL in the schema and defaults here to a distinct
+ * generated name, because labels must be distinct across a BOUND set
+ * (`duplicate_connection_label`) — two fixture rows sharing one would refuse
+ * every multi-connection bind. Pass one when the test asserts on it.
+ */
 export async function seedIntegrationConnection(
   ctx: TestContext,
   integrationId: string,
+  opts: { label?: string } = {},
 ): Promise<string> {
   const [row] = await db
     .insert(integrationConnections)
@@ -178,6 +185,7 @@ export async function seedIntegrationConnection(
       endUserId: null,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret-value" } }),
       scopesGranted: [],
+      label: opts.label ?? `Connexion ${crypto.randomUUID().slice(0, 8)}`,
     })
     .returning({ id: integrationConnections.id });
   return row!.id;

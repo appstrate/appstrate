@@ -116,6 +116,7 @@ describe("createApiCallCredentialAdapter — connect.tool session via shared sou
 
   it("api_call injects the captured session header after setSessionOutputs", async () => {
     const source = createIntegrationCredentialsSource({
+      connectionId: "conn-a",
       integrationId: "@appstrate/connect-tool-test",
       platformApiUrl: "http://api",
       runToken: "rt",
@@ -160,6 +161,7 @@ describe("createApiCallCredentialAdapter — connect.tool session via shared sou
   it("keeps a sibling api_key auth injectable after the connect.tool session is minted", async () => {
     // Multi-auth: `session` (connect.tool) + `apikey` (static, also api_call).
     const source = createIntegrationCredentialsSource({
+      connectionId: "conn-a",
       integrationId: "@vendor/multi",
       platformApiUrl: "http://api",
       runToken: "rt",

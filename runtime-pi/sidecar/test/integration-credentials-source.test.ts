@@ -82,6 +82,7 @@ describe("createIntegrationCredentialsSource", () => {
     const initial = makePayload("tok-1");
     const fetchFn = (async () => new Response("", { status: 500 })) as unknown as typeof fetch;
     const source = createIntegrationCredentialsSource({
+      connectionId: "conn-a",
       integrationId: "@test/integ",
       platformApiUrl: "http://api",
       runToken: "run-tok",
@@ -108,6 +109,7 @@ describe("createIntegrationCredentialsSource", () => {
     }) as unknown as typeof fetch;
 
     const source = createIntegrationCredentialsSource({
+      connectionId: "conn-a",
       integrationId: "@test/integ",
       platformApiUrl: "http://api",
       runToken: "run-tok",
@@ -120,7 +122,9 @@ describe("createIntegrationCredentialsSource", () => {
     expect(ok).toBe(true);
     expect(calls.length).toBe(1);
     expect(calls[0]!.method).toBe("POST");
-    expect(calls[0]!.url).toBe("http://api/internal/integration-credentials/@test/integ/refresh");
+    expect(calls[0]!.url).toBe(
+      "http://api/internal/integration-credentials/@test/integ/refresh?connection_id=conn-a",
+    );
     expect(calls[0]!.headers.Authorization).toBe("Bearer run-tok");
     expect(source.current().auths[0]!.fields.apiKey).toBe("tok-2");
     expect(source.deliveryPlans().primary?.value).toBe("tok-2");
@@ -135,6 +139,7 @@ describe("createIntegrationCredentialsSource", () => {
     }) as unknown as typeof fetch;
 
     const source = createIntegrationCredentialsSource({
+      connectionId: "conn-a",
       integrationId: "@test/integ",
       platformApiUrl: "http://api",
       runToken: "run-tok",
@@ -155,6 +160,7 @@ describe("createIntegrationCredentialsSource", () => {
       throw new TypeError("ConnectionRefused");
     }) as unknown as typeof fetch;
     const source = createIntegrationCredentialsSource({
+      connectionId: "conn-a",
       integrationId: "@test/integ",
       platformApiUrl: "http://api",
       runToken: "run-tok",
@@ -171,6 +177,7 @@ describe("createIntegrationCredentialsSource", () => {
     const fetchFn = (async () =>
       new Response("upstream broke", { status: 502 })) as unknown as typeof fetch;
     const source = createIntegrationCredentialsSource({
+      connectionId: "conn-a",
       integrationId: "@test/integ",
       platformApiUrl: "http://api",
       runToken: "run-tok",
@@ -193,6 +200,7 @@ describe("createIntegrationCredentialsSource", () => {
     }) as unknown as typeof fetch;
 
     const source = createIntegrationCredentialsSource({
+      connectionId: "conn-a",
       integrationId: "@test/integ",
       platformApiUrl: "http://api",
       runToken: "run-tok",
@@ -221,6 +229,7 @@ describe("createIntegrationCredentialsSource", () => {
     }) as unknown as typeof fetch;
 
     const source = createIntegrationCredentialsSource({
+      connectionId: "conn-a",
       integrationId: "@test/integ",
       platformApiUrl: "http://api",
       runToken: "run-tok",
@@ -266,6 +275,7 @@ describe("createIntegrationCredentialsSource — setSessionOutputs (per-auth)", 
 
   it("replaces only the matching authKey, preserving sibling auths + plans", () => {
     const source = createIntegrationCredentialsSource({
+      connectionId: "conn-a",
       integrationId: "@test/integ",
       platformApiUrl: "http://api",
       runToken: "run-tok",
@@ -300,6 +310,7 @@ describe("createIntegrationCredentialsSource — setSessionOutputs (per-auth)", 
 
   it("does not duplicate the auth entry on a re-mint (re-login)", () => {
     const source = createIntegrationCredentialsSource({
+      connectionId: "conn-a",
       integrationId: "@test/integ",
       platformApiUrl: "http://api",
       runToken: "run-tok",
@@ -327,6 +338,7 @@ describe("createIntegrationCredentialsSource — setSessionOutputs (per-auth)", 
 describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", () => {
   it("shouldReauth is true only for a registered authKey + declared status", () => {
     const source = createIntegrationCredentialsSource({
+      connectionId: "conn-a",
       integrationId: "@test/integ",
       platformApiUrl: "http://api",
       runToken: "run-tok",
@@ -352,6 +364,7 @@ describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", ()
       return new Response(JSON.stringify(makeWireJson("tok-platform")), { status: 200 });
     }) as unknown as typeof fetch;
     const source = createIntegrationCredentialsSource({
+      connectionId: "conn-a",
       integrationId: "@test/integ",
       platformApiUrl: "http://api",
       runToken: "run-tok",
@@ -383,6 +396,7 @@ describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", ()
       return new Response(JSON.stringify(makeWireJson("tok-2")), { status: 200 });
     }) as unknown as typeof fetch;
     const source = createIntegrationCredentialsSource({
+      connectionId: "conn-a",
       integrationId: "@test/integ",
       platformApiUrl: "http://api",
       runToken: "run-tok",
@@ -399,6 +413,7 @@ describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", ()
 
   it("applies cooldown + in-flight dedup to the re-login path", async () => {
     const source = createIntegrationCredentialsSource({
+      connectionId: "conn-a",
       integrationId: "@test/integ",
       platformApiUrl: "http://api",
       runToken: "run-tok",
@@ -437,6 +452,7 @@ describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", ()
 
   it("returns false (and arms cooldown) when the re-login handler throws", async () => {
     const source = createIntegrationCredentialsSource({
+      connectionId: "conn-a",
       integrationId: "@test/integ",
       platformApiUrl: "http://api",
       runToken: "run-tok",
@@ -470,14 +486,34 @@ describe("fetchInitialIntegrationCredentials", () => {
       seen.auth = headers?.Authorization;
       return new Response(JSON.stringify(payload), { status: 200 });
     }) as unknown as typeof fetch;
-    const out = await fetchInitialIntegrationCredentials("@scope/name", {
+    const out = await fetchInitialIntegrationCredentials("@scope/name", "conn-a", {
+      platformApiUrl: "http://api",
+      runToken: "tok",
+      fetchFn,
+    });
+    // The connection id is REQUIRED on the wire — the platform rejects a
+    // credentials read that does not name one.
+    expect(seen.url).toBe(
+      "http://api/internal/integration-credentials/@scope/name?connection_id=conn-a",
+    );
+    expect(seen.auth).toBe("Bearer tok");
+    expect(out.auths[0]!.fields.apiKey).toBe("tok-x");
+  });
+
+  it("CONTROL — omits the query entirely when there is no connection (connect run)", async () => {
+    // A connect run is minting the credential that becomes a connection, so
+    // there is no id to send; the platform answers it from the grant branch.
+    const seen: { url?: string } = {};
+    const fetchFn = (async (url: string) => {
+      seen.url = url;
+      return new Response(JSON.stringify(makeWireJson("tok-x")), { status: 200 });
+    }) as unknown as typeof fetch;
+    await fetchInitialIntegrationCredentials("@scope/name", undefined, {
       platformApiUrl: "http://api",
       runToken: "tok",
       fetchFn,
     });
     expect(seen.url).toBe("http://api/internal/integration-credentials/@scope/name");
-    expect(seen.auth).toBe("Bearer tok");
-    expect(out.auths[0]!.fields.apiKey).toBe("tok-x");
   });
 
   it("surfaces the platform's `detail` on HTTP failure", async () => {
@@ -486,7 +522,7 @@ describe("fetchInitialIntegrationCredentials", () => {
         status: 404,
       })) as unknown as typeof fetch;
     await expect(
-      fetchInitialIntegrationCredentials("@scope/name", {
+      fetchInitialIntegrationCredentials("@scope/name", "conn-a", {
         platformApiUrl: "http://api",
         runToken: "tok",
         fetchFn,
@@ -497,7 +533,7 @@ describe("fetchInitialIntegrationCredentials", () => {
   it("falls back to a generic message when the body isn't structured", async () => {
     const fetchFn = (async () => new Response("oops", { status: 500 })) as unknown as typeof fetch;
     await expect(
-      fetchInitialIntegrationCredentials("@scope/name", {
+      fetchInitialIntegrationCredentials("@scope/name", "conn-a", {
         platformApiUrl: "http://api",
         runToken: "tok",
         fetchFn,
@@ -516,7 +552,7 @@ describe("fetchInitialIntegrationCredentials", () => {
     // is version-locked to at boot.
     const fetchFn = (async () => new Response(null, { status: 204 })) as unknown as typeof fetch;
     await expect(
-      fetchInitialIntegrationCredentials("@scope/name", {
+      fetchInitialIntegrationCredentials("@scope/name", "conn-a", {
         platformApiUrl: "http://api",
         runToken: "tok",
         fetchFn,
@@ -532,13 +568,14 @@ describe("fetchInitialIntegrationCredentials", () => {
     const emptyWire = { auths: [], delivery_plans: {}, expires_at_epoch_ms: {} };
     const fetchFn = (async () =>
       new Response(JSON.stringify(emptyWire), { status: 200 })) as unknown as typeof fetch;
-    const initialPayload = await fetchInitialIntegrationCredentials("@scope/name", {
+    const initialPayload = await fetchInitialIntegrationCredentials("@scope/name", "conn-a", {
       platformApiUrl: "http://api",
       runToken: "tok",
       fetchFn,
     });
 
     const source = createIntegrationCredentialsSource({
+      connectionId: "conn-a",
       integrationId: "@scope/name",
       platformApiUrl: "http://api",
       runToken: "tok",

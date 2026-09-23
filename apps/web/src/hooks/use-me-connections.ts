@@ -16,7 +16,7 @@ import { toast } from "sonner";
 import { getErrorMessage } from "@appstrate/core/errors";
 import i18n from "../i18n";
 import { $api, client } from "../api/client";
-import { onMutationError } from "./use-mutations";
+import { onMutationError } from "../lib/mutation-error";
 import { invalidateIntegrationQueries } from "./use-integrations";
 
 /**
@@ -53,8 +53,8 @@ export function useDisconnectIntegrationConnection() {
   return $api.useMutation("delete", "/api/me/connections/{connectionId}", {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] });
-      // Member pins anywhere referencing the deleted connection cascaded
-      // server-side; refresh their cache so the picker re-fetches.
+      // A member pin naming the deleted connection keeps its id (only an admin
+      // pin or org default refuses the delete); refresh so the picker shows it stale.
       void qc.invalidateQueries({ queryKey: ["get", "/api/me/integration-pins"] });
       // The agent page's reuse hints + accessible-connection lists live under
       // the typed `/api/integrations…` keys — refresh the whole subtree.
@@ -84,7 +84,7 @@ export function useUpdateMeIntegrationConnection() {
     }: OrgSpaceHeaders & {
       packageId: string;
       connectionId: string;
-      label?: string | null;
+      label?: string;
       sharedWithOrg?: boolean;
     }) => {
       const { data } = await client.PATCH(

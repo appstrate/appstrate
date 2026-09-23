@@ -42,14 +42,12 @@ export interface RunOverridesValue {
   proxy_id_override?: string;
   /**
    * Per-integration connection picks — frozen at schedule create/edit so
-   * every fire uses the same row. Loses to admin pins; beats
-   * schedule-less fallback + per-run overrides on the actor. Flat map:
-   * `{ "@scope/integration": "<connection_id>" }`. The chosen connection
-   * carries its own `auth_key`; the picker UI surfaces one row per
-   * declared authKey for readability but writes one value per integration
-   * (last write wins per integration — matches the wire format).
+   * every fire uses the same rows. Loses to admin pins; beats
+   * schedule-less fallback + per-run overrides on the actor. Map of SETS:
+   * `{ "@scope/integration": ["<connection_id>", ...] }`, up to
+   * `MAX_CONNECTIONS_PER_INTEGRATION` per key.
    */
-  connection_overrides?: Record<string, string>;
+  connection_overrides?: Record<string, string[]>;
 }
 
 interface AgentIntegrationRef {
@@ -257,19 +255,12 @@ export function RunOverridesPanel({
           version={version}
           value={value.connection_overrides ?? {}}
           onChange={(next) => {
-            // Drop falsy entries — empty string === "Inherit", which is
-            // the absence of an override; sending it would be a spurious
-            // pick the resolver would have to disambiguate.
-            const compacted: Record<string, string> = {};
-            for (const [intId, connId] of Object.entries(next)) {
-              if (connId) compacted[intId] = connId;
-            }
-            if (Object.keys(compacted).length === 0) {
+            if (Object.keys(next).length === 0) {
               const { connection_overrides: _omit, ...rest } = value;
               void _omit;
               onChange(rest);
             } else {
-              onChange({ ...value, connection_overrides: compacted });
+              onChange({ ...value, connection_overrides: next });
             }
           }}
         />
@@ -281,8 +272,8 @@ export function RunOverridesPanel({
 /**
  * Per-integration picker section that drives `value.connection_overrides`.
  * Renders the shared `IntegrationConnectionPicker` (one dropdown per
- * integration) in `override` mode: selecting writes the pick into the
- * flat `connection_overrides` map, "inherit" clears it. The pick freezes
+ * integration) in `override` mode: validating a set writes it into the
+ * `connection_overrides` map, "inherit" clears the key. The pick freezes
  * into the schedule row on save (cascade layer 4 — below admin pins,
  * above member pins).
  *
@@ -300,8 +291,8 @@ function ScheduleConnectionOverridesSection({
   agentPackageId: string;
   integrations: AgentIntegrationRef[];
   version?: string;
-  value: Record<string, string>;
-  onChange: (next: Record<string, string>) => void;
+  value: Record<string, string[]>;
+  onChange: (next: Record<string, string[]>) => void;
 }) {
   const { t } = useTranslation(["agents"]);
   return (
@@ -315,10 +306,10 @@ function ScheduleConnectionOverridesSection({
             agentPackageId={agentPackageId}
             integration={integ}
             version={version}
-            value={value[integ.id] ?? ""}
-            onChange={(connId) => {
+            value={value[integ.id] ?? []}
+            onChange={(connIds) => {
               const next = { ...value };
-              if (connId) next[integ.id] = connId;
+              if (connIds.length > 0) next[integ.id] = connIds;
               else delete next[integ.id];
               onChange(next);
             }}
@@ -339,9 +330,9 @@ function IntegrationOverrideRow({
   agentPackageId: string;
   integration: AgentIntegrationRef;
   version?: string;
-  /** Currently-picked connection id; empty = inherit. */
-  value: string;
-  onChange: (next: string) => void;
+  /** Currently-picked connection set; empty = inherit. */
+  value: string[];
+  onChange: (next: string[]) => void;
 }) {
   const { data: detail } = useIntegrationDetail(integration.id);
   const displayName = detail?.manifest.display_name ?? integration.id;

@@ -27,7 +27,10 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { integrationConnections, packages } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
-import { resolveAgentConnectionReadiness } from "../../../src/services/integration-pins-service.ts";
+import {
+  resolveAgentConnectionReadiness,
+  upsertMemberPin,
+} from "../../../src/services/integration-pins-service.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion, seedSpacePackage } from "../../helpers/seed.ts";
@@ -124,6 +127,7 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
       endUserId: null,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { access_token: "tok" } }),
       scopesGranted: ["read"],
+      label: "Readiness pin",
     });
   });
 
@@ -206,5 +210,56 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
     const published = await resolveAgentConnectionReadiness({ ...base, version: "1.0.0" });
     expect(published.integrations).toEqual([]);
     expect(published.blocks_run).toBe(false);
+  });
+
+  it("an under-scoped member of a pinned SET reports the whole set, not just itself", async () => {
+    await seedPackage({
+      id: AGENT,
+      orgId: ctx.orgId,
+      type: "agent",
+      source: "local",
+      homeSpaceId: ctx.defaultSpaceId,
+      draftManifest: agentManifest({ withIntegration: true }),
+    });
+    await seedSpacePackage(ctx.defaultSpaceId, AGENT);
+    const [short] = await db
+      .select({ id: integrationConnections.id })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.label, "Readiness pin"));
+    const [full] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: INTEG,
+        authKey: "primary",
+        accountId: "acct-readiness-full",
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { access_token: "tok" } }),
+        scopesGranted: ["read", "write"],
+        label: "Readiness full",
+      })
+      .returning({ id: integrationConnections.id });
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    await upsertMemberPin(scope, {
+      agentPackageId: AGENT,
+      integrationId: INTEG,
+      connectionIds: [full!.id, short!.id],
+      userId: ctx.user.id,
+    });
+
+    const readiness = await resolveAgentConnectionReadiness({
+      scope,
+      agentPackageId: AGENT,
+      actor: { type: "user", id: ctx.user.id },
+      canConfigureIntegrations: true,
+      version: "draft",
+    });
+
+    expect(readiness.errors[0]?.code).toBe("insufficient_scopes");
+    const resolution = readiness.integrations[0]!.resolution;
+    expect(resolution.status).toBe("pinned");
+    // The picker re-pins from this list: one id here would drop `full`.
+    expect(resolution.resolved_connection_ids).toEqual([full!.id, short!.id]);
+    expect(resolution.resolved_missing_scopes).toEqual(["write"]);
   });
 });

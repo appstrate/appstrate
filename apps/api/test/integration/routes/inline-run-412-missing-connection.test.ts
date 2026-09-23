@@ -19,6 +19,7 @@
  *                                     both `connection_overrides` and the
  *                                     matching `resolved_connections` snapshot
  *   - /inline/validate parity       → same verdict as the launch, both ways
+ *   - >1 candidate + a pick of BOTH → launch, both connections bound
  *   - empty connection id           → 400 from the shared inline body schema, on
  *                                     BOTH routes, declared integration or not
  *                                     (`parseRequestInput` cannot own this here:
@@ -143,7 +144,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
     const res = await post("/api/runs/inline", {
       manifest: inlineManifest([INTEGRATION]),
       prompt: "do the thing",
-      connection_overrides: { [INTEGRATION]: picked },
+      connection_overrides: { [INTEGRATION]: [picked] },
     });
 
     expect(res.status).toBe(201);
@@ -152,12 +153,75 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
 
     const [row] = await db.select().from(runs).where(eq(runs.id, created.id));
     expect(row).toBeDefined();
-    // Mechanism #2 audit trail — what the caller asked for.
-    expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: picked });
+    // Run-override audit trail — what the caller asked for.
+    expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [picked] });
     // …and the resolver snapshot the spawn loader + MITM refresh read back.
     expect(row!.resolvedConnections).toMatchObject({
-      [INTEGRATION]: { connectionId: picked },
+      [INTEGRATION]: [{ connectionId: picked }],
     });
+  });
+
+  it("binds BOTH candidates when connection_overrides names them both", async () => {
+    await seedIntegration(INTEGRATION);
+    await seedDefaultModel();
+    const a = await seedIntegrationConnection(ctx, INTEGRATION, { label: "web-1" });
+    const b = await seedIntegrationConnection(ctx, INTEGRATION, { label: "db" });
+
+    const res = await post("/api/runs/inline", {
+      manifest: inlineManifest([INTEGRATION]),
+      prompt: "do the thing",
+      connection_overrides: { [INTEGRATION]: [a, b] },
+    });
+
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { id: string };
+    const [row] = await db.select().from(runs).where(eq(runs.id, created.id));
+    expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [a, b] });
+    expect(row!.resolvedConnections![INTEGRATION]!.map((c) => c.connectionId)).toEqual([a, b]);
+  });
+
+  it("resolves an UPPERCASE connection id — the schema folds it before the resolver", async () => {
+    // `z.uuid()` accepts either case; Postgres stores and returns the lower
+    // one, and the resolver keys its lookup on what the database returned. An
+    // unfolded id would 412 `override_connection_unavailable` instead.
+    await seedIntegration(INTEGRATION);
+    await seedDefaultModel();
+    const picked = await seedConnection(INTEGRATION);
+    await seedConnection(INTEGRATION);
+
+    const res = await post("/api/runs/inline", {
+      manifest: inlineManifest([INTEGRATION]),
+      prompt: "do the thing",
+      connection_overrides: { [INTEGRATION]: [picked.toUpperCase()] },
+    });
+
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { id: string };
+    const [row] = await db.select().from(runs).where(eq(runs.id, created.id));
+    expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [picked] });
+    expect(row!.resolvedConnections![INTEGRATION]!.map((c) => c.connectionId)).toEqual([picked]);
+  });
+
+  it("refuses a two-connection bind whose labels collide (duplicate_connection_label)", async () => {
+    await seedIntegration(INTEGRATION);
+    await seedDefaultModel();
+    const a = await seedIntegrationConnection(ctx, INTEGRATION, { label: "same" });
+    const b = await seedIntegrationConnection(ctx, INTEGRATION, { label: "same" });
+
+    const res = await post("/api/runs/inline", {
+      manifest: inlineManifest([INTEGRATION]),
+      prompt: "do the thing",
+      connection_overrides: { [INTEGRATION]: [a, b] },
+    });
+
+    expect(res.status).toBe(412);
+    const body = (await res.json()) as ProblemDetails;
+    expect(body.code).toBe("missing_integration_connection");
+    const err = body.errors!.find((e) => e.field === `integrations.${INTEGRATION}`);
+    expect(err!.code).toBe("duplicate_connection_label");
+    expect(err!.candidate_connections!.map((c) => c.id).sort()).toEqual([a, b].sort());
+    // The run must not exist — the refusal is at the gate, not mid-boot.
+    expect(await db.select().from(runs)).toHaveLength(0);
   });
 
   it("POST /api/runs/inline/validate agrees with the launch — pick clears, absence does not", async () => {
@@ -182,7 +246,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
     const withPick = await post("/api/runs/inline/validate", {
       manifest: inlineManifest([INTEGRATION]),
       prompt: "do the thing",
-      connection_overrides: { [INTEGRATION]: picked },
+      connection_overrides: { [INTEGRATION]: [picked] },
     });
     expect(withPick.status).toBe(200);
     expect(await withPick.json()).toEqual({ valid: true });
@@ -202,12 +266,12 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       const res = await post(path, {
         manifest: inlineManifest(),
         prompt: "do the thing",
-        connection_overrides: { [INTEGRATION]: "" },
+        connection_overrides: { [INTEGRATION]: [""] },
       });
 
       expect(res.status).toBe(400);
       const body = (await res.json()) as ProblemDetails;
-      const err = body.errors!.find((e) => e.field === `connection_overrides.${INTEGRATION}`);
+      const err = body.errors!.find((e) => e.field === `connection_overrides.${INTEGRATION}[0]`);
       expect(err).toBeDefined();
       // Pinned to the Zod `too_small` code so a `.min(1)` reverted to plain
       // `z.string()` fails here rather than silently launching: with no
@@ -226,7 +290,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       const res = await post(path, {
         manifest: inlineManifest([INTEGRATION]),
         prompt: "do the thing",
-        connection_overrides: { [INTEGRATION]: "" },
+        connection_overrides: { [INTEGRATION]: [""] },
       });
 
       // Deterministically the body guard, NOT the 412 readiness would-be
@@ -234,7 +298,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       expect(res.status).toBe(400);
       const body = (await res.json()) as ProblemDetails;
       expect(body.code).not.toBe("missing_integration_connection");
-      expect(body.errors!.some((e) => e.field === `connection_overrides.${INTEGRATION}`)).toBe(
+      expect(body.errors!.some((e) => e.field === `connection_overrides.${INTEGRATION}[0]`)).toBe(
         true,
       );
 

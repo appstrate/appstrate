@@ -157,7 +157,8 @@ function manifestErrorsToFieldErrors(errors: string[]): ValidationFieldError[] {
  * integrations not visible to the org (the latter handled by run-time dep
  * validation).
  *
- * `requireCallableTools` adds the declared-but-empty gate on top. It belongs
+ * `requireCallableTools` adds the freeze-point gates on top (declared-but-empty,
+ * `auth_key` serving no selected tool). It belongs
  * to the paths that FREEZE an artifact (publish, import), never to a draft
  * write: the editor's own add-integration → tick-a-tool flow autosaves
  * through the empty state.

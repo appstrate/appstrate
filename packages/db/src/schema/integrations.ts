@@ -110,11 +110,12 @@ export const integrationConnections = pgTable(
     // If "when did refresh last fail" is ever needed, build the reader first —
     // a column with no reader is not telemetry, it is write amplification.
     // User-facing display name, set at creation: the extracted identity
-    // (email/login) when available, else "Connexion N" (N = existing connection
-    // count + 1 in the same (space, integration, owner) group). Stable for the
-    // row's lifetime; user-editable. The UI shows it verbatim — a single source
-    // of truth, no render-time fallback gymnastics.
-    label: text("label"),
+    // (email/login) when available, else "Connexion N" (N = 1 + the highest
+    // "Connexion <n>" in the same (space, integration), every owner). Stable
+    // for the row's lifetime; user-editable. The UI shows it verbatim — a
+    // single source of truth, no render-time fallback gymnastics. Never empty:
+    // the sidecar's `connection` tool argument addresses a bound connection by it.
+    label: text("label").notNull(),
     // Owner-set opt-in: when true, this connection is selectable by
     // any actor of the same space during the run-time fallback
     // resolution (see integration-connection-resolver). Off by default
@@ -163,6 +164,7 @@ export const integrationConnections = pgTable(
     // never disagree (an attacker-crafted INSERT bypassing the API still
     // hits the same gate).
     check("integration_connections_auth_key_valid", sql`"auth_key" ~ '^[a-z][a-z0-9_]*$'`),
+    check("integration_connections_label_not_empty", sql`label <> ''`),
   ],
 );
 

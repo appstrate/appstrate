@@ -107,6 +107,8 @@ import {
   PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
 } from "../services/integration-manifest-helpers.ts";
 import { partitionScopesByAuthCatalog } from "@appstrate/core/integration";
+import { connectionIdSetSchema } from "../lib/connection-set.ts";
+import { CONNECTION_LABEL_MAX, connectionLabelProblem } from "../lib/connection-label.ts";
 import {
   deleteIntegrationPin,
   listAgentsConsumingIntegration,
@@ -207,20 +209,28 @@ export const updateSettingsSchema = z
 
 export const setPinSchema = z
   .object({
-    connection_id: z.uuid(),
+    connection_ids: connectionIdSetSchema,
   })
   .strict();
 
 export const setOrgDefaultSchema = z
   .object({
-    connection_id: z.uuid(),
+    connection_ids: connectionIdSetSchema,
     enforce: z.boolean().default(false),
   })
   .strict();
 
 export const updateConnectionSchema = z
   .object({
-    label: z.string().max(80).nullable().optional(),
+    label: z
+      .string()
+      .min(1)
+      .max(CONNECTION_LABEL_MAX)
+      .superRefine((label, ctx) => {
+        const problem = connectionLabelProblem(label);
+        if (problem) ctx.addIssue({ code: "custom", message: `label ${problem}` });
+      })
+      .optional(),
     shared_with_org: z.boolean().optional(),
   })
   .strict()
@@ -1220,14 +1230,14 @@ export function createIntegrationsRouter() {
       const userId = c.get("user")?.id ?? null;
       const pin = await upsertIntegrationPin(scope, packageId, {
         agentPackageId,
-        connectionId: body.connection_id,
+        connectionIds: body.connection_ids,
         createdBy: userId,
       });
       await recordAuditFromContext(c, {
         action: "integration.pin.upserted",
         resourceType: "integration_pin",
         resourceId: `${packageId}#${agentPackageId}`,
-        after: { connectionId: pin.connection_id },
+        after: { connectionIds: pin.connection_ids },
       });
       return c.json(pin);
     },
@@ -1254,7 +1264,7 @@ export function createIntegrationsRouter() {
   );
 
   // ─── Org default connection (cross-agent governance) ─────────────────────
-  // One default connection per (space, integration) — the resolver
+  // One default connection set per (space, integration) — the resolver
   // baseline for every consuming agent (enforce → org-wide lock; soft →
   // overridable by member pins). Admin-only.
 
@@ -1281,7 +1291,7 @@ export function createIntegrationsRouter() {
       const body = await readJsonBody(c, setOrgDefaultSchema);
       const userId = c.get("user")?.id ?? null;
       const def = await upsertOrgDefault(scope, packageId, {
-        connectionId: body.connection_id,
+        connectionIds: body.connection_ids,
         enforce: body.enforce,
         createdBy: userId,
       });
@@ -1289,7 +1299,7 @@ export function createIntegrationsRouter() {
         action: "integration.org_default.upserted",
         resourceType: "integration_org_default",
         resourceId: packageId,
-        after: { connectionId: def.connection_id, enforce: def.enforce },
+        after: { connectionIds: def.connection_ids, enforce: def.enforce },
       });
       return c.json(def);
     },

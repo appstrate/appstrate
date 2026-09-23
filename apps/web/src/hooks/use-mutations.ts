@@ -3,12 +3,11 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { getErrorMessage } from "@appstrate/core/errors";
-import i18n from "../i18n";
-import { ApiError, client, type components } from "../api/client";
+import { client, type components } from "../api/client";
 import { PACKAGE_CONFIG, type PackageType } from "./use-packages";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { splitPackageRef } from "../lib/package-paths";
+import { onMutationError } from "../lib/mutation-error";
 import {
   packageKeys,
   agentsKeys,
@@ -24,51 +23,6 @@ import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 // are PINNED legacy keys — use-global-run-sync.ts patches them from SSE
 // events, and the runs hooks are migrated with the same pinned keys. The
 // package/agent keys stay legacy too (see the note in use-packages.ts).
-
-/**
- * Refusals whose server sentence is replaced rather than prefixed. The raw
- * `detail` is English, so a French UI falling back to it tells the user
- * nothing they can act on.
- *
- * The two lock codes are about ONE named field and the server puts its name in
- * `param` (`input.<field>` / `locked_fields.<field>`) — hence the `field`
- * interpolation, which a code carrying no `param` simply leaves empty.
- * `draft_not_writable` is the launch refusal: the draft is the author's
- * working copy and runs only for whoever can write the package in its home
- * space, so the sentence has to say which version WILL run instead.
- */
-const REFUSAL_ERROR_KEYS: Record<string, string> = {
-  locked_input_field: "error.lockedInputField",
-  locked_required_field_empty: "error.lockedRequiredFieldEmpty",
-  draft_not_writable: "error.draftNotWritable",
-};
-
-function refusalMessage(err: ApiError): string | null {
-  const key = REFUSAL_ERROR_KEYS[err.code];
-  if (!key) return null;
-  // `param` is `<prefix>.<field>`; the field itself may contain dots, so only
-  // the first segment is the prefix.
-  const field = err.param?.slice(err.param.indexOf(".") + 1) || err.param || "";
-  return i18n.t(key, { field, ns: "agents" });
-}
-
-export function onMutationError(err: Error) {
-  // Skip the generic toast for missing_integration_connection (412) —
-  // the RunAgentButton renders MissingConnectionsModal off `runAgent.error`
-  // for that case. Showing both a toast AND the modal is noisy and the
-  // toast carries strictly less info than the modal.
-  if (err instanceof ApiError && err.code === "missing_integration_connection") {
-    return;
-  }
-  if (err instanceof ApiError) {
-    const refusal = refusalMessage(err);
-    if (refusal) {
-      toast.error(refusal);
-      return;
-    }
-  }
-  toast.error(i18n.t("error.prefix", { message: getErrorMessage(err) }));
-}
 
 /**
  * Persist the editor layer of input resolution for this space.
@@ -107,13 +61,14 @@ interface RunAgentParams {
    */
   version?: string;
   /**
-   * Per-integration connection picks for THIS run (#199 mechanism #2).
-   * Flat map: `{ "@scope/integration": "<connectionId>" }` — one pick per
-   * integration; the chosen connection carries its own `auth_key`. Wire
-   * format validated by `input-parser.ts`. Surfaced from the must_choose
-   * modal picker.
+   * Per-integration connection picks for THIS run (cascade layer 3, the run override).
+   * Map of SETS: `{ "@scope/integration": ["<connectionId>", ...] }` — up to
+   * `MAX_CONNECTIONS_PER_INTEGRATION` per integration; each chosen connection
+   * carries its own `auth_key`. Wire format validated in
+   * `apps/api/src/lib/launch-schemas.ts`. Surfaced from the must_choose modal
+   * picker.
    */
-  connectionOverrides?: Record<string, string>;
+  connectionOverrides?: Record<string, string[]>;
   /** Per-run model id override (wire `modelId`). From the run-with-options modal. */
   modelId?: string;
   /** Per-run proxy id override (wire `proxyId`). From the run-with-options modal. */

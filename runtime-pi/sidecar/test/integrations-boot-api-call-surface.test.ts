@@ -74,14 +74,19 @@ function platformFetch(authKeys: readonly string[]): typeof fetch {
   }) as unknown as typeof fetch;
 }
 
+const CONN_A = { id: "conn-a", label: "work", accountId: "work@example.com" };
+const CONN_B = { id: "conn-b", label: "perso", accountId: "perso@example.com" };
+
 function serverlessSpec(
   apiCalls: NonNullable<IntegrationSpawnSpec["apiCalls"]>,
   hiddenTools?: readonly string[],
   namespace = "drive",
+  connection: IntegrationSpawnSpec["connection"] = CONN_A,
 ): IntegrationSpawnSpec {
   return {
     integrationId: INTEGRATION_ID,
     namespace,
+    connection,
     sourceKind: "none",
     manifest: { name: INTEGRATION_ID, version: "1.0.0" },
     apiCalls,
@@ -97,18 +102,22 @@ function serverlessSpec(
   };
 }
 
-async function boot(spec: IntegrationSpawnSpec) {
+async function boot(...specs: IntegrationSpawnSpec[]) {
+  return await bootWith(apiCallDeps, specs);
+}
+
+async function bootWith(deps: ApiCallToolDeps, specs: IntegrationSpawnSpec[]) {
   const previousAdapter = process.env.INTEGRATION_RUNTIME_ADAPTER;
   process.env.INTEGRATION_RUNTIME_ADAPTER = "process";
   try {
     return await bootIntegrations(
-      [spec],
+      specs,
       {
         platformApiUrl: "http://platform.local",
         runToken: "run-token",
-        fetchFn: platformFetch((spec.apiCalls ?? []).map((call) => call.authKey)),
+        fetchFn: platformFetch(specs.flatMap((s) => (s.apiCalls ?? []).map((c) => c.authKey))),
       },
-      apiCallDeps,
+      deps,
     );
   } finally {
     if (previousAdapter === undefined) delete process.env.INTEGRATION_RUNTIME_ADAPTER;
@@ -250,6 +259,178 @@ describe("bootIntegrations — synthetic api_call surface", () => {
     try {
       expect(result.failed).toEqual([]);
       expect(result.tools.map((tool) => tool.descriptor.name)).toEqual(["drive__api_call"]);
+    } finally {
+      await result.shutdown();
+    }
+  });
+
+  it("serves ONE api_call tool for two connections, selected by a required enum", async () => {
+    const apiCalls = [
+      {
+        authKey: "primary",
+        toolName: "api_call",
+        authorizedUris: ["https://www.googleapis.com/**"],
+      },
+    ];
+    const result = await boot(
+      serverlessSpec(apiCalls, undefined, "drive", CONN_A),
+      serverlessSpec(apiCalls, undefined, "drive", CONN_B),
+    );
+    try {
+      expect(result.failed).toEqual([]);
+      // One descriptor, not `drive_2__api_call` — the second connection is a
+      // route on the first's name.
+      expect(result.tools.map((tool) => tool.descriptor.name)).toEqual(["drive__api_call"]);
+      const schema = result.tools[0]!.descriptor.inputSchema as {
+        properties: Record<string, { enum?: string[]; description?: string }>;
+        required: string[];
+      };
+      expect(schema.properties.connection!.enum).toEqual(["work", "perso"]);
+      expect(schema.required).toContain("connection");
+      expect(schema.properties.connection!.description).toContain("work → work@example.com");
+      expect(schema.properties.connection!.description).toContain("perso → perso@example.com");
+      // Both connections booted, and the report names each one.
+      expect(result.spawned.map((entry) => entry.connectionLabel)).toEqual(["work", "perso"]);
+      expect(result.spawned.map((entry) => entry.toolCount)).toEqual([1, 1]);
+    } finally {
+      await result.shutdown();
+    }
+  });
+
+  it("CONTROL — one connection leaves the api_call schema untouched", async () => {
+    const apiCalls = [
+      {
+        authKey: "primary",
+        toolName: "api_call",
+        authorizedUris: ["https://www.googleapis.com/**"],
+      },
+    ];
+    const result = await boot(serverlessSpec(apiCalls, undefined, "drive", CONN_A));
+    try {
+      expect(result.tools.map((tool) => tool.descriptor.name)).toEqual(["drive__api_call"]);
+      const schema = result.tools[0]!.descriptor.inputSchema as {
+        properties: Record<string, unknown>;
+        required?: string[];
+      };
+      expect(Object.keys(schema.properties)).not.toContain("connection");
+      expect(schema.required ?? []).not.toContain("connection");
+      expect(result.spawned[0]!.connectionLabel).toBe("work");
+    } finally {
+      await result.shutdown();
+    }
+  });
+
+  it("injects the selector on the api_upload companion too", async () => {
+    // The upload tool executes agent-side but dispatches through its
+    // `api_call` sibling, so it has to advertise the same selector.
+    const apiCalls = [
+      {
+        authKey: "primary",
+        toolName: "api_call",
+        authorizedUris: ["https://www.googleapis.com/**"],
+        uploadProtocols: ["google-resumable"],
+      },
+    ];
+    const result = await boot(
+      serverlessSpec(apiCalls, undefined, "drive", CONN_A),
+      serverlessSpec(apiCalls, undefined, "drive", CONN_B),
+    );
+    try {
+      expect(result.failed).toEqual([]);
+      expect(result.tools.map((tool) => tool.descriptor.name)).toEqual([
+        "drive__api_call",
+        "drive__api_upload",
+      ]);
+      for (const tool of result.tools) {
+        const schema = tool.descriptor.inputSchema as {
+          properties: Record<string, { enum?: string[] }>;
+          required: string[];
+        };
+        expect(schema.properties.connection!.enum).toEqual(["work", "perso"]);
+        expect(schema.required).toContain("connection");
+      }
+    } finally {
+      await result.shutdown();
+    }
+  });
+
+  it("routes each connection only on the api_call of its own auth", async () => {
+    // A connection holds ONE auth, so its spec lists only that auth's
+    // api_call; the selector enumerates the connections on that auth alone.
+    const onAuth = (authKey: string) => [
+      {
+        authKey,
+        toolName: `api_call__${authKey}`,
+        authorizedUris: ["https://www.googleapis.com/**"],
+      },
+    ];
+    const archive = { id: "conn-c", label: "archive", accountId: "archive@example.com" };
+    const result = await boot(
+      serverlessSpec(onAuth("primary"), undefined, "drive", CONN_A),
+      serverlessSpec(onAuth("primary"), undefined, "drive", CONN_B),
+      serverlessSpec(onAuth("backup"), undefined, "drive", archive),
+    );
+    try {
+      expect(result.failed).toEqual([]);
+      expect(result.tools.map((tool) => tool.descriptor.name)).toEqual([
+        "drive__api_call__primary",
+        "drive__api_call__backup",
+      ]);
+      const [primary, backup] = result.tools.map(
+        (tool) =>
+          tool.descriptor.inputSchema as { properties: Record<string, { enum?: string[] }> },
+      );
+      expect(primary!.properties.connection!.enum).toEqual(["work", "perso"]);
+      // One connection on `backup`: nothing to select.
+      expect(Object.keys(backup!.properties)).not.toContain("connection");
+    } finally {
+      await result.shutdown();
+    }
+  });
+
+  it("keeps each connection's upstream session cookie to that connection", async () => {
+    const cookiesSeen: (string | null)[] = [];
+    const upstream = (async (_url: string | URL, init?: RequestInit) => {
+      cookiesSeen.push(new Headers(init?.headers).get("cookie"));
+      return new Response("ok", {
+        status: 200,
+        headers: cookiesSeen.length === 1 ? { "Set-Cookie": "sess=work-session; Path=/" } : {},
+      });
+    }) as unknown as typeof fetch;
+    const deps: ApiCallToolDeps = {
+      ...apiCallDeps,
+      proxyDeps: {
+        ...apiCallDeps.proxyDeps,
+        cookieJar: new Map(),
+        reportedAuthFailures: new Set(),
+        fetchFn: upstream,
+        resolveHost: async () => ["203.0.113.7"],
+      },
+    };
+    const apiCalls = [
+      {
+        authKey: "primary",
+        toolName: "api_call",
+        authorizedUris: ["https://www.googleapis.com/**"],
+      },
+    ];
+    const result = await bootWith(deps, [
+      serverlessSpec(apiCalls, undefined, "drive", CONN_A),
+      serverlessSpec(apiCalls, undefined, "drive", CONN_B),
+    ]);
+    try {
+      const tool = result.tools[0]!;
+      const callOn = (connection: string) =>
+        tool.handler(
+          { target: "https://www.googleapis.com/drive/v3/files", method: "GET", connection },
+          {} as never,
+        );
+      await callOn("work");
+      await callOn("perso");
+      await callOn("work");
+      expect(cookiesSeen[1]).toBeNull();
+      // CONTROL — the connection that earned the session still replays it.
+      expect(cookiesSeen[2]).toBe("sess=work-session");
     } finally {
       await result.shutdown();
     }

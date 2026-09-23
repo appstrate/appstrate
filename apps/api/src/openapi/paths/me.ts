@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { connectionSetRefusals } from "./integrations.ts";
 
 /**
  * User-scoped identity routes (`/api/me/*`).
@@ -151,7 +153,7 @@ export const mePaths = {
                             properties: {
                               connection_id: { type: "string" },
                               kind: { type: "string", enum: ["integration"] },
-                              label: { type: ["string", "null"] },
+                              label: { type: "string" },
                               scopes_granted: { type: "array", items: { type: "string" } },
                               connected_at: { type: "string", format: "date-time" },
                               needs_reconnection: { type: "boolean" },
@@ -200,7 +202,7 @@ export const mePaths = {
       tags: ["Profile"],
       summary: "List the caller's member-scope integration pins for an agent",
       description:
-        "Returns the caller's own (integration, authKey) → connectionId pins for the " +
+        "Returns the caller's own integration → connection-set pins for the " +
         "given agent. Used by the agent-page picker to render the collapsed default " +
         "row. Member-only; end-user callers receive an empty list. Requires " +
         "`X-Space-Id`.",
@@ -232,14 +234,19 @@ export const mePaths = {
                   data: {
                     type: "array",
                     // `listMemberPinsForAgent` projects to exactly these two
-                    // fields (NOT the 6-field IntegrationPin the PUT route's
-                    // `toPinSummary` emits) — keep the list item minimal.
+                    // fields (NOT the 6-field IntegrationPin the PUT route
+                    // emits) — keep the list item minimal.
                     items: {
                       type: "object",
-                      required: ["integration_package_id", "connection_id"],
+                      required: ["integration_package_id", "connection_ids"],
                       properties: {
                         integration_package_id: { type: "string" },
-                        connection_id: { type: "string", format: "uuid" },
+                        connection_ids: {
+                          type: "array",
+                          items: { type: "string", format: "uuid" },
+                          minItems: 1,
+                          maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+                        },
                       },
                     },
                   },
@@ -257,12 +264,13 @@ export const mePaths = {
     put: {
       operationId: "upsertMyIntegrationPin",
       tags: ["Profile"],
-      summary: "Pin a connection for the caller's runs of an agent",
+      summary: "Pin connections for the caller's runs of an agent",
       description:
-        "Persists the caller's preference for a (integration, authKey) on this agent. " +
-        "Sits at cascade layer 4 — wins over the fallback ambiguity but loses to admin " +
-        "pins / run / schedule overrides. Replaces the previous R5 localStorage pick. " +
-        "Idempotent — repeated calls update the row in place.",
+        "Persists the caller's preference for an integration on this agent. " +
+        "Sits at cascade layer 5 — wins over a soft org default and the fallback, loses " +
+        "to an admin pin, an enforced org default and run / schedule overrides. " +
+        "The body carries the WHOLE set and this write replaces it; `DELETE` clears it. " +
+        "Idempotent — repeated calls rewrite the same set.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -273,11 +281,16 @@ export const mePaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["agent_package_id", "integration_package_id", "connection_id"],
+              required: ["agent_package_id", "integration_package_id", "connection_ids"],
               properties: {
                 agent_package_id: { type: "string", minLength: 1 },
                 integration_package_id: { type: "string", minLength: 1 },
-                connection_id: { type: "string", format: "uuid" },
+                connection_ids: {
+                  type: "array",
+                  items: { type: "string", format: "uuid" },
+                  minItems: 1,
+                  maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+                },
               },
               additionalProperties: false,
             },
@@ -294,8 +307,7 @@ export const mePaths = {
           },
         },
         "400": {
-          description:
-            "Validation failed (connection wrong integration/auth, or not accessible to caller).",
+          description: `Refused: ${connectionSetRefusals}; or a connection of another integration or space, or one neither owned by the caller nor shared.`,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -307,8 +319,8 @@ export const mePaths = {
       tags: ["Profile"],
       summary: "Clear the caller's pin on a (agent, integration)",
       description:
-        "Removes the caller's member pin so the resolver falls back to layer 5 " +
-        "(accessible connections). Idempotent — 204 even when no row exists.",
+        "Removes the caller's member pin so the resolver falls back to layers 6-7 " +
+        "(soft org default, then accessible connections). Idempotent — 204 even when no row exists.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -342,9 +354,13 @@ export const mePaths = {
       tags: ["Profile"],
       summary: "Delete one of the caller's own connections (destructive)",
       description:
-        "Removes the `integration_connections` row globally. ON DELETE CASCADE vacates " +
-        "every reference (admin pins, member pins, run snapshots, schedule overrides). " +
+        "Removes the `integration_connections` row globally. " +
         "Intent is destructive: 'I never want to use this credential anywhere again'. " +
+        "Refused with 409 `connection_pinned` while an admin pin or an org default names the connection: " +
+        "those sets carry no foreign key, so the dead id would fail every consuming run. An admin removes " +
+        "it from the pin(s) or default first. A member pin (anyone's, the caller's own included) never " +
+        "blocks the delete: it keeps the id, and that member's next run fails with " +
+        "`pinned_connection_unavailable` until they pick again. " +
         "Surfaced only from the /connections management page — agent-surface unlinks now " +
         "drop the member pin instead (see `DELETE /api/me/integration-pins`). " +
         "With a delegated or end-user credential, only connections inside its bound " +
@@ -360,6 +376,16 @@ export const mePaths = {
       responses: {
         "204": { description: "Connection deleted (or never existed)" },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "409": {
+          description:
+            "Connection is named by an admin pin or an org default (`connection_pinned`)",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },

@@ -1133,12 +1133,25 @@ export function validateAgentIntegrationScopes(
 // resolver output, not the AFPS manifest, so they stay idiomatic TS.
 // ────────────────────────────────────────────────────────────────────
 
+/** Cap on the connections one declared integration binds in a run, enforced at every write. */
+export const MAX_CONNECTIONS_PER_INTEGRATION = 10;
+
+/**
+ * Rows whose `label` is shared verbatim with another row of the set — the one
+ * definition of a collision, for the resolver and every UI composing a set.
+ */
+export function labelsSharedBy<T extends { label: string }>(rows: readonly T[]): T[] {
+  const counts = new Map<string, number>();
+  for (const row of rows) counts.set(row.label, (counts.get(row.label) ?? 0) + 1);
+  return rows.filter((row) => (counts.get(row.label) ?? 0) > 1);
+}
+
 /**
  * Per-integration connection picks. Used on `runs.connection_overrides`
  * (caller's run-time choice) and `package_schedules.connection_overrides`
- * (frozen at schedule create). Shape: `{ "@scope/integration": "<connection_id>" }`.
+ * (frozen at schedule create). Shape: `{ "@scope/integration": ["<connection_id>", ...] }`.
  */
-export type ConnectionOverrides = Record<string, string>;
+export type ConnectionOverrides = Record<string, string[]>;
 
 /** Where a resolved connection came from — drives the audit + UI badge. */
 export type ConnectionResolutionSource =
@@ -1166,9 +1179,9 @@ export interface ResolvedConnection {
 
 /**
  * Snapshot of the resolver output for one run. Persisted on
- * `runs.resolved_connections`. Shape: `{ "@scope/integration": ResolvedConnection }`.
+ * `runs.resolved_connections`. Shape: `{ "@scope/integration": ResolvedConnection[] }`.
  */
-export type ResolvedConnectionMap = Record<string, ResolvedConnection>;
+export type ResolvedConnectionMap = Record<string, ResolvedConnection[]>;
 
 /** Error codes the resolver emits per integration. */
 export type ConnectionResolutionErrorCode =
@@ -1177,11 +1190,14 @@ export type ConnectionResolutionErrorCode =
   | "pinned_connection_unavailable"
   | "override_connection_unavailable"
   | "must_choose_connection"
+  | "duplicate_connection_label"
   | "insufficient_scopes"
-  | "auth_key_mismatch";
+  | "auth_key_mismatch"
+  | "auth_serves_no_selected_tool"
+  | "pinned_auth_serves_no_selected_tool";
 
 /**
- * One connection the caller may pick from on `must_choose_connection`.
+ * One connection carried by `must_choose_connection` or `duplicate_connection_label`.
  *
  * Carries what it takes to TELL the candidates apart, not just to name them.
  * An id alone is opaque: a model reading the 412 has to fetch the connection
@@ -1189,13 +1205,13 @@ export type ConnectionResolutionErrorCode =
  * and a human reading a log learns nothing at all. The resolver already holds
  * the rows, so denormalizing the three distinguishing fields costs no query.
  *
- * `label` is user-given and may be null; `accountId` is the connect flow's own
- * discriminator and is always set, so the pair always identifies the account.
+ * `label` is user-given; `accountId` is the connect flow's own discriminator
+ * and is always set, so the pair always identifies the account.
  */
 export interface ConnectionCandidate {
   id: string;
-  /** User-given name, `null` when the connection was never labelled. */
-  label: string | null;
+  /** User-given name, minted at creation. */
+  label: string;
   /** The auth's account discriminator (`sub` claim, email, host…). */
   accountId: string;
   /** True when the row is the calling actor's own, false when inherited via org sharing. */
@@ -1206,12 +1222,13 @@ export interface ConnectionCandidate {
 export interface ConnectionResolutionError {
   integrationId: string;
   code: ConnectionResolutionErrorCode;
-  /** The connections the caller may pick from when `code === "must_choose_connection"`. */
+  /** Pickable on `must_choose_connection`; colliding on `duplicate_connection_label`. */
   candidateConnections?: ConnectionCandidate[];
   /**
    * The connection the error is bound to:
    *   - `insufficient_scopes` → the under-scoped connection (target of OAuth upgrade).
    *   - `needs_reconnection` → the dead connection (target of OAuth reconnect).
+   *   - `auth_serves_no_selected_tool` → the member to take out of the set.
    * Threaded into the OAuth re-kickoff `state` so the callback UPDATEs the
    * existing row instead of INSERTing a duplicate (integration-connections.ts
    * "explicit connectionId = update; no id = insert").
@@ -1235,19 +1252,23 @@ export interface ConnectionResolutionError {
    * The integration manifest auth the connect flow must target
    * (`/auths/{authKey}/connect/...`), for the three codes a connect flow can
    * clear: `insufficient_scopes` and `needs_reconnection` (the resolved
-   * connection's own auth) and `not_connected` (the agent dep's pinned
-   * `auth_key`, else the integration's single `oauth2` auth). Omitted on
-   * `not_connected` when the integration declares several oauth2 auths and
-   * the dep pins none — the caller must then let the user choose.
+   * connection's own auth) and `not_connected` (among the auths serving the
+   * selected tools: the agent dep's pinned `auth_key`, else the single
+   * `oauth2` one). Omitted on `not_connected` when several oauth2 auths
+   * qualify (or none) and the dep pins none — the caller must then let the
+   * user choose.
    */
   authKey?: string;
   /**
    * The cascade layer that resolved the (failing) connection, when the error
-   * is bound to a specific connection (`insufficient_scopes`). Lets callers
+   * is bound to a specific connection (`insufficient_scopes`,
+   * `auth_serves_no_selected_tool`). Lets callers
    * derive the pick status directly instead of re-comparing `connectionId`
    * against re-fetched pin ids.
    */
   source?: ConnectionResolutionSource;
+  /** Every connection the layer that won bound, in its order — set when that set failed to bind. */
+  boundConnectionIds?: string[];
   /**
    * True when the resolved connection belongs to the current actor. Carried on
    * the two connection-bound connect-flow codes — `insufficient_scopes` and
@@ -1256,8 +1277,8 @@ export interface ConnectionResolutionError {
    */
   ownedByActor?: boolean;
   /**
-   * AFPS §4.1 — agent dep's pinned `auth_key` when
-   * `code === "auth_key_mismatch"`.
+   * AFPS §4.1 — agent dep's pinned `auth_key` on `auth_key_mismatch` and
+   * `pinned_auth_serves_no_selected_tool`.
    */
   requiredAuthKey?: string;
   /**

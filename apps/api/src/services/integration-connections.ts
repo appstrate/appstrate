@@ -20,13 +20,15 @@
  * module is the write side that populates it.
  */
 
-import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, arrayOverlaps, asc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   spacePackages,
   packageShares,
   integrationConnections,
   integrationOauthClients,
+  integrationOrgDefaults,
+  integrationPins,
   packages,
 } from "@appstrate/db/schema";
 import {
@@ -60,6 +62,7 @@ import {
   orgOrSystemFilter,
 } from "../lib/package-helpers.ts";
 import { integrationCallbackUrl } from "../lib/integration-callback-url.ts";
+import { toMintedLabel } from "../lib/connection-label.ts";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
 import type { Actor } from "@appstrate/connect";
 import {
@@ -160,12 +163,17 @@ interface ActorConnectionRow {
  * Spawn-side connection row — carries the `authKey` so the spawn
  * resolver can pick the right `manifest.auths[authKey].delivery`
  * declaration without iterating every declared auth on the integration.
- *
- * Used after the connection resolver has chosen one connection per
- * integration (flat model — no per-authKey iteration at runtime).
  */
 export interface ResolvedConnectionRow extends ActorConnectionRow {
   authKey: string;
+}
+
+/** `account_id` of an identity-less connection ({@link extractIdentity} found no claim). */
+const PLACEHOLDER_ACCOUNT_ID = "default";
+
+/** The `account_id` column as an account, or `null` for the placeholder. */
+export function displayAccountId(accountId: string | null | undefined): string | null {
+  return accountId && accountId !== PLACEHOLDER_ACCOUNT_ID ? accountId : null;
 }
 
 /**
@@ -262,9 +270,7 @@ async function loadActorConnection(
 /**
  * Load a specific connection row by its id, scoped to the space
  * and protected by the actor's access predicate (own OR shared). Used
- * by the spawn resolver to decrypt the connection chosen by the cascade
- * (admin pin / overrides / member pin / auto fallback) and return its
- * authKey for downstream delivery selection.
+ * by the spawn and live-credentials resolvers to load a run-bound connection.
  *
  * SECURITY — `integrationId` is a REQUIRED filter: a connection id is
  * caller-supplied on some paths (`X-Connection-Id` on the credential
@@ -276,7 +282,7 @@ async function loadActorConnection(
  * caller has pinned a specific auth (AFPS §4.1 `auth_key`); pass `null`
  * when the connection's own authKey is authoritative.
  */
-async function loadAccessibleConnectionById(
+export async function loadAccessibleConnectionById(
   connectionId: string,
   integrationId: string,
   expectedAuthKey: string | null,
@@ -324,8 +330,7 @@ async function loadAccessibleConnectionById(
 }
 
 /**
- * Fallback connection pick used when no resolver snapshot is available
- * (the live credentials path). Walks the declared
+ * Fallback pick for a credential-proxy call naming no connection. Walks the declared
  * auth keys and returns the first accessible connection found — same
  * auto-pick semantics as the runtime resolver's single-candidate fallback.
  * Multi-candidate ambiguity is resolved by iteration order (declared-auth
@@ -353,11 +358,8 @@ async function pickAnyAccessibleConnection(
 }
 
 /**
- * Single source of truth for "which connection does this integration use":
- * load the resolver-pinned row when a snapshot is present, otherwise fall
- * back to the auto-pick. Shared by the spawn resolver (boot) and the live
- * credentials resolver (runtime) so the two paths can never diverge on
- * connection selection.
+ * The credential proxy's connection selection: the named row, else the
+ * auto-pick. Run paths never auto-pick ({@link loadAccessibleConnectionById}).
  *
  * Both branches are bound to `packageId`: the by-id branch filters on
  * `integrationId` (and `requiredAuthKey` when set) so a pinned/overridden
@@ -1821,6 +1823,19 @@ export async function deleteIntegrationOAuthClient(
   clientId: string,
 ): Promise<{ deletedConnections: number }> {
   await assertSpaceInScope(scope);
+  const minted = await db
+    .select({ id: integrationConnections.id })
+    .from(integrationConnections)
+    .where(
+      and(
+        eq(integrationConnections.clientRef, clientId),
+        eq(integrationConnections.spaceId, scope.spaceId),
+      ),
+    );
+  await assertConnectionsUnpinned(
+    minted.map((c) => c.id),
+    "A connection this OAuth client minted cannot be deleted",
+  );
   return db.transaction(async (tx) => {
     const deleted = await tx
       .delete(integrationOauthClients)
@@ -1890,7 +1905,7 @@ export function extractIdentity(
     (typeof source.email === "string" && source.email) ||
     (typeof source.account_email === "string" && source.account_email) ||
     (typeof source.sub === "string" && source.sub) ||
-    "default";
+    PLACEHOLDER_ACCOUNT_ID;
   return { accountId, identityClaims: claims };
 }
 
@@ -2150,34 +2165,17 @@ export async function persistCredentialBundle(
     const insertAuthKey = input.authKey;
     const insertAccountId = input.accountId;
     // No mono-auth-per-actor gate: an actor may hold N connections across any
-    // mix of declared auths (OAuth + PAT + custom). The runtime picks exactly
-    // one per run via the resolver cascade; the member picker disambiguates
-    // when >1 candidate is accessible.
+    // mix of declared auths (OAuth + PAT + custom).
     //
-    // Display name, resolved once at creation and stable thereafter (refresh /
-    // update paths never touch `label`). The extracted identity (`accountId`,
-    // which `extractTokenIdentity` maps to the upstream email/login) when one
-    // was produced, else "Connexion N" — N is the actor's existing connection
-    // count for this (space, integration) + 1, computed as a subquery in the
-    // INSERT so it's one statement. This is the single source of truth for the
-    // UI: no render-time fallback, the label is always set. User-editable after.
-    const identityLabel =
-      input.accountId && input.accountId !== "default" ? input.accountId : undefined;
-    const ownerFilter = userId ? sql`user_id = ${userId}` : sql`end_user_id = ${endUserId}`;
+    // Label: identity or `labelHint`, else "Connexion N" past the highest N across EVERY
+    // owner (a set spans owners); the advisory lock serialises concurrent reads of MAX.
+    const namedLabel = [displayAccountId(input.accountId), input.labelHint]
+      .map((raw) => (raw ? toMintedLabel(raw) : ""))
+      .find((label) => label.length > 0);
     const labelValue: string | SQL =
-      identityLabel ??
-      input.labelHint ??
-      sql<string>`'Connexion ' || ((SELECT COUNT(*) FROM integration_connections WHERE space_id = ${target.scope.spaceId} AND integration_package_id = ${insertPackageId} AND ${ownerFilter}) + 1)`;
-    // Serialize the COUNT(*)-derived "Connexion N" numbering per
-    // (space, integration, owner) with a transaction-scoped advisory lock: two
-    // concurrent first-time connects for the same actor would otherwise both
-    // read the same COUNT (READ COMMITTED — neither sees the other's
-    // uncommitted row) and mint duplicate "Connexion 2" labels. Under the lock
-    // the second insert waits for the first to commit, so its subquery counts
-    // the freshly-inserted row and numbers monotonically. Identity/labelHint
-    // labels don't need it but the lock is cheap and keeps one code path.
-    const ownerKey = userId ?? endUserId ?? "";
-    const labelLockKey = `ic_label:${target.scope.spaceId}:${insertPackageId}:${ownerKey}`;
+      namedLabel ??
+      sql<string>`'Connexion ' || (COALESCE((SELECT MAX(substring(label from '^Connexion ([0-9]+)$')::numeric) FROM integration_connections WHERE space_id = ${target.scope.spaceId} AND integration_package_id = ${insertPackageId} AND label ~ '^Connexion [0-9]+$'), 0) + 1)`;
+    const labelLockKey = `ic_label:${target.scope.spaceId}:${insertPackageId}`;
     const row = await db.transaction(async (tx) => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${labelLockKey})::bigint)`);
       const inserted = await tx
@@ -2258,7 +2256,7 @@ export async function persistCredentialBundle(
     // transaction and take a row lock (`FOR UPDATE`) on the SELECT so the row
     // is pinned for the duration.
     const row = await db.transaction(async (tx) => {
-      if (input.accountId !== undefined && input.accountId !== "default") {
+      if (input.accountId !== undefined && input.accountId !== PLACEHOLDER_ACCOUNT_ID) {
         const [existing] = await tx
           .select({ accountId: integrationConnections.accountId })
           .from(integrationConnections)
@@ -2267,7 +2265,7 @@ export async function persistCredentialBundle(
           .for("update");
         if (
           existing &&
-          existing.accountId !== "default" &&
+          existing.accountId !== PLACEHOLDER_ACCOUNT_ID &&
           existing.accountId !== input.accountId
         ) {
           throw conflict(
@@ -2579,6 +2577,45 @@ export async function listUsableIntegrationsForActor(
 }
 
 /**
+ * 409 `connection_pinned` while an admin pin or an org default names one of
+ * `ids` — the references only an admin can clear (the sets have no FK). A member
+ * pin never blocks: only its owner can clear it, so it keeps the id and that
+ * member's next run fails with `pinned_connection_unavailable` until they re-pick.
+ */
+export async function assertConnectionsUnpinned(
+  ids: readonly string[],
+  refused: string,
+): Promise<void> {
+  if (ids.length === 0) return;
+  const [pins, orgDefaults] = await Promise.all([
+    db
+      .select({ id: integrationPins.id })
+      .from(integrationPins)
+      .where(
+        and(isNull(integrationPins.userId), arrayOverlaps(integrationPins.connectionIds, [...ids])),
+      )
+      .limit(1),
+    db
+      .select({ id: integrationOrgDefaults.id })
+      .from(integrationOrgDefaults)
+      .where(arrayOverlaps(integrationOrgDefaults.connectionIds, [...ids]))
+      .limit(1),
+  ]);
+  if (pins.length > 0) {
+    throw conflict(
+      "connection_pinned",
+      `${refused} while an admin has pinned it to one or more agents. Remove it from the pin(s) first.`,
+    );
+  }
+  if (orgDefaults.length > 0) {
+    throw conflict(
+      "connection_pinned",
+      `${refused} while it is the org default for an integration. Remove it from the default first.`,
+    );
+  }
+}
+
+/**
  * Delete one connection row. Used by the "disconnect" button per auth
  * (or per account, when multi-account).
  */
@@ -2600,6 +2637,19 @@ export async function deleteIntegrationConnection(
   // routes skip org context.
   if ("orgId" in scope) await assertSpaceInScope(scope);
   const ownerPredicate = actorFilter(actor, integrationConnections);
+  const [owned] = await db
+    .select({ id: integrationConnections.id })
+    .from(integrationConnections)
+    .where(
+      and(
+        eq(integrationConnections.id, connectionId),
+        eq(integrationConnections.spaceId, scope.spaceId),
+        ownerPredicate,
+      ),
+    )
+    .limit(1);
+  if (!owned) throw notFound(`Connection '${connectionId}' not found or not owned by caller`);
+  await assertConnectionsUnpinned([connectionId], "Connection cannot be deleted");
   const deleted = await db
     .delete(integrationConnections)
     .where(

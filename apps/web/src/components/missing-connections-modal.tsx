@@ -3,13 +3,21 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, XCircle, Puzzle, Check, Loader2 } from "lucide-react";
-import type { AgentIntegrationEntry } from "@appstrate/shared-types";
+import { Input } from "@appstrate/ui/components/input";
+import type { AgentIntegrationEntry, IntegrationCandidate } from "@appstrate/shared-types";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
-import { resolutionBlocksRun } from "./integration-connect/integration-run-readiness";
-import { useIntegrationDetail, useIntegrationAgentResolution } from "../hooks/use-integrations";
+import {
+  isStructuralCode,
+  resolutionBlocksRun,
+} from "./integration-connect/integration-run-readiness";
+import {
+  useIntegrationDetail,
+  useIntegrationAgentResolution,
+  useUpdateIntegrationConnection,
+} from "../hooks/use-integrations";
 
 /**
  * Recovery surface for the run-kickoff 412 emitted by
@@ -21,10 +29,10 @@ import { useIntegrationDetail, useIntegrationAgentResolution } from "../hooks/us
  * Connexions tab and the schedule editor use, in `override` mode: the picker
  * lists every accessible connection (own + shared — including ones that need
  * reconnection, with an inline renew button) and exposes the connect / renew /
- * upgrade / add flows. A selection accumulates into the modal's per-run
+ * upgrade / add flows. A validated SET accumulates into the modal's per-run
  * `connection_overrides` map; the footer's "Re-run with picks" button fires
  * the parent's `onRetryWithOverrides` callback with the full
- * `{ integrationId: connectionId }` flat map (mechanism #2).
+ * `{ integrationId: connectionIds[] }` map (cascade layer 3, the run override).
  *
  * Reusing the picker keeps this modal in lockstep with the dropdown — same
  * candidate list, scope/lock verdicts and connect orchestration — instead of
@@ -51,7 +59,10 @@ export interface MissingIntegrationFieldError {
     | "needs_reconnection"
     | "insufficient_scopes"
     | "must_choose_connection"
+    | "duplicate_connection_label"
     | "auth_key_mismatch"
+    | "auth_serves_no_selected_tool"
+    | "pinned_auth_serves_no_selected_tool"
     | "pinned_connection_unavailable"
     | "override_connection_unavailable"
     | "integration_not_found"
@@ -64,15 +75,13 @@ export interface MissingIntegrationFieldError {
   /** Missing scopes — populated on insufficient_scopes for the OAuth re-consent upgrade. */
   missing_scopes?: string[];
   /**
-   * Candidate connections — populated on must_choose_connection. Declared to
-   * describe the payload, deliberately unread here: the row embeds the shared
-   * `IntegrationConnectionPicker`, whose candidate list is a superset (see the
-   * module comment above). API and MCP callers, which have no picker, choose
-   * from this field.
+   * On `must_choose_connection`: the rows to choose among, for API and MCP
+   * callers — the row's picker lists a superset, so it is unread here. On
+   * `duplicate_connection_label`: the BOUND rows sharing a label, read by the rename remedy.
    */
   candidate_connections?: {
     id: string;
-    label: string | null;
+    label: string;
     account_id: string;
     owned_by_actor: boolean;
   }[];
@@ -84,29 +93,10 @@ export interface MissingIntegrationFieldError {
 }
 
 /**
- * Per-run connection picks, flat map keyed by integration id. Matches the
- * wire format the run route expects on `connection_overrides` (mechanism #2,
- * validated by `input-parser.ts`: `Record<integrationId, connectionId>`). The
- * chosen connection carries its own `auth_key`; storing it twice would let
- * the two diverge.
+ * Per-run picks in the run route's `connection_overrides` wire shape, validated in
+ * `apps/api/src/lib/launch-schemas.ts` (up to `MAX_CONNECTIONS_PER_INTEGRATION` ids per key).
  */
-type ConnectionOverridesMap = Record<string, string>;
-
-/**
- * Codes that no connection pick can fix — surfaced as a plain message, no
- * picker. They are exactly the four the readiness pass raises about the
- * integration PACKAGE, before any account is looked at: the declared package is
- * absent, is not an integration, has a manifest that will not load, or is not
- * active in this space. Connecting an account changes none of them.
- */
-function isStructuralCode(code: string): boolean {
-  return (
-    code === "integration_not_active" ||
-    code === "integration_not_found" ||
-    code === "integration_wrong_type" ||
-    code === "integration_invalid_manifest"
-  );
-}
+type ConnectionOverridesMap = Record<string, string[]>;
 
 interface MissingConnectionsModalProps {
   open: boolean;
@@ -153,23 +143,23 @@ export function MissingConnectionsModal({
   const mustChooseIds = integrationErrors
     .filter((e) => e.code === "must_choose_connection")
     .map((e) => parseField(e.field));
-  const allMustChosen = mustChooseIds.every((id) => !!picks[id]);
+  const allMustChosen = mustChooseIds.every((id) => (picks[id]?.length ?? 0) > 0);
 
   const hasActionable = integrationErrors.some((e) => !isStructuralCode(e.code));
   const showRetry = hasActionable;
   const canRetry = !retrying && allMustChosen;
 
-  // Selecting a connection writes the per-run override; clearing (empty id,
-  // the picker's "inherit / reset" entry) drops the key so the resolver falls
+  // Validating a set writes the per-run override; clearing (empty set, the
+  // picker's "inherit / reset" entry) drops the key so the resolver falls
   // back to the member pin / cascade default at re-run.
-  const setPick = (integrationId: string, connectionId: string) => {
+  const setPick = (integrationId: string, connectionIds: string[]) => {
     setPicks((prev) => {
-      if (!connectionId) {
+      if (connectionIds.length === 0) {
         const { [integrationId]: _omit, ...rest } = prev;
         void _omit;
         return rest;
       }
-      return { ...prev, [integrationId]: connectionId };
+      return { ...prev, [integrationId]: connectionIds };
     });
   };
 
@@ -209,7 +199,7 @@ export function MissingConnectionsModal({
             err={err}
             agentPackageId={agentPackageId}
             integrationEntries={integrationEntries}
-            pick={picks[parseField(err.field)] ?? ""}
+            pick={picks[parseField(err.field)] ?? []}
             onPick={setPick}
           />
         ))}
@@ -228,15 +218,15 @@ function MissingRow({
   err: MissingIntegrationFieldError;
   agentPackageId?: string;
   integrationEntries?: AgentIntegrationEntry[];
-  /** Current per-run pick for this integration; empty = no override. */
-  pick: string;
-  onPick: (integrationId: string, connectionId: string) => void;
+  /** Current per-run pick set for this integration; empty = no override. */
+  pick: string[];
+  onPick: (integrationId: string, connectionIds: string[]) => void;
 }) {
   const { t } = useTranslation(["agents"]);
   const packageId = parseField(err.field);
   const { data: detail } = useIntegrationDetail(packageId);
   // Structural failures can't be fixed by connecting — an admin must activate
-  // the integration or the agent must drop the dependency. No picker.
+  // the integration, or the agent's dependency or configuration must change. No picker.
   const isStructural = isStructuralCode(err.code);
 
   // Server-authoritative verdict — the SAME `IntegrationAgentResolution` the
@@ -290,6 +280,13 @@ function MissingRow({
           <Loader2 className="text-muted-foreground size-4 shrink-0 animate-spin" />
         )}
       </div>
+      {err.code === "duplicate_connection_label" && err.candidate_connections && (
+        <DuplicateLabelFix
+          packageId={packageId}
+          connections={err.candidate_connections}
+          {...(resolution ? { candidates: resolution.candidates } : {})}
+        />
+      )}
       {canRenderPicker && (
         <div className="border-border/60 mt-1 border-t pt-2">
           <IntegrationConnectionPicker
@@ -302,11 +299,105 @@ function MissingRow({
             persistence={{
               mode: "override",
               value: pick,
-              onChange: (connectionId) => onPick(packageId, connectionId),
+              onChange: (connectionIds) => onPick(packageId, connectionIds),
             }}
           />
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Remedy for `duplicate_connection_label`: the agent addresses each bound
+ * connection BY its label, so no re-pick fixes a collision — one has to be
+ * renamed. Renaming a foreign shared row is refused server-side, so those ask
+ * their owner instead of offering a control that would 403.
+ */
+function DuplicateLabelFix({
+  packageId,
+  connections,
+  candidates,
+}: {
+  packageId: string;
+  connections: { id: string; label: string; account_id: string; owned_by_actor: boolean }[];
+  candidates?: IntegrationCandidate[];
+}) {
+  const { t } = useTranslation(["agents"]);
+  const rename = useUpdateIntegrationConnection();
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  // Without this the field snaps back to the stale 412 payload and lets the
+  // same PATCH be sent again.
+  const [renamed, setRenamed] = useState<Record<string, string>>({});
+
+  const ownerOf = (id: string): string =>
+    candidates?.find((c) => c.id === id)?.owner_name ??
+    t("detail.integrationMemberPicker.ownerUnknown");
+
+  return (
+    <div
+      className="mt-1 flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs"
+      data-testid={`duplicate-label-fix-${packageId}`}
+    >
+      <span className="text-amber-700 dark:text-amber-300">
+        {t("missingConnections.duplicateLabel.hint")}
+      </span>
+      {connections.map((c) => {
+        const current = renamed[c.id] ?? c.label;
+        const draft = drafts[c.id] ?? current;
+        return (
+          <div key={c.id} className="flex items-center gap-2">
+            <span className="text-muted-foreground min-w-0 flex-1 truncate">{c.account_id}</span>
+            {c.owned_by_actor ? (
+              <>
+                <Input
+                  className="h-7 max-w-[10rem] text-xs"
+                  value={draft}
+                  onChange={(e) => setDrafts((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                  aria-label={t("missingConnections.duplicateLabel.renameField", {
+                    account: c.account_id,
+                  })}
+                  data-testid={`duplicate-label-input-${c.id}`}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  disabled={rename.isPending || draft.trim() === "" || draft === current}
+                  onClick={() =>
+                    rename.mutate(
+                      {
+                        params: { path: { packageId, connectionId: c.id } },
+                        body: { label: draft },
+                      },
+                      {
+                        onSuccess: () => {
+                          setRenamed((prev) => ({ ...prev, [c.id]: draft }));
+                          setDrafts((prev) => {
+                            const { [c.id]: _done, ...rest } = prev;
+                            void _done;
+                            return rest;
+                          });
+                        },
+                      },
+                    )
+                  }
+                  data-testid={`duplicate-label-save-${c.id}`}
+                >
+                  {t("missingConnections.duplicateLabel.rename")}
+                </Button>
+              </>
+            ) : (
+              <span data-testid={`duplicate-label-foreign-${c.id}`}>
+                {t("missingConnections.duplicateLabel.askOwner", {
+                  label: current,
+                  owner: ownerOf(c.id),
+                })}
+              </span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

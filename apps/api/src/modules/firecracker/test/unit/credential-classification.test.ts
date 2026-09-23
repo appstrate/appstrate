@@ -66,6 +66,7 @@ const CLASSIFIED_NON_SECRET: readonly string[] = [
 const integrationSpec: IntegrationSpawnSpec = {
   integrationId: "@appstrate/gmail",
   namespace: "gmail",
+  connection: { id: "11111111-1111-4111-8111-111111111111", label: "Perso", accountId: null },
   sourceKind: "none",
   manifest: { name: "@appstrate/gmail", version: "1.0.0" },
   // Live credentials ride here in production — exactly why the enclosing

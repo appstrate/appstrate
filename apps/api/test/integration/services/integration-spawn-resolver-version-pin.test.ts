@@ -33,6 +33,7 @@ import { encryptCredentialEnvelope } from "@appstrate/connect";
 
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
+import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
@@ -78,6 +79,7 @@ async function seedConnection(ctx: TestContext) {
     integrationId: INTEG,
     authKey: "oauth",
     accountId: "default",
+    label: "default",
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     endUserId: null,
@@ -113,6 +115,7 @@ async function resolve(ctx: TestContext) {
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
+      resolvedConnections: await bindAllConnections(INTEG),
     })
   ).specs;
 }

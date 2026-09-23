@@ -267,8 +267,8 @@ async function progress(message: string, data?: Record<string, unknown>): Promis
 
 /**
  * Cap on how long we wait for the sidecar's boot report. Generous: it
- * exceeds the sidecar's per-integration MCP connect deadline (30 s) plus
- * headroom for a few sequential integrations, so a report that never
+ * exceeds the sidecar's per-connection MCP connect deadline (30 s) plus
+ * headroom for a few sequential connections, so a report that never
  * arrives means an integration boot genuinely hung — which we treat as a
  * fatal "did not start as declared", not a transient blip.
  */
@@ -635,10 +635,17 @@ if (sidecarUrl) {
       }).catch(() => {});
     }
     if (!bootReport.ok) {
-      const summary = bootReport.failed.map((f) => `${f.integrationId} (${f.error})`).join("; ");
+      // N connections of one integration fail independently, so the label is
+      // what tells two lines with the same integration id apart.
+      const summary = bootReport.failed
+        .map(
+          (f) =>
+            `${f.integrationId}${f.connectionLabel ? ` [${f.connectionLabel}]` : ""} (${f.error})`,
+        )
+        .join("; ");
       await die(
-        `Integration boot failed — ${bootReport.failed.length} of ${bootReport.declared} ` +
-          `integration(s) did not start: ${summary}`,
+        `Integration boot failed — ${bootReport.failed.length} of ${bootReport.declaredConnections} ` +
+          `connection(s) did not start: ${summary}`,
         { failed: bootReport.failed },
       );
     }
