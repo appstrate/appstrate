@@ -279,8 +279,8 @@ export interface IntegrationOAuthCallbackResult {
   refreshToken?: string;
   expiresAt: string | null;
   scopesGranted: string[];
-  scopeShortfall: string[];
-  scopeCreep: string[];
+  /** Scopes sent on the authorize URL, from the signed state. */
+  scopesRequested: string[];
   /**
    * Raw token-response JSON for callers that need extra claims
    * (`id_token`, custom IdP fields, …). The platform layer's identity
@@ -376,8 +376,7 @@ export async function handleIntegrationOAuthCallback(
     refreshToken: parsed.refreshToken,
     expiresAt: parsed.expiresAt,
     scopesGranted: parsed.scopesGranted,
-    scopeShortfall: parsed.scopeShortfall,
-    scopeCreep: parsed.scopeCreep,
+    scopesRequested: stateRow.scopesRequested,
     tokenResponse: tokenData,
     ...(integration.connectionId ? { connectionId: integration.connectionId } : {}),
     ...(integration.clientRef ? { clientRef: integration.clientRef } : {}),

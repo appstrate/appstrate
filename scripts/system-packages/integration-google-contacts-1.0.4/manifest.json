@@ -1,13 +1,13 @@
 {
-  "name": "@appstrate/google-sheets",
-  "version": "1.0.3",
+  "name": "@appstrate/google-contacts",
+  "version": "1.0.4",
   "type": "integration",
   "schema_version": "0.1",
-  "display_name": "Google Sheets (API)",
-  "description": "Online spreadsheet editor",
-  "keywords": ["productivity", "spreadsheets"],
+  "display_name": "Google Contacts (API)",
+  "description": "Contact management service by Google",
+  "keywords": ["contacts", "productivity"],
   "license": "Apache-2.0",
-  "icon": "simple-icons:googlesheets",
+  "icon": "logos:google",
   "source": {
     "kind": "none"
   },
@@ -32,11 +32,7 @@
     "primary": {
       "type": "oauth2",
       "issuer": "https://accounts.google.com",
-      "default_scopes": [
-        "openid",
-        "email",
-        "https://www.googleapis.com/auth/spreadsheets.readonly"
-      ],
+      "default_scopes": ["openid", "email", "https://www.googleapis.com/auth/contacts.readonly"],
       "authorization_params": {
         "access_type": "offline",
         "prompt": "consent"
@@ -59,19 +55,33 @@
           "label": "Email address"
         },
         {
-          "value": "https://www.googleapis.com/auth/spreadsheets.readonly",
-          "label": "Read-only access"
+          "value": "https://www.googleapis.com/auth/userinfo.email",
+          "label": "Email address (Google canonical scope)",
+          "description": "Google's canonical form of the OIDC `email` scope — returned in token responses in place of `email`.",
+          "implies": ["email"]
         },
         {
-          "value": "https://www.googleapis.com/auth/spreadsheets",
-          "label": "Full spreadsheet access"
+          "value": "https://www.googleapis.com/auth/contacts.readonly",
+          "label": "Read contacts"
         },
         {
-          "value": "https://www.googleapis.com/auth/drive.file",
-          "label": "Per-file access (recommended)"
+          "value": "https://www.googleapis.com/auth/contacts",
+          "label": "Read and write contacts"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/contacts.other.readonly",
+          "label": "Read 'Other contacts' (auto-suggested)"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/directory.readonly",
+          "label": "Read organization directory (Google Workspace)"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/userinfo.profile",
+          "label": "Read user profile info"
         }
       ],
-      "authorized_uris": ["https://sheets.googleapis.com/**"],
+      "authorized_uris": ["https://people.googleapis.com/**"],
       "delivery": {
         "http": {
           "in": "header",

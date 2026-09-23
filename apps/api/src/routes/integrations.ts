@@ -106,7 +106,7 @@ import {
   CLIENT_SECRET_REQUIRED_MESSAGE,
   PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
 } from "../services/integration-manifest-helpers.ts";
-import { partitionScopesByAuthCatalog } from "@appstrate/core/integration";
+import { partitionScopesByAuthCatalog, scopesNotCovered } from "@appstrate/core/integration";
 import {
   deleteIntegrationPin,
   listAgentsConsumingIntegration,
@@ -509,7 +509,7 @@ export function createIntegrationsRouter() {
     // single credential writer.
     try {
       const scope = { orgId: result.orgId, spaceId: result.spaceId };
-      const { auth } = await readIntegrationAuth(scope, result.packageId, result.authKey);
+      const { manifest, auth } = await readIntegrationAuth(scope, result.packageId, result.authKey);
       const strategy = resolveStrategy(auth);
       await strategy.complete(
         {
@@ -524,7 +524,12 @@ export function createIntegrationsRouter() {
       logger.info("Integration OAuth callback success", {
         packageId: result.packageId,
         authKey: result.authKey,
-        scopeShortfall: result.scopeShortfall,
+        scopeShortfall: scopesNotCovered(
+          result.scopesRequested,
+          result.scopesGranted,
+          manifest,
+          result.authKey,
+        ),
       });
     } catch (err) {
       logger.error("Integration OAuth callback persistence failed", {

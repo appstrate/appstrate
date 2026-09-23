@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/gmail-mcp",
-  "version": "2.3.3",
+  "version": "2.3.4",
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "Gmail",
@@ -49,6 +49,12 @@
           "value": "email",
           "label": "Email address",
           "description": "Required alongside openid to bind the OAuth token to a Google IAM principal so the MCP server can authorise tool calls."
+        },
+        {
+          "value": "https://www.googleapis.com/auth/userinfo.email",
+          "label": "Email address (Google canonical scope)",
+          "description": "Google's canonical form of the OIDC `email` scope — returned in token responses in place of `email`.",
+          "implies": ["email"]
         },
         {
           "value": "https://www.googleapis.com/auth/gmail.readonly",

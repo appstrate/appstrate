@@ -87,55 +87,15 @@ describe("parseTokenResponse", () => {
   });
 });
 
-describe("parseTokenResponse — scope diff", () => {
-  const baseToken = { access_token: "tok_x" };
-
-  it("reports zero shortfall and creep when granted == requested", () => {
-    const result = parseTokenResponse({ ...baseToken, scope: "read:user repo" }, [
+describe("parseTokenResponse — granted vs requested", () => {
+  it("reports the response scopes verbatim when the provider narrows the request", () => {
+    // Shortfall is computed by the platform against the manifest's `implies`
+    // aliases; here the response simply wins over the requested set.
+    const result = parseTokenResponse({ access_token: "tok_x", scope: "read:user" }, [
       "read:user",
       "repo",
     ]);
-    expect(result.scopeShortfall).toEqual([]);
-    expect(result.scopeCreep).toEqual([]);
-  });
-
-  it("reports shortfall when provider grants fewer scopes than requested", () => {
-    const result = parseTokenResponse({ ...baseToken, scope: "read:user" }, ["read:user", "repo"]);
-    expect(result.scopeShortfall).toEqual(["repo"]);
-    expect(result.scopeCreep).toEqual([]);
-  });
-
-  it("reports creep when provider grants extra scopes (Slack-style super-set)", () => {
-    const result = parseTokenResponse({ ...baseToken, scope: "read:user repo admin" }, [
-      "read:user",
-      "repo",
-    ]);
-    expect(result.scopeShortfall).toEqual([]);
-    expect(result.scopeCreep).toEqual(["admin"]);
-  });
-
-  it("reports both shortfall and creep simultaneously", () => {
-    const result = parseTokenResponse({ ...baseToken, scope: "different:scope" }, [
-      "read:user",
-      "repo",
-    ]);
-    expect(result.scopeShortfall).toEqual(["read:user", "repo"]);
-    expect(result.scopeCreep).toEqual(["different:scope"]);
-  });
-
-  it("treats missing scope field as 'requested == granted' (no signal)", () => {
-    // When the provider omits `scope`, we fall back to requestedScopes; that's
-    // the documented assumption that the request was granted in full.
-    const result = parseTokenResponse(baseToken, ["read:user", "repo"]);
-    expect(result.scopesGranted).toEqual(["read:user", "repo"]);
-    expect(result.scopeShortfall).toEqual([]);
-    expect(result.scopeCreep).toEqual([]);
-  });
-
-  it("treats no requested scopes as no shortfall, all granted as creep", () => {
-    const result = parseTokenResponse({ ...baseToken, scope: "read:user" });
-    expect(result.scopeShortfall).toEqual([]);
-    expect(result.scopeCreep).toEqual(["read:user"]);
+    expect(result.scopesGranted).toEqual(["read:user"]);
   });
 });
 

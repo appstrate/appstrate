@@ -1,13 +1,13 @@
 {
-  "name": "@appstrate/google-forms",
-  "version": "1.0.3",
+  "name": "@appstrate/google-drive",
+  "version": "1.0.4",
   "type": "integration",
   "schema_version": "0.1",
-  "display_name": "Google Forms (API)",
-  "description": "Form creation and response collection by Google",
-  "keywords": ["forms", "productivity"],
+  "display_name": "Google Drive (API)",
+  "description": "Cloud file storage and synchronization",
+  "keywords": ["storage", "productivity"],
   "license": "Apache-2.0",
-  "icon": "simple-icons:googleforms",
+  "icon": "logos:google-drive",
   "source": {
     "kind": "none"
   },
@@ -32,12 +32,7 @@
     "primary": {
       "type": "oauth2",
       "issuer": "https://accounts.google.com",
-      "default_scopes": [
-        "openid",
-        "email",
-        "https://www.googleapis.com/auth/forms.body.readonly",
-        "https://www.googleapis.com/auth/forms.responses.readonly"
-      ],
+      "default_scopes": ["openid", "email", "https://www.googleapis.com/auth/drive.file"],
       "authorization_params": {
         "access_type": "offline",
         "prompt": "consent"
@@ -60,27 +55,40 @@
           "label": "Email address"
         },
         {
-          "value": "https://www.googleapis.com/auth/forms.body.readonly",
-          "label": "Read form structure"
+          "value": "https://www.googleapis.com/auth/userinfo.email",
+          "label": "Email address (Google canonical scope)",
+          "description": "Google's canonical form of the OIDC `email` scope — returned in token responses in place of `email`.",
+          "implies": ["email"]
         },
         {
-          "value": "https://www.googleapis.com/auth/forms.body",
-          "label": "Read and edit form structure"
-        },
-        {
-          "value": "https://www.googleapis.com/auth/forms.responses.readonly",
-          "label": "Read form responses"
+          "value": "https://www.googleapis.com/auth/drive.file",
+          "label": "Per-file access (recommended)"
         },
         {
           "value": "https://www.googleapis.com/auth/drive.readonly",
-          "label": "Read Google Drive (list forms)"
+          "label": "Read-only access"
         },
         {
           "value": "https://www.googleapis.com/auth/drive",
-          "label": "Full Google Drive access"
+          "label": "Full access"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/drive.metadata.readonly",
+          "label": "Read metadata only"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/drive.appdata",
+          "label": "App data folder"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/drive.photos.readonly",
+          "label": "Read photos/videos"
         }
       ],
-      "authorized_uris": ["https://forms.googleapis.com/**"],
+      "authorized_uris": [
+        "https://www.googleapis.com/drive/**",
+        "https://www.googleapis.com/upload/drive/**"
+      ],
       "delivery": {
         "http": {
           "in": "header",
@@ -105,7 +113,9 @@
     },
     "dev.appstrate/api": {
       "auths": {
-        "primary": {}
+        "primary": {
+          "upload_protocols": ["google-resumable"]
+        }
       }
     }
   }
