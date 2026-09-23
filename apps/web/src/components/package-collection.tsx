@@ -26,6 +26,7 @@ import { PackageCard } from "./package-card";
 import { PackagesTable, usePackageColumns } from "./packages-table";
 import { ListFooter, ListToolbar, type FilterSpec } from "./list-toolbar";
 import { EmptyState, ErrorState } from "./page-states";
+import { SettingsHeading } from "./settings/settings-heading";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import type { ListState } from "../lib/list-params";
@@ -107,6 +108,13 @@ export interface PackageCollectionProps {
    * be run.
    */
   dropColumns?: string[];
+  /**
+   * Cards split into titled sections, in order — how the catalogue's Découvrir
+   * says what its ticks mean ("Pas encore dans Default", "Déjà dans Default").
+   * An empty section is not drawn. Loading, failure and an empty list keep the
+   * single grid, whose states say those things already.
+   */
+  cardSections?: (items: CardItem[]) => { key: string; title: string; items: CardItem[] }[];
 }
 
 export function PackageCollection({
@@ -134,6 +142,7 @@ export function PackageCollection({
   leadingColumns = NO_COLUMNS,
   trailingColumns = NO_COLUMNS,
   dropColumns = NO_IDS,
+  cardSections,
 }: PackageCollectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   // Client-side on purpose, and honestly so: this catalogue arrives whole, so
@@ -250,6 +259,40 @@ export function PackageCollection({
           empty={emptyBody}
           error={<ErrorState message={error?.message} compact />}
         />
+      ) : cardSections && !isLoading && !error && shown.length > 0 ? (
+        <div className="space-y-8 pt-2">
+          {cardSections(shown)
+            .filter((section) => section.items.length > 0)
+            .map((section) => (
+              <section key={section.key}>
+                <SettingsHeading
+                  level="group"
+                  title={
+                    <>
+                      {section.title}{" "}
+                      <span className="text-muted-foreground font-normal tabular-nums">
+                        {section.items.length}
+                      </span>
+                    </>
+                  }
+                />
+                <CardGrid
+                  items={section.items}
+                  itemKey={(item) => item.id}
+                  renderCard={(item) => (
+                    <PackageCard
+                      {...item}
+                      showRun={cardRun}
+                      onOpen={rowAction ? () => rowAction(item) : undefined}
+                    />
+                  )}
+                  isLoading={false}
+                  isError={false}
+                  empty={null}
+                />
+              </section>
+            ))}
+        </div>
       ) : (
         <CardGrid
           items={shown}

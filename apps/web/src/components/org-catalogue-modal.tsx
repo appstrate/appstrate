@@ -940,6 +940,26 @@ export function OrgCatalogueModal({
             actionsColumn,
           ]}
           rowAction={(item) => preview.open(item.id)}
+          // Découvrir shows the whole catalogue; its two sections say what the
+          // tick meant all along — what the space the reader is in does not run
+          // yet, first, then what it already runs — and name that space. "Not
+          // yet", not "to add": a package the reader may not add is there too.
+          cardSections={
+            discovering && spaceId
+              ? (cards) => [
+                  {
+                    key: "to-add",
+                    title: t("catalogue.section.toAdd", { space: spaceNameOf(spaceId) }),
+                    items: cards.filter((card) => placementById.get(card.id)?.here !== "active"),
+                  },
+                  {
+                    key: "already",
+                    title: t("catalogue.section.already", { space: spaceNameOf(spaceId) }),
+                    items: cards.filter((card) => placementById.get(card.id)?.here === "active"),
+                  },
+                ]
+              : undefined
+          }
           actions={
             <>
               {readingSwitcher}

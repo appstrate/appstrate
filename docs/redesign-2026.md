@@ -1842,6 +1842,12 @@ in Découvrir, which is where you switch it back on.
   "Ajouter" alone and mean "in the space the app is in", which the card never
   said. `CardItem` gained `icon`, `status` and
   `meta`, all optional: lists that pass none keep their card as it was.
+- **Découvrir is split in two sections that say what its tick means**: "Pas
+  encore dans {espace}" first, then "Déjà dans {espace}", each with its count
+  (`PackageCollection.cardSections`). The reading was the whole catalogue with
+  a tick on some cards, and nothing on screen said the tick was about ONE
+  space, nor which. "Not yet", not "to add": a package the reader may not add
+  sits in the first section too, without a button.
 - **Every change of where a package runs says what it did**, in one place
   (`setActive`): "Débrief d'appel est maintenant actif dans Bac à sable", or
   "n'est plus actif dans". A switch is its own feedback, but a menu that closes

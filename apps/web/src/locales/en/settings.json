@@ -1300,6 +1300,8 @@
   "catalogue.openFullPage": "Open the full page",
   "catalogue.here": "here",
   "catalogue.activeHere": "Active here",
+  "catalogue.section.toAdd": "Not yet in {{space}}",
+  "catalogue.section.already": "Already in {{space}}",
   "catalogue.shared.title": "Pending shares",
   "catalogue.shared.description": "What colleagues shared with your spaces and nobody has activated there yet.",
   "catalogue.shared.empty": "Nothing waiting.",

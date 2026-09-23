@@ -1300,6 +1300,8 @@
   "catalogue.openFullPage": "Ouvrir la fiche complète",
   "catalogue.here": "ici",
   "catalogue.activeHere": "Actif ici",
+  "catalogue.section.toAdd": "Pas encore dans {{space}}",
+  "catalogue.section.already": "Déjà dans {{space}}",
   "catalogue.shared.title": "Partages en attente",
   "catalogue.shared.description": "Ce que vos collègues ont partagé avec vos espaces et que personne n'y a encore activé.",
   "catalogue.shared.empty": "Rien en attente.",
