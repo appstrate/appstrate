@@ -106,6 +106,23 @@ describe("api-keys service", () => {
       expect(id.length).toBeGreaterThan(0);
     });
 
+    it("refuses a creator who is not a member of the org (403), inserting nothing", async () => {
+      const outsider = await createTestContext();
+      const rawKey = generateApiKey();
+
+      await expect(
+        createApiKeyRecord({
+          scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+          name: "Outsider Key",
+          keyHash: await hashApiKey(rawKey),
+          keyPrefix: extractKeyPrefix(rawKey),
+          createdBy: outsider.user.id,
+          expiresAt: null,
+        }),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(await listApiKeys({ orgId: ctx.orgId })).toEqual([]);
+    });
+
     it("created record is retrievable via listApiKeys", async () => {
       const rawKey = generateApiKey();
       const hash = await hashApiKey(rawKey);

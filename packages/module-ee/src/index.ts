@@ -22,7 +22,7 @@ import {
   drainBillingSweeper,
 } from "./billing/billing-sweeper.ts";
 import { ensureCursorSeeded } from "./billing/usage-recorder.ts";
-import { onOrgCreate, onOrgDelete } from "./onboarding/post-signup.ts";
+import { onOrgCreate, onOrgDelete, onOrgMemberRemove } from "./onboarding/post-signup.ts";
 import {
   checkoutBodySchema,
   createBillingRoutes,
@@ -302,6 +302,7 @@ const eeModule: AppstrateModule = {
   events: {
     onOrgCreate,
     onOrgDelete,
+    onOrgMemberRemove,
   },
 
   async shutdown() {

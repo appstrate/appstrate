@@ -539,6 +539,14 @@ export interface ModuleEvents {
    * ahead of the cascade so a listener can still read the org's rows.
    */
   onOrgDelete: (orgId: string) => void | Promise<void>;
+  /**
+   * Org member removed — broadcast AFTER a member left or was removed, once the
+   * removal has committed (the membership row is gone). For a module to drop
+   * what it granted to that `(orgId, userId)` pair: the platform revokes only
+   * its own grants, so anything a module keyed on the pair would otherwise come
+   * back if the same user is invited again. Must be idempotent.
+   */
+  onOrgMemberRemove: (orgId: string, userId: string) => void | Promise<void>;
 }
 
 // ---------------------------------------------------------------------------

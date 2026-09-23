@@ -13,16 +13,27 @@ import {
   orgOnlyHeaders,
 } from "../../helpers/auth.ts";
 import { createInvitation } from "../../../src/services/invitations.ts";
-import { seedApiKey } from "../../helpers/seed.ts";
-import { assertDbHas, assertDbMissing } from "../../helpers/assertions.ts";
+import {
+  seedApiKey,
+  seedInvitation,
+  seedPackage,
+  seedSchedule,
+  seedSpaceMember,
+} from "../../helpers/seed.ts";
+import { assertDbHas, assertDbMissing, expectProblem } from "../../helpers/assertions.ts";
 import {
   organizations,
   orgInvitations,
   organizationMembers,
   auditEvents,
+  apiKeys,
+  notifications,
+  schedules,
+  spaceMembers,
+  spaces,
 } from "@appstrate/db/schema";
 import { CURRENT_API_VERSION } from "../../../src/lib/api-versions.ts";
-import { getOrgSettings } from "../../../src/services/organizations.ts";
+import { getOrgSettings, provisionMember } from "../../../src/services/organizations.ts";
 import { recordAudit } from "../../../src/services/audit.ts";
 
 const app = getTestApp();
@@ -899,6 +910,302 @@ describe("Organizations API", () => {
           and(eq(organizationMembers.userId, member.id), eq(organizationMembers.orgId, ctx.orgId)),
         );
       expect(rows).toHaveLength(0);
+    });
+  });
+
+  // Several owners, one invariant: an org always keeps at least one. Only an
+  // owner touches an owner; an admin's reach is unchanged.
+  describe("owner management", () => {
+    const changeRole = (cookie: string, orgId: string, userId: string, role: string) =>
+      app.request(`/api/orgs/${orgId}/members/${userId}`, {
+        method: "PUT",
+        headers: { Cookie: cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ role }),
+      });
+    const remove = (cookie: string, orgId: string, userId: string) =>
+      app.request(`/api/orgs/${orgId}/members/${userId}`, {
+        method: "DELETE",
+        headers: { Cookie: cookie },
+      });
+    const roleOf = async (orgId: string, userId: string) =>
+      (
+        await db
+          .select({ role: organizationMembers.role })
+          .from(organizationMembers)
+          .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId)))
+      )[0]?.role;
+
+    it("lets an owner promote a member to owner", async () => {
+      const ctx = await createTestContext();
+      const member = await createTestUser();
+      await addOrgMember(ctx.orgId, member.id, "member");
+
+      const res = await changeRole(ctx.cookie, ctx.orgId, member.id, "owner");
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect(((await res.json()) as { role: string }).role).toBe("owner");
+      expect(await roleOf(ctx.orgId, member.id)).toBe("owner");
+    });
+
+    it("refuses an admin promoting anyone to owner", async () => {
+      const ctx = await createTestContext();
+      const admin = await createTestUser();
+      const member = await createTestUser();
+      await addOrgMember(ctx.orgId, admin.id, "admin");
+      await addOrgMember(ctx.orgId, member.id, "member");
+
+      await expectProblem(await changeRole(admin.cookie, ctx.orgId, member.id, "owner"), 403);
+      expect(await roleOf(ctx.orgId, member.id)).toBe("member");
+    });
+
+    it("lets an owner demote and remove a co-owner", async () => {
+      const ctx = await createTestContext();
+      const coOwner = await createTestUser();
+      await addOrgMember(ctx.orgId, coOwner.id, "owner");
+
+      expect((await changeRole(ctx.cookie, ctx.orgId, coOwner.id, "admin")).status).toBe(200);
+      expect(await roleOf(ctx.orgId, coOwner.id)).toBe("admin");
+
+      await changeRole(ctx.cookie, ctx.orgId, coOwner.id, "owner");
+      expect((await remove(ctx.cookie, ctx.orgId, coOwner.id)).status).toBe(204);
+      expect(await roleOf(ctx.orgId, coOwner.id)).toBeUndefined();
+    });
+
+    it("refuses an admin demoting or removing an owner", async () => {
+      const ctx = await createTestContext();
+      const admin = await createTestUser();
+      await addOrgMember(ctx.orgId, admin.id, "admin");
+
+      await expectProblem(await changeRole(admin.cookie, ctx.orgId, ctx.user.id, "member"), 403);
+      await expectProblem(await remove(admin.cookie, ctx.orgId, ctx.user.id), 403);
+      expect(await roleOf(ctx.orgId, ctx.user.id)).toBe("owner");
+    });
+
+    it("still refuses an invitation granting owner (400)", async () => {
+      const ctx = await createTestContext();
+      const res = await app.request(`/api/orgs/${ctx.orgId}/members`, {
+        method: "POST",
+        headers: orgOnlyHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ email: "would-be-owner@test.com", role: "owner" }),
+      });
+      await expectProblem(res, 400);
+      await assertDbMissing(orgInvitations, eq(orgInvitations.email, "would-be-owner@test.com"));
+    });
+
+    it("revokes the removed member's API keys and records them on the audit", async () => {
+      const ctx = await createTestContext();
+      const member = await createTestUser();
+      await addOrgMember(ctx.orgId, member.id, "member");
+      const key = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: member.id,
+        scopes: ["agents:read"],
+      });
+
+      expect((await remove(ctx.cookie, ctx.orgId, member.id)).status).toBe(204);
+
+      const [row] = await db.select().from(apiKeys).where(eq(apiKeys.id, key.id));
+      expect(row!.revokedAt).not.toBeNull();
+      const [event] = await db
+        .select()
+        .from(auditEvents)
+        .where(
+          and(eq(auditEvents.action, "org.member_removed"), eq(auditEvents.resourceId, member.id)),
+        );
+      expect((event!.after as { revokedApiKeyIds: string[] }).revokedApiKeyIds).toEqual([key.id]);
+    });
+  });
+
+  describe("POST /api/orgs/:orgId/leave", () => {
+    const leave = (orgId: string, headers: Record<string, string>) =>
+      app.request(`/api/orgs/${orgId}/leave`, { method: "POST", headers });
+    const isMember = async (orgId: string, userId: string) =>
+      (
+        await db
+          .select()
+          .from(organizationMembers)
+          .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId)))
+      ).length === 1;
+    /** A member through the real door — membership row AND personal space. */
+    const joined = async (orgId: string, role: "admin" | "member" | "guest" | "owner") => {
+      const user = await createTestUser();
+      await db.transaction((tx) => provisionMember(tx, orgId, user.id, role));
+      return user;
+    };
+
+    for (const role of ["member", "admin", "guest"] as const) {
+      it(`lets a ${role} leave, after which the org is out of their reach`, async () => {
+        const ctx = await createTestContext();
+        const leaver = await joined(ctx.orgId, role);
+
+        const res = await leave(ctx.orgId, { Cookie: leaver.cookie });
+        expect(res.status, await res.clone().text()).toBe(204);
+        expect(await res.text()).toBe("");
+        expect(await isMember(ctx.orgId, leaver.id)).toBe(false);
+
+        const listed = await app.request("/api/orgs", { headers: { Cookie: leaver.cookie } });
+        const ids = ((await listed.json()) as { data: { id: string }[] }).data.map((o) => o.id);
+        expect(ids).not.toContain(ctx.orgId);
+        expect(
+          (await app.request(`/api/orgs/${ctx.orgId}`, { headers: { Cookie: leaver.cookie } }))
+            .status,
+        ).toBe(403);
+        expect(
+          (
+            await app.request("/api/spaces", {
+              headers: { Cookie: leaver.cookie, "X-Org-Id": ctx.orgId },
+            })
+          ).status,
+        ).toBe(403);
+      });
+    }
+
+    it("refuses the last owner (409 last_owner) and keeps them", async () => {
+      const ctx = await createTestContext();
+      await joined(ctx.orgId, "admin");
+
+      await expectProblem(await leave(ctx.orgId, { Cookie: ctx.cookie }), 409, {
+        code: "last_owner",
+      });
+      expect(await isMember(ctx.orgId, ctx.user.id)).toBe(true);
+    });
+
+    it("lets an owner leave once another member is promoted to owner", async () => {
+      const ctx = await createTestContext();
+      const successor = await joined(ctx.orgId, "member");
+      const promoted = await app.request(`/api/orgs/${ctx.orgId}/members/${successor.id}`, {
+        method: "PUT",
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "owner" }),
+      });
+      expect(promoted.status).toBe(200);
+
+      expect((await leave(ctx.orgId, { Cookie: ctx.cookie })).status).toBe(204);
+      expect(await isMember(ctx.orgId, ctx.user.id)).toBe(false);
+      // The successor is now the last owner, and the invariant holds for them too.
+      await expectProblem(await leave(ctx.orgId, { Cookie: successor.cookie }), 409, {
+        code: "last_owner",
+      });
+    });
+
+    it("refuses a non-member (403)", async () => {
+      const ctx = await createTestContext();
+      const outsider = await createTestUser();
+      await expectProblem(await leave(ctx.orgId, { Cookie: outsider.cookie }), 403);
+    });
+
+    it("refuses an API key, even its creator's own (403), and the membership survives", async () => {
+      const ctx = await createTestContext();
+      const member = await joined(ctx.orgId, "member");
+      const key = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: member.id,
+        scopes: ["agents:read"],
+      });
+
+      await expectProblem(await leave(ctx.orgId, { Authorization: `Bearer ${key.rawKey}` }), 403);
+      expect(await isMember(ctx.orgId, member.id)).toBe(true);
+    });
+
+    it("judges a leave under a role preview on the real membership", async () => {
+      const ctx = await createTestContext();
+      await joined(ctx.orgId, "member");
+
+      // Previewed as `member` the sole owner would look free to go; the real
+      // row says otherwise.
+      await expectProblem(
+        await leave(ctx.orgId, { Cookie: ctx.cookie, "X-View-As": "org_role=member" }),
+        409,
+        { code: "last_owner" },
+      );
+      expect(await isMember(ctx.orgId, ctx.user.id)).toBe(true);
+    });
+
+    it("offboards like a removal, and a re-invite gives back the space but not the key", async () => {
+      const ctx = await createTestContext();
+      const leaver = await joined(ctx.orgId, "member");
+      const [personal] = await db
+        .select({ id: spaces.id })
+        .from(spaces)
+        .where(and(eq(spaces.orgId, ctx.orgId), eq(spaces.ownerUserId, leaver.id)));
+      await seedSpaceMember({
+        spaceId: ctx.defaultSpaceId,
+        userId: leaver.id,
+        presetRole: "builder",
+      });
+      const pkg = await seedPackage({ orgId: ctx.orgId, id: `@${ctx.org.slug}/leaver-agent` });
+      const schedule = await seedSchedule({
+        packageId: pkg.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: leaver.id,
+        enabled: true,
+        nextRunAt: new Date(Date.now() + 3600_000),
+      });
+      await db.insert(notifications).values({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        recipientType: "user",
+        recipientId: leaver.id,
+        type: "run_completed",
+        payload: { status: "success" },
+      });
+      const key = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: leaver.id,
+        scopes: ["agents:read"],
+      });
+      const bearer = { Authorization: `Bearer ${key.rawKey}` };
+      // Control: the key authenticates before the departure.
+      expect((await app.request("/api/orgs", { headers: bearer })).status).toBe(200);
+
+      expect((await leave(ctx.orgId, { Cookie: leaver.cookie })).status).toBe(204);
+
+      const [orphaned] = await db.select().from(spaces).where(eq(spaces.id, personal!.id));
+      expect(orphaned!.orphanedAt).not.toBeNull();
+      expect(
+        await db.select().from(spaceMembers).where(eq(spaceMembers.userId, leaver.id)),
+      ).toEqual([]);
+      const [disabled] = await db.select().from(schedules).where(eq(schedules.id, schedule.id));
+      expect(disabled!.enabled).toBe(false);
+      expect(
+        await db.select().from(notifications).where(eq(notifications.recipientId, leaver.id)),
+      ).toEqual([]);
+      const [revoked] = await db.select().from(apiKeys).where(eq(apiKeys.id, key.id));
+      expect(revoked!.revokedAt).not.toBeNull();
+      expect((await app.request("/api/orgs", { headers: bearer })).status).toBe(401);
+
+      const [event] = await db
+        .select()
+        .from(auditEvents)
+        .where(
+          and(eq(auditEvents.action, "org.member_left"), eq(auditEvents.resourceId, leaver.id)),
+        );
+      expect(event).toBeDefined();
+      expect(event!.orgId).toBe(ctx.orgId);
+      expect(event!.after).toMatchObject({
+        orphanedSpaceIds: [personal!.id],
+        revokedApiKeyIds: [key.id],
+      });
+
+      // Re-invite inside the window: the personal space comes back…
+      const inv = await seedInvitation({
+        orgId: ctx.orgId,
+        email: leaver.email,
+        invitedBy: ctx.user.id,
+        role: "member",
+      });
+      const accepted = await app.request(`/invite/${inv.token}/accept`, {
+        method: "POST",
+        headers: { Cookie: leaver.cookie },
+      });
+      expect(accepted.status, await accepted.clone().text()).toBe(200);
+      const [returned] = await db.select().from(spaces).where(eq(spaces.id, personal!.id));
+      expect(returned!.orphanedAt).toBeNull();
+      // …but the key stays dead: membership alone would have revived it.
+      expect((await app.request("/api/orgs", { headers: bearer })).status).toBe(401);
     });
   });
 

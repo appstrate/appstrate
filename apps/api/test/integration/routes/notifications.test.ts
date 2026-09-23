@@ -670,7 +670,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       expect(await countForRecipient("user", userB.id)).toBe(1);
       expect(await countForRecipient("user", ctx.user.id)).toBe(1);
 
-      await removeMember(ctx.orgId, userB.id);
+      await removeMember(ctx.orgId, userB.id, { userId: ctx.user.id, firstPartySession: true });
 
       // B's notification is gone; A (still a member) keeps theirs.
       expect(await countForRecipient("user", userB.id)).toBe(0);
@@ -690,7 +690,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       await seedNotifiedRun({ agentName: "member-run", actor: "schedule" });
       expect(await countForRecipient("user", userB.id)).toBe(1);
 
-      await removeMember(ctx.orgId, userB.id);
+      await removeMember(ctx.orgId, userB.id, { userId: ctx.user.id, firstPartySession: true });
 
       // The member's row is cleaned; the end-user (same id-space, different
       // recipientType) is untouched — proves the delete filters on type.

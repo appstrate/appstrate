@@ -374,9 +374,9 @@ to accept only their own half, so the wrong-mode call does not compile.
   free-tier policy and OIDC's per-client org policy are independent), so
   dispatching them first-match-wins would silently disable all but the first.
 - **Events** (`emitEvent`, broadcast-to-all): `onRunStatusChange`,
-  `onRunConnectionMissing`, `onOrgCreate`, `onOrgDelete`. Handlers run for side
-  effects only; errors in one handler are **isolated** and do not block others —
-  that isolation is the difference from a broadcast hook.
+  `onRunConnectionMissing`, `onOrgCreate`, `onOrgDelete`, `onOrgMemberRemove`.
+  Handlers run for side effects only; errors in one handler are **isolated** and
+  do not block others — that isolation is the difference from a broadcast hook.
 
 `onOrgDelete` must be **idempotent**. The platform reserves the deletion
 (`organizations.deleting_at`) before it emits, so the organization cannot be
@@ -384,6 +384,17 @@ saved by a concurrent run and the operator can simply repeat the DELETE when a
 later step fails — which emits the event again for the same org id. Tear down
 what is still there, and treat what is already gone as success; never make the
 second call throw, and never make it charge, refund or cancel anything twice.
+
+`onOrgMemberRemove(orgId, userId)` is emitted by the platform's member service
+after a member left the org or was removed from it, once the exit has committed
+(the membership row is gone). Best-effort, like every event: a failing handler
+is logged, not retried. The platform revokes only its own grants on that exit
+(space roles, API keys, the refresh and opaque access tokens bound to the
+org — RBAC spec §3.6);
+anything a module keyed on the `(orgId, userId)` pair must be dropped here, or
+it comes back when the same user is invited again — `@appstrate/module-ee`
+deletes the billing-manager row. It must be **idempotent**: a no-op when there
+is nothing left to drop.
 
 Names are defined in `packages/core/src/module.ts` (`FirstMatchHooks` /
 `BroadcastHooks` / `ModuleHooks`, `ModuleEvents`). To add a new hook or event,

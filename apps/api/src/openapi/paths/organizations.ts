@@ -4,6 +4,7 @@ import { STD_RESPONSE_HEADERS } from "../headers.ts";
 import { ORG_SETTINGS_PROPERTIES } from "../schemas.ts";
 
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
+import { ORG_ROLES } from "@appstrate/core/permissions";
 
 /** Request-body shape of one space assignment — mirrors the `SpaceAssignment` component. */
 const SPACE_ASSIGNMENTS_BODY = {
@@ -300,7 +301,7 @@ export const organizationsPaths = {
       tags: ["Organizations"],
       summary: "Change member role",
       description:
-        "Change a member's role. Owners can manage any non-owner; admins can manage guests and members.",
+        "Change a member's role. Owners can manage every other member, owners included, and are the only ones who may assign `owner` or change an owner's role; admins can manage guests and members and assign `guest`, `member` or `admin`. Nobody changes their own role. The caller is judged on their current role in the organization. Granting `owner` or changing an owner's role requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403 even when its user is an owner.",
       parameters: [
         { name: "orgId", in: "path", required: true, schema: { type: "string" } },
         { name: "userId", in: "path", required: true, schema: { type: "string" } },
@@ -313,7 +314,7 @@ export const organizationsPaths = {
               type: "object",
               required: ["role"],
               properties: {
-                role: { type: "string", enum: [...ASSIGNABLE_ORG_ROLES] },
+                role: { type: "string", enum: [...ORG_ROLES] },
               },
               additionalProperties: false,
             },
@@ -347,7 +348,8 @@ export const organizationsPaths = {
       operationId: "removeMember",
       tags: ["Organizations"],
       summary: "Remove a member",
-      description: "Remove a member from the organization.",
+      description:
+        "Remove a member from the organization. Owners can remove every other member, owners included; admins can remove guests and members. Nobody removes themselves — use `leaveOrganization`. The caller is judged on their current role in the organization; removing an owner requires a dashboard session (any token — API key, OAuth/MCP client, CLI — is refused with 403). The member's explicit space roles and notifications in this organization are deleted, their schedules here disabled, their API keys here and the OAuth tokens that grant only this organization (its own clients' and those bound to its MCP resource) revoked, and their personal space enters the 30-day offboarding window. A JWT access token is not stored and cannot be revoked: it stays valid until it expires, and the per-request membership check refuses it meanwhile.",
       parameters: [
         { name: "orgId", in: "path", required: true, schema: { type: "string" } },
         { name: "userId", in: "path", required: true, schema: { type: "string" } },
@@ -360,6 +362,34 @@ export const organizationsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/orgs/{orgId}/leave": {
+    post: {
+      operationId: "leaveOrganization",
+      tags: ["Organizations"],
+      summary: "Leave an organization",
+      description:
+        "The caller leaves the organization. Any member may leave, whatever their role; the last owner is refused with `409 last_owner` and must first promote another member to owner, or delete the organization. The decision reads the caller's real membership, so an active `X-View-As` preview changes nothing. Leaving has the effects of a removal: the caller's explicit space roles and notifications in this organization are deleted, their schedules here disabled, their API keys here and the OAuth tokens that grant only this organization (its own clients' and those bound to its MCP resource) revoked, and their personal space enters the 30-day offboarding window (a re-invitation inside it gives the space back; revoked keys and opaque tokens stay revoked). A JWT access token is not stored and cannot be revoked: it stays valid until it expires, and the per-request membership check refuses it meanwhile. Leaving requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403, as is a caller who is not a member.",
+      parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
+      responses: {
+        "204": {
+          description: "Left the organization",
+          headers: STD_RESPONSE_HEADERS,
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": {
+          description:
+            "The caller's membership disappeared between authentication and the exit (a concurrent removal or leave). A caller who is not a member at all gets 403.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+        "409": { $ref: "#/components/responses/LastOwner" },
       },
     },
   },
