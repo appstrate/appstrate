@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/gmail-mcp",
-  "version": "2.3.2",
+  "version": "2.3.3",
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "Gmail",
@@ -17,6 +17,7 @@
   "auths": {
     "primary": {
       "type": "oauth2",
+      "issuer": "https://accounts.google.com",
       "authorization_endpoint": "https://accounts.google.com/o/oauth2/v2/auth",
       "token_endpoint": "https://oauth2.googleapis.com/token",
       "userinfo_endpoint": "https://openidconnect.googleapis.com/v1/userinfo",

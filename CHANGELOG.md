@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **The conformance monitor now probes the provider API of seven
+  credential-only integrations without a credential** (`auth-reject`, tier
+  `mcp`). Each `AUTH_PROBES` endpoint is sent a deliberately invalid
+  credential, rendered through the manifest's own `delivery.http`, and must
+  refuse it (401/403); a 404/410 or an accepted invalid credential fails the
+  run. Before, a probe without a `CONFORMANCE_TOKENS` entry reported only
+  "skipped", so a retired host or API version went unnoticed. New probes:
+  brevo, fathom, firecrawl, shortcut, twilio (stripe and google-calendar gain
+  the credential-free half). The run also names the credential-only
+  integrations whose API nothing probes.
+- **`identity-source` conformance check** (every tier, WARN): an `oauth2` auth
+  declaring none of `identity_claims`, `userinfo_endpoint` or `issuer` resolves
+  every connection to accountId `"default"` unless its token response happens
+  to carry `email`/`sub`. Nine shipped integrations are in that state today:
+  dropbox, dynamics365, hubspot, linear, mailchimp, monday, notion,
+  quickbooks-online, youtube.
+- **`@appstrate/gmail` 1.1.4 and `@appstrate/gmail-mcp` 2.3.3 declare
+  `issuer: https://accounts.google.com`**, like the other Google integrations.
+  Their explicit endpoints still win; the issuer lets the conformance monitor
+  verify them against Google's published metadata, which it reported as
+  UNVERIFIED until now.
+
 ### Changed
 
 - **BREAKING (CLI): `appstrate packages pull --version <spec>` is now
@@ -39,6 +63,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   good release no longer fails while npm propagates it (the check waits up to
   12 minutes on what bun resolves), and its GitHub Release is created whenever
   the npm publish succeeded.
+- **The conformance monitor only opens, comments on or closes its tracking
+  issue from `main`.** A run dispatched on a fix branch to check the fix
+  against the live servers closed #1480 while `main` still shipped the drift.
+  A branch run still goes red on drift; it no longer touches the issue.
 
 ## [1.0.0-beta.61] - 2026-09-23
 

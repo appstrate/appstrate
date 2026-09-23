@@ -6,7 +6,9 @@ import { declaredTools, serverEntryPoint, diffTools } from "./mcp-local-parity.t
 import { diffToolSets } from "./tool-diff.ts";
 import { resolveToken, resolveAccessToken, credentialedCount, _resetCredsCache } from "./creds.ts";
 import { remoteUrl, toolsPolicyKeys, allowsUndeclared } from "./remote-parity.ts";
-import { applyAuth, checkAuthLiveness } from "./auth-live.ts";
+import { applyAuth, checkAuthLiveness, requiredCredentialFields } from "./auth-live.ts";
+import { checkAuthRejection } from "./auth-reject.ts";
+import { checkIdentitySource } from "./identity-source.ts";
 import { metadataCandidates, compareAuth } from "./oauth-metadata.ts";
 import {
   checkRefreshStrategy,
@@ -15,7 +17,11 @@ import {
   UNVERIFIED,
   UNVERIFIED_CEILING,
 } from "./refresh-strategy.ts";
-import { declaredIdentityEndpoints, classifyIdentityProbe } from "./identity-endpoint.ts";
+import {
+  declaredIdentityEndpoints,
+  classifyIdentityProbe,
+  INVALID_BEARER,
+} from "./identity-endpoint.ts";
 import { buildDiscoveryProbes, discoveryIssuerMatches } from "@appstrate/connect";
 import { listAllTools } from "./mcp-list.ts";
 import { snapshotSlug, writeSnapshot, readSnapshot } from "./snapshot.ts";
@@ -298,7 +304,10 @@ describe("remote manifest accessors", () => {
 describe("applyAuth", () => {
   const headerManifest = {
     auths: {
-      primary: { delivery: { http: { in: "header", name: "Authorization", prefix: "Bearer " } } },
+      primary: {
+        type: "oauth2",
+        delivery: { http: { in: "header", name: "Authorization", prefix: "Bearer " } },
+      },
     },
   };
 
@@ -307,29 +316,179 @@ describe("applyAuth", () => {
     // applies AFPS §7.6's literal rule rather than normalising spacing. A
     // composite prefix is the case that proves it: trimming + re-spacing used
     // to turn "Token token=" into "Token token= tok", which no run emits.
-    const { headers } = applyAuth("https://api/x", headerManifest, "tok", "primary");
-    expect(headers.Authorization).toBe("Bearer tok");
+    expect(
+      applyAuth("https://api/x", headerManifest, "tok", "primary")!.headers.Authorization,
+    ).toBe("Bearer tok");
 
     const composite = {
-      auths: { primary: { delivery: { http: { name: "Authorization", prefix: "Token token=" } } } },
+      auths: {
+        primary: {
+          type: "api_key",
+          delivery: { http: { name: "Authorization", prefix: "Token token=" } },
+        },
+      },
     };
-    expect(applyAuth("https://api/x", composite, "tok", "primary").headers.Authorization).toBe(
+    expect(applyAuth("https://api/x", composite, "tok", "primary")!.headers.Authorization).toBe(
       "Token token=tok",
     );
   });
 
-  it("falls back to Bearer Authorization when no delivery declared", () => {
-    const { headers } = applyAuth("https://api/x", {}, "tok", "primary");
-    expect(headers.Authorization).toBe("Bearer tok");
+  it("sends an api_key with no declared prefix bare — never a Bearer no run sends", () => {
+    // The brevo / fathom / shortcut shape.
+    const manifest = {
+      auths: {
+        primary: {
+          type: "api_key",
+          credentials: { schema: { properties: { api_key: {} } } },
+          delivery: { http: { in: "header", name: "api-key", value: "{$credential.api_key}" } },
+        },
+      },
+    };
+    const { headers } = applyAuth("https://api/x", manifest, "tok", "primary")!;
+    expect(headers["api-key"]).toBe("tok");
   });
 
-  it("delivers via query param when declared", () => {
+  it("renders a templated Basic value with every credential field", () => {
+    // The twilio shape: `account_sid:auth_token`, base64-encoded.
     const manifest = {
-      auths: { primary: { delivery: { http: { in: "query", name: "access_token" } } } },
+      auths: {
+        primary: {
+          type: "api_key",
+          credentials: { schema: { properties: { account_sid: {}, auth_token: {} } } },
+          delivery: {
+            http: {
+              name: "Authorization",
+              prefix: "Basic ",
+              value: "{$credential.account_sid}:{$credential.auth_token}",
+              encoding: "base64",
+            },
+          },
+        },
+      },
     };
-    const { url, headers } = applyAuth("https://api/x", manifest, "tok", "primary");
-    expect(url).toBe("https://api/x?access_token=tok");
-    expect(headers.Authorization).toBeUndefined();
+    const { headers } = applyAuth("https://api/x", manifest, "s", "primary")!;
+    expect(headers.Authorization).toBe(`Basic ${Buffer.from("s:s").toString("base64")}`);
+  });
+
+  it("falls back to the auth type's default delivery", () => {
+    const manifest = { auths: { primary: { type: "oauth2" } } };
+    expect(applyAuth("https://api/x", manifest, "tok", "primary")!.headers.Authorization).toBe(
+      "Bearer tok",
+    );
+  });
+
+  it("returns null when the auth delivers no HTTP header", () => {
+    expect(applyAuth("https://api/x", {}, "tok", "primary")).toBeNull();
+    const envOnly = {
+      auths: { primary: { type: "custom", delivery: { env: { TOKEN: { value: "x" } } } } },
+    };
+    expect(applyAuth("https://api/x", envOnly, "tok", "primary")).toBeNull();
+  });
+});
+
+describe("requiredCredentialFields", () => {
+  it("lists the fields the credential schema requires", () => {
+    const manifest = {
+      auths: { primary: { credentials: { schema: { required: ["account_sid", "auth_token"] } } } },
+    };
+    expect(requiredCredentialFields(manifest, "primary")).toEqual(["account_sid", "auth_token"]);
+    expect(requiredCredentialFields({}, "primary")).toEqual([]);
+  });
+});
+
+describe("checkAuthRejection", () => {
+  const status = (code: number): typeof fetch =>
+    (async () => new Response(null, { status: code })) as unknown as typeof fetch;
+  // @appstrate/brevo is a seeded probe.
+  const brevo = entry({
+    packageId: "@appstrate/brevo",
+    manifest: {
+      auths: {
+        primary: {
+          type: "api_key",
+          delivery: { http: { name: "api-key", value: "{$credential.api_key}" } },
+        },
+      },
+    },
+  });
+
+  it("INFO when the invalid credential is refused", async () => {
+    for (const code of [401, 403]) {
+      const f = await checkAuthRejection(brevo, { fetchImpl: status(code) });
+      expect(f.map((x) => x.severity)).toEqual(["info"]);
+    }
+  });
+
+  it("FAILs when the path is gone or the invalid credential is accepted", async () => {
+    for (const code of [404, 405, 410, 200]) {
+      const f = await checkAuthRejection(brevo, { fetchImpl: status(code) });
+      expect(f.map((x) => x.severity)).toEqual(["fail"]);
+    }
+  });
+
+  it("WARNs on an inconclusive status or a network error", async () => {
+    expect((await checkAuthRejection(brevo, { fetchImpl: status(500) }))[0]!.severity).toBe("warn");
+    const boom = (async () => {
+      throw new Error("ENOTFOUND");
+    }) as unknown as typeof fetch;
+    expect((await checkAuthRejection(brevo, { fetchImpl: boom }))[0]!.severity).toBe("warn");
+  });
+
+  it("sends the invalid credential through the manifest's delivery", async () => {
+    let sent: Headers | undefined;
+    const capture = (async (_u: string, init?: RequestInit) => {
+      sent = new Headers(init?.headers);
+      return new Response(null, { status: 401 });
+    }) as unknown as typeof fetch;
+    await checkAuthRejection(brevo, { fetchImpl: capture });
+    expect(sent?.get("api-key")).toBe(INVALID_BEARER);
+    expect(sent?.get("authorization")).toBeNull();
+  });
+
+  it("skips a probe marked rejectsInvalid:false, and an unprobed package", async () => {
+    const slack = entry({
+      packageId: "@appstrate/slack",
+      manifest: { auths: { primary: { type: "oauth2" } } },
+    });
+    expect(await checkAuthRejection(slack, { fetchImpl: status(200) })).toEqual([]);
+    expect(await checkAuthRejection(entry({ packageId: "@appstrate/notion" }))).toEqual([]);
+  });
+
+  it("FAILs a probed package whose manifest delivers no header", async () => {
+    const f = await checkAuthRejection(entry({ packageId: "@appstrate/brevo", manifest: {} }), {
+      fetchImpl: status(401),
+    });
+    expect(f[0]!.severity).toBe("fail");
+  });
+});
+
+describe("checkIdentitySource", () => {
+  const oauth = (auth: Record<string, unknown>) =>
+    entry({
+      packageId: "@appstrate/x",
+      manifest: { auths: { primary: { type: "oauth2", ...auth } } },
+    });
+
+  it("WARNs an oauth2 auth with no identity source at all", () => {
+    const f = checkIdentitySource(oauth({}));
+    expect(f).toHaveLength(1);
+    expect(f[0]!.severity).toBe("warn");
+    expect(f[0]!.message).toContain('"default"');
+  });
+
+  it("accepts identity_claims, userinfo_endpoint or issuer", () => {
+    expect(checkIdentitySource(oauth({ identity_claims: { accountId: "$.id" } }))).toEqual([]);
+    expect(checkIdentitySource(oauth({ userinfo_endpoint: "https://x/me" }))).toEqual([]);
+    expect(checkIdentitySource(oauth({ issuer: "https://x" }))).toEqual([]);
+  });
+
+  it("ignores non-oauth2 auths and an empty mapping counts as none", () => {
+    const apiKey = entry({
+      packageId: "@appstrate/x",
+      manifest: { auths: { primary: { type: "api_key" } } },
+    });
+    expect(checkIdentitySource(apiKey)).toEqual([]);
+    expect(checkIdentitySource(oauth({ identity_claims: {} }))).toHaveLength(1);
   });
 });
 
@@ -340,7 +499,12 @@ describe("checkAuthLiveness", () => {
   const ghEntry = entry({
     packageId: "@appstrate/github",
     manifest: {
-      auths: { primary: { delivery: { http: { name: "Authorization", prefix: "Bearer " } } } },
+      auths: {
+        primary: {
+          type: "oauth2",
+          delivery: { http: { name: "Authorization", prefix: "Bearer " } },
+        },
+      },
     },
   });
 
@@ -377,6 +541,25 @@ describe("checkAuthLiveness", () => {
     const f = await checkAuthLiveness(ghEntry, { fetchImpl: okFetch(401) });
     expect(f[0]!.severity).toBe("fail");
     expect(f[0]!.message).toContain("401");
+  });
+
+  it("WARNs instead of probing an auth that needs several credential fields", async () => {
+    process.env.CONFORMANCE_TOKENS = JSON.stringify({ "@appstrate/twilio": "tok" });
+    _resetCredsCache();
+    const twilio = entry({
+      packageId: "@appstrate/twilio",
+      manifest: {
+        auths: {
+          primary: {
+            type: "api_key",
+            credentials: { schema: { required: ["account_sid", "auth_token"] } },
+          },
+        },
+      },
+    });
+    const f = await checkAuthLiveness(twilio, { fetchImpl: okFetch(200) });
+    expect(f[0]!.severity).toBe("warn");
+    expect(f[0]!.message).toContain("account_sid, auth_token");
   });
 
   it("WARNs on a network error", async () => {
