@@ -34,12 +34,13 @@ jobs:
   publish:
     name: Quality, Tests & Publish
     runs-on: ubuntu-latest
-    # 15m caps the worst case: install + tsc + tests + pack + install
-    # smoke + publish + 6×20s post-publish CDN retry (~120s) + GH
-    # Release. Steady state is ~4-6m. A hang past 15m means npm/CDN
+    # 20m caps the worst case: ~3m of install + tsc + tests + pack +
+    # smoke + publish, up to 12m waiting for the version on the registry
+    # (its own budget, which fails first with a clear error), then the
+    # bunx smoke + GH Release, plus slack. A hang past 20m means npm/CDN
     # is wedged — fail loud rather than burn the GH Actions minutes
     # quota until the 6h hard ceiling.
-    timeout-minutes: 15
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: apps/cli
@@ -174,28 +175,49 @@ jobs:
           TARBALL: ${{ steps.version.outputs.tarball }}
         run: npm publish "$TARBALL" --provenance --tag latest
 
-      - name: Post-publish smoke test (registry → bunx)
-        # Belt-and-suspenders check: pull from the actual registry and
-        # run via bunx. Catches cases where the tarball is correct but
-        # npm registry metadata is wrong (bin field dropped, etc).
-        #
-        # `npm publish` returns as soon as the registry accepts the
-        # tarball, but the version may take 30-90s to appear in the
-        # public CDN that `bunx` queries — alpha.55 saw a 404 from
-        # bunx ~10s after publish. Retry with backoff so a propagation
-        # delay doesn't fail the workflow.
+      - name: Wait for the version on the npm registry
+        # `npm publish` returns before consumers can resolve the version. For
+        # 1.0.0-beta.61 the abbreviated packument bun resolves against changed
+        # ~4 min after publish, and the CDN caches it for 300 s: ~10 min worst
+        # case. Retrying bunx is the wrong loop: in run 35872274810 each of its
+        # 6 attempts failed within ~35 ms, i.e. likely without a fresh registry
+        # read. So poll what bun sees (same URL and Accept header, no cache
+        # buster) for up to 12 min, the worst case plus slack; a curl error
+        # counts as "not yet".
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          WAIT_MINUTES: 12
+          POLL_SECONDS: 15
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          for attempt in 1 2 3 4 5 6; do
-            if bunx -y "appstrate@${VERSION}" --help; then
-              echo "Smoke test passed on attempt $attempt"
-              exit 0
+          PACKUMENT_URL="https://registry.npmjs.org/appstrate"
+          polls=0
+          until curl -fsS -H "Accept: application/vnd.npm.install-v1+json" "$PACKUMENT_URL" \
+            | jq -e --arg v "$VERSION" '.versions[$v]' >/dev/null; do
+            if [ "$SECONDS" -ge $((WAIT_MINUTES * 60)) ]; then
+              echo "::error::npm publish succeeded, but appstrate@$VERSION was still not visible in the registry packument after $WAIT_MINUTES minutes. Do NOT republish or re-run this job (npm refuses an existing version): once the version appears, check it with 'bunx appstrate@$VERSION __install-source'."
+              exit 1
             fi
-            echo "Attempt $attempt failed (registry propagation?), retrying in 20s…"
-            sleep 20
+            polls=$((polls + 1))
+            if [ $((polls % 4)) -eq 0 ]; then
+              echo "appstrate@$VERSION not visible yet (${SECONDS}s elapsed)"
+            fi
+            sleep "$POLL_SECONDS"
           done
-          echo "::error::Post-publish smoke test failed after 6 attempts (~120s of backoff)."
-          exit 1
+          echo "appstrate@$VERSION visible after ${SECONDS}s"
+
+      - name: Post-publish smoke test (registry → bunx)
+        # Runs what users download, once: catches wrong registry metadata (bin
+        # dropped, etc.) or a wrong stamp that the tarball check above cannot.
+        # A fresh BUN_INSTALL_CACHE_DIR so no manifest cached earlier in the job
+        # can answer for the registry. Same assertion as the pre-publish smoke.
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          INFO="$(BUN_INSTALL_CACHE_DIR="$(mktemp -d)" bunx -y "appstrate@$VERSION" __install-source)"
+          if ! jq -e --arg v "$VERSION" '.source == "bun" and .version == $v' <<<"$INFO" >/dev/null; then
+            echo "::error::Published CLI reports $INFO, expected source \"bun\" and version \"$VERSION\""
+            exit 1
+          fi
 
       - name: Create GitHub Release
         if: github.event_name == 'push'
