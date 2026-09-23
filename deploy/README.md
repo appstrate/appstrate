@@ -44,7 +44,9 @@ Facts worth writing down, because each one is easy to break:
 
 - **Coolify injects every variable configured on the resource into every service**, whatever the `environment:` blocks in `docker-compose.yml` list. So those blocks are not production's contract — `.env.example` is, and the blocks are the contract for a **raw** `docker compose` run. That is who they are maintained for, and it is why a variable missing from them can go unnoticed here for months.
 
-- **A bare name in an `environment:` block is materialised as the empty string.** Coolify rewrites `- FOO` into `FOO: ''` in the compose it generates, so "unset, let the schema default apply" is a state that file cannot express. `verify:compose-defaults` (class 6) refuses one, and `env_file` is what delivers the operator's variables instead.
+- **A bare name in an `environment:` block is materialised as the empty string.** Coolify rewrites `- FOO` into `FOO: ''` in the compose it generates, so "unset, let the schema default apply" is a state that file cannot express. `verify:compose-defaults` (class 5) refuses one, and `env_file` is what delivers the operator's variables instead.
+
+- **`MODULES` is required, not defaulted.** `docker-compose.yml` reads it as `${MODULES:?}`, so an unset or empty value makes Coolify flag the variable and refuse to deploy, and a raw `docker compose` refuse to start. There is no fallback list: the code default names no billing module, and a list pinned in this file would be a second copy of the operator's choice. Set it on the resource, and include `@appstrate/module-ee` — this is the deployment that bills. The module's Stripe keys are required once it is named; `.env.example` lists them, and the module refuses to boot without them.
 
 - **Coolify regenerates `.env` from the resource's own environment configuration on every deploy.** A value written into the file on the server is gone at the next one. Edit the variables in Coolify, never the file.
 

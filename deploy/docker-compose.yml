@@ -1,8 +1,9 @@
 # Appstrate — production Docker Compose
 #
 # The DEPLOYMENT, not the product: every service PULLS a published image and
-# nothing here is built. `MODULES` below names the billing module, which ships
-# inside `ghcr.io/appstrate/appstrate` and is inert until it is named.
+# nothing here is built. The billing module ships inside
+# `ghcr.io/appstrate/appstrate` and is inert until `MODULES` names it, so this
+# file requires `MODULES` rather than defaulting it (see below).
 #
 # Coolify:  one application resource, build pack `dockercompose`,
 #           git_repository `appstrate/appstrate`, docker_compose_location and
@@ -198,7 +199,7 @@ services:
     # HARMFUL: Coolify materialises every key this block names, so a bare
     # `- FOO` is rewritten into `FOO: ''` and "unset, let the schema default
     # apply" becomes "set to the empty string". `verify:compose-defaults`
-    # (class 6) refuses a bare name here for that reason.
+    # (class 5) refuses a bare name here for that reason.
     env_file:
       - .env
     environment:
@@ -217,10 +218,13 @@ services:
       # RUN_ADAPTER: the code default is `process`, for OSS dev. A containerised
       # deployment must run agents in Docker.
       - RUN_ADAPTER=${RUN_ADAPTER:-docker}
-      # MODULES: the code default is the OSS set and does not name the billing
-      # module. This deployment is the one that bills, so it carries its own
-      # list — reviewed, not copied. Drift here is what #513 was.
-      - MODULES=${MODULES:-oidc,webhooks,core-providers,mcp,@appstrate/module-codex,@appstrate/module-claude-code,@appstrate/module-chat,@appstrate/module-ee}
+      # ── Required, no fallback ──
+      # MODULES: this deployment bills, so MODULES must be set on the
+      # resource (or in .env) and must name @appstrate/module-ee. `:?` makes an
+      # unset or empty value refuse to deploy (Coolify) or to start (raw
+      # compose) instead of falling back to the code default, which has no
+      # billing. Bare `:?`, no message: it is the form Coolify documents.
+      - MODULES=${MODULES:?}
       # ── Bound to ${APPSTRATE_VERSION} ──
       # Without these the sidecar falls back to bare `appstrate-*:latest` tags
       # and tries to pull them from Docker Hub, so every local integration dies
