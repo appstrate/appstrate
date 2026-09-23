@@ -289,6 +289,7 @@ const EVENT_LEDGER: Record<EventMember, NamedLedgerEntry> = {
   onRunConnectionMissing: { owners: ["webhooks"] },
   onOrgCreate: { owners: ["mcp", "module-ee"] },
   onOrgDelete: { owners: ["mcp", "module-ee"] },
+  onOrgMemberRemove: { owners: ["module-ee"] },
 };
 
 /**

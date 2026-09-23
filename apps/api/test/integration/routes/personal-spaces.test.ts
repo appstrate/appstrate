@@ -70,6 +70,9 @@ import { applySpacePermissions } from "../../../src/middleware/space-context.ts"
 
 const app = getTestApp();
 
+/** The org owner acting from the dashboard — the removal door's actor. */
+const ownerActor = (ctx: TestContext) => ({ userId: ctx.user.id, firstPartySession: true });
+
 interface ListedSpace {
   id: string;
   name: string;
@@ -806,7 +809,7 @@ describe("personal spaces — convert to a team space", () => {
   it("hands an ORPHANED space to the organization", async () => {
     // The case the 30-day window exists for: keep what the departing member
     // built, without ever letting an admin read it as-is.
-    await removeMember(owner.orgId, member.user.id);
+    await removeMember(owner.orgId, member.user.id, ownerActor(owner));
     const res = await convert(owner, personalId);
     expect(res.status, await res.clone().text()).toBe(200);
     expect((await res.json()) as { personal: boolean; visibility: string }).toMatchObject({
@@ -962,7 +965,7 @@ describe("personal spaces — 404 before 409 on the three administrative acts", 
   });
 
   it("lets an owner or admin act on an ORPHANED one, delete excepted", async () => {
-    await removeMember(owner.orgId, member.user.id);
+    await removeMember(owner.orgId, member.user.id, ownerActor(owner));
 
     // `DELETE` never applies to a personal space: `sweep-now` is the route that
     // empties it first, and a named 409 here is safe because an orphan is
@@ -976,7 +979,7 @@ describe("personal spaces — 404 before 409 on the three administrative acts", 
   });
 
   it("sweeps an orphaned one for an owner, and refuses a team space by name", async () => {
-    await removeMember(owner.orgId, member.user.id);
+    await removeMember(owner.orgId, member.user.id, ownerActor(owner));
     for (const act of ["convert-to-team", "sweep"] as const) {
       await expectProblem(await ACTS[act](owner, owner.defaultSpaceId), 409, {
         code: "space_not_personal",
@@ -1010,14 +1013,14 @@ describe("personal spaces — offboarding", () => {
   });
 
   it("stamps the window on removal instead of deleting anything", async () => {
-    await removeMember(owner.orgId, member.user.id);
+    await removeMember(owner.orgId, member.user.id, ownerActor(owner));
     const row = await getDbRow(spaces, eq(spaces.id, personalId));
     expect(row.orphanedAt).not.toBeNull();
     expect(row.ownerUserId).toBe(member.user.id);
   });
 
   it("does not revive a departed member when an authenticated request reaches lazy repair late", async () => {
-    await removeMember(owner.orgId, member.user.id);
+    await removeMember(owner.orgId, member.user.id, ownerActor(owner));
     await expect(ensurePersonalSpaceFor(owner.orgId, member.user.id)).rejects.toMatchObject({
       status: 404,
     });
@@ -1069,7 +1072,7 @@ describe("personal spaces — offboarding", () => {
   });
 
   it("lists an orphaned space to owners and admins, with `orphaned_at`, unenterable", async () => {
-    await removeMember(owner.orgId, member.user.id);
+    await removeMember(owner.orgId, member.user.id, ownerActor(owner));
     const listed = (await listSpaces(owner)).find((s) => s.id === personalId);
     expect(listed).toBeDefined();
     expect(listed!.personal).toBe(true);
@@ -1083,7 +1086,7 @@ describe("personal spaces — offboarding", () => {
   });
 
   it("hands the space back untouched when the member re-joins inside the window", async () => {
-    await removeMember(owner.orgId, member.user.id);
+    await removeMember(owner.orgId, member.user.id, ownerActor(owner));
     const inv = await seedInvitation({
       orgId: owner.orgId,
       email: member.user.email,
@@ -1121,7 +1124,7 @@ describe("personal spaces — offboarding", () => {
     await seedPackageShare(otherSpace.id, SHARED);
     await seedSpacePackage(otherSpace.id, SHARED);
 
-    await removeMember(owner.orgId, member.user.id);
+    await removeMember(owner.orgId, member.user.id, ownerActor(owner));
     await ageOrphan(personalId);
 
     const result = await sweepOrphanedPersonalSpaces();
@@ -1161,7 +1164,7 @@ describe("personal spaces — offboarding", () => {
     });
     await seedSpacePackage(team.id, SHARED, { enabled: true });
 
-    await removeMember(owner.orgId, member.user.id);
+    await removeMember(owner.orgId, member.user.id, ownerActor(owner));
     await ageOrphan(personalId);
     expect(await sweepOrphanedPersonalSpaces()).toEqual({ sweptSpaces: 1, failedSpaces: 0 });
 
@@ -1212,7 +1215,7 @@ describe("personal spaces — offboarding", () => {
       await seedSpacePackage(spaceId, SHARED, { enabled: true });
     }
 
-    await removeMember(owner.orgId, member.user.id);
+    await removeMember(owner.orgId, member.user.id, ownerActor(owner));
     await ageOrphan(personalId);
     expect(await sweepOrphanedPersonalSpaces()).toEqual({ sweptSpaces: 1, failedSpaces: 0 });
 
@@ -1246,7 +1249,7 @@ describe("personal spaces — offboarding", () => {
     });
     await seedPackageShare(team.id, SHARED);
 
-    await removeMember(owner.orgId, member.user.id);
+    await removeMember(owner.orgId, member.user.id, ownerActor(owner));
     await ageOrphan(personalId);
     expect(await sweepOrphanedPersonalSpaces()).toEqual({ sweptSpaces: 1, failedSpaces: 0 });
 
@@ -1277,7 +1280,7 @@ describe("personal spaces — offboarding", () => {
     await seedPackageShare(personalId, HOMED);
     await seedSpacePackage(personalId, HOMED);
 
-    await removeMember(owner.orgId, member.user.id);
+    await removeMember(owner.orgId, member.user.id, ownerActor(owner));
     await ageOrphan(personalId);
     expect(await sweepOrphanedPersonalSpaces()).toEqual({ sweptSpaces: 1, failedSpaces: 0 });
 
@@ -1305,7 +1308,7 @@ describe("personal spaces — offboarding", () => {
     await seedPackageShare(team.id, SHARED);
     const before = (await getDbRow(packages, eq(packages.id, SHARED))).updatedAt;
 
-    await removeMember(owner.orgId, member.user.id);
+    await removeMember(owner.orgId, member.user.id, ownerActor(owner));
     await ageOrphan(personalId);
     expect(await sweepOrphanedPersonalSpaces()).toEqual({ sweptSpaces: 1, failedSpaces: 0 });
 
@@ -1315,7 +1318,7 @@ describe("personal spaces — offboarding", () => {
   });
 
   it("leaves a space inside the window alone", async () => {
-    await removeMember(owner.orgId, member.user.id);
+    await removeMember(owner.orgId, member.user.id, ownerActor(owner));
     expect(await sweepOrphanedPersonalSpaces()).toEqual({ sweptSpaces: 0, failedSpaces: 0 });
     await getDbRow(spaces, eq(spaces.id, personalId));
   });
@@ -1329,7 +1332,7 @@ describe("personal spaces — offboarding", () => {
         headers: orgOnlyHeaders(ctx),
       });
 
-    await removeMember(owner.orgId, member.user.id);
+    await removeMember(owner.orgId, member.user.id, ownerActor(owner));
     // No ageing: an administrator does not have to wait out the window.
     const res = await sweepNow(owner, personalId);
     expect(res.status, await res.clone().text()).toBe(200);
@@ -1367,7 +1370,7 @@ describe("personal spaces — offboarding", () => {
       packageId: pkg.id,
       status: "running",
     });
-    await removeMember(owner.orgId, member.user.id);
+    await removeMember(owner.orgId, member.user.id, ownerActor(owner));
     await ageOrphan(personalId);
 
     expect(await sweepOrphanedPersonalSpaces()).toEqual({ sweptSpaces: 0, failedSpaces: 1 });
@@ -1396,7 +1399,7 @@ describe("personal spaces — offboarding", () => {
       draftManifest: { name: HOMED, version: "0.1.0", type: "skill" },
       draftContent: "---\nname: x\ndescription: d\n---\n\nbody",
     });
-    await removeMember(owner.orgId, member.user.id);
+    await removeMember(owner.orgId, member.user.id, ownerActor(owner));
     await ageOrphan(personalId);
     expect((await listSweepablePersonalSpaces()).map((s) => s.id)).toContain(personalId);
 
@@ -1430,7 +1433,7 @@ describe("personal spaces — offboarding", () => {
       packageId: pkg.id,
       status: "running",
     });
-    await removeMember(owner.orgId, member.user.id);
+    await removeMember(owner.orgId, member.user.id, ownerActor(owner));
     await ageOrphan(personalId);
 
     expect(await sweepOrphanedPersonalSpaces()).toEqual({ sweptSpaces: 0, failedSpaces: 1 });
@@ -1457,6 +1460,6 @@ describe("personal spaces — offboarding", () => {
         eq(auditEvents.resourceId, member.user.id),
       )!,
     );
-    expect(event.after).toEqual({ orphanedSpaceIds: [personalId] });
+    expect(event.after).toEqual({ orphanedSpaceIds: [personalId], revokedApiKeyIds: [] });
   });
 });

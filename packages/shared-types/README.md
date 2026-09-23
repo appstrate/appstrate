@@ -10,7 +10,7 @@ Shared TypeScript type definitions used by both frontend (`apps/web`) and backen
 - **API response types**: `AgentListItem`, `AgentDetail`, `OrgPackageItem`, `AppConfig`, `AppConfigFeatures`
 - **Integration types**: `IntegrationSummary`, `IntegrationConnection`, `IntegrationCandidate`, `IntegrationPin`
 - **Headless types**: `SpaceInfo`, `EndUserInfo`, `ApiKeyInfo`
-- **Policy helpers**: `assignableRolesForMember()`, `canRemoveMember()` (`ASSIGNABLE_ORG_ROLES`)
+- **Policy helpers**: `assignableRolesForMember()`, `canRemoveMember()`, `canLeaveOrg()`. `ASSIGNABLE_ORG_ROLES` (guest/member/admin) is what an invitation or OIDC `signupRole` may grant; a role change may target every role of `ORG_ROLES` (`@appstrate/core/permissions`), `owner` included — only an owner assigns, demotes or removes an owner, and nobody manages themselves
 
 ## Usage
 

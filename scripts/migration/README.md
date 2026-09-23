@@ -711,6 +711,40 @@ if it is needed at all, runs with the platform stopped and before the batch.
    `PUT /api/models/{id}` answers the same when an edit would repoint a row onto
    a binding another row holds.
 
+## Detail — Credentials of departed members (script `0019`)
+
+**Not a runbook.** From the leave-organization release on, every exit — a
+removal or a leave — revokes, in its own transaction (`removeMemberInTx`), the
+member's API keys in the organization and the OAuth tokens that grant only that
+organization. `0019` repairs the members who left BEFORE it: their credentials
+were inert only because every reader joins `org_members`, and they revived the
+moment the person was re-invited.
+
+What it revokes — `revoked_at` / `revoked` = now(), only where NULL, for a user
+who is no longer a member of the organization concerned:
+
+- `api_keys` whose creator has no `org_members` row in the key's organization
+  (a key whose creator was deleted, `created_by` NULL, is left alone);
+- `oauth_refresh_tokens` / `oauth_access_tokens` of an org-level client
+  (`oauth_clients.level = 'org'`) of that organization;
+- the same tables' rows whose `resources` holds the organization's MCP resource
+  URI, `<APP_URL>/api/mcp/o/<org_id>` — so `APP_URL` is passed as the psql
+  variable `app_url`, exactly as the platform runs with it (the script refuses
+  anything that is not `scheme://host[:port]`).
+
+Only opaque tokens are rows: a JWT access token is not stored and stays valid
+until its TTL, the per-request membership check being what stops it.
+
+Run it once, after the release is deployed; the header carries the invocation
+and a read-only pre-flight query that counts exactly what the script captures.
+The three predicates are stated once, as temporary views: the script prints
+their counts before the writes, then re-runs them against the tables after the
+writes and aborts if any departed member still holds an unrevoked credential —
+a check on the end state, not on its own capture. Idempotent without a marker:
+the predicate is the condition the write removes. Not harmless to skip: those
+credentials authenticate again on a re-invite, and a refresh through an
+`allowSignup` org client re-provisions the membership on its own.
+
 ## Log
 
 | #    | date                | what                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -731,3 +765,4 @@ if it is needed at all, runs with the platform stopped and before the batch.
 | 0015 | not run — by design | one personal space per existing `org_members` row (`spaces.owner_user_id`, drizzle `0064`) — **run AFTER the release is deployed and validated, never inside the window**: `provisionMember` creates them at every membership door and `GET /api/spaces` repairs the caller's own, so nothing is degraded while this has not run; what it buys is the members who do not log in soon. **Pre-flight the space count first** — it inserts one row per membership, and nothing counts spaces for a quota today                                                                                                               | unmeasured — prints the membership count and the missing-personal-space count before and after; after must be 0. **Deliberately outstanding.** Read back 2026-09-18: 6 personal spaces against 50 memberships, the 6 created by `provisionMember` at a membership door rather than by this script. Pre-flight the space count before running it                                                                                                                                                                                                                                                                                                                                                              |
 | 0016 | 2026-09-17          | one `package_shares` row (`shared_by` NULL) per `space_packages` row sitting outside its package's home, so the placement rule drizzle `0063` + `0065` carry — a package is readable from its home and from the spaces it is shared into, never from the fact that somebody installed it — does not hide every pre-existing team installation at the first request; **run inside the window, right after `0014`**, whose `home_space_id` it reads                                                                                                                                                                         | unmeasured — prints the installations-outside-home count and the without-share count before, and the without-share count after, which must be 0. **Ran in the beta.58 window.** Read back 2026-09-18: 4 `package_shares` rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 0017 | 2026-09-17          | the 2 org members moved off `viewer` **by hand** on 2026-09-09 (to `member`, the only value available before drizzle `0056` added `guest`) given the shape `0008` writes for a real viewer: one `viewer` `space_members` row per TEAM space of their org, then `member` → `guest`. `0008` cannot see them — its `WHERE role::text = 'viewer'` is the empty set — while `member` + `spaces.default_role = 'operator'` is write access in every open space; **run inside the window, right after `0008` and `0012`**                                                                                                        | 2 pairs counted on production read-only 2026-09-17 (31 `owner` / 16 `admin` / **2 `member`** / 0 `viewer`), NOT rehearsed against a restored dump — prints the per-pair role before and after and aborts on any uncovered (user, team space) pair. **Ran in the beta.58 window**, right after `0008` and `0012`; the end-state witness is the one in `0008`'s row                                                                                                                                                                                                                                                                                                                                            |
+| 0019 | not applied         | credentials of members removed before the leave-organization release: `api_keys` whose creator is no longer a member of the key's org, and opaque OAuth refresh/access tokens of the org's own clients or bound to its MCP resource URI (`<APP_URL>/api/mcp/o/<org_id>`) whose user is no longer a member — `revoked_at` / `revoked` set where NULL; **run once after deploying the release**, with `-v app_url=<APP_URL>`                                                                                                                                                                                                | unmeasured — prints the key / refresh / access counts before, re-runs the same predicates against the tables after and aborts if any is non-zero. NOT rehearsed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |

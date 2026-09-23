@@ -7,6 +7,8 @@ import { getPlans } from "../config.ts";
 import { syncOrgStorageEntitlement } from "../billing/storage-entitlement.ts";
 import { drainOrgUsageOnDelete } from "../billing/org-drain.ts";
 import { cancelSubscriptionAndCleanUp } from "../billing/org-cancellation.ts";
+import { deleteBillingManagers } from "../billing/managers.ts";
+import { resyncOwnerFallbackToStripe } from "../billing/contact.ts";
 import { logger } from "../logger.ts";
 
 /**
@@ -138,4 +140,28 @@ export async function onOrgDelete(orgId: string): Promise<void> {
       subscriptionId,
     });
   }
+}
+
+/**
+ * A member left or was removed — emitted by the platform after the removal has
+ * committed, so the org's owner list no longer names them.
+ *
+ * Two things EE keyed on the person outlive the membership row: a
+ * billing-manager grant (keyed on `(org, user)`, so it would come back with a
+ * re-invite) and, when that person was the owner the contact fell back to,
+ * the Stripe customer's email.
+ */
+export async function onOrgMemberRemove(orgId: string, userId: string): Promise<void> {
+  // Awaited: this IS the grant, and it must be gone before the platform answers.
+  await deleteBillingManagers(orgId, userId);
+  // Not awaited: the platform awaits this handler inside the leave/remove
+  // request, and a Stripe round-trip has no business on that latency. The
+  // resync is best-effort anyway (the next checkout re-sends the address), so
+  // the catch only has to keep a failure out of the unhandled-rejection path.
+  void resyncOwnerFallbackToStripe(orgId).catch((err: unknown) => {
+    logger.error("Failed to resync the billing contact to Stripe after a member left", {
+      orgId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
 }

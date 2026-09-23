@@ -10,6 +10,7 @@ import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 export {
   ASSIGNABLE_ORG_ROLES,
   assignableRolesForMember,
+  canLeaveOrg,
   canRemoveMember,
   type AssignableOrgRole,
 } from "./member-role-policy.ts";

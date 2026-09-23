@@ -113,16 +113,24 @@ export async function replaceBillingManagers(
 }
 
 /**
- * Drop every manager of a deleted org. Called from `onOrgDelete`: the rows
- * carry no FK to the platform's `organizations` table, so nothing else removes
- * them, and a manager row outliving its org would answer for an org id the
- * platform could later reuse.
+ * Drop the managers of an org — every one of them, or only `userId`'s row.
+ *
+ * Without `userId`: called from `onOrgDelete`. The rows carry no FK to the
+ * platform's `organizations` table, so nothing else removes them, and a manager
+ * row outliving its org would answer for an org id the platform could later
+ * reuse.
+ *
+ * With `userId`: called from `onOrgMemberRemove`. The platform revokes only
+ * what the membership itself granted; a row left here would hand `billing:*`
+ * straight back if the same user were invited again. A user who was not a
+ * manager deletes nothing.
  */
-export async function deleteBillingManagers(orgId: string): Promise<void> {
+export async function deleteBillingManagers(orgId: string, userId?: string): Promise<void> {
   const db = getEeDb();
+  const byOrg = eq(billingManagers.orgId, orgId);
   const removed = await db
     .delete(billingManagers)
-    .where(eq(billingManagers.orgId, orgId))
+    .where(userId === undefined ? byOrg : and(byOrg, eq(billingManagers.userId, userId)))
     .returning({ userId: billingManagers.userId });
   for (const row of removed) {
     invalidatePrincipalPermissions(orgId, row.userId);

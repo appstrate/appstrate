@@ -24,6 +24,8 @@ async function fetchOrgs(viewAs?: string) {
   return data?.data ?? [];
 }
 
+type OrgList = Awaited<ReturnType<typeof fetchOrgs>>;
+
 /**
  * The org listing as it would be answered FOR `persona` — the `permissions`
  * every `can()` gate reads. The header is passed explicitly because the store
@@ -85,9 +87,8 @@ export function useOrg() {
 
   useAutoSelect(orgs.length > 0 ? orgs : undefined, currentOrgId, setOrgId);
 
-  const switchOrg = useCallback(
-    (orgId: string) => {
-      if (orgId === orgStore.getState().id) return;
+  const selectOrg = useCallback(
+    (orgId: string | null) => {
       // A persona is validated in ONE organization; carrying it across is not
       // a preview of anything. No-op unless one is active.
       exitViewAs();
@@ -98,12 +99,36 @@ export function useOrg() {
     [queryClient],
   );
 
+  const switchOrg = useCallback(
+    (orgId: string) => {
+      if (orgId !== orgStore.getState().id) selectOrg(orgId);
+    },
+    [selectOrg],
+  );
+
+  /**
+   * Step out of an org the caller left or deleted. Dropping it from the cached
+   * list first keeps auto-select from re-picking it while the list refetches.
+   */
+  const forgetOrg = useCallback(
+    (orgId: string) => {
+      const remaining = (queryClient.getQueryData<OrgList>(orgKeys.all) ?? []).filter(
+        (o) => o.id !== orgId,
+      );
+      queryClient.setQueryData<OrgList>(orgKeys.all, remaining);
+      selectOrg(remaining[0]?.id ?? null);
+      void queryClient.invalidateQueries({ queryKey: orgKeys.all });
+    },
+    [queryClient, selectOrg],
+  );
+
   const currentOrg = orgs.find((o) => o.id === currentOrgId) ?? null;
 
   return {
     currentOrg,
     orgs,
     switchOrg,
+    forgetOrg,
     loading: isLoading,
   };
 }

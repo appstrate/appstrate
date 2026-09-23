@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dashboard's publish dialog and `appstrate packages publish`.
 - **`buildDownloadHeaders`** takes a DRAFT input (`version: "draft"`, no `integrity`) beside a version input, which still requires its digest. A draft archive has no
   digest to publish, so it is served without `X-Integrity`.
+- **New event `ModuleEvents.onOrgMemberRemove(orgId, userId)`
+  (`@appstrate/core/module`)** — broadcast after a member left or was removed
+  from an organization, once the removal has committed. A module that granted
+  something to that `(orgId, userId)` pair drops it here, so it does not come
+  back if the same user is invited again. Optional to implement; must be
+  idempotent.
 
 ### Changed
 

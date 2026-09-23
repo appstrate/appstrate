@@ -76,13 +76,56 @@ export async function resolvePrimaryBillingEmail(
 }
 
 /**
- * Apply a validated patch and, when the primary address moved, push it to the
- * Stripe customer so Stripe's own receipts follow.
+ * Push the resolved primary address to the Stripe customer so Stripe's own
+ * receipts follow it.
  *
- * The Stripe write is best-effort and deliberately AFTER the local commit: the
- * contact is EE's record, and a Stripe outage must not refuse an address
- * change the org can see is correct. A failed push is logged; the next checkout
- * re-sends the address anyway.
+ * Best-effort, and every caller runs it AFTER its local commit: the contact is
+ * EE's record, and a Stripe outage must not refuse a change the org can see is
+ * correct. A failed push is logged; the next checkout re-sends the address
+ * anyway.
+ */
+async function pushPrimaryEmailToStripe(
+  orgId: string,
+  customerId: string,
+  billingEmail: string | null,
+): Promise<void> {
+  const email = await resolvePrimaryBillingEmail(orgId, billingEmail);
+  if (!email) return;
+  try {
+    await getStripe().customers.update(customerId, { email });
+  } catch (err) {
+    logger.error("Failed to push the billing contact to Stripe", {
+      orgId,
+      customerId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
+ * Re-push the owner fallback after a member left the org.
+ *
+ * The fallback is resolved live for EE's own emails but COPIED into Stripe, so
+ * when the owner it resolved to leaves, Stripe keeps sending receipts to an
+ * ex-member until something re-sends it. Only an org with no explicit
+ * `billing_email` and an existing Stripe customer has anything to re-send.
+ */
+export async function resyncOwnerFallbackToStripe(orgId: string): Promise<void> {
+  const db = getEeDb();
+  const [account] = await db
+    .select({
+      billingEmail: billingAccounts.billingEmail,
+      stripeCustomerId: billingAccounts.stripeCustomerId,
+    })
+    .from(billingAccounts)
+    .where(eq(billingAccounts.orgId, orgId));
+  if (!account || account.billingEmail !== null || !account.stripeCustomerId) return;
+  await pushPrimaryEmailToStripe(orgId, account.stripeCustomerId, null);
+}
+
+/**
+ * Apply a validated patch and, when the primary address moved, push it to the
+ * Stripe customer (see {@link pushPrimaryEmailToStripe}).
  *
  * Returns null when the org has no billing account.
  */
@@ -109,18 +152,7 @@ export async function updateBillingContact(
   if (!updated) return null;
 
   if (patch.billing_email !== undefined && updated.stripeCustomerId) {
-    const email = await resolvePrimaryBillingEmail(orgId, updated.billingEmail);
-    if (email) {
-      try {
-        await getStripe().customers.update(updated.stripeCustomerId, { email });
-      } catch (err) {
-        logger.error("Failed to push the billing contact to Stripe", {
-          orgId,
-          customerId: updated.stripeCustomerId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
+    await pushPrimaryEmailToStripe(orgId, updated.stripeCustomerId, updated.billingEmail);
   }
 
   return { billingEmail: updated.billingEmail, billingCc: updated.billingCc };
