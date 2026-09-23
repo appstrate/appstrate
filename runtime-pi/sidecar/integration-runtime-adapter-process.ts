@@ -48,6 +48,18 @@ import {
 } from "./integration-runtime-adapter.ts";
 
 /**
+ * True when `value` names `path` inside a longer string (`-i /run/secrets/key`).
+ * An occurrence followed by a path character names another file
+ * (`/run/secrets/key.pub`), not this one.
+ */
+function embedsMountPath(value: string, path: string): boolean {
+  for (let at = value.indexOf(path); at !== -1; at = value.indexOf(path, at + 1)) {
+    if (!/[A-Za-z0-9._-]/.test(value.charAt(at + path.length))) return true;
+  }
+  return false;
+}
+
+/**
  * Subprocess-mode interpreter mapping. Symmetric with
  * RUNNER_IMAGE_BY_TYPE in the docker adapter — adding a new runtime
  * requires updating both.
@@ -437,15 +449,16 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
         const holder = spec.connection?.id ?? null;
         const pointsAt = (path: string) =>
           Object.keys(procEnv).filter((key) => normalizeMountPath(procEnv[key]!) === path);
+        const declaredPaths = new Set(Object.keys(spec.fileMounts).map(normalizeMountPath));
         const relocate = new Set<string>();
-        for (const declared of Object.keys(spec.fileMounts)) {
-          const path = normalizeMountPath(declared);
+        for (const path of declaredPaths) {
           const current = declaredPathHolders.get(path);
           if (current === undefined || current === holder) continue;
           // Relocating is only sound when an env var names the file exactly;
           // a hardcoded or embedded path would read the other connection's.
           const embeds = Object.values(procEnv).some(
-            (value) => value.includes(path) && normalizeMountPath(value) !== path,
+            (value) =>
+              !declaredPaths.has(normalizeMountPath(value)) && embedsMountPath(value, path),
           );
           if (pointsAt(path).length === 0 || embeds) {
             throw new Error(

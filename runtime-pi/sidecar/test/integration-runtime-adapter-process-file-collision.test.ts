@@ -59,6 +59,7 @@ describe("process adapter — delivery.files across connections of one run", () 
     connection: { id: string; label: string },
     content: string,
     env: Record<string, string>,
+    extraFiles: Record<string, string> = {},
   ): IntegrationSpawnSpec {
     return {
       integrationId: "@appstrate/ssh",
@@ -71,7 +72,15 @@ describe("process adapter — delivery.files across connections of one run", () 
         server: { type: "bun", entry_point: "server.ts", packageId: "@appstrate/mcp-server-ssh" },
       },
       spawnEnv: { DUMP: join(dir, `${connection.id}.json`), ...env },
-      fileMounts: { [declaredPath]: { content_b64: b64(content), mode: "0600" } },
+      fileMounts: {
+        [declaredPath]: { content_b64: b64(content), mode: "0600" },
+        ...Object.fromEntries(
+          Object.entries(extraFiles).map(([path, body]) => [
+            path,
+            { content_b64: b64(body), mode: "0644" },
+          ]),
+        ),
+      },
     } as IntegrationSpawnSpec;
   }
 
@@ -175,18 +184,47 @@ describe("process adapter — delivery.files across connections of one run", () 
     expect(await readFile(declaredPath, "utf8")).toBe("web-key");
   });
 
-  it("points the env var at the scratch copy when the declared path cannot be written", async () => {
-    // A parent the sidecar may not write — `/run` for a non-root sidecar.
-    await mkdir(join(dir, "run"), { recursive: true });
-    await chmod(join(dir, "run"), 0o500);
-    const onlySpec = spec({ id: "conn-only", label: "only" }, "only-key", {
-      KEY_PATH: declaredPath,
-    });
-    const only = await dump(await spawn(onlySpec), onlySpec);
+  // chmod 0o500 does not stop root from writing, so the fallback never fires there.
+  it.skipIf(process.getuid?.() === 0)(
+    "points the env var at the scratch copy when the declared path cannot be written",
+    async () => {
+      // A parent the sidecar may not write — `/run` for a non-root sidecar.
+      await mkdir(join(dir, "run"), { recursive: true });
+      await chmod(join(dir, "run"), 0o500);
+      const onlySpec = spec({ id: "conn-only", label: "only" }, "only-key", {
+        KEY_PATH: declaredPath,
+      });
+      const only = await dump(await spawn(onlySpec), onlySpec);
 
-    expect(only.content).toBe("only-key");
-    expect(only.keyPath).not.toBe(declaredPath);
-    expect(Object.values(only.mountVars)).toEqual([only.keyPath]);
+      expect(only.content).toBe("only-key");
+      expect(only.keyPath).not.toBe(declaredPath);
+      expect(Object.values(only.mountVars)).toEqual([only.keyPath]);
+    },
+  );
+
+  it("repoints a second connection whose other declared file extends the colliding path", async () => {
+    // `key.pub` starts with `key` but names another declared file, not an
+    // embedding of `key`.
+    const pubPath = `${declaredPath}.pub`;
+    const make = (id: string, key: string) =>
+      spec(
+        { id, label: id },
+        key,
+        { KEY_PATH: declaredPath, PUB_PATH: pubPath },
+        {
+          [pubPath]: `${key}.pub`,
+        },
+      );
+    const webSpec = make("conn-web", "web-key");
+    const dbSpec = make("conn-db", "db-key");
+    const webRunner = await spawn(webSpec);
+    const db = await dump(await spawn(dbSpec), dbSpec);
+    await dump(webRunner, webSpec);
+
+    expect(db.content).toBe("db-key");
+    expect(db.keyPath).not.toBe(declaredPath);
+    expect(Object.values(db.mountVars)).toHaveLength(2);
+    expect(Object.values(db.mountVars)).toContain(db.keyPath);
   });
 
   it("refuses a second connection whose env embeds the colliding path", async () => {
