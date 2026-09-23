@@ -49,6 +49,7 @@ import {
   getCatalog,
   collectReferencedSchemas,
   operationGranted,
+  operationIdGranted,
   type CatalogOperation,
 } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
@@ -61,12 +62,7 @@ import {
 } from "../../services/files.ts";
 import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
-import {
-  VIEW_AS_HEADER,
-  agentCapabilities,
-  reaches,
-  type CorePermission,
-} from "@appstrate/core/permissions";
+import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
 import { asString, textResult } from "./tool-results.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 
@@ -86,9 +82,7 @@ export type McpToolName =
   | "get_runtime_capabilities"
   | "get_me";
 
-/** Outcome of an `invoke_operation` call, for audit + telemetry. `buildMcpTools`
- *  declares the tool only to a caller holding `mcp:invoke`, so every outcome
- *  here belongs to a call the handler ran. */
+/** Outcome of an `invoke_operation` call, for audit + telemetry. */
 export type McpInvokeOutcome =
   /** Client error before dispatch (unknown operationId, missing path params). */
   | "rejected"
@@ -105,10 +99,7 @@ export interface McpToolEvent {
   tool: McpToolName;
   /** Wall-clock duration of the handler, milliseconds. */
   durationMs: number;
-  /**
-   * Rows the caller is SHOWN: `search_operations` granted matches after
-   * `limit`, `list_files` projected rows. Not how many matched.
-   */
+  /** Rows returned to the caller (after `limit`), not rows matched. */
   shownCount?: number;
   /** `search_operations`: matches withheld for lack of permission. */
   deniedCount?: number;
@@ -140,12 +131,6 @@ export interface McpToolContext {
   /** The caller's org+space scope (org fixed by the endpoint/token; space resolved). */
   scope: SpaceScope;
   authorizeBundle: Parameters<typeof buildPackageFileTools>[0]["authorizeBundle"];
-  /**
-   * Whether the caller may OFFER a package from its home space — the predicate
-   * `import_package_file` needs to place a re-imported root the way the REST
-   * import route places it. Required: a caller who cannot be asked states the
-   * fail-closed answer itself.
-   */
   mayShareRoot: Parameters<typeof buildPackageFileTools>[0]["mayShareRoot"];
   /** In-process dispatcher (defaults to the platform app at request time). */
   dispatch: Dispatch;
@@ -314,12 +299,8 @@ function describePayload(
     path_params: op.pathParams,
     summary: op.summary,
     description: op.description,
-    // What the route's guards ask, and whether this caller holds it. The two
-    // spaces stay apart: `required_permissions` is what `granted` tests against
-    // the caller's own set, while a target-space one is decided where the path
-    // points — flattening them together pre-refuses a cross-space call the
-    // route would have allowed. `conditional` means a guard reads the loaded
-    // row or the target space, so a grant is a lower bound, not a promise.
+    // Only caller-space requirements decide `granted` — merging target-space ones
+    // would pre-refuse an allowed cross-space call. `conditional`: a lower bound.
     required_permissions: op.requirement.requirements,
     target_space_permissions: op.requirement.targetSpaceRequirements,
     conditional: op.requirement.conditional,
@@ -388,9 +369,7 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
       .filter(({ score }) => tokens.length === 0 || score > 0)
       .sort((a, b) => b.score - a.score || a.op.operationId.localeCompare(b.op.operationId));
 
-    // A match the caller may not invoke is answered, not hidden: the id and
-    // what it needs, no summary and no schema. Both halves keep score order
-    // and are capped at `limit`.
+    // A denied match is answered, not hidden — its id and requirement only.
     const granted: CatalogOperation[] = [];
     const denied: CatalogOperation[] = [];
     for (const { op } of scored) {
@@ -405,10 +384,7 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
       deniedCount: denied.length,
     });
 
-    // For a keyword search with at least one GRANTED hit, embed the top match's
-    // full invoke-ready definition so the common single-target case needs no
-    // follow-up describe_operation call. Only the top result carries the
-    // schema, to keep the response bounded; the rest stay compact.
+    // Only the top granted hit carries its schema: one describe saved, response bounded.
     const top = shown[0];
     const bestMatch =
       tokens.length > 0 && top
@@ -425,7 +401,6 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
         tags: op.tags,
       })),
       denied_total: denied.length,
-      // Caller-space only: a denied operation is denied on exactly those.
       denied: denied.slice(0, limit).map((op) => ({
         operation_id: op.operationId,
         required_permissions: op.requirement.requirements,
@@ -564,9 +539,7 @@ function interpolatePath(op: CatalogOperation, pathParams: Record<string, unknow
  *    server promise (the platform exposes SSE GET operations).
  *  - Non-text bodies (downloads, tarballs) are summarised, not decoded.
  *  - Text bodies are capped to bound context size.
- *
- * `extra` is merged into the payload by the caller that knows something about
- * the response the reader does not — today, what a 403 required.
+ *  - `extra` is merged into the payload (e.g. what a 403 required).
  */
 export async function readResponse(
   response: Response,
@@ -826,14 +799,11 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
       status: response.status,
       outcome: "invoked",
     });
-    // Only a 403 the permission set explains gets the permission answer. A 403
-    // the ROW decided (a file ACL, `draft_not_writable`) does not: the caller
-    // holds every listed permission, and the problem+json already names it.
+    // Only a 403 the permission set explains gets the permission answer; one the
+    // ROW decided (a file ACL, `draft_not_writable`) already names its reason.
     const denial =
       response.status === 403 && !operationGranted(op, ctx.permissions)
         ? {
-            // The caller-space set is the one that failed; the hint is emitted
-            // only when it does.
             required_permissions: op.requirement.requirements,
             hint:
               "Your role does not hold this permission. Report it to the user; do not retry " +
@@ -855,7 +825,7 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 
 /**
  * `run_and_wait` arguments that exist only for `kind:"inline"`. Declared only
- * to a caller whose `agentCapabilities` run level reaches `compose`. The launch allowlist
+ * to a caller whose surface `composes`. The launch allowlist
  * (`RUN_AND_WAIT_ARGUMENT_NAMES`) still knows them either way: an agent-only
  * caller that sends `kind:"inline"` anyway reaches the route and takes its 403,
  * the one refusal that owns the rule.
@@ -935,11 +905,8 @@ const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
   },
 };
 
-/**
- * `inline`: the caller's run level reaches `compose`. The route is the gate;
- * this only decides what the model is told.
- */
 function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToolDefinition {
+  // The route is the gate; this only decides what the model is told.
   // Inline-only descriptor spans are absent, not contradicted, for a caller
   // who cannot launch one.
   const descriptor: Tool = {
@@ -1505,40 +1472,58 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
 }
 
 /**
+ * What one request's caller is offered: the tools `buildMcpTools` declares AND
+ * the acts `buildServerInstructions` teaches, each read off the guards of the
+ * route it dispatches to (or, for `import_package_file`, stands in for). A
+ * withheld act is ABSENT from both — never declared then refused.
+ */
+export interface McpSurface {
+  /** `invoke_operation`; the transport already required `mcp:read`. */
+  invokes: boolean;
+  /** `run_and_wait`: launch AND read back — a run nobody can poll still bills. */
+  runs: boolean;
+  /** `run_and_wait` with `kind:"inline"`. */
+  composes: boolean;
+  /** Creating an agent through `invoke_operation`. */
+  authors: boolean;
+  listsFiles: boolean;
+  importsPackages: boolean;
+}
+
+export function deriveMcpSurface(permissions: ReadonlySet<string>, actor: Actor): McpSurface {
+  const granted = (operationId: string): boolean => operationIdGranted(operationId, permissions);
+  const invokes = permissions.has("mcp:invoke");
+  const runs = invokes && granted("runAgent") && granted("getRun");
+  return {
+    invokes,
+    runs,
+    composes: runs && granted("runInline"),
+    authors: invokes && granted("createAgent"),
+    listsFiles: granted("listFiles"),
+    // `import_package_file` calls the import service directly: it re-checks
+    // each package's `write`, but `mcp:invoke` and the user actor (the import
+    // is recorded under a user id) are checked here and nowhere else.
+    importsPackages: invokes && actor.type === "user" && granted("importBundle"),
+  };
+}
+
+/**
  * Build the per-request tool set. Handlers close over the caller's auth
  * context.
  *
- * There are no aliases for retired tool names or arguments. The server
- * advertises `tools: { listChanged: false }`, so a client holding a stale list
- * and calling an old name is behaving correctly; it gets `-32602 Unknown tool`
- * and re-lists — bounded and transient, where an alias would be a permanent
- * second dispatch path.
+ * No aliases for retired tool names: a stale client gets `-32602 Unknown tool`
+ * and re-lists, where an alias would be a permanent second dispatch path.
  */
-export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
-  const has = (permission: CorePermission): boolean => ctx.permissions.has(permission);
-  const invokes = ctx.permissions.has("mcp:invoke");
-  const { runLevel } = agentCapabilities(has, invokes);
-  // `list_files` dispatches to this operation, so its declaration reads the
-  // same route table; its absence would mean a rename — a programming error.
-  const listFiles = getCatalog().operations.get("listFiles");
-  if (!listFiles) {
-    throw new Error("Catalog has no `listFiles` operation — list_files dispatches to it");
-  }
-  // What this caller's permissions make structurally impossible is ABSENT, not
-  // declared then refused; a row-conditional act stays visible. The route
-  // decides every call, so this is context reduction, not a gate.
+export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition[] {
   return [
-    buildSearchTool(ctx, invokes),
-    buildDescribeTool(ctx, invokes),
-    ...(invokes ? [buildInvokeTool(ctx)] : []),
-    // The `run` level is both halves of `canRunAgents`: launching a run this
-    // caller could not read back bills an orphan — see that predicate's doc.
-    ...(reaches(runLevel, "run") ? [buildRunAndWaitTool(ctx, reaches(runLevel, "compose"))] : []),
-    ...(operationGranted(listFiles, ctx.permissions) ? [buildListFilesTool(ctx)] : []),
+    buildSearchTool(ctx, surface.invokes),
+    buildDescribeTool(ctx, surface.invokes),
+    ...(surface.invokes ? [buildInvokeTool(ctx)] : []),
+    ...(surface.runs ? [buildRunAndWaitTool(ctx, surface.composes)] : []),
+    ...(surface.listsFiles ? [buildListFilesTool(ctx)] : []),
     buildReadFileTool(ctx),
-    ...buildPackageFileTools(ctx),
-    // Dropped for a caller that injects the get_me payload into its own prompt;
-    // `search_operations` stays either way, for `best_match`'s inline schema.
+    ...buildPackageFileTools(ctx, surface.importsPackages),
+    // Redundant for a context-injecting caller; search_operations stays for `best_match`.
     ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx)]),
   ];
 }

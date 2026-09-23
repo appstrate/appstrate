@@ -146,7 +146,11 @@ would blow past any client's tool budget): the progressive-disclosure triple
 over the whole API, plus shortcuts for the things clients otherwise get wrong.
 `mcp:read` is the transport gate — every row asking for it alone is shown to
 anyone who can connect. The rows asking for more are **shown only when those
-grants hold**.
+grants hold**. The server reads those grants off the guards mounted on the
+operation each tool dispatches to (for `import_package_file`, the
+`importBundle` route it stands in for); the permissions below are what those
+guards require today. The package `:write` permissions are `agents:write`,
+`skills:write`, `integrations:write` and `mcp-servers:write` — any one will do.
 
 | Tool                       | Permission                                                   | What it does                                                                                                                                                                |
 | -------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -158,8 +162,8 @@ grants hold**.
 | `get_runtime_capabilities` | `mcp:read`                                                   | The MCP-server runtimes and manifest templates package authoring works from.                                                                                                |
 | `invoke_operation`         | `mcp:invoke`                                                 | Execute one operation (validated + authorized exactly as the equivalent REST call).                                                                                         |
 | `run_and_wait`             | `mcp:invoke` + `agents:run` + `runs:read` or `runs:read-all` | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and returns when it reaches a terminal status.                                 |
-| `list_files`               | the `listFiles` operation's own guard (`files:read` today)   | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                                                  |
-| `import_package_file`      | `mcp:invoke` + a package write permission (org users only)   | Import a validated archive as a package.                                                                                                                                    |
+| `list_files`               | `files:read`                                                 | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                                                  |
+| `import_package_file`      | `mcp:invoke` + a package `:write` permission; not end-users  | Import a validated archive as a package.                                                                                                                                    |
 
 `run_and_wait` needs both halves because it launches AND polls the run back
 under your own credentials: `agents:run` without a run-read permission would
@@ -167,10 +171,10 @@ bill a run you could never read. It declares the inline kind and its arguments
 (`manifest`, `prompt`, `context_files`) only to a caller who also holds
 `agents:write`; anyone else is offered `kind:"agent"` alone.
 
-The whole surface follows your permissions, derived from the guards the routes
-actually mount: the tool list, the operation index in the server instructions,
-`search_operations` (matches you cannot invoke come back under `denied` with
-their `required_permissions`, never mixed into `operations`) and
+The whole surface follows your permissions the same way: the tool list, the
+operation index in the server instructions, `search_operations` (matches you
+cannot invoke come back under `denied` with their `required_permissions`, never
+mixed into `operations`) and
 `describe_operation` (`granted`, `required_permissions`,
 `target_space_permissions`, `conditional`). What your role makes impossible is
 **not shown** rather than shown and refused — but an operation your permission

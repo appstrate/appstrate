@@ -5,7 +5,7 @@ All notable changes to `@appstrate/core` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [12.0.0]
+## [Unreleased]
 
 ### Added
 
@@ -27,6 +27,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `insufficient_scopes`) or `duplicate_connection_label`. Additive.
 
 ### Changed
+
+- **A guard carrying the boolean `appstrate.permissionGuard` marker but no
+  `PERMISSION_REQUIREMENT_MARKER` requirement is no longer read as row-aware**
+  — the platform now reads it as naming no requirement, where 11.1.0 read it as
+  conditional. A middleware whose verdict comes from the row it loads declares
+  that with the registry symbol `Symbol.for("appstrate.rowAuthority")` set to
+  `true` on the mounted function
+  (`Object.defineProperty(mw, Symbol.for("appstrate.rowAuthority"), { value: true })`);
+  being a registry symbol, a module stamps it without importing the platform.
+- **BREAKING: every operation a module's `openApiPaths()` documents must be
+  served by a terminal route handler, or the platform refuses to boot.** A
+  documented operation no route served used to fail only in the MCP tool
+  catalog; it now stops the boot, so an out-of-tree module that documents an
+  operation it does not serve crash-loops on upgrade. Middleware alone does not
+  serve, nor does a sub-app attached with `mount()`. Before upgrading, forward
+  each such operation from a route handler,
+  `router.all("/x/*", (c) => handler(c.req.raw))`, or remove it from
+  `openApiPaths()`.
 
 - **BREAKING: an integration binds a SET of connections, not one**
   (`@appstrate/core/integration`, `@appstrate/core/sidecar-types`,
@@ -56,13 +74,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first connection": the array is the only accepted shape, and a value left in
   the old one fails loudly. Wrap each existing value in an array.
 
-- **BREAKING: `ConnectionResolutionErrorCode` gains `duplicate_connection_label`**
-  (`@appstrate/core/integration`) — raised when the connections bound to one
-  integration do not carry distinct labels. The label is the handle the agent
-  names a connection by, so a colliding set is unaddressable. It carries
+- **BREAKING: `ConnectionResolutionErrorCode` gains `duplicate_connection_label`
+  and `auth_serves_no_selected_tool`** (`@appstrate/core/integration`).
+  `duplicate_connection_label` is raised when the connections bound to one
+  integration do not carry distinct labels — the label is the handle the agent
+  names a connection by, so a colliding set is unaddressable; it carries
   `candidateConnections` (the rows sharing a label), the same field
-  `must_choose_connection` uses. Exhaustive `switch`es over the code must handle
-  it.
+  `must_choose_connection` uses. `auth_serves_no_selected_tool` is raised when a
+  bound connection's auth exposes none of the agent's selected tools; it
+  carries that `connectionId`. Exhaustive `switch`es over the code must handle
+  both.
 
 - **BREAKING: a connection label is never null.** `ConnectionCandidate.label`
   (`@appstrate/core/integration`) and `ResolutionFieldError.candidate_connections[].label`

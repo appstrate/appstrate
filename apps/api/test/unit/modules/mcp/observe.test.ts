@@ -8,19 +8,16 @@
  * (covered by the integration suite).
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
+import { getCatalog, type CatalogOperation } from "../../../../src/modules/mcp/catalog.ts";
 import {
-  getCatalog,
-  resetCatalog,
-  type CatalogOperation,
-} from "../../../../src/modules/mcp/catalog.ts";
-import {
-  buildMcpTools,
   type Dispatch,
+  type McpToolContext,
   type McpToolEvent,
 } from "../../../../src/modules/mcp/tools.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
+import { toolsFor } from "./helpers.ts";
 
 // `buildMcpTools` decides what this caller is shown from the guards mounted on
 // the routes, so it reads the route table.
@@ -41,7 +38,7 @@ function makeTools(permissions: string[], status = 200) {
       status,
       headers: { "content-type": "application/json" },
     });
-  const tools = buildMcpTools({
+  const ctx: McpToolContext = {
     origin: "https://test.local",
     authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
     permissions: new Set(permissions),
@@ -51,14 +48,13 @@ function makeTools(permissions: string[], status = 200) {
     scope: { orgId: "org_1", spaceId: "spc_1" },
     authorizeBundle: async () => {},
     mayShareRoot: async () => false,
-  });
+  };
+  const tools = toolsFor(ctx);
   const byName = new Map(tools.map((t) => [t.descriptor.name, t]));
   return { byName, events };
 }
 
 describe("observe — search_operations", () => {
-  beforeEach(() => resetCatalog());
-
   it("emits a search event carrying the shown count and a duration", async () => {
     const { byName, events } = makeTools(["mcp:read"]);
     await byName.get("search_operations")!.handler({ query: "agent", limit: 3 }, noExtra);
@@ -86,8 +82,6 @@ describe("observe — search_operations", () => {
 });
 
 describe("observe — describe_operation", () => {
-  beforeEach(() => resetCatalog());
-
   it("emits a describe event for a known operation", async () => {
     const op = firstOp(() => true);
     const { byName, events } = makeTools(["mcp:read"]);
@@ -109,8 +103,6 @@ describe("observe — describe_operation", () => {
 });
 
 describe("observe — invoke_operation", () => {
-  beforeEach(() => resetCatalog());
-
   it("emits outcome=invoked with method/path/status after dispatch", async () => {
     const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
     const { byName, events } = makeTools(["mcp:read", "mcp:invoke"], 200);

@@ -37,7 +37,6 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve, join } from "node:path";
 import type { AppEnv } from "../../types/index.ts";
 import { logger } from "../logger.ts";
-import { setPlatformApp } from "../platform-app.ts";
 import {
   registerOrchestrator,
   _resetOrchestratorRegistryForTesting,
@@ -691,14 +690,6 @@ export function getModulePublicPaths(): ReadonlySet<string> {
  * catch-all, otherwise the catch-all shadows every module-owned path.
  */
 export function registerModuleRoutes(app: Hono<AppEnv>): void {
-  // Register the app so modules can issue authenticated in-process requests
-  // back through the platform (e.g. the `mcp` module re-enters via `app.fetch`
-  // to reuse the auth pipeline + RBAC). Generic capability — set here because
-  // this is the single production site where every route (core + module) is
-  // mounted on one app instance. It is registered BEFORE the module routers
-  // below mount, so every reader must run at request time, never at boot
-  // (`lib/platform-app.ts`).
-  setPlatformApp(app);
   for (const mod of _modules.values()) {
     const router = mod.createRouter?.();
     if (router) {

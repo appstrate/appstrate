@@ -1,26 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What a route requires, read off Hono's route table — the same mounts that
- * decide it (`middleware/handler-marker.ts`). Matching follows Hono's, since
- * several operations have no route of their own: a prefix mount (`*`) with a
- * concrete method SERVES its subtree, bare prefix included; a wildcard `ALL`
- * mount only DECORATES, contributing its guard without making anything exist,
- * while an exact-path one serves every method; a root `/*` entry with a
- * concrete method is the SPA fallback and is discarded outright, since reading
- * it would answer every GET template ever spelled — an `ALL /*` is kept, since
- * a guard mounted that way really does gate everything beneath it. A guard mounted
- * after a space re-scope (`markSpaceRescope`) is enforced in the space the
- * PATH names, so it is reported separately and never filters.
+ * What a route requires, read off the handler markers of Hono's route table
+ * and matched segment by segment as Hono matches, since several operations
+ * have no route of their own. An operation is SERVED by the first terminal
+ * handler that matches all of it, whatever its method or path shape; middleware
+ * matching before it only adds its guard. Guards mounted after a space
+ * re-scope (`markSpaceRescope`) are enforced in the space the PATH names, so
+ * they are reported apart and never filter.
  */
 
 import { PERMISSION_REQUIREMENT_MARKER } from "@appstrate/core/permissions";
-import { readHandlerMarker } from "../middleware/handler-marker.ts";
-import {
-  isPermissionGuard,
-  isRowAuthority,
-  isSpaceRescope,
-} from "../middleware/require-permission.ts";
+import { findTargetHandler, isMiddleware } from "hono/utils/handler";
+import { getPattern, splitPath, splitRoutingPath } from "hono/utils/url";
+import { hasHandlerMarker, markHandler, readHandlerMarker } from "../middleware/handler-marker.ts";
+import { isRowAuthority, isSpaceRescope } from "../middleware/require-permission.ts";
 
 export interface RouteRequirement {
   /** One per guard evaluated in the caller's own space, mount order, all required; `"a|b"` is a disjunction. Filters. */
@@ -44,54 +38,61 @@ export type RouteRequirementLookup = (
   pathTemplate: string,
 ) => RouteRequirement | undefined;
 
-const PARAM_CHAR = /[A-Za-z0-9_]/;
+type Token =
+  | { readonly kind: "literal"; readonly value: string }
+  | { readonly kind: "param"; readonly accepts: RegExp | null }
+  | { readonly kind: "wildcard" };
 
-/** Hono's `:param` (constrained or not) in OpenAPI `{param}` form, so the join
- *  between the route table and the spec needs no second grammar. */
-function openApiPath(path: string): string {
-  let out = "";
-  let i = 0;
-  while (i < path.length) {
-    if (path.charAt(i) !== ":") {
-      out += path.charAt(i);
-      i += 1;
-      continue;
-    }
-    let end = i + 1;
-    while (end < path.length && PARAM_CHAR.test(path.charAt(end))) end += 1;
-    const name = path.slice(i + 1, end);
-    if (name === "") {
-      out += ":";
-      i += 1;
-      continue;
-    }
-    // `:packageId{@[^/]+/[^/]+}` — a constraint holds `/` and nested braces.
-    if (path.charAt(end) === "{") {
-      let depth = 1;
-      end += 1;
-      while (end < path.length && depth > 0) {
-        const char = path.charAt(end);
-        if (char === "{") depth += 1;
-        else if (char === "}") depth -= 1;
-        end += 1;
-      }
-    }
-    out += `{${name}}`;
-    i = end;
-  }
-  return out;
-}
+/** One segment of an OpenAPI template; `null` is a `{param}`, i.e. any value. */
+type TemplateSegment = string | null;
 
-/** Pre-rewritten so a lookup only compares; exactly one of the two paths is set. */
+/** `partial`: the entry runs for some values of a `{param}` and not others. */
+type Match = "none" | "partial" | "full";
+
+const WILDCARD: Token = Object.freeze({ kind: "wildcard" });
+
 interface TableEntry {
   readonly method: string;
-  readonly exact: string | null;
-  readonly prefix: string | null;
+  /** Without the trailing `*` of a prefix mount. */
+  readonly tokens: readonly Token[];
+  readonly prefix: boolean;
+  readonly serves: boolean;
   readonly requirement: string | null;
-  /** The handler decides on the row it loads — a guard stamping no requirement, or `rowAuthority()`. */
   readonly rowDecides: boolean;
-  /** Everything matched after this entry is enforced in the space the path names. */
   readonly rescope: boolean;
+}
+
+const FALLBACK = Symbol.for("appstrate.fallback");
+
+/** Mark a catch-all terminal handler (unknown-path 404, SPA shell): it answers
+ *  whatever it matches, yet serves no documented operation. */
+export function markFallback<T extends object>(handler: T): T {
+  return markHandler(handler, FALLBACK);
+}
+
+/** Hono's convention, not its dispatch: a handler declaring `next` is
+ *  middleware (`isMiddleware` reads `length > 1`). So a middleware written with
+ *  rest args or a defaulted `next` reads as serving, and `app.mount()`, whose
+ *  handler declares `next`, never serves. Read on the target, since
+ *  `app.route()` wraps a sub-app's handlers in a `(c, next)` shim when it has
+ *  an `onError`. */
+export function servesOperation(handler: unknown): boolean {
+  if (typeof handler !== "function") return false;
+  const target = findTargetHandler(handler as (...args: never[]) => unknown);
+  return !isMiddleware(target) && !hasHandlerMarker(handler, FALLBACK);
+}
+
+function tokenize(path: string): Token[] {
+  return splitRoutingPath(path).map((label): Token => {
+    const pattern = getPattern(label);
+    if (pattern === "*") return WILDCARD;
+    if (pattern === null) return { kind: "literal", value: label };
+    return { kind: "param", accepts: pattern[2] === true ? null : pattern[2] };
+  });
+}
+
+function templateSegments(pathTemplate: string): TemplateSegment[] {
+  return splitPath(pathTemplate).map((segment) => (/^\{[^{}]+\}$/.test(segment) ? null : segment));
 }
 
 export function deriveRouteRequirements(
@@ -99,30 +100,28 @@ export function deriveRouteRequirements(
 ): RouteRequirementLookup {
   const entries: TableEntry[] = [];
   for (const route of routes) {
-    const path = openApiPath(route.path);
-    // The SPA fallback only. An `ALL /*` mount decorates without serving, so
-    // dropping it would silently discard a guard covering the whole app.
-    if (path === "/*" && route.method.toUpperCase() !== "ALL") continue;
-    const wildcard = path.endsWith("*");
+    const method = route.method.toUpperCase();
+    const tokens = tokenize(route.path);
+    const prefix = tokens.at(-1)?.kind === "wildcard";
     const required = readHandlerMarker(route.handler, PERMISSION_REQUIREMENT_MARKER);
-    const requirement = typeof required === "string" && required.length > 0 ? required : null;
     entries.push({
-      method: route.method.toUpperCase(),
-      exact: wildcard ? null : path,
-      prefix: wildcard ? path.slice(0, -1) : null,
-      requirement,
-      rowDecides:
-        (requirement === null && isPermissionGuard(route.handler)) || isRowAuthority(route.handler),
+      method,
+      tokens: prefix ? tokens.slice(0, -1) : tokens,
+      prefix,
+      serves: servesOperation(route.handler),
+      requirement: typeof required === "string" && required.length > 0 ? required : null,
+      rowDecides: isRowAuthority(route.handler),
       rescope: isSpaceRescope(route.handler),
     });
   }
-  return (method, pathTemplate) => lookup(entries, method.toUpperCase(), openApiPath(pathTemplate));
+  return (method, pathTemplate) =>
+    lookup(entries, method.toUpperCase(), templateSegments(pathTemplate));
 }
 
 function lookup(
   entries: readonly TableEntry[],
   method: string,
-  template: string,
+  template: readonly TemplateSegment[],
 ): RouteRequirement | undefined {
   let served = false;
   let rescoped = false;
@@ -132,15 +131,21 @@ function lookup(
   // Mount order, so a guard is attributed to the space in force where it sits.
   for (const entry of entries) {
     if (entry.method !== "ALL" && entry.method !== method) continue;
-    const exactHit = entry.exact !== null && entry.exact === template;
-    if (!exactHit && !coversPrefix(entry.prefix, template)) continue;
-    if (exactHit || entry.method !== "ALL") served = true;
+    const match = matches(entry, template);
+    if (match === "none") continue;
     if (entry.rescope) rescoped = true;
+    if (entry.rowDecides) conditional = true;
     if (entry.requirement !== null) {
-      // De-duplicated: a guard reached twice is one requirement to the model.
+      // A guard reached twice is one requirement to the model.
       const into = rescoped ? targetSpaceRequirements : requirements;
       if (!into.includes(entry.requirement)) into.push(entry.requirement);
-    } else if (entry.rowDecides) conditional = true;
+    }
+    // Hono answers with the first terminal handler; nothing after it runs.
+    // A partial one leaves the other values to later entries, guards included.
+    if (entry.serves) {
+      served = true;
+      if (match === "full") break;
+    }
   }
   if (!served) return undefined;
   if (targetSpaceRequirements.length > 0) conditional = true;
@@ -152,15 +157,38 @@ function lookup(
   });
 }
 
-function coversPrefix(prefix: string | null, template: string): boolean {
-  if (prefix === null) return false;
-  if (template.startsWith(prefix)) return true;
-  return prefix.endsWith("/") && template === prefix.slice(0, -1);
+/** Hono's match, lifted from a URL to a template: a `{param}` also stands for
+ *  values a mount literal does not name, so a literal never covers it, and a
+ *  constrained mount param covers only the values its pattern accepts. */
+function matches(entry: TableEntry, template: readonly TemplateSegment[]): Match {
+  const { tokens } = entry;
+  if (entry.prefix ? template.length < tokens.length : template.length !== tokens.length) {
+    return "none";
+  }
+  let match: Match = "full";
+  for (const [i, segment] of template.slice(0, tokens.length).entries()) {
+    const covered = tokenCovers(tokens[i]!, segment);
+    if (covered === "none") return "none";
+    if (covered === "partial") match = "partial";
+  }
+  return match;
+}
+
+function tokenCovers(token: Token, segment: TemplateSegment): Match {
+  switch (token.kind) {
+    case "wildcard":
+      return "full";
+    case "literal":
+      return segment === token.value ? "full" : "none";
+    case "param":
+      if (token.accepts === null) return "full";
+      if (segment === null) return "partial";
+      return token.accepts.test(segment) ? "full" : "none";
+  }
 }
 
 /** Every requirement holds, a `|` entry on any alternative. Target-space and
- *  row-conditional requirements are granted here — only the space or the row
- *  the call names could still refuse. */
+ *  row-conditional routes count as granted: only that space or row can refuse. */
 export function isGranted(
   requirement: RouteRequirement,
   permissions: ReadonlySet<string>,
