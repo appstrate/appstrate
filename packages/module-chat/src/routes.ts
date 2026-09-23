@@ -55,7 +55,7 @@ export const renameSessionSchema = z.object({
   title: z.string().min(1).max(200),
 });
 
-/** An unknown id is a pin the turn reports as unresolved, never a 400. */
+/** An unknown id is a pin the turn names as unavailable, never a 400. */
 export const sessionSkillsSchema = z
   .object({
     skill_catalogue: z.boolean(),

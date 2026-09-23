@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
+import { MAX_REQUESTED_SKILLS } from "../../services/space-packages.ts";
 
 /**
  * User-scoped identity routes (`/api/me/*`).
@@ -471,10 +472,12 @@ export const mePaths = {
           required: false,
           description:
             "Comma-separated `@scope/name` skill ids to resolve by exact id into " +
-            "`requested_skills`, past the `skills` cap. At most 30 distinct ids; a malformed " +
-            "id or more than 30 is a 400, an unknown or unreadable id lands in `unresolved_skills`.",
+            `\`requested_skills\`, past the \`skills\` cap. At most ${MAX_REQUESTED_SKILLS} distinct ids; ` +
+            `a malformed id or more than ${MAX_REQUESTED_SKILLS} distinct ids is a 400; an unknown, ` +
+            "inactive or unreadable id is absent from " +
+            "`requested_skills`.",
           schema: { type: "string" },
-          example: "@appstrate/copilot,@appstrate/web-search",
+          example: "@acme/tone,@acme/pdf",
         },
       ],
       responses: {
@@ -497,7 +500,6 @@ export const mePaths = {
                   "skills_truncated",
                   "skills_total",
                   "requested_skills",
-                  "unresolved_skills",
                 ],
                 properties: {
                   user: {
@@ -658,16 +660,9 @@ export const mePaths = {
                     type: "array",
                     description:
                       "Skills named by the `skills` query parameter that resolved in this space " +
-                      "(past the `skills` cap), sorted by `package_id`. Empty without the parameter " +
+                      "(past the `skills` cap), in no particular order. Empty without the parameter " +
                       "or without `skills:read`.",
                     items: skillHintSchema,
-                  },
-                  unresolved_skills: {
-                    type: "array",
-                    description:
-                      "Requested ids that did not resolve (unknown, not active here, or out of " +
-                      "reach), in request order. Empty without `skills:read`.",
-                    items: { type: "string" },
                   },
                 },
               },
@@ -724,7 +719,6 @@ export const mePaths = {
                     source: "system",
                   },
                 ],
-                unresolved_skills: ["@acme/retired"],
               },
             },
           },

@@ -25,7 +25,6 @@ function resolve(
   return resolveChatSkills({
     selection: { ...DEFAULT_SKILL_SELECTION, ...selection },
     requested: [],
-    unresolved: [],
     catalogue: [],
     catalogueTruncated: false,
     ...rest,
@@ -72,11 +71,11 @@ describe("resolveChatSkills", () => {
     expect(out.catalogueTruncated).toBe(false);
   });
 
-  it("notices an unresolved pin, and only a pin", () => {
+  it("notices a pin the context did not resolve, and nothing else", () => {
     const out = resolve({
       selection: { pinned: ["@a/gone-pin", "@a/here"] },
       requested: [hint("@a/here")],
-      unresolved: ["@a/gone-pin", "@a/not-asked"],
+      catalogue: [hint("@a/other")],
     });
     expect(out.pinned.map((s) => s.package_id)).toEqual(["@a/here"]);
     expect(out.notices).toHaveLength(1);
@@ -86,7 +85,6 @@ describe("resolveChatSkills", () => {
   it("orders notices deterministically and de-duplicates the pin list", () => {
     const out = resolve({
       selection: { pinned: ["@a/zulu", "@a/alpha", "@a/zulu"] },
-      unresolved: ["@a/zulu", "@a/alpha"],
     });
     expect(out.notices).toHaveLength(2);
     expect(out.notices[0]).toContain("@a/alpha");

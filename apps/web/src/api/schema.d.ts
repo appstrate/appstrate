@@ -13248,8 +13248,8 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description Comma-separated `@scope/name` skill ids to resolve by exact id into `requested_skills`, past the `skills` cap. At most 30 distinct ids; a malformed id or more than 30 is a 400, an unknown or unreadable id lands in `unresolved_skills`.
-                 * @example @appstrate/copilot,@appstrate/web-search
+                 * @description Comma-separated `@scope/name` skill ids to resolve by exact id into `requested_skills`, past the `skills` cap. At most 30 distinct ids; a malformed id or more than 30 distinct ids is a 400; an unknown, inactive or unreadable id is absent from `requested_skills`.
+                 * @example @acme/tone,@acme/pdf
                  */
                 skills?: string;
             };
@@ -13342,9 +13342,6 @@ export interface operations {
                      *           "home_writable": false,
                      *           "source": "system"
                      *         }
-                     *       ],
-                     *       "unresolved_skills": [
-                     *         "@acme/retired"
                      *       ]
                      *     }
                      */
@@ -13422,7 +13419,7 @@ export interface operations {
                         skills_truncated: boolean;
                         /** @description Total active skills before the cap. */
                         skills_total: number;
-                        /** @description Skills named by the `skills` query parameter that resolved in this space (past the `skills` cap), sorted by `package_id`. Empty without the parameter or without `skills:read`. */
+                        /** @description Skills named by the `skills` query parameter that resolved in this space (past the `skills` cap), in no particular order. Empty without the parameter or without `skills:read`. */
                         requested_skills: {
                             /** @description Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills. */
                             package_id: string;
@@ -13437,8 +13434,6 @@ export interface operations {
                             /** @enum {string} */
                             source: "system" | "local";
                         }[];
-                        /** @description Requested ids that did not resolve (unknown, not active here, or out of reach), in request order. Empty without `skills:read`. */
-                        unresolved_skills: string[];
                     };
                 };
             };

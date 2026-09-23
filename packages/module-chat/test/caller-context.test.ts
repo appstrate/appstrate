@@ -387,7 +387,6 @@ describe("formatCallerContext", () => {
         user: { name: "Ada" },
         org: { role: "member" },
         requested_skills: [],
-        unresolved_skills: ["@acme/gone"],
       },
       { ...BASE_OPTS, skills: { catalogue: true, pinned: ["@acme/gone"] } },
     );
@@ -684,7 +683,6 @@ describe("formatCallerContext", () => {
         { package_id: "@acme/mine", display_name: "Mine" },
       ],
       skills: [{ package_id: "@acme/pdf", display_name: "PDF" }],
-      unresolved_skills: ["@acme/gone"],
     };
     const opts = {
       ...BASE_OPTS,
@@ -907,10 +905,12 @@ describe("buildCallerContextBlock", () => {
       deps,
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
-      skills: DEFAULT_SKILL_SELECTION,
+      // Nothing was resolved, so a pin must not read as unavailable.
+      skills: { catalogue: true, pinned: ["@acme/mine"] },
     });
     expect(out).toContain("Ada (ada@acme.com)");
     expect(out).toContain("Current space: `spc_1`");
+    expect(out).not.toContain("@acme/mine");
   });
 
   it("degrades to no block on any other dispatch failure", async () => {

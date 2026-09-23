@@ -9,6 +9,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
+import { MAX_REQUESTED_SKILLS } from "../../../src/services/space-packages.ts";
 import { MAX_PINNED_SKILLS } from "../../../../../packages/module-chat/src/skills.ts";
 
 const app = getTestApp();
@@ -20,7 +21,6 @@ const UNKNOWN = "@ctxskill/nope";
 interface ContextBody {
   skills: { package_id: string }[];
   requested_skills: { package_id: string; version: string | null; source: string }[];
-  unresolved_skills: string[];
 }
 
 async function createSkill(ctx: TestContext, id: string) {
@@ -53,7 +53,7 @@ describe("GET /api/me/context?skills=", () => {
     await createSkill(ctx, SECOND);
   });
 
-  it("resolves both skills by exact id, and reports the unknown one", async () => {
+  it("resolves both skills by exact id, and leaves the unknown one out", async () => {
     const query = encodeURIComponent([UNKNOWN, FIRST, SECOND].join(","));
     const res = await app.request(`/api/me/context?skills=${query}`, {
       headers: authHeaders(ctx),
@@ -61,25 +61,14 @@ describe("GET /api/me/context?skills=", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as ContextBody;
 
-    expect(body.requested_skills.map((s) => s.package_id)).toEqual([FIRST, SECOND]);
+    expect(body.requested_skills.map((s) => s.package_id).sort()).toEqual([FIRST, SECOND]);
     expect(body.requested_skills[0]?.version).toBe("1.0.0");
-    expect(body.unresolved_skills).toEqual([UNKNOWN]);
   });
 
-  it("sorts resolved skills by package id whatever order they were asked in", async () => {
-    const res = await app.request(
-      `/api/me/context?skills=${encodeURIComponent([SECOND, FIRST].join(","))}`,
-      { headers: authHeaders(ctx) },
-    );
-    const body = (await res.json()) as ContextBody;
-    expect(body.requested_skills.map((s) => s.package_id)).toEqual([FIRST, SECOND]);
-  });
-
-  it("returns both fields empty when the parameter is absent", async () => {
+  it("returns no requested skill when the parameter is absent", async () => {
     const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
     const body = (await res.json()) as ContextBody;
     expect(body.requested_skills).toEqual([]);
-    expect(body.unresolved_skills).toEqual([]);
   });
 
   it("answers nothing about the requested skills without `skills:read`", async () => {
@@ -97,18 +86,27 @@ describe("GET /api/me/context?skills=", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as ContextBody;
     expect(body.requested_skills).toEqual([]);
-    expect(body.unresolved_skills).toEqual([]);
     expect(body.skills).toEqual([]);
   });
 
-  it("accepts the largest request the chat can build: a full pin set", async () => {
-    const ids = Array.from({ length: MAX_PINNED_SKILLS }, (_, i) => `@ctxskill/pin-${i}`);
-    const res = await app.request(`/api/me/context?skills=${encodeURIComponent(ids.join(","))}`, {
+  it("accepts the largest request the chat can build, and refuses one id past the cap", async () => {
+    const pins = [
+      FIRST,
+      ...Array.from({ length: MAX_PINNED_SKILLS - 1 }, (_, i) => `@ctxskill/pin-${i}`),
+    ];
+    const ok = await app.request(`/api/me/context?skills=${encodeURIComponent(pins.join(","))}`, {
       headers: authHeaders(ctx),
     });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as ContextBody;
-    expect(body.unresolved_skills).toHaveLength(ids.length);
+    expect(ok.status).toBe(200);
+    const body = (await ok.json()) as ContextBody;
+    expect(body.requested_skills.map((s) => s.package_id)).toEqual([FIRST]);
+
+    const over = Array.from({ length: MAX_REQUESTED_SKILLS + 1 }, (_, i) => `@ctxskill/x-${i}`);
+    const refused = await app.request(
+      `/api/me/context?skills=${encodeURIComponent(over.join(","))}`,
+      { headers: authHeaders(ctx) },
+    );
+    expect(refused.status).toBe(400);
   });
 
   it("rejects the whole parameter when an id is not @scope/name", async () => {

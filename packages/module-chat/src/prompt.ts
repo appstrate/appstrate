@@ -21,7 +21,12 @@ import type { PrincipalKind } from "@appstrate/core/module";
 import { logger } from "./logger.ts";
 import { reaches, type TurnCapabilities } from "./capabilities.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
-import { resolveChatSkills, type ChatSkillSelection, type SkillHint } from "./skills.ts";
+import {
+  DEFAULT_SKILL_SELECTION,
+  resolveChatSkills,
+  type ChatSkillSelection,
+  type SkillHint,
+} from "./skills.ts";
 
 /** Structural mirror of `SpaceRoleRef` (`apps/api/src/lib/space-role.ts`) — not importable from here. */
 type SpaceRoleRefLike =
@@ -229,7 +234,6 @@ interface CallerContext {
   skills_truncated?: boolean | null;
   /** The pins, resolved by exact id past the `skills` cap. */
   requested_skills?: SkillHint[] | null;
-  unresolved_skills?: string[] | null;
 }
 
 /**
@@ -320,7 +324,6 @@ export function formatCallerContext(
   const skills = resolveChatSkills({
     selection: opts.skills,
     requested: ctx.requested_skills ?? [],
-    unresolved: ctx.unresolved_skills ?? [],
     catalogue: ctx.skills ?? [],
     catalogueTruncated: ctx.skills_truncated ?? false,
   });
@@ -511,7 +514,8 @@ export async function buildCallerContextBlock(
   const orgSlug = c.get("orgSlug");
 
   // Identity/role straight off the request context — the fallback when the
-  // space-scoped read cannot answer.
+  // space-scoped read cannot answer. It resolved no pin, so it names none: a
+  // pin absent from `requested_skills` would otherwise read as unavailable.
   const identityOnly = (): string =>
     formatCallerContext(
       {
@@ -525,7 +529,7 @@ export async function buildCallerContextBlock(
         spaceRole,
         spaceId,
         permissions: args.permissions,
-        skills,
+        skills: DEFAULT_SKILL_SELECTION,
       },
     );
 

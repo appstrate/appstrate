@@ -878,27 +878,24 @@ export async function listActiveSkills(
   return { skills: items, truncated, total };
 }
 
-/** Exact-id resolution of skill hints, past the listing's cap, sorted for a stable prompt. */
+/** Cap on one {@link resolveSkillsByIds} call; above the chat's pin ceiling, it bounds one query. */
+export const MAX_REQUESTED_SKILLS = 30;
+
+/** Exact-id resolution of skill hints, past the listing's cap; an id that resolves nothing is absent. */
 export async function resolveSkillsByIds(
   scope: SpaceScope,
   ids: readonly string[],
   opts?: HintOptions,
-): Promise<{ resolved: ActiveSkill[]; unresolved: string[] }> {
-  if (ids.length === 0) return { resolved: [], unresolved: [] };
+): Promise<ActiveSkill[]> {
+  if (ids.length === 0) return [];
   const rows = await db
     .select(hintColumns)
     .from(packages)
     .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
     .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
     .leftJoin(packageDistTags, latestDistTagJoin())
-    .where(and(activePackagesFilter(scope, "skill"), inArray(packages.id, [...ids])))
-    .orderBy(packages.id);
-
-  const found = new Set(rows.map((row) => row.id));
-  return {
-    resolved: rows.map((row) => projectPackageHint(row, projectActiveSkill, opts?.homeWritable)),
-    unresolved: ids.filter((id) => !found.has(id)),
-  };
+    .where(and(activePackagesFilter(scope, "skill"), inArray(packages.id, [...ids])));
+  return rows.map((row) => projectPackageHint(row, projectActiveSkill, opts?.homeWritable));
 }
 
 /**

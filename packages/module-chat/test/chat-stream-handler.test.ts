@@ -478,7 +478,6 @@ describe("handleChatStream", () => {
           description: "fixture",
           version: null,
         })),
-        unresolved_skills: [],
       });
     };
 

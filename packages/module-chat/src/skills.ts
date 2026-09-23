@@ -23,9 +23,8 @@ export const DEFAULT_SKILL_SELECTION: ChatSkillSelection = { catalogue: true, pi
 
 export interface ResolveChatSkillsInput {
   selection: ChatSkillSelection;
-  /** `/api/me/context` fields: `requested_skills`, `unresolved_skills`, `skills`. */
+  /** `/api/me/context` fields: `requested_skills` (the pins that resolved) and `skills`. */
   requested: readonly SkillHint[];
-  unresolved: readonly string[];
   catalogue: readonly SkillHint[];
   catalogueTruncated: boolean;
 }
@@ -51,9 +50,8 @@ export function resolveChatSkills(input: ResolveChatSkillsInput): ResolvedChatSk
   }
 
   // A pin is the user's own act, so the model is told when it no longer resolves.
-  const unresolved = new Set(input.unresolved);
   const notices = [...wanted]
-    .filter((id) => unresolved.has(id))
+    .filter((id) => !byId.has(id))
     .sort()
     .map(
       (id) =>

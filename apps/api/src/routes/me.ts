@@ -66,6 +66,7 @@ import { logger } from "../lib/logger.ts";
 import {
   listRunnableAgents,
   listActiveSkills,
+  MAX_REQUESTED_SKILLS,
   resolveSkillsByIds,
 } from "../services/space-packages.ts";
 import { packageIdSchema } from "@appstrate/core/validation";
@@ -444,12 +445,9 @@ router.get("/connections/:connectionId/handoff", async (c) => {
   }
 });
 
-/** Cap on `?skills=`; well above the chat's pin ceiling, it only bounds one query. */
-const MAX_REQUESTED_SKILLS = 30;
-
 /**
  * `?skills=@scope/a,@scope/b` — deduped, order-preserving; a malformed id is a
- * 400, an unknown one is reported in `unresolved_skills`.
+ * 400, an unknown one is absent from `requested_skills`.
  */
 const requestedSkillsSchema = z
   .string()
@@ -546,7 +544,7 @@ router.get("/context", requireSpaceContext(), async (c) => {
     // Same gate as the catalogue: without it, nothing about skills at all.
     canReadSkills
       ? resolveSkillsByIds(scope, requestedSkillIds, { homeWritable })
-      : Promise.resolve({ resolved: [], unresolved: [] }),
+      : Promise.resolve([]),
     // Actor-scoped, but still a runs read: the same permission `GET /api/runs`
     // asks for (`runs:read` ∨ `runs:read-all`, `canReadRuns`).
     mayReadRuns
@@ -570,8 +568,7 @@ router.get("/context", requireSpaceContext(), async (c) => {
     skills: activeSkills.skills,
     skills_truncated: activeSkills.truncated,
     skills_total: activeSkills.total,
-    requested_skills: requestedSkills.resolved,
-    unresolved_skills: requestedSkills.unresolved,
+    requested_skills: requestedSkills,
   });
 });
 
