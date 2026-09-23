@@ -208,7 +208,11 @@ export async function ensureImage(image: string): Promise<void> {
  */
 export const IMAGE_PIN_PREFIX = "appstrate-imagepin-";
 
-/** Label carrying the image reference a pin container currently holds. */
+/**
+ * Label carrying the image reference a pin container currently holds.
+ * Informational only (operator legibility, `docker ps --filter`): drift is
+ * decided by {@link IMAGE_PIN_SPEC_LABEL}, which already covers the image.
+ */
 const IMAGE_PIN_IMAGE_LABEL = "appstrate.pin.image";
 
 /** Label carrying the fingerprint of the container config a pin was created from. */
@@ -248,7 +252,9 @@ async function inspectPinContainer(name: string): Promise<PinInspectResult | nul
  * tag or changed the pin's config — is replaced, so pins can never drift
  * behind the images the platform actually launches.
  *
- * Returns what the pass did, for the caller's log line.
+ * Returns `"unchanged"` when the live pin already matches; `"created"` when no
+ * live pin was holding the image (absent, or present but stopped); `"replaced"`
+ * when a live pin was swapped because its spec drifted.
  */
 export async function ensureImagePin(
   image: string,
@@ -292,7 +298,8 @@ export async function ensureImagePin(
   if (existing) {
     // Stale spec, or right spec but not running. Not-running still pins the
     // image against `image prune`, but NOT against `container prune`, which
-    // reaps stopped containers wholesale — so converge on "running" either way.
+    // reaps stopped containers wholesale — so remove and recreate it running.
+    // A stopped pin is reported as "created": nothing live was holding the image.
     await removeContainer(existing.id).catch(() => {});
   }
 
@@ -320,7 +327,8 @@ export async function ensureImagePin(
   const created = (await res.json()) as { Id: string };
   await startContainer(created.Id);
 
-  return existing ? "replaced" : "created";
+  // A running pin reaching here necessarily had a drifted spec.
+  return existing?.running ? "replaced" : "created";
 }
 
 interface CreateContainerOptions {

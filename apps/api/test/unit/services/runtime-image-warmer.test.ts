@@ -6,8 +6,9 @@
  * can't put a cold pull back on the run-boot critical path.
  *
  * Behaviours worth locking down: every image is offered to the pin reconciler
- * on every pass, and one broken image never costs the others their pin.
- * (That a pin holds the right image, converges, and survives the orphan
+ * on every pass, one broken image never costs the others their pin, and only
+ * a missing or stopped pin warns — a release's spec-drift replacement logs at
+ * info. (That a pin holds the right image, converges, and survives the orphan
  * sweep is asserted against a real daemon in
  * `test/integration/services/docker-api.test.ts`.)
  */
@@ -67,9 +68,10 @@ describe("runtime image warmer", () => {
     expect(report.pinned).toEqual(["sidecar"]);
   });
 
-  it("warns only for a missing pin, not for one replaced after spec drift", async () => {
+  it("warns only for a missing or stopped pin, not for one replaced after spec drift", async () => {
     // A replaced pin is every host's first pass after a release — warning
-    // "missing" there is a false alarm; a created one means a janitor struck.
+    // there is a false alarm; a created one (the pin was absent or stopped)
+    // means a janitor struck.
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     const info = spyOn(logger, "info").mockImplementation(() => {});
     try {

@@ -8,9 +8,9 @@
  * leaves an existing pin alone or replaces it — is decided from the inspect
  * payload and the create body, not from anything a real daemon does.
  * `apps/api/test/integration/services/docker-api.test.ts` covers the same
- * ground against a live daemon, but those cases are gated behind
- * `TEST_DOCKER=1` and no workflow sets it, so CI would otherwise verify none
- * of this. Stubbing `fetch` keeps the decision under test at tier 0.
+ * ground against a live daemon, but those cases only run in the integration
+ * job (post-merge on main, or opt-in via the `integration` PR label). Stubbing
+ * `fetch` keeps the decision under test in the default unit run.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
@@ -117,8 +117,8 @@ function removedIds(): string[] {
     .map((c) => c.path.replace("/containers/", "").replace(/\?.*$/, ""));
 }
 
-function pinSpec(): string | undefined {
-  return containers.get(PIN_NAME)?.Labels["appstrate.pin.spec"];
+function pinLabel(key: string): string | undefined {
+  return containers.get(PIN_NAME)?.Labels[key];
 }
 
 beforeEach(() => {
@@ -185,33 +185,35 @@ describe("ensureImagePin", () => {
     expect(await ensureImagePin(SIDECAR_IMAGE, SLOT)).toBe("replaced");
 
     expect(removedIds()).toEqual(["legacy-pin"]);
-    expect(pinSpec()).toMatch(/^[0-9a-f]{64}$/);
+    expect(pinLabel("appstrate.pin.spec")).toMatch(/^[0-9a-f]{64}$/);
     expect(containers.get(PIN_NAME)?.Running).toBe(true);
   });
 
   it("replaces a pin whose image drifted, and the spec follows the image", async () => {
     await ensureImagePin(SIDECAR_IMAGE, SLOT);
     const previousId = containers.get(PIN_NAME)!.Id;
-    const previousSpec = pinSpec();
+    const previousSpec = pinLabel("appstrate.pin.spec");
 
     expect(await ensureImagePin(NEXT_SIDECAR_IMAGE, SLOT)).toBe("replaced");
 
     expect(removedIds()).toEqual([previousId]);
-    expect(containers.get(PIN_NAME)?.Labels["appstrate.pin.image"]).toBe(NEXT_SIDECAR_IMAGE);
-    expect(pinSpec()).not.toBe(previousSpec);
+    expect(pinLabel("appstrate.pin.image")).toBe(NEXT_SIDECAR_IMAGE);
+    expect(pinLabel("appstrate.pin.spec")).not.toBe(previousSpec);
   });
 
-  it("replaces a pin with the current spec that is no longer running", async () => {
+  it("treats a stopped pin as missing and recreates it", async () => {
     await ensureImagePin(SIDECAR_IMAGE, SLOT);
     const stopped = containers.get(PIN_NAME)!;
-    const spec = pinSpec();
+    const spec = pinLabel("appstrate.pin.spec");
     stopped.Running = false;
 
-    expect(await ensureImagePin(SIDECAR_IMAGE, SLOT)).toBe("replaced");
+    // Host interference (unless-stopped means someone stopped it), not spec
+    // drift — reported like an absent pin so the caller warns.
+    expect(await ensureImagePin(SIDECAR_IMAGE, SLOT)).toBe("created");
 
     expect(removedIds()).toEqual([stopped.Id]);
     // Deterministic fingerprint: the same image yields the same spec.
-    expect(pinSpec()).toBe(spec);
+    expect(pinLabel("appstrate.pin.spec")).toBe(spec);
     expect(containers.get(PIN_NAME)?.Running).toBe(true);
   });
 });
