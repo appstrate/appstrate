@@ -18,6 +18,7 @@ import {
   readPackageFolder,
   readSpaceOf,
   recordLock,
+  splitPackageSpec,
   toOperations,
   writeOperation,
 } from "../src/lib/packages.ts";
@@ -25,6 +26,26 @@ import { lineDiff } from "../src/commands/packages.ts";
 import type { PackageHome } from "@appstrate/shared-types";
 
 const utf8 = (text: string) => new TextEncoder().encode(text);
+
+describe("splitPackageSpec", () => {
+  it("splits <package>@<spec> past a scope's leading @", () => {
+    expect(splitPackageSpec("@acme/pdf")).toEqual({ ref: "@acme/pdf" });
+    expect(splitPackageSpec("pdf")).toEqual({ ref: "pdf" });
+    expect(splitPackageSpec("@acme/pdf@1.2.0")).toEqual({ ref: "@acme/pdf", spec: "1.2.0" });
+    expect(splitPackageSpec("@acme/pdf@^1.2")).toEqual({ ref: "@acme/pdf", spec: "^1.2" });
+    expect(splitPackageSpec("pdf@latest")).toEqual({ ref: "pdf", spec: "latest" });
+    expect(splitPackageSpec("@acme/pdf@draft")).toEqual({ ref: "@acme/pdf", spec: "draft" });
+  });
+
+  it("keeps everything after the first @ as the spec, for the server to judge", () => {
+    expect(splitPackageSpec("@acme/pdf@1@2")).toEqual({ ref: "@acme/pdf", spec: "1@2" });
+  });
+
+  it("refuses an @ with nothing after it", () => {
+    expect(() => splitPackageSpec("@acme/pdf@")).toThrow('nothing after "@"');
+    expect(() => splitPackageSpec("pdf@")).toThrow('nothing after "@"');
+  });
+});
 
 describe("isIgnoredPath", () => {
   it("ignores dot-named segments, tooling folders and the root signature", () => {

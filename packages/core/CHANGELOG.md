@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`formatErrorChain`** (`@appstrate/core/errors`) starts a cause as a new
+  sentence after a message that already ends one (`"Refused. Conflict"`, never
+  `"Refused.: Conflict"`), and no longer appends a cause whose message the text
+  already carries — a wrapper that quoted it printed it twice. Output with no
+  cause, and chains of unpunctuated messages, are unchanged.
 - **A guard carrying the boolean `appstrate.permissionGuard` marker but no
   `PERMISSION_REQUIREMENT_MARKER` requirement is no longer read as row-aware**
   — the platform now reads it as naming no requirement, where 11.1.0 read it as

@@ -88,6 +88,7 @@ import {
   shouldSkipDualInstallCheck,
 } from "./lib/dual-install-check.ts";
 import { installSignalHandlers, onShutdown } from "./lib/shutdown.ts";
+import { asksForVersion, showVersionFlagInHelp, valueFlagsOf } from "./lib/root-version.ts";
 import { exitWithError } from "./lib/ui.ts";
 import { CLI_VERSION } from "./lib/version.ts";
 
@@ -158,7 +159,6 @@ const program = new Command();
 program
   .name("appstrate")
   .description("Official CLI for the Appstrate platform")
-  .version(CLI_VERSION)
   .option(
     "-p, --profile <name>",
     "Profile to use (overrides APPSTRATE_PROFILE / defaultProfile / 'default').",
@@ -584,25 +584,21 @@ packagesGroup
 packagesGroup
   .command("pull <package> [dir]")
   .description(
-    "Bring a package into a local working folder: its draft when you may write it, else its published version (read-only). Default folder: <workDir>/<org>/packages/<type segment>/@<scope>/<name>.",
+    "Bring a package into a local working folder: its draft when you may write it, else its published version (read-only). <package>@<spec> pulls a published version (latest, exact, range, tag), or @draft the draft. Default folder: <workDir>/<org>/packages/<type segment>/@<scope>/<name>.",
   )
-  .option("--version <spec>", "A published version (latest, exact, or range) instead of the draft")
   .option(
     "--force",
     "Pull into a folder that already has files: it then mirrors the package, and files the package does not have are deleted",
   )
-  .action(
-    async (pkg: string, dir: string | undefined, opts: { version?: string; force?: boolean }) => {
-      const globalOpts = program.opts<{ profile?: string }>();
-      await packagesPullCommand({
-        profile: globalOpts.profile,
-        package: pkg,
-        dir,
-        version: opts.version,
-        force: opts.force,
-      });
-    },
-  );
+  .action(async (pkg: string, dir: string | undefined, opts: { force?: boolean }) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await packagesPullCommand({
+      profile: globalOpts.profile,
+      package: pkg,
+      dir,
+      force: opts.force,
+    });
+  });
 
 packagesGroup
   .command("status <dir>")
@@ -1177,6 +1173,15 @@ function parseSinkTtl(raw: unknown): number | undefined {
     throw new Error(`Invalid --sink-ttl "${raw}" (expected a positive integer number of seconds)`);
   }
   return n;
+}
+
+// `-V, --version` is answered here, from the top level only: registered with
+// commander it would be a program option, parsed after any command word too,
+// and shadow a subcommand's own flag (#1516). See `lib/root-version.ts`.
+showVersionFlagInHelp(program);
+if (asksForVersion(process.argv.slice(2), valueFlagsOf(program))) {
+  process.stdout.write(`${CLI_VERSION}\n`);
+  process.exit(0);
 }
 
 program.parseAsync(process.argv).catch((err) => exitWithError(err));

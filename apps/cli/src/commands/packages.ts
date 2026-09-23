@@ -44,8 +44,9 @@ import {
 import { PROJECT_FILE_RELPATH } from "../lib/install/project.ts";
 import { listOrgs } from "../lib/orgs.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
-import { formatError } from "../lib/ui.ts";
+import { ExplainedError, formatError } from "../lib/ui.ts";
 import {
+  draftRefusal,
   fetchPackageDefinition,
   PackageDefinitionError,
   SIGNATURE_RECORD,
@@ -56,6 +57,7 @@ import {
   diffFiles,
   draftStateOf,
   folderManifest,
+  DRAFT_SELECTOR,
   forgetLock,
   isIgnoredPath,
   listFolderFiles,
@@ -67,6 +69,7 @@ import {
   readSpaceOf,
   recordLock,
   resolvePackage,
+  splitPackageSpec,
   toOperations,
   typeOfFolder,
   type DraftDetail,
@@ -261,18 +264,23 @@ async function rewriteManifest(dir: string, manifest: Record<string, unknown>): 
   await writeFile(join(dir, PACKAGE_MANIFEST_FILE), manifestFileText(manifest));
 }
 
-const DRAFT_REMEDY_PULL = "Pull its published version instead: --version latest.";
+/** What to run instead when a draft is refused: its published version. */
+function draftRemedyPull(packageId: string): string {
+  return `Pull its published version instead: appstrate packages pull ${packageId}@latest.`;
+}
 
 // ─── pull ────────────────────────────────────────────────────────────────
 
 export interface PackagesPullOptions {
   profile?: string;
-  /** `@scope/name`, or a bare name under the organization's slug. */
+  /**
+   * `@scope/name`, or a bare name under the organization's slug, optionally
+   * followed by `@<spec>`: a published version (`latest`, exact, range, tag),
+   * or `draft`.
+   */
   package: string;
   /** Destination folder. Default: `<workDir>/<org slug>/packages/<type segment>/@<scope>/<name>`. */
   dir?: string;
-  /** A published version (`latest`, exact, range) instead of the draft. */
-  version?: string;
   /** Pull into a folder that already has files, making it mirror the definition. */
   force?: boolean;
 }
@@ -284,9 +292,13 @@ export async function packagesPullCommand(
   const session = await openSession(opts.profile, io);
   if (!session) return;
   try {
-    const packageId = await resolvePackageId(session, opts.package);
+    const { ref, spec } = splitPackageSpec(opts.package);
+    const packageId = await resolvePackageId(session, ref);
     const home = await resolvePackage(session.profileName, packageId);
     if (!home) throw new Error(`${packageId}: no package with this id that you can read.`);
+    if (spec === DRAFT_SELECTOR && !home.home_writable) {
+      throw draftRefusal(packageId, home.type, draftRemedyPull(packageId));
+    }
 
     let dir: string;
     if (opts.dir) dir = resolve(expandHome(opts.dir));
@@ -298,8 +310,9 @@ export async function packagesPullCommand(
     const existing = await prepareDestination(dir, opts.force === true);
 
     // The draft is the author's: read it when this caller may write the
-    // package and asked for no version. Everyone else reads what is published.
-    const readsDraft = home.home_writable && opts.version === undefined;
+    // package and named no version, or named the draft. Everyone else reads
+    // what is published.
+    const readsDraft = home.home_writable && (spec === undefined || spec === DRAFT_SELECTOR);
     let files: PackageFiles;
     let lock: number | undefined;
     if (readsDraft) {
@@ -311,14 +324,14 @@ export async function packagesPullCommand(
         type: home.type,
         spaceId: home.home_space_id ?? undefined,
         source: "draft",
-        refusalRemedy: DRAFT_REMEDY_PULL,
+        refusalRemedy: draftRemedyPull(packageId),
       });
     } else {
-      const published = await fetchPublished(session, home, opts.version ?? "latest");
+      const published = await fetchPublished(session, home, spec ?? "latest");
       if (!published) {
         throw new Error(
           home.home_writable
-            ? `${packageId} has no published version yet: pull its draft (no --version).`
+            ? `${packageId} has no published version yet: pull its draft (appstrate packages pull ${packageId}).`
             : `${packageId} has no published version yet, and only its authors read its draft.`,
         );
       }
@@ -330,7 +343,7 @@ export async function packagesPullCommand(
     else await forgetLock(session.profileName, dir);
 
     const version = definitionVersion(files);
-    const what = readsDraft ? "draft" : `published ${version ?? opts.version ?? "latest"}`;
+    const what = readsDraft ? "draft" : `published ${version ?? spec ?? "latest"}`;
     io.stdout.write(`Pulled ${packageId} (${home.type}, ${what}, ${written} files) into ${dir}\n`);
     if (removed.length > 0) {
       io.stderr.write(
@@ -519,7 +532,7 @@ export async function packagesStatusCommand(
         type: home.type,
         spaceId: home.home_space_id ?? undefined,
         source: "draft",
-        refusalRemedy: DRAFT_REMEDY_PULL,
+        refusalRemedy: draftRemedyPull(home.id),
       });
       const seen = await readLock(session.profileName, local.dir, home.id);
       if (seen === undefined) {
@@ -679,7 +692,7 @@ export async function packagesPushCommand(
       type,
       spaceId: home.home_space_id ?? undefined,
       source: "draft",
-      refusalRemedy: DRAFT_REMEDY_PULL,
+      refusalRemedy: draftRemedyPull(packageId),
     });
 
     const changes = diffFiles(files, draft);
@@ -714,13 +727,15 @@ export async function packagesPushCommand(
           (s) => ` → ${s.lockVersion}`,
           () => "",
         );
-        throw new Error(
+        throw new ExplainedError(
           `The draft of ${packageId} was edited elsewhere since this folder last saw it (lock ${lock}${now}). Pull it into another folder to compare, or push --force to replace it.`,
           { cause: err },
         );
       }
       if (err instanceof ApiError) {
-        throw new Error(`Push of ${packageId} refused: ${describeProblem(err)}`, { cause: err });
+        throw new ExplainedError(`Push of ${packageId} refused: ${describeProblem(err)}`, {
+          cause: err,
+        });
       }
       throw err;
     }
@@ -799,7 +814,7 @@ async function createPackage(
     });
   } catch (err) {
     if (err instanceof ApiError) {
-      throw new Error(`Creating ${packageId} was refused: ${describeProblem(err)}`, {
+      throw new ExplainedError(`Creating ${packageId} was refused: ${describeProblem(err)}`, {
         cause: err,
       });
     }
@@ -894,7 +909,7 @@ export async function packagesPublishCommand(
         type: home.type,
         spaceId: home.home_space_id ?? undefined,
         source: "draft",
-        refusalRemedy: DRAFT_REMEDY_PULL,
+        refusalRemedy: draftRemedyPull(packageId),
       });
       if (seen !== before.lockVersion || diffFiles(folder.files, draft).length > 0) {
         throw new Error(
@@ -1008,31 +1023,35 @@ async function carryVersion(
   }
 }
 
-function publishRefusal(err: ApiError, packageId: string, target: string | undefined): Error {
+function publishRefusal(
+  err: ApiError,
+  packageId: string,
+  target: string | undefined,
+): ExplainedError {
   const { code } = problemFields(err.body);
   const cut = target ? ` ${target}` : "";
   switch (code) {
     case "version_exists":
-      return new Error(
+      return new ExplainedError(
         `Version${cut} of ${packageId} is already published. Set a higher \`version\` in manifest.json and push.`,
         { cause: err },
       );
     case "no_changes":
-      return new Error(
+      return new ExplainedError(
         `Nothing changed in the draft of ${packageId} since its latest version: there is nothing to publish.`,
         { cause: err },
       );
     case "conflict":
-      return new Error(
+      return new ExplainedError(
         `The draft of ${packageId} changed while this command read it (a push or an edit landed in between): nothing was published. Check it and publish again.`,
         { cause: err },
       );
     case "agent_in_use":
-      return new Error(`${packageId} has runs in progress; retry when they finish.`, {
+      return new ExplainedError(`${packageId} has runs in progress; retry when they finish.`, {
         cause: err,
       });
     default:
-      return new Error(`Publishing ${packageId} was refused: ${describeProblem(err)}`, {
+      return new ExplainedError(`Publishing ${packageId} was refused: ${describeProblem(err)}`, {
         cause: err,
       });
   }

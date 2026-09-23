@@ -471,6 +471,106 @@ describe("packages pull", () => {
     expect(await text(join(dir, "Cafe\u0301.md"))).toBe("new");
   });
 
+  describe("<package>@<spec>", () => {
+    /** A writable skill published twice, so an exact version is told apart from `latest`. */
+    const twoVersions = () =>
+      skill({
+        published: [
+          { version: "1.0.0", files: { "SKILL.md": "---\nname: pdf\n---\nOne.\n" } },
+          { version: "1.1.0", files: { "SKILL.md": "---\nname: pdf\n---\nOne-one.\n" } },
+        ],
+      });
+
+    it("pulls that published version even for a writer, and records no lock", async () => {
+      // Delete-to-fail (#1516): the spec used to ride on `--version`, which
+      // the root `-V/--version` swallowed — the pull never happened.
+      const server = createPackageServer([twoVersions()]);
+      server.install();
+      const dir = join(root, "pdf");
+      const { io, stdout, stderr } = createMemoryIO();
+
+      await packagesPullCommand({ package: "@acme/pdf@1.0.0", dir }, io);
+
+      expect(await text(join(dir, "SKILL.md"))).toContain("One.");
+      expect(server.seen.some((s) => s.path.endsWith("/1.0.0/download"))).toBe(true);
+      expect(server.seen.some((s) => s.path.includes("draft"))).toBe(false);
+      expect(await readLock("default", dir, "@acme/pdf")).toBeUndefined();
+      expect(stdout()).toContain("Pulled @acme/pdf (skill, published 1.0.0, 2 files)");
+      expect(stderr()).toContain("This is a published version, not the draft");
+    });
+
+    it("takes a tag on a bare name, under the organization's slug", async () => {
+      const server = createPackageServer([twoVersions()]);
+      server.install();
+      const dir = join(root, "pdf");
+      const { io, stdout } = createMemoryIO();
+
+      await packagesPullCommand({ package: "pdf@latest", dir }, io);
+
+      expect(await text(join(dir, "SKILL.md"))).toContain("One-one.");
+      expect(server.seen.some((s) => s.path.endsWith("/latest/download"))).toBe(true);
+      expect(stdout()).toContain("published 1.1.0");
+    });
+
+    it("reads the draft for @draft, lock included", async () => {
+      const server = createPackageServer([twoVersions()]);
+      server.install();
+      const dir = join(root, "pdf");
+
+      await packagesPullCommand({ package: "@acme/pdf@draft", dir }, createMemoryIO().io);
+
+      expect(await text(join(dir, "SKILL.md"))).toContain("Draft.");
+      expect(server.seen.some((s) => s.path === "/api/packages/@acme/pdf/draft/download")).toBe(
+        true,
+      );
+      expect(await readLock("default", dir, "@acme/pdf")).toBe(3);
+    });
+
+    it("refuses @draft to a reader instead of falling back to the published version", async () => {
+      const server = createPackageServer([
+        skill({ writable: false, homeSpaceId: null, readSpaceIds: ["spc_2"] }),
+      ]);
+      server.install();
+      const dir = join(root, "pdf");
+      const { io, stderr } = createMemoryIO();
+
+      await expect(
+        packagesPullCommand({ package: "@acme/pdf@draft", dir }, io),
+      ).rejects.toBeInstanceOf(ExitError);
+
+      expect(stderr()).toContain("The draft of @acme/pdf is the author's working copy.");
+      expect(stderr()).toContain("appstrate packages pull @acme/pdf@latest");
+      expect(server.seen.some((s) => s.path.endsWith("/download"))).toBe(false);
+      await expect(readdir(dir)).rejects.toThrow();
+    });
+
+    it("says which version does not exist, once", async () => {
+      createPackageServer([twoVersions()]).install();
+      const dir = join(root, "pdf");
+      const { io, stderr } = createMemoryIO();
+
+      await expect(
+        packagesPullCommand({ package: "@acme/pdf@9.9.9", dir }, io),
+      ).rejects.toBeInstanceOf(ExitError);
+
+      expect(stderr()).toContain("No such version");
+      expect(stderr().split("No such version").length - 1).toBe(1);
+    });
+
+    it("refuses an empty spec before calling the instance", async () => {
+      const server = createPackageServer([twoVersions()]);
+      server.install();
+      const { io, stderr } = createMemoryIO();
+
+      await expect(
+        packagesPullCommand({ package: "@acme/pdf@", dir: join(root, "pdf") }, io),
+      ).rejects.toBeInstanceOf(ExitError);
+
+      expect(stderr()).toContain('@acme/pdf@: nothing after "@"');
+      expect(server.seen.some((s) => s.path.startsWith("/api/packages"))).toBe(false);
+    });
+  });
+
   it("reads a read-only package's published version from a space that reads it", async () => {
     const server = createPackageServer([
       skill({ writable: false, homeSpaceId: null, readSpaceIds: ["spc_2"] }),
@@ -625,6 +725,10 @@ describe("packages push", () => {
 
     expect(stderr()).toContain("was edited elsewhere since this folder last saw it (lock 3 → 4)");
     expect(stderr()).toContain("push --force");
+    // #1517: the translation is the whole message — not the server's wording
+    // appended after it ("…replace it.: The package was modified…").
+    expect(stderr()).not.toContain("The package was modified since you loaded it");
+    expect(stderr()).not.toContain(".:");
     expect(pkg.draft.files["SKILL.md"]).toContain("Draft.");
   });
 
@@ -709,6 +813,7 @@ describe("packages push", () => {
     expect(stderr()).toContain(
       "Push of @acme/pdf refused: Refused by the stand-in (path_conflict)",
     );
+    expect(stderr().split("Refused by the stand-in").length - 1).toBe(1);
     expect(stderr()).not.toContain("edited elsewhere");
   });
 
@@ -774,6 +879,7 @@ describe("packages push", () => {
     await expect(packagesPushCommand({ dir, create: true }, io)).rejects.toBeInstanceOf(ExitError);
 
     expect(stderr()).toContain("older than this CLI");
+    expect(stderr()).not.toContain("API endpoint not found");
     expect(server.seen.some((s) => s.path === "/api/packages/import")).toBe(false);
   });
 
@@ -1015,6 +1121,7 @@ describe("packages publish", () => {
       );
 
       expect(stderr()).toContain(message);
+      expect(stderr()).not.toContain("Refused by the stand-in");
     });
   }
 });

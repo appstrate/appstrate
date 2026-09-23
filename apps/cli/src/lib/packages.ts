@@ -25,6 +25,7 @@ import { getDataDir } from "./config.ts";
 import { withFileLock } from "./file-lock.ts";
 import { SIGNATURE_RECORD } from "./package-definition.ts";
 import { SKILL_ENTRY } from "./skills-sync/materialize.ts";
+import { ExplainedError } from "./ui.ts";
 import { canonicalJsonStringify } from "@appstrate/afps-runtime/bundle";
 
 export type PackageFiles = Record<string, Uint8Array>;
@@ -34,6 +35,26 @@ export type PackageFiles = Record<string, Uint8Array>;
  * NOT one: an MCP server bundle ships `server/node_modules` as package content.
  */
 const IGNORED_NAMES: ReadonlySet<string> = new Set(["__pycache__"]);
+
+/** The platform's reserved selector for a package's draft, as `run` reads it too. */
+export const DRAFT_SELECTOR = "draft";
+
+/**
+ * Split `<package>[@<spec>]` — the shape `appstrate run` and npm take — into
+ * the package reference and the version spec. The spec starts at the first `@`
+ * past the first character, so a scope's leading `@` is never read as one.
+ */
+export function splitPackageSpec(raw: string): { ref: string; spec?: string } {
+  const at = raw.indexOf("@", 1);
+  if (at === -1) return { ref: raw };
+  const spec = raw.slice(at + 1);
+  if (spec.length === 0) {
+    throw new Error(
+      `${raw}: nothing after "@". Name a version, a range or a tag (e.g. ${raw}1.2.0, ${raw}latest), or drop the "@".`,
+    );
+  }
+  return { ref: raw.slice(0, at), spec };
+}
 
 /** `/api/packages/<segment>/@scope/name`: the per-type detail, update and versions root. */
 export function packageRoute(type: PackageType, packageId: string): string {
@@ -57,7 +78,7 @@ export async function resolvePackage(
       if (code === "package_not_found") return null;
       // The `/api/*` fallback's own wording: the route itself is unknown here.
       if (detail?.startsWith("API endpoint not found")) {
-        throw new Error(
+        throw new ExplainedError(
           "This instance does not serve GET /api/packages/{scope}/{name}/home: it is older than this CLI. Update the instance, or use a CLI of its version.",
           { cause: err },
         );

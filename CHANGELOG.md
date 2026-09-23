@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING (CLI): `appstrate packages pull --version <spec>` is now
+  `appstrate packages pull <package>@<spec>`** — the shape `appstrate run` and
+  npm already take: `@acme/pdf@1.2.0`, `pdf@latest`, `@acme/pdf@^1.2`. The flag
+  never worked in the form most people type (#1516, below), so it is removed,
+  not aliased: `--version` after a command is now refused as an unknown option.
+  `<package>@draft` pulls the draft explicitly, and is refused to someone who
+  cannot write the package instead of falling back to the published version.
+
+### Fixed
+
+- **`appstrate … --version` after a command no longer prints the CLI's version
+  and exits 0** (#1516). `-V, --version` was a program option, which commander
+  recognises anywhere on the line, so it shadowed every subcommand:
+  `appstrate packages pull @acme/pdf DIR --version 1.0.0` printed
+  `1.0.0-beta.61`, exited 0 and pulled nothing. The flag is answered only
+  before the command word (`appstrate --version`, `appstrate -p prod -V`);
+  after it, the command refuses it like any option it does not declare.
+- **CLI errors no longer glue two sentences with `.:` or repeat the server's
+  reason** (#1517). A refusal the CLI already explains
+  (`…or push --force to replace it.`) is printed alone, not followed by the
+  server's own wording of it, and any other error chain starts its cause as a
+  new sentence after a full stop.
+
 ## [1.0.0-beta.61] - 2026-09-23
 
 ### Added

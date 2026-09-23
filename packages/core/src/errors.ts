@@ -20,7 +20,10 @@ export function getErrorMessage(err: unknown): string {
 const MAX_CAUSE_DEPTH = 5;
 
 /**
- * Render an error and every `cause` beneath it as one `": "`-joined string.
+ * Render an error and every `cause` beneath it as one string: each cause after
+ * `": "`, or after a space when the text so far already ends a sentence (never
+ * `"refused.: Conflict"`), and a cause whose message the text already carries —
+ * a wrapper that quoted it — is not written twice.
  *
  * ## Why this exists at all
  *
@@ -62,7 +65,7 @@ export function formatErrorChain(err: unknown): string {
   // Happy path: one `instanceof` and one property read, no allocation.
   if (!(err instanceof Error) || err.cause === undefined || err.cause === null) return head;
 
-  const parts = [head];
+  let out = head;
   // A cause chain can be cyclic (`a.cause = b; b.cause = a`) — a plain walk
   // never terminates. Identity-tracking the visited errors is the only guard
   // that works, since two distinct errors may share a message.
@@ -72,18 +75,25 @@ export function formatErrorChain(err: unknown): string {
 
   while (cursor !== undefined && cursor !== null) {
     if (seen.has(cursor)) {
-      parts.push("[circular cause]");
+      out = appendCause(out, "[circular cause]");
       break;
     }
     if (depth >= MAX_CAUSE_DEPTH) {
-      parts.push("[cause chain truncated]");
+      out = appendCause(out, "[cause chain truncated]");
       break;
     }
     seen.add(cursor);
-    parts.push(getErrorMessage(cursor));
+    const message = getErrorMessage(cursor);
+    if (!out.includes(message)) out = appendCause(out, message);
     depth += 1;
     cursor = cursor instanceof Error ? cursor.cause : undefined;
   }
 
-  return parts.join(": ");
+  return out;
+}
+
+/** `text: cause`, or `text cause` when `text` already ends a sentence. */
+function appendCause(text: string, cause: string): string {
+  const trimmed = text.trimEnd();
+  return /[.!?]$/.test(trimmed) ? `${trimmed} ${cause}` : `${text}: ${cause}`;
 }
