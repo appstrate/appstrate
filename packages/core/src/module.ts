@@ -1598,4 +1598,28 @@ export interface PlatformServices {
    * 400 for a negative / non-integer `bytes`.
    */
   setFileStorageLimit(orgId: string, bytes: number | null): Promise<void>;
+  /**
+   * Append one row to the platform's `audit_events` trail for a state change a
+   * module route made. The table is platform-owned and a module may not write
+   * platform tables, so without this seam a module mutation cannot be audited.
+   *
+   * The org, space, actor, IP, user agent and request id are derived from the
+   * request context `c`, exactly as for a core route, so a module can neither
+   * forge nor forget them. `action` follows the platform vocabulary (a verb
+   * scoped by resource, `billing.plan_changed`); `before` / `after` take
+   * camelCase keys and never a secret. Best-effort like every audit write: a
+   * failed insert is logged and the promise still resolves.
+   */
+  audit: {
+    record(
+      c: Context,
+      entry: {
+        action: string;
+        resourceType: string;
+        resourceId?: string | null;
+        before?: Record<string, unknown> | null;
+        after?: Record<string, unknown> | null;
+      },
+    ): Promise<void>;
+  };
 }

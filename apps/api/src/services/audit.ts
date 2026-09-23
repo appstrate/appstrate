@@ -41,6 +41,11 @@ interface RecordAuditInput {
   requestId?: string | null;
 }
 
+type ContextAuditInput = Omit<
+  RecordAuditInput,
+  "orgId" | "spaceId" | "actorType" | "actorId" | "ip" | "userAgent" | "requestId"
+>;
+
 export async function recordAudit(input: RecordAuditInput): Promise<void> {
   try {
     await db.insert(auditEvents).values({
@@ -142,17 +147,16 @@ export async function drainAudits(
  * there).
  *
  * A route acting on a resource in another space re-enters that space before it
- * writes, so the spaceId read here is already the resource's. No per-call override.
+ * writes, so the space read here is already the resource's. A module route
+ * enters through `enterSpaceContext`, which sets `space` but leaves `spaceId`
+ * (the credential's) alone — hence `space` first. No per-call override.
  *
  * Under a role preview the persona goes into `after.view_as`; the actor stays
  * the administrator, which is who they were.
  */
 export async function recordAuditFromContext(
   c: Context<AppEnv>,
-  input: Omit<
-    RecordAuditInput,
-    "orgId" | "spaceId" | "actorType" | "actorId" | "ip" | "userAgent" | "requestId"
-  > & { orgIdOverride?: string },
+  input: ContextAuditInput & { orgIdOverride?: string },
 ): Promise<void> {
   const { orgIdOverride, ...auditInput } = input;
   const orgId = orgIdOverride ?? c.get("orgId");
@@ -180,11 +184,30 @@ export async function recordAuditFromContext(
     ...auditInput,
     ...(persona ? { after: { ...(auditInput.after ?? {}), view_as: viewAsWire(persona) } } : {}),
     orgId,
-    spaceId: c.get("spaceId") ?? null,
+    spaceId: c.get("space")?.id ?? c.get("spaceId") ?? null,
     actorType,
     actorId,
+    ...requestAuditMeta(c),
+  });
+}
+
+/**
+ * For session-less doors (the integration OAuth callback, the hosted connect
+ * form): the principal rides signed state rather than the auth middleware, so
+ * the context holds no org or actor and the caller names them.
+ */
+export async function recordAuditAs(
+  c: Context<AppEnv>,
+  principal: { orgId: string; spaceId: string | null; actorType: AuditActorType; actorId: string },
+  input: ContextAuditInput,
+): Promise<void> {
+  await recordAudit({ ...input, ...principal, ...requestAuditMeta(c) });
+}
+
+function requestAuditMeta(c: Context<AppEnv>) {
+  return {
     ip: getClientIpFromRequest(c.req.raw),
     userAgent: c.req.header("user-agent") ?? null,
     requestId: c.get("requestId") ?? null,
-  });
+  };
 }

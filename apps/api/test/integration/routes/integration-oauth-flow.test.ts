@@ -31,7 +31,7 @@ import {
   type StrictAuthorizationServer,
   type StrictAuthorizationServerOptions,
 } from "../../helpers/strict-authorization-server.ts";
-import { spacePackages, integrationConnections } from "@appstrate/db/schema";
+import { auditEvents, spacePackages, integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { decryptCredentialsToStringMap } from "@appstrate/connect";
 import {
@@ -274,9 +274,20 @@ describe("integration OAuth2 flow (conformant provider)", () => {
     );
     await consentAndCallback(await beginConnect(ctx));
 
-    expect(await storedConnection()).not.toBeNull();
+    const connection = await storedConnection();
+    expect(connection).not.toBeNull();
     expect(provider.tokenRequests[0]!.authorization).toMatch(/^Basic /);
     expect(provider.tokenRequests[0]!.params.client_secret).toBeUndefined();
+
+    // The callback is session-less: the principal comes from the signed state.
+    const trail = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.resourceId, connection!.id));
+    expect(trail.map((r) => [r.action, r.actorType, r.actorId, r.orgId, r.spaceId])).toEqual([
+      ["integration.connection.created", "user", ctx.user.id, ctx.orgId, ctx.defaultSpaceId],
+    ]);
+    expect(JSON.stringify(trail)).not.toContain(provider.issuedAccessTokens[0]!);
   });
 
   it("connects with a manifest-declared public client (none)", async () => {

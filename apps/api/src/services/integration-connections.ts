@@ -2345,38 +2345,49 @@ export async function markIntegrationConnectionNeedsReconnection(
 }
 
 /**
- * Record a *transient* token-refresh failure (network / 5xx / parse — NOT
- * `invalid_grant`, which flips `needsReconnection` immediately via
- * {@link markIntegrationConnectionNeedsReconnection}). Atomic, race-safe:
- * the increment and the escalation decision happen in one SQL statement so
- * concurrent refreshes on the same row (overlapping runs) cannot lose a count.
+ * Record a failure on a connection's credential and escalate once the streak
+ * is long enough. Two callers, one counter:
+ *   - a *transient* OAuth token-refresh failure (network / 5xx / parse — NOT
+ *     `invalid_grant`, which flips `needsReconnection` immediately via
+ *     {@link markIntegrationConnectionNeedsReconnection}), with `graceSeconds`;
+ *   - an upstream rejection of a credential that cannot be refreshed
+ *     (api_key / basic / custom), with `graceSeconds: null`.
+ * Atomic, race-safe: the increment and the escalation decision happen in one
+ * SQL statement so concurrent failures on the same row (overlapping runs)
+ * cannot lose a count.
  *
- * Escalation gate — `needsReconnection` is set to `true` only when BOTH:
- *   1. this failure brings the streak to `>= maxFailures`, AND
- *   2. the token is genuinely dead: `expires_at` is set AND already older than
- *      `graceSeconds` ago.
- *
- * The expiry gate is what makes this safe: a transient upstream outage while
- * the cached token is still valid (future `expires_at`) increments the counter
- * but never escalates — the connection keeps working and a later refresh
- * recovers (clearing the streak via `persistCredentialBundle`). Only a token
- * that is expired-past-grace AND repeatedly unrefreshable — the silent-death
- * case — gets flipped. `needsReconnection` is OR'd so a concurrently-set `true`
- * (revoke / scope-shrink) is never cleared here.
+ * Escalation gate — `needsReconnection` is set to `true` only when this
+ * failure brings the streak to `>= maxFailures` AND, when `graceSeconds` is
+ * given, the token is genuinely dead: `expires_at` is set AND already older
+ * than `graceSeconds` ago. That expiry gate is what keeps a transient outage
+ * on a still-valid OAuth token from bricking the connection; an unrefreshable
+ * credential has no expiry to prove it dead, so the streak alone decides.
+ * Any successful credential write (a refresh, a reconnect) clears the streak
+ * via `persistCredentialBundle`. `needsReconnection` is OR'd so a
+ * concurrently-set `true` (revoke / scope-shrink) is never cleared here.
  */
 export async function recordIntegrationRefreshFailure(
   connectionId: string,
   maxFailures: number,
-  graceSeconds: number,
-): Promise<void> {
-  await db
+  graceSeconds: number | null,
+): Promise<{ failures: number; needsReconnection: boolean }> {
+  const expired =
+    graceSeconds === null
+      ? sql`TRUE`
+      : sql`${integrationConnections.expiresAt} IS NOT NULL AND ${integrationConnections.expiresAt} < now() - make_interval(secs => ${graceSeconds})`;
+  const [row] = await db
     .update(integrationConnections)
     .set({
       refreshFailureCount: sql`${integrationConnections.refreshFailureCount} + 1`,
-      needsReconnection: sql`${integrationConnections.needsReconnection} OR (${integrationConnections.refreshFailureCount} + 1 >= ${maxFailures} AND ${integrationConnections.expiresAt} IS NOT NULL AND ${integrationConnections.expiresAt} < now() - make_interval(secs => ${graceSeconds}))`,
+      needsReconnection: sql`${integrationConnections.needsReconnection} OR (${integrationConnections.refreshFailureCount} + 1 >= ${maxFailures} AND ${expired})`,
       updatedAt: sql`now()`,
     })
-    .where(eq(integrationConnections.id, connectionId));
+    .where(eq(integrationConnections.id, connectionId))
+    .returning({
+      failures: integrationConnections.refreshFailureCount,
+      needsReconnection: integrationConnections.needsReconnection,
+    });
+  return row ?? { failures: 0, needsReconnection: false };
 }
 
 /**

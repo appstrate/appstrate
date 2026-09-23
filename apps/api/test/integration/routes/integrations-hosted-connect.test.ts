@@ -25,7 +25,12 @@ import { seedApiKey, seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
-import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
+import {
+  auditEvents,
+  integrationConnections,
+  integrationOauthClients,
+  packages,
+} from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { AppstrateModule, AuthResolution } from "@appstrate/core/module";
 import {
@@ -290,6 +295,20 @@ describe("hosted connect portal — dispatch + submit", () => {
       .from(integrationConnections)
       .where(eq(integrationConnections.integrationId, "@myorg/gmail"));
     expect(all).toHaveLength(1);
+
+    // The page cookie carries the principal, not a session: the trail must
+    // still name the user, and tell the renewal apart from the creation.
+    const trail = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.resourceId, created.connection.id))
+      .orderBy(auditEvents.id);
+    expect(trail.map((r) => [r.action, r.actorType, r.actorId, r.spaceId])).toEqual([
+      ["integration.connection.created", "user", ctx.user.id, ctx.defaultSpaceId],
+      ["integration.connection.reconnected", "user", ctx.user.id, ctx.defaultSpaceId],
+    ]);
+    expect(trail[0]!.after).toMatchObject({ packageId: "@myorg/gmail", authKey: "api" });
+    expect(JSON.stringify(trail)).not.toContain("AKIA");
   });
 });
 

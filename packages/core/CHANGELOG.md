@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   something to that `(orgId, userId)` pair drops it here, so it does not come
   back if the same user is invited again. Optional to implement; must be
   idempotent.
+- **`PlatformServices.audit.record(c, entry)` (`@appstrate/core/module`)** —
+  a module route writes a row to the platform's `audit_events` trail. The org,
+  space, actor, IP, user agent and request id come from the request context,
+  as for a core route; the entry names `action`, `resourceType` and optionally
+  `resourceId`, `before` and `after`. Best-effort: never rejects.
 
 ### Changed
 

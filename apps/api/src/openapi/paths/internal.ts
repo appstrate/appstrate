@@ -234,6 +234,43 @@ export const internalPaths = {
       },
     },
   },
+  "/internal/model-credential/outcome": {
+    post: {
+      operationId: "reportModelCredentialOutcome",
+      tags: ["Internal"],
+      summary: "Report what the upstream said about the run's model API key",
+      description:
+        "Sidecar-only. Auth via Bearer run token. The sidecar's `/llm/*` API-key path reports an upstream `401` as `rejected` and the first `2xx` after a rejection (or of the run) as `accepted`. `rejected` counts toward the credential's failure streak — at `INTEGRATION_REFRESH_MAX_FAILURES` consecutive rejections the credential is flagged `needs_reconnection` — and is dropped when `key_sha256` does not match the stored key (a run still holding a key the user has since rotated). `accepted` resets the streak. The credential is always the run's own pinned `model_credential_id`; a run with none (built-in key, model alias, remote run) is a no-op.",
+      security: [{ bearerExecToken: [] }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["outcome", "key_sha256"],
+              properties: {
+                outcome: { type: "string", enum: ["rejected", "accepted"] },
+                key_sha256: {
+                  type: "string",
+                  pattern: "^[0-9a-f]{64}$",
+                  description:
+                    "SHA-256 (hex) of the API key the sidecar used — never the key itself.",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "204": { description: "Recorded (or nothing to record for this run)." },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/internal/integration-credentials/{scope}/{name}": {
     get: {
       operationId: "getIntegrationCredentials",
@@ -320,7 +357,7 @@ export const internalPaths = {
         },
         "502": {
           description:
-            "Transient OAuth refresh failure upstream — same semantics as the GET endpoint.",
+            "Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected fewer than `INTEGRATION_REFRESH_MAX_FAILURES` consecutive times; the rejection is counted and the connection is flagged (`410`) once the streak reaches the threshold.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

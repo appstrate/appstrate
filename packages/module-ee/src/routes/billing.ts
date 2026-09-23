@@ -31,6 +31,7 @@ import {
   updateBillingContact,
 } from "../billing/contact.ts";
 import { getOrgQueries } from "../platform-org-queries.ts";
+import { getPlatformServices } from "../platform.ts";
 import {
   problemJson,
   noBillingAccount,
@@ -218,6 +219,20 @@ async function billingSnapshot(orgId: string) {
  * Render the failure of a Stripe-facing billing call. `ApiError` first: the refusals this
  * module raises itself are decisions, and a generic 503 would invite a pointless retry.
  */
+/** Audit a billing mutation on the platform trail; the account is keyed by its org. */
+function auditBilling(
+  c: Context<EeEnv>,
+  action: string,
+  after: Record<string, unknown>,
+): Promise<void> {
+  return getPlatformServices().audit.record(c, {
+    action,
+    resourceType: "billing_account",
+    resourceId: c.get("orgId"),
+    after,
+  });
+}
+
 function stripeCallFailure(
   c: Context<EeEnv>,
   err: unknown,
@@ -268,6 +283,8 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
 
       try {
         const url = await createCheckoutSession(orgId, body.plan_id, appUrl, body.return_url);
+        // The session URL is a bearer link to a payment page: it stays out of the trail.
+        await auditBilling(c, "billing.checkout_created", { planId: body.plan_id });
         return c.json({ url });
       } catch (err) {
         return stripeCallFailure(c, err, { route: "checkout", orgId, planId: body.plan_id });
@@ -291,6 +308,7 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
       } catch (err) {
         return stripeCallFailure(c, err, { route: "plan", orgId, planId: body.plan_id });
       }
+      await auditBilling(c, "billing.plan_changed", { planId: body.plan_id });
 
       // The account is written by the `customer.subscription.updated` webhook Stripe sends
       // back, so this snapshot may still name the previous plan; everything else in it is
@@ -366,6 +384,7 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
     }
 
     const managers = await replaceBillingManagers(orgId, wanted, c.get("user").id);
+    await auditBilling(c, "billing.managers_updated", { userIds: wanted });
     return c.json({ managers: managers.map(managerDetail) });
   });
 
@@ -382,6 +401,10 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
 
     const contact = await updateBillingContact(c.get("orgId"), body);
     if (!contact) return problemJson(c, noBillingAccount());
+    await auditBilling(c, "billing.contact_updated", {
+      billingEmail: contact.billingEmail,
+      billingCc: contact.billingCc,
+    });
     return c.json({ billing_email: contact.billingEmail, billing_cc: contact.billingCc });
   });
 

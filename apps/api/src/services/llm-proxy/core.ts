@@ -35,6 +35,11 @@ import { checkEgressUrl, egressGuardedFetch } from "../../lib/egress-host-guard.
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import { getModelProvider } from "../model-providers/registry.ts";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
+import { getEnv } from "@appstrate/env";
+import {
+  clearModelCredentialFailureStreak,
+  recordModelCredentialAuthFailure,
+} from "../model-providers/credentials.ts";
 
 /** Maximum request body the proxy will accept before refusing up-front. */
 const DEFAULT_MAX_REQUEST_BYTES = 10 * 1024 * 1024;
@@ -322,6 +327,8 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     throw err;
   }
 
+  await trackCredentialHealth(inputs.principal.orgId, resolved, upstream.status);
+
   // Forward + meter, weaving in the alias-swap (every branch) and the
   // response-cache write (non-streaming 2xx).
   return forwardMeteredResponse(
@@ -342,6 +349,40 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
         : null,
     },
   );
+}
+
+/**
+ * Feed the upstream's verdict on an org-owned API key into the credential's
+ * failure streak, so a revoked key ends up flagged `needs_reconnection` like a
+ * dead OAuth grant. Only 401 counts: providers answer 403 for a key that is
+ * valid but not entitled to this model or region, which re-entering the key
+ * would not fix. Platform keys (`credentialId` unset) are the operator's.
+ * Never fails the call — the caller gets the upstream response either way.
+ */
+async function trackCredentialHealth(
+  orgId: string,
+  resolved: ResolvedModel,
+  status: number,
+): Promise<void> {
+  const credentialId = resolved.credentialId;
+  if (!credentialId) return;
+  try {
+    if (status === 401) {
+      await recordModelCredentialAuthFailure(
+        orgId,
+        credentialId,
+        (storedKey) => storedKey === resolved.apiKey,
+        getEnv().INTEGRATION_REFRESH_MAX_FAILURES,
+      );
+    } else if (status >= 200 && status < 300) {
+      await clearModelCredentialFailureStreak(orgId, credentialId);
+    }
+  } catch (err) {
+    logger.warn("llm-proxy: credential health update failed", {
+      credentialId,
+      error: getErrorMessage(err),
+    });
+  }
 }
 
 async function resolvePresetForOrg(

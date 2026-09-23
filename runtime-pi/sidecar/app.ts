@@ -39,6 +39,7 @@ import {
 } from "./token-budget.ts";
 import { OAuthTokenCache, NeedsReconnectionError, type CachedToken } from "./oauth-token-cache.ts";
 import { logger } from "./logger.ts";
+import { createLlmKeyOutcomeReporter } from "./llm-key-health.ts";
 import { filterSensitiveHeaders, scrubSecretMaterial, truncateForScrub } from "./redact.ts";
 
 export type { SidecarConfig } from "./helpers.ts";
@@ -595,6 +596,15 @@ export function createApp(deps: AppDeps): Hono {
   const { config } = deps;
   const fetchFn = deps.fetchFn ?? fetch;
   const isReady = deps.isReady ?? (() => true);
+  const reportLlmKeyOutcome =
+    config.llm?.authMode === "api_key" && config.runToken
+      ? createLlmKeyOutcomeReporter({
+          platformApiUrl: config.platformApiUrl,
+          runToken: config.runToken,
+          apiKey: config.llm.apiKey,
+          fetchFn,
+        })
+      : null;
 
   const app = new Hono();
 
@@ -812,6 +822,7 @@ export function createApp(deps: AppDeps): Hono {
       abort.firstResponse();
     }
 
+    reportLlmKeyOutcome?.(upstream.status);
     return passUpstream(upstream, { targetUrl, authMode: "api_key" }, deps.llmStreamIdleTimeoutMs);
   });
 

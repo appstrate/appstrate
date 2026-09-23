@@ -170,8 +170,10 @@ describe("sidecar control surface — agent authentication", () => {
     // The token is a live secret and the upstream is a third party. It reaches
     // `filterHeaders`' skip set for the same reason `x-appstrate-pi-sdk` does.
     let forwarded: Headers | undefined;
-    const fetchFn = mock(async (_url: string, init: RequestInit) => {
-      forwarded = new Headers(init.headers);
+    const fetchFn = mock(async (url: string, init: RequestInit) => {
+      // The key-outcome report to the platform shares this fetch; only the
+      // upstream call is under test.
+      if (!url.includes("/internal/")) forwarded = new Headers(init.headers);
       return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
     });
     const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));

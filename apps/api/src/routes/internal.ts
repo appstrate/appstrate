@@ -2,6 +2,9 @@
 
 import { Hono } from "hono";
 import type { Context } from "hono";
+import { z } from "zod";
+import { getEnv } from "@appstrate/env";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials, packages, packageVersions, runs } from "@appstrate/db/schema";
@@ -50,6 +53,10 @@ import {
   forceRefreshOAuthModelProviderToken,
   resolveOAuthTokenForSidecar,
 } from "../services/model-providers/token-resolver.ts";
+import {
+  clearModelCredentialFailureStreak,
+  recordModelCredentialAuthFailure,
+} from "../services/model-providers/credentials.ts";
 import {
   resolveLiveIntegrationCredentials,
   serializeIntegrationCredentialsWire,
@@ -321,6 +328,15 @@ const EMPTY_CREDENTIALS_WIRE = {
   expiresAtEpochMs: {},
 };
 
+/** Body of `POST /internal/model-credential/outcome`. */
+export const modelCredentialOutcomeSchema = z
+  .object({
+    outcome: z.enum(["rejected", "accepted"]),
+    /** SHA-256 (hex) of the key the sidecar used — never the key itself. */
+    key_sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  })
+  .strict();
+
 export function createInternalRouter() {
   const router = new Hono();
 
@@ -455,6 +471,31 @@ export function createInternalRouter() {
     const credentialId = c.req.param("credentialId");
     await assertOAuthModelCredential(credentialId, run.orgId, run.modelCredentialId);
     return c.json(await forceRefreshOAuthModelProviderToken(credentialId, run.orgId));
+  });
+
+  // POST /internal/model-credential/outcome — the sidecar's `/llm/*` API-key
+  // path reports what the upstream said about the run's key, feeding the same
+  // failure streak the platform LLM proxy feeds (a revoked BYOK key ends up
+  // flagged). The credential is the run's own pin, never a caller-supplied id;
+  // a run with none (system key, alias, remote origin) has nothing to report on.
+  router.post("/model-credential/outcome", async (c) => {
+    const { run } = await verifyRunToken(c);
+    const body = await readJsonBody(c, modelCredentialOutcomeSchema);
+    const credentialId = run.modelCredentialId;
+    if (credentialId) {
+      if (body.outcome === "rejected") {
+        await recordModelCredentialAuthFailure(
+          run.orgId,
+          credentialId,
+          (storedKey) =>
+            new Bun.CryptoHasher("sha256").update(storedKey).digest("hex") === body.key_sha256,
+          getEnv().INTEGRATION_REFRESH_MAX_FAILURES,
+        );
+      } else {
+        await clearModelCredentialFailureStreak(run.orgId, credentialId);
+      }
+    }
+    return c.body(null, 204);
   });
 
   /**

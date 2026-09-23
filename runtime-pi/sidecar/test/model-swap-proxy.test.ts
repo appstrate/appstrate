@@ -138,7 +138,8 @@ describe("/llm/* alias surface restriction", () => {
     // provider it was configured with, so the surface stays wide open.
     let seenUrl = "";
     const fetchFn = mock(async (url: string) => {
-      seenUrl = url;
+      // The key-outcome report to the platform shares this fetch.
+      if (!url.includes("/internal/")) seenUrl = url;
       return new Response('{"data":[{"id":"deepseek-chat"}]}', {
         status: 200,
         headers: { "Content-Type": "application/json" },

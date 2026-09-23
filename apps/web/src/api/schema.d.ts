@@ -4034,7 +4034,7 @@ export interface paths {
         };
         /**
          * Get run logs
-         * @description Get persisted log entries for a run, wrapped in the standard list envelope `{ object: "list", data, hasMore }`. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI's polling tail to bound per-poll payload growth, and the pagination cursor when combined with `?limit=`. Pass `?level=` to filter by minimum severity (`level=info` skips debug breadcrumbs). `limit` defaults to 1000 when omitted — the response is never unbounded; when more entries follow, `hasMore` is `true` and an RFC 5988 `Link: <…?since=<lastId>>; rel="next"` response header points at the next page. `id` is a monotonic BIGSERIAL; invalid `since`/`level`/`limit` values fall back to the default rather than 400 so a stale cursor never breaks a polling tail. Rate-limited to 120/min per identity. Note: tool-result payloads inside `data` are truncated at write time by the runner (default 2048 bytes, operator-tunable via `TOOL_RESULT_BYTE_LIMIT`) — entries already persisted truncated cannot be recovered by this endpoint.
+         * @description Get persisted log entries for a run, wrapped in the standard list envelope `{ object: "list", data, hasMore }`. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI's polling tail to bound per-poll payload growth, and the pagination cursor when combined with `?limit=`. Pass `?level=` to filter by minimum severity (`level=info` skips debug breadcrumbs). `limit` defaults to 1000 when omitted — the response is never unbounded; when more entries follow, `hasMore` is `true` and an RFC 5988 `Link: <…?since=<lastId>>; rel="next"` response header points at the next page. `id` is a monotonic int64 (one sequence across all runs, so consecutive entries of a run are not contiguous); invalid `since`/`level`/`limit` values fall back to the default rather than 400 so a stale cursor never breaks a polling tail. Rate-limited to 120/min per identity. Note: tool-result payloads inside `data` are truncated at write time by the runner (default 2048 bytes, operator-tunable via `TOOL_RESULT_BYTE_LIMIT`) — entries already persisted truncated cannot be recovered by this endpoint.
          */
         get: operations["getRunLogs"];
         put?: never;
@@ -4851,6 +4851,26 @@ export interface paths {
         get: operations["recallMemories"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/internal/model-credential/outcome": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report what the upstream said about the run's model API key
+         * @description Sidecar-only. Auth via Bearer run token. The sidecar's `/llm/*` API-key path reports an upstream `401` as `rejected` and the first `2xx` after a rejection (or of the run) as `accepted`. `rejected` counts toward the credential's failure streak — at `INTEGRATION_REFRESH_MAX_FAILURES` consecutive rejections the credential is flagged `needs_reconnection` — and is dropped when `key_sha256` does not match the stored key (a run still holding a key the user has since rotated). `accepted` resets the streak. The credential is always the run's own pinned `model_credential_id`; a run with none (built-in key, model alias, remote run) is a no-op.
+         */
+        post: operations["reportModelCredentialOutcome"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5700,7 +5720,7 @@ export interface components {
             reasoning?: boolean | null;
             enabled: boolean;
             is_default: boolean;
-            /** @description True when the model's stored credential can no longer be used for inference — an OAuth credential flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment. */
+            /** @description True when the model's stored credential can no longer be used for inference — a credential flagged as needing reconnection (an OAuth grant revoked, or an API key the upstream rejected on consecutive calls), or a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment. */
             needs_reconnection: boolean;
             /** @description Managed-model flag. When true, the binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is not exposed in this projection — these fields are `null`; render a managed badge. */
             aliased: boolean;
@@ -6216,6 +6236,7 @@ export interface components {
             }[] | null;
         };
         RunLog: {
+            /** Format: int64 */
             id: number;
             runId: string;
             orgId?: string;
@@ -23323,7 +23344,7 @@ export interface operations {
                 };
             };
             500: components["responses"]["InternalServerError"];
-            /** @description Transient OAuth refresh failure upstream — same semantics as the GET endpoint. */
+            /** @description Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected fewer than `INTEGRATION_REFRESH_MAX_FAILURES` consecutive times; the rejection is counted and the connection is flagged (`410`) once the streak reaches the threshold. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -23434,6 +23455,36 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalServerError"];
+        };
+    };
+    reportModelCredentialOutcome: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    outcome: "rejected" | "accepted";
+                    /** @description SHA-256 (hex) of the API key the sidecar used — never the key itself. */
+                    key_sha256: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Recorded (or nothing to record for this run). */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
     getOAuthModelProviderToken: {

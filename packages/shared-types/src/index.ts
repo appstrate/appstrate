@@ -944,11 +944,11 @@ export interface OrgModelInfo extends ModelMetadata {
   is_default: boolean;
   /**
    * True when the model's stored credential can no longer be used for
-   * inference — an OAuth credential flagged `needsReconnection` (revoked
-   * refresh token), or, for either auth mode, a stored blob that no longer
-   * decrypts (e.g. a key rotation that retired a kid still in use). The model
-   * is listed (so it can be inspected/detached/deleted) but must never be
-   * selectable for inference. Always false for built-in/system models, which
+   * inference — a credential flagged `needsReconnection` (an OAuth refresh
+   * token revoked, or an API key the upstream rejected on consecutive calls),
+   * or a stored blob that no longer decrypts (e.g. a key rotation that
+   * retired a kid still in use). The model is listed (so it can be
+   * inspected/detached/deleted) but must never be selectable for inference. Always false for built-in/system models, which
    * read their key from the environment and have no stored blob.
    *
    * snake_case on purpose: mirrors {@link ModelProviderCredentialInfo.needs_reconnection}
@@ -1006,7 +1006,7 @@ export interface ModelProviderCredentialInfo {
   providerId?: string | null;
   /** Surface email of the OAuth account (extracted from the access-token identity claim). UI shows it as transparency hint. */
   oauth_email?: string | null;
-  /** True when the worker (or token-resolver) detected an `invalid_grant`. UI surfaces a "Reconnect" badge. */
+  /** True when the credential is dead: an OAuth `invalid_grant`, an API key rejected (401) on consecutive calls, or a blob that no longer decrypts. UI surfaces a "Reconnect" (OAuth) or "unavailable" + Edit (API key) badge. */
   needs_reconnection?: boolean;
   /**
    * Model ids empirically verified against this credential by the

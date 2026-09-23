@@ -67,6 +67,8 @@ import { createIntegrationEgressListener } from "./integration-egress-listener.t
 import {
   createIntegrationCredentialsSource,
   fetchInitialIntegrationCredentials,
+  isCredentialRejectedResult,
+  postIntegrationCredentialsRefresh,
   type IntegrationCredentialsSource,
 } from "./integration-credentials-source.ts";
 import { createApiCallCredentialAdapter } from "./api-call-credentials.ts";
@@ -808,6 +810,11 @@ async function spawnAndConnectLocalIntegration(params: {
   hiddenTools?: readonly string[];
   /** Log-message prefix: `"integration"` (agent-run) | `"connect-run"`. */
   logLabel: string;
+  /**
+   * Called when a tool result carries the credential-rejected signal. Set on
+   * the agent-run path only: a connect-run has no run to attribute it to.
+   */
+  onCredentialRejected?: () => void;
   /** Caller-owned teardown collectors — appended to as resources are built. */
   clients: AppstrateMcpClient[];
   mitmListeners: MitmListenerHandle[];
@@ -1008,7 +1015,10 @@ async function spawnAndConnectLocalIntegration(params: {
     if (timeoutId !== undefined) clearTimeout(timeoutId);
   }
   const connectMs = performance.now() - connectStart;
-  const wrapped = wrapClient(client, spawnedIntegration.transport, toolTimeoutMsFromEnv());
+  const base = wrapClient(client, spawnedIntegration.transport, toolTimeoutMsFromEnv());
+  const wrapped = params.onCredentialRejected
+    ? reportCredentialRejections(base, params.onCredentialRejected)
+    : base;
   params.clients.push(wrapped);
 
   const sizeBefore = host.size();
@@ -1034,6 +1044,46 @@ async function spawnAndConnectLocalIntegration(params: {
     connectMs,
     ...(spawnedIntegration.diagnosticId ? { diagnosticId: spawnedIntegration.diagnosticId } : {}),
   };
+}
+
+/**
+ * Decorate a client so a tool result signalling a rejected credential (a
+ * server whose credential never crosses the MITM — SSH, env-delivered keys —
+ * has no HTTP 401 to observe) triggers `onRejected`. The result itself is
+ * returned untouched: the agent still sees the server's error.
+ */
+export function reportCredentialRejections(
+  client: AppstrateMcpClient,
+  onRejected: () => void,
+): AppstrateMcpClient {
+  return {
+    ...client,
+    async callTool(args, options) {
+      const result = await client.callTool(args, options);
+      if (isCredentialRejectedResult(result)) onRejected();
+      return result;
+    },
+  };
+}
+
+/**
+ * Route a credential rejection to the platform's forced-refresh endpoint — the
+ * same call the MITM makes on an upstream 401 — which counts it toward
+ * flagging the connection for reconnect. Fire-and-forget: never fails the tool.
+ */
+function reportRejectedCredential(integrationId: string, opts: BundleFetchOptions): void {
+  postIntegrationCredentialsRefresh(integrationId, opts).then(
+    (res) =>
+      logger.warn("integration credential rejected by the target — reported", {
+        integrationId,
+        status: res.status,
+      }),
+    (err: unknown) =>
+      logger.warn("integration credential rejection report failed", {
+        integrationId,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+  );
 }
 
 /**
@@ -1576,6 +1626,7 @@ export async function bootIntegrations(
         // runtime, regardless of whether install-time validation removed them.
         ...(nativeHiddenTools ? { hiddenTools: nativeHiddenTools } : {}),
         logLabel: "integration",
+        onCredentialRejected: () => reportRejectedCredential(spec.integrationId, bundleFetchOpts),
         clients,
         mitmListeners,
         stderrTail,
