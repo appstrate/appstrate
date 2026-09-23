@@ -10,14 +10,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **The conformance monitor now probes the provider API of seven
   credential-only integrations without a credential** (`auth-reject`, tier
-  `mcp`). Each `AUTH_PROBES` endpoint is sent a deliberately invalid
-  credential, rendered through the manifest's own `delivery.http`, and must
-  refuse it (401/403); a 404/410 or an accepted invalid credential fails the
-  run. Before, a probe without a `CONFORMANCE_TOKENS` entry reported only
-  "skipped", so a retired host or API version went unnoticed. New probes:
-  brevo, fathom, firecrawl, shortcut, twilio (stripe and google-calendar gain
-  the credential-free half). The run also names the credential-only
-  integrations whose API nothing probes.
+  `mcp`). A 401 alone proves little — most providers answer 401 with or
+  without the header, and some authenticate before routing — so each
+  `AUTH_PROBES` endpoint gets three requests: an invalid credential rendered
+  through the manifest's own `delivery.http`, the same on a sibling path that
+  cannot exist, and none at all. The probe must refuse the credential (a
+  404/410 or an accepted invalid credential fails the run), and its answer must
+  differ from the no-credential answer — otherwise the provider never read the
+  header the manifest declares, and the run fails. A sibling path answering 404
+  verifies the path too; when it answers 401 the report says only the host was
+  verified. New probes: brevo, fathom, firecrawl, shortcut, twilio (stripe and
+  google-calendar gain the credential-free half). The run also names the
+  credential-only integrations whose API nothing probes.
 - **`identity-source` conformance check** (every tier, WARN): an `oauth2` auth
   declaring none of `identity_claims`, `userinfo_endpoint` or `issuer` resolves
   every connection to accountId `"default"` unless its token response happens

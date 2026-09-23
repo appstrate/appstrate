@@ -40,6 +40,13 @@ interface AuthProbe {
    * cannot tell that apart from success. Defaults to `true`.
    */
   rejectsInvalid?: boolean;
+  /**
+   * The provider answers an invalid credential byte-for-byte like a missing
+   * one (Fathom: an empty 401 either way), so `auth-reject` cannot confirm the
+   * manifest's delivery header was read and reports it as unconfirmable
+   * instead of failing. Set only after checking both responses by hand.
+   */
+  sameResponseWithoutCredential?: boolean;
 }
 
 /** package id → probe. Each invalid-credential status was checked by hand. */
@@ -57,7 +64,11 @@ export const AUTH_PROBES: Record<string, AuthProbe> = {
     expectStatus: [200],
   },
   "@appstrate/brevo": { url: "https://api.brevo.com/v3/account", expectStatus: [200] },
-  "@appstrate/fathom": { url: "https://api.fathom.ai/external/v1/meetings", expectStatus: [200] },
+  "@appstrate/fathom": {
+    url: "https://api.fathom.ai/external/v1/meetings",
+    expectStatus: [200],
+    sameResponseWithoutCredential: true,
+  },
   "@appstrate/firecrawl": {
     url: "https://api.firecrawl.dev/v1/team/credit-usage",
     expectStatus: [200],

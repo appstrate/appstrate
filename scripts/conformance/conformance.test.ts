@@ -397,8 +397,27 @@ describe("requiredCredentialFields", () => {
 });
 
 describe("checkAuthRejection", () => {
-  const status = (code: number): typeof fetch =>
-    (async () => new Response(null, { status: code })) as unknown as typeof fetch;
+  const PROBE = "https://api.brevo.com/v3/account";
+  // A fake provider: routes by path, answers by whether its credential header
+  // arrived. `routesBeforeAuth` models brevo/shortcut/twilio (any path → 401).
+  function provider(opts: {
+    header?: string;
+    probeStatus?: number;
+    routesBeforeAuth?: boolean;
+    sameBodyWithoutCredential?: boolean;
+  }): typeof fetch {
+    const { header = "api-key", probeStatus = 401 } = opts;
+    return (async (url: string, init?: RequestInit) => {
+      const sent = new Headers(init?.headers).has(header);
+      const known = url === PROBE;
+      if (!known && !opts.routesBeforeAuth)
+        return new Response('{"error":"not found"}', { status: 404 });
+      if (!sent && !opts.sameBodyWithoutCredential) {
+        return new Response('{"message":"authentication not found in headers"}', { status: 401 });
+      }
+      return new Response('{"message":"Key not found"}', { status: probeStatus });
+    }) as unknown as typeof fetch;
+  }
   // @appstrate/brevo is a seeded probe.
   const brevo = entry({
     packageId: "@appstrate/brevo",
@@ -412,37 +431,87 @@ describe("checkAuthRejection", () => {
     },
   });
 
-  it("INFO when the invalid credential is refused", async () => {
-    for (const code of [401, 403]) {
-      const f = await checkAuthRejection(brevo, { fetchImpl: status(code) });
-      expect(f.map((x) => x.severity)).toEqual(["info"]);
-    }
+  it("INFO with delivery and path both verified", async () => {
+    const f = await checkAuthRejection(brevo, { fetchImpl: provider({}) });
+    expect(f.map((x) => x.severity)).toEqual(["info"]);
+    expect(f[0]!.message).toContain("`api-key` read by the provider");
+    expect(f[0]!.message).toContain("path verified");
+  });
+
+  it("says 'host only' when the provider authenticates before routing", async () => {
+    const f = await checkAuthRejection(brevo, { fetchImpl: provider({ routesBeforeAuth: true }) });
+    expect(f[0]!.severity).toBe("info");
+    expect(f[0]!.message).toContain("host only");
+  });
+
+  it("FAILs when the provider never read the manifest's header (witness: wrong name)", async () => {
+    // The provider expects X-Api-Key; the manifest delivers api-key → the
+    // probe's answer is the no-credential answer.
+    const f = await checkAuthRejection(brevo, { fetchImpl: provider({ header: "X-Api-Key" }) });
+    expect(f[0]!.severity).toBe("fail");
+    expect(f[0]!.message).toContain("never read the `api-key` header");
+  });
+
+  it("reports delivery as unconfirmable for a probe marked sameResponseWithoutCredential", async () => {
+    const fathom = entry({
+      packageId: "@appstrate/fathom",
+      manifest: {
+        auths: {
+          primary: {
+            type: "api_key",
+            delivery: { http: { name: "X-Api-Key", value: "{$credential.api_key}" } },
+          },
+        },
+      },
+    });
+    const same = (async (url: string) =>
+      new Response(null, {
+        status: url.includes("canary") ? 404 : 401,
+      })) as unknown as typeof fetch;
+    const f = await checkAuthRejection(fathom, { fetchImpl: same });
+    expect(f[0]!.severity).toBe("info");
+    expect(f[0]!.message).toContain("unconfirmable");
+  });
+
+  it("compares JSON bodies regardless of key order", async () => {
+    let n = 0;
+    // Same no-credential body twice, keys reordered — must not read as "differs".
+    const reorder = (async (url: string, init?: RequestInit) => {
+      if (url.includes("canary")) return new Response("{}", { status: 404 });
+      const body = n++ % 2 ? '{"a":1,"b":2}' : '{"b":2,"a":1}';
+      void init;
+      return new Response(body, { status: 401 });
+    }) as unknown as typeof fetch;
+    const f = await checkAuthRejection(brevo, { fetchImpl: reorder });
+    expect(f[0]!.severity).toBe("fail");
   });
 
   it("FAILs when the path is gone or the invalid credential is accepted", async () => {
-    for (const code of [404, 405, 410, 200]) {
-      const f = await checkAuthRejection(brevo, { fetchImpl: status(code) });
+    for (const probeStatus of [404, 410, 200]) {
+      const f = await checkAuthRejection(brevo, { fetchImpl: provider({ probeStatus }) });
       expect(f.map((x) => x.severity)).toEqual(["fail"]);
     }
   });
 
   it("WARNs on an inconclusive status or a network error", async () => {
-    expect((await checkAuthRejection(brevo, { fetchImpl: status(500) }))[0]!.severity).toBe("warn");
+    const f = await checkAuthRejection(brevo, { fetchImpl: provider({ probeStatus: 500 }) });
+    expect(f[0]!.severity).toBe("warn");
     const boom = (async () => {
       throw new Error("ENOTFOUND");
     }) as unknown as typeof fetch;
     expect((await checkAuthRejection(brevo, { fetchImpl: boom }))[0]!.severity).toBe("warn");
   });
 
-  it("sends the invalid credential through the manifest's delivery", async () => {
-    let sent: Headers | undefined;
+  it("sends the invalid credential through the manifest's delivery, and only there", async () => {
+    const seen: Headers[] = [];
     const capture = (async (_u: string, init?: RequestInit) => {
-      sent = new Headers(init?.headers);
+      seen.push(new Headers(init?.headers));
       return new Response(null, { status: 401 });
     }) as unknown as typeof fetch;
     await checkAuthRejection(brevo, { fetchImpl: capture });
-    expect(sent?.get("api-key")).toBe(INVALID_BEARER);
-    expect(sent?.get("authorization")).toBeNull();
+    expect(seen.filter((h) => h.get("api-key") === INVALID_BEARER)).toHaveLength(2);
+    expect(seen.filter((h) => !h.has("api-key"))).toHaveLength(1);
+    expect(seen.some((h) => h.has("authorization"))).toBe(false);
   });
 
   it("skips a probe marked rejectsInvalid:false, and an unprobed package", async () => {
@@ -450,13 +519,13 @@ describe("checkAuthRejection", () => {
       packageId: "@appstrate/slack",
       manifest: { auths: { primary: { type: "oauth2" } } },
     });
-    expect(await checkAuthRejection(slack, { fetchImpl: status(200) })).toEqual([]);
+    expect(await checkAuthRejection(slack, { fetchImpl: provider({}) })).toEqual([]);
     expect(await checkAuthRejection(entry({ packageId: "@appstrate/notion" }))).toEqual([]);
   });
 
   it("FAILs a probed package whose manifest delivers no header", async () => {
     const f = await checkAuthRejection(entry({ packageId: "@appstrate/brevo", manifest: {} }), {
-      fetchImpl: status(401),
+      fetchImpl: provider({}),
     });
     expect(f[0]!.severity).toBe("fail");
   });

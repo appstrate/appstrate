@@ -85,7 +85,7 @@ export function applyAuth(
   manifest: Record<string, unknown>,
   secret: string,
   authKey: string,
-): { url: string; headers: Record<string, string> } | null {
+): { url: string; headers: Record<string, string>; credentialHeader: string } | null {
   const auth = manifestAuth(manifest, authKey);
   if (!auth?.type) return null;
   const fields = Object.fromEntries(credentialFieldNames(auth).map((f) => [f, secret]));
@@ -98,6 +98,7 @@ export function applyAuth(
       "User-Agent": "Appstrate",
       [plan.headerName]: `${plan.headerPrefix}${plan.value}`,
     },
+    credentialHeader: plan.headerName,
   };
 }
 
