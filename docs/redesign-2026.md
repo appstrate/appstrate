@@ -1599,9 +1599,10 @@ response only ever carries the spaces the caller can enter.
   wider), every reachable space always shown. Hiding one is the column menu's
   job; there is no space filter and no "espace actif" mode any more — both
   answered, in a heavier way, the question Découvrir's tick answers.
-- **The State filter speaks each reading's words**: here / not here / shared
-  in Découvrir, active / switched off / shared in Par espace. One URL key,
-  dropped when the reading changes.
+- **The State filter belongs to Par espace alone**: active, switched off,
+  shared, across the spaces on screen. Découvrir has none — its two sections
+  already say here / not here, and a share waiting has its own entry at the
+  head of the rail — and only Provenance is left to filter there.
 - **Three placement states**, the third being the one the model added: active,
   switched off, and SHARED — a placement somebody made and nobody switched on.
   Turning the switch on IS accepting it; there is nothing else to accept.

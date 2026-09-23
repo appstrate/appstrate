@@ -348,20 +348,20 @@ export function OrgCatalogueModal({
     );
 
   /**
-   * The STATE filter, in each reading's own words.
+   * The STATE filter — Par espace only.
    *
-   * Par espace compares spaces, so its states are the placement's — active,
-   * switched off, shared and waiting — anywhere on screen. Découvrir asks about
-   * the space the reader is in, so its states say so: here, not here, shared
-   * with one of your spaces. Same URL key, and `pages/catalogue.tsx` drops it
-   * when the reading changes, so one reading's value never lands in the other.
+   * The matrix compares spaces, so its states are the placement's: active,
+   * switched off, shared and waiting, anywhere on screen. Découvrir has none:
+   * its two sections already say here / not here, and a share waiting has its
+   * own entry at the head of the rail. `pages/catalogue.tsx` drops the key when
+   * the reading changes, so it never lingers on the way to Découvrir.
    */
-  const STATE_VALUES = discovering
-    ? (["here", "elsewhere", "offered"] as const)
-    : (["active", "inactive", "offered"] as const);
-  const states = (searchParams.get("state") ?? "")
-    .split(",")
-    .filter((value) => (STATE_VALUES as readonly string[]).includes(value));
+  const STATE_VALUES = ["active", "inactive", "offered"] as const;
+  const states = discovering
+    ? []
+    : (searchParams.get("state") ?? "")
+        .split(",")
+        .filter((value) => (STATE_VALUES as readonly string[]).includes(value));
   const setStates = (next: string[]) =>
     setSearchParams(
       (prev) => {
@@ -375,13 +375,7 @@ export function OrgCatalogueModal({
       { replace: true, state: routerLocation.state },
     );
   /** Its states across every space: the columns are the question. */
-  const statesIn = (placement: CataloguePlacement): string[] => {
-    if (discovering) {
-      return [
-        placement.here === "active" ? "here" : "elsewhere",
-        ...(placement.offeredIn.length > 0 ? ["offered"] : []),
-      ];
-    }
+  const statesIn = (placement: CataloguePlacement): PlacementState[] => {
     const out: PlacementState[] = [];
     if (placement.activeIn.length > 0) out.push("active");
     if (placement.inactiveIn.length > 0) out.push("inactive");
@@ -398,17 +392,11 @@ export function OrgCatalogueModal({
     id: "state",
     label: t("catalogue.filter.state"),
     values: states,
-    options: discovering
-      ? [
-          { value: "here", label: t("catalogue.activeHere") },
-          { value: "elsewhere", label: t("catalogue.filter.notHere") },
-          { value: "offered", label: t("catalogue.filter.offered") },
-        ]
-      : [
-          { value: "active", label: t("catalogue.filter.active") },
-          { value: "inactive", label: t("catalogue.filter.inactive") },
-          { value: "offered", label: t("catalogue.filter.offered") },
-        ],
+    options: [
+      { value: "active", label: t("catalogue.filter.active") },
+      { value: "inactive", label: t("catalogue.filter.inactive") },
+      { value: "offered", label: t("catalogue.filter.offered") },
+    ],
     onChange: setStates,
   };
   // Provenance: an attribute of the package, not the question a reader asks
@@ -926,7 +914,7 @@ export function OrgCatalogueModal({
           // filter here has, rather than the collection's built-in one.
           activityFilter={false}
           originFilter={false}
-          extraFilters={[stateFilter, originFilter]}
+          extraFilters={discovering ? [originFilter] : [stateFilter, originFilter]}
           // A package this space has not activated cannot be run from here.
           cardRun={false}
           // A tick is a table affordance; in cards, each card carries its own
