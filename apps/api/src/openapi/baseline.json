@@ -2158,7 +2158,7 @@
         "operationId": "runInline",
         "tags": ["Runs"],
         "summary": "Execute an inline agent (no persisted package)",
-        "description": "Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. The body is closed: an unknown field is a `400`, never a silently dropped value — `dependency_overrides` in particular is NOT honoured on this surface and is refused rather than ignored. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.",
+        "description": "Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. The body is closed: an unknown field is a `400`, never a silently dropped value — `dependency_overrides` in particular is NOT honoured on this surface and is refused rather than ignored. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors. **Permission:** `agents:write` and `agents:run` — composing a manifest is authoring, launching it is running. A caller holding `agents:run` without `agents:write` — the `operator` and `runner` presets, an API key scoped to `agents:run` — is refused.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -2430,7 +2430,7 @@
         "operationId": "validateInlineRun",
         "tags": ["Runs"],
         "summary": "Validate an inline manifest without firing a run",
-        "description": "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, input against the manifest schema, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json for validation failures (with the accumulated validation errors). Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.",
+        "description": "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, input against the manifest schema, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json for validation failures (with the accumulated validation errors). Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors. **Permission:** `agents:write` and `agents:run` — composing a manifest is authoring, launching it is running. A caller holding `agents:run` without `agents:write` — the `operator` and `runner` presets, an API key scoped to `agents:run` — is refused.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -3106,7 +3106,7 @@
         "operationId": "createRemoteRun",
         "tags": ["Runs"],
         "summary": "Create a remote-backed run (caller executes the agent)",
-        "description": "Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.",
+        "description": "Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply.\n\n**Permission:** `agents:run`; an `inline` source (a manifest the body carries) also requires `agents:write`. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -11064,7 +11064,7 @@
         "operationId": "changeMemberRole",
         "tags": ["Organizations"],
         "summary": "Change member role",
-        "description": "Change a member's role. Owners can manage any non-owner; admins can manage guests and members.",
+        "description": "Change a member's role. Owners can manage every other member, owners included, and are the only ones who may assign `owner` or change an owner's role; admins can manage guests and members and assign `guest`, `member` or `admin`. Nobody changes their own role. The caller is judged on their current role in the organization. Granting `owner` or changing an owner's role requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403 even when its user is an owner.",
         "parameters": [
           {
             "name": "orgId",
@@ -11093,7 +11093,7 @@
                 "properties": {
                   "role": {
                     "type": "string",
-                    "enum": ["guest", "member", "admin"]
+                    "enum": ["owner", "admin", "member", "guest"]
                   }
                 },
                 "additionalProperties": false
@@ -11145,7 +11145,7 @@
         "operationId": "removeMember",
         "tags": ["Organizations"],
         "summary": "Remove a member",
-        "description": "Remove a member from the organization.",
+        "description": "Remove a member from the organization. Owners can remove every other member, owners included; admins can remove guests and members. Nobody removes themselves — use `leaveOrganization`. The caller is judged on their current role in the organization; removing an owner requires a dashboard session (any token — API key, OAuth/MCP client, CLI — is refused with 403). The member's explicit space roles and notifications in this organization are deleted, their schedules here disabled, their API keys here and the OAuth tokens that grant only this organization (its own clients' and those bound to its MCP resource) revoked, and their personal space enters the 30-day offboarding window. A JWT access token is not stored and cannot be revoked: it stays valid until it expires, and the per-request membership check refuses it meanwhile.",
         "parameters": [
           {
             "name": "orgId",
@@ -11184,6 +11184,56 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/orgs/{orgId}/leave": {
+      "post": {
+        "operationId": "leaveOrganization",
+        "tags": ["Organizations"],
+        "summary": "Leave an organization",
+        "description": "The caller leaves the organization. Any member may leave, whatever their role; the last owner is refused with `409 last_owner` and must first promote another member to owner, or delete the organization. The decision reads the caller's real membership, so an active `X-View-As` preview changes nothing. Leaving has the effects of a removal: the caller's explicit space roles and notifications in this organization are deleted, their schedules here disabled, their API keys here and the OAuth tokens that grant only this organization (its own clients' and those bound to its MCP resource) revoked, and their personal space enters the 30-day offboarding window (a re-invitation inside it gives the space back; revoked keys and opaque tokens stay revoked). A JWT access token is not stored and cannot be revoked: it stays valid until it expires, and the per-request membership check refuses it meanwhile. Leaving requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403, as is a caller who is not a member.",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Left the organization",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "The caller's membership disappeared between authentication and the exit (a concurrent removal or leave). A caller who is not a member at all gets 403.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "409": {
+            "$ref": "#/components/responses/LastOwner"
           }
         }
       }
@@ -26911,6 +26961,29 @@
           "application/problem+json": {
             "schema": {
               "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "LastOwner": {
+        "description": "`last_owner` — the operation would leave the organization without an owner. Promote another member to owner first, or delete the organization.",
+        "headers": {
+          "Request-Id": {
+            "$ref": "#/components/headers/RequestId"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "example": {
+              "type": "https://docs.appstrate.dev/errors/last-owner",
+              "title": "Conflict",
+              "status": 409,
+              "detail": "An organization must keep at least one owner. Promote another member to owner first, or delete the organization.",
+              "code": "last_owner",
+              "requestId": "req_abc123"
             }
           }
         }

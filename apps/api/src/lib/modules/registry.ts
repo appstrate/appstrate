@@ -200,7 +200,10 @@ async function getOrgOwnerEmails(orgId: string): Promise<string[]> {
     .select({ email: user.email })
     .from(organizationMembers)
     .innerJoin(user, eq(organizationMembers.userId, user.id))
-    .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.role, "owner")));
+    .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.role, "owner")))
+    // Several owners are possible: `owners[0]` (the billing fallback contact) is
+    // the one who joined the org first, not whichever row the scan returns.
+    .orderBy(organizationMembers.joinedAt, organizationMembers.userId);
 
   return owners.map((row) => row.email);
 }

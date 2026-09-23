@@ -1,11 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { eq } from "drizzle-orm";
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from "bun:test";
+import type { AppstrateModule } from "@appstrate/core/module";
+import { and, eq } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedPackage, seedSchedule } from "../../helpers/seed.ts";
-import { organizations, schedules } from "@appstrate/db/schema";
+import { seedApiKey, seedPackage, seedSchedule } from "../../helpers/seed.ts";
+import { describeRequiresPostgres } from "../../helpers/tier.ts";
+import {
+  apiKeys,
+  oauthAccessToken,
+  oauthClient,
+  oauthRefreshToken,
+  organizationMembers,
+  organizations,
+  schedules,
+} from "@appstrate/db/schema";
 import {
   createOrganization,
   getUserOrganizations,
@@ -14,6 +24,7 @@ import {
   getOrgById,
   provisionMember,
   removeMember,
+  leaveOrganization,
   updateMemberRole,
   getOrgSettings,
   getCachedOrgApiVersion,
@@ -25,6 +36,21 @@ import { setCacheClock } from "@appstrate/core/cache";
 import { orgSettingsSchema } from "@appstrate/core/permissions";
 import { toSlug } from "@appstrate/core/naming";
 import { CURRENT_API_VERSION, listSupportedVersions } from "../../../src/lib/api-versions.ts";
+import { ApiError } from "../../../src/lib/errors.ts";
+import { getMcpOrgResourceUri } from "../../../src/lib/audiences.ts";
+import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
+import { buildModuleInitContext } from "../../../src/lib/modules/registry.ts";
+import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
+import { getTestApp } from "../../helpers/app.ts";
+
+/** Owner ids of `orgId`, read straight from the table. */
+async function ownerIds(orgId: string): Promise<string[]> {
+  const rows = await db
+    .select({ userId: organizationMembers.userId })
+    .from(organizationMembers)
+    .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.role, "owner")));
+  return rows.map((row) => row.userId);
+}
 
 const slugify = (v: string) => toSlug(v, 50);
 
@@ -374,6 +400,11 @@ describe("organizations service", () => {
   // ── provisionMember / removeMember / updateMemberRole ────
 
   describe("member management", () => {
+    // The creator (`userId`) is the owner of every org built below; the actor's
+    // role is re-read from its row by the service, never passed in.
+    const asOwner = () => ({ userId, firstPartySession: true });
+    const asDelegateOf = (id: string) => ({ userId: id, firstPartySession: false });
+
     it("provisionMember is idempotent for duplicate membership", async () => {
       const org = await createOrganization("Dup Org", "dup-org", userId);
 
@@ -389,19 +420,113 @@ describe("organizations service", () => {
       const member = await createTestUser({ email: "removable@test.com" });
       await db.transaction((tx) => provisionMember(tx, org.id, member.id, "member"));
 
-      await removeMember(org.id, member.id);
+      await removeMember(org.id, member.id, asOwner());
 
       const members = await getOrgMembers(org.id);
       const memberIds = members.map((m) => m.userId);
       expect(memberIds).not.toContain(member.id);
     });
 
-    it("removeMember throws for a non-existent member", async () => {
+    it("removeMember answers 404 for a non-existent member", async () => {
       const org = await createOrganization("Rm2 Org", "rm2-org", userId);
 
-      await expect(removeMember(org.id, "00000000-0000-0000-0000-000000000000")).rejects.toThrow(
-        /not found/i,
+      const error = await removeMember(
+        org.id,
+        "00000000-0000-0000-0000-000000000000",
+        asOwner(),
+      ).catch((err: unknown) => err);
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error).toMatchObject({ status: 404, code: "not_found" });
+    });
+
+    it("removeMember refuses a target the actor may not manage, and keeps the row", async () => {
+      const org = await createOrganization("Rm3 Org", "rm3-org", userId);
+      const admin = await createTestUser();
+      const peer = await createTestUser();
+      await db.transaction((tx) => provisionMember(tx, org.id, admin.id, "admin"));
+      await db.transaction((tx) => provisionMember(tx, org.id, peer.id, "admin"));
+
+      await expect(
+        removeMember(org.id, peer.id, { userId: admin.id, firstPartySession: true }),
+      ).rejects.toMatchObject({ status: 403 });
+      expect((await getOrgMembers(org.id)).map((m) => m.userId)).toContain(peer.id);
+    });
+
+    it("removeMember lets an owner remove a co-owner, on their own credential only", async () => {
+      const org = await createOrganization("Co Org", "co-org", userId);
+      const coOwner = await createTestUser();
+      await db.transaction((tx) => provisionMember(tx, org.id, coOwner.id, "member"));
+      await updateMemberRole(org.id, coOwner.id, "owner", asOwner());
+
+      // A delegate (OAuth/MCP client) of the very same owner is refused.
+      await expect(removeMember(org.id, coOwner.id, asDelegateOf(userId))).rejects.toMatchObject({
+        status: 403,
+      });
+      expect((await ownerIds(org.id)).sort()).toEqual([userId, coOwner.id].sort());
+
+      await removeMember(org.id, coOwner.id, asOwner());
+      expect(await ownerIds(org.id)).toEqual([userId]);
+    });
+
+    it("removeMember lets a delegate manage non-owners as before", async () => {
+      const org = await createOrganization("Deleg Org", "deleg-org", userId);
+      const member = await createTestUser();
+      await db.transaction((tx) => provisionMember(tx, org.id, member.id, "member"));
+
+      await removeMember(org.id, member.id, asDelegateOf(userId));
+      expect((await getOrgMembers(org.id)).map((m) => m.userId)).toEqual([userId]);
+    });
+
+    it("judges the actor on its role under the lock, not the one read at authentication", async () => {
+      const org = await createOrganization("Stale Org", "stale-org", userId);
+      const admin = await createTestUser();
+      const member = await createTestUser();
+      await db.transaction((tx) => provisionMember(tx, org.id, admin.id, "admin"));
+      await db.transaction((tx) => provisionMember(tx, org.id, member.id, "member"));
+      // Demoted by the owner after its request was authenticated as admin.
+      await updateMemberRole(org.id, admin.id, "member", asOwner());
+
+      const stale = { userId: admin.id, firstPartySession: true };
+      await expect(removeMember(org.id, member.id, stale)).rejects.toMatchObject({ status: 403 });
+      await expect(updateMemberRole(org.id, member.id, "guest", stale)).rejects.toMatchObject({
+        status: 403,
+      });
+      expect((await getOrgMembers(org.id)).find((m) => m.userId === member.id)?.role).toBe(
+        "member",
       );
+
+      // An actor removed meanwhile is no member at all.
+      await removeMember(org.id, admin.id, asOwner());
+      await expect(removeMember(org.id, member.id, stale)).rejects.toMatchObject({ status: 403 });
+    });
+
+    it("removeMember revokes the member's API keys in THAT org only", async () => {
+      const member = await createTestUser();
+      const { org: org1, defaultSpaceId: space1 } = await createTestOrg(userId, {
+        slug: "keys-org1",
+      });
+      await db.transaction((tx) => provisionMember(tx, org1.id, member.id, "member"));
+      const { org: org2, defaultSpaceId: space2 } = await createTestOrg(member.id, {
+        slug: "keys-org2",
+      });
+      const memberKey = await seedApiKey({ orgId: org1.id, spaceId: space1, createdBy: member.id });
+      const ownerKey = await seedApiKey({ orgId: org1.id, spaceId: space1, createdBy: userId });
+      const otherOrgKey = await seedApiKey({
+        orgId: org2.id,
+        spaceId: space2,
+        createdBy: member.id,
+      });
+
+      const { revokedApiKeyIds } = await removeMember(org1.id, member.id, asOwner());
+      expect(revokedApiKeyIds).toEqual([memberKey.id]);
+
+      const revokedAt = async (id: string) =>
+        (
+          await db.select({ revokedAt: apiKeys.revokedAt }).from(apiKeys).where(eq(apiKeys.id, id))
+        )[0]!.revokedAt;
+      expect(await revokedAt(memberKey.id)).not.toBeNull();
+      expect(await revokedAt(ownerKey.id)).toBeNull();
+      expect(await revokedAt(otherOrgKey.id)).toBeNull();
     });
 
     // ── CRIT-13 — removeMember disables the member's schedules ──
@@ -436,7 +561,7 @@ describe("organizations service", () => {
         nextRunAt: new Date(Date.now() + 3600_000),
       });
 
-      await removeMember(org.id, member.id);
+      await removeMember(org.id, member.id, asOwner());
 
       const [revoked] = await db
         .select({ enabled: schedules.enabled, nextRunAt: schedules.nextRunAt })
@@ -486,7 +611,7 @@ describe("organizations service", () => {
         nextRunAt: new Date(Date.now() + 3600_000),
       });
 
-      await removeMember(org1.id, member.id);
+      await removeMember(org1.id, member.id, asOwner());
 
       const [revoked] = await db
         .select({ enabled: schedules.enabled })
@@ -507,12 +632,273 @@ describe("organizations service", () => {
       const member = await createTestUser({ email: "promote@test.com" });
       await db.transaction((tx) => provisionMember(tx, org.id, member.id, "member"));
 
-      await updateMemberRole(org.id, member.id, "admin");
+      const { previousRole } = await updateMemberRole(org.id, member.id, "admin", asOwner());
+      expect(previousRole).toBe("member");
 
       const allMembers = await getOrgMembers(org.id);
       const updated = allMembers.find((m) => m.userId === member.id);
       expect(updated).toBeDefined();
       expect(updated!.role).toBe("admin");
+    });
+
+    it("updateMemberRole offers owner to an owner only", async () => {
+      const org = await createOrganization("Promo Org", "promo-org", userId);
+      const admin = await createTestUser();
+      const member = await createTestUser();
+      await db.transaction((tx) => provisionMember(tx, org.id, admin.id, "admin"));
+      await db.transaction((tx) => provisionMember(tx, org.id, member.id, "member"));
+
+      await expect(
+        updateMemberRole(org.id, member.id, "owner", { userId: admin.id, firstPartySession: true }),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(await ownerIds(org.id)).toEqual([userId]);
+
+      await updateMemberRole(org.id, member.id, "owner", asOwner());
+      expect((await ownerIds(org.id)).sort()).toEqual([userId, member.id].sort());
+    });
+
+    it("updateMemberRole refuses a delegate granting or taking owner, not other roles", async () => {
+      const org = await createOrganization("Deleg Role Org", "deleg-role-org", userId);
+      const member = await createTestUser();
+      const coOwner = await createTestUser();
+      await db.transaction((tx) => provisionMember(tx, org.id, member.id, "member"));
+      await db.transaction((tx) => provisionMember(tx, org.id, coOwner.id, "member"));
+      await updateMemberRole(org.id, coOwner.id, "owner", asOwner());
+      const delegate = asDelegateOf(userId);
+
+      await expect(updateMemberRole(org.id, member.id, "owner", delegate)).rejects.toMatchObject({
+        status: 403,
+      });
+      await expect(updateMemberRole(org.id, coOwner.id, "admin", delegate)).rejects.toMatchObject({
+        status: 403,
+      });
+      expect((await ownerIds(org.id)).sort()).toEqual([userId, coOwner.id].sort());
+
+      const { previousRole } = await updateMemberRole(org.id, member.id, "admin", delegate);
+      expect(previousRole).toBe("member");
+    });
+
+    it("leaveOrganization removes a member and refuses the last owner", async () => {
+      const org = await createOrganization("Leave Org", "leave-org", userId);
+      const member = await createTestUser();
+      await db.transaction((tx) => provisionMember(tx, org.id, member.id, "member"));
+
+      await leaveOrganization(org.id, member.id);
+      expect((await getOrgMembers(org.id)).map((m) => m.userId)).toEqual([userId]);
+
+      await expect(leaveOrganization(org.id, userId)).rejects.toMatchObject({
+        status: 409,
+        code: "last_owner",
+      });
+      await expect(leaveOrganization(org.id, member.id)).rejects.toMatchObject({ status: 404 });
+      expect(await ownerIds(org.id)).toEqual([userId]);
+    });
+  });
+
+  // ── OAuth tokens die with the membership ────────────────
+  //
+  // A refresh through an org-level `allowSignup` client re-provisions the
+  // membership, so the exit revokes the tokens of THIS org's own clients.
+  describe("exit revokes the org's own OAuth tokens", () => {
+    async function seedClient(clientId: string, level: "org" | "instance", orgId?: string) {
+      await db.insert(oauthClient).values({
+        id: clientId,
+        clientId,
+        redirectUris: ["https://client.test/cb"],
+        level,
+        referencedOrgId: level === "org" ? orgId : null,
+      });
+    }
+    async function seedTokens(clientId: string, ownerId: string, resources?: string[]) {
+      const refreshId = crypto.randomUUID();
+      await db.insert(oauthRefreshToken).values({
+        id: refreshId,
+        token: `rt_${refreshId}`,
+        clientId,
+        userId: ownerId,
+        scopes: ["openid"],
+        resources,
+        expiresAt: new Date(Date.now() + 3600_000),
+      });
+      const accessId = crypto.randomUUID();
+      await db.insert(oauthAccessToken).values({
+        id: accessId,
+        token: `at_${accessId}`,
+        clientId,
+        userId: ownerId,
+        refreshId,
+        scopes: ["openid"],
+        resources,
+        expiresAt: new Date(Date.now() + 3600_000),
+      });
+      return { refreshId, accessId };
+    }
+    async function revokedState(tokens: { refreshId: string; accessId: string }) {
+      const [refresh] = await db
+        .select({ revoked: oauthRefreshToken.revoked })
+        .from(oauthRefreshToken)
+        .where(eq(oauthRefreshToken.id, tokens.refreshId));
+      const [access] = await db
+        .select({ revoked: oauthAccessToken.revoked })
+        .from(oauthAccessToken)
+        .where(eq(oauthAccessToken.id, tokens.accessId));
+      return { refresh: refresh!.revoked !== null, access: access!.revoked !== null };
+    }
+
+    it("leaving revokes this org's client tokens and leaves the others", async () => {
+      const org = await createOrganization("Tok Org", "tok-org", userId);
+      const other = await createOrganization("Other Tok Org", "other-tok-org", userId);
+      const member = await createTestUser();
+      await db.transaction((tx) => provisionMember(tx, org.id, member.id, "member"));
+      await db.transaction((tx) => provisionMember(tx, other.id, member.id, "member"));
+      await seedClient("cli_this_org", "org", org.id);
+      await seedClient("cli_other_org", "org", other.id);
+      await seedClient("cli_instance", "instance");
+      const thisOrg = await seedTokens("cli_this_org", member.id);
+      const otherOrg = await seedTokens("cli_other_org", member.id);
+      const instance = await seedTokens("cli_instance", member.id);
+      // Witness: the same client's tokens held by someone who stays.
+      const stayer = await seedTokens("cli_this_org", userId);
+
+      await leaveOrganization(org.id, member.id);
+
+      expect(await revokedState(thisOrg)).toEqual({ refresh: true, access: true });
+      expect(await revokedState(otherOrg)).toEqual({ refresh: false, access: false });
+      expect(await revokedState(instance)).toEqual({ refresh: false, access: false });
+      expect(await revokedState(stayer)).toEqual({ refresh: false, access: false });
+    });
+
+    it("revokes instance-client tokens bound to this org's MCP resource, only those", async () => {
+      const org = await createOrganization("Mcp Org", "mcp-org", userId);
+      const other = await createOrganization("Other Mcp Org", "other-mcp-org", userId);
+      const member = await createTestUser();
+      await db.transaction((tx) => provisionMember(tx, org.id, member.id, "member"));
+      await db.transaction((tx) => provisionMember(tx, other.id, member.id, "member"));
+      await seedClient("cli_mcp", "instance");
+      const bound = await seedTokens("cli_mcp", member.id, [getMcpOrgResourceUri(org.id)]);
+      const otherBound = await seedTokens("cli_mcp", member.id, [getMcpOrgResourceUri(other.id)]);
+      const unbound = await seedTokens("cli_mcp", member.id);
+
+      await removeMember(org.id, member.id, { userId, firstPartySession: true });
+
+      expect(await revokedState(bound)).toEqual({ refresh: true, access: true });
+      expect(await revokedState(otherBound)).toEqual({ refresh: false, access: false });
+      expect(await revokedState(unbound)).toEqual({ refresh: false, access: false });
+    });
+  });
+
+  // ── `onOrgMemberRemove` fires from the service, for the exiting member ──
+  //
+  // A recording module in the loader registry — the same entry point boot uses
+  // (see `organizations-delete-preconditions.test.ts`).
+  describe("onOrgMemberRemove", () => {
+    let calls: Array<[string, string]> = [];
+    const recorder: AppstrateModule = {
+      manifest: {
+        id: "test-member-remove-recorder",
+        name: "Member remove recorder",
+        version: "1.0.0",
+      },
+      async init() {},
+      events: {
+        onOrgMemberRemove: async (orgId: string, removedUserId: string) => {
+          calls.push([orgId, removedUserId]);
+        },
+      },
+    };
+
+    beforeAll(async () => {
+      resetModules();
+      await loadModulesFromInstances([recorder], buildModuleInitContext());
+    });
+    afterAll(async () => {
+      // Back to the preload's registry; `getTestApp()` restores the RBAC
+      // provider the reset nulls out (same teardown as the delete-preconditions suite).
+      await restoreDiscoveredModules();
+      getTestApp();
+    });
+    beforeEach(() => {
+      calls = [];
+    });
+
+    it("fires once with the removed member's id, not the actor's", async () => {
+      const org = await createOrganization("Evt Org", "evt-org", userId);
+      const member = await createTestUser();
+      await db.transaction((tx) => provisionMember(tx, org.id, member.id, "member"));
+
+      await removeMember(org.id, member.id, { userId, firstPartySession: true });
+      expect(calls).toEqual([[org.id, member.id]]);
+    });
+
+    it("fires once for a member who leaves", async () => {
+      const org = await createOrganization("Evt Leave Org", "evt-leave-org", userId);
+      const member = await createTestUser();
+      await db.transaction((tx) => provisionMember(tx, org.id, member.id, "member"));
+
+      await leaveOrganization(org.id, member.id);
+      expect(calls).toEqual([[org.id, member.id]]);
+    });
+
+    it("does not fire on a refused exit", async () => {
+      const org = await createOrganization("Evt Refused Org", "evt-refused-org", userId);
+      const admin = await createTestUser();
+      await db.transaction((tx) => provisionMember(tx, org.id, admin.id, "admin"));
+
+      await expect(leaveOrganization(org.id, userId)).rejects.toMatchObject({ status: 409 });
+      await expect(
+        removeMember(org.id, userId, { userId: admin.id, firstPartySession: true }),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(calls).toEqual([]);
+    });
+  });
+
+  // ── The org keeps an owner under concurrency ─────────────
+  //
+  // Without `lockOrgOwnership` both writers read the other owner as present and
+  // both commit, leaving zero owners — these can fail without the lock. PGlite
+  // serialises on one connection, which would make them vacuous: Postgres only.
+  describeRequiresPostgres("owner invariant under concurrent exits", () => {
+    const ROUNDS = 5;
+
+    async function twoOwnerOrg(round: number): Promise<{ orgId: string; coOwnerId: string }> {
+      const org = await createOrganization(`Race ${round}`, `race-${round}`, userId);
+      const coOwner = await createTestUser();
+      await db.transaction((tx) => provisionMember(tx, org.id, coOwner.id, "member"));
+      await updateMemberRole(org.id, coOwner.id, "owner", { userId, firstPartySession: true });
+      return { orgId: org.id, coOwnerId: coOwner.id };
+    }
+
+    it("two owners leaving at once: exactly one leaves, one owner remains", async () => {
+      for (let round = 0; round < ROUNDS; round++) {
+        const { orgId, coOwnerId } = await twoOwnerOrg(round);
+
+        const results = await Promise.allSettled([
+          leaveOrganization(orgId, userId),
+          leaveOrganization(orgId, coOwnerId),
+        ]);
+
+        expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+        const rejected = results.filter((r) => r.status === "rejected");
+        expect(rejected).toHaveLength(1);
+        expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({
+          status: 409,
+          code: "last_owner",
+        });
+        expect(await ownerIds(orgId)).toHaveLength(1);
+      }
+    });
+
+    it("an owner demoting the other while that one leaves keeps at least one owner", async () => {
+      for (let round = 0; round < ROUNDS; round++) {
+        const { orgId, coOwnerId } = await twoOwnerOrg(round);
+
+        await Promise.allSettled([
+          updateMemberRole(orgId, coOwnerId, "member", { userId, firstPartySession: true }),
+          leaveOrganization(orgId, userId),
+        ]);
+
+        expect((await ownerIds(orgId)).length).toBeGreaterThanOrEqual(1);
+      }
     });
   });
 

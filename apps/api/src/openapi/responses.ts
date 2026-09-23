@@ -220,6 +220,26 @@ export const responses = {
       },
     },
   },
+  /** The last owner leaving — the one exit that can empty the owner set. */
+  LastOwner: {
+    description:
+      "`last_owner` — the operation would leave the organization without an owner. Promote another member to owner first, or delete the organization.",
+    headers: REQUEST_ID_ONLY_HEADERS,
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        example: {
+          type: "https://docs.appstrate.dev/errors/last-owner",
+          title: "Conflict",
+          status: 409,
+          detail:
+            "An organization must keep at least one owner. Promote another member to owner first, or delete the organization.",
+          code: "last_owner",
+          requestId: "req_abc123",
+        },
+      },
+    },
+  },
   InternalServerError: {
     description: "Unexpected server error",
     content: {

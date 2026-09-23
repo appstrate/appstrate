@@ -11,6 +11,8 @@ import {
 } from "@appstrate/db/schema";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
+import { forbidden } from "../lib/errors.ts";
+import { lockOrgMember } from "./space-members.ts";
 import type { ApiKeyInfo } from "@appstrate/shared-types";
 import type { OrgRole } from "../types/index.ts";
 import { toISO, toISORequired } from "../lib/date-helpers.ts";
@@ -123,7 +125,10 @@ export async function validateApiKey(rawKey: string): Promise<ValidatedApiKey | 
   };
 }
 
-/** Create a new API key record. Returns the record ID. */
+/**
+ * Create a new API key record. Returns the record ID. 403 when the creator is
+ * not (or no longer) a member.
+ */
 export async function createApiKeyRecord(params: {
   scope: SpaceScope;
   name: string;
@@ -134,16 +139,23 @@ export async function createApiKeyRecord(params: {
   scopes?: string[];
 }): Promise<string> {
   const id = crypto.randomUUID();
-  await db.insert(apiKeys).values({
-    id,
-    orgId: params.scope.orgId,
-    spaceId: params.scope.spaceId,
-    name: params.name,
-    keyHash: params.keyHash,
-    keyPrefix: params.keyPrefix,
-    createdBy: params.createdBy,
-    expiresAt: params.expiresAt,
-    scopes: params.scopes ?? [],
+  await db.transaction(async (tx) => {
+    // The exit holds this row FOR UPDATE while it revokes the member's keys: a
+    // key inserted without it could commit after the revocation and escape it.
+    if (!(await lockOrgMember(tx, params.scope.orgId, params.createdBy))) {
+      throw forbidden("Not a member of this organization");
+    }
+    await tx.insert(apiKeys).values({
+      id,
+      orgId: params.scope.orgId,
+      spaceId: params.scope.spaceId,
+      name: params.name,
+      keyHash: params.keyHash,
+      keyPrefix: params.keyPrefix,
+      createdBy: params.createdBy,
+      expiresAt: params.expiresAt,
+      scopes: params.scopes ?? [],
+    });
   });
   return id;
 }

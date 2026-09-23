@@ -127,6 +127,7 @@ export function createApiKeysRouter() {
 
       return c.json({ id, key: rawKey, keyPrefix, scopes: validatedScopes }, 201);
     } catch (err) {
+      if (err instanceof ApiError) throw err;
       logger.error("API key creation failed", {
         error: getErrorMessage(err),
       });

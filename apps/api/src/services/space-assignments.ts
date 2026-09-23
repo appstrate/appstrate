@@ -7,7 +7,7 @@ import type { SpaceAssignment } from "@appstrate/core/permissions";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
 import { invalidRequest, notFound } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
-import { lockOrgMemberForSpaceGrant } from "./space-members.ts";
+import { lockOrgMember } from "./space-members.ts";
 import type { DbOrTx } from "../lib/db-helpers.ts";
 
 /**
@@ -100,7 +100,7 @@ export async function applySpaceAssignments(
   if (assignments.length === 0) return [];
 
   // An existing member may have been promoted since the grants were configured.
-  const member = await lockOrgMemberForSpaceGrant(tx, orgId, userId);
+  const member = await lockOrgMember(tx, orgId, userId);
   if (!member) throw notFound("User is not a member of this organization");
   const orgRole = member.role;
   if (orgRole === "owner" || orgRole === "admin") {
