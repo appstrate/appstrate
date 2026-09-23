@@ -105,9 +105,8 @@ import { isUserConnectionCreationBlocked } from "../services/integration-connect
 import {
   CLIENT_SECRET_REQUIRED_MESSAGE,
   PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
-  oauthScopeShortfall,
 } from "../services/integration-manifest-helpers.ts";
-import { partitionScopesByAuthCatalog } from "@appstrate/core/integration";
+import { partitionScopesByAuthCatalog, scopesNotCovered } from "@appstrate/core/integration";
 import {
   deleteIntegrationPin,
   listAgentsConsumingIntegration,
@@ -525,7 +524,7 @@ export function createIntegrationsRouter() {
       logger.info("Integration OAuth callback success", {
         packageId: result.packageId,
         authKey: result.authKey,
-        scopeShortfall: oauthScopeShortfall(
+        scopeShortfall: scopesNotCovered(
           result.scopesRequested,
           result.scopesGranted,
           manifest,

@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`scopesNotCovered`** (`@appstrate/core/integration`) — the required OAuth
+  scopes a grant does not cover once expanded through `scope_catalog[].implies`,
+  so an alias a provider echoes (Google `userinfo.email` for `email`) counts as
+  granted. One diff for the connection-gap check, the refresh shrink check and
+  the OAuth callback.
 - **`PACKAGE_TYPE_ROUTE_SEGMENT`** (`@appstrate/core/package-files`) — the URL
   segment of each package type's collection (`skill` → `skills`, …), declared
   once for the API router, the dashboard and the CLI.
