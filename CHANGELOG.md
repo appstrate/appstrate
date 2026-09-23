@@ -30,6 +30,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`…or push --force to replace it.`) is printed alone, not followed by the
   server's own wording of it, and any other error chain starts its cause as a
   new sentence after a full stop.
+- **`@appstrate/clickup-mcp` 1.2.3 matches ClickUp's live tool surface again**
+  (#1480). The upstream server (public beta) dropped `clickup_merge_document`
+  and `clickup_merge_document_page`, and added
+  `clickup_list_document_page_attachments`,
+  `clickup_download_document_page_attachment`, `clickup_get_schema`,
+  `clickup_get_operators` and `clickup_execute_operator`. The last two are
+  declared for parity but listed in `hidden_tools`: `clickup_execute_operator`
+  runs whatever operators ClickUp enables server-side, a surface the per-tool
+  allowlist cannot bound, so it stays out of the picker and off `tools/list`.
 - **The npm `appstrate` CLI knows it was installed from npm** (#1518). Every
   npm release up to 1.0.0-beta.61 shipped a bundle stamped with install source
   `unknown` instead of `bun`: the publish step rebuilt it without the stamp, so
