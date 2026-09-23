@@ -208,11 +208,7 @@ export async function ensureImage(image: string): Promise<void> {
  */
 export const IMAGE_PIN_PREFIX = "appstrate-imagepin-";
 
-/**
- * Label carrying the image reference a pin container currently holds.
- * Informational only (operator legibility, `docker ps --filter`): drift is
- * decided by {@link IMAGE_PIN_SPEC_LABEL}, which already covers the image.
- */
+/** Image a pin holds — informational (`docker ps --filter`); the spec label decides drift. */
 const IMAGE_PIN_IMAGE_LABEL = "appstrate.pin.image";
 
 /** Label carrying the fingerprint of the container config a pin was created from. */
@@ -236,9 +232,8 @@ async function inspectPinContainer(name: string): Promise<PinInspectResult | nul
   return {
     id: data.Id,
     // Read the pin's own label, not the inspected config: Docker rewrites
-    // `Config.Image` to a digest in some versions and fills in defaults
-    // elsewhere, which would make every reconcile pass think the pin drifted
-    // and recreate it forever.
+    // `Config.Image` to a digest in some versions, which would make every
+    // reconcile pass think the pin drifted and recreate it forever.
     spec: data.Config?.Labels?.[IMAGE_PIN_SPEC_LABEL] ?? "",
     running: data.State?.Running === true,
   };
@@ -247,14 +242,12 @@ async function inspectPinContainer(name: string): Promise<PinInspectResult | nul
 /**
  * Reconcile one pin container for `image` under the stable slot name
  * `${IMAGE_PIN_PREFIX}${slot}`. Idempotent and convergent: a pin already
- * created from this exact spec and running is left alone; one whose spec
- * drifted — image reference or container config, e.g. a release bumped the
- * tag or changed the pin's config — is replaced, so pins can never drift
- * behind the images the platform actually launches.
+ * created from this exact spec and running is left alone; one whose spec drifted
+ * (image tag or pin config) is replaced, so pins never lag behind what the
+ * platform launches.
  *
- * Returns `"unchanged"` when the live pin already matches; `"created"` when no
- * live pin was holding the image (absent, or present but stopped); `"replaced"`
- * when a live pin was swapped because its spec drifted.
+ * Returns `"unchanged"` (live pin matches), `"created"` (no live pin held the
+ * image: absent or stopped) or `"replaced"` (a live pin's spec drifted).
  */
 export async function ensureImagePin(
   image: string,
@@ -270,9 +263,8 @@ export async function ensureImagePin(
     // reference, so a missing `sleep` degrades rather than breaks.
     Entrypoint: ["sleep"],
     Cmd: ["infinity"],
-    // A pin runs `sleep`, not the image's process, so the image's HEALTHCHECK
-    // probes something that isn't running (the sidecar's probes a port nothing
-    // listens on here).
+    // A pin runs `sleep`, so the image's HEALTHCHECK would probe a process
+    // that isn't there (#1521).
     Healthcheck: { Test: ["NONE"] },
     HostConfig: {
       // No network, no privileges, minimal resources: this process must be
@@ -288,8 +280,7 @@ export async function ensureImagePin(
       RestartPolicy: { Name: "unless-stopped" },
     },
   };
-  // Fingerprint the whole config (image included) so any change to what a pin
-  // should be — not just its tag — converges on the next pass.
+  // Fingerprint the whole config, image included, so any change converges.
   const spec = new Bun.CryptoHasher("sha256").update(JSON.stringify(config)).digest("hex");
 
   const existing = await inspectPinContainer(name);
@@ -299,8 +290,7 @@ export async function ensureImagePin(
   if (existing) {
     // Stale spec, or right spec but not running. Not-running still pins the
     // image against `image prune`, but NOT against `container prune`, which
-    // reaps stopped containers wholesale — so remove and recreate it running.
-    // A stopped pin is reported as "created": nothing live was holding the image.
+    // reaps stopped containers wholesale — so converge on "running" either way.
     await removeContainer(existing.id).catch(() => {});
   }
 

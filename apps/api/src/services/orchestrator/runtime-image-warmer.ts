@@ -79,20 +79,16 @@ export async function reconcileRuntimeImages(
       if (outcome === "unchanged") continue;
       pinned.push(slot);
       if (outcome === "created") {
-        // Deliberately loud: a running pin is the steady state, so a pass that
-        // found none (absent, or present but stopped) means something on this
-        // host removed or stopped it — the very janitor whose invisible
-        // nightly re-pull this module exists to stop. Silent self-healing
-        // would hide it again.
+        // Deliberately loud: a running pin is the steady state, so finding none
+        // means something on this host removed or stopped it — the janitor this
+        // module exists to stop. Silent self-healing would hide it again.
         logger.warn("runtime image pin was missing or stopped — recreated", {
           image,
           slot,
           outcome,
         });
       } else {
-        // A running pin was swapped because its spec drifted (image tag or
-        // pin config changed) — expected once per host after a release, not
-        // an alarm.
+        // Spec drift: expected once per host after a release, not an alarm.
         logger.info("runtime image pin replaced — spec drifted", { image, slot, outcome });
       }
     } catch (err) {
