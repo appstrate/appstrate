@@ -383,7 +383,7 @@ describe("every /api/ operation has a readable requirement", () => {
 
   it("still has reads and writes to judge", () => {
     // Control for the loop above: a filter excluding everything would pass it.
-    // Row-decided GETs are allowlisted by method, so they no longer count as judged.
+    // Row-decided GETs are allowlisted by method, so they are not counted as judged.
     const judged = [...getCatalog().operations.values()].filter(
       (operation) =>
         operation.pathTemplate.startsWith("/api/") && !covers(NO_MOUNTED_GUARD, operation),

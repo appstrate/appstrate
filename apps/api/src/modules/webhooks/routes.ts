@@ -310,7 +310,7 @@ export function createWebhooksRouter() {
 
   // GET /api/webhooks/:id — get webhook detail.
   //
-  // Every by-id route mounts no guard: `loadWebhookForAction` enters the ROW's
+  // Every by-id route mounts no permission guard: `loadWebhookForAction` enters the ROW's
   // space and judges there.
   router.get("/api/webhooks/:id", rateLimit(300), async (c) => {
     return c.json(await loadWebhookForAction(c, "read"));

@@ -791,7 +791,7 @@ export function createSpacesRouter() {
   // to hand out). Activating is therefore not a way around `share`. An API key
   // never carries it, so a key activates the already-placed and nothing else.
   //
-  // No guard is mounted: the gate below reads the package's own rows
+  // No permission guard is mounted: the gate below reads the package's own rows
   // (`gateSpacePackageWrite`, `assertPackageShareAccess`).
   router.post("/:spaceId/packages", async (c) => {
     const orgId = c.get("orgId");
