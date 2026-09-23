@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`canonicalPackagePath`** (`@appstrate/core/package-file-operations`) — the
   NFC, lowercased key two package paths collide on, shared by the tree algebra
   and by clients writing a tree to a case-insensitive disk.
-- **`planPublishVersion`** and **`VersionBump`** (`@appstrate/core/semver`) —
+- **`planPublishVersion`**, **`PublishVersionPlan`** and **`VersionBump`** (`@appstrate/core/semver`) —
   what publishing a draft would cut (`bump` | `direct` | `blocked` | `none`)
   from the draft's version and the latest published one, shared by the
   dashboard's publish dialog and `appstrate packages publish`.
