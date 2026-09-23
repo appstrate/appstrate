@@ -46,7 +46,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   module to drop what it granted to that pair. Best-effort like every module
   event: a failing handler is logged, not retried. `@appstrate/module-ee` uses it to delete the member's
   billing-manager row, so a re-invited ex-billing-manager no longer regains
-  `billing:manage`. This extends the `@appstrate/core` module contract: minor
+  `billing:manage` — for exits from this release on: rows left by members who
+  departed before it are not repaired. This extends the `@appstrate/core` module contract: minor
   core release.
 
 ### Changed

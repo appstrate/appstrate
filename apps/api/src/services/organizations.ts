@@ -545,7 +545,7 @@ async function exitOrg(
     const member = await lockOrgMember(tx, orgId, userId);
     if (!member) throw notFound("Member not found");
     await authorize(tx, member.role);
-    // Reachable through leave only: a removal of an owner is by another owner.
+    // Runs on every exit; only a leave can fail it (an owner is removed only by another owner).
     if (member.role === "owner") await assertAnotherOwnerRemains(tx, orgId, userId);
     return removeMemberInTx(tx, orgId, userId);
   });
