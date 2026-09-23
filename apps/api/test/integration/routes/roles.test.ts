@@ -219,12 +219,8 @@ describe("custom space roles", () => {
 
       // The read each entry needs travels on the wire, empty when none.
       expect(byName.get("schedules:write")!.requires_one_of).toEqual(["schedules:read"]);
-      expect(byName.get("runs:cancel")!.requires_one_of).toEqual(["runs:read", "runs:read-all"]);
       expect(byName.get("agents:run")!.requires_one_of).toEqual(["runs:read", "runs:read-all"]);
-      expect(byName.get("runs:delete")!.requires_one_of).toEqual(["runs:read", "runs:read-all"]);
-      expect(byName.get("runs:read-all")!.requires_one_of).toEqual([]);
       expect(byName.get("integrations:connect")!.requires_one_of).toEqual([]);
-      expect(byName.get("integrations:disconnect")!.requires_one_of).toEqual([]);
 
       // And every offered string is accepted by the create route.
       expect((await post(validBody({ permissions: offered }))).status).toBe(201);
@@ -310,34 +306,17 @@ describe("custom space roles", () => {
       expect(detail).toContain("'skills:write' requires 'skills:read'");
     });
 
-    it("accepts the overrides: read-free actions and a runs read for runs and launches", async () => {
-      const cases: [string, string[]][] = [
-        ["runner-own", ["agents:run", "runs:read"]],
-        ["runner-all", ["agents:run", "runs:read-all"]],
-        ["runs-supervisor", ["runs:read-all", "runs:cancel"]],
-        ["runs-purger", ["runs:read-all", "runs:delete"]],
-        ["own-purger", ["runs:read", "runs:delete"]],
-        ["inviter", ["space-members:invite"]],
-        ["connector", ["integrations:connect"]],
-        ["disconnector", ["integrations:disconnect"]],
-      ];
-      for (const [key, permissions] of cases) {
-        expect((await post(validBody({ key, permissions }))).status, key).toBe(201);
-      }
-      // The controls: a launch, a cancel or a delete with no runs read at all,
-      // and `uninstall`, which gates a route, are refused.
-      for (const permission of ["agents:run", "runs:cancel", "runs:delete"]) {
-        const bad = await post(validBody({ key: "no-runs-read", permissions: [permission] }));
-        expect((await expectProblem(bad, 400)).detail).toContain(
-          `'${permission}' requires one of 'runs:read', 'runs:read-all'`,
-        );
-      }
-      const uninstaller = await post(
-        validBody({ key: "uninstaller", permissions: ["integrations:uninstall"] }),
+    it("asks a launch for either runs read, and accepts it without the agent's", async () => {
+      const bad = await post(validBody({ key: "launcher", permissions: ["agents:run"] }));
+      expect((await expectProblem(bad, 400, { param: "permissions" })).detail).toContain(
+        "'agents:run' requires one of 'runs:read', 'runs:read-all'",
       );
-      expect((await expectProblem(uninstaller, 400)).detail).toContain(
-        "'integrations:uninstall' requires 'integrations:read'",
+
+      // The twin: the cross-resource read is honoured end to end, no `agents:read`.
+      const ok = await post(
+        validBody({ key: "launcher", permissions: ["agents:run", "runs:read"] }),
       );
+      expect(ok.status).toBe(201);
     });
 
     it("holds a module resource to the same rule", async () => {

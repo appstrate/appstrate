@@ -14,85 +14,50 @@ import {
   spaceLevelVocabulary,
 } from "../../../src/lib/permissions.ts";
 
-describe("the read requirement of one permission", () => {
-  it("is `R:read` for an action, and nothing for the read itself", () => {
-    expect(readGrantsFor("schedules:write")).toEqual(["schedules:read"]);
-    expect(readGrantsFor("schedules:read")).toEqual([]);
-  });
+const RUNS_READS = ["runs:read", "runs:read-all"];
 
-  it("is either runs read for a cancel, `runs:read` first", () => {
-    expect(readGrantsFor("runs:cancel")).toEqual(["runs:read", "runs:read-all"]);
-    expect(readGrantsFor("runs:read-all")).toEqual([]);
-  });
+/** Permission → the reads any one of which it requires, canonical first. */
+const REQUIREMENTS: [string, string[]][] = [
+  // The default: an action needs its resource's read; a read needs nothing.
+  ["schedules:write", ["schedules:read"]],
+  ["agents:write", ["agents:read"]],
+  ["schedules:read", []],
+  ["runs:read-all", []],
+  // Runs actions and a launch take either runs read, `runs:read` first —
+  // a launch is read back as a run, never as the agent.
+  ["runs:cancel", RUNS_READS],
+  ["runs:delete", RUNS_READS],
+  ["agents:run", RUNS_READS],
+  // Read-free actions, each next to a gated neighbour on the same resource.
+  ["space-members:invite", []],
+  ["space-members:change-role", ["space-members:read"]],
+  ["integrations:connect", []],
+  ["integrations:disconnect", []],
+  ["integrations:uninstall", ["integrations:read"]],
+  // A resource with no read action, and a string nobody declared.
+  ["space-settings:write", []],
+  ["credential-proxy:call", []],
+  ["nope:write", []],
+];
 
-  it("is either runs read for a delete, `runs:read` first", () => {
-    expect(readGrantsFor("runs:delete")).toEqual(["runs:read", "runs:read-all"]);
-  });
-
-  it("is a runs read for a launch, not the agent's read", () => {
-    expect(readGrantsFor("agents:run")).toEqual(["runs:read", "runs:read-all"]);
-    expect(readGrantsFor("agents:write")).toEqual(["agents:read"]);
-  });
-
-  it("is nothing for a read-free action, and something for its neighbours", () => {
-    expect(readGrantsFor("integrations:connect")).toEqual([]);
-    expect(readGrantsFor("integrations:disconnect")).toEqual([]);
-    expect(readGrantsFor("integrations:uninstall")).toEqual(["integrations:read"]);
-    expect(readGrantsFor("space-members:invite")).toEqual([]);
-    expect(readGrantsFor("space-members:change-role")).toEqual(["space-members:read"]);
-  });
-
-  it("is nothing on a resource with no read action, or for an unknown string", () => {
-    expect(readGrantsFor("space-settings:write")).toEqual([]);
-    expect(readGrantsFor("credential-proxy:call")).toEqual([]);
-    expect(readGrantsFor("nope:write")).toEqual([]);
+describe("readGrantsFor", () => {
+  it.each(REQUIREMENTS)("%s requires one of %p", (permission, reads) => {
+    expect(readGrantsFor(permission)).toEqual(reads);
   });
 });
 
 describe("missingReadGrants", () => {
-  it("names the read an action lacks, and nothing once it is held", () => {
-    expect(missingReadGrants(["schedules:write"])).toEqual([
-      { permission: "schedules:write", reads: ["schedules:read"] },
+  it("is satisfied by any one of the reads, and names them all when none is held", () => {
+    expect(missingReadGrants(["runs:cancel"])).toEqual([
+      { permission: "runs:cancel", reads: RUNS_READS },
     ]);
+    expect(missingReadGrants(["runs:cancel", "runs:read-all"])).toEqual([]);
+    expect(missingReadGrants(["runs:delete", "runs:read"])).toEqual([]);
+    expect(missingReadGrants(["agents:run", "runs:read"])).toEqual([]);
     expect(missingReadGrants(["schedules:write", "schedules:read"])).toEqual([]);
   });
 
-  it("accepts `runs:read-all` as the read of a runs action, and names both reads", () => {
-    expect(missingReadGrants(["runs:read-all", "runs:cancel"])).toEqual([]);
-    expect(missingReadGrants(["runs:cancel"])).toEqual([
-      { permission: "runs:cancel", reads: ["runs:read", "runs:read-all"] },
-    ]);
-  });
-
-  it("refuses a delete with no runs read, and accepts either one", () => {
-    expect(missingReadGrants(["runs:delete"])).toEqual([
-      { permission: "runs:delete", reads: ["runs:read", "runs:read-all"] },
-    ]);
-    expect(missingReadGrants(["runs:read", "runs:delete"])).toEqual([]);
-    expect(missingReadGrants(["runs:read-all", "runs:delete"])).toEqual([]);
-  });
-
-  it("asks a launch for a runs read, either one, and never `agents:read`", () => {
-    expect(missingReadGrants(["agents:run"])).toEqual([
-      { permission: "agents:run", reads: ["runs:read", "runs:read-all"] },
-    ]);
-    expect(missingReadGrants(["agents:run", "runs:read"])).toEqual([]);
-    expect(missingReadGrants(["agents:run", "runs:read-all"])).toEqual([]);
-  });
-
-  it("lets the read-free actions stand alone, and not their neighbours", () => {
-    const readFree = ["space-members:invite", "integrations:connect", "integrations:disconnect"];
-    expect(missingReadGrants(readFree)).toEqual([]);
-    expect(missingReadGrants(["integrations:uninstall"])).toEqual([
-      { permission: "integrations:uninstall", reads: ["integrations:read"] },
-    ]);
-    expect(missingReadGrants(["space-members:change-role"])).toEqual([
-      { permission: "space-members:change-role", reads: ["space-members:read"] },
-    ]);
-    expect(missingReadGrants(["space-settings:write"])).toEqual([]);
-  });
-
-  it("ignores unknown strings and sorts what it names", () => {
+  it("names every missing read, sorted, and ignores unknown strings", () => {
     expect(missingReadGrants(["retired:thing"])).toEqual([]);
     expect(missingReadGrants(["skills:write", "agents:write", "retired:thing"])).toEqual([
       { permission: "agents:write", reads: ["agents:read"] },
