@@ -39,6 +39,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   good release no longer fails while npm propagates it (the check waits up to
   12 minutes on what bun resolves), and its GitHub Release is created whenever
   the npm publish succeeded.
+- **A run event Postgres refuses no longer wedges the run** (#1501). A NUL byte
+  or lone UTF-16 surrogate in a runner string (binary tool output, a model
+  cutting an emoji) made the `run_logs` insert fail identically on every retry:
+  the event 500'd forever, every later event buffered behind it failed too, and
+  the run could not finalize until the watchdog killed it. Those characters are
+  now replaced with U+FFFD wherever run logs, run results, memories and chat
+  messages are written, and any other write refused for its own values (SQLSTATE class 22 or
+  `23514`) is recorded as a `system`/`event_dropped` log row instead, so the
+  stream moves on. Runner token counts are capped to fit the usage ledger's
+  integer columns.
 
 ## [1.0.0-beta.61] - 2026-09-23
 
