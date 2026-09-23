@@ -332,6 +332,15 @@ snapshot yields `No schema changes, nothing to migrate`. Tier-0 tests replay the
 whole chain from `0000` under PGlite, so a malformed migration fails there
 loudly.
 
+A migration that changes the schema also regenerates **`packages/db/schema-catalog.txt`** — the
+fingerprint of what the chain builds (columns, indexes, constraints, enum labels; the query is
+`scripts/schema-catalog.sql`). Migrate an EMPTY Postgres 16 database with
+`bun packages/db/src/migrate.ts`, then `bun run verify:schema-catalog --write` against it, and commit
+the file; the `schema-catalog` job in `check.yml` fails until you do. It is not in `bun run check`
+because it needs a database. Its point is outside CI: the same query run on production and diffed
+against this file is how a long-lived database's drift from the chain shows up (#1507, release
+runbook Phase 2a).
+
 ## Quality Gate — and the signals it lies with
 
 `bun run check` is the gate. It is honest in CI and in a plain clone; several of
