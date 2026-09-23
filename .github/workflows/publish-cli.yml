@@ -135,6 +135,7 @@ jobs:
           fi
 
       - name: Publish to npm
+        id: publish
         # Publishes the tarball validated above, not the source directory: a
         # tarball publish runs no lifecycle scripts, so `prepack` cannot rebuild
         # the bundle without APPSTRATE_INSTALL_SOURCE (which shipped the
@@ -220,7 +221,10 @@ jobs:
           fi
 
       - name: Create GitHub Release
-        if: github.event_name == 'push'
+        # Runs whenever `npm publish` succeeded, even if the wait/smoke above
+        # failed: the npm version is immutable once published, so its tag gets
+        # its release regardless (#1518).
+        if: github.event_name == 'push' && !cancelled() && steps.publish.outcome == 'success'
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           generate_release_notes: true
