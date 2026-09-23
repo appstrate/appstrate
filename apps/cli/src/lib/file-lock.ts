@@ -29,7 +29,7 @@ import { dirname } from "node:path";
 import { DEFAULT_IO, type CommandIO } from "./io.ts";
 
 /** The outcome of one non-blocking attempt at the lock. */
-export type LockAttempt =
+type LockAttempt =
   { status: "acquired" } | { status: "busy" } | { status: "unsupported"; reason: string };
 
 /** Takes an open descriptor, tries once, never blocks, never throws. */
