@@ -16,7 +16,8 @@
     "./ids": "./src/ids.ts",
     "./provision-org": "./src/provision-org.ts",
     "./storage": "./src/storage.ts",
-    "./notify": "./src/notify.ts"
+    "./notify": "./src/notify.ts",
+    "./pg-safe": "./src/pg-safe.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -27,10 +27,10 @@
  *      container POSTs a complete `result`, the row is complete too.
  */
 
-import { describe, it, expect, beforeEach, afterAll } from "bun:test";
-import { eq, sql } from "drizzle-orm";
+import { describe, it, expect, beforeEach, afterEach, afterAll, spyOn, type Mock } from "bun:test";
+import { asc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, runLogs, llmUsage, packages } from "@appstrate/db/schema";
+import { runs, runLogs, llmUsage, packages, packagePersistence } from "@appstrate/db/schema";
 import { and } from "drizzle-orm";
 import { encrypt } from "@appstrate/connect";
 import { sign } from "@appstrate/afps-runtime/events";
@@ -40,6 +40,7 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
 import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
+import { failRunLogsInsert, clearRunLogsFault } from "../../helpers/run-logs-fault.ts";
 import {
   finalizeRun,
   getRunSinkContext,
@@ -50,7 +51,8 @@ import {
   scheduleRunMetricBroadcast,
   activeRunMetricThrottleCount,
 } from "../../../src/services/run-metric-broadcaster.ts";
-import { getRunFull } from "../../../src/services/state/runs.ts";
+import { appendRunLog, getRunFull } from "../../../src/services/state/runs.ts";
+import { logger } from "../../../src/lib/logger.ts";
 import { getEventBuffer } from "../../../src/infra/index.ts";
 import { recordLlmUsage } from "../../../src/services/llm-usage-ledger.ts";
 import type { RunArtifactsSummary } from "@appstrate/db/schema";
@@ -61,6 +63,8 @@ import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 const app = getTestApp();
 
 const RUN_SECRET = "a".repeat(43); // matches mintSinkCredentials base64url(32 bytes)
+/** serialization_failure — transient: the ingest must roll back so the runner retries. */
+const TRANSIENT_SQLSTATE = "40001";
 
 function signedHeaders(secret: string, body: string) {
   const msgId = `msg_${crypto.randomUUID()}`;
@@ -633,15 +637,15 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
   // and the dispatch in `db.transaction()` so either both apply or
   // neither does.
   //
-  // We simulate a transient failure by adding a CHECK constraint that
-  // rejects a marker message. The dispatch INSERT throws inside the tx,
-  // rolling the CAS back.
+  // We simulate a TRANSIENT failure: a trigger raises 40001
+  // (serialization_failure) on a marker message. The dispatch INSERT throws
+  // inside the tx, rolling the CAS back. A row-value failure (22xxx, 23514)
+  // would instead be claimed with a placeholder row — see the
+  // "Postgres-poisoned values (#1501)" block below.
   it("rolls back the sequence advance when the run_logs INSERT fails", async () => {
     const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
 
-    await db.execute(
-      sql`ALTER TABLE run_logs ADD CONSTRAINT _test_reject_poison CHECK (message != '__poison__')`,
-    );
+    await failRunLogsInsert("__poison__", TRANSIENT_SQLSTATE);
 
     try {
       const envelope = buildEnvelope(
@@ -651,7 +655,7 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
         1,
       );
       const res = await postEvent(runId, envelope);
-      // The transaction aborts on the CHECK violation; the route surfaces
+      // The transaction aborts on the serialization failure; the route surfaces
       // an unhandled error as a 5xx. Either 500 or a problem+json shape
       // is acceptable — the contract is the rollback below.
       expect(res.status).toBeGreaterThanOrEqual(500);
@@ -664,7 +668,7 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
       const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
       expect(logs).toHaveLength(0);
     } finally {
-      await db.execute(sql`ALTER TABLE run_logs DROP CONSTRAINT _test_reject_poison`);
+      await clearRunLogsFault();
     }
   });
 
@@ -685,14 +689,12 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     const body = JSON.stringify(envelope);
     const stickyHeaders = signedHeaders(RUN_SECRET, body);
 
-    await db.execute(
-      sql`ALTER TABLE run_logs ADD CONSTRAINT _test_reject_poison CHECK (message != '__poison__')`,
-    );
+    await failRunLogsInsert("__poison__", TRANSIENT_SQLSTATE);
 
-    // The DROP is part of the test flow (it lifts the simulated failure), but it
-    // MUST also run when an assertion above it throws — otherwise the constraint
-    // survives on the shared test database and poisons every later test in this
-    // process. `IF EXISTS` makes the finally idempotent with the in-flow drop.
+    // Clearing the fault is part of the test flow (it lifts the simulated
+    // failure), but it MUST also run when an assertion above it throws —
+    // otherwise the trigger survives on the shared test database and poisons
+    // every later test in this process. `clearRunLogsFault` is idempotent.
     try {
       const first = await app.request(`/api/runs/${runId}/events`, {
         method: "POST",
@@ -706,7 +708,7 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
       // replay key was sticky for `replayWindow` seconds and this retry
       // would have been swallowed as "replay" with the event never
       // persisted.
-      await db.execute(sql`ALTER TABLE run_logs DROP CONSTRAINT _test_reject_poison`);
+      await clearRunLogsFault();
 
       const second = await app.request(`/api/runs/${runId}/events`, {
         method: "POST",
@@ -726,7 +728,7 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
         .where(and(eq(runLogs.runId, runId), eq(runLogs.message, "__poison__")));
       expect(logs).toHaveLength(1);
     } finally {
-      await db.execute(sql`ALTER TABLE run_logs DROP CONSTRAINT IF EXISTS _test_reject_poison`);
+      await clearRunLogsFault();
     }
   });
 
@@ -2391,4 +2393,236 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
     expect(row?.error).toBeNull();
     expect(row?.packageId).toBeNull();
   });
+});
+
+// #1501 — a runner value Postgres refuses must not wedge the event stream.
+// NUL / lone surrogates are stored as U+FFFD at the write; a write that still
+// fails on its own values (class 22, 23514) claims the sequence with a
+// `system/event_dropped` row and one error log; any other failure rolls back.
+// Row-value failures are forced with `failRunLogsInsert` (a real trigger), so
+// they travel through Drizzle as genuine Postgres errors.
+describe("Postgres-poisoned values (#1501)", () => {
+  const AGENT = "@test/poison-agent";
+  const POISON = "__poison__";
+  const FFFD = "\uFFFD";
+  let ctx: TestContext;
+  let error: Mock<typeof logger.error>;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ email: "poison@test.dev", orgSlug: "poison-org" });
+    await seedPackage({ orgId: ctx.orgId, id: AGENT, type: "agent" });
+    error = spyOn(logger, "error");
+  });
+
+  afterEach(async () => {
+    error.mockRestore();
+    await clearRunLogsFault();
+  });
+
+  const progress = async (runId: string, sequence: number, data: Record<string, unknown>) => {
+    const res = await postEvent(runId, buildEnvelope(runId, "appstrate.progress", data, sequence));
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { outcome: string }).outcome;
+  };
+  const finalize = (runId: string, body: Record<string, unknown>) =>
+    postFinalize(runId, {
+      status: "success",
+      durationMs: 100,
+      usage: { input_tokens: 10, output_tokens: 5 },
+      ...body,
+    });
+  const readRun = async (runId: string) =>
+    (await db.select().from(runs).where(eq(runs.id, runId)).limit(1))[0]!;
+  const readLogs = (runId: string) =>
+    db.select().from(runLogs).where(eq(runLogs.runId, runId)).orderBy(asc(runLogs.id));
+  /** Progress messages in sequence order, placeholders shown as `<dropped>`. */
+  const timeline = (logs: Awaited<ReturnType<typeof readLogs>>) =>
+    logs.map((l) => (l.event === "event_dropped" ? "<dropped>" : l.message));
+  const dropLogs = () =>
+    error.mock.calls.filter((c) => c[0] === "run event could not be stored and was dropped");
+
+  function expectPlaceholder(
+    logs: Awaited<ReturnType<typeof readLogs>>,
+    sequence: number,
+    code: string,
+  ) {
+    const dropped = logs.filter((l) => l.event === "event_dropped");
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]).toMatchObject({ type: "system", level: "warn" });
+    for (const part of ['"appstrate.progress"', `#${sequence}`, code]) {
+      expect(dropped[0]!.message).toContain(part);
+    }
+    expect(dropLogs()).toHaveLength(1);
+  }
+
+  it("stores a NUL / lone surrogate in event data (incl. a key) as U+FFFD and keeps the stream moving", async () => {
+    const runId = await seedRunWithSink(ctx, AGENT);
+
+    expect(
+      await progress(runId, 1, {
+        message: "step",
+        data: { text: "a\u0000b", note: "x\uD800y", ["k\u0000"]: "v" },
+      }),
+    ).toBe("persisted");
+    expect(await progress(runId, 2, { message: "two" })).toBe("persisted");
+
+    expect((await readRun(runId)).lastEventSequence).toBe(2);
+    const logs = await readLogs(runId);
+    expect(timeline(logs)).toEqual(["step", "two"]);
+    expect(logs[0]!.data).toEqual({ text: `a${FFFD}b`, note: `x${FFFD}y`, [`k${FFFD}`]: "v" });
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it("stores a NUL / lone surrogate in the message as U+FFFD", async () => {
+    const runId = await seedRunWithSink(ctx, AGENT);
+
+    expect(await progress(runId, 1, { message: "a\u0000b\uDC00" })).toBe("persisted");
+
+    expect(timeline(await readLogs(runId))).toEqual([`a${FFFD}b${FFFD}`]);
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it("sanitises a direct appendRunLog call, outside event ingestion", async () => {
+    const runId = await seedRunWithSink(ctx, AGENT);
+
+    await appendRunLog(
+      { orgId: ctx.orgId },
+      runId,
+      "system",
+      "firecracker_console",
+      "console\u0000tail",
+      { text: "a\u0000b" },
+      "error",
+    );
+
+    const [log] = await readLogs(runId);
+    expect(log).toMatchObject({ message: `console${FFFD}tail`, data: { text: `a${FFFD}b` } });
+  });
+
+  it("stores a memory whose trim splits a surrogate pair, the half replaced", async () => {
+    const runId = await seedRunWithSink(ctx, AGENT);
+
+    const res = await finalize(runId, { memories: [{ content: `${"a".repeat(1999)}😀` }] });
+    expect(res.status).toBe(200);
+
+    const memories = await db
+      .select()
+      .from(packagePersistence)
+      .where(eq(packagePersistence.runId, runId));
+    expect(memories.map((m) => m.content)).toEqual([`${"a".repeat(1999)}${FFFD}`]);
+  });
+
+  it("drains a buffered successor behind a dirty event that arrives late", async () => {
+    const runId = await seedRunWithSink(ctx, AGENT);
+
+    expect(await progress(runId, 2, { message: "two" })).toBe("buffered");
+    expect(await progress(runId, 1, { message: "one\u0000", data: { text: "a\u0000b" } })).toBe(
+      "persisted",
+    );
+
+    expect((await readRun(runId)).lastEventSequence).toBe(2);
+    expect(timeline(await readLogs(runId))).toEqual([`one${FFFD}`, "two"]);
+  });
+
+  it("stores a NUL in the finalize body's output and error sanitised", async () => {
+    const runId = await seedRunWithSink(ctx, AGENT);
+
+    const res = await finalize(runId, {
+      status: "failed",
+      output: { text: "out\u0000put", ["k\uD800"]: 1 },
+      error: { message: "boom\u0000!" },
+    });
+    expect(res.status).toBe(200);
+
+    const row = await readRun(runId);
+    expect(row).toMatchObject({ status: "failed", error: `boom${FFFD}!` });
+    expect(row.sinkClosedAt).not.toBeNull();
+    expect((row.result as { output?: unknown }).output).toEqual({
+      text: `out${FFFD}put`,
+      [`k${FFFD}`]: 1,
+    });
+  });
+
+  // 22xxx data exception, 23514 CHECK violation: determined by the row's own
+  // values, so a retry would replay the failure identically.
+  for (const code of ["22P05", "23514"]) {
+    it(`claims the sequence with an event_dropped row on the fast path (${code})`, async () => {
+      const runId = await seedRunWithSink(ctx, AGENT);
+      await failRunLogsInsert(POISON, code);
+
+      expect(await progress(runId, 1, { message: "one" })).toBe("persisted");
+      expect(await progress(runId, 2, { message: POISON })).toBe("persisted");
+      expect(await progress(runId, 3, { message: "three" })).toBe("persisted");
+
+      expect((await readRun(runId)).lastEventSequence).toBe(3);
+      const logs = await readLogs(runId);
+      expect(timeline(logs)).toEqual(["one", "<dropped>", "three"]);
+      expectPlaceholder(logs, 2, code);
+    });
+  }
+
+  it("a poisoned FIRST event still flips a pending run to running", async () => {
+    const runId = await seedRunWithSink(ctx, AGENT, { status: "pending" });
+    await failRunLogsInsert(POISON, "22P05");
+
+    expect(await progress(runId, 1, { message: POISON })).toBe("persisted");
+
+    expect(await readRun(runId)).toMatchObject({ status: "running", lastEventSequence: 1 });
+    expectPlaceholder(await readLogs(runId), 1, "22P05");
+  });
+
+  it("drops a buffered poisoned event without failing the POST that drains it", async () => {
+    const runId = await seedRunWithSink(ctx, AGENT);
+    await failRunLogsInsert(POISON, "22P05");
+
+    expect(await progress(runId, 3, { message: "three" })).toBe("buffered");
+    expect(await progress(runId, 2, { message: POISON })).toBe("buffered");
+    // seq 1 persists, then its drain meets the poisoned head: still 200.
+    expect(await progress(runId, 1, { message: "one" })).toBe("persisted");
+
+    expect((await readRun(runId)).lastEventSequence).toBe(3);
+    const logs = await readLogs(runId);
+    expect(timeline(logs)).toEqual(["one", "<dropped>", "three"]);
+    expectPlaceholder(logs, 2, "22P05");
+  });
+
+  it("finalize drains a buffered poisoned event and terminates the run", async () => {
+    const runId = await seedRunWithSink(ctx, AGENT);
+    await failRunLogsInsert(POISON, "22P05");
+
+    expect(await progress(runId, 1, { message: "one" })).toBe("persisted");
+    // seq 2 never arrives: the poisoned seq 3 stays buffered behind the gap.
+    expect(await progress(runId, 3, { message: POISON })).toBe("buffered");
+
+    expect((await finalize(runId, {})).status).toBe(200);
+
+    const row = await readRun(runId);
+    expect(row).toMatchObject({ status: "success", lastEventSequence: 3 });
+    expect(row.sinkClosedAt).not.toBeNull();
+    const logs = await readLogs(runId);
+    expect(
+      timeline(logs.filter((l) => l.type !== "system" || l.event === "event_dropped")),
+    ).toEqual(["one", "<dropped>"]);
+    expectPlaceholder(logs, 3, "22P05");
+  });
+
+  // 08006 connection failure (transient), 23505 unique violation (depends on
+  // OTHER rows), 23502 NOT NULL (not a row-value class): the runner must retry.
+  for (const code of ["08006", "23505", "23502"]) {
+    it(`${code} still rolls back: 5xx, sequence not advanced, nothing dropped`, async () => {
+      const runId = await seedRunWithSink(ctx, AGENT);
+      await failRunLogsInsert(POISON, code);
+
+      const res = await postEvent(
+        runId,
+        buildEnvelope(runId, "appstrate.progress", { message: POISON }, 1),
+      );
+      expect(res.status).toBeGreaterThanOrEqual(500);
+
+      expect((await readRun(runId)).lastEventSequence).toBe(0);
+      expect(await readLogs(runId)).toHaveLength(0);
+      expect(dropLogs()).toHaveLength(0);
+    });
+  }
 });

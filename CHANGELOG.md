@@ -104,6 +104,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   issue from `main`.** A run dispatched on a fix branch to check the fix
   against the live servers closed #1480 while `main` still shipped the drift.
   A branch run still goes red on drift; it no longer touches the issue.
+- **A run event Postgres refuses no longer wedges the run** (#1501). A NUL byte
+  or lone UTF-16 surrogate in a runner string (binary tool output, a model
+  cutting an emoji) made the `run_logs` insert fail identically on every retry:
+  the event 500'd forever, every later event buffered behind it failed too, and
+  the run could not finalize until the watchdog killed it. Those characters are
+  now replaced with U+FFFD wherever run logs, run results, memories and chat
+  messages are written, and any other write refused for its own values
+  (SQLSTATE class 22 or `23514`) is recorded as a `system`/`event_dropped` log
+  row instead, so the stream moves on.
 
 ## [1.0.0-beta.61] - 2026-09-23
 
