@@ -316,7 +316,7 @@ test("a pending standard invitation can become a guest invitation with a space a
   await page.getByRole("option", { name: "Default", exact: true }).click();
   const updated = page.waitForResponse(
     (response) =>
-      response.request().method() === "PUT" &&
+      response.request().method() === "PATCH" &&
       response.url().endsWith(`/api/orgs/${browserCtx.org.orgId}/invitations/${invitation.id}`),
   );
   await dialog.getByRole("button", { name: /Enregistrer|Save/ }).click();

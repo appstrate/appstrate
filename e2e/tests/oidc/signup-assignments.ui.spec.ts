@@ -9,7 +9,7 @@ test("OAuth signup assignments survive create, edit, and temporary role changes"
   browserCtx,
 }) => {
   const space = await createSpace(orgOnlyClient, `Signup space ${Date.now()}`);
-  const enabled = await orgOnlyClient.put(`/orgs/${browserCtx.org.orgId}/settings`, {
+  const enabled = await orgOnlyClient.patch(`/orgs/${browserCtx.org.orgId}/settings`, {
     dashboard_sso_enabled: true,
   });
   expect(enabled.status()).toBe(200);

@@ -12,9 +12,9 @@ import { resolutionBlocksRun } from "./integration-connect/integration-run-readi
 import { useIntegrationDetail, useIntegrationAgentResolution } from "../hooks/use-integrations";
 
 /**
- * Recovery surface for the run-kickoff 412 emitted by
+ * Recovery surface for the run-kickoff 409 emitted by
  * `validateAgentReadiness` when integration connections are missing. The
- * 412 ships every failing `(integration, auth)` pair on `errors[]`;
+ * 409 ships every failing `(integration, auth)` pair on `errors[]`;
  * this modal renders one row per entry.
  *
  * Each actionable row embeds the SAME `IntegrationConnectionPicker` the
@@ -28,8 +28,8 @@ import { useIntegrationDetail, useIntegrationAgentResolution } from "../hooks/us
  *
  * Reusing the picker keeps this modal in lockstep with the dropdown — same
  * candidate list, scope/lock verdicts and connect orchestration — instead of
- * re-deriving an affordance from the static 412 payload (the previous code
- * filtered must_choose candidates down to the 412's `candidate_connections`,
+ * re-deriving an affordance from the static 409 payload (the previous code
+ * filtered must_choose candidates down to the 409's `candidate_connections`,
  * which dropped connections needing reconnection and so disagreed with the tab
  * dropdown). Only structural failures — the integration is not active here, or
  * its package is missing, mistyped or unloadable — keep a plain message: no
@@ -113,7 +113,7 @@ interface MissingConnectionsModalProps {
   onClose: () => void;
   errors: MissingIntegrationFieldError[];
   /**
-   * The agent whose run 412'd. Keys the bulk server resolution
+   * The agent whose run 409'd. Keys the bulk server resolution
    * (`GET /api/agents/:scope/:name/connection-readiness`) each picker consumes
    * so its status + CTA stay in lockstep with the Connexions tab. Omitted only
    * by callers without the agent in context (none today).
@@ -149,7 +149,7 @@ export function MissingConnectionsModal({
   // must_choose rows have N>1 candidates and no auto-pick, so a re-run can't
   // proceed until the user picks one. Other actionable rows (connect / renew /
   // upgrade) resolve through the picker's own flow and re-run freely — a fresh
-  // 412 just reopens the modal with the updated error list.
+  // 409 just reopens the modal with the updated error list.
   const mustChooseIds = integrationErrors
     .filter((e) => e.code === "must_choose_connection")
     .map((e) => parseField(e.field));

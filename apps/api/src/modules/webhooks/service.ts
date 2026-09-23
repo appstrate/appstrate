@@ -531,7 +531,6 @@ export function buildEventEnvelope(params: {
   payloadMode: "full" | "summary";
 }): { eventId: string; payload: Record<string, unknown> } {
   const eventId = prefixedId("evt");
-  const now = Math.floor(Date.now() / 1000);
 
   // Default the inner `object` discriminator to "run" so run-lifecycle
   // callers don't have to set it; callers for non-run events (e.g.
@@ -564,7 +563,8 @@ export function buildEventEnvelope(params: {
       object: "event",
       type: params.eventType,
       apiVersion: CURRENT_API_VERSION,
-      created: now,
+      // Standard Webhooks' payload field: when the event occurred, ISO 8601.
+      timestamp: new Date().toISOString(),
       data: { object: execObj },
     },
   };

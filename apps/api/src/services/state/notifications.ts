@@ -32,7 +32,7 @@ interface NotificationDto {
   run_id: string | null;
   payload: Record<string, unknown> | null;
   read_at: string | null;
-  created_at: string;
+  createdAt: string;
 }
 
 interface NotificationListResult {
@@ -354,7 +354,7 @@ export async function listNotifications(
       run_id: r.runId,
       payload: r.payload ?? null,
       read_at: r.readAt?.toISOString() ?? null,
-      created_at: r.createdAt.toISOString(),
+      createdAt: r.createdAt.toISOString(),
     })),
     has_more: hasMore,
   };

@@ -245,8 +245,8 @@ export function ScheduleForm({
   // it must not wipe the frozen connection picks.
   const actorChanged =
     !!actor &&
-    ((actor.user_id ?? null) !== (currentActor?.user_id ?? null) ||
-      (actor.end_user_id ?? null) !== (currentActor?.end_user_id ?? null));
+    ((actor.userId ?? null) !== (currentActor?.userId ?? null) ||
+      (actor.endUserId ?? null) !== (currentActor?.endUserId ?? null));
 
   const {
     register,

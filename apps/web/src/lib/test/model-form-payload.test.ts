@@ -414,7 +414,7 @@ describe("buildModelFormPayload — missing credential", () => {
 });
 
 describe("toCreateModelBody", () => {
-  it("drops the `null` clears, which only PUT understands", () => {
+  it("drops the `null` clears, which only PATCH understands", () => {
     const body = toCreateModelBody(
       {
         modelId: "qwen3:8b",

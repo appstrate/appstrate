@@ -573,8 +573,14 @@ export function createPackageDraft(
 }
 
 export type MutateDraftFilesInput = {
-  /** Authoring requires a token; imports may deliberately replace a draft. */
-  precondition: { lockVersion: number } | { imported: true; lockVersion?: number };
+  /**
+   * An authored write asserts the draft version it was based on — evaluated
+   * here, under the draft lock, so the check and the write are one step (the
+   * route passes its `If-Match` evaluation). Imports may deliberately replace
+   * a draft, optionally pinned to the version the importer read.
+   */
+  precondition:
+    { assertVersion: (current: number) => void } | { imported: true; lockVersion?: number };
   /** Manifest to persist with this write. Defaults to the row's current draft. */
   manifest?: Record<string, unknown>;
   /**
@@ -626,7 +632,9 @@ export async function mutatePackageDraftFiles(
       draftContent: row.draftContent,
     };
 
-    if (
+    if ("assertVersion" in input.precondition) {
+      input.precondition.assertVersion(row.lockVersion);
+    } else if (
       input.precondition.lockVersion !== undefined &&
       input.precondition.lockVersion !== row.lockVersion
     ) {

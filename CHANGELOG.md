@@ -26,6 +26,86 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   not aliased: `--version` after a command is now refused as an unknown option.
   `<package>@draft` pulls the draft explicitly, and is refused to someone who
   cannot write the package instead of falling back to the published version.
+- **BREAKING (API): partial updates are served on `PATCH`, and the `PUT`
+  spelling of each is removed** (RFC 9110 §9.3.4: `PUT` replaces). Same bodies,
+  same `operationId`s, merge semantics (RFC 7396): an absent field is left
+  unchanged, `null` clears a nullable one. A `PUT` to these paths now answers
+  `404` (`API endpoint not found`). Moved: `/api/schedules/{id}`, `/api/webhooks/{id}`,
+  `/api/proxies/{id}`, `/api/models/{id}`, `/api/model-provider-credentials/{id}`,
+  `/api/orgs/{orgId}`, `/api/orgs/{orgId}/settings`,
+  `/api/spaces/{spaceId}/packages/{scope}/{name}`, the package draft save
+  `/api/packages/{agents|skills|mcp-servers|integrations}/{scope}/{name}`,
+  `/api/agents/{scope}/{name}/model` (an absent `generation` keeps the stored
+  settings) and `/api/orgs/{orgId}/invitations/{invitationId}` (an absent
+  `space_assignments` keeps the stored ones). The
+  dashboard and the CLI (`packages push`) send `PATCH`. `PUT` stays on routes
+  whose body is the whole resource (`…/input-settings`, `…/home`,
+  `/api/billing/managers`, the `…/default` pointers, and
+  `…/oauth-clients/{clientId}`, whose absent secret is write-only, …).
+- **BREAKING (API, CLI): drafts are versioned by `ETag` + `If-Match`, and
+  `lock_version` leaves the wire.** The package detail, create, update,
+  restore, fork and home-move responses carry the draft version as a strong
+  `ETag` and no longer have a `lock_version` field. The draft save
+  (`PATCH /api/packages/{type}/{scope}/{name}`) requires `If-Match` with that
+  ETag — absent is `428 precondition_required`, stale is `412
+precondition_failed` (it was `409 conflict`), and a body still sending
+  `lock_version` is a `400` (unknown field). Publishing
+  (`POST …/versions`) and restoring take an optional `If-Match` in place of
+  the body's `lock_version`. The other `PATCH` resources (schedules,
+  webhooks, proxies, models, model-provider credentials, organizations and
+  their settings, spaces, space packages, roles) now send an `ETag` and honour
+  an optional `If-Match` the same way. MCP: `invoke_operation` results carry
+  `etag`, and the tool takes `if_match`. CLI: `appstrate packages` records
+  ETags per working folder; a lock table written by an older CLI (numeric
+  locks) is refused with the steps to rebuild it — delete it, then re-pull or
+  `push --force` each folder.
+- **BREAKING (API): a run refused for a missing or ambiguous integration
+  connection answers `409`, not `412`.** `missing_integration_connection`
+  (including its `must_choose_connection` items with `candidate_connections`)
+  keeps its code and body on every run door (`POST …/run`, `POST /api/runs/inline`,
+  `POST /api/runs/remote`) and through the MCP `run_and_wait` tool. `412` is
+  reserved for failed conditional requests (RFC 9110 §15.5.13). Clients should
+  branch on `code`.
+- **BREAKING (API): chat answers `409 needs_reconnection`, not `401`, when the
+  selected model's subscription credential is dead** (`POST /api/chat`). The
+  caller's own token is valid, so the response no longer carries a
+  `WWW-Authenticate: Bearer error="invalid_token"` challenge that generic 401
+  handlers read as "log out".
+- **BREAKING (API): chat's capacity refusal (`429 chat_capacity`) is a standard
+  problem document**: `retryAfter` replaces the non-standard `retry_after`, and
+  `instance`/`requestId` are present.
+- **BREAKING (API): timestamps named `expiresAt` / `createdAt` are RFC 3339
+  strings, and the universal ids and timestamps are spelled camelCase on the
+  surfaces that still used snake_case.** The hosted-connect session
+  (`POST /api/integrations/{packageId}/auths/{authKey}/connect/session`) returns
+  `{ connect_url, expiresAt }`, and each connect offer on a `409
+missing_integration_connection` item carries `connect_url`, `expiresAt` and
+  `packageId`: `expires_at` (epoch ms) and `package_id` are gone. Also renamed:
+  `GET /api/me/context` (`recent_runs[].packageId`, `recent_runs[].runNumber`,
+  `agents[].packageId`, `skills[].packageId`), `GET /api/notifications`
+  (`data[].createdAt`), the schedule `actor` request field on
+  `POST /api/agents/{scope}/{name}/schedules` and `PATCH /api/schedules/{id}`
+  (`{ userId }` or `{ endUserId }`; the snake_case keys are refused with a 400) and, with `@appstrate/module-ee`, the billing managers (`userId`,
+  `createdAt`). Chat connect cards saved before the upgrade lose
+  their integration icon and name; their links had already expired.
+- **BREAKING (webhooks): the delivery envelope's `created` (Unix seconds) is
+  replaced by `timestamp`, an RFC 3339 string** — the Standard Webhooks
+  payload field. The `webhook-timestamp` signing header is unchanged (Unix
+  seconds, as the spec requires).
+- **The sidecar's own `/llm/*` refusals are provider-shaped**
+  (`{ "type": "error", "error": { "type", "message" } }`) instead of
+  `{ "error": "…" }`, so the agent's model SDK reports the message (LLM proxy
+  not configured, blocked base URL, OAuth token failures, oversized body,
+  upstream unreachable) rather than an opaque status.
+- **Browser clients on `TRUSTED_ORIGINS` can read the API's response headers.**
+  CORS now sends `Access-Control-Expose-Headers` for `Link`, `Request-Id`,
+  `RateLimit`, `RateLimit-Policy`, `Retry-After`, `ETag`, `Location`,
+  `Appstrate-Version`, `Idempotent-Replayed`, `WWW-Authenticate` and the other
+  non-safelisted headers the API sets.
+- **`Retry-After` is sent with every error that carries `retryAfter`**: the
+  per-organization run rate limit (`429 org_run_rate_limited`, which only put
+  the delay in `detail`), the shutdown refusal (`503 shutting_down`, 5 s) and
+  chat's `429 chat_capacity`.
 
 ### Fixed
 

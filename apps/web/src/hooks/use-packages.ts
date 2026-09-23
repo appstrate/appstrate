@@ -37,11 +37,18 @@ import type {
 // `PACKAGE_TYPE_ROUTE_SEGMENT` is `as const`, so the template paths below stay
 // literal and the typed client still resolves each one to its operation.
 
+/**
+ * A detail with the draft version it was read at: the response's `ETag`,
+ * which a draft write sends back as `If-Match`. `null` where the server
+ * sends none (a system package, a summary read).
+ */
+export type Versioned<T> = T & { etag: string | null };
+
 type PackageDetailMap = {
-  agent: AgentDetail;
-  skill: OrgPackageItemDetail;
-  "mcp-server": OrgPackageItemDetail;
-  integration: OrgPackageItemDetail;
+  agent: Versioned<AgentDetail>;
+  skill: Versioned<OrgPackageItemDetail>;
+  "mcp-server": Versioned<OrgPackageItemDetail>;
+  integration: Versioned<OrgPackageItemDetail>;
 };
 
 /**
@@ -61,7 +68,6 @@ function normalizeAgentDetail(d: components["schemas"]["AgentDetail"]): AgentDet
     version: d.version ?? null,
     manifest: d.manifest,
     updatedAt: d.updatedAt ?? null,
-    lock_version: d.lock_version,
     running_runs: d.running_runs,
     effective_timeout_seconds: d.effective_timeout_seconds,
     forked_from: d.forked_from,
@@ -108,7 +114,7 @@ async function fetchPackageDetail(
   type: PackageType,
   packageId: string,
   version?: string,
-): Promise<AgentDetail | OrgPackageItemDetail> {
+): Promise<Versioned<AgentDetail | OrgPackageItemDetail>> {
   const path = splitPackageRef(packageId);
   // Omitted lets the server pick the definition this caller may see — their
   // draft when they may write the package, the latest published version
@@ -116,18 +122,18 @@ async function fetchPackageDetail(
   // it the same way (`403 draft_not_writable` for anybody else).
   const query = version ? { query: { version } } : {};
   if (type === "agent") {
-    const { data } = await client.GET("/api/packages/agents/{scope}/{name}", {
+    const { data, response } = await client.GET("/api/packages/agents/{scope}/{name}", {
       params: { path, ...query },
     });
-    return normalizeAgentDetail(data!);
+    return { ...normalizeAgentDetail(data!), etag: response.headers.get("ETag") };
   }
-  const { data } = await client.GET(
+  const { data, response } = await client.GET(
     `/api/packages/${PACKAGE_TYPE_ROUTE_SEGMENT[type]}/{scope}/{name}`,
     {
       params: { path, ...query },
     },
   );
-  return normalizePackageItemDetail(data!);
+  return { ...normalizePackageItemDetail(data!), etag: response.headers.get("ETag") };
 }
 
 /**
@@ -413,25 +419,24 @@ export function useCreateVersion(type: PackageType, packageId: string) {
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
     /**
-     * `version` overrides the draft manifest's; `lockVersion` is the draft the
-     * caller looked at — a draft moved since is refused (`409 conflict`) rather
-     * than published unseen.
+     * `version` overrides the draft manifest's; `etag` is the draft the caller
+     * looked at, sent as `If-Match` — a draft moved since is refused
+     * (`412 precondition_failed`) rather than published unseen.
      */
     mutationFn: async ({
       version,
-      lockVersion,
-    }: { version?: string; lockVersion?: number } = {}): Promise<{
+      etag,
+    }: { version?: string; etag?: string | null } = {}): Promise<{
       id: number;
       version: string;
     }> => {
       // 201 → the created version resource, bare (issue #657).
-      const body = {
-        ...(version ? { version } : {}),
-        ...(lockVersion !== undefined ? { lock_version: lockVersion } : {}),
-      };
       const { data } = await client.POST(`/api/packages/${segment}/{scope}/{name}/versions`, {
-        params: { path: splitPackageRef(packageId) },
-        body: Object.keys(body).length > 0 ? body : undefined,
+        params: {
+          path: splitPackageRef(packageId),
+          ...(etag ? { header: { "If-Match": etag } } : {}),
+        },
+        body: version ? { version } : undefined,
       });
       return { id: data!.id, version: data!.version };
     },
@@ -445,10 +450,13 @@ export function useCreateVersion(type: PackageType, packageId: string) {
       // dist-tag-resolved read of it are now wrong.
       invalidatePackageFiles(qc);
     },
-    // A refusal that moved or settled the draft (`conflict`: someone wrote it;
-    // `no_changes`: the server cleared its dirty marker) leaves the page stale.
+    // A refusal that moved or settled the draft (`precondition_failed`: someone
+    // wrote it; `no_changes`: the server cleared its dirty marker) leaves the page stale.
     onError: (err) => {
-      if (err instanceof ApiError && (err.code === "conflict" || err.code === "no_changes")) {
+      if (
+        err instanceof ApiError &&
+        (err.code === "precondition_failed" || err.code === "no_changes")
+      ) {
         qc.invalidateQueries({ queryKey: ["version-info"] });
         qc.invalidateQueries({ queryKey: agentsKeys.all });
         qc.invalidateQueries({ queryKey: packageKeys.all });
@@ -485,18 +493,18 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
   return useMutation({
     mutationFn: async (
       version: string,
-    ): Promise<{ id: string; version: string | null; lock_version: number }> => {
+    ): Promise<{ id: string; version: string | null; etag: string | null }> => {
       // 200 → the updated PACKAGE resource, bare (issue #657): the restore is
-      // reflected in `version`/`manifest`/`content` and the resource carries
-      // the package's NEW `lock_version`.
-      const { data } = await client.POST(
+      // reflected in `version`/`manifest`/`content`, and its `ETag` is the
+      // draft's NEW version.
+      const { data, response } = await client.POST(
         `/api/packages/${segment}/{scope}/{name}/versions/{version}/restore`,
         { params: { path: { ...splitPackageRef(packageId), version } } },
       );
       return {
         id: data!.id,
         version: data!.version ?? null,
-        lock_version: data!.lock_version ?? 0,
+        etag: response.headers.get("ETag"),
       };
     },
     onSuccess: () => {

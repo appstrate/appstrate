@@ -21,10 +21,10 @@
  * space-scoped prefixes). The explicit path never touches the singleton cache.
  */
 import { Hono, type Context } from "hono";
-import { cors } from "hono/cors";
 import { requestId } from "../../src/middleware/request-id.ts";
 import { clientIp } from "../../src/middleware/client-ip.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
+import { apiCors } from "../../src/lib/cors.ts";
 import { apiVersion } from "../../src/middleware/api-version.ts";
 import { isSpaceScopedPath, requireSpaceContext } from "../../src/middleware/space-context.ts";
 import { idempotencyGuard } from "../../src/middleware/idempotency-guard.ts";
@@ -174,7 +174,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.use("*", clientIp());
 
   // CORS
-  app.use("*", cors({ origin: "*", credentials: true }));
+  app.use("*", apiCors("*"));
 
   // Response-contract gate: validate every JSON response against its OpenAPI
   // schema, fail-closed. The spec is assembled from the SAME module set this

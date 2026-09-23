@@ -3,7 +3,7 @@
 /**
  * Bounded concurrency for the in-process Pi chat engine: the
  * counting gate (cap via CHAT_PI_MAX_CONCURRENCY, default 6), the 429 capacity
- * response, and the slot-release stream wrapper. The wrapper is the leak guard
+ * error, and the slot-release stream wrapper. The wrapper is the leak guard
  * — it must fire exactly once on every terminal path: normal completion,
  * downstream cancellation (client disconnected while the persistence drain
  * also stopped), and source error.
@@ -12,7 +12,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   acquirePiChatSlot,
-  chatCapacityResponse,
+  chatCapacityError,
   piChatConcurrencyStats,
   piChatMaxConcurrency,
   warnIfDefaultChatConcurrency,
@@ -102,15 +102,13 @@ describe("acquirePiChatSlot", () => {
   });
 });
 
-describe("chatCapacityResponse", () => {
-  it("returns an RFC 9457 429 with retry-after", async () => {
-    const res = chatCapacityResponse();
-    expect(res.status).toBe(429);
-    expect(res.headers.get("content-type")).toBe("application/problem+json");
-    expect(res.headers.get("retry-after")).toBe("5");
-    const body = (await res.json()) as { code: string; retry_after: number };
-    expect(body.code).toBe("chat_capacity");
-    expect(body.retry_after).toBe(5);
+describe("chatCapacityError", () => {
+  it("is an RFC 9457 429 carrying retryAfter", () => {
+    const err = chatCapacityError();
+    expect(err.status).toBe(429);
+    expect(err.code).toBe("chat_capacity");
+    expect(err.retryAfter).toBe(5);
+    expect(err.toProblemDetail("req_x")).toMatchObject({ retryAfter: 5, requestId: "req_x" });
   });
 });
 

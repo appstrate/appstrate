@@ -23,6 +23,7 @@ import { readJsonBody } from "@appstrate/core/request-body";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { spaceLevelVocabulary } from "../lib/permissions.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
+import { assertIfMatch, setEtag } from "../lib/conditional-request.ts";
 import {
   createSpaceRole,
   deleteSpaceRole,
@@ -93,6 +94,8 @@ export function createRolesRouter() {
 
   router.patch("/:id", requirePermission("roles", "write"), async (c) => {
     const id = roleIdParam(c);
+    const current = (await listSpaceRoles(c.get("orgId"))).find((r) => r.id === id);
+    if (current?.updatedAt) assertIfMatch(c, current.updatedAt);
     const data = await readJsonBody(c, updateSpaceRoleSchema);
     const role = await updateSpaceRole({ orgId: c.get("orgId"), id, patch: data });
     await recordAuditFromContext(c, {
@@ -101,6 +104,7 @@ export function createRolesRouter() {
       resourceId: id,
       after: { key: role.key, name: role.name, permissions: role.permissions },
     });
+    if (role.updatedAt) setEtag(c, role.updatedAt);
     return c.json(role);
   });
 

@@ -21,7 +21,7 @@
 import type { Context } from "hono";
 import { safeValidateUIMessages, type UIMessage } from "ai";
 import { z } from "zod";
-import { parseBody, invalidRequest } from "@appstrate/core/api-errors";
+import { parseBody, invalidRequest, conflict } from "@appstrate/core/api-errors";
 import { withByteCap } from "@appstrate/core/safe-json";
 import { isAttachmentUri } from "@appstrate/core/file-uri";
 import { logger } from "./logger.ts";
@@ -32,7 +32,7 @@ import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import { materializeUserAttachments } from "./attachments.ts";
 import { runPiChat, type PiChatInput } from "./pi-chat/engine.ts";
 import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
-import { acquirePiChatSlot, chatCapacityResponse } from "./pi-chat/concurrency.ts";
+import { acquirePiChatSlot, chatCapacityError } from "./pi-chat/concurrency.ts";
 import { turnPermissions } from "./turn-permissions.ts";
 import { buildSystemPrompt, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
 export type { ChatEnv } from "./prompt.ts";
@@ -49,24 +49,6 @@ import {
   modelGenerationSettingsSchema,
   resolveModelGenerationSettings,
 } from "@appstrate/core/model-generation";
-
-/**
- * RFC 9457 `401` returned when the chosen subscription model's oauth credential
- * is dead (revoked/expired-beyond-refresh). The client renders a reconnect
- * prompt rather than the engine launching a session that would 401 upstream.
- */
-function subscriptionReconnectResponse(): Response {
-  return new Response(
-    JSON.stringify({
-      type: "https://docs.appstrate.dev/errors/subscription-reconnect",
-      title: "Reconnection required",
-      status: 401,
-      detail: "The selected model's subscription credential expired or was revoked.",
-      code: "needs_reconnection",
-    }),
-    { status: 401, headers: { "content-type": "application/problem+json" } },
-  );
-}
 
 /**
  * RFC 9457 response for a turn blocked by the platform admission gate
@@ -497,14 +479,19 @@ export async function handleChatStream(
   });
   if (resolution.status === "needs-reconnection") {
     // The oauth credential is dead → tell the client to reconnect rather than
-    // launching a session that would 401 upstream.
-    return subscriptionReconnectResponse();
+    // launching a session that would 401 upstream. 409, not 401: the dead
+    // credential is the MODEL's, never the caller's — a 401 would draw a
+    // `WWW-Authenticate: invalid_token` challenge against a valid token.
+    throw conflict(
+      "needs_reconnection",
+      "The selected model's subscription credential expired or was revoked.",
+    );
   }
   if (resolution.status !== "ready") {
     throw invalidRequest(`Model family "${chosen.apiShape}" is not supported by the chat.`);
   }
   const slot = acquirePiChatSlot();
-  if (!slot) return chatCapacityResponse();
+  if (!slot) throw chatCapacityError();
   const modelBinding = resolution.binding;
 
   // ── Server-authoritative persistence + resumable streaming ───────────────

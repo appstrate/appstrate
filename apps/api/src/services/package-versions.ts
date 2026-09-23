@@ -574,8 +574,7 @@ async function getLatestVersionIntegrity(packageId: string): Promise<string | nu
   return row?.integrity ?? null;
 }
 
-type CreateVersionError =
-  "invalid_version" | "invalid_bundle" | "no_changes" | "version_exists" | "conflict";
+type CreateVersionError = "invalid_version" | "invalid_bundle" | "no_changes" | "version_exists";
 type CreateVersionResult =
   { id: number; version: string } | { error: CreateVersionError; detail?: string };
 
@@ -591,10 +590,11 @@ export async function createVersionFromDraft(params: {
   userId: string;
   version?: string;
   /**
-   * The draft `lock_version` the caller read. When set and the draft has moved
-   * since, nothing is cut (`conflict`): the version is the draft they saw.
+   * Asserts the draft version the caller read (the route's `If-Match`), against
+   * the snapshot captured under the draft lock: when it throws, nothing is cut
+   * — the version is the draft they saw.
    */
-  lockVersion?: number;
+  assertVersion?: (current: number) => void;
   /** Context-dependent publish gates must validate the captured manifest. */
   validateManifest?: (manifest: Record<string, unknown>, type: PackageType) => Promise<unknown>;
 }): Promise<CreateVersionResult> {
@@ -624,9 +624,7 @@ export async function createVersionFromDraft(params: {
   });
   if (!snapshot) return { error: "invalid_version" };
   const { pkg, storedFiles } = snapshot;
-  if (params.lockVersion !== undefined && params.lockVersion !== pkg.lockVersion) {
-    return { error: "conflict" };
-  }
+  params.assertVersion?.(pkg.lockVersion);
 
   const baseManifest = asRecord(pkg.draftManifest);
   const content = (pkg.draftContent ?? "") as string;

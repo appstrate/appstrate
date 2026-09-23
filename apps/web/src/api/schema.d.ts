@@ -254,7 +254,7 @@ export interface paths {
         };
         /**
          * Bulk integration connection readiness for an agent
-         * @description Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict: the run-kickoff 412 (run semantics, includeInert false + required-auth carve-out), plus `agent_not_active` when the SPACE has switched the agent off. This is a READ and answers 200 either way — the execution doors answer `404 agent_not_active_in_space` for the same state, and a panel that 404s cannot tell anyone what to fix. `integrations[]` lists every declared integration with its management verdict (includeInert true) so the Connexions tab and the launch badge share one source of truth.
+         * @description Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict: the run-kickoff 409 (run semantics, includeInert false + required-auth carve-out), plus `agent_not_active` when the SPACE has switched the agent off. This is a READ and answers 200 either way — the execution doors answer `404 agent_not_active_in_space` for the same state, and a panel that 404s cannot tell anyone what to fix. `integrations[]` lists every declared integration with its management verdict (includeInert true) so the Connexions tab and the launch badge share one source of truth.
          */
         get: operations["getAgentConnectionReadiness"];
         put?: never;
@@ -297,16 +297,16 @@ export interface paths {
          * @description Returns the LLM model override and persisted generation defaults for an agent (null values inherit organization/runtime defaults). Readable with `agents:read` or `agents:run`: the launch form resolves the model a run will use from it, and the body carries no manifest and no prompt.
          */
         get: operations["getAgentModel"];
-        /**
-         * Set agent model override
-         * @description Set a model override and optional generation defaults for this agent. Pass a model ID or null to revert to org default; null generation settings inherit runtime defaults. The model ID must name a system model preset or an org model owned by the organization — unknown or cross-org IDs are rejected with 404.
-         */
-        put: operations["setAgentModel"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Set agent model override
+         * @description Set a model override and optional generation defaults for this agent. Pass a model ID or null to revert to org default; null generation settings inherit runtime defaults. The model ID must name a system model preset or an org model owned by the organization — unknown or cross-org IDs are rejected with 404. Merge semantics (RFC 7396): an absent `generation` keeps the stored settings, reconciled against the selected model.
+         */
+        patch: operations["setAgentModel"];
         trace?: never;
     };
     "/api/agents/{scope}/{name}/persistence": {
@@ -2122,11 +2122,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /**
-         * Update a model provider credential
-         * @description Update a model provider credential's mutable fields. The `apiShape` and `baseUrl` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers.
-         */
-        put: operations["updateModelProviderCredential"];
+        put?: never;
         post?: never;
         /**
          * Delete a model provider credential
@@ -2135,7 +2131,11 @@ export interface paths {
         delete: operations["deleteModelProviderCredential"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update a model provider credential
+         * @description Update a model provider credential's mutable fields. The `apiShape` and `baseUrl` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.
+         */
+        patch: operations["updateModelProviderCredential"];
         trace?: never;
     };
     "/api/model-provider-credentials/{id}/refresh-models": {
@@ -2354,11 +2354,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /**
-         * Update a custom model
-         * @description Update a custom model configuration. Built-in models cannot be modified.
-         */
-        put: operations["updateModel"];
+        put?: never;
         post?: never;
         /**
          * Delete a custom model
@@ -2367,7 +2363,11 @@ export interface paths {
         delete: operations["deleteModel"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update a custom model
+         * @description Update a custom model configuration. Built-in models cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.
+         */
+        patch: operations["updateModel"];
         trace?: never;
     };
     "/api/models/{id}/test": {
@@ -2666,11 +2666,7 @@ export interface paths {
          * @description Get organization details including members and pending invitations.
          */
         get: operations["getOrganization"];
-        /**
-         * Update organization
-         * @description Update organization name and/or slug. Owner only.
-         */
-        put: operations["updateOrganization"];
+        put?: never;
         post?: never;
         /**
          * Delete organization
@@ -2679,7 +2675,11 @@ export interface paths {
         delete: operations["deleteOrganization"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update organization
+         * @description Update organization name and/or slug. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.
+         */
+        patch: operations["updateOrganization"];
         trace?: never;
     };
     "/api/orgs/{orgId}/cli-sessions": {
@@ -2732,11 +2732,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /**
-         * Change invitation role
-         * @description Change the role and/or the space assignments of a pending invitation. Admin or owner required. Omitting `space_assignments` keeps the ones already stored, and the role rules are re-checked against them.
-         */
-        put: operations["changeInvitationRole"];
+        put?: never;
         post?: never;
         /**
          * Cancel an invitation
@@ -2745,7 +2741,11 @@ export interface paths {
         delete: operations["cancelInvitation"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Change invitation role
+         * @description Change the role and/or the space assignments of a pending invitation. Admin or owner required. Merge semantics (RFC 7396): omitting `space_assignments` keeps the ones already stored, and the role rules are re-checked against them.
+         */
+        patch: operations["changeInvitationRole"];
         trace?: never;
     };
     "/api/orgs/{orgId}/leave": {
@@ -2824,16 +2824,16 @@ export interface paths {
          * @description Get organization settings (redirect domains, etc.).
          */
         get: operations["getOrgSettings"];
-        /**
-         * Update organization settings
-         * @description Update organization settings (merge — only provided fields are updated).
-         */
-        put: operations["updateOrgSettings"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update organization settings
+         * @description Update organization settings. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.
+         */
+        patch: operations["updateOrgSettings"];
         trace?: never;
     };
     "/api/packages/agents": {
@@ -2869,14 +2869,10 @@ export interface paths {
         };
         /**
          * Get agent detail
-         * @description Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `home_space_id`, `home_writable`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).
+         * @description Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `home_space_id`, `home_writable`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, the `ETag`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).
          */
         get: operations["getAgentPackage"];
-        /**
-         * Update a user agent
-         * @description Update manifest and content of a user agent with optimistic locking. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
-         */
-        put: operations["updateAgent"];
+        put?: never;
         post?: never;
         /**
          * Delete a user agent
@@ -2885,7 +2881,11 @@ export interface paths {
         delete: operations["deleteAgent"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update a user agent
+         * @description Update manifest and content of a user agent, under its `If-Match`. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
+         */
+        patch: operations["updateAgent"];
         trace?: never;
     };
     "/api/packages/agents/{scope}/{name}/versions": {
@@ -3072,11 +3072,7 @@ export interface paths {
          * @description Get an integration package's full details including content.
          */
         get: operations["getIntegrationPackage"];
-        /**
-         * Update an integration package
-         * @description Update an integration package in the organization packages. Built-in integration packages cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
-         */
-        put: operations["updateIntegrationPackage"];
+        put?: never;
         post?: never;
         /**
          * Delete an integration package
@@ -3085,7 +3081,11 @@ export interface paths {
         delete: operations["deleteIntegrationPackage"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update an integration package
+         * @description Update an integration package in the organization packages. Built-in integration packages cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
+         */
+        patch: operations["updateIntegrationPackage"];
         trace?: never;
     };
     "/api/packages/integrations/{scope}/{name}/versions": {
@@ -3212,11 +3212,7 @@ export interface paths {
          * @description Get an MCP-server package's full details including content.
          */
         get: operations["getMcpServerPackage"];
-        /**
-         * Update an MCP-server package
-         * @description Update an MCP-server package in the organization packages. Built-in MCP-server packages cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
-         */
-        put: operations["updateMcpServerPackage"];
+        put?: never;
         post?: never;
         /**
          * Delete an MCP-server package
@@ -3225,7 +3221,11 @@ export interface paths {
         delete: operations["deleteMcpServerPackage"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update an MCP-server package
+         * @description Update an MCP-server package in the organization packages. Built-in MCP-server packages cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
+         */
+        patch: operations["updateMcpServerPackage"];
         trace?: never;
     };
     "/api/packages/mcp-servers/{scope}/{name}/versions": {
@@ -3352,11 +3352,7 @@ export interface paths {
          * @description Get a skill's full details including content.
          */
         get: operations["getSkill"];
-        /**
-         * Update a skill
-         * @description Update a skill in the organization packages. Built-in skills cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
-         */
-        put: operations["updateSkill"];
+        put?: never;
         post?: never;
         /**
          * Delete a skill
@@ -3365,7 +3361,11 @@ export interface paths {
         delete: operations["deleteSkill"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update a skill
+         * @description Update a skill in the organization packages. Built-in skills cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.
+         */
+        patch: operations["updateSkill"];
         trace?: never;
     };
     "/api/packages/skills/{scope}/{name}/versions": {
@@ -3530,7 +3530,7 @@ export interface paths {
         get: operations["getPackageHome"];
         /**
          * Move a package to another home space
-         * @description Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it, and every member but a guest holds `admin` (hence `<type>:write`) in their own, so the move would otherwise put a team's package beyond every administrator's reach (RBAC spec §3.6 gives no admin a way in) for as long as its owner stays a member. `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. It also reconciles PLACEMENT in the same transaction: every space that holds the package and is not the new home gains the `package_shares` row that now places it there (a package is present in a space through its home or a share, never through its `space_packages` row alone), the destination's own share, if any, is dropped since a package is not offered to the space it lives in, and the destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would, and refuses the whole move with `422 bundle_invalid` for an mcp-server whose `latest` archive is not executable. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. Those reconciling shares carry `shared_by: null` — nobody offered them, the home did until this call — so `GET /api/packages/{scope}/{name}/shares` lists them with a null sharer, and revoking one removes the package from that space like any other revocation. The draft itself is edited through `PUT /api/packages/{type}/{scope}/{name}`, under its optimistic lock.
+         * @description Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it, and every member but a guest holds `admin` (hence `<type>:write`) in their own, so the move would otherwise put a team's package beyond every administrator's reach (RBAC spec §3.6 gives no admin a way in) for as long as its owner stays a member. `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. It also reconciles PLACEMENT in the same transaction: every space that holds the package and is not the new home gains the `package_shares` row that now places it there (a package is present in a space through its home or a share, never through its `space_packages` row alone), the destination's own share, if any, is dropped since a package is not offered to the space it lives in, and the destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would, and refuses the whole move with `422 bundle_invalid` for an mcp-server whose `latest` archive is not executable. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. Those reconciling shares carry `shared_by: null` — nobody offered them, the home did until this call — so `GET /api/packages/{scope}/{name}/shares` lists them with a null sharer, and revoking one removes the package from that space like any other revocation. The draft itself is edited through `PATCH /api/packages/{type}/{scope}/{name}`, under its `If-Match`.
          */
         put: operations["movePackageHome"];
         post?: never;
@@ -3720,11 +3720,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /**
-         * Update a custom proxy
-         * @description Update a custom proxy (label, url, enabled). Built-in proxies cannot be modified.
-         */
-        put: operations["updateProxy"];
+        put?: never;
         post?: never;
         /**
          * Delete a custom proxy
@@ -3733,7 +3729,11 @@ export interface paths {
         delete: operations["deleteProxy"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update a custom proxy
+         * @description Update a custom proxy (label, url, enabled). Built-in proxies cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.
+         */
+        patch: operations["updateProxy"];
         trace?: never;
     };
     "/api/proxies/{id}/test": {
@@ -4236,11 +4236,7 @@ export interface paths {
          * @description Get a single schedule by ID.
          */
         get: operations["getSchedule"];
-        /**
-         * Update a schedule
-         * @description Update a cron schedule (expression, timezone, enabled state, or input).
-         */
-        put: operations["updateSchedule"];
+        put?: never;
         post?: never;
         /**
          * Delete a schedule
@@ -4249,7 +4245,11 @@ export interface paths {
         delete: operations["deleteSchedule"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update a schedule
+         * @description Update a cron schedule (expression, timezone, enabled state, or input). Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.
+         */
+        patch: operations["updateSchedule"];
         trace?: never;
     };
     "/api/schedules/{id}/runs": {
@@ -4564,11 +4564,7 @@ export interface paths {
          * @description Get one of this space's package placements with its `enabled` flag and its model and proxy overrides.
          */
         get: operations["getSpacePackage"];
-        /**
-         * Configure how this space runs a placed package
-         * @description Update the model/proxy overrides and generation settings of a package PLACED in this space. Requires the package type's `configure` grant, personal space included: selecting a model spends the organization's budget. There is no `enabled` field: activating and deactivating are their own acts, on `POST /api/spaces/{spaceId}/packages` and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`, where the placement rule and the offer that may have to be created with it are stated once. Sending it is a `400`. There is no version field either: a placement carries no version — outside its home space a package runs its latest published version, and its draft runs for whoever can write it. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.
-         */
-        put: operations["updateSpacePackage"];
+        put?: never;
         post?: never;
         /**
          * Deactivate a package in this space
@@ -4577,7 +4573,11 @@ export interface paths {
         delete: operations["deactivatePackage"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Configure how this space runs a placed package
+         * @description Update the model/proxy overrides and generation settings of a package PLACED in this space. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. Requires the package type's `configure` grant, personal space included: selecting a model spends the organization's budget. There is no `enabled` field: activating and deactivating are their own acts, on `POST /api/spaces/{spaceId}/packages` and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`, where the placement rule and the offer that may have to be created with it are stated once. Sending it is a `400`. There is no version field either: a placement carries no version — outside its home space a package runs its latest published version, and its draft runs for whoever can write it. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.
+         */
+        patch: operations["updateSpacePackage"];
         trace?: never;
     };
     "/api/spaces/{spaceId}/packages/{scope}/{name}/run-config": {
@@ -4676,11 +4676,7 @@ export interface paths {
          * @description Get a single webhook by ID.
          */
         get: operations["getWebhook"];
-        /**
-         * Update a webhook
-         * @description Update webhook URL, events, filters, or enabled status. Cannot change the secret or the scoping level.
-         */
-        put: operations["updateWebhook"];
+        put?: never;
         post?: never;
         /**
          * Delete a webhook
@@ -4689,7 +4685,11 @@ export interface paths {
         delete: operations["deleteWebhook"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update a webhook
+         * @description Update webhook URL, events, filters, or enabled status. Cannot change the secret or the scoping level. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.
+         */
+        patch: operations["updateWebhook"];
         trace?: never;
     };
     "/api/webhooks/{id}/deliveries": {
@@ -4996,11 +4996,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** @description What stands between this agent and a run, in one call: the connection verdict (mirroring the run-kickoff 412, run semantics) plus the space's own activation switch. `integrations[]` carries every declared integration's management verdict for the Connexions tab. */
+        /** @description What stands between this agent and a run, in one call: the connection verdict (mirroring the run-kickoff 409, run semantics) plus the space's own activation switch. `integrations[]` carries every declared integration's management verdict for the Connexions tab. */
         AgentConnectionReadiness: {
-            /** @description True iff `POST /api/agents/{scope}/{name}/run` would refuse — a connection the resolver rejects (412), or the agent being switched off in this space (404 `agent_not_active_in_space`). Equivalently: `errors` is non-empty. */
+            /** @description True iff `POST /api/agents/{scope}/{name}/run` would refuse — a connection the resolver rejects (409), or the agent being switched off in this space (404 `agent_not_active_in_space`). Equivalently: `errors` is non-empty. */
             blocks_run: boolean;
-            /** @description What blocks the run. The integration portion of the 412 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors), plus, FIRST when it applies, `{ field: "agent", code: "agent_not_active" }` — the space has switched the agent off, so the run doors answer `404 agent_not_active_in_space` while this read answers 200 and says why. The remedy is `POST /api/spaces/{spaceId}/packages`. Shares the single ResolutionFieldError component so the shape can't drift from the 412 error items. */
+            /** @description What blocks the run. The integration portion of the 409 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors), plus, FIRST when it applies, `{ field: "agent", code: "agent_not_active" }` — the space has switched the agent off, so the run doors answer `404 agent_not_active_in_space` while this read answers 200 and says why. The remedy is `POST /api/spaces/{spaceId}/packages`. Shares the single ResolutionFieldError component so the shape can't drift from the 409 error items. */
             errors: components["schemas"]["ResolutionFieldError"][];
             integrations: {
                 integration_id: string;
@@ -5033,8 +5033,6 @@ export interface components {
              * @description Last updated timestamp (user agents only)
              */
             updatedAt?: string;
-            /** @description Optimistic lock version (user agents only) */
-            lock_version?: number;
             /** @description AFPS schema wrapper for the agent's parameters, plus the per-space stored values and field locks. Resolution order at launch: author default (JSON Schema `default`) < stored value (`values`) < schedule value < caller input. A field named in `locked_fields` is not asked at launch and a caller that sets it is refused with 400 `locked_input_field`. A summary read (`agents:run` without `agents:read`) still receives every locked field's NAME, but `values` carries no entry for one — a field the launcher cannot set is not one it reads the stored value of. */
             input: components["schemas"]["AgentInputSettings"] & {
                 /** @description Pure JSON Schema 2020-12 object */
@@ -5384,11 +5382,11 @@ export interface components {
         };
         EeBillingManager: {
             /** @description Platform user id granted `billing:read` + `billing:manage`. */
-            user_id: string;
+            userId: string;
             /** @description User id that granted it. */
             added_by: string;
             /** Format: date-time */
-            created_at: string;
+            createdAt: string;
         };
         EeBillingManagerList: {
             /** @enum {string} */
@@ -5817,8 +5815,6 @@ export interface components {
             source: "local" | "system";
             created_by: string | null;
             auto_installed: boolean;
-            /** @description Optimistic lock version */
-            lock_version?: number;
             /** @description Manifest version (semver) */
             version: string | null;
             /** @description Full manifest object */
@@ -6039,7 +6035,7 @@ export interface components {
             requestId: string;
             /** @description Parameter that caused the error */
             param?: string;
-            /** @description Seconds before retry (on 429) */
+            /** @description Seconds before retry; mirrored in the `Retry-After` header */
             retryAfter?: number;
             /** @description Field-level validation errors */
             errors?: components["schemas"]["ResolutionFieldError"][];
@@ -6080,13 +6076,16 @@ export interface components {
             available_auth_keys?: string[];
             /**
              * Format: uri
-             * @description Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 412 whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.
+             * @description Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.
              */
             connect_url?: string;
-            /** @description Absolute expiry of `connect_url`, epoch ms. */
-            expires_at?: number;
+            /**
+             * Format: date-time
+             * @description Absolute expiry of `connect_url` (RFC 3339).
+             */
+            expiresAt?: string;
             /** @description Integration package id `connect_url` connects (`@scope/name`). */
-            package_id?: string;
+            packageId?: string;
         };
         /** @description A space role: one of the four platform presets (read-only, `id: null`) or an organization-defined bundle. */
         RoleObject: {
@@ -6643,6 +6642,47 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
+        /** @description `If-Match` does not match the resource's current `ETag`: it changed since it was read. Nothing was written. The response carries the current `ETag`; re-read, reapply, retry. */
+        PreconditionFailed: {
+            headers: {
+                "Request-Id": components["headers"]["RequestId"];
+                ETag: components["headers"]["ETag"];
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "type": "https://docs.appstrate.dev/errors/precondition-failed",
+                 *       "title": "Precondition Failed",
+                 *       "status": 412,
+                 *       "detail": "The resource changed since you read it: If-Match does not match its current ETag. Re-read it, reapply your change, and send the new ETag.",
+                 *       "code": "precondition_failed",
+                 *       "requestId": "req_abc123"
+                 *     }
+                 */
+                "application/problem+json": components["schemas"]["ProblemDetail"];
+            };
+        };
+        /** @description The write requires an `If-Match` header and none was sent (RFC 6585 §3). */
+        PreconditionRequired: {
+            headers: {
+                "Request-Id": components["headers"]["RequestId"];
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "type": "https://docs.appstrate.dev/errors/precondition-required",
+                 *       "title": "Precondition Required",
+                 *       "status": 428,
+                 *       "detail": "This write requires an If-Match header carrying the ETag of the representation you read. GET the resource, then send its ETag.",
+                 *       "code": "precondition_required",
+                 *       "requestId": "req_abc123"
+                 *     }
+                 */
+                "application/problem+json": components["schemas"]["ProblemDetail"];
+            };
+        };
         /** @description Validation error. Body-level failures emit `code: "validation_failed"` with a populated `errors[]` array listing every offending field in one response. Single-field failures outside the body (query params, headers) still use `code: "invalid_request"` with the `param` pointer. */
         ValidationError: {
             headers: {
@@ -6715,7 +6755,7 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
-        /** @description `idempotency_in_progress` — a request with the same `Idempotency-Key` is already being processed; wait and retry. Or `org_deleting` — the organization's deletion is reserved, so no new work is admitted and a retry will not succeed. */
+        /** @description `idempotency_in_progress` — a request with the same `Idempotency-Key` is already being processed; wait and retry. Or `org_deleting` — the organization's deletion is reserved, so no new work is admitted and a retry will not succeed. Or `missing_integration_connection` — a declared integration has no usable connection for the caller: `errors[]` carries one item per integration (`field: integrations.<id>`), and a `must_choose_connection` item lists `candidate_connections` to pick from via `connection_overrides`. */
         RunAdmissionConflict: {
             headers: {
                 "Request-Id": components["headers"]["RequestId"];
@@ -6793,7 +6833,7 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
-        /** @description Resource not found. On `PUT /api/schedules/{id}`, most commonly the schedule id itself does not exist (or belongs to another space) — that check runs first. Both writes also answer 404 when the target agent does not exist, or has no published version (`no_published_version`): on `POST` always, on `PUT` when the patch carries `input` or `version_override`. A schedule with no `version_override` fires the PUBLISHED manifest, so a never-published agent is refused at the write rather than 404ing on every tick; pin the working copy with `version_override: "draft"` to schedule it anyway. */
+        /** @description Resource not found. On `PATCH /api/schedules/{id}`, most commonly the schedule id itself does not exist (or belongs to another space) — that check runs first. Both writes also answer 404 when the target agent does not exist, or has no published version (`no_published_version`): on `POST` always, on `PATCH` when the patch carries `input` or `version_override`. A schedule with no `version_override` fires the PUBLISHED manifest, so a never-published agent is refused at the write rather than 404ing on every tick; pin the working copy with `version_override: "draft"` to schedule it anyway. */
         NoPublishedVersion: {
             headers: {
                 [name: string]: unknown;
@@ -6845,6 +6885,10 @@ export interface components {
     parameters: {
         /** @description Number of items to skip before the first returned item. */
         Offset: number;
+        /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
+        IfMatch: string;
+        /** @description The `ETag` of the draft the write is based on (read it from the package GET, or from the previous write's response). Mandatory: absent is `428 precondition_required`; stale is `412 precondition_failed` and nothing is written. `*` writes over whatever is current. */
+        IfMatchRequired: string;
         /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
         XOrgId: string;
         /** @description Organization ID. Required for SSE auth (cookies cannot carry X-Org-Id header on EventSource). */
@@ -6859,7 +6903,7 @@ export interface components {
         AppstrateVersion: string;
         /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same method, URL and body replays the original response with `Idempotent-Replayed: true`, the same key with a different method, URL or body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. Current permissions are checked again; run responses are projected using current visibility. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
         IdempotencyKey: string;
-        /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 412 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. */
+        /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. */
         ConnectOffers: "1";
         /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
         SseSpaceId: string;
@@ -6906,10 +6950,12 @@ export interface components {
         RateLimit: string;
         /** @description IETF RateLimit-Policy header describing the rate limit window (e.g. 20;w=60). */
         RateLimitPolicy: string;
-        /** @description Seconds to wait before retrying. Present on 429 responses. */
+        /** @description Seconds to wait before retrying. Present on every 429, and on any error whose problem body carries `retryAfter` (the two always agree), such as the 503 `shutting_down`. */
         RetryAfter: number;
         /** @description RFC 6750 Bearer challenge, present on every 401. `Bearer error="invalid_token"` when a credential was presented but rejected, bare `Bearer` when no credential was presented. Resources registered for RFC 9728 discovery (e.g. MCP) answer with a richer challenge carrying `resource_metadata="…"`. */
         WWWAuthenticate: string;
+        /** @description Strong entity-tag of the resource version this response carries (RFC 9110 §8.8.3). Send it back verbatim in `If-Match` on the next write to that resource: a write based on a stale read is refused with `412 precondition_failed`. */
+        ETag: string;
         /** @description RFC 5988 pagination link(s), e.g. `<https://…?since=42&limit=100>; rel="next"`. Present only when another page follows — absence means the listing is complete. */
         Link: string;
     };
@@ -7857,7 +7903,7 @@ export interface operations {
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
                 /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same method, URL and body replays the original response with `Idempotent-Replayed: true`, the same key with a different method, URL or body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. Current permissions are checked again; run responses are projected using current visibility. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 412 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. */
+                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. */
                 "X-Appstrate-Connect-Offers"?: components["parameters"]["ConnectOffers"];
             };
             path: {
@@ -7891,7 +7937,7 @@ export interface operations {
                     generation?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Proxy ID override for this run, or "none" to disable proxying. Takes priority over agent and org defaults. */
                     proxyId?: string;
-                    /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor. */
+                    /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 409 `missing_integration_connection` if the chosen id is not accessible to the actor. */
                     connection_overrides?: {
                         [key: string]: string;
                     };
@@ -8001,7 +8047,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description `agent_not_found` when this space holds no placement for the agent (homed here, offered here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{spaceId}/packages`. */
             404: components["responses"]["NotFound"];
-            /** @description Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference) */
+            /** @description Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference), or a declared integration has no usable connection for the caller (`missing_integration_connection` — one `errors[]` item per integration, `must_choose_connection` items carrying `candidate_connections`) */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -8013,15 +8059,6 @@ export interface operations {
             };
             /** @description A referenced upload has expired before consume, or its post-consume reuse window has elapsed (`upload_expired`) — stage a fresh upload and retry */
             410: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description Missing integration connection (`missing_integration_connection`) */
-            412: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8245,10 +8282,10 @@ export interface operations {
                     dependency_overrides?: {
                         [key: string]: string;
                     };
-                    /** @description Execution identity for runs this schedule fires (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this space). Omit to default to the calling identity. Requires `schedules:write`. */
+                    /** @description Execution identity for runs this schedule fires (#738). Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to default to the calling identity. Requires `schedules:write`. */
                     actor?: {
-                        user_id?: string;
-                        end_user_id?: string;
+                        userId?: string;
+                        endUserId?: string;
                     } & (unknown | unknown);
                 };
             };
@@ -8345,6 +8382,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -9857,13 +9895,6 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json with `code: "needs_reconnection"`. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
             /** @description Usage refused by the `beforeUsage` admission hook; only emitted when a module provides it. RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {
                 headers: {
@@ -9873,20 +9904,15 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. RFC 9457 problem+json. */
+            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. Or `needs_reconnection` — the selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description Rate limited (20/min per caller) */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            /** @description Rate limited (20/min per caller), or `chat_capacity` — the instance is at its concurrent chat-turn cap. Both carry `Retry-After`. */
+            429: components["responses"]["RateLimited"];
         };
     };
     listChatSessions: {
@@ -12000,8 +12026,11 @@ export interface operations {
                     "application/json": {
                         /** Format: uri */
                         connect_url: string;
-                        /** @description Absolute expiry of the connect session (epoch ms). */
-                        expires_at: number;
+                        /**
+                         * Format: date-time
+                         * @description Absolute expiry of the connect session (RFC 3339).
+                         */
+                        expiresAt: string;
                     };
                 };
             };
@@ -13360,16 +13389,16 @@ export interface operations {
                      *       ],
                      *       "recent_runs": [
                      *         {
-                     *           "package_id": "@appstrate/triage",
+                     *           "packageId": "@appstrate/triage",
                      *           "status": "failed",
-                     *           "run_number": 7,
+                     *           "runNumber": 7,
                      *           "started_at": "2026-06-25T09:12:00.000Z",
                      *           "error": "Gmail token expired"
                      *         }
                      *       ],
                      *       "agents": [
                      *         {
-                     *           "package_id": "@appstrate/triage",
+                     *           "packageId": "@appstrate/triage",
                      *           "display_name": "Inbox Triage",
                      *           "description": "Sorts and labels incoming email.",
                      *           "takes_input": false,
@@ -13382,7 +13411,7 @@ export interface operations {
                      *       "agents_total": 1,
                      *       "skills": [
                      *         {
-                     *           "package_id": "@appstrate/web-research",
+                     *           "packageId": "@appstrate/web-research",
                      *           "display_name": "Web Research",
                      *           "description": "Multi-source web search and synthesis.",
                      *           "version": "1.2.0",
@@ -13412,9 +13441,9 @@ export interface operations {
                         };
                         /** @description The caller's own most recent runs (actor-scoped), newest first — lets an agent reference a recent or failed run without a discovery round-trip. */
                         recent_runs: {
-                            package_id: string;
+                            packageId: string;
                             status: string;
-                            run_number?: number | null;
+                            runNumber?: number | null;
                             /** Format: date-time */
                             started_at?: string | null;
                             /** @description Failure message for non-success runs, when available. */
@@ -13434,7 +13463,7 @@ export interface operations {
                         /** @description Agents the caller can run in the current space (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the full list is reachable via the `listAgents` operation. */
                         agents: {
                             /** @description Invokable identifier, e.g. "@appstrate/triage". */
-                            package_id: string;
+                            packageId: string;
                             display_name: string;
                             description: string;
                             /** @description Whether the agent declares an input schema with properties. */
@@ -13453,7 +13482,7 @@ export interface operations {
                         /** @description Skills the caller could attach to an agent in the current space (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the full list is reachable via the `listSkills` operation. */
                         skills: {
                             /** @description Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills. */
-                            package_id: string;
+                            packageId: string;
                             display_name: string;
                             description: string;
                             /** @description The skill package's own manifest version, when known. Use it to pin a satisfiable dependencies.skills range. */
@@ -14008,53 +14037,6 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
         };
     };
-    updateModelProviderCredential: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    label?: string;
-                    apiKey?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Model provider credential updated — the bare updated credential resource (same non-secret shape as `GET`/`list`). The api key / OAuth token is never echoed back. */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelProviderCredential"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            /** @description Forbidden — caller lacks `model-provider-credentials:write` (generic RBAC), or `operation_not_allowed` when `id` refers to a built-in/system credential that cannot be modified. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
     deleteModelProviderCredential: {
         parameters: {
             query?: never;
@@ -14096,6 +14078,57 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+        };
+    };
+    updateModelProviderCredential: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    label?: string;
+                    apiKey?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Model provider credential updated — the bare updated credential resource (same non-secret shape as `GET`/`list`). The api key / OAuth token is never echoed back. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelProviderCredential"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            /** @description Forbidden — caller lacks `model-provider-credentials:write` (generic RBAC), or `operation_not_allowed` when `id` refers to a built-in/system credential that cannot be modified. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["PreconditionFailed"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     refreshModelProviderCredentialModels: {
@@ -14736,10 +14769,38 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
+    deleteModel: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Model deleted */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     updateModel: {
         parameters: {
             query?: never;
             header?: {
+                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
+                "If-Match"?: components["parameters"]["IfMatch"];
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
             };
@@ -14778,6 +14839,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -14789,32 +14851,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["ModelAlreadyAdded"];
-        };
-    };
-    deleteModel: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Model deleted */
-            204: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            412: components["responses"]["PreconditionFailed"];
         };
     };
     testModel: {
@@ -14890,7 +14927,7 @@ export interface operations {
                      *             "status": "success"
                      *           },
                      *           "read_at": null,
-                     *           "created_at": "2026-01-15T10:31:12Z"
+                     *           "createdAt": "2026-01-15T10:31:12Z"
                      *         }
                      *       ],
                      *       "has_more": false
@@ -14917,7 +14954,7 @@ export interface operations {
                              */
                             read_at: string | null;
                             /** Format: date-time */
-                            created_at: string;
+                            createdAt: string;
                         }[];
                         /** @description True when another page follows — page via the Link header cursor */
                         has_more: boolean;
@@ -15640,6 +15677,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -15675,41 +15713,6 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    updateOrganization: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                orgId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    name?: string;
-                    slug?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Updated organization — same OrgDetail shape as GET /api/orgs/{orgId} */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgDetail"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
     deleteOrganization: {
         parameters: {
             query?: never;
@@ -15733,6 +15736,46 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    updateOrganization: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+            };
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    slug?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated organization — same OrgDetail shape as GET /api/orgs/{orgId} */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgDetail"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["PreconditionFailed"];
         };
     };
     listOrgCliSessions: {
@@ -15840,6 +15883,32 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
+    cancelInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                invitationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invitation cancelled */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     changeInvitationRole: {
         parameters: {
             query?: never;
@@ -15884,32 +15953,6 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    cancelInvitation: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                orgId: string;
-                invitationId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Invitation cancelled */
-            204: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -16005,7 +16048,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Conflict — this email already holds a pending invitation in the organization. `invitation_id` names it; edit it (PUT /api/orgs/{orgId}/invitations/{invitationId}) to change the role or add a space instead of creating a second token. */
+            /** @description Conflict — this email already holds a pending invitation in the organization. `invitation_id` names it; edit it (PATCH /api/orgs/{orgId}/invitations/{invitationId}) to change the role or add a space instead of creating a second token. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -16107,6 +16150,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -16125,7 +16169,10 @@ export interface operations {
     updateOrgSettings: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+            };
             path: {
                 orgId: string;
             };
@@ -16149,6 +16196,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -16158,6 +16206,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            412: components["responses"]["PreconditionFailed"];
         };
     };
     listAgentPackages: {
@@ -16209,7 +16258,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations. */
+                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates are guarded by the same `If-Match` as the manifest; a stale draft returns 412 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations. */
                     operations?: components["schemas"]["PackageFileWriteOperation"][];
                     manifest: components["schemas"]["AgentManifest"];
                     /** @description Agent prompt (markdown). Must not be blank. */
@@ -16223,6 +16272,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -16281,6 +16331,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -16292,71 +16343,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["VersionArtifactUnavailable"];
-        };
-    };
-    updateAgent: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    manifest?: components["schemas"]["AgentManifest"];
-                    content?: string;
-                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations. */
-                    operations?: components["schemas"]["PackageFileWriteOperation"][];
-                    /** @description Optimistic lock version */
-                    lock_version: number;
-                };
-            };
-        };
-        responses: {
-            /** @description Agent updated */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentDetail"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description Written file or resulting tree exceeds its byte/count limit */
-            413: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
         };
     };
     deleteAgent: {
@@ -16398,6 +16384,65 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+        };
+    };
+    updateAgent: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description The `ETag` of the draft the write is based on (read it from the package GET, or from the previous write's response). Mandatory: absent is `428 precondition_required`; stale is `412 precondition_failed` and nothing is written. `*` writes over whatever is current. */
+                "If-Match": components["parameters"]["IfMatchRequired"];
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    manifest?: components["schemas"]["AgentManifest"];
+                    content?: string;
+                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates are guarded by the same `If-Match` as the manifest; a stale draft returns 412 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations. */
+                    operations?: components["schemas"]["PackageFileWriteOperation"][];
+                };
+            };
+        };
+        responses: {
+            /** @description Agent updated */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentDetail"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["PreconditionFailed"];
+            /** @description Written file or resulting tree exceeds its byte/count limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            428: components["responses"]["PreconditionRequired"];
         };
     };
     listAgentVersions: {
@@ -16448,6 +16493,8 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
                 "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -16462,8 +16509,6 @@ export interface operations {
                 "application/json": {
                     /** @description Optional semver version override (e.g. from bump selector) */
                     version?: string;
-                    /** @description Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at. */
-                    lock_version?: number;
                 };
             };
         };
@@ -16482,7 +16527,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Agent in use (runs in progress), no changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `agent_in_use`, `no_changes`, `version_exists`, or `conflict`. */
+            /** @description Agent in use (runs in progress), no changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `agent_in_use`, `no_changes`, `version_exists`. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -16491,6 +16536,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            412: components["responses"]["PreconditionFailed"];
         };
     };
     getAgentVersionInfo: {
@@ -16617,6 +16663,8 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
                 "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -16634,6 +16682,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -16643,7 +16692,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`. */
+            /** @description Agent in use. RFC 9457 problem+json with `code` `agent_in_use`. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -16652,6 +16701,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            412: components["responses"]["PreconditionFailed"];
         };
     };
     importPackage: {
@@ -16922,7 +16972,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations. */
+                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates are guarded by the same `If-Match` as the manifest; a stale draft returns 412 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations. */
                     operations?: components["schemas"]["PackageFileWriteOperation"][];
                     /** @description Integration package manifest (AFPS). The package ID is derived from `manifest.name`. */
                     manifest: {
@@ -16939,6 +16989,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -16997,6 +17048,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -17008,74 +17060,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["VersionArtifactUnavailable"];
-        };
-    };
-    updateIntegrationPackage: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description Package manifest */
-                    manifest?: {
-                        [key: string]: unknown;
-                    };
-                    content?: string;
-                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations. */
-                    operations?: components["schemas"]["PackageFileWriteOperation"][];
-                    /** @description Optimistic lock version */
-                    lock_version: number;
-                };
-            };
-        };
-        responses: {
-            /** @description Integration package updated */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description Draft was changed concurrently; reload before retrying */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description Written file or resulting tree exceeds its byte/count limit */
-            413: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
         };
     };
     deleteIntegrationPackage: {
@@ -17117,6 +17101,68 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+        };
+    };
+    updateIntegrationPackage: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description The `ETag` of the draft the write is based on (read it from the package GET, or from the previous write's response). Mandatory: absent is `428 precondition_required`; stale is `412 precondition_failed` and nothing is written. `*` writes over whatever is current. */
+                "If-Match": components["parameters"]["IfMatchRequired"];
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Package manifest */
+                    manifest?: {
+                        [key: string]: unknown;
+                    };
+                    content?: string;
+                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates are guarded by the same `If-Match` as the manifest; a stale draft returns 412 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations. */
+                    operations?: components["schemas"]["PackageFileWriteOperation"][];
+                };
+            };
+        };
+        responses: {
+            /** @description Integration package updated */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgPackageItemDetail"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["PreconditionFailed"];
+            /** @description Written file or resulting tree exceeds its byte/count limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            428: components["responses"]["PreconditionRequired"];
         };
     };
     listIntegrationPackageVersions: {
@@ -17167,6 +17213,8 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
                 "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -17181,8 +17229,6 @@ export interface operations {
                 "application/json": {
                     /** @description Optional semver version override (e.g. from bump selector) */
                     version?: string;
-                    /** @description Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at. */
-                    lock_version?: number;
                 };
             };
         };
@@ -17201,7 +17247,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`, or `conflict`. */
+            /** @description No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -17210,6 +17256,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            412: components["responses"]["PreconditionFailed"];
         };
     };
     getIntegrationPackageVersionInfo: {
@@ -17329,6 +17376,8 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
                 "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -17347,6 +17396,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -17356,15 +17406,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Concurrent modification. RFC 9457 problem+json with `code` of `conflict`. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
+            412: components["responses"]["PreconditionFailed"];
         };
     };
     listMcpServerPackages: {
@@ -17431,6 +17473,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -17470,6 +17513,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -17481,74 +17525,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["VersionArtifactUnavailable"];
-        };
-    };
-    updateMcpServerPackage: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description Package manifest */
-                    manifest?: {
-                        [key: string]: unknown;
-                    };
-                    content?: string;
-                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations. */
-                    operations?: components["schemas"]["PackageFileWriteOperation"][];
-                    /** @description Optimistic lock version */
-                    lock_version: number;
-                };
-            };
-        };
-        responses: {
-            /** @description MCP-server package updated */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description Draft was changed concurrently; reload before retrying */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description Written file or resulting tree exceeds its byte/count limit */
-            413: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
         };
     };
     deleteMcpServerPackage: {
@@ -17590,6 +17566,68 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+        };
+    };
+    updateMcpServerPackage: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description The `ETag` of the draft the write is based on (read it from the package GET, or from the previous write's response). Mandatory: absent is `428 precondition_required`; stale is `412 precondition_failed` and nothing is written. `*` writes over whatever is current. */
+                "If-Match": components["parameters"]["IfMatchRequired"];
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Package manifest */
+                    manifest?: {
+                        [key: string]: unknown;
+                    };
+                    content?: string;
+                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates are guarded by the same `If-Match` as the manifest; a stale draft returns 412 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations. */
+                    operations?: components["schemas"]["PackageFileWriteOperation"][];
+                };
+            };
+        };
+        responses: {
+            /** @description MCP-server package updated */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgPackageItemDetail"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["PreconditionFailed"];
+            /** @description Written file or resulting tree exceeds its byte/count limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            428: components["responses"]["PreconditionRequired"];
         };
     };
     listMcpServerPackageVersions: {
@@ -17640,6 +17678,8 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
                 "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -17654,8 +17694,6 @@ export interface operations {
                 "application/json": {
                     /** @description Optional semver version override (e.g. from bump selector) */
                     version?: string;
-                    /** @description Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at. */
-                    lock_version?: number;
                 };
             };
         };
@@ -17674,7 +17712,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`, or `conflict`. */
+            /** @description No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -17683,6 +17721,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            412: components["responses"]["PreconditionFailed"];
         };
     };
     getMcpServerPackageVersionInfo: {
@@ -17802,6 +17841,8 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
                 "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -17820,6 +17861,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -17829,15 +17871,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Concurrent modification. RFC 9457 problem+json with `code` of `conflict`. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
+            412: components["responses"]["PreconditionFailed"];
         };
     };
     listSkills: {
@@ -17919,7 +17953,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations. */
+                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates are guarded by the same `If-Match` as the manifest; a stale draft returns 412 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations. */
                     operations?: components["schemas"]["PackageFileWriteOperation"][];
                     /** @description Skill package manifest (AFPS). The package ID is derived from `manifest.name`. */
                     manifest: {
@@ -17936,6 +17970,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -17995,6 +18030,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -18006,75 +18042,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["VersionArtifactUnavailable"];
-        };
-    };
-    updateSkill: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description Package manifest */
-                    manifest?: {
-                        [key: string]: unknown;
-                    };
-                    content?: string;
-                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations. */
-                    operations?: components["schemas"]["PackageFileWriteOperation"][];
-                    /** @description Optimistic lock version */
-                    lock_version: number;
-                };
-            };
-        };
-        responses: {
-            /** @description Skill updated */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. */
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description Draft was changed concurrently; reload before retrying */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description Written file or resulting tree exceeds its byte/count limit */
-            413: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
         };
     };
     deleteSkill: {
@@ -18116,6 +18083,69 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+        };
+    };
+    updateSkill: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description The `ETag` of the draft the write is based on (read it from the package GET, or from the previous write's response). Mandatory: absent is `428 precondition_required`; stale is `412 precondition_failed` and nothing is written. `*` writes over whatever is current. */
+                "If-Match": components["parameters"]["IfMatchRequired"];
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Package manifest */
+                    manifest?: {
+                        [key: string]: unknown;
+                    };
+                    content?: string;
+                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates are guarded by the same `If-Match` as the manifest; a stale draft returns 412 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations. */
+                    operations?: components["schemas"]["PackageFileWriteOperation"][];
+                };
+            };
+        };
+        responses: {
+            /** @description Skill updated */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgPackageItemDetail"];
+                };
+            };
+            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. */
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["PreconditionFailed"];
+            /** @description Written file or resulting tree exceeds its byte/count limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            428: components["responses"]["PreconditionRequired"];
         };
     };
     listSkillVersions: {
@@ -18166,6 +18196,8 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
                 "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -18180,8 +18212,6 @@ export interface operations {
                 "application/json": {
                     /** @description Optional semver version override (e.g. from bump selector) */
                     version?: string;
-                    /** @description Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at. */
-                    lock_version?: number;
                 };
             };
         };
@@ -18201,7 +18231,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`, or `conflict`. */
+            /** @description No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -18210,6 +18240,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            412: components["responses"]["PreconditionFailed"];
         };
     };
     getSkillVersionInfo: {
@@ -18329,6 +18360,8 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
                 "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -18347,6 +18380,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -18358,15 +18392,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Concurrent modification. RFC 9457 problem+json with `code` of `conflict`. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
+            412: components["responses"]["PreconditionFailed"];
         };
     };
     listPackageFiles: {
@@ -18562,6 +18588,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -18665,6 +18692,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -19258,59 +19286,6 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    updateProxy: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    label?: string;
-                    /** Format: uri */
-                    url?: string;
-                    enabled?: boolean;
-                };
-            };
-        };
-        responses: {
-            /** @description Proxy updated */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "id": "cm6pqr679",
-                     *       "label": "US Residential Proxy",
-                     *       "urlPrefix": "http://user:****@us-proxy.example.com:8080",
-                     *       "source": "custom",
-                     *       "enabled": true,
-                     *       "is_default": false,
-                     *       "created_by": "usr_k7x9m2p4q1",
-                     *       "createdAt": "2026-01-10T08:00:00Z",
-                     *       "updatedAt": "2026-01-12T09:00:00Z"
-                     *     }
-                     */
-                    "application/json": components["schemas"]["OrgProxy"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
     deleteProxy: {
         parameters: {
             query?: never;
@@ -19335,6 +19310,63 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    updateProxy: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    label?: string;
+                    /** Format: uri */
+                    url?: string;
+                    enabled?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Proxy updated */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "id": "cm6pqr679",
+                     *       "label": "US Residential Proxy",
+                     *       "urlPrefix": "http://user:****@us-proxy.example.com:8080",
+                     *       "source": "custom",
+                     *       "enabled": true,
+                     *       "is_default": false,
+                     *       "created_by": "usr_k7x9m2p4q1",
+                     *       "createdAt": "2026-01-10T08:00:00Z",
+                     *       "updatedAt": "2026-01-12T09:00:00Z"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["OrgProxy"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["PreconditionFailed"];
         };
     };
     testProxy: {
@@ -19645,6 +19677,8 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
+                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
+                "If-Match"?: components["parameters"]["IfMatch"];
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
             };
@@ -19670,6 +19704,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -19689,6 +19724,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            412: components["responses"]["PreconditionFailed"];
         };
     };
     listRuns: {
@@ -19766,7 +19802,7 @@ export interface operations {
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
                 /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same method, URL and body replays the original response with `Idempotent-Replayed: true`, the same key with a different method, URL or body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. Current permissions are checked again; run responses are projected using current visibility. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 412 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. */
+                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. */
                 "X-Appstrate-Connect-Offers"?: components["parameters"]["ConnectOffers"];
             };
             path?: never;
@@ -19800,7 +19836,7 @@ export interface operations {
                     input?: Record<string, never>;
                     /** @description `appfile://file_xxx` URIs to mount read-only into the run's `files/` directory — fan-in by reference, without declaring a file field in the manifest. The platform declares a reserved `_context_files` input field for them, so they go through the same ACL, byte/count caps and `file_links` chaining as any other file input, and are announced to the agent in its prompt. A manifest (or `input`) that already declares `_context_files` is rejected with a `400` — the name is reserved. */
                     context_files?: string[];
-                    /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor. */
+                    /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 409 `missing_integration_connection` if the chosen id is not accessible to the actor. */
                     connection_overrides?: {
                         [key: string]: string;
                     };
@@ -19913,15 +19949,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["RunAdmissionConflict"];
-            /** @description Missing integration connection (`missing_integration_connection`) */
-            412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
             /** @description `payload_too_large` — an inline `data:` input file exceeds the per-file inline cap (4 MiB decoded), or the run's input files together exceed `WORKSPACE_MAX_FILES_BYTES`. Or `file_count_exceeded` — the run would carry more than `RUN_MAX_FILES` input files (uploads + inline + `appfile://` refs). Both are refused before the run launches, so nothing is charged and no workspace is provisioned; distinct codes so a client can tell "one file too big" from "too many files". */
             413: {
                 headers: {
@@ -20137,15 +20164,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["RunAdmissionConflict"];
-            /** @description Missing integration connection (`missing_integration_connection`) */
-            412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
             422: components["responses"]["IdempotencyConflict"];
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
@@ -21018,6 +21036,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -21062,10 +21081,42 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    deleteSchedule: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Schedule deleted */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     updateSchedule: {
         parameters: {
             query?: never;
             header?: {
+                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
+                "If-Match"?: components["parameters"]["IfMatch"];
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
@@ -21098,10 +21149,10 @@ export interface operations {
                     dependency_overrides?: {
                         [key: string]: string;
                     } | null;
-                    /** @description Re-point the schedule's execution identity (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this space). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`. */
+                    /** @description Re-point the schedule's execution identity (#738). Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`. */
                     actor?: {
-                        user_id?: string;
-                        end_user_id?: string;
+                        userId?: string;
+                        endUserId?: string;
                     } & (unknown | unknown);
                 };
             };
@@ -21112,6 +21163,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -21131,36 +21183,7 @@ export interface operations {
             /** @description Insufficient permissions — including `draft_not_writable` when the patch CHANGES `version_override` to `draft` and the caller cannot WRITE the agent, or changes a `dependency_overrides` entry to `draft` on a dependency they cannot WRITE. A value identical to the one already stored is an echo, not a decision, and is not judged. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NoPublishedVersion"];
-        };
-    };
-    deleteSchedule: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Schedule deleted */
-            204: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            412: components["responses"]["PreconditionFailed"];
         };
     };
     listScheduleRuns: {
@@ -21427,6 +21450,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -21480,6 +21504,8 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
+                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
+                "If-Match"?: components["parameters"]["IfMatch"];
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
             };
@@ -21517,6 +21543,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -21536,6 +21563,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            412: components["responses"]["PreconditionFailed"];
         };
     };
     convertSpaceToTeam: {
@@ -22405,6 +22433,7 @@ export interface operations {
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -22412,49 +22441,6 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    updateSpacePackage: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                spaceId: string;
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": {
-                    generationConfig?: components["schemas"]["ModelGenerationSettings"] | null;
-                    modelId?: string | null;
-                    proxyId?: string | null;
-                };
-            };
-        };
-        responses: {
-            /** @description Updated placement */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SpacePackage"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            /** @description The caller lacks the package type's `configure` grant in this space. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
@@ -22487,6 +22473,53 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    updateSpacePackage: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                spaceId: string;
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    generationConfig?: components["schemas"]["ModelGenerationSettings"] | null;
+                    modelId?: string | null;
+                    proxyId?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated placement */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpacePackage"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The caller lacks the package type's `configure` grant in this space. */
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["PreconditionFailed"];
         };
     };
     getSpacePackageRunConfig: {
@@ -22889,6 +22922,7 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -22913,70 +22947,6 @@ export interface operations {
                     "application/json": components["schemas"]["WebhookObject"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            429: components["responses"]["RateLimited"];
-        };
-    };
-    updateWebhook: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": {
-                    /** Format: uri */
-                    url?: string;
-                    events?: ("run.started" | "run.success" | "run.failed" | "run.timeout" | "run.cancelled" | "run.connection_missing")[];
-                    packageId?: string | null;
-                    /** @enum {string} */
-                    payloadMode?: "full" | "summary";
-                    enabled?: boolean;
-                };
-            };
-        };
-        responses: {
-            /** @description Webhook updated */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "id": "wh_cm1abc123",
-                     *       "object": "webhook",
-                     *       "level": "space",
-                     *       "spaceId": "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
-                     *       "url": "https://example.com/webhooks/appstrate",
-                     *       "events": [
-                     *         "run.success",
-                     *         "run.failed"
-                     *       ],
-                     *       "packageId": null,
-                     *       "payloadMode": "full",
-                     *       "enabled": true,
-                     *       "createdAt": "2026-01-15T10:30:00Z",
-                     *       "updatedAt": "2026-01-20T14:00:00Z"
-                     *     }
-                     */
-                    "application/json": components["schemas"]["WebhookObject"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -23010,6 +22980,74 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    updateWebhook: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** Format: uri */
+                    url?: string;
+                    events?: ("run.started" | "run.success" | "run.failed" | "run.timeout" | "run.cancelled" | "run.connection_missing")[];
+                    packageId?: string | null;
+                    /** @enum {string} */
+                    payloadMode?: "full" | "summary";
+                    enabled?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Webhook updated */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "id": "wh_cm1abc123",
+                     *       "object": "webhook",
+                     *       "level": "space",
+                     *       "spaceId": "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
+                     *       "url": "https://example.com/webhooks/appstrate",
+                     *       "events": [
+                     *         "run.success",
+                     *         "run.failed"
+                     *       ],
+                     *       "packageId": null,
+                     *       "payloadMode": "full",
+                     *       "enabled": true,
+                     *       "createdAt": "2026-01-15T10:30:00Z",
+                     *       "updatedAt": "2026-01-20T14:00:00Z"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["WebhookObject"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["PreconditionFailed"];
             429: components["responses"]["RateLimited"];
         };
     };

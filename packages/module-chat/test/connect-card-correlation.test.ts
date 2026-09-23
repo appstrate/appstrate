@@ -36,7 +36,7 @@ describe("claimResume", () => {
     expect(claimResume({ packageId: "@test/claim-d", toolCallId: "call-d" }, t0)).toBe(true);
   });
 
-  // Issue #1207: a run-kickoff 412 lists every integration still to connect and
+  // Issue #1207: a run-kickoff 409 lists every integration still to connect and
   // the chat renders one card per offer. They are DIFFERENT packages, so only
   // the tool-call axis stops the second completion from appending a second
   // resume — i.e. from opening a second concurrent turn.

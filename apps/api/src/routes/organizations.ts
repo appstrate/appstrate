@@ -53,6 +53,7 @@ import { createDefaultSpace } from "../services/spaces.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { logger } from "../lib/logger.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
+import { assertIfMatch, setEtag } from "../lib/conditional-request.ts";
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 import { ORG_ROLES } from "@appstrate/core/permissions";
 
@@ -214,7 +215,18 @@ router.post("/", async (c) => {
 
 // --- Routes below require org context (orgId from params, verified via membership) ---
 
-// OrgDetail serializer — shared by GET /:orgId and PUT /:orgId so the update
+// The org row's `updatedAt` versions both its detail and its settings.
+async function assertOrgIfMatch(c: Context<AppEnv>, orgId: string) {
+  const org = await getOrgById(orgId);
+  if (org) assertIfMatch(c, org.updatedAt);
+}
+
+async function stampOrgEtag(c: Context<AppEnv>, orgId: string) {
+  const org = await getOrgById(orgId);
+  if (org) setEtag(c, org.updatedAt);
+}
+
+// OrgDetail serializer — shared by GET /:orgId and PATCH /:orgId so the update
 // response is the exact same resource shape as the detail read.
 async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
   const permissions = c.get("permissions");
@@ -226,6 +238,7 @@ async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
   if (!org) {
     throw notFound("Organization not found");
   }
+  setEtag(c, org.updatedAt);
 
   // Storage consumption vs. the org's file storage limit. `used_bytes` is
   // the transactionally-maintained `organizations.files_bytes_used` counter.
@@ -279,9 +292,10 @@ router.get("/:orgId", async (c) => {
   return c.json(await buildOrgDetail(c, orgId));
 });
 
-// PUT /api/orgs/:orgId — update name/slug (owner only — org routes skip org context)
-router.put("/:orgId", requirePermission("org", "update"), async (c) => {
+// PATCH /api/orgs/:orgId — update name/slug (owner only — org routes skip org context)
+router.patch("/:orgId", requirePermission("org", "update"), async (c) => {
   const orgId = c.req.param("orgId")!;
+  await assertOrgIfMatch(c, orgId);
   const data = await readJsonBody(c, updateOrgSchema);
 
   if (data.slug) {
@@ -375,7 +389,7 @@ router.delete("/:orgId", requirePermission("org", "delete"), async (c) => {
 //
 // One pending invitation per (org, email): a duplicate is a 409
 // `invitation_already_pending` carrying `invitation_id`; the caller edits that
-// one (PUT /invitations/:id) instead — the space Members page relies on this.
+// one (PATCH /invitations/:id) instead — the space Members page relies on this.
 router.post("/:orgId/members", requirePermission("members", "invite"), async (c) => {
   const user = c.get("user");
   const orgId = c.req.param("orgId")!;
@@ -459,8 +473,8 @@ router.delete(
   },
 );
 
-// PUT /api/orgs/:orgId/invitations/:invitationId — change invitation role (admin+)
-router.put(
+// PATCH /api/orgs/:orgId/invitations/:invitationId — merge-update an invitation (admin+)
+router.patch(
   "/:orgId/invitations/:invitationId",
   requirePermission("members", "change-role"),
   async (c) => {
@@ -624,12 +638,14 @@ router.get("/:orgId/settings", async (c) => {
   if (!c.get("orgRole")) throw forbidden("Not a member of this organization");
 
   const settings = await getOrgSettings(orgId);
+  await stampOrgEtag(c, orgId);
   return c.json(settings);
 });
 
-// PUT /api/orgs/:orgId/settings — update org settings (owner/admin)
-router.put("/:orgId/settings", requirePermission("org", "settings"), async (c) => {
+// PATCH /api/orgs/:orgId/settings — update org settings (owner/admin)
+router.patch("/:orgId/settings", requirePermission("org", "settings"), async (c) => {
   const orgId = c.req.param("orgId")!;
+  await assertOrgIfMatch(c, orgId);
   const data = await readJsonBody(c, orgSettingsPatchSchema);
 
   // Write-side counterpart of the read-side check in `middleware/api-version.ts`.
@@ -642,12 +658,12 @@ router.put("/:orgId/settings", requirePermission("org", "settings"), async (c) =
   //   - **Session (cookie) callers can always recover.** `skipOrgContext()`
   //     (`lib/auth-pipeline.ts`) returns true for `/api/orgs/`, so
   //     `requireOrgContext` never runs on this route and `c.get("orgId")` is
-  //     unset — the middleware's org-pin branch is skipped entirely and the PUT
+  //     unset — the middleware's org-pin branch is skipped entirely and the PATCH
   //     answers 200. Reproduced against an org pinned to "2020-01-01" directly
-  //     in the DB: `GET /api/runs` → 400, `PUT /api/orgs/:orgId/settings` → 200.
+  //     in the DB: `GET /api/runs` → 400, `PATCH /api/orgs/:orgId/settings` → 200.
   //   - **API-key callers cannot.** `applyAuthPipeline` sets `orgId` inline from
   //     the key, before any path-based skip, so the pin branch runs on *every*
-  //     route including this one. Same reproduction: `PUT` → 400. A headless
+  //     route including this one. Same reproduction: `PATCH` → 400. A headless
   //     operator with no dashboard session is locked out with no self-serve
   //     remedy.
   //
@@ -672,6 +688,7 @@ router.put("/:orgId/settings", requirePermission("org", "settings"), async (c) =
     after: data as unknown as Record<string, unknown>,
     orgIdOverride: orgId,
   });
+  await stampOrgEtag(c, orgId);
   return c.json(settings);
 });
 

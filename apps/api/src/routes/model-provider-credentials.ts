@@ -46,6 +46,7 @@ import {
 } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { recordAuditFromContext } from "../services/audit.ts";
+import { assertIfMatch, setEtag } from "../lib/conditional-request.ts";
 
 export const createSchema = z
   .object({
@@ -504,13 +505,15 @@ export function createModelProviderCredentialsRouter() {
     },
   );
 
-  // PUT /api/model-provider-credentials/:id
-  router.put("/:id", requirePermission("model-provider-credentials", "write"), async (c) => {
+  // PATCH /api/model-provider-credentials/:id
+  router.patch("/:id", requirePermission("model-provider-credentials", "write"), async (c) => {
     const orgId = c.get("orgId");
     const id = c.req.param("id")!;
     if (isSystemModelProviderCredential(id)) {
       throw systemEntityForbidden("model provider credential", id);
     }
+    const before = await getOrgModelProviderCredential(orgId, id);
+    if (before) assertIfMatch(c, before.updatedAt);
     const data = await readJsonBody(c, updateSchema);
     try {
       await updateModelProviderCredential(orgId, id, data);
@@ -526,6 +529,7 @@ export function createModelProviderCredentialsRouter() {
       // key is NEVER echoed back (#657).
       const credential = await getOrgModelProviderCredential(orgId, id);
       if (!credential) throw notFound("Model provider credential not found");
+      setEtag(c, credential.updatedAt);
       return c.json(credential);
     } catch (err) {
       if (err instanceof ApiError) throw err;

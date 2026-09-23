@@ -130,7 +130,7 @@ export function OAuthConnectCard({
   packageId?: string;
   /**
    * Tool call this card was rendered from. Several cards share one when a
-   * run-kickoff 412 lists several integrations to connect; it is the second
+   * run-kickoff 409 lists several integrations to connect; it is the second
    * axis of the resume claim (see {@link claimResume}).
    */
   toolCallId?: string;

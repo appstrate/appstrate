@@ -8,6 +8,7 @@
  * then attempts cross-org access from org B.
  */
 
+import { ifMatch } from "../helpers/etag.ts";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../helpers/app.ts";
 import { truncateAll } from "../helpers/db.ts";
@@ -76,11 +77,13 @@ describe("Multi-tenancy isolation", () => {
       const pkg = await seedAgent({ id: "@org-a/secret-agent", orgId: orgA.orgId });
 
       const res = await app.request("/api/packages/agents/@org-a/secret-agent", {
-        method: "PUT",
-        headers: authHeaders(orgB, { "Content-Type": "application/json" }),
+        method: "PATCH",
+        headers: authHeaders(orgB, {
+          "Content-Type": "application/json",
+          ...ifMatch(pkg.lockVersion),
+        }),
         body: JSON.stringify({
           content: "Hijacked prompt",
-          lock_version: pkg.lockVersion,
         }),
       });
 

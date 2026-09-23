@@ -347,10 +347,6 @@ export const chatPaths = {
           description:
             "No enabled model configured, or invalid body — including a message that is not a valid AI SDK UIMessage, or a last message whose JSON exceeds 256 KB.",
         },
-        "401": {
-          description:
-            'The selected model\'s subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json with `code: "needs_reconnection"`.',
-        },
         "402": {
           description:
             "Usage refused by the `beforeUsage` admission hook; only emitted when a module provides it. RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
@@ -359,9 +355,13 @@ export const chatPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. RFC 9457 problem+json.",
+            "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. Or `needs_reconnection` — the selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json.",
         },
-        "429": { description: "Rate limited (20/min per caller)" },
+        "429": {
+          $ref: "#/components/responses/RateLimited",
+          description:
+            "Rate limited (20/min per caller), or `chat_capacity` — the instance is at its concurrent chat-turn cap. Both carry `Retry-After`.",
+        },
       },
     },
   },

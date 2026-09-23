@@ -40,6 +40,7 @@ import { assertSpaceId } from "../../lib/ids.ts";
 import { validateSpaceInOrg } from "../../lib/space-lookup.ts";
 import { parseListPagination } from "../../lib/list-query.ts";
 import { setCursorLinkHeader } from "../../lib/pagination-link.ts";
+import { assertIfMatch, setEtag } from "../../lib/conditional-request.ts";
 
 /**
  * Assert that a space belongs to the given org.
@@ -314,13 +315,16 @@ export function createWebhooksRouter() {
   // `rowAuthority()` on every by-id route: `loadWebhookForAction` enters the
   // ROW's space and judges there, so no mounted guard can state the requirement.
   router.get("/api/webhooks/:id", rateLimit(300), rowAuthority(), async (c) => {
-    return c.json(await loadWebhookForAction(c, "read"));
+    const webhook = await loadWebhookForAction(c, "read");
+    setEtag(c, webhook.updatedAt);
+    return c.json(webhook);
   });
 
-  // PUT /api/webhooks/:id — update webhook (url, events, filters — not secret/level)
-  router.put("/api/webhooks/:id", rateLimit(10), rowAuthority(), async (c) => {
+  // PATCH /api/webhooks/:id — update webhook (url, events, filters — not secret/level)
+  router.patch("/api/webhooks/:id", rateLimit(10), rowAuthority(), async (c) => {
     // Permission check must still precede reading the body.
-    await loadWebhookForAction(c, "write");
+    const existing = await loadWebhookForAction(c, "write");
+    assertIfMatch(c, existing.updatedAt);
     const data = await readJsonBody(c, updateWebhookSchema);
 
     const result = await updateWebhook(webhookScope(c), c.req.param("id")!, data);
@@ -330,6 +334,7 @@ export function createWebhooksRouter() {
       resourceId: c.req.param("id")!,
       after: data as unknown as Record<string, unknown>,
     });
+    setEtag(c, result.updatedAt);
     return c.json(result);
   });
 

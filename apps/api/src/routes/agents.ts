@@ -354,7 +354,7 @@ export function createAgentsRouter() {
   // connection readiness for the agent: run-blocking CONNECTION verdict + the
   // per-integration management DTO.
   //
-  // Same resolver, same pinned manifests as the run-kickoff 412 — but not the
+  // Same resolver, same pinned manifests as the run-kickoff 409 — but not the
   // whole kickoff gate: readiness also refuses an integration that is not
   // active in the space and excludes those ids from the resolver
   // (`skipIntegrationIds`). This endpoint runs no activation gate, so such
@@ -432,8 +432,8 @@ export function createAgentsRouter() {
     return c.json({ modelId, generation: generationConfig });
   });
 
-  // PUT /api/agents/:scope/:name/model — set agent model override (admin-only)
-  router.put(
+  // PATCH /api/agents/:scope/:name/model — merge-update the agent model override (admin-only)
+  router.patch(
     `/${SCOPED_PACKAGE_ROUTE}/model`,
     requirePermission("agents", "configure"),
     requireAgent(),

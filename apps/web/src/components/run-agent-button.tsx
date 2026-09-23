@@ -18,7 +18,7 @@ import { ApiError } from "../api/errors";
 import type { AgentDetail } from "@appstrate/shared-types";
 
 /**
- * 412 recovery surface — lazy because it is a modal that only ever opens on a
+ * 409 recovery surface — lazy because it is a modal that only ever opens on a
  * failed run kickoff, while this button sits in the eager entry graph (agent
  * list → card → button). Its subtree reaches `IntegrationConnectionPicker` →
  * `@appstrate/core/integration` → `@afps-spec/schema`, which instantiates AJV
@@ -58,7 +58,7 @@ interface RunAgentButtonProps {
   /**
    * Render a non-blocking orange badge on the button when the agent's
    * integration connections are not ready for a run. Iso with the run-kickoff
-   * 412 / MissingConnectionsModal (same server resolver) — see
+   * 409 / MissingConnectionsModal (same server resolver) — see
    * `useAgentIntegrationsReadiness`. Does NOT disable the button: the user can
    * still click Run and recover through the modal.
    */
@@ -88,17 +88,13 @@ export function RunAgentButton({
   // the resolver. The MissingConnectionsModal still uses connectionOverrides
   // for per-run one-shot picks (cascade 2).
 
-  // Intercept 412 missing_integration_connection — surface the recovery
+  // Intercept missing_integration_connection — surface the recovery
   // modal instead of (or alongside) the generic toast. Set via the
   // per-call onError so we open the modal in response to a user action
   // (passes the react-hooks/set-state-in-effect rule) rather than mirroring
   // the mutation's error state in a useEffect.
   const onRunError = (err: unknown) => {
-    if (
-      err instanceof ApiError &&
-      err.status === 412 &&
-      err.code === "missing_integration_connection"
-    ) {
+    if (err instanceof ApiError && err.code === "missing_integration_connection") {
       const errors = Array.isArray(err.details)
         ? (err.details as MissingIntegrationFieldError[])
         : [];
@@ -234,7 +230,7 @@ export function RunAgentButton({
       )}
 
       {missingErrors !== null && (
-        // Mounted only while the 412 modal is open — that mount is what
+        // Mounted only while the 409 modal is open — that mount is what
         // triggers the dynamic import. The fallback keeps the same modal
         // frame so the dialog appears immediately and only its body swaps.
         <Suspense
@@ -256,7 +252,7 @@ export function RunAgentButton({
             onRetryWithOverrides={(overrides) => {
               // Re-fire the run with the user's picks. Keep the modal open
               // until the response lands so the picker stays visible if the
-              // server returns a fresh 412 (e.g. picks disappeared mid-flight).
+              // server returns a fresh 409 (e.g. picks disappeared mid-flight).
               runAgent.mutate(
                 { version: runVersion, connectionOverrides: overrides },
                 {

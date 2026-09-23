@@ -84,6 +84,7 @@ import {
 import type { PackageType } from "@appstrate/core/validation";
 import type { SpaceSweepResult } from "@appstrate/shared-types";
 import { recordAuditFromContext } from "../services/audit.ts";
+import { assertIfMatch, setEtag } from "../lib/conditional-request.ts";
 import { listSpaceRoles } from "../services/space-roles.ts";
 import { assertCanGrantSpaceRole, canGrantSpaceRole } from "../lib/space-role-policy.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
@@ -310,7 +311,7 @@ async function coarseSpacePackageGate(
  *      so the route is not an enumeration oracle.
  *   2. **Catalog lookup**, through `assertCatalogPackageAccess` — the same
  *      reachability rule the READ routes obey, for all three ops, so `POST`,
- *      `DELETE` and `PUT` cannot be told apart by their refusals. Two different
+ *      `DELETE` and `PATCH` cannot be told apart by their refusals. Two different
  *      `detail` strings here (org-visible but unreachable vs nonexistent) would
  *      be an existence oracle over the whole catalogue.
  *   3. **Exact gate** for the resolved type.
@@ -471,6 +472,7 @@ export function createSpacesRouter() {
       if (!isSpaceVisibleTo(orgRole, access.space, role)) {
         throw notFound(`Space '${spaceId}' not found in this organization`);
       }
+      setEtag(c, space.updatedAt);
       return c.json(spaceWireForCaller(c, { ...space, ...access.space }, role));
     } catch (err) {
       if (err instanceof ApiError) throw err;
@@ -493,6 +495,7 @@ export function createSpacesRouter() {
       const spaceId = c.req.param("id")!;
       const data = await readJsonBody(c, updateSpaceSchema);
       const current = c.get("space")!;
+      assertIfMatch(c, (await getSpace(orgId, spaceId)).updatedAt);
       // A stored default can become effective later. Opening also grants the
       // existing default to every implicit member, even when it is not edited.
       if (
@@ -524,6 +527,7 @@ export function createSpacesRouter() {
           resourceId: space.id,
           after: data,
         });
+        setEtag(c, space.updatedAt);
         return c.json(spaceWireForCaller(c, space, c.get("spaceRole") ?? null));
       } catch (err) {
         if (err instanceof ApiError) throw err;
@@ -882,12 +886,13 @@ export function createSpacesRouter() {
           detail: `Package '${packageId}' is not placed in this space`,
         });
       }
+      setEtag(c, row.updatedAt);
       return c.json({ object: "space_package", ...row });
     },
   );
 
-  // PUT /api/spaces/:spaceId/packages/:packageId — update config
-  router.put(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, rowAuthority(), async (c) => {
+  // PATCH /api/spaces/:spaceId/packages/:packageId — merge-update config
+  router.patch(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, rowAuthority(), async (c) => {
     const spaceId = c.req.param("spaceId")!;
     const orgId = c.get("orgId");
     const scope = { orgId, spaceId: spaceId };
@@ -908,6 +913,7 @@ export function createSpacesRouter() {
     const data = await readJsonBody(c, updatePackageSchema);
 
     const placement = await getSpacePackage(scope, packageId);
+    if (placement) assertIfMatch(c, placement.updatedAt);
     let generationConfig = data.generationConfig;
     if (placement && (data.modelId !== undefined || generationConfig !== undefined)) {
       const effectiveModelId = data.modelId !== undefined ? data.modelId : placement.modelId;
@@ -952,6 +958,7 @@ export function createSpacesRouter() {
       { requirePlacement: true },
     );
     const updated = await getSpacePackage(scope, packageId);
+    if (updated) setEtag(c, updated.updatedAt);
     return c.json({ object: "space_package", ...updated });
   });
 

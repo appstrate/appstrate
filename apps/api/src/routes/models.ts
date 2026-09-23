@@ -46,6 +46,7 @@ import {
 } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { recordAuditFromContext } from "../services/audit.ts";
+import { assertIfMatch, setEtag } from "../lib/conditional-request.ts";
 
 export const createModelSchema = z
   .object({
@@ -155,7 +156,7 @@ export const testInlineSchema = z
 
 /**
  * Map an alias-invariant violation to its 400 — shared by the create and
- * update handlers so PUT cannot accept a state POST rejects (issue #727).
+ * update handlers so PATCH cannot accept a state POST rejects (issue #727).
  */
 function throwOnAliasViolation(violation: AliasInvariantViolation | null, apiShape: string): void {
   // 1. Require an explicit label. The derive-from-catalog fallback (POST) —
@@ -634,8 +635,8 @@ export function createModelsRouter() {
     }
   });
 
-  // PUT /api/models/:id — update a custom model
-  router.put("/:id", requirePermission("models", "write"), async (c) => {
+  // PATCH /api/models/:id — update a custom model
+  router.patch("/:id", requirePermission("models", "write"), async (c) => {
     const orgId = c.get("orgId");
     const modelId = c.req.param("id")!;
     const data = await readJsonBody(c, updateModelSchema);
@@ -643,6 +644,8 @@ export function createModelsRouter() {
     if (isSystemModel(modelId)) {
       throw systemEntityForbidden("model", modelId);
     }
+    const before = await getOrgModel(orgId, modelId);
+    if (before) assertIfMatch(c, before.updatedAt);
     // Same FK constraint applies to updates that re-point a model to a
     // different credential. Catch the same case here.
     if (data.credentialId && getSystemModelProviderCredentials().has(data.credentialId)) {
@@ -670,7 +673,7 @@ export function createModelsRouter() {
     }
 
     // Model-alias guards on the EFFECTIVE post-update state (issue #727) —
-    // without this, PUT is a bypass of every invariant POST enforces: flip
+    // without this, PATCH is a bypass of every invariant POST enforces: flip
     // `aliased` on an oauth-subscription or url-model row, or re-point an
     // aliased row to such a credential, and the row becomes a state creation
     // rejects (runs then fail-close late at launch; chat would diverge).
@@ -693,7 +696,7 @@ export function createModelsRouter() {
           // A false→true flip must carry a fresh explicit label: the row's
           // existing label may be catalog-derived and name the backing. An
           // already-aliased row's label is explicit by construction (POST
-          // enforced it), so it stays valid when this PUT omits `label`.
+          // enforced it), so it stays valid when this PATCH omits `label`.
           label: data.label ?? (current.aliased ? current.label : undefined),
           apiShape: creds.apiShape,
           authMode: isOAuthModelProvider(creds.providerId) ? "oauth2" : "api_key",
@@ -747,7 +750,7 @@ export function createModelsRouter() {
       // The asymmetry with POST is deliberate, not an oversight. A create
       // response echoes a binding the operator just sent in the request body,
       // so it discloses nothing the caller did not already hold. An update
-      // does not: `PUT {"enabled":true}` names no binding field, yet the raw
+      // does not: `PATCH {"enabled":true}` names no binding field, yet the raw
       // row answers with `apiShape`, `providerId`, `baseUrl`, `modelId`,
       // `contextWindow` and `cost`. `isSystemModel` above does not cover this
       // — it rejects env-declared models, while an alias is an ordinary DB row
@@ -755,6 +758,7 @@ export function createModelsRouter() {
       // every backing an org admin (or a `models:write` API key) can name.
       const model = await getOrgModel(orgId, modelId);
       if (!model) throw notFound("Model not found");
+      setEtag(c, model.updatedAt);
       return c.json(projectAliasedModel(model));
     } catch (err) {
       if (err instanceof ApiError) throw err;

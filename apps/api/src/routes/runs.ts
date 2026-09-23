@@ -355,7 +355,7 @@ export function createRunsRouter() {
           spaceId: c.get("spaceId"),
           orgId,
           actor,
-          // Opt-in only: absent header ⇒ null ⇒ a 412 with no connect link.
+          // Opt-in only: absent header ⇒ null ⇒ a 409 with no connect link.
           connectOffers: connectOfferPolicyFromRequest(c),
           connectionOverrides: connectionOverrides ?? null,
           // Same overrides handed to `prepareAndExecuteRun` below, so the

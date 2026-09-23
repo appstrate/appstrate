@@ -224,10 +224,11 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
   // anything again, nobody re-pins: the next run the guest starts carries it.
   const draft = await apiClient.get(`/packages/agents/${scope}/${name}`);
   expect(draft.status(), await draft.text()).toBe(200);
-  const fixed = await apiClient.put(`/packages/agents/${scope}/${name}`, {
-    lock_version: ((await draft.json()) as { lock_version: number }).lock_version,
-    content: "Fixed prompt.",
-  });
+  const fixed = await apiClient.patch(
+    `/packages/agents/${scope}/${name}`,
+    { content: "Fixed prompt." },
+    { "If-Match": draft.headers()["etag"]! },
+  );
   expect(fixed.status(), await fixed.text()).toBe(200);
   const republished = await apiClient.post(`/packages/agents/${scope}/${name}/versions`, {
     version: "0.2.0",

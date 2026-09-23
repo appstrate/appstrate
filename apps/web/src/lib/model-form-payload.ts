@@ -55,7 +55,7 @@ interface ModelFormCredentialBinding {
 }
 
 /**
- * One model, ready to submit. The four overrides widen to `null`: `PUT` reads
+ * One model, ready to submit. The four overrides widen to `null`: `PATCH` reads
  * `null` as "drop the stored override", `POST` refuses it and goes through
  * {@link toCreateModelBody}.
  */

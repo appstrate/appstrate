@@ -25,7 +25,7 @@ import { resolveRunTimeout } from "../services/run-limits.ts";
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { withoutLockedFields } from "@appstrate/core/input-resolution";
 import { parseScopedName } from "@appstrate/core/naming";
-import { getItemId } from "./packages.ts";
+import { getItemId, sendPackageDetail, type PackageDetail } from "./packages.ts";
 import { notFound } from "../lib/errors.ts";
 import { getSpaceScope } from "../lib/scope.ts";
 import {
@@ -142,7 +142,7 @@ async function buildDependencyGroups(
 export async function buildAgentDetailDto(
   c: Context<AppEnv>,
   opts: { itemId?: string; requireAccess?: boolean; version?: string } = {},
-): Promise<Record<string, unknown> | null> {
+): Promise<PackageDetail | null> {
   const scope = getSpaceScope(c);
   const { orgId, spaceId } = scope;
   const itemId = opts.itemId ?? getItemId(c);
@@ -233,7 +233,8 @@ export async function buildAgentDetailDto(
     latestVersionDate,
   );
 
-  return {
+  const authoring = agent.source !== "system" && rawItem !== null && !summaryOnly;
+  const body = {
     id: agent.id,
     display_name: m.display_name,
     description: m.description,
@@ -309,21 +310,21 @@ export async function buildAgentDetailDto(
           has_unarchived_changes: hasUnarchivedChanges,
           forked_from: rawItem?.forked_from ?? null,
         }),
-    ...(agent.source !== "system" && rawItem && !summaryOnly
+    ...(authoring
       ? {
           manifest: m,
           updatedAt: rawItem.updatedAt,
-          lock_version: rawItem.lock_version,
           prompt: effectivePrompt,
         }
       : {}),
   };
+  return { body, lockVersion: authoring ? rawItem.lockVersion : null };
 }
 
 export async function agentDetailHandler(c: Context<AppEnv>) {
-  const dto = await buildAgentDetailDto(c, { version: c.req.query("version") });
-  if (!dto) {
+  const detail = await buildAgentDetailDto(c, { version: c.req.query("version") });
+  if (!detail) {
     throw notFound(`Agent '${getItemId(c)}' not found`);
   }
-  return c.json(dto);
+  return sendPackageDetail(c, detail);
 }

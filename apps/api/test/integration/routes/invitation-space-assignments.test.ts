@@ -151,7 +151,7 @@ describe("Invitation space assignments", () => {
     });
   });
 
-  describe("PUT /api/orgs/:orgId/invitations/:id", () => {
+  describe("PATCH /api/orgs/:orgId/invitations/:id", () => {
     it("replaces the stored assignments", async () => {
       const first = await seedSpace({ orgId: ctx.orgId, name: "First" });
       const second = await seedSpace({ orgId: ctx.orgId, name: "Second" });
@@ -163,7 +163,7 @@ describe("Invitation space assignments", () => {
       });
 
       const res = await app.request(`/api/orgs/${ctx.orgId}/invitations/${inv.id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...orgOnlyHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           role: "guest",
@@ -190,7 +190,7 @@ describe("Invitation space assignments", () => {
       // so the stored grants have to be gone before the promotion lands. The
       // body names only the role, so the check has to read the STORED list.
       const res = await app.request(`/api/orgs/${ctx.orgId}/invitations/${inv.id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...orgOnlyHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ role: "admin" }),
       });

@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+import {
+  STD_RESPONSE_HEADERS,
+  REQUEST_ID_ONLY_HEADERS,
+  ETAG_RESPONSE_HEADERS,
+} from "../headers.ts";
 
 export const proxiesPaths = {
   "/api/proxies": {
@@ -172,13 +176,14 @@ export const proxiesPaths = {
     },
   },
   "/api/proxies/{id}": {
-    put: {
+    patch: {
       operationId: "updateProxy",
       tags: ["Proxies"],
       summary: "Update a custom proxy",
       description:
-        "Update a custom proxy (label, url, enabled). Built-in proxies cannot be modified.",
+        "Update a custom proxy (label, url, enabled). Built-in proxies cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
       parameters: [
+        { $ref: "#/components/parameters/IfMatch" },
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
@@ -201,7 +206,7 @@ export const proxiesPaths = {
       responses: {
         "200": {
           description: "Proxy updated",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -224,6 +229,7 @@ export const proxiesPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
+        "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },

@@ -85,7 +85,7 @@ export function OrgInvitationForm({
     onError,
   });
 
-  const update = $api.useMutation("put", "/api/orgs/{orgId}/invitations/{invitationId}", {
+  const update = $api.useMutation("patch", "/api/orgs/{orgId}/invitations/{invitationId}", {
     onSuccess: () => {
       toast.success(t("orgSettings.inviteUpdated"));
       complete();

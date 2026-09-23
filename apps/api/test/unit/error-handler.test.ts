@@ -242,8 +242,36 @@ describe("errorHandler middleware", () => {
 
     const res = await app.request("/test");
     expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("30");
     const body = (await res.json()) as any;
     expect(body.retryAfter).toBe(30);
+  });
+
+  it("emits Retry-After from retryAfter on any status, not only 429", async () => {
+    const app = createApp();
+    app.get("/test", () => {
+      throw new ApiError({
+        status: 503,
+        code: "shutting_down",
+        title: "Service Unavailable",
+        detail: "Server is shutting down",
+        retryAfter: 5,
+      });
+    });
+
+    const res = await app.request("/test");
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("5");
+  });
+
+  it("emits no Retry-After when retryAfter is unset", async () => {
+    const app = createApp();
+    app.get("/test", () => {
+      throw conflict("some_conflict", "Conflict.");
+    });
+
+    const res = await app.request("/test");
+    expect(res.headers.get("Retry-After")).toBeNull();
   });
 
   it("merges custom headers from ApiError into response", async () => {

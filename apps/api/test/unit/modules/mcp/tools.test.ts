@@ -545,6 +545,39 @@ describe("invoke_operation", () => {
     expect(pathname).not.toContain("%40");
   });
 
+  it("round-trips the ETag: a result carries `etag`, `if_match` goes out as If-Match", async () => {
+    const { byName, calls } = makeTools(
+      ["mcp:invoke"],
+      false,
+      undefined,
+      () =>
+        new Response(JSON.stringify({ id: "@acme/a" }), {
+          status: 200,
+          headers: { "content-type": "application/json", etag: '"5"' },
+        }),
+    );
+    const invoke = byName.get("invoke_operation")!;
+    const path_params = { scope: "@acme", name: "a" };
+
+    const read = parseResult(
+      await invoke.handler({ operation_id: "getAgentPackage", path_params }, noExtra),
+    );
+    expect(read.etag).toBe('"5"');
+    expect(calls[0]!.headers.get("If-Match")).toBeNull();
+
+    await invoke.handler(
+      {
+        operation_id: "updateAgent",
+        path_params,
+        if_match: read.etag,
+        body: { content: "edited" },
+      },
+      noExtra,
+    );
+    expect(calls[1]!.method).toBe("PATCH");
+    expect(calls[1]!.headers.get("If-Match")).toBe('"5"');
+  });
+
   it("auto-maps a declared header param supplied in query onto a real header", async () => {
     const op = firstOp((o) => o.headerParams.includes("X-Integration-Id"));
     const values: Record<string, string> = {};

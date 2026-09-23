@@ -2,7 +2,7 @@
 
 /**
  * The authoring loop's view of a package: where it lives and who may write it
- * (`GET …/home`), what its draft's optimistic lock is, and how a local working
+ * (`GET …/home`), what its draft's version (`ETag`) is, and how a local working
  * folder compares to one of its definitions. Definitions themselves are read
  * through `./package-definition.ts`, the path `packages sync` reads them through.
  */
@@ -20,7 +20,7 @@ import {
 import { decodePackageFileText } from "@appstrate/core/package-file-operations";
 import { packageTypeEnum, type PackageType } from "@appstrate/core/validation";
 import { isSafeArchivePath } from "@appstrate/core/zip";
-import { apiFetch, ApiError, problemFields } from "./api.ts";
+import { apiFetch, apiFetchWithHeaders, ApiError, problemFields } from "./api.ts";
 import { getDataDir } from "./config.ts";
 import { withFileLock } from "./file-lock.ts";
 import { SIGNATURE_RECORD } from "./package-definition.ts";
@@ -83,11 +83,12 @@ export function readSpaceOf(home: PackageHome, pinnedSpaceId?: string): string |
 /** What the loop reads from a per-type detail or update response. */
 export type DraftDetail = Pick<
   OrgPackageItemDetail | AgentDetail,
-  "lock_version" | "manifest" | "has_unarchived_changes"
+  "manifest" | "has_unarchived_changes"
 >;
 
 export interface DraftState {
-  lockVersion: number;
+  /** The draft version, opaque: the response's `ETag`, sent back as `If-Match`. */
+  etag: string;
   manifest: Record<string, unknown>;
   /**
    * The server's `has_unarchived_changes`: whether the draft moved since the
@@ -96,29 +97,26 @@ export interface DraftState {
   hasUnpublishedChanges: boolean;
 }
 
-/** The draft's lock and validated manifest, read in the home space. Writers only. */
+/** The draft's version and validated manifest, read in the home space. Writers only. */
 export async function readDraftState(profileName: string, home: PackageHome): Promise<DraftState> {
-  const detail = await apiFetch<DraftDetail>(
+  const { body, headers } = await apiFetchWithHeaders<DraftDetail>(
     profileName,
     `${packageRoute(home.type, home.id)}?version=draft`,
     home.home_space_id ? { spaceId: home.home_space_id } : {},
   );
-  return draftStateOf(home.id, detail);
+  return draftStateOf(home.id, body, headers);
 }
 
 /** A detail or update response, narrowed to what the loop needs from it. */
-export function draftStateOf(packageId: string, detail: DraftDetail): DraftState {
-  if (
-    typeof detail.lock_version !== "number" ||
-    !detail.manifest ||
-    typeof detail.has_unarchived_changes !== "boolean"
-  ) {
+export function draftStateOf(packageId: string, detail: DraftDetail, headers: Headers): DraftState {
+  const etag = headers.get("etag");
+  if (!etag || !detail.manifest || typeof detail.has_unarchived_changes !== "boolean") {
     throw new Error(
-      `${packageId}: the draft detail carries no lock_version, manifest or has_unarchived_changes.`,
+      `${packageId}: the draft response carries no ETag, manifest or has_unarchived_changes.`,
     );
   }
   return {
-    lockVersion: detail.lock_version,
+    etag,
     manifest: detail.manifest,
     hasUnpublishedChanges: detail.has_unarchived_changes,
   };
@@ -309,7 +307,7 @@ export function manifestFileText(manifest: Record<string, unknown>): string {
   return `${JSON.stringify(manifest, null, 2)}\n`;
 }
 
-/** One entry of the draft `PUT`'s `operations`. */
+/** One entry of the draft `PATCH`'s `operations`. */
 type FileOperation =
   | { op: "write"; path: string; text: string }
   | { op: "write"; path: string; bytes_base64: string }
@@ -347,8 +345,8 @@ export function toOperations(changes: FileChange[], local: PackageFiles): FileOp
 
 /**
  * `<data dir>/packages/<profile>-locks.json`: working folder (its real path) →
- * the package it holds and the draft lock that folder last read from a pull or
- * wrote with a push. Keyed by FOLDER, not by package: two folders of one
+ * the package it holds and the draft `ETag` that folder last read from a pull or
+ * wrote with a push — sent back as `If-Match` on its next push. Keyed by FOLDER, not by package: two folders of one
  * package are two authors, and the second push must not ride the lock the
  * first one moved. Only a DRAFT read records a lock: a published version says
  * nothing about the draft. Every write is a read-modify-write under an flock
@@ -362,7 +360,7 @@ function locksMutexPath(profileName: string): string {
   return join(getDataDir(), "packages", `${profileName}-locks.lock`);
 }
 
-type LockEntry = { packageId: string; lock: number };
+type LockEntry = { packageId: string; etag: string };
 type LockTable = Record<string, LockEntry>;
 
 /** The key a folder is recorded under: its real path, so a symlinked or relative spelling finds it. */
@@ -401,11 +399,18 @@ async function readLockTable(profileName: string): Promise<LockTable> {
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw invalid();
   const table: LockTable = {};
   for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-    const entry = value as Partial<LockEntry> | null;
-    if (!entry || typeof entry.packageId !== "string" || typeof entry.lock !== "number") {
+    const entry = value as (Partial<LockEntry> & { lock?: unknown }) | null;
+    // A numeric `lock` is what a CLI before ETag-versioned drafts recorded. It
+    // cannot be turned into an ETag: the folder must read its draft again.
+    if (entry && typeof entry.lock === "number") {
+      throw new Error(
+        `${path} holds numeric draft locks written by an older appstrate CLI (first: ${key}); drafts are now versioned by ETag and those locks cannot be carried over. Delete ${path}, then for each working folder either re-pull it (appstrate packages pull <package> <folder> --force — discards its unpushed edits) or push it over the draft (appstrate packages push <folder> --force).`,
+      );
+    }
+    if (!entry || typeof entry.packageId !== "string" || typeof entry.etag !== "string") {
       throw invalid();
     }
-    table[key] = { packageId: entry.packageId, lock: entry.lock };
+    table[key] = { packageId: entry.packageId, etag: entry.etag };
   }
   return table;
 }
@@ -428,25 +433,25 @@ async function updateLockTable(
   );
 }
 
-/** The lock `dir` last saw of `packageId`'s draft, or `undefined` when it never read that draft. */
+/** The draft `ETag` `dir` last saw of `packageId`, or `undefined` when it never read that draft. */
 export async function readLock(
   profileName: string,
   dir: string,
   packageId: string,
-): Promise<number | undefined> {
+): Promise<string | undefined> {
   const entry = (await readLockTable(profileName))[await folderKey(dir)];
-  return entry?.packageId === packageId ? entry.lock : undefined;
+  return entry?.packageId === packageId ? entry.etag : undefined;
 }
 
 export async function recordLock(
   profileName: string,
   dir: string,
   packageId: string,
-  lock: number,
+  etag: string,
 ): Promise<void> {
   const key = await folderKey(dir);
   await updateLockTable(profileName, (table) => {
-    table[key] = { packageId, lock };
+    table[key] = { packageId, etag };
   });
 }
 
@@ -468,15 +473,15 @@ export async function forgetLock(profileName: string, dir: string): Promise<void
 export async function advanceLocks(
   profileName: string,
   packageId: string,
-  from: number,
-  to: number,
+  from: string,
+  to: string,
   carry: (dir: string) => Promise<boolean>,
 ): Promise<void> {
   await updateLockTable(profileName, async (table) => {
     for (const [dir, entry] of Object.entries(table)) {
-      if (entry.packageId !== packageId || entry.lock !== from) continue;
+      if (entry.packageId !== packageId || entry.etag !== from) continue;
       if (!(await carry(dir))) continue;
-      table[dir] = { packageId, lock: to };
+      table[dir] = { packageId, etag: to };
     }
   });
 }

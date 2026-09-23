@@ -66,13 +66,14 @@ export interface ConnectOffer {
   connect_url: string;
   /** Porte B (the headless OAuth2 start) pairs `auth_url` with a correlation `state`. */
   state?: string;
-  expires_at?: number;
+  /** RFC 3339. */
+  expiresAt?: string;
   /**
-   * Integration the link connects (`@scope/name`). A run-kickoff 412 item
+   * Integration the link connects (`@scope/name`). A run-kickoff 409 item
    * (#1207) pairs it with `connect_url`; the card uses it for the integration's
    * icon and display name, and to claim the resume append.
    */
-  package_id?: string;
+  packageId?: string;
 }
 
 interface SplitResult {
@@ -90,16 +91,15 @@ type OfferSink = ConnectOffer[] | null;
 
 /**
  * Optional offer fields, read under their wire spelling only — same reason as
- * {@link CONNECT_URL_KEYS}. `expires_at` is worth naming: carve-out 4b of
- * `docs/CASING_CONVENTIONS.md` keeps `expiresAt` camelCase even on the wire,
- * but this endpoint emits `expires_at`, as its OpenAPI response schema
- * requires; a reader follows the endpoint, not the carve-out.
+ * {@link CONNECT_URL_KEYS}. `expiresAt` and `packageId` are the universal
+ * DB-convention spellings (carve-out 4b of `docs/CASING_CONVENTIONS.md`), so
+ * they sit camelCase beside the snake_case `connect_url`.
  */
 function pickOfferFields(obj: Record<string, unknown>): Omit<ConnectOffer, "connect_url"> {
   return {
     ...(typeof obj.state === "string" ? { state: obj.state } : {}),
-    ...(typeof obj.expires_at === "number" ? { expires_at: obj.expires_at } : {}),
-    ...(typeof obj.package_id === "string" ? { package_id: obj.package_id } : {}),
+    ...(typeof obj.expiresAt === "string" ? { expiresAt: obj.expiresAt } : {}),
+    ...(typeof obj.packageId === "string" ? { packageId: obj.packageId } : {}),
   };
 }
 

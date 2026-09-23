@@ -325,14 +325,25 @@ export function syntheticAliasClassifierMessage(status?: number): string {
  * retryable outage. A structured field cannot be mistaken for prose.
  */
 export function syntheticAliasErrorBody(swap: ModelSwap, status?: number): string {
-  return JSON.stringify({
-    type: "error",
-    error: {
-      type: "upstream_error",
-      message: syntheticAliasClassifierMessage(status),
-      model: swap.alias,
-    },
+  return llmProxyErrorBody("upstream_error", syntheticAliasClassifierMessage(status), {
+    model: swap.alias,
   });
+}
+
+/**
+ * The error envelope every refusal the sidecar's `/llm/*` proxy answers itself
+ * carries. The sidecar does not know a non-aliased run's API dialect (only its
+ * base URL), so one body serves them all: Anthropic's SDK keys on
+ * `type: "error"` + `error.{type,message}`, the OpenAI family (chat and
+ * responses) reads `error.{message,type}`. A flat `{ error: "…" }` parses in
+ * neither and surfaced as an opaque status.
+ */
+export function llmProxyErrorBody(
+  type: string,
+  message: string,
+  extra?: Record<string, unknown>,
+): string {
+  return JSON.stringify({ type: "error", error: { type, message, ...extra } });
 }
 
 function isErrorObject(value: unknown): boolean {

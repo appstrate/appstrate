@@ -52,6 +52,7 @@ import { collectFileRefs } from "../services/input-parser.ts";
 import { dependencyOverridesSchema } from "../lib/launch-schemas.ts";
 import { insertShadowPackage, buildShadowLoadedPackage } from "../services/inline-run.ts";
 import { createRun } from "../services/run-creation.ts";
+import { preflightGateApiError } from "../services/run-preflight-gates.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { resolveRegistryAgent } from "../services/registry-run-resolver.ts";
 import { validateInput } from "../services/schema.ts";
@@ -415,15 +416,7 @@ export function createRunsRemoteRouter() {
         ...(manifestCache ? { manifestCache } : {}),
       });
 
-      if (!result.ok) {
-        // createRun's error shape carries { code, message, status? }.
-        throw new ApiError({
-          status: result.error.status ?? 500,
-          code: result.error.code,
-          title: result.error.code.replace(/_/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase()),
-          detail: result.error.message,
-        });
-      }
+      if (!result.ok) throw preflightGateApiError(result.error);
       logger.info("runs.remote.attribution", {
         runId: result.runId,
         orgId,

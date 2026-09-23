@@ -892,12 +892,13 @@ export const integrationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["connect_url", "expires_at"],
+                required: ["connect_url", "expiresAt"],
                 properties: {
                   connect_url: { type: "string", format: "uri" },
-                  expires_at: {
-                    type: "integer",
-                    description: "Absolute expiry of the connect session (epoch ms).",
+                  expiresAt: {
+                    type: "string",
+                    format: "date-time",
+                    description: "Absolute expiry of the connect session (RFC 3339).",
                   },
                 },
               },

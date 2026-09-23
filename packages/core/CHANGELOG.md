@@ -108,6 +108,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   upper case, `-`, `__` or overlong names change; stored manifests reference
   ORIGINAL upstream names (`tools`, `hidden_tools`, `tools_policy`) and are
   unaffected.
+- **BREAKING: the connect offer on `ResolutionFieldError`**
+  (`@appstrate/core/api-errors`) renames `expires_at` (epoch ms) to
+  **`expiresAt`** (RFC 3339 string) and `package_id` to **`packageId`**, the
+  universal DB-convention spellings. `connect_url` is unchanged.
+- **Sidecar `/llm/*` refusals are provider-shaped**: a new
+  **`llmProxyErrorBody(type, message)`** (`@appstrate/core/model-swap`) builds
+  `{ type: "error", error: { type, message } }`, the envelope
+  `syntheticAliasErrorBody` already used and both the Anthropic and the OpenAI
+  SDK parse. `syntheticAliasErrorBody` now builds on it (same output).
 
 ## [11.1.0] — 2026-09-22
 

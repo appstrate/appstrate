@@ -597,8 +597,16 @@ export async function readResponse(
     }
   }
 
+  // The version to send back as `if_match` on the next write to this resource.
+  const etag = response.headers.get("etag");
   return textResult(
-    { status: response.status, ...(truncated ? { truncated: true } : {}), body, ...extra },
+    {
+      status: response.status,
+      ...(etag ? { etag } : {}),
+      ...(truncated ? { truncated: true } : {}),
+      body,
+      ...extra,
+    },
     isError,
   );
 }
@@ -620,7 +628,11 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     description:
       "Execute an Appstrate API operation. Call describe_operation first to learn its " +
       "path_params, query, and body shapes. Runs with your own credentials and permissions; " +
-      "the request is validated and authorized exactly as the equivalent REST call.",
+      "the request is validated and authorized exactly as the equivalent REST call. " +
+      "Optimistic concurrency: a result carries `etag` when the resource is versioned — " +
+      "pass it back as `if_match` on the next write to that resource. A write refused with " +
+      "412 means it changed since you read it: re-read, reapply your change, retry; 428 means " +
+      "the write requires `if_match` (package draft updates do — read the package first).",
     annotations: {
       title: "Invoke API operation",
       // Dispatches any of ~222 operations, including POST/PUT/DELETE — declare
@@ -649,6 +661,12 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
           type: "object",
           description: "JSON request body (for POST/PUT/PATCH).",
           additionalProperties: true,
+        },
+        if_match: {
+          type: "string",
+          description:
+            "The `etag` of the representation this write is based on, sent as the If-Match " +
+            "header (copy it verbatim from the result that returned it, quotes included).",
         },
         headers: {
           type: "object",
@@ -714,6 +732,8 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     const query = asRecord(args.query) ?? {};
 
     const headers = new Headers(ctx.authHeaders);
+    const ifMatch = asString(args.if_match);
+    if (ifMatch) headers.set("If-Match", ifMatch);
     const extraHeaders = asRecord(args.headers);
     if (extraHeaders) {
       for (const [name, value] of Object.entries(extraHeaders)) {
@@ -999,7 +1019,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
             (inline ? " (either kind)" : "") +
             ': `{ "@scope/integration": ' +
             '"<connection_id>" }`, exactly one connection id per integration. This is the retry ' +
-            "path for a `412 must_choose_connection` launch error — that error lists the " +
+            "path for a `409 must_choose_connection` launch error — that error lists the " +
             "ambiguous integration and its `candidate_connections`, each with a `label`, an " +
             "`account_id` and `owned_by_actor`; pick one candidate's `id` and retry the SAME " +
             "call with it here. Those fields are what tells the candidates apart, so read them " +

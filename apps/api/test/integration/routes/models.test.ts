@@ -601,7 +601,7 @@ describe("Models API", () => {
     });
   });
 
-  describe("PUT /api/models/:id", () => {
+  describe("PATCH /api/models/:id", () => {
     it("updates a model and returns the full updated resource", async () => {
       const credentialId = await createProviderKey();
 
@@ -618,7 +618,7 @@ describe("Models API", () => {
       const { id } = (await createRes.json()) as any;
 
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ label: "After", enabled: false }),
       });
@@ -647,7 +647,7 @@ describe("Models API", () => {
       const { id } = (await createRes.json()) as { id: string };
 
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ cost: { input: 3, output: 15 } }),
       });
@@ -673,7 +673,7 @@ describe("Models API", () => {
       const { id } = (await createRes.json()) as { id: string };
 
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ cost: null }),
       });
@@ -699,7 +699,7 @@ describe("Models API", () => {
       const { id } = (await createRes.json()) as { id: string };
 
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ label: "Renamed" }),
       });
@@ -733,7 +733,7 @@ describe("Models API", () => {
       });
 
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ credentialId: dead.id }),
       });
@@ -773,7 +773,7 @@ describe("Models API", () => {
       const { id } = (await createRes.json()) as { id: string };
 
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ aliased: true, label: "Masked" }),
       });
@@ -798,7 +798,7 @@ describe("Models API", () => {
 
       // Flip without a label — rejected (the derived label would leak).
       const noLabel = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ aliased: true }),
       });
@@ -808,7 +808,7 @@ describe("Models API", () => {
 
       // Same flip with an explicit label — accepted (api-key, body-model shape).
       const withLabel = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ aliased: true, label: "Appstrate Medium" }),
       });
@@ -840,7 +840,7 @@ describe("Models API", () => {
         createdBy: ctx.user.id,
       });
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ credentialId: oauth.id }),
       });
@@ -868,7 +868,7 @@ describe("Models API", () => {
       const { id } = (await createRes.json()) as { id: string };
 
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ enabled: false }),
       });
@@ -896,7 +896,7 @@ describe("Models API", () => {
       const { id } = (await createRes.json()) as { id: string };
 
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ maxTokens: 100_000 }),
       });
@@ -926,14 +926,14 @@ describe("Models API", () => {
       const { id } = (await createRes.json()) as { id: string };
 
       const reject = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ contextWindow: 50_000 }),
       });
       expect(reject.status).toBe(400);
 
       const accept = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ contextWindow: 60_000 }),
       });
@@ -960,7 +960,7 @@ describe("Models API", () => {
       const { id } = (await createRes.json()) as { id: string };
 
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ modelId: catalogModel.id }),
       });
@@ -991,7 +991,7 @@ describe("Models API", () => {
       const { id } = (await createRes.json()) as { id: string };
 
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ contextWindow: null }),
       });
@@ -1021,7 +1021,7 @@ describe("Models API", () => {
       // binding back because the operator just sent it in the request body,
       // but an `{ enabled }` update discloses fields the caller never had.
       const put = await app.request(`/api/models/${created.id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ enabled: true }),
       });
@@ -1070,7 +1070,7 @@ describe("Models API", () => {
       });
 
       const res = await app.request(`/api/models/${other.id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ modelId: "gpt-4o" }),
       });
@@ -1092,7 +1092,7 @@ describe("Models API", () => {
       const { id } = (await createRes.json()) as { id: string };
 
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ input: ["video"] }),
       });

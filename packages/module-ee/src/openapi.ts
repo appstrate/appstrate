@@ -67,14 +67,14 @@ export function openApiComponentSchemas(): Record<string, unknown> {
     },
     EeBillingManager: {
       type: "object",
-      required: ["user_id", "added_by", "created_at"],
+      required: ["userId", "added_by", "createdAt"],
       properties: {
-        user_id: {
+        userId: {
           type: "string",
           description: "Platform user id granted `billing:read` + `billing:manage`.",
         },
         added_by: { type: "string", description: "User id that granted it." },
-        created_at: { type: "string", format: "date-time" },
+        createdAt: { type: "string", format: "date-time" },
       },
     },
     EeBillingManagerList: {

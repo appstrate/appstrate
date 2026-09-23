@@ -114,7 +114,7 @@ describe("space package activate/configure/deactivate — permission is per pack
 
     const configure = (spaceId: string) =>
       app.request(`/api/spaces/${spaceId}/packages/${AGENT}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(spaceAdmin, { "Content-Type": "application/json" }),
         body: JSON.stringify({ proxyId: null }),
       });
@@ -141,7 +141,7 @@ describe("space package activate/configure/deactivate — permission is per pack
     const missing = "@testorg/does-not-exist";
     const put = (pkg: string, ctx: TestContext) =>
       app.request(`/api/spaces/${runs.id}/packages/${pkg}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ proxyId: null }),
       });
@@ -202,7 +202,7 @@ describe("space package activate/configure/deactivate — permission is per pack
     };
     const put = (pkg: string) =>
       app.request(`/api/spaces/${runs.id}/packages/${pkg}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(spaceAdmin, { "Content-Type": "application/json" }),
         body: JSON.stringify({ proxyId: null }),
       });

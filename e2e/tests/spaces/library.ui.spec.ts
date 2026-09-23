@@ -128,7 +128,7 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
   });
   expect(model.status(), await model.text()).toBe(201);
   const modelId = (await model.json()).id as string;
-  const configured = await apiClient.put(
+  const configured = await apiClient.patch(
     `/spaces/${browserCtx.org.defaultSpaceId}/packages/${scope}/${name}`,
     { modelId },
   );
@@ -296,13 +296,13 @@ test("a switched-off agent leaves the index, stays in the library, and is switch
   await page.getByRole("tab", { name: "Paramètres par défaut", exact: true }).click();
   const modelWrite = page.waitForResponse(
     (response) =>
-      response.request().method() === "PUT" &&
+      response.request().method() === "PATCH" &&
       response.url().includes(`/agents/${scope}/${name}/model`),
   );
   await page
     .getByRole("button", { name: /Enregistrer les réglages du modèle|Save model settings/ })
     .click();
-  expect((await modelWrite).status(), "PUT …/model on a switched-off agent").toBe(200);
+  expect((await modelWrite).status(), "PATCH …/model on a switched-off agent").toBe(200);
 
   // ── Switched back on from the banner itself ──
   const activated = page.waitForResponse(

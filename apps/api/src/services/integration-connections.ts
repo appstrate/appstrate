@@ -176,7 +176,7 @@ export interface ResolvedConnectionRow extends ActorConnectionRow {
 /**
  * Lookup the actor's `integration_connections` row for `(packageId, authKey)`
  * scoped to `spaceId`. Returns `null` when no accessible connection
- * exists — callers decide whether that is a 404, a silent skip, or a 412
+ * exists — callers decide whether that is a 404, a silent skip, or a 409
  * envelope.
  *
  * "Accessible" = own connection first, then any `shared_with_org=true`
@@ -184,7 +184,7 @@ export interface ResolvedConnectionRow extends ActorConnectionRow {
  * unlocks the admin-shared workflow: when `block_user_connections` is on
  * and the admin has marked their connection `shared_with_org`, members
  * who run agents on this integration land on the admin's row instead of
- * 412-ing with "not connected".
+ * 409-ing with "not connected".
  *
  * Ordering rationale (own first): a user with their own connection
  * deliberately prefers their identity over the org pool — sharing is a

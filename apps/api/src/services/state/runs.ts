@@ -1092,7 +1092,7 @@ export async function getRecentRuns(
  * The given actor's most recent runs in a space (own runs only, newest
  * first) — feeds the chat module's caller-context block. Unlike `getRecentRuns`
  * this spans all packages and all statuses (so failures surface), and returns a
- * minimal wire-shape (snake_case) tuned for the system prompt. Actor isolation
+ * minimal wire shape tuned for the system prompt. Actor isolation
  * is mandatory: a user never sees another actor's runs.
  */
 export async function listRecentForActor(
@@ -1101,9 +1101,9 @@ export async function listRecentForActor(
   options: { limit?: number } = {},
 ): Promise<
   Array<{
-    package_id: string;
+    packageId: string;
     status: string;
-    run_number: number | null;
+    runNumber: number | null;
     started_at: string | null;
     error: string | null;
   }>
@@ -1133,9 +1133,9 @@ export async function listRecentForActor(
       // there is nothing useful to reference in the prompt.
       .filter((row): row is typeof row & { packageId: string } => row.packageId != null)
       .map((row) => ({
-        package_id: row.packageId,
+        packageId: row.packageId,
         status: row.status,
-        run_number: row.runNumber,
+        runNumber: row.runNumber,
         started_at: toISO(row.startedAt),
         // Only surface the error message for non-success runs.
         error: row.status === "success" ? null : (row.error ?? null),

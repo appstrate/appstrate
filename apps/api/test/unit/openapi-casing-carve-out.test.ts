@@ -41,22 +41,6 @@ const ALLOWED = new Set([
   "components.IntegrationCredentialsResponse: auths[].expires_at",
   // OAuth 2.0 token endpoint (Zone 1, RFC 6749 wire).
   "POST /api/auth/oauth2/token 200: expires_at",
-  // Open: epoch-ms connect-offer expiry and its package id — issue #1529, finding 13.
-  "components.ResolutionFieldError: expires_at",
-  "components.ResolutionFieldError: package_id",
-  "POST /api/integrations/{packageId}/auths/{authKey}/connect/session 200: expires_at",
-  // Open: not yet reconciled with the carve-out.
-  "GET /api/me/context 200: recent_runs[].package_id",
-  "GET /api/me/context 200: recent_runs[].run_number",
-  "GET /api/me/context 200: agents[].package_id",
-  "GET /api/me/context 200: skills[].package_id",
-  "GET /api/notifications 200: data[].created_at",
-  "POST /api/agents/{scope}/{name}/schedules request: actor.user_id",
-  "POST /api/agents/{scope}/{name}/schedules request: actor.end_user_id",
-  "PUT /api/schedules/{id} request: actor.user_id",
-  "PUT /api/schedules/{id} request: actor.end_user_id",
-  "components.EeBillingManager: user_id",
-  "components.EeBillingManager: created_at",
 ]);
 
 type Schema = Record<string, unknown>;

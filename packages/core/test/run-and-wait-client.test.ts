@@ -716,9 +716,9 @@ describe("launchRunAndWait launch body", () => {
     expect(captured()).toBeUndefined();
   });
 
-  // `connection_overrides` is the documented retry for a 412
+  // `connection_overrides` is the documented retry for a 409
   // `must_choose_connection`. Dropped anywhere along the way, every retry hits
-  // the same 412 with nothing saying why, and the model has no way out.
+  // the same 409 with nothing saying why, and the model has no way out.
   it("kind:inline forwards connection_overrides", async () => {
     const { fetchImpl, captured } = captureLaunch();
 

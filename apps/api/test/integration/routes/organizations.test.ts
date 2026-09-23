@@ -391,12 +391,12 @@ describe("Organizations API", () => {
     });
   });
 
-  describe("PUT /api/orgs/:orgId", () => {
+  describe("PATCH /api/orgs/:orgId", () => {
     it("returns the bare OrgDetail (same serializer as GET /api/orgs/:orgId)", async () => {
       const ctx = await createTestContext({ orgSlug: "renameorg" });
 
       const res = await app.request(`/api/orgs/${ctx.orgId}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
         body: JSON.stringify({ name: "Renamed Org" }),
       });
@@ -422,7 +422,7 @@ describe("Organizations API", () => {
       await addOrgMember(ctx.orgId, admin.id, "admin");
 
       const res = await app.request(`/api/orgs/${ctx.orgId}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { Cookie: admin.cookie, "Content-Type": "application/json" },
         body: JSON.stringify({ name: "Admin Rename" }),
       });
@@ -432,7 +432,7 @@ describe("Organizations API", () => {
       // 403 is about `org:update`, not about admins being locked out of the
       // org routes wholesale.
       const settings = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { Cookie: admin.cookie, "Content-Type": "application/json" },
         body: JSON.stringify({ dashboard_sso_enabled: true }),
       });
@@ -442,7 +442,7 @@ describe("Organizations API", () => {
     it("200s the owner on the same request", async () => {
       const ctx = await createTestContext({ orgSlug: "ownerok" });
       const res = await app.request(`/api/orgs/${ctx.orgId}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
         body: JSON.stringify({ name: "Owner Rename" }),
       });
@@ -450,7 +450,7 @@ describe("Organizations API", () => {
     });
   });
 
-  describe("PUT /api/orgs/:orgId/settings — api_version", () => {
+  describe("PATCH /api/orgs/:orgId/settings — api_version", () => {
     // `apiVersion` middleware is mounted on `*` and 400s on a pin it cannot
     // serve, so an unsupported value persisted here would lock the org out of
     // every authed route — including this one. The write path must make that
@@ -461,7 +461,7 @@ describe("Organizations API", () => {
       const before = await getOrgSettings(ctx.orgId);
 
       const res = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
         body: JSON.stringify({ api_version: "2020-01-01" }),
       });
@@ -481,7 +481,7 @@ describe("Organizations API", () => {
       const before = await getOrgSettings(ctx.orgId);
 
       const res = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
         body: JSON.stringify({ api_version: "not-a-date" }),
       });
@@ -500,7 +500,7 @@ describe("Organizations API", () => {
       const ctx = await createTestContext();
 
       const res = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
         body: JSON.stringify({ api_version: "2020-01-01", dashboard_sso_enabled: true }),
       });
@@ -514,7 +514,7 @@ describe("Organizations API", () => {
       const ctx = await createTestContext();
 
       const res = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
         body: JSON.stringify({ api_version: CURRENT_API_VERSION }),
       });
@@ -533,14 +533,14 @@ describe("Organizations API", () => {
       // Pin the org first, so the middleware's org-pin branch is actually
       // exercised below rather than the no-pin fallback.
       const pin = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
         body: JSON.stringify({ api_version: CURRENT_API_VERSION }),
       });
       expect(pin.status).toBe(200);
 
       const bad = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
         body: JSON.stringify({ api_version: "2020-01-01" }),
       });
@@ -553,7 +553,7 @@ describe("Organizations API", () => {
 
       // And the settings route itself is still reachable — the recovery path.
       const recover = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
         body: JSON.stringify({ dashboard_sso_enabled: true }),
       });
@@ -592,7 +592,7 @@ describe("Organizations API", () => {
         // `/api/orgs/`, so `requireOrgContext` never runs, `c.get("orgId")` is
         // unset, and the middleware skips the pin branch entirely.
         const recover = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
-          method: "PUT",
+          method: "PATCH",
           headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
           body: JSON.stringify({ api_version: CURRENT_API_VERSION }),
         });
@@ -615,7 +615,7 @@ describe("Organizations API", () => {
         // included. A headless operator has no self-serve remedy, which is
         // exactly why the write path must refuse to create this state.
         const recover = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
-          method: "PUT",
+          method: "PATCH",
           headers: {
             Authorization: `Bearer ${key.rawKey}`,
             "Content-Type": "application/json",
@@ -787,7 +787,7 @@ describe("Organizations API", () => {
     });
   });
 
-  describe("PUT /api/orgs/:orgId/invitations/:invitationId", () => {
+  describe("PATCH /api/orgs/:orgId/invitations/:invitationId", () => {
     it("lets an admin change a pending invitation's role", async () => {
       const ctx = await createTestContext({ orgSlug: "admin-invitation-role-org" });
       const admin = await createTestUser({ email: "invitation-admin@test.com" });
@@ -801,7 +801,7 @@ describe("Organizations API", () => {
       });
 
       const res = await app.request(`/api/orgs/${ctx.orgId}/invitations/${invitation.id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { Cookie: admin.cookie, "Content-Type": "application/json" },
         body: JSON.stringify({ role: "admin" }),
       });
@@ -822,7 +822,7 @@ describe("Organizations API", () => {
       });
 
       const res = await app.request(`/api/orgs/${ctx.orgId}/invitations/${invitation.id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: orgOnlyHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ role: "admin" }),
       });
@@ -1284,7 +1284,7 @@ describe("Organizations API", () => {
     it("PUT /api/orgs/:otherOrgId returns 403 and does not mutate", async () => {
       const { orgB, bearer } = await setupTwoOrgKey();
       const res = await app.request(`/api/orgs/${orgB.id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...bearer, "Content-Type": "application/json" },
         body: JSON.stringify({ name: "PWNED" }),
       });
@@ -1345,10 +1345,10 @@ describe("Organizations API", () => {
       expect(res.status).toBe(403);
     });
 
-    it("PUT /api/orgs/:otherOrgId/invitations/:invId returns 403", async () => {
+    it("PATCH /api/orgs/:otherOrgId/invitations/:invId returns 403", async () => {
       const { orgB, bearer } = await setupTwoOrgKey();
       const res = await app.request(`/api/orgs/${orgB.id}/invitations/inv_x`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...bearer, "Content-Type": "application/json" },
         body: JSON.stringify({ role: "owner" }),
       });
@@ -1373,7 +1373,7 @@ describe("Organizations API", () => {
     it("PUT /api/orgs/:otherOrgId/settings returns 403", async () => {
       const { orgB, bearer } = await setupTwoOrgKey();
       const res = await app.request(`/api/orgs/${orgB.id}/settings`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...bearer, "Content-Type": "application/json" },
         body: JSON.stringify({ apiVersion: "2026-03-21" }),
       });
@@ -1427,7 +1427,7 @@ describe("Organizations API", () => {
       const { ctx, bearer } = await setupOwnerKeyInOwnOrg();
 
       const res = await app.request(`/api/orgs/${ctx.orgId}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...bearer, "Content-Type": "application/json" },
         body: JSON.stringify({ name: "PWNED-BY-KEY" }),
       });
@@ -1490,7 +1490,7 @@ describe("Organizations API", () => {
       const { ctx, bearer } = await setupOwnerKeyInOwnOrg();
 
       const res = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...bearer, "Content-Type": "application/json" },
         body: JSON.stringify({ dashboard_sso_enabled: true }),
       });
@@ -1508,14 +1508,14 @@ describe("Organizations API", () => {
       const cookieHeaders = { Cookie: ctx.cookie, "Content-Type": "application/json" };
 
       const rename = await app.request(`/api/orgs/${ctx.orgId}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: cookieHeaders,
         body: JSON.stringify({ name: "Renamed By Owner" }),
       });
       expect(rename.status).toBe(200);
 
       const settings = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
-        method: "PUT",
+        method: "PATCH",
         headers: cookieHeaders,
         body: JSON.stringify({ dashboard_sso_enabled: true }),
       });

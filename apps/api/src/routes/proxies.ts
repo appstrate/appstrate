@@ -21,6 +21,7 @@ import { logger } from "../lib/logger.ts";
 import { ApiError, notFound, internalError, systemEntityForbidden } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { recordAuditFromContext } from "../services/audit.ts";
+import { assertIfMatch, setEtag } from "../lib/conditional-request.ts";
 
 export const createProxySchema = z
   .object({
@@ -137,8 +138,8 @@ export function createProxiesRouter() {
     }
   });
 
-  // PUT /api/proxies/:id — update a custom proxy
-  router.put("/:id", requirePermission("proxies", "write"), async (c) => {
+  // PATCH /api/proxies/:id — update a custom proxy
+  router.patch("/:id", requirePermission("proxies", "write"), async (c) => {
     const orgId = c.get("orgId");
     const proxyId = c.req.param("id")!;
     const data = await readJsonBody(c, updateProxySchema);
@@ -146,6 +147,8 @@ export function createProxiesRouter() {
     if (isSystemProxy(proxyId)) {
       throw systemEntityForbidden("proxy", proxyId);
     }
+    const current = await getOrgProxy(orgId, proxyId);
+    if (current) assertIfMatch(c, current.updatedAt);
 
     try {
       await updateOrgProxy(orgId, proxyId, data);
@@ -159,6 +162,7 @@ export function createProxiesRouter() {
       // serializer — so callers don't need a follow-up GET (#657).
       const proxy = await getOrgProxy(orgId, proxyId);
       if (!proxy) throw notFound("Proxy not found");
+      setEtag(c, proxy.updatedAt);
       return c.json(proxy);
     } catch (err) {
       if (err instanceof ApiError) throw err;

@@ -329,7 +329,7 @@ export interface InlineRunBody {
    * Per-integration connection picks for THIS run (flat map:
    * `{ "@scope/integration": "<connection_id>" }`, resolver mechanism #2).
    * Read by the preflight so a caller that disambiguates a
-   * `must_choose_connection` 412 by re-posting its pick gets past the readiness
+   * `must_choose_connection` 409 by re-posting its pick gets past the readiness
    * gate — the same recovery loop the cataloged run route supports.
    *
    * Optional but NOT nullable: both run routes reject an explicit `null` on the

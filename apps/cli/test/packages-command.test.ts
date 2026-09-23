@@ -10,7 +10,7 @@
  * `skills-server.ts` approach), so the CLI's auth pipeline stays in the path.
  * The stand-in is strict where the real routes are: the draft routes answer
  * only in the home space, a published download only in a space that reads the
- * package, and the draft `PUT` refuses a stale `lock_version` with `409`.
+ * package, and the draft `PATCH` refuses a stale `If-Match` with `412`.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
@@ -60,10 +60,10 @@ interface FakePackage {
   published: { version: string; files: Tree }[];
   /** Problem `code` the version POST answers with instead of publishing. */
   publishError?: { status: number; code: string };
-  /** Problem the draft PUT answers with instead of writing. */
+  /** Problem the draft PATCH answers with instead of writing. */
   putError?: { status: number; code: string };
   /**
-   * Someone else writes the draft between the PUT's write and its read-back:
+   * Someone else writes the draft between the PATCH's write and its read-back:
    * the response then carries a lock two steps ahead of the one it was sent.
    */
   concurrentWriteAfterPut?: boolean;
@@ -80,8 +80,12 @@ interface Seen {
   method: string;
   path: string;
   spaceId: string | null;
+  ifMatch: string | null;
   body?: unknown;
 }
+
+/** The fake's draft ETag: its lock, opaque to the CLI. */
+const tag = (lock: number): string => `"${lock}"`;
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}): Response =>
   new Response(JSON.stringify(body), {
@@ -120,7 +124,8 @@ function createPackageServer(
     const method = init?.method ?? "GET";
     const path = url.pathname;
     const spaceId = new Headers(init?.headers).get("X-Space-Id");
-    const entry: Seen = { method, path: `${path}${url.search}`, spaceId };
+    const ifMatch = new Headers(init?.headers).get("If-Match");
+    const entry: Seen = { method, path: `${path}${url.search}`, spaceId, ifMatch };
     seen.push(entry);
 
     if (path === "/api/orgs") {
@@ -214,21 +219,23 @@ function createPackageServer(
       }
       const tail = typed[4];
       if (!tail && method === "GET") {
-        const read = json({
-          id: p.id,
-          lock_version: p.draft.lock,
-          manifest: p.draft.manifest,
-          has_unarchived_changes: p.draft.unpublished ?? true,
-        });
+        const read = json(
+          {
+            id: p.id,
+            manifest: p.draft.manifest,
+            has_unarchived_changes: p.draft.unpublished ?? true,
+          },
+          200,
+          { ETag: tag(p.draft.lock) },
+        );
         if (p.pushBetweenReadAndPublish) {
           p.pushBetweenReadAndPublish = false;
           p.draft.lock += 1;
         }
         return read;
       }
-      if (!tail && method === "PUT") {
+      if (!tail && method === "PATCH") {
         const body = JSON.parse(init!.body as string) as {
-          lock_version: number;
           manifest?: Record<string, unknown>;
           operations?: (
             | { op: "write"; path: string; text?: string; bytes_base64?: string }
@@ -242,8 +249,9 @@ function createPackageServer(
         if (p.putError) {
           return problem(p.putError.status, p.putError.code, "Refused by the stand-in");
         }
-        if (body.lock_version !== p.draft.lock) {
-          return problem(409, "conflict", "The package was modified since you loaded it");
+        if (ifMatch === null) return problem(428, "precondition_required", "If-Match required");
+        if (ifMatch !== tag(p.draft.lock)) {
+          return problem(412, "precondition_failed", "The resource changed since you read it");
         }
         for (const op of body.operations ?? []) {
           if (op.op === "delete") delete p.draft.files[op.path];
@@ -255,15 +263,15 @@ function createPackageServer(
         // The route stores the VALIDATED manifest, which may differ from the one sent.
         if (body.manifest) p.draft.manifest = { ...body.manifest, schema_version: "1.0" };
         p.draft.lock += 1;
+        p.draft.unpublished = true;
+        // The route stamps the ETag of THIS write, whatever the read-back shows.
+        const written = tag(p.draft.lock);
         if (p.concurrentWriteAfterPut) {
           p.concurrentWriteAfterPut = false;
           p.draft.lock += 1;
         }
-        return json({
-          id: p.id,
-          lock_version: p.draft.lock,
-          manifest: p.draft.manifest,
-          has_unarchived_changes: true,
+        return json({ id: p.id, manifest: p.draft.manifest, has_unarchived_changes: true }, 200, {
+          ETag: written,
         });
       }
       if (tail === "/versions/info") {
@@ -273,13 +281,10 @@ function createPackageServer(
         });
       }
       if (tail === "/versions" && method === "POST") {
-        const body = JSON.parse(init!.body as string) as {
-          version?: string;
-          lock_version?: number;
-        };
+        const body = JSON.parse(init!.body as string) as { version?: string };
         entry.body = body;
-        if (body.lock_version !== undefined && body.lock_version !== p.draft.lock) {
-          return problem(409, "conflict", "The draft changed since you read it.");
+        if (ifMatch !== null && ifMatch !== tag(p.draft.lock)) {
+          return problem(412, "precondition_failed", "The draft changed since you read it.");
         }
         if (p.publishError) {
           return problem(p.publishError.status, p.publishError.code, "Refused by the stand-in");
@@ -288,10 +293,14 @@ function createPackageServer(
         if (p.concurrentPushOnPublish) {
           p.draft.lock += 1;
           version = body.version ?? version;
-        } else if (body.version !== undefined && body.version !== version) {
-          p.draft.manifest = { ...p.draft.manifest, version: body.version };
-          p.draft.lock += 1;
-          version = body.version;
+        } else {
+          if (body.version !== undefined && body.version !== version) {
+            p.draft.manifest = { ...p.draft.manifest, version: body.version };
+            p.draft.lock += 1;
+            version = body.version;
+          }
+          // The draft IS the version just cut.
+          p.draft.unpublished = false;
         }
         p.published.push({ version, files: { ...p.draft.files } });
         return json({ version, integrity: "sha256-x" }, 201);
@@ -383,7 +392,7 @@ describe("packages pull", () => {
 
     expect((await readdir(dir)).sort()).toEqual(["SKILL.md", "manifest.json", "ref"]);
     expect(await text(join(dir, "SKILL.md"))).toContain("Draft.");
-    expect(await readLock("default", dir, "@acme/pdf")).toBe(3);
+    expect(await readLock("default", dir, "@acme/pdf")).toBe('"3"');
     const detail = server.seen.findIndex(
       (s) => s.path === "/api/packages/skills/@acme/pdf?version=draft",
     );
@@ -523,7 +532,7 @@ describe("packages pull", () => {
       expect(server.seen.some((s) => s.path === "/api/packages/@acme/pdf/draft/download")).toBe(
         true,
       );
-      expect(await readLock("default", dir, "@acme/pdf")).toBe(3);
+      expect(await readLock("default", dir, "@acme/pdf")).toBe('"3"');
     });
 
     it("refuses @draft to a reader instead of falling back to the published version", async () => {
@@ -666,12 +675,12 @@ describe("packages status", () => {
 
     await packagesStatusCommand({ dir }, io);
 
-    expect(stdout()).toContain("lock 3 → 5");
+    expect(stdout()).toContain('("3" → "5")');
   });
 });
 
 describe("packages push", () => {
-  it("sends ONE PUT under the recorded lock and rewrites the manifest the server stored", async () => {
+  it("sends ONE PATCH under the recorded ETag and rewrites the manifest the server stored", async () => {
     const pkg = skill();
     const dir = join(root, "pdf");
     const server = await pulled(pkg, dir);
@@ -687,11 +696,11 @@ describe("packages push", () => {
 
     await packagesPushCommand({ dir }, io);
 
-    const puts = server.seen.filter((s) => s.method === "PUT");
+    const puts = server.seen.filter((s) => s.method === "PATCH");
     expect(puts).toHaveLength(1);
     expect(puts[0]!.spaceId).toBe("spc_home");
+    expect(puts[0]!.ifMatch).toBe('"3"');
     expect(puts[0]!.body).toEqual({
-      lock_version: 3,
       manifest: { ...manifest, description: "More" },
       operations: [
         {
@@ -705,7 +714,7 @@ describe("packages push", () => {
     });
     expect(JSON.parse(await text(join(dir, "manifest.json")))).toEqual(pkg.draft.manifest);
     expect(pkg.draft.manifest.schema_version).toBe("1.0");
-    expect(await readLock("default", dir, "@acme/pdf")).toBe(4);
+    expect(await readLock("default", dir, "@acme/pdf")).toBe('"4"');
     expect(stdout()).toContain("Pushed 3 file operation(s) and the manifest");
 
     const status = createMemoryIO();
@@ -713,7 +722,7 @@ describe("packages push", () => {
     expect(status.stdout()).toContain("clean");
   });
 
-  it("says the draft moved elsewhere on 409, naming both locks", async () => {
+  it("says the draft moved elsewhere on 412", async () => {
     const pkg = skill();
     const dir = join(root, "pdf");
     await pulled(pkg, dir);
@@ -723,11 +732,11 @@ describe("packages push", () => {
 
     await expect(packagesPushCommand({ dir }, io)).rejects.toBeInstanceOf(ExitError);
 
-    expect(stderr()).toContain("was edited elsewhere since this folder last saw it (lock 3 → 4)");
+    expect(stderr()).toContain("was edited elsewhere since this folder last saw it.");
     expect(stderr()).toContain("push --force");
     // #1517: the translation is the whole message — not the server's wording
     // appended after it ("…replace it.: The package was modified…").
-    expect(stderr()).not.toContain("The package was modified since you loaded it");
+    expect(stderr()).not.toContain("The resource changed since you read it");
     expect(stderr()).not.toContain(".:");
     expect(pkg.draft.files["SKILL.md"]).toContain("Draft.");
   });
@@ -744,7 +753,7 @@ describe("packages push", () => {
 
     await writeFile(join(dir, "SKILL.md"), "---\nname: pdf\ndescription: PDFs.\n---\nEdited.\n");
     await packagesPushCommand({ dir }, createMemoryIO().io);
-    const puts = server.seen.filter((s) => s.method === "PUT");
+    const puts = server.seen.filter((s) => s.method === "PATCH");
     expect(puts).toHaveLength(1);
     expect((puts[0]!.body as { operations: unknown[] }).operations).toEqual([
       { op: "write", path: "SKILL.md", text: "---\nname: pdf\ndescription: PDFs.\n---\nEdited.\n" },
@@ -756,7 +765,7 @@ describe("packages push", () => {
     const { io, stderr } = createMemoryIO();
     await expect(packagesPushCommand({ dir }, io)).rejects.toBeInstanceOf(ExitError);
     expect(stderr()).toMatch(/big\.bin: 2097152 bytes, over the 1 MiB limit/);
-    expect(server.seen.filter((s) => s.method === "PUT")).toHaveLength(1);
+    expect(server.seen.filter((s) => s.method === "PATCH")).toHaveLength(1);
   });
 
   it("pushes node_modules: an MCP server bundle ships it", async () => {
@@ -768,36 +777,44 @@ describe("packages push", () => {
 
     await packagesPushCommand({ dir }, createMemoryIO().io);
 
-    const put = server.seen.find((s) => s.method === "PUT");
+    const put = server.seen.find((s) => s.method === "PATCH");
     expect((put?.body as { operations: unknown[] }).operations).toEqual([
       { op: "write", path: "server/node_modules/dep/index.js", text: "module.exports = 1;" },
     ]);
   });
 
-  it("records the lock its own write produced, not a later one the read-back shows", async () => {
+  it("records the ETag its own write produced, not a later one the read-back shows", async () => {
     const pkg = skill();
     const dir = join(root, "pdf");
     await pulled(pkg, dir);
     const manifest = JSON.parse(await text(join(dir, "manifest.json")));
     await writeFile(join(dir, "manifest.json"), JSON.stringify({ ...manifest, description: "M" }));
     pkg.concurrentWriteAfterPut = true;
-    const { io, stderr } = createMemoryIO();
-
-    await packagesPushCommand({ dir }, io);
+    await packagesPushCommand({ dir }, createMemoryIO().io);
 
     expect(pkg.draft.lock).toBe(5);
-    expect(await readLock("default", dir, "@acme/pdf")).toBe(4);
-    expect(stderr()).toContain("moved again right after this push (lock 4 → 5)");
-    // Not rewritten from the read-back: it may already hold the other author's write.
-    expect(JSON.parse(await text(join(dir, "manifest.json")))).toEqual({
-      ...manifest,
-      description: "M",
-    });
+    expect(await readLock("default", dir, "@acme/pdf")).toBe('"4"');
 
     await writeFile(join(dir, "SKILL.md"), "---\nname: pdf\ndescription: PDFs.\n---\nNext.\n");
     const next = createMemoryIO();
     await expect(packagesPushCommand({ dir }, next.io)).rejects.toBeInstanceOf(ExitError);
-    expect(next.stderr()).toContain("edited elsewhere since this folder last saw it (lock 4 → 5)");
+    expect(next.stderr()).toContain("edited elsewhere since this folder last saw it.");
+  });
+
+  it("refuses a lock table of numeric locks from an older CLI, naming the fix", async () => {
+    const pkg = skill();
+    const dir = join(root, "pdf");
+    await pulled(pkg, dir);
+    const table = join(root, "data", "appstrate", "packages", "default-locks.json");
+    await writeFile(table, JSON.stringify({ [dir]: { packageId: "@acme/pdf", lock: 3 } }));
+    const { io, stderr } = createMemoryIO();
+
+    await expect(packagesPushCommand({ dir }, io)).rejects.toBeInstanceOf(ExitError);
+
+    expect(stderr()).toContain("numeric draft locks written by an older appstrate CLI");
+    expect(stderr()).toContain(`Delete ${table}`);
+    expect(stderr()).toContain("appstrate packages pull <package> <folder> --force");
+    expect(pkg.draft.lock).toBe(3);
   });
 
   it("reports a 409 that is not a stale lock as the problem it names", async () => {
@@ -843,10 +860,10 @@ describe("packages push", () => {
     expect(stderr()).toContain(`appstrate packages push ${dir} --force`);
     expect(stderr()).not.toContain("pull --force");
     expect(stderr()).not.toContain("packages pull");
-    expect(server.seen.some((s) => s.method === "PUT")).toBe(false);
+    expect(server.seen.some((s) => s.method === "PATCH")).toBe(false);
   });
 
-  it("with --force, replaces the draft under the lock it just read", async () => {
+  it("with --force, replaces the draft under the ETag it just read", async () => {
     const pkg = skill();
     const server = createPackageServer([pkg]);
     server.install();
@@ -856,16 +873,16 @@ describe("packages push", () => {
 
     await packagesPushCommand({ dir, force: true }, createMemoryIO().io);
 
-    const put = server.seen.find((s) => s.method === "PUT");
+    const put = server.seen.find((s) => s.method === "PATCH");
     // No manifest.json in the folder: the draft's manifest is neither compared nor sent.
+    expect(put?.ifMatch).toBe('"3"');
     expect(put?.body).toEqual({
-      lock_version: 3,
       operations: [
         { op: "write", path: "SKILL.md", text: "---\nname: pdf\ndescription: PDFs.\n---\nMine.\n" },
         { op: "delete", path: "ref/a.md" },
       ],
     });
-    expect(await readLock("default", dir, "@acme/pdf")).toBe(4);
+    expect(await readLock("default", dir, "@acme/pdf")).toBe('"4"');
   });
 
   it("does not take an instance older than GET …/home for a missing package", async () => {
@@ -921,7 +938,7 @@ describe("packages push", () => {
       type: "skill",
       version: "1.0.0",
     });
-    expect(await readLock("default", dir, "@acme/fresh")).toBe(1);
+    expect(await readLock("default", dir, "@acme/fresh")).toBe('"1"');
     expect(stdout()).toContain(
       "Created @acme/fresh in space spc_mine and published its first version 1.0.0",
     );
@@ -939,10 +956,11 @@ describe("packages publish", () => {
 
     expect(
       server.seen.find((s) => s.path.endsWith("/versions") && s.method === "POST")?.body,
-    ).toEqual({ version: "1.1.0", lock_version: 3 });
+    ).toEqual({ version: "1.1.0" });
+    expect(server.seen.find((s) => s.path.endsWith("/versions"))?.ifMatch).toBe('"3"');
     expect(stdout()).toContain("Published @acme/pdf@1.1.0");
     expect(JSON.parse(await text(join(dir, "manifest.json"))).version).toBe("1.1.0");
-    expect(await readLock("default", dir, "@acme/pdf")).toBe(4);
+    expect(await readLock("default", dir, "@acme/pdf")).toBe('"4"');
 
     const status = createMemoryIO();
     await packagesStatusCommand({ dir }, status.io);
@@ -963,7 +981,7 @@ describe("packages publish", () => {
       ...mine,
       version: "1.0.1",
     });
-    expect(await readLock("default", dir, "@acme/pdf")).toBe(4);
+    expect(await readLock("default", dir, "@acme/pdf")).toBe('"4"');
   });
 
   it("leaves every folder behind when a concurrent push moved the draft during the publish", async () => {
@@ -977,8 +995,8 @@ describe("packages publish", () => {
 
     expect(stdout()).toContain("Published @acme/pdf@1.0.1");
     expect(pkg.draft.lock).toBe(4);
-    // The lock moved by one, but for an edit this folder never saw.
-    expect(await readLock("default", dir, "@acme/pdf")).toBe(3);
+    // The draft moved, but for an edit this folder never saw.
+    expect(await readLock("default", dir, "@acme/pdf")).toBe('"3"');
     expect(JSON.parse(await text(join(dir, "manifest.json"))).version).toBe("1.0.0");
     expect(stderr()).not.toContain("Updated the version");
   });
@@ -1055,7 +1073,8 @@ describe("packages publish", () => {
 
     expect(
       server.seen.find((s) => s.path.endsWith("/versions") && s.method === "POST")?.body,
-    ).toEqual({ lock_version: 3 });
+    ).toEqual({});
+    expect(server.seen.find((s) => s.path.endsWith("/versions"))?.ifMatch).toBe('"3"');
     expect(stdout()).toContain("Published @acme/pdf@2.0.0");
     expect(pkg.draft.lock).toBe(3);
   });

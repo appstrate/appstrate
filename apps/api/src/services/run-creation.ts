@@ -33,7 +33,7 @@ import {
 import { ApiError } from "../lib/errors.ts";
 import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 import { createRun as createRunRow } from "./state/runs.ts";
-import { runPreflightGates } from "./run-preflight-gates.ts";
+import { runPreflightGates, type PreflightGateError } from "./run-preflight-gates.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -88,7 +88,7 @@ type CreateRunResult =
     }
   | {
       ok: false;
-      error: { code: string; message: string; status?: number };
+      error: PreflightGateError;
     };
 
 // ---------------------------------------------------------------------------
@@ -123,7 +123,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   // platform-run feature).
   //
   // Both call sites let the original `ApiError` escape to the route, which
-  // preserves the 412 `missing_integration_connection` envelope (with its
+  // preserves the 409 `missing_integration_connection` envelope (with its
   // `errors[]` list driving the dashboard's MissingConnections modal). This
   // function reports failures as a flat `{ code, message, status }` result
   // instead, so re-running readiness here would have to collapse that

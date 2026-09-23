@@ -293,7 +293,7 @@ describe("Model Provider Keys API", () => {
     });
   });
 
-  describe("PUT /api/model-provider-credentials/:id", () => {
+  describe("PATCH /api/model-provider-credentials/:id", () => {
     it("updates the label and returns the full non-secret resource", async () => {
       // Create a model provider key first
       const createRes = await app.request("/api/model-provider-credentials", {
@@ -310,7 +310,7 @@ describe("Model Provider Keys API", () => {
 
       // Update the label (and rotate the key — must not leak in the response).
       const res = await app.request(`/api/model-provider-credentials/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ label: "Updated Label", apiKey: "sk-rotated-secret-456" }),
       });

@@ -74,7 +74,7 @@ export type RunAndWaitHeaders = Headers | Record<string, string> | Array<[string
 
 /**
  * Request header asking the run-kickoff routes to mint a hosted-connect session
- * for every actor-actionable item of a `missing_integration_connection` 412 and
+ * for every actor-actionable item of a `missing_integration_connection` 409 and
  * return it as `connect_url` on that item (RFC 6750 / Arcade.dev pattern: the
  * error carries the remedy, so nothing has to be called to obtain it).
  *
@@ -313,13 +313,13 @@ function contextFilesArgument(args: Record<string, unknown>): {
 
 /**
  * The tool's `connection_overrides` argument — the documented remedy for a
- * `412 must_choose_connection`, where the model must name one connection per
+ * `409 must_choose_connection`, where the model must name one connection per
  * ambiguous integration and retry.
  *
  * Refused before dispatch whenever it is present but does not resolve to a
  * plain object. The MCP transport does not validate tool arguments, so a
  * wrong-typed value is otherwise dropped on the floor: the launch answers the
- * IDENTICAL 412, with nothing in it saying the argument was ignored, and the
+ * IDENTICAL 409, with nothing in it saying the argument was ignored, and the
  * retry loop has no exit. This is the only place that signal can exist. A
  * string gets its own message because it names the real mistake (a JSON-encoded
  * map); an array / number / boolean / `null` gets the generic one. Validating
@@ -526,7 +526,7 @@ export async function launchRunAndWait(
   const args = asRecordOrUndefined(rawArgs) ?? {};
   const kind = asString(args.kind);
   // Launch-only: `waitForRunAndWaitCompletion` polls with `opts.headers`, so the
-  // opt-in cannot leak onto a request that has no 412 to enrich.
+  // opt-in cannot leak onto a request that has no 409 to enrich.
   const headers = jsonHeaders(opts.headers);
   if (opts.connectOffers) headers.set(RUN_CONNECT_OFFERS_HEADER, "1");
 

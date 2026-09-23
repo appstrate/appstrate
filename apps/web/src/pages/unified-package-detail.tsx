@@ -13,6 +13,7 @@ import {
   usePackageDownload,
   useDeletePackage,
   useAgents,
+  type Versioned,
 } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import type { SchemaWrapper } from "@appstrate/core/form";
@@ -88,7 +89,7 @@ function AgentRunButtonInline({
   const { data: agentModel } = useAgentModel(packageId);
   const readiness = useAgentReadiness(detail, agentModel?.modelId, models);
   // Launch-time integration readiness — drives the non-blocking orange badge.
-  // Same server resolver as the run-kickoff 412 (see useAgentIntegrationsReadiness).
+  // Same server resolver as the run-kickoff 409 (see useAgentIntegrationsReadiness).
   const integrationsReady = useAgentIntegrationsReadiness(packageId);
 
   if (!detail) return null;
@@ -102,7 +103,7 @@ function AgentRunButtonInline({
   // here, and the run gate refuses it like any other.
   const inactiveHere = !detail.active;
   // Integration connection gaps don't disable Run — they surface as a warning
-  // badge here and the recovery modal at run-kickoff (412 → MissingConnectionsModal).
+  // badge here and the recovery modal at run-kickoff (409 → MissingConnectionsModal).
   const runDisabled = inactiveHere || !hasPrompt || !hasRequiredSkills || !hasModel;
   const runDisabledTitle = inactiveHere
     ? t("detail.titleNotActive")
@@ -172,8 +173,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const { data: allAgents } = useAgents();
 
   // Type-narrowed aliases for type-specific branches
-  const agentDetail = type === "agent" ? (detail as AgentDetail | undefined) : undefined;
-  const pkgDetail = type !== "agent" ? (detail as OrgPackageItemDetail | undefined) : undefined;
+  const agentDetail = type === "agent" ? (detail as Versioned<AgentDetail> | undefined) : undefined;
+  const pkgDetail =
+    type !== "agent" ? (detail as Versioned<OrgPackageItemDetail> | undefined) : undefined;
 
   const displayName = agentDetail?.display_name ?? pkgDetail?.name ?? pkgDetail?.id ?? "";
   const source = agentDetail?.source ?? pkgDetail?.source;
@@ -614,7 +616,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         type={type}
         packageId={packageId}
         hasUnarchivedChanges={hasTimestampChanges}
-        lockVersion={(agentDetail ?? pkgDetail)?.lock_version}
+        etag={(agentDetail ?? pkgDetail)?.etag}
       />
 
       <ForkPackageModal

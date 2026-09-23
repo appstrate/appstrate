@@ -251,9 +251,9 @@ describe("module auth strategy pipeline", () => {
       expect(res.status).toBe(403);
     });
 
-    it("403s PUT /api/orgs/:orgId/settings and POST /api/orgs/:orgId/members too", async () => {
+    it("403s PATCH /api/orgs/:orgId/settings and POST /api/orgs/:orgId/members too", async () => {
       const settings = await app.request(`/api/orgs/${currentCtx!.orgId}/settings`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { "X-Test-Strategy": "valid", "Content-Type": "application/json" },
         body: JSON.stringify({ dashboard_sso_enabled: true }),
       });
@@ -301,7 +301,7 @@ describe("module auth strategy pipeline", () => {
       // Proves the refusals above come from the strategy's ceiling, not from
       // the org routes being closed or the subject lacking the role.
       const res = await app.request(`/api/orgs/${currentCtx!.orgId}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { Cookie: currentCtx!.cookie, "Content-Type": "application/json" },
         body: JSON.stringify({ name: "Renamed By Owner" }),
       });

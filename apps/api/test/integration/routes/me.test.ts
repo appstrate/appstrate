@@ -231,7 +231,7 @@ describe("Me API (/api/me)", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
         agents: {
-          package_id: string;
+          packageId: string;
           display_name: string;
           takes_input: boolean;
           published: boolean;
@@ -240,11 +240,11 @@ describe("Me API (/api/me)", () => {
         agents_total: number;
       };
 
-      const ids = new Set(body.agents.map((a) => a.package_id));
+      const ids = new Set(body.agents.map((a) => a.packageId));
       expect(ids.has("@ctx/triage")).toBe(true);
       expect(ids.has("@ctx/disabled")).toBe(false);
       expect(ids.has("@ctx/uninstalled")).toBe(false);
-      const triage = body.agents.find((a) => a.package_id === "@ctx/triage");
+      const triage = body.agents.find((a) => a.packageId === "@ctx/triage");
       expect(triage?.display_name).toBe("Triage");
       expect(triage?.takes_input).toBe(true);
       // No `latest` dist-tag was seeded → draft-only agent → must run with version=draft.
@@ -289,16 +289,16 @@ describe("Me API (/api/me)", () => {
       const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        skills: { package_id: string; display_name: string; version: string | null }[];
+        skills: { packageId: string; display_name: string; version: string | null }[];
         skills_truncated: boolean;
         skills_total: number;
       };
 
-      const ids = new Set(body.skills.map((s) => s.package_id));
+      const ids = new Set(body.skills.map((s) => s.packageId));
       expect(ids.has("@ctx/web-research")).toBe(true);
       expect(ids.has("@ctx/skill-disabled")).toBe(false);
       expect(ids.has("@ctx/skill-uninstalled")).toBe(false);
-      const skill = body.skills.find((s) => s.package_id === "@ctx/web-research");
+      const skill = body.skills.find((s) => s.packageId === "@ctx/web-research");
       expect(skill?.display_name).toBe("Web Research");
       expect(skill?.version).toBe("1.2.0");
       expect(body.skills_truncated).toBe(false);

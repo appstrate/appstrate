@@ -1124,7 +1124,7 @@ export async function updateSchedule(
  * Refusing the lock write instead would block a legitimate admin action.
  *
  * The whole lock set is applied, not just the keys added by this write: it is
- * idempotent on a consistent row (`PUT /api/schedules/:id` already refuses a
+ * idempotent on a consistent row (`PATCH /api/schedules/:id` already refuses a
  * locked field, so a compliant schedule names none) and it repairs any drift.
  *
  * Rewrites go through {@link updateSchedule} rather than a raw UPDATE so the

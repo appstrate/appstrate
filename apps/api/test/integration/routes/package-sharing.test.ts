@@ -1074,7 +1074,7 @@ describe("offered is not activated", () => {
     // field of this body at all — sending it is a 400 from `.strict()`.
     const patch = (body: Record<string, unknown>) =>
       app.request(`/api/spaces/${guest.personalSpaceId}/packages/${AGENT}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...guest.headers(), "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });

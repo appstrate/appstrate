@@ -557,7 +557,7 @@ export function OrgSettingsModelsPage() {
         isPending={createPkMutation.isPending || updatePkMutation.isPending}
         onSubmit={(data) => {
           if (editPk) {
-            // The PUT body only accepts mutable fields — `api`/`baseUrl` are
+            // The PATCH body only accepts mutable fields — `api`/`baseUrl` are
             // pinned by `providerId` at create time. Strip them here even
             // though the form disables those inputs on edit.
             const patch: { label?: string; apiKey?: string } = { label: data.label };

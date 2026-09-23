@@ -23,16 +23,17 @@ async function listFiles(client: ApiClient, id: string): Promise<FileEntry[]> {
   return (await response.json()).data;
 }
 async function writeElsewhere(client: ApiClient, id: string, path: string, text: string) {
-  const before = await (await client.get(`/packages/skills/${id}`)).json();
-  const response = await client.put(`/packages/skills/${id}`, {
-    lock_version: before.lock_version,
-    operations: [{ op: "write", path, text }],
-  });
+  const before = await client.get(`/packages/skills/${id}`);
+  const response = await client.patch(
+    `/packages/skills/${id}`,
+    { operations: [{ op: "write", path, text }] },
+    { "If-Match": before.headers()["etag"]! },
+  );
   expect(response.status()).toBe(200);
 }
 
 for (const type of ["skills", "agents", "integrations", "mcp-servers"]) {
-  test(`${type}: stages a file and saves manifest and files in one PUT`, async ({
+  test(`${type}: stages a file and saves manifest and files in one PATCH`, async ({
     authedPage: page,
     apiClient,
     browserCtx,
@@ -76,7 +77,7 @@ for (const type of ["skills", "agents", "integrations", "mcp-servers"]) {
     );
     const writes: Record<string, unknown>[] = [];
     page.on("request", (request) => {
-      if (request.method() === "PUT" && request.url().includes(`/api/packages/${type}/`))
+      if (request.method() === "PATCH" && request.url().includes(`/api/packages/${type}/`))
         writes.push(request.postDataJSON());
     });
     await editor.saveButton.click();
@@ -145,7 +146,7 @@ test("an in-flight save locks Monaco and structural actions", async ({
     received = resolve;
   });
   await page.route("**/api/packages/skills/**", async (route) => {
-    if (route.request().method() !== "PUT") return route.continue();
+    if (route.request().method() !== "PATCH") return route.continue();
     received();
     await blocked;
     await route.continue();
@@ -183,15 +184,17 @@ test("a concurrent manifest update refuses repeated saves and preserves the whol
   await editor.openFilesTab();
   await editor.createFile("notes.txt");
   await editor.typeIntoEditor("notes.txt", "MINE");
-  const before = await (await apiClient.get(`/packages/skills/${id}`)).json();
-  const changed = await apiClient.put(`/packages/skills/${id}`, {
-    manifest: { ...before.manifest, description: "COLLEAGUE" },
-    lock_version: before.lock_version,
-  });
+  const read = await apiClient.get(`/packages/skills/${id}`);
+  const before = await read.json();
+  const changed = await apiClient.patch(
+    `/packages/skills/${id}`,
+    { manifest: { ...before.manifest, description: "COLLEAGUE" } },
+    { "If-Match": read.headers()["etag"]! },
+  );
   expect(changed.status()).toBe(200);
   for (let attempt = 0; attempt < 2; attempt++) {
     const refused = page.waitForResponse(
-      (response) => response.request().method() === "PUT" && response.status() === 409,
+      (response) => response.request().method() === "PATCH" && response.status() === 412,
     );
     await editor.saveButton.click();
     await refused;
@@ -528,7 +531,7 @@ test("a MCP home author edits files while browsing a read-only placement", async
     await editor.typeIntoEditor("notes.txt", "Written by the home author");
     const saved = page.waitForResponse(
       (response) =>
-        response.request().method() === "PUT" &&
+        response.request().method() === "PATCH" &&
         response.url().includes(`/packages/mcp-servers/${id}`),
     );
     await editor.saveButton.click();

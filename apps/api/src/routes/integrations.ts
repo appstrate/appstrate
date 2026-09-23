@@ -905,7 +905,7 @@ export function createIntegrationsRouter() {
           ...(body.force_account_select ? { forceAccountSelect: true } : {}),
         }),
       );
-      return c.json({ connect_url: connectUrl, expires_at: expiresAt });
+      return c.json({ connect_url: connectUrl, expiresAt });
     },
   );
 

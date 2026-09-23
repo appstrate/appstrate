@@ -31,7 +31,7 @@ interface NotificationDto {
   run_id: string | null;
   payload: { agent_id?: string; status?: string } | null;
   read_at: string | null;
-  created_at: string;
+  createdAt: string;
 }
 
 describe("Notifications API (per-recipient, issue #667)", () => {
@@ -746,8 +746,8 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       expect(body.data).toHaveLength(2);
       expect(body.has_more).toBe(true);
       // created_at descending (newest first).
-      expect(new Date(body.data[0]!.created_at).getTime()).toBeGreaterThanOrEqual(
-        new Date(body.data[1]!.created_at).getTime(),
+      expect(new Date(body.data[0]!.createdAt).getTime()).toBeGreaterThanOrEqual(
+        new Date(body.data[1]!.createdAt).getTime(),
       );
       // A further page exists → RFC 5988 next link carrying the keyset cursor.
       expect(nextCursor(res.headers.get("Link"))).toBe(body.data[1]!.id);
@@ -853,8 +853,8 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       expect(b2.data).toHaveLength(2);
       expect(b2.has_more).toBe(false);
       // Cross-page ordering: page 2's first row is older-or-equal to page 1's last.
-      expect(new Date(b1.data.at(-1)!.created_at).getTime()).toBeGreaterThanOrEqual(
-        new Date(b2.data[0]!.created_at).getTime(),
+      expect(new Date(b1.data.at(-1)!.createdAt).getTime()).toBeGreaterThanOrEqual(
+        new Date(b2.data[0]!.createdAt).getTime(),
       );
     });
 

@@ -74,7 +74,7 @@ export function PackageFilesEditor({
     { enabled: scope.enabled && !!packageId, staleTime: 0, gcTime: 0, refetchOnMount: "always" },
   );
   // Keep the tree this draft started from. Refetches cannot silently rebase it;
-  // the parent's original lock_version rejects any intervening server write.
+  // the parent's original ETag (sent as If-Match) rejects any intervening write.
   const [base, setBase] = useState<readonly PackageFileEntry[] | null>(() =>
     packageId ? null : [{ path: PACKAGE_MANIFEST_FILE, size: 0, media_kind: "text", inline: "" }],
   );

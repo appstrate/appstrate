@@ -50,7 +50,7 @@ function useCreateModel() {
 
 function useUpdateModel() {
   const invalidate = useInvalidateModels();
-  return $api.useMutation("put", "/api/models/{id}", { onSuccess: invalidate });
+  return $api.useMutation("patch", "/api/models/{id}", { onSuccess: invalidate });
 }
 
 export function useDeleteModel() {
@@ -138,7 +138,7 @@ export function useSetAgentModel(packageId: string) {
         string | null | { modelId: string | null; generation?: ModelGenerationSettings | null },
     ) => {
       const body = typeof input === "object" && input !== null ? input : { modelId: input };
-      const { data } = await client.PUT("/api/agents/{scope}/{name}/model", {
+      const { data } = await client.PATCH("/api/agents/{scope}/{name}/model", {
         params: { path: splitPackageRef(packageId) },
         body,
       });

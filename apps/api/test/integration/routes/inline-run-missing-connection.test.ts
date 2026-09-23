@@ -3,18 +3,18 @@
 /**
  * POST /api/runs/inline (+ /inline/validate) — connection disambiguation.
  *
- * The sibling suite `runs-412-missing-connection.test.ts` pins the same
+ * The sibling suite `runs-missing-connection.test.ts` pins the same
  * contract for the cataloged agent route. This one exists because the inline
  * route reaches the readiness gate through a DIFFERENT path: its preflight
  * runs BEFORE `parseRequestInput`, so the caller's `connection_overrides` only
  * reach the resolver if the inline body schema declares the field AND
  * `runInlinePreflight` forwards it as `runOverrides`. While that wiring was
  * missing, an inline caller facing >1 candidate connection could never escape
- * the 412 — the picker had a remedy the route refused to accept. That is the
+ * the 409 — the picker had a remedy the route refused to accept. That is the
  * chat/MCP `run_and_wait` path, so the loop was unexitable there too.
  *
  * Covered here:
- *   - >1 candidate + no pick        → 412 must_choose_connection (unchanged)
+ *   - >1 candidate + no pick        → 409 must_choose_connection (unchanged)
  *   - >1 candidate + a valid pick   → launch, and the persisted run row carries
  *                                     both `connection_overrides` and the
  *                                     matching `resolved_connections` snapshot
@@ -64,8 +64,8 @@ interface ValidationFieldError {
     owned_by_actor: boolean;
   }[];
   connect_url?: string;
-  expires_at?: number;
-  package_id?: string;
+  expiresAt?: string;
+  packageId?: string;
 }
 
 interface ProblemDetails {
@@ -111,7 +111,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
     });
   }
 
-  it("returns 412 must_choose_connection when the actor has >1 candidate and sends no pick", async () => {
+  it("returns 409 must_choose_connection when the actor has >1 candidate and sends no pick", async () => {
     await seedIntegration(INTEGRATION);
     const conn1 = await seedConnection(INTEGRATION);
     const conn2 = await seedConnection(INTEGRATION);
@@ -121,7 +121,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       prompt: "do the thing",
     });
 
-    expect(res.status).toBe(412);
+    expect(res.status).toBe(409);
     const body = (await res.json()) as ProblemDetails;
     expect(body.code).toBe("missing_integration_connection");
 
@@ -189,7 +189,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
   });
 
   // An empty connection id is falsy at the resolver's `resolveOne`, so the
-  // override layer is skipped and readiness answers 412 — which is why this
+  // override layer is skipped and readiness answers 409 — which is why this
   // guard cannot live downstream of the preflight. It is enforced on the shared
   // inline body schema so BOTH routes answer identically, and it must fire even
   // when the manifest declares the integration (the case where readiness would
@@ -229,7 +229,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
         connection_overrides: { [INTEGRATION]: "" },
       });
 
-      // Deterministically the body guard, NOT the 412 readiness would-be
+      // Deterministically the body guard, NOT the 409 readiness would-be
       // answer: the parse happens before the preflight ever runs.
       expect(res.status).toBe(400);
       const body = (await res.json()) as ProblemDetails;
@@ -296,7 +296,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       });
     }
 
-    // The offer's full wire shape (`package_id`, `expires_at`, the permission
+    // The offer's full wire shape (`packageId`, `expiresAt`, the permission
     // gate, the non-oauth2 refusal) is the mint's own contract and is pinned
     // once, on the cataloged-agent route in the sibling suite. What is proven
     // HERE is only what that suite cannot: that this route reaches the same
@@ -305,7 +305,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       await seedOauthIntegration();
 
       const res = await launch("/api/runs/inline", { [RUN_CONNECT_OFFERS_HEADER]: "1" });
-      expect(res.status).toBe(412);
+      expect(res.status).toBe(409);
       const body = (await res.json()) as ProblemDetails;
       const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
       expect(err.code).toBe("not_connected");
@@ -333,7 +333,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       await seedOauthIntegration();
 
       const res = await launch("/api/runs/inline", {});
-      expect(res.status).toBe(412);
+      expect(res.status).toBe(409);
       const body = (await res.json()) as ProblemDetails;
       const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
       expect(err.connect_url).toBeUndefined();
@@ -346,7 +346,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       for (const headers of headerSets) {
         const res = await launch("/api/runs/inline/validate", headers);
         // Accumulate mode answers `validation_failed` (400), not the launch
-        // route's 412 envelope — the readiness entries ride the same `errors[]`.
+        // route's 409 envelope — the readiness entries ride the same `errors[]`.
         expect(res.status).toBe(400);
         const body = (await res.json()) as ProblemDetails;
         const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;

@@ -12,6 +12,7 @@
  * lenient, or runs of agents depending on a pre-rule skill break.
  */
 
+import { etagVersion, ifMatch } from "../../helpers/etag.ts";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { zipSync } from "fflate";
 import { eq } from "drizzle-orm";
@@ -164,19 +165,18 @@ describe("skill SKILL.md frontmatter gate (AFPS §3.3)", () => {
     });
   });
 
-  describe("PUT /api/packages/skills/{scope}/{name} (draft save)", () => {
+  describe("PATCH /api/packages/skills/{scope}/{name} (draft save)", () => {
     it("refuses a save that would leave the draft unpublishable", async () => {
       const created = await createSkill(ctx, VALID_CONTENT);
       expect(created.status).toBe(201);
-      const lockVersion = ((await created.json()) as { lock_version: number }).lock_version;
+      const lockVersion = etagVersion(created);
 
       const res = await app.request(`/api/packages/skills/${SKILL_ID}`, {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        method: "PATCH",
+        headers: authHeaders(ctx, { "Content-Type": "application/json", ...ifMatch(lockVersion) }),
         body: JSON.stringify({
           manifest: skillManifest(),
           content: "---\nname: gate-skill\n---\nBody without a description.",
-          lock_version: lockVersion,
         }),
       });
       expect(res.status).toBe(400);
@@ -193,15 +193,14 @@ describe("skill SKILL.md frontmatter gate (AFPS §3.3)", () => {
 
     it("accepts a save that keeps the frontmatter conforming", async () => {
       const created = await createSkill(ctx, VALID_CONTENT);
-      const lockVersion = ((await created.json()) as { lock_version: number }).lock_version;
+      const lockVersion = etagVersion(created);
 
       const res = await app.request(`/api/packages/skills/${SKILL_ID}`, {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        method: "PATCH",
+        headers: authHeaders(ctx, { "Content-Type": "application/json", ...ifMatch(lockVersion) }),
         body: JSON.stringify({
           manifest: skillManifest(),
           content: "---\nname: gate-skill\ndescription: A better description.\n---\nBody.",
-          lock_version: lockVersion,
         }),
       });
       expect(res.status).toBe(200);

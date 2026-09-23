@@ -362,7 +362,7 @@ describe("handleChatStream", () => {
     expect(calls).toEqual([]);
   });
 
-  it("answers 401 reconnect for a dead oauth credential, before any persistence", async () => {
+  it("answers 409 reconnect for a dead oauth credential, before any persistence", async () => {
     const sessionId = mintSessionId();
     const { engine, calls } = scriptedEngine();
     const res = await postChat(sessionId, undefined, engine, {
@@ -372,7 +372,9 @@ describe("handleChatStream", () => {
       resolveChatModel: async () => ({ subscription: true, needsReconnection: true }),
     });
 
-    expect(res.status).toBe(401);
+    // 409, never 401: the caller's own token is valid, so no auth challenge.
+    expect(res.status).toBe(409);
+    expect(res.headers.get("WWW-Authenticate")).toBeNull();
     expect(res.headers.get("content-type") ?? "").toContain("application/problem+json");
     const body = (await res.json()) as { code?: string };
     // The problem `code` is the whole client contract: `refusalCode()`
@@ -464,6 +466,10 @@ describe("handleChatStream", () => {
       });
 
       expect(res.status).toBe(429);
+      expect(res.headers.get("Retry-After")).toBe("5");
+      const body = (await res.json()) as { code?: string; retryAfter?: number; instance?: string };
+      expect(body).toMatchObject({ code: "chat_capacity", retryAfter: 5 });
+      expect(body.instance).toStartWith("urn:appstrate:request:");
       expect(engineCalls).toBe(0);
 
       const rows = await db
@@ -652,13 +658,13 @@ describe("handleChatStream", () => {
       context: () =>
         contextResponse([
           {
-            package_id: "@acme/report",
+            packageId: "@acme/report",
             status: "failed",
-            run_number: 41,
+            runNumber: 41,
             started_at: new Date().toISOString(),
             error: "provider timed out",
           },
-          { package_id: "@acme/triage", status: "success", run_number: 42 },
+          { packageId: "@acme/triage", status: "success", runNumber: 42 },
         ]),
     });
 
@@ -816,7 +822,7 @@ describe("handleChatStream", () => {
           org: { role: "owner", name: CONTEXT_ORG_MARKER, slug: "chat-handler-test" },
           connections: [],
           agents: [],
-          skills: [{ package_id: SKILL_ID, display_name: "Research", version: "1.2.0" }],
+          skills: [{ packageId: SKILL_ID, display_name: "Research", version: "1.2.0" }],
           recent_runs: [],
         });
       const { system } = await turn(new Set(["mcp:read", "agents:write"]), true, withSkill);

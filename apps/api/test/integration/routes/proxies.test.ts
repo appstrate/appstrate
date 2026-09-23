@@ -58,7 +58,7 @@ describe("Proxies API", () => {
     });
   });
 
-  describe("PUT /api/proxies/:id", () => {
+  describe("PATCH /api/proxies/:id", () => {
     it("updates a proxy and returns the full resource", async () => {
       const createRes = await app.request("/api/proxies", {
         method: "POST",
@@ -71,7 +71,7 @@ describe("Proxies API", () => {
       const { id } = (await createRes.json()) as any;
 
       const res = await app.request(`/api/proxies/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ label: "After", enabled: false }),
       });

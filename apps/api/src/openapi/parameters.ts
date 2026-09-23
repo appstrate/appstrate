@@ -13,6 +13,22 @@ export const parameters = {
     description: "Number of items to skip before the first returned item.",
     schema: { type: "integer", minimum: 0, default: 0 },
   },
+  IfMatch: {
+    name: "If-Match",
+    in: "header" as const,
+    required: false,
+    description:
+      "Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins.",
+    schema: { type: "string", example: '"42"' },
+  },
+  IfMatchRequired: {
+    name: "If-Match",
+    in: "header" as const,
+    required: true,
+    description:
+      "The `ETag` of the draft the write is based on (read it from the package GET, or from the previous write's response). Mandatory: absent is `428 precondition_required`; stale is `412 precondition_failed` and nothing is written. `*` writes over whatever is current.",
+    schema: { type: "string", example: '"42"' },
+  },
   XOrgId: {
     name: "X-Org-Id",
     in: "header" as const,
@@ -81,7 +97,7 @@ export const parameters = {
     required: false,
     description:
       "Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable " +
-      "item of a 412 `missing_integration_connection` also carries a ready-to-open `connect_url` " +
+      "item of a 409 `missing_integration_connection` also carries a ready-to-open `connect_url` " +
       "(a single-use bearer link that connects AS the actor). Set only by clients that render the " +
       "connect card or hand the link to that human.",
     schema: { type: "string", enum: ["1"] },

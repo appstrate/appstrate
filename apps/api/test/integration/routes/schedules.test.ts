@@ -208,7 +208,7 @@ describe("Schedules API", () => {
       const { id } = (await created.json()) as any;
 
       const res = await app.request(`/api/schedules/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ input: { note: "no email at all" } }),
       });
@@ -233,7 +233,7 @@ describe("Schedules API", () => {
       const { id } = (await created.json()) as any;
 
       const res = await app.request(`/api/schedules/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ input: { email: "other@example.com" } }),
       });
@@ -444,7 +444,7 @@ describe("Schedules API", () => {
 
       const overrides = { "@runorg/svc": "conn_xyz789" };
       const res = await app.request(`/api/schedules/${schedule.id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ connection_overrides: overrides }),
       });
@@ -455,7 +455,7 @@ describe("Schedules API", () => {
     });
   });
 
-  describe("PUT /api/schedules/:id", () => {
+  describe("PATCH /api/schedules/:id", () => {
     it("updates schedule name and cron", async () => {
       const fid = agentId("upd-agent");
       const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
@@ -470,7 +470,7 @@ describe("Schedules API", () => {
       });
 
       const res = await app.request(`/api/schedules/${schedule.id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ name: "New Name", cron_expression: "0 12 * * *" }),
       });
@@ -482,6 +482,81 @@ describe("Schedules API", () => {
       // EnrichedSchedule — same serializer as GET /schedules/:id (#657).
       expect(body.actor_type).toBe("user");
       expect(body).toHaveProperty("actor_name");
+    });
+
+    it("merges (RFC 7396): an absent field is kept, `null` clears a nullable one", async () => {
+      const fid = agentId("merge-agent");
+      const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
+      await publish(fid);
+      const schedule = await seedSchedule({
+        packageId: agent.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        name: "Kept",
+      });
+      const patch = (body: Record<string, unknown>) =>
+        app.request(`/api/schedules/${schedule.id}`, {
+          method: "PATCH",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+
+      const overrides = { "@runorg/svc": "conn_merge" };
+      expect((await patch({ connection_overrides: overrides })).status).toBe(200);
+      const cleared = await patch({ connection_overrides: null });
+      expect(cleared.status).toBe(200);
+      const body = (await cleared.json()) as any;
+      expect(body.connection_overrides ?? null).toBeNull();
+      expect(body.name).toBe("Kept");
+    });
+
+    it("honours an optional If-Match against the schedule's ETag", async () => {
+      const fid = agentId("etag-agent");
+      const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
+      await publish(fid);
+      const schedule = await seedSchedule({
+        packageId: agent.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        name: "Tagged",
+      });
+      const read = await app.request(`/api/schedules/${schedule.id}`, {
+        headers: authHeaders(ctx),
+      });
+      const etag = read.headers.get("ETag")!;
+      expect(etag).toMatch(/^"\d+"$/);
+      const patch = (name: string, headers: Record<string, string> = {}) =>
+        app.request(`/api/schedules/${schedule.id}`, {
+          method: "PATCH",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json", ...headers },
+          body: JSON.stringify({ name }),
+        });
+
+      // Timestamps are the version: make sure the write lands on a later millisecond.
+      await Bun.sleep(5);
+      const first = await patch("First", { "If-Match": etag });
+      expect(first.status).toBe(200);
+      const next = first.headers.get("ETag")!;
+      expect(next).not.toBe(etag);
+
+      const stale = await patch("Stale", { "If-Match": etag });
+      expect(stale.status).toBe(412);
+      expect(((await stale.json()) as { code: string }).code).toBe("precondition_failed");
+      expect(stale.headers.get("ETag")).toBe(next);
+
+      // Optional: without the header the write is last-write-wins.
+      expect((await patch("Unconditional")).status).toBe(200);
+    });
+
+    it("is not served on PUT", async () => {
+      const res = await app.request(`/api/schedules/sched_absent`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "x" }),
+      });
+      expect(res.status).toBe(404);
     });
 
     it("reconciles the generation override when the model changes", async () => {
@@ -506,7 +581,7 @@ describe("Schedules API", () => {
       });
 
       const res = await app.request(`/api/schedules/${schedule.id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ model_id_override: model.id }),
       });
@@ -528,7 +603,7 @@ describe("Schedules API", () => {
       });
 
       const res = await app.request(`/api/schedules/${schedule.id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ generation_config_override: { temperature: 0.4 } }),
       });
@@ -560,7 +635,7 @@ describe("Schedules API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           cron_expression: "0 9 * * *",
-          actor: { user_id: other.id },
+          actor: { userId: other.id },
         }),
       });
 
@@ -592,7 +667,7 @@ describe("Schedules API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           cron_expression: "0 9 * * *",
-          actor: { end_user_id: eu.id },
+          actor: { endUserId: eu.id },
         }),
       });
 
@@ -624,7 +699,7 @@ describe("Schedules API", () => {
       expect(body.userId).toBe(ctx.user.id);
     });
 
-    it("rejects a user_id that is not an org member", async () => {
+    it("rejects a userId that is not an org member", async () => {
       const fid = agentId("actor-foreign");
       await seedAgent({
         id: fid,
@@ -640,14 +715,14 @@ describe("Schedules API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           cron_expression: "0 9 * * *",
-          actor: { user_id: stranger.id },
+          actor: { userId: stranger.id },
         }),
       });
 
       expect(res.status).toBe(400);
     });
 
-    it("rejects an unknown end_user_id with 400 (not 404)", async () => {
+    it("rejects an unknown endUserId with 400 (not 404)", async () => {
       const fid = agentId("actor-bad-eu");
       await seedAgent({
         id: fid,
@@ -662,7 +737,7 @@ describe("Schedules API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           cron_expression: "0 9 * * *",
-          actor: { end_user_id: "eu_does_not_exist" },
+          actor: { endUserId: "eu_does_not_exist" },
         }),
       });
 
@@ -702,10 +777,10 @@ describe("Schedules API", () => {
       });
 
       const res = await app.request(`/api/schedules/${schedule.id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         // Same actor as the existing one → not a change → overrides preserved.
-        body: JSON.stringify({ actor: { user_id: ctx.user.id } }),
+        body: JSON.stringify({ actor: { userId: ctx.user.id } }),
       });
 
       expect(res.status).toBe(200);
@@ -714,7 +789,7 @@ describe("Schedules API", () => {
       expect(body.connection_overrides).toEqual({ "@acme/slack": "conn_keep" });
     });
 
-    it("rejects both user_id and end_user_id together", async () => {
+    it("rejects both userId and endUserId together", async () => {
       const fid = agentId("actor-both");
       await seedAgent({
         id: fid,
@@ -729,8 +804,27 @@ describe("Schedules API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           cron_expression: "0 9 * * *",
-          actor: { user_id: ctx.user.id, end_user_id: "eu_x" },
+          actor: { userId: ctx.user.id, endUserId: "eu_x" },
         }),
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("refuses the retired snake_case actor keys", async () => {
+      const fid = agentId("actor-snake");
+      await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      await publish(fid);
+
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ cron_expression: "0 9 * * *", actor: { user_id: ctx.user.id } }),
       });
 
       expect(res.status).toBe(400);
@@ -752,9 +846,9 @@ describe("Schedules API", () => {
       });
 
       const res = await app.request(`/api/schedules/${schedule.id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ actor: { user_id: other.id } }),
+        body: JSON.stringify({ actor: { userId: other.id } }),
       });
 
       expect(res.status).toBe(200);
@@ -776,7 +870,7 @@ describe("Schedules API", () => {
       });
 
       const res = await app.request(`/api/schedules/${schedule.id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ name: "Renamed" }),
       });
@@ -1072,7 +1166,7 @@ describe("Schedules API", () => {
           "POST /api/agents/{scope}/{name}/schedules",
           paths["/api/agents/{scope}/{name}/schedules"].post,
         ],
-        ["PUT /api/schedules/{id}", paths["/api/schedules/{id}"].put],
+        ["PATCH /api/schedules/{id}", paths["/api/schedules/{id}"].patch],
       ];
 
       // Positive control: two operations, both real. A typo in either key would
@@ -1091,7 +1185,7 @@ describe("Schedules API", () => {
 
       // Where the two writes legitimately DIFFER. Creating a schedule is an
       // execution decision and mounts `requireActiveAgent()`, so its 404 has
-      // two more causes; `PUT /api/schedules/{id}` takes a schedule id, mounts
+      // two more causes; `PATCH /api/schedules/{id}` takes a schedule id, mounts
       // no agent lookup at all, and must not claim refusals it cannot raise —
       // that is the CONTROL half of this assertion.
       //
@@ -1122,7 +1216,7 @@ describe("Schedules API", () => {
       const scheduleId = ((await created.json()) as any).id as string;
 
       const res = await app.request(`/api/schedules/${scheduleId}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ input: { note: "hi" } }),
       });
@@ -1162,7 +1256,7 @@ describe("Schedules API", () => {
 
       function put(scheduleId: string, body: Record<string, unknown>) {
         return app.request(`/api/schedules/${scheduleId}`, {
-          method: "PUT",
+          method: "PATCH",
           headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
@@ -1273,7 +1367,7 @@ describe("Schedules API", () => {
       });
 
       const res = await app.request(`/api/schedules/${schedule.id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ timezone: "Not/AZone" }),
       });

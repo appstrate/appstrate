@@ -55,6 +55,7 @@ import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { scheduleInputSchema } from "../lib/jsonb-schemas.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
+import { assertIfMatch, setEtag } from "../lib/conditional-request.ts";
 
 // Both maps are the shared launch rules (`lib/launch-schemas.ts`). A schedule
 // freezes them onto the row and replays them on every tick, which is what makes
@@ -244,22 +245,22 @@ async function loadScheduleOr404(c: Context<AppEnv>, id: string, scope: SpaceSco
 }
 
 // #738: schedule execution identity, chosen by an admin from the form.
-// XOR — exactly one of user_id / end_user_id. Omitted at create → defaults to
+// XOR — exactly one of userId / endUserId. Omitted at create → defaults to
 // the caller (`getActor`). Omitted at update → actor left untouched. The actor
 // can never be cleared (preserves #735: a schedule always has an identity).
 // `strictObject` BEFORE `.refine()` — `.refine()` returns a ZodPipe on which
 // `.strict()` is no longer chainable, and the enclosing bodies' own `.strict()`
-// only closes their ROOT. Without it, `{ actor: { user_id, end_user_ids } }`
+// only closes their ROOT. Without it, `{ actor: { userId, endUserIds } }`
 // strips the typo, the XOR below counts exactly one key and the schedule is
 // frozen onto the WRONG identity with a 201 as the only receipt — the very
 // failure {@link createScheduleSchema}'s docstring closes the root against.
 const actorSchema = z
   .strictObject({
-    user_id: z.string().min(1).optional(),
-    end_user_id: z.string().min(1).optional(),
+    userId: z.string().min(1).optional(),
+    endUserId: z.string().min(1).optional(),
   })
-  .refine((a) => (a.user_id ? 1 : 0) + (a.end_user_id ? 1 : 0) === 1, {
-    message: "provide exactly one of user_id or end_user_id",
+  .refine((a) => (a.userId ? 1 : 0) + (a.endUserId ? 1 : 0) === 1, {
+    message: "provide exactly one of userId or endUserId",
   });
 
 /**
@@ -270,37 +271,34 @@ const actorSchema = z
  */
 async function resolveScheduleActor(
   scope: SpaceScope,
-  selected: { user_id?: string; end_user_id?: string } | undefined,
+  selected: { userId?: string; endUserId?: string } | undefined,
   fallback?: Actor,
 ): Promise<Actor> {
-  if (!selected || (!selected.user_id && !selected.end_user_id)) {
+  if (!selected || (!selected.userId && !selected.endUserId)) {
     if (fallback) return fallback;
-    throw invalidRequest("actor.user_id or actor.end_user_id is required", "actor");
+    throw invalidRequest("actor.userId or actor.endUserId is required", "actor");
   }
-  if (selected.user_id && selected.end_user_id) {
-    throw invalidRequest("actor.user_id and actor.end_user_id are mutually exclusive", "actor");
+  if (selected.userId && selected.endUserId) {
+    throw invalidRequest("actor.userId and actor.endUserId are mutually exclusive", "actor");
   }
-  if (selected.user_id) {
-    const member = await getOrgMember(scope.orgId, selected.user_id);
+  if (selected.userId) {
+    const member = await getOrgMember(scope.orgId, selected.userId);
     if (!member) {
-      throw invalidRequest("actor.user_id is not a member of this organization", "actor.user_id");
+      throw invalidRequest("actor.userId is not a member of this organization", "actor.userId");
     }
-    return { type: "user", id: selected.user_id };
+    return { type: "user", id: selected.userId };
   }
-  // end_user_id present. Translate getEndUser's 404 into a 400 so both actor
+  // endUserId present. Translate getEndUser's 404 into a 400 so both actor
   // branches report an invalid selection consistently as a bad request.
   try {
-    await getEndUser(scope, selected.end_user_id!);
+    await getEndUser(scope, selected.endUserId!);
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
-      throw invalidRequest(
-        "actor.end_user_id is not an end-user of this space",
-        "actor.end_user_id",
-      );
+      throw invalidRequest("actor.endUserId is not an end-user of this space", "actor.endUserId");
     }
     throw err;
   }
-  return { type: "end_user", id: selected.end_user_id! };
+  return { type: "end_user", id: selected.endUserId! };
 }
 
 /**
@@ -479,13 +477,14 @@ export function createSchedulesRouter() {
   router.get("/schedules/:id", requirePermission("schedules", "read"), async (c) => {
     const id = c.req.param("id")!;
     const schedule = await loadScheduleOr404(c, id, getSpaceScope(c));
+    setEtag(c, schedule.updatedAt);
     return c.json(schedule);
   });
 
-  // PUT /api/schedules/:id — update a schedule
+  // PATCH /api/schedules/:id — merge-update a schedule (RFC 7396)
   // `rowAuthority()`: same draft authority as the create route, asked of the
   // package the stored schedule points at.
-  router.put(
+  router.patch(
     "/schedules/:id",
     requirePermission("schedules", "write"),
     rowAuthority(),
@@ -493,6 +492,7 @@ export function createSchedulesRouter() {
       const id = c.req.param("id")!;
       const scope = getSpaceScope(c);
       const existing = await loadScheduleOr404(c, id, scope);
+      assertIfMatch(c, existing.updatedAt);
 
       const data = await readJsonBody(c, updateScheduleSchema);
 
@@ -532,7 +532,7 @@ export function createSchedulesRouter() {
       }
 
       // Same resolve-and-validate the create route runs, for the same stated
-      // reason: refuse at THIS write rather than silently at every tick. A PUT
+      // reason: refuse at THIS write rather than silently at every tick. A PATCH
       // replacing `input` with a wrong-typed or incomplete value used to answer
       // 200 and then die on every subsequent fire, visible only in the
       // schedule's failure record.
@@ -708,6 +708,8 @@ export function createSchedulesRouter() {
         getActor(c),
         runVisibilityFilter(c),
       );
+      // Deleted between the read above and this write: nothing was updated.
+      if (!schedule) throw notFound(`Schedule '${id}' not found`);
       // Mirror schedule.created: explicit camelCase keys (dominant audit
       // convention — see api-keys.ts, modules/webhooks/routes.ts). Only
       // include keys the caller actually sent so the audit reflects the
@@ -737,6 +739,7 @@ export function createSchedulesRouter() {
         resourceId: id,
         after: auditAfter,
       });
+      setEtag(c, schedule.updatedAt);
       return c.json(schedule);
     },
   );

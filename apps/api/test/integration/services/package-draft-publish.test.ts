@@ -60,7 +60,11 @@ describe("publishing a coherent package draft", () => {
     await mutatePackageDraftFiles(
       { id, type: "agent", orgId: ctx.orgId },
       {
-        precondition: { lockVersion },
+        precondition: {
+          assertVersion: (current) => {
+            if (current !== lockVersion) throw new Error("stale");
+          },
+        },
         manifest: { ...manifest, version, description: "NEW" },
         mutate: (files) => ({
           ...files,
@@ -103,7 +107,7 @@ describe("publishing a coherent package draft", () => {
     expect(updated.draftManifest).toMatchObject({ version: "2.0.0" });
     expect(updated.lockVersion).toBe(lockVersion + 1);
     expect(await hasUnpublishedChanges()).toBe(false);
-    await expect(edit()).rejects.toThrow("modified concurrently");
+    await expect(edit()).rejects.toThrow("stale");
   });
 
   it("keeps the draft untouched when the captured manifest fails validation", async () => {

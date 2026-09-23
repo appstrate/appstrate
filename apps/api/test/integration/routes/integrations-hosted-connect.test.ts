@@ -102,8 +102,9 @@ async function mintSession(
     body: JSON.stringify(body),
   });
   expect(res.status).toBe(200);
-  const json = (await res.json()) as { connect_url: string; expires_at: number };
-  expect(typeof json.expires_at).toBe("number");
+  const json = (await res.json()) as { connect_url: string; expiresAt: string };
+  // RFC 3339, not epoch ms: the canonical `expiresAt` spelling carries a string.
+  expect(new Date(json.expiresAt).toISOString()).toBe(json.expiresAt);
   const url = new URL(json.connect_url);
   const token = url.searchParams.get("token");
   expect(token).toBeTruthy();
@@ -125,7 +126,7 @@ describe("hosted connect portal — mint", () => {
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(200);
-    const json = (await res.json()) as { connect_url: string; expires_at: number };
+    const json = (await res.json()) as { connect_url: string; expiresAt: string };
     expect(json.connect_url).toContain("/api/integrations/connect/start?token=");
   });
 

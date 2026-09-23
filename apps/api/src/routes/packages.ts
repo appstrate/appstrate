@@ -48,7 +48,7 @@ import {
 import { validateManifest, type PackageType } from "@appstrate/core/validation";
 import { decodeSkillMarkdown } from "@appstrate/afps-shared/companion-files";
 import { SLUG_REGEX, attachmentDisposition } from "@appstrate/core/naming";
-import { ifNoneMatchSatisfied } from "../lib/if-none-match.ts";
+import { assertIfMatch, ifNoneMatchSatisfied, setEtag } from "../lib/conditional-request.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 import {
   getVersionDetail,
@@ -190,7 +190,7 @@ async function assertAgentIntegrationScopesValid(
  *
  * `direction` says where the manifest came from, and both policies key off it:
  *
- * - `"author"` — the manifest is in THIS request (create; a PUT supplying
+ * - `"author"` — the manifest is in THIS request (create; a PATCH supplying
  *   `manifest`). The `type` gate applies: the route family fixes the package
  *   type while `validateManifest` dispatches purely on the manifest's own root
  *   `type`, so without it a wrong-type manifest validates against ITS OWN
@@ -198,7 +198,7 @@ async function assertAgentIntegrationScopesValid(
  *   persisting a manifest no schema ever accepted (issue #987). Retired
  *   `runtime_tools` ids reject, so a typo or a removed id is reported instead
  *   of silently stripped.
- * - `"stored"` — the manifest is already persisted (PUT content-only
+ * - `"stored"` — the manifest is already persisted (PATCH content-only
  *   carry-forward; publishing an existing draft). NO `type` gate: stored
  *   artifacts are tolerated on read (#983), and gating here would make a
  *   legacy drifted draft permanently un-publishable. Retired ids drop so such
@@ -206,7 +206,7 @@ async function assertAgentIntegrationScopesValid(
  *
  * `direction` is orthogonal to `opts.requireCallableTools`: it says where the
  * bytes came from, not whether they are being frozen. Publishing a draft is
- * `"stored"` yet must run the declared-but-empty gate; a PUT carrying a
+ * `"stored"` yet must run the declared-but-empty gate; a PATCH carrying a
  * manifest is `"author"` yet must not.
  */
 async function validateManifestForRoute(
@@ -341,20 +341,10 @@ export const packageJsonUpdateSchema = z
     manifest: z.record(z.string(), z.unknown()).optional(),
     content: z.string().optional(),
     operations: packageFileOperationsSchema.optional(),
-    /**
-     * Optimistic-lock token. Mandatory and integral — the value is a row version,
-     * never a fraction. This used to be `z.number().optional()` with a hand-rolled
-     * `null / typeof !== "number"` check in the handler restating both rules; the
-     * schema now carries them, so the spec's `required: ["lock_version"]` and
-     * `type: "integer"` have exactly one runtime counterpart.
-     */
-    lock_version: z.number().int(),
   })
   .strict();
 
-export const createVersionBodySchema = z
-  .object({ version: z.string().min(1).optional(), lock_version: z.number().int().optional() })
-  .strict();
+export const createVersionBodySchema = z.object({ version: z.string().min(1).optional() }).strict();
 
 /**
  * Body of `PUT /api/packages/{scope}/{name}/home` — the package's home space,
@@ -363,8 +353,8 @@ export const createVersionBodySchema = z
  * of its spaces (`packages_org_package_has_home`), so there is no "move it
  * nowhere" to express — a package that belongs to no team is homed in the
  * organization's DEFAULT space like any other. `.strict()` so this route can
- * never be mistaken for the draft editor: the draft is `PUT`, with its
- * optimistic lock.
+ * never be mistaken for the draft editor: the draft is `PATCH`, under its
+ * `If-Match`.
  *
  * The id is SHAPE-CHECKED, like every other space id arriving in a body
  * (`lib/space-role-assignment.ts`): a retired `app_` spelling resolves to no
@@ -587,11 +577,7 @@ interface PackageRouteConfig<T extends PackageType = PackageType> {
    * (agents return the richer Agent detail via `buildAgentDetailDto`).
    * Returns `null` when the package cannot be resolved.
    */
-  detailDto?: (
-    c: Context<AppEnv>,
-    itemId: string,
-    orgId: string,
-  ) => Promise<Record<string, unknown> | null>;
+  detailDto?: (c: Context<AppEnv>, itemId: string, orgId: string) => Promise<PackageDetail | null>;
 }
 
 // Three types have JSON creation forms; MCP server creation accepts an archive.
@@ -847,7 +833,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       logger.error("Created package could not be re-read", { packageId, orgId });
       throw internalError();
     }
-    return c.json(detail, 201);
+    return sendPackageDetail(c, detail, 201);
   };
 }
 
@@ -979,7 +965,7 @@ async function buildPackageDetailDto(
   itemId: string,
   orgId: string,
   opts: { version?: string } = {},
-): Promise<Record<string, unknown> | null> {
+): Promise<PackageDetail | null> {
   const [item, versionCount, latestVersionDate, accessible] = await Promise.all([
     getOrgItem(orgId, itemId, rcfg.cfg),
     getVersionCount(itemId),
@@ -1010,8 +996,8 @@ async function buildPackageDetailDto(
     ? null
     : await loadPublishedDefinition(rcfg.cfg.type, item.id, spec);
 
-  const { homeSpaceId, ...rest } = item;
-  return {
+  const { homeSpaceId, lockVersion, ...rest } = item;
+  const body = {
     ...rest,
     ...published,
     definition,
@@ -1027,6 +1013,28 @@ async function buildPackageDetailDto(
       latestVersionDate,
     ),
   };
+  return { body, lockVersion: item.source === "system" ? null : lockVersion };
+}
+
+/**
+ * A package detail and the draft version it was read at. The version never
+ * rides in the body: it is the response's `ETag`, and a draft write sends it
+ * back in `If-Match`. `null` for a package nobody can write (a system one) or a
+ * read that withholds authoring state.
+ */
+export interface PackageDetail {
+  body: Record<string, unknown>;
+  lockVersion: number | null;
+}
+
+/** Answer a package detail: the body, and its version as the `ETag`. */
+export function sendPackageDetail(
+  c: Context<AppEnv>,
+  detail: PackageDetail,
+  status: 200 | 201 = 200,
+) {
+  if (detail.lockVersion !== null) setEtag(c, detail.lockVersion);
+  return c.json(detail.body, status);
 }
 
 /**
@@ -1047,7 +1055,7 @@ function loadPackageDetailDto(
   rcfg: PackageRouteConfig,
   itemId: string,
   orgId: string,
-): Promise<Record<string, unknown> | null> {
+): Promise<PackageDetail | null> {
   return rcfg.detailDto
     ? rcfg.detailDto(c, itemId, orgId)
     : buildPackageDetailDto(c, rcfg, itemId, orgId, { version: VERSION_SELECTOR_DRAFT });
@@ -1064,14 +1072,14 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
       throw notFound(`${rcfg.cfg.labelSingular} '${itemId}' not found`);
     }
 
-    const dto = await buildPackageDetailDto(c, rcfg, itemId, orgId, {
+    const detail = await buildPackageDetailDto(c, rcfg, itemId, orgId, {
       version: c.req.query("version"),
     });
-    if (!dto) {
+    if (!detail) {
       throw notFound(`${rcfg.cfg.labelSingular} '${itemId}' not found`);
     }
 
-    return c.json(dto);
+    return sendPackageDetail(c, detail);
   };
 }
 
@@ -1090,7 +1098,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
 
     const body = await readJsonBody(c, packageJsonUpdateSchema);
 
-    // A PUT that omits `manifest` is a content-only edit: the stored draft is
+    // A PATCH that omits `manifest` is a content-only edit: the stored draft is
     // carried forward untouched. That makes this handler directional per
     // request — `manifest` SUPPLIED is author input, `manifest` OMITTED is the
     // already-stored draft — and the direction decides both the `type` gate and
@@ -1133,7 +1141,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     // carried forward.
     if (!body.operations && content) assertContentConforms(rcfg.cfg.type, content, "content");
 
-    // A manifest-only integration PUT has no authored `content`. When the
+    // A manifest-only integration PATCH has no authored `content`. When the
     // overloaded column contains the manifest fallback (rather than a real
     // INTEGRATION.md), refresh it from the validated manifest instead of
     // carrying the old fallback forward. A real companion remains protected.
@@ -1148,7 +1156,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     // Bytes for `rcfg.storageFileName`. When that file is NOT the type's
     // content entry it is the manifest (integration, mcp-server), and it is
     // rebuilt from the VALIDATED manifest rather than echoing `content`: this
-    // route accepts a manifest-only PUT, and the `existing.content`
+    // route accepts a manifest-only PATCH, and the `existing.content`
     // carried forward above is `packages.draft_content` — which for an
     // integration is its INTEGRATION.md. Echoing it would overwrite the
     // package's `manifest.json` with its documentation.
@@ -1158,17 +1166,20 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     // advisory lock — the same helper the file-tree writes take, so two writers
     // of one package queue instead of overwriting each other's merge. The tree
     // it hands `mutate` is the draft as the explorer shows it, so every file
-    // this PUT does not name is carried through untouched.
+    // this PATCH does not name is carried through untouched.
     //
     // `content` feeds TWO sinks that are the same file for `agent`/`skill` and
     // different files for the manifest-backed types — see `storageFileName`.
     // `resolveDraftContent` guards the column; the storage entry is resolved on
     // its own terms.
+    let written: number;
     try {
-      await mutatePackageDraftFiles(
+      ({ lockVersion: written } = await mutatePackageDraftFiles(
         { id: itemId, type: rcfg.cfg.type, orgId },
         {
-          precondition: { lockVersion: body.lock_version },
+          precondition: {
+            assertVersion: (current) => assertIfMatch(c, current, { required: true }),
+          },
           manifest: validatedManifest,
           validateBundle: body.operations !== undefined,
           // File operations own the content column when they are supplied.
@@ -1184,7 +1195,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
             });
           },
         },
-      );
+      ));
     } catch (error) {
       if (error instanceof PackageFileWriteError) throw draftFileWriteApiError(error);
       throw error;
@@ -1203,14 +1214,14 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     });
 
     // Return the updated package resource bare — same serializer as the GET
-    // detail (issue #657). The resource carries `lock_version`, the NEW
-    // optimistic-lock token consumers must read back for the next edit.
+    // detail (issue #657). The `ETag` is the version THIS write produced, not
+    // the re-read's: a write landing in between must still refuse the caller's next.
     const detail = await loadPackageDetailDto(c, rcfg, itemId, orgId);
     if (!detail) {
       logger.error("Updated package could not be re-read", { packageId: itemId, orgId });
       throw internalError();
     }
-    return c.json(detail);
+    return sendPackageDetail(c, { ...detail, lockVersion: written });
   };
 }
 
@@ -1369,11 +1380,9 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     // entirely when no override is chosen), so only read it when present;
     // a present-but-malformed body is a 400, not a silent no-override.
     let versionOverride: string | undefined;
-    let expectedLock: number | undefined;
     if (c.req.raw.body !== null) {
       const body = await readJsonBody(c, createVersionBodySchema);
       versionOverride = body.version;
-      expectedLock = body.lock_version;
     }
 
     const result = await createVersionFromDraft({
@@ -1381,7 +1390,8 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       orgId,
       userId: user.id,
       version: versionOverride,
-      lockVersion: expectedLock,
+      // Optional: with it the version cut is the draft the caller read.
+      assertVersion: (current) => assertIfMatch(c, current),
       // Validate the exact snapshot that will be published, including its
       // version override. The route's earlier read is not a coherent snapshot.
       // Stored manifests may carry retired tools; empty callable selections
@@ -1393,12 +1403,6 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     });
 
     if ("error" in result) {
-      if (result.error === "conflict") {
-        throw conflict(
-          "conflict",
-          "The draft changed since you read it. Reload it before publishing.",
-        );
-      }
       if (result.error === "no_changes") {
         throw conflict("no_changes", "No changes since the last version");
       }
@@ -1455,7 +1459,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     }
 
     const existing = await loadOrgItemOr404(rcfg, orgId, itemId);
-    if (!existing.lock_version) {
+    if (!existing.lockVersion) {
       throw notFound(`${rcfg.cfg.labelSingular} '${itemId}' not found`);
     }
 
@@ -1497,7 +1501,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     await mutatePackageDraftFiles(
       { id: itemId, type: rcfg.cfg.type, orgId },
       {
-        precondition: { lockVersion: existing.lock_version },
+        precondition: { assertVersion: (current) => assertIfMatch(c, current) },
         manifest: asRecord(detail.manifest),
         draftContent: content,
         ...(detail.content
@@ -1530,14 +1534,13 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     // Restore mutates the package draft — return the updated PACKAGE resource
     // bare, same DTO/serializer as the package GET detail (issue #657). The
     // restored version info is reflected in the resource itself (`version`,
-    // `manifest`, `content`), and the resource carries `lock_version`, the
-    // package's NEW optimistic-lock token to read back before the next edit.
+    // `manifest`, `content`), and the response carries the draft's NEW `ETag`.
     const packageDto = await loadPackageDetailDto(c, rcfg, itemId, orgId);
     if (!packageDto) {
       logger.error("Restored package could not be re-read", { packageId: itemId, orgId });
       throw internalError();
     }
-    return c.json(packageDto);
+    return sendPackageDetail(c, packageDto);
   };
 }
 
@@ -2005,7 +2008,11 @@ export function createPackagesRouter() {
       rcfg.cfg.type === "agent" ? requireAgentRead : readGuard,
       rcfg.getHandler ?? makeGetHandler(rcfg),
     );
-    router.put(`/${path}/${SCOPED_PACKAGE_ROUTE}`, requirePackageInOrg(), makeUpdateHandler(rcfg));
+    router.patch(
+      `/${path}/${SCOPED_PACKAGE_ROUTE}`,
+      requirePackageInOrg(),
+      makeUpdateHandler(rcfg),
+    );
     router.delete(
       `/${path}/${SCOPED_PACKAGE_ROUTE}`,
       requirePackageInOrg("delete"),
@@ -2222,7 +2229,7 @@ export function createPackagesRouter() {
       logger.error("Moved package could not be re-read", { packageId, orgId });
       throw internalError();
     }
-    return c.json(detail);
+    return sendPackageDetail(c, detail);
   });
 
   // --- Where a package lives: the read of the move above (`resolvePackageHome`) ---
@@ -2331,7 +2338,7 @@ export function createPackagesRouter() {
         });
         throw internalError();
       }
-      return c.json(detail, 201);
+      return sendPackageDetail(c, detail, 201);
     },
   );
 

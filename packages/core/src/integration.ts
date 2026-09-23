@@ -905,7 +905,7 @@ export function connectableAuthKeysForAgent(
  * {@link validateAgentIntegrationScopes} accepts anything in the UNION of every
  * auth's catalog ({@link getAvailableScopes}); the connect kickoff, in contrast,
  * is per-auth and refuses a scope the TARGET auth does not declare. Unioning a
- * sibling auth's scope in here relayed it as `required_scopes` on the 412, and
+ * sibling auth's scope in here relayed it as `required_scopes` on the 409, and
  * the kickoff then rejected the platform's own value — a loop nothing in the
  * agent could break. Tool-contributed scopes need no such filter: they are read
  * out of `tools_policy[tool].required_scopes[authKey]`, per-auth by
@@ -1202,7 +1202,7 @@ export type ConnectionResolutionErrorCode =
  * One connection the caller may pick from on `must_choose_connection`.
  *
  * Carries what it takes to TELL the candidates apart, not just to name them.
- * An id alone is opaque: a model reading the 412 has to fetch the connection
+ * An id alone is opaque: a model reading the 409 has to fetch the connection
  * list to learn which uuid is the account the user named before it can retry,
  * and a human reading a log learns nothing at all. The resolver already holds
  * the rows, so denormalizing the three distinguishing fields costs no query.

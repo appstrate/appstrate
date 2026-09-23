@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { STD_RESPONSE_HEADERS } from "../headers.ts";
+import { STD_RESPONSE_HEADERS, ETAG_RESPONSE_HEADERS } from "../headers.ts";
 import { ORG_SETTINGS_PROPERTIES } from "../schemas.ts";
 
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
@@ -129,7 +129,7 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Organization detail with members and invitations",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgDetail" },
@@ -163,12 +163,16 @@ export const organizationsPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
-    put: {
+    patch: {
       operationId: "updateOrganization",
       tags: ["Organizations"],
       summary: "Update organization",
-      description: "Update organization name and/or slug. Owner only.",
-      parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
+      description:
+        "Update organization name and/or slug. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
+      parameters: [
+        { $ref: "#/components/parameters/IfMatch" },
+        { name: "orgId", in: "path", required: true, schema: { type: "string" } },
+      ],
       requestBody: {
         required: true,
         content: {
@@ -187,7 +191,7 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Updated organization — same OrgDetail shape as GET /api/orgs/{orgId}",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgDetail" },
@@ -195,6 +199,7 @@ export const organizationsPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
+        "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -270,7 +275,7 @@ export const organizationsPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "Conflict — this email already holds a pending invitation in the organization. `invitation_id` names it; edit it (PUT /api/orgs/{orgId}/invitations/{invitationId}) to change the role or add a space instead of creating a second token.",
+            "Conflict — this email already holds a pending invitation in the organization. `invitation_id` names it; edit it (PATCH /api/orgs/{orgId}/invitations/{invitationId}) to change the role or add a space instead of creating a second token.",
           content: {
             "application/problem+json": {
               schema: {
@@ -394,12 +399,12 @@ export const organizationsPaths = {
     },
   },
   "/api/orgs/{orgId}/invitations/{invitationId}": {
-    put: {
+    patch: {
       operationId: "changeInvitationRole",
       tags: ["Organizations"],
       summary: "Change invitation role",
       description:
-        "Change the role and/or the space assignments of a pending invitation. Admin or owner required. Omitting `space_assignments` keeps the ones already stored, and the role rules are re-checked against them.",
+        "Change the role and/or the space assignments of a pending invitation. Admin or owner required. Merge semantics (RFC 7396): omitting `space_assignments` keeps the ones already stored, and the role rules are re-checked against them.",
       parameters: [
         { name: "orgId", in: "path", required: true, schema: { type: "string" } },
         { name: "invitationId", in: "path", required: true, schema: { type: "string" } },
@@ -476,7 +481,7 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Organization settings",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgSettings" },
@@ -490,12 +495,16 @@ export const organizationsPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
-    put: {
+    patch: {
       operationId: "updateOrgSettings",
       tags: ["Organizations"],
       summary: "Update organization settings",
-      description: "Update organization settings (merge — only provided fields are updated).",
-      parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
+      description:
+        "Update organization settings. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
+      parameters: [
+        { $ref: "#/components/parameters/IfMatch" },
+        { name: "orgId", in: "path", required: true, schema: { type: "string" } },
+      ],
       requestBody: {
         content: {
           "application/json": {
@@ -517,7 +526,7 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Settings updated",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgSettings" },
@@ -525,6 +534,7 @@ export const organizationsPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
+        "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
       },

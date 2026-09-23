@@ -54,7 +54,7 @@ function refusalMessage(err: ApiError): string | null {
 }
 
 export function onMutationError(err: Error) {
-  // Skip the generic toast for missing_integration_connection (412) —
+  // Skip the generic toast for missing_integration_connection (409) —
   // the RunAgentButton renders MissingConnectionsModal off `runAgent.error`
   // for that case. Showing both a toast AND the modal is noisy and the
   // toast carries strictly less info than the modal.
@@ -407,24 +407,29 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
-    mutationFn: async (body: {
-      manifest: Record<string, unknown>;
-      /** Legacy API content field; the editor sends ordered file operations. */
-      content?: string;
-      operations?: import("../lib/package-file-tree").PackageFileWriteOperation[];
-      lock_version: number;
-    }): Promise<{ id: string; lock_version: number }> => {
-      const { data } = await client.PUT(`/api/packages/${segment}/{scope}/{name}`, {
-        params: { path: splitPackageRef(packageId) },
-        // No cast needed: the body's explicit `{manifest, content,
-        // lock_version}` keys satisfy the skill/integration/mcp-server update
-        // operations (generic-object manifest) in the dynamic-path union, so
-        // the assignment typechecks directly.
+    mutationFn: async ({
+      etag,
+      body,
+    }: {
+      /** The draft version the edit is based on: sent as `If-Match`. */
+      etag: string;
+      body: {
+        manifest: Record<string, unknown>;
+        /** Legacy API content field; the editor sends ordered file operations. */
+        content?: string;
+        operations?: import("../lib/package-file-tree").PackageFileWriteOperation[];
+      };
+    }): Promise<{ id: string; etag: string | null }> => {
+      const { data, response } = await client.PATCH(`/api/packages/${segment}/{scope}/{name}`, {
+        params: { path: splitPackageRef(packageId), header: { "If-Match": etag } },
+        // No cast needed: the body's explicit `{manifest, content}` keys
+        // satisfy the skill/integration/mcp-server update operations
+        // (generic-object manifest) in the dynamic-path union.
         body,
       });
-      // 200 → the updated package resource, bare (issue #657). The resource
-      // carries the NEW `lock_version` optimistic-lock token.
-      return { id: data!.id, lock_version: data!.lock_version ?? 0 };
+      // 200 → the updated package resource, bare (issue #657); its `ETag` is
+      // the version THIS save produced, the base of the next one.
+      return { id: data!.id, etag: response.headers.get("ETag") };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: packageKeys.all });

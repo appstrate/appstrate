@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { etagVersion, ifMatch } from "../../helpers/etag.ts";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { zipSync } from "fflate";
 import { getTestApp } from "../../helpers/app.ts";
@@ -555,9 +556,9 @@ describe("Packages API", () => {
     async function detail(
       headers: Record<string, string>,
       query = "",
-    ): Promise<{ status: number; body: any }> {
+    ): Promise<{ status: number; body: any; etag: string | null }> {
       const res = await app.request(`/api/packages/skills/${id}${query}`, { headers });
-      return { status: res.status, body: await res.json() };
+      return { status: res.status, body: await res.json(), etag: res.headers.get("ETag") };
     }
 
     it("serves the PUBLISHED definition to a reader who cannot write, with no ?version", async () => {
@@ -660,12 +661,11 @@ describe("Packages API", () => {
       const owner = { ...authHeaders(ctx), "X-Space-Id": homeId };
       const current = await detail(owner, "?version=draft");
       const res = await app.request(`/api/packages/skills/${id}`, {
-        method: "PUT",
-        headers: { ...owner, "Content-Type": "application/json" },
+        method: "PATCH",
+        headers: { ...owner, "Content-Type": "application/json", "If-Match": current.etag! },
         body: JSON.stringify({
           content: EDITED_BODY,
           manifest: draftManifest,
-          lock_version: current.body.lock_version,
         }),
       });
       const body = (await res.json()) as any;
@@ -744,11 +744,12 @@ describe("Packages API", () => {
       });
 
       expect(res.status).toBe(201);
-      // Bare created resource (issue #657): `id` + `lock_version` are resource
-      // state; no `packageId`/`message` envelope.
+      // Bare created resource (issue #657): `id` is resource state, the draft
+      // version its ETag; no `packageId`/`message` envelope.
       const body = (await res.json()) as any;
       expect(body.id).toBe("@pkgorg/new-agent");
-      expect(body.lock_version).toBeNumber();
+      expect(body.lock_version).toBeUndefined();
+      expect(etagVersion(res)).toBeNumber();
       expect(body.packageId).toBeUndefined();
       expect(body.message).toBeUndefined();
 
@@ -944,7 +945,7 @@ describe("Packages API", () => {
   });
 
   // ═══════════════════════════════════════════════
-  // POST/PUT /api/packages/integrations — JSON-body manifest editor
+  // POST/PATCH /api/packages/integrations — JSON-body manifest editor
   // ═══════════════════════════════════════════════
 
   describe("POST /api/packages/integrations", () => {
@@ -994,7 +995,7 @@ describe("Packages API", () => {
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
       expect(body.id).toBe("@pkgorg/new-integration");
-      expect(body.lock_version).toBeNumber();
+      expect(etagVersion(res)).toBeNumber();
       expect(body.packageId).toBeUndefined();
 
       await assertDbHas(packages, eq(packages.id, "@pkgorg/new-integration"));
@@ -1023,29 +1024,29 @@ describe("Packages API", () => {
       expect(res.status).toBe(400);
     });
 
-    it("updates an integration manifest with lock_version", async () => {
+    it("updates an integration manifest under If-Match", async () => {
       const createRes = await app.request("/api/packages/integrations", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ manifest: remoteIntegrationManifest("@pkgorg/edit-integration") }),
       });
-      const created = (await createRes.json()) as any;
 
       const res = await app.request("/api/packages/integrations/@pkgorg/edit-integration", {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(etagVersion(createRes)),
+        }),
         body: JSON.stringify({
           manifest: {
             ...remoteIntegrationManifest("@pkgorg/edit-integration"),
             display_name: "Renamed Integration",
           },
-          lock_version: created.lock_version,
         }),
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.lock_version).toBeGreaterThan(created.lock_version);
+      expect(etagVersion(res)).toBeGreaterThan(etagVersion(createRes));
     });
 
     // `source_code` was dropped from the JSON-body schemas once the last reader
@@ -1078,18 +1079,19 @@ describe("Packages API", () => {
       });
 
       expect(createRes.status).toBe(201);
-      const created = (await createRes.json()) as any;
 
       const updateRes = await app.request("/api/packages/integrations/@pkgorg/legacy-source-code", {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(etagVersion(createRes)),
+        }),
         body: JSON.stringify({
           manifest: {
             ...remoteIntegrationManifest("@pkgorg/legacy-source-code"),
             display_name: "Renamed Integration",
           },
           source_code: "export const stillUnused = true;",
-          lock_version: created.lock_version,
         }),
       });
 
@@ -1097,35 +1099,35 @@ describe("Packages API", () => {
 
       // The control for that refusal, and the only place this file pins that
       // `.strict()` left the ordinary update path alone: the same body MINUS
-      // the retired key is a 200. The refused PUT wrote nothing, so it still
-      // carries the `lock_version` the create returned.
+      // the retired key is a 200. The refused PATCH wrote nothing, so the ETag
+      // the create returned still matches.
       const acceptedUpdate = await app.request(
         "/api/packages/integrations/@pkgorg/legacy-source-code",
         {
-          method: "PUT",
-          headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+          method: "PATCH",
+          headers: authHeaders(ctx, {
+            "Content-Type": "application/json",
+            ...ifMatch(etagVersion(createRes)),
+          }),
           body: JSON.stringify({
             manifest: {
               ...remoteIntegrationManifest("@pkgorg/legacy-source-code"),
               display_name: "Renamed Integration",
             },
-            lock_version: created.lock_version,
           }),
         },
       );
 
       expect(acceptedUpdate.status).toBe(200);
-      expect(((await acceptedUpdate.json()) as any).lock_version).toBeGreaterThan(
-        created.lock_version,
-      );
+      expect(etagVersion(acceptedUpdate)).toBeGreaterThan(etagVersion(createRes));
     });
   });
 
   // ═══════════════════════════════════════════════
-  // PUT /api/packages/agents/:scope/:name — update agent (admin only)
+  // PATCH /api/packages/agents/:scope/:name — update agent (admin only)
   // ═══════════════════════════════════════════════
 
-  describe("PUT /api/packages/agents/:scope/:name", () => {
+  describe("PATCH /api/packages/agents/:scope/:name", () => {
     it("updates an agent with valid manifest and lockVersion", async () => {
       const agent = await seedAgent({
         id: "@pkgorg/update-agent",
@@ -1134,8 +1136,11 @@ describe("Packages API", () => {
       });
 
       const res = await app.request("/api/packages/agents/@pkgorg/update-agent", {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(agent.lockVersion),
+        }),
         body: JSON.stringify({
           manifest: {
             name: "@pkgorg/update-agent",
@@ -1146,18 +1151,62 @@ describe("Packages API", () => {
             description: "Updated agent",
           },
           content: "Updated prompt content.",
-          lock_version: agent.lockVersion,
         }),
       });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.id).toBe("@pkgorg/update-agent");
-      expect(body.lock_version).toBeGreaterThan(agent.lockVersion!);
+      expect(etagVersion(res)).toBeGreaterThan(agent.lockVersion!);
       expect(body.packageId).toBeUndefined();
     });
 
-    it("returns 400 when lockVersion is missing", async () => {
+    it("round-trips the draft ETag: GET → PATCH → the old tag is stale, `*` is not", async () => {
+      await seedAgent({ id: "@pkgorg/etag-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const url = "/api/packages/agents/@pkgorg/etag-agent";
+      const read = await app.request(url, { headers: authHeaders(ctx) });
+      const etag = read.headers.get("ETag")!;
+      expect(etag).toMatch(/^"\d+"$/);
+      const save = (ifMatchHeader: string, content: string) =>
+        app.request(url, {
+          method: "PATCH",
+          headers: authHeaders(ctx, {
+            "Content-Type": "application/json",
+            "If-Match": ifMatchHeader,
+          }),
+          body: JSON.stringify({
+            manifest: {
+              name: "@pkgorg/etag-agent",
+              version: "0.2.0",
+              type: "agent",
+              schema_version: "0.1",
+              display_name: "ETag Agent",
+              description: "Saved under If-Match",
+            },
+            content,
+          }),
+        });
+
+      const first = await save(etag, "first");
+      expect(first.status).toBe(200);
+      const next = first.headers.get("ETag")!;
+      expect(next).not.toBe(etag);
+      // The GET agrees with the write's own ETag.
+      expect((await app.request(url, { headers: authHeaders(ctx) })).headers.get("ETag")).toBe(
+        next,
+      );
+
+      const stale = await save(etag, "stale");
+      await expectProblem(stale, 412, { code: "precondition_failed" });
+      expect(stale.headers.get("ETag")).toBe(next);
+      expect(
+        ((await (await app.request(url, { headers: authHeaders(ctx) })).json()) as any).prompt,
+      ).toBe("first");
+
+      expect((await save("*", "forced")).status).toBe(200);
+    });
+
+    it("returns 428 when If-Match is missing", async () => {
       await seedAgent({
         id: "@pkgorg/no-lock-agent",
         orgId: ctx.orgId,
@@ -1165,7 +1214,7 @@ describe("Packages API", () => {
       });
 
       const res = await app.request("/api/packages/agents/@pkgorg/no-lock-agent", {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           manifest: {
@@ -1174,19 +1223,19 @@ describe("Packages API", () => {
             type: "agent",
             schema_version: "0.1",
             display_name: "No Lock Agent",
-            description: "No lockVersion",
+            description: "No If-Match",
           },
           content: "content",
         }),
       });
 
-      expect(res.status).toBe(400);
+      await expectProblem(res, 428, { code: "precondition_required" });
     });
 
     it("returns 404 for non-existent agent", async () => {
       const res = await app.request("/api/packages/agents/@pkgorg/ghost-agent", {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        method: "PATCH",
+        headers: authHeaders(ctx, { "Content-Type": "application/json", ...ifMatch(1) }),
         body: JSON.stringify({
           manifest: {
             name: "@pkgorg/ghost-agent",
@@ -1197,7 +1246,6 @@ describe("Packages API", () => {
             description: "Ghost",
           },
           content: "ghost",
-          lock_version: 1,
         }),
       });
 
@@ -1213,8 +1261,8 @@ describe("Packages API", () => {
       });
 
       const res = await app.request("/api/packages/agents/@foreignorg/their-agent", {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        method: "PATCH",
+        headers: authHeaders(ctx, { "Content-Type": "application/json", ...ifMatch(1) }),
         body: JSON.stringify({
           manifest: {
             name: "@foreignorg/their-agent",
@@ -1225,7 +1273,6 @@ describe("Packages API", () => {
             description: "Hijack",
           },
           content: "hijack",
-          lock_version: 1,
         }),
       });
 
@@ -1241,8 +1288,11 @@ describe("Packages API", () => {
       });
 
       const res = await app.request("/api/packages/agents/@otherscope/imported-agent", {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(agent.lockVersion),
+        }),
         body: JSON.stringify({
           manifest: {
             name: "@otherscope/imported-agent",
@@ -1253,13 +1303,11 @@ describe("Packages API", () => {
             description: "Edited despite foreign scope",
           },
           content: "edited prompt",
-          lock_version: agent.lockVersion,
         }),
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { lock_version: number };
-      expect(body.lock_version).toBeGreaterThan(agent.lockVersion!);
+      expect(etagVersion(res)).toBeGreaterThan(agent.lockVersion!);
     });
 
     // ── retired `runtime_tools` ids: direction decides ──────────
@@ -1290,8 +1338,11 @@ describe("Packages API", () => {
       });
 
       const res = await app.request("/api/packages/agents/@pkgorg/retired-tool-agent", {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(agent.lockVersion),
+        }),
         body: JSON.stringify({
           manifest: {
             name: "@pkgorg/retired-tool-agent",
@@ -1302,7 +1353,6 @@ describe("Packages API", () => {
             runtime_tools: ["report", "log"],
           },
           content: "Updated prompt.",
-          lock_version: agent.lockVersion,
         }),
       });
 
@@ -1331,11 +1381,13 @@ describe("Packages API", () => {
       // Content-only save: no `manifest` in the body, so the stored draft is
       // carried forward. It must be written back VALIDATED, not raw.
       const res = await app.request(`/api/packages/agents/${id}`, {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(agent.lockVersion),
+        }),
         body: JSON.stringify({
           content: "Only the prompt changed.",
-          lock_version: agent.lockVersion,
         }),
       });
 
@@ -1356,8 +1408,8 @@ describe("Packages API", () => {
       dependencies: Record<string, unknown>,
     ): Promise<Response> {
       return app.request(`/api/packages/agents/${packageId}`, {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        method: "PATCH",
+        headers: authHeaders(ctx, { "Content-Type": "application/json", ...ifMatch(lockVersion) }),
         body: JSON.stringify({
           manifest: {
             name: packageId,
@@ -1368,7 +1420,6 @@ describe("Packages API", () => {
             dependencies,
           },
           content: "Updated prompt.",
-          lock_version: lockVersion,
         }),
       });
     }
@@ -1466,11 +1517,13 @@ describe("Packages API", () => {
       });
 
       const res = await app.request(`/api/packages/agents/${id}`, {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(agent.lockVersion),
+        }),
         body: JSON.stringify({
           content: "Only the prompt changed.",
-          lock_version: agent.lockVersion,
         }),
       });
 
@@ -1721,7 +1774,7 @@ describe("Packages API", () => {
       expect(res.status).toBe(201);
     });
 
-    it("PUT also runs the scope validation", async () => {
+    it("PATCH also runs the scope validation", async () => {
       await seedGmailIntegration();
       const agent = await seedAgent({
         id: "@pkgorg/agent-put",
@@ -1729,8 +1782,11 @@ describe("Packages API", () => {
         createdBy: ctx.user.id,
       });
       const res = await app.request("/api/packages/agents/@pkgorg/agent-put", {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(agent.lockVersion),
+        }),
         body: JSON.stringify({
           manifest: {
             name: "@pkgorg/agent-put",
@@ -1744,7 +1800,6 @@ describe("Packages API", () => {
             integrations_configuration: { [integrationId]: { tools: ["nope"] } },
           },
           content: "Updated prompt",
-          lock_version: agent.lockVersion,
         }),
       });
       expect(res.status).toBe(400);
@@ -1833,7 +1888,7 @@ describe("Packages API", () => {
       expect(frozen).toHaveLength(1);
     });
 
-    it("draft PUT accepts a declared integration with an explicitly empty tool selection", async () => {
+    it("draft PATCH accepts a declared integration with an explicitly empty tool selection", async () => {
       await seedGmailIntegration();
       const agent = await seedAgent({
         id: "@pkgorg/agent-put-empty",
@@ -1841,8 +1896,11 @@ describe("Packages API", () => {
         createdBy: ctx.user.id,
       });
       const res = await app.request("/api/packages/agents/@pkgorg/agent-put-empty", {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(agent.lockVersion),
+        }),
         body: JSON.stringify({
           manifest: {
             name: "@pkgorg/agent-put-empty",
@@ -1854,7 +1912,6 @@ describe("Packages API", () => {
             integrations_configuration: { [integrationId]: { tools: [] } },
           },
           content: "Updated prompt",
-          lock_version: agent.lockVersion,
         }),
       });
       expect(res.status).toBe(200);
@@ -2550,7 +2607,7 @@ describe("Packages API", () => {
       });
     });
 
-    it("moves lock_version when it overwrites an existing package, so a stale editor save is refused", async () => {
+    it("moves the draft version when it overwrites an existing package, so a stale editor save is refused", async () => {
       const enc = (str: string) => new TextEncoder().encode(str);
       const id = "@pkgorg/reimported-skill";
       const manifest = (description: string) => ({
@@ -2581,7 +2638,7 @@ describe("Packages API", () => {
 
       expect((await importArchive(archive("First import.", "First."))).status).toBe(201);
       const before = await app.request(`/api/packages/skills/${id}`, { headers: authHeaders(ctx) });
-      const stale = ((await before.json()) as { lock_version: number }).lock_version;
+      const stale = etagVersion(before);
 
       // A re-import is the later writer: it overwrites the draft wholesale.
       expect(
@@ -2591,14 +2648,13 @@ describe("Packages API", () => {
       // An editor tab holding the pre-import token must be told its save is
       // stale rather than writing its screen over the freshly imported draft.
       const put = await app.request(`/api/packages/skills/${id}`, {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        method: "PATCH",
+        headers: authHeaders(ctx, { "Content-Type": "application/json", ...ifMatch(stale) }),
         body: JSON.stringify({
           content: "---\nname: reimported-skill\ndescription: Stale.\n---\n\nStale.",
-          lock_version: stale,
         }),
       });
-      expect(put.status).toBe(409);
+      expect(put.status).toBe(412);
     });
 
     // The dashboard's resource-section ".afps import" (useUploadPackage) routes
@@ -2956,8 +3012,8 @@ describe("Packages API", () => {
 
   // ═══════════════════════════════════════════════
   // Issue #657 — mutating endpoints return the affected resource BARE (same
-  // shape as the GET detail). No operation envelope: `lock_version` and
-  // `forked_from` are resource state inside the detail DTO.
+  // shape as the GET detail). No operation envelope: `forked_from` is resource
+  // state inside the detail DTO, the draft version its `ETag`.
   // ═══════════════════════════════════════════════
 
   describe("issue #657 — mutating package endpoints return the bare resource", () => {
@@ -2988,8 +3044,9 @@ describe("Packages API", () => {
       expect(body.dependencies).toBeDefined();
       expect(body.input).toBeDefined();
       expect(body.version_count).toBeNumber();
-      // `lock_version` is resource state (draft optimistic-lock token).
-      expect(body.lock_version).toBeNumber();
+      // The draft version rides in the ETag, never in the body.
+      expect(body.lock_version).toBeUndefined();
+      expect(etagVersion(res)).toBeNumber();
       // No operation envelope.
       expect(body.packageId).toBeUndefined();
       expect(body.message).toBeUndefined();
@@ -3041,7 +3098,7 @@ describe("Packages API", () => {
       const body = (await res.json()) as any;
       // Full OrgPackageItemDetail resource, bare.
       expect(body.id).toBe("@pkgorg/res-integration");
-      expect(body.lock_version).toBeNumber();
+      expect(etagVersion(res)).toBeNumber();
       expect(body.manifest).toBeDefined();
       expect(body.version_count).toBeNumber();
       expect(body.has_unarchived_changes).toBeBoolean();
@@ -3050,7 +3107,7 @@ describe("Packages API", () => {
       expect(body.message).toBeUndefined();
     });
 
-    it("PUT update agent returns the bare Agent detail DTO with the new lock_version", async () => {
+    it("PATCH update agent returns the bare Agent detail DTO with the new ETag", async () => {
       const create = await app.request("/api/packages/agents", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
@@ -3059,24 +3116,23 @@ describe("Packages API", () => {
           content: "original prompt",
         }),
       });
-      const created = (await create.json()) as any;
-
       const res = await app.request("/api/packages/agents/@pkgorg/upd-res-agent", {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(etagVersion(create)),
+        }),
         body: JSON.stringify({
           manifest: agentManifest("@pkgorg/upd-res-agent"),
           content: "updated prompt",
-          lock_version: created.lock_version,
         }),
       });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      // Full Agent detail resource, bare. The resource carries the NEW
-      // `lock_version` consumers read back before the next edit.
+      // Full Agent detail resource, bare; its ETag is the NEW draft version.
       expect(body.id).toBe("@pkgorg/upd-res-agent");
-      expect(body.lock_version).toBeGreaterThan(created.lock_version);
+      expect(etagVersion(res)).toBeGreaterThan(etagVersion(create));
       expect(body.dependencies).toBeDefined();
       expect(body.input).toBeDefined();
       // No operation envelope.
@@ -3093,16 +3149,17 @@ describe("Packages API", () => {
           content: "v1 prompt",
         }),
       });
-      const created = (await create.json()) as any;
 
       // Change the draft so a new version is not a no-op.
       await app.request("/api/packages/agents/@pkgorg/ver-res-agent", {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(etagVersion(create)),
+        }),
         body: JSON.stringify({
           manifest: agentManifest("@pkgorg/ver-res-agent"),
           content: "v2 prompt",
-          lock_version: created.lock_version,
         }),
       });
 
@@ -3134,8 +3191,6 @@ describe("Packages API", () => {
           content: "v1 prompt",
         }),
       });
-      const created = (await create.json()) as any;
-
       const res = await app.request(
         "/api/packages/agents/@pkgorg/restore-res-agent/versions/0.1.0/restore",
         {
@@ -3148,18 +3203,17 @@ describe("Packages API", () => {
       const body = (await res.json()) as any;
       // A restore mutates the package draft — the response is the updated
       // PACKAGE resource (Agent detail), bare. The restored version is
-      // reflected in the resource, and the resource carries the package's NEW
-      // `lock_version`.
+      // reflected in the resource, and its ETag is the draft's NEW version.
       expect(body.id).toBe("@pkgorg/restore-res-agent");
       expect(body.version).toBe("0.1.0");
       expect(body.manifest).toBeDefined();
-      expect(body.lock_version).toBeGreaterThan(created.lock_version);
+      expect(etagVersion(res)).toBeGreaterThan(etagVersion(create));
       // No operation envelope.
       expect(body.message).toBeUndefined();
       expect(body.restored_version).toBeUndefined();
     });
 
-    it("POST versions refuses a stale lock_version and cuts the draft it names", async () => {
+    it("POST versions refuses a stale If-Match and cuts the draft it names", async () => {
       const headers = authHeaders(ctx, { "Content-Type": "application/json" });
       const create = await app.request("/api/packages/agents", {
         method: "POST",
@@ -3167,26 +3221,29 @@ describe("Packages API", () => {
         body: JSON.stringify({ manifest: agentManifest("@pkgorg/locked"), content: "v1" }),
       });
       expect(create.status).toBe(201);
-      const read = (await create.json()) as { lock_version: number };
+      const read = create.headers.get("ETag")!;
       const saved = await app.request("/api/packages/agents/@pkgorg/locked", {
-        method: "PUT",
-        headers,
-        body: JSON.stringify({ lock_version: read.lock_version, content: "v2" }),
+        method: "PATCH",
+        headers: { ...headers, "If-Match": read },
+        body: JSON.stringify({ content: "v2" }),
       });
       expect(saved.status).toBe(200);
-      const current = ((await saved.json()) as { lock_version: number }).lock_version;
+      const current = saved.headers.get("ETag")!;
+      expect(current).not.toBe(read);
 
       const stale = await app.request("/api/packages/agents/@pkgorg/locked/versions", {
         method: "POST",
-        headers,
-        body: JSON.stringify({ version: "0.2.0", lock_version: read.lock_version }),
+        headers: { ...headers, "If-Match": read },
+        body: JSON.stringify({ version: "0.2.0" }),
       });
-      await expectProblem(stale, 409, { code: "conflict" });
+      await expectProblem(stale, 412, { code: "precondition_failed" });
+      // The refusal names the version to retry against.
+      expect(stale.headers.get("ETag")).toBe(current);
 
       const cut = await app.request("/api/packages/agents/@pkgorg/locked/versions", {
         method: "POST",
-        headers,
-        body: JSON.stringify({ version: "0.2.0", lock_version: current }),
+        headers: { ...headers, "If-Match": current },
+        body: JSON.stringify({ version: "0.2.0" }),
       });
       expect(cut.status, await cut.clone().text()).toBe(201);
     });
@@ -3228,7 +3285,7 @@ describe("Packages API", () => {
       expect(body.id).toBe("@pkgorg/forkable-agent");
       expect(body.forked_from).toBe("@forksrc/forkable-agent");
       expect(body.manifest).toBeDefined();
-      expect(body.lock_version).toBeDefined();
+      expect(etagVersion(res)).toBeNumber();
       // No operation envelope.
       expect(body.packageId).toBeUndefined();
       expect(body.type).toBeUndefined();
@@ -3275,7 +3332,7 @@ describe("Packages API", () => {
       // Bare forked OrgPackageItem detail DTO.
       expect(body.id).toBe("@pkgorg/forkable-skill");
       expect(body.forked_from).toBe("@forksrc2/forkable-skill");
-      expect(body.lock_version).toBeDefined();
+      expect(etagVersion(res)).toBeNumber();
       // No operation envelope.
       expect(body.packageId).toBeUndefined();
       expect(body.type).toBeUndefined();

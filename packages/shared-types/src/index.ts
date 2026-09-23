@@ -590,8 +590,6 @@ export interface AgentDetail {
   } | null;
   /** Omitted for system agents (the SPA treats absence as "no timestamp"). */
   updatedAt?: string | null;
-  /** Omitted for system agents — absence means "no optimistic-lock token". */
-  lock_version?: number;
   prompt?: string;
   scope: string | null;
   version: string | null;
@@ -764,7 +762,6 @@ export interface OrgPackageItemDetail extends Omit<
   agents: { id: string; display_name: string }[];
   manifest?: Record<string, unknown>;
   manifest_name?: string | null;
-  lock_version?: number;
   version_count?: number;
   has_unarchived_changes?: boolean;
 }

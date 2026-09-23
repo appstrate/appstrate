@@ -162,9 +162,9 @@ export const managersBodySchema = z.object({ user_ids: z.array(z.string().min(1)
 /** Org roles that already hold `billing:*` — see the PUT handler's refusal. */
 const ROLES_WITH_BILLING_MANAGE: ReadonlySet<string> = new Set(ORG_ROLES_WITH_FULL_ACCESS);
 
-/** Wire projection — snake_case, per the platform casing policy. */
+/** Wire projection — snake_case, with the universal `userId` / `createdAt` carve-out. */
 function managerDetail(m: BillingManager) {
-  return { user_id: m.userId, added_by: m.addedBy, created_at: m.createdAt.toISOString() };
+  return { userId: m.userId, added_by: m.addedBy, createdAt: m.createdAt.toISOString() };
 }
 
 /** The platform's list envelope; the set is small and never paginated. */

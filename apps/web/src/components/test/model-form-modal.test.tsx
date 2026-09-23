@@ -236,7 +236,7 @@ describe("ModelFormBody — editing a custom endpoint", () => {
   it("opens on the model the row already names, editable and free-text", () => {
     expect(html).toContain('id="mdl-modelId"');
     expect(html).toContain('id="mdl-label"');
-    // The name is required on a saved row: PUT reads an absent one as "keep",
+    // The name is required on a saved row: PATCH reads an absent one as "keep",
     // so promising a derived one would describe a save that changes nothing.
     expect(html).not.toContain(settingsFr["models.form.labelPlaceholder"]);
   });

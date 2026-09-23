@@ -67,7 +67,7 @@ function spaceWire(fixture: SpaceFixture) {
 export interface DraftFixture {
   /** `SKILL.md` of the working copy. Defaults to the published one. */
   skillMd?: string;
-  /** Optimistic-concurrency counter, half of the draft change token. */
+  /** The draft version, served as its detail `ETag`: half of the draft change token. */
   lockVersion?: number;
   /** File-index `ETag`, the other half. */
   etag?: string;
@@ -344,28 +344,34 @@ export function createSkillServer(
       // ever reached.
       const refusal = draftSelectorRefusal(found, url);
       if (refusal) return refusal;
-      return json({
-        id: found.fixture.id,
-        name: found.name,
-        description: MANIFEST_DESCRIPTION,
-        // Same rule as the file routes: the working copy answers only when the
-        // selector NAMES it, so a resolution that forgets it reads published
-        // metadata and fails on content.
-        content:
-          url.searchParams.get("version") === "draft" ? draftSkillMd(found) : found.fixture.skillMd,
-        source: found.fixture.source ?? "local",
-        version: found.version,
-        manifest: {
-          afps_version: "0.2",
-          type: "skill",
-          name: found.fixture.id,
-          version: found.version,
+      return json(
+        {
+          id: found.fixture.id,
+          name: found.name,
           description: MANIFEST_DESCRIPTION,
+          // Same rule as the file routes: the working copy answers only when the
+          // selector NAMES it, so a resolution that forgets it reads published
+          // metadata and fails on content.
+          content:
+            url.searchParams.get("version") === "draft"
+              ? draftSkillMd(found)
+              : found.fixture.skillMd,
+          source: found.fixture.source ?? "local",
+          version: found.version,
+          manifest: {
+            afps_version: "0.2",
+            type: "skill",
+            name: found.fixture.id,
+            version: found.version,
+            description: MANIFEST_DESCRIPTION,
+          },
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-02T00:00:00.000Z",
         },
-        lock_version: found.fixture.draft.lockVersion ?? 1,
-        createdAt: "2026-01-01T00:00:00.000Z",
-        updatedAt: "2026-01-02T00:00:00.000Z",
-      });
+        200,
+        // The draft version is the detail's ETag, never a body field.
+        { ETag: `"${found.fixture.draft.lockVersion ?? 1}"` },
+      );
     }
 
     const index = path.match(/^\/api\/packages\/(@[^/]+)\/([^/]+)\/files$/);

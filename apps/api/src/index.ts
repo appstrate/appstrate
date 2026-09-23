@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono, type Context } from "hono";
-import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { getEnv } from "@appstrate/env";
 import { recordProcessAnomaly } from "@appstrate/core/telemetry";
@@ -65,6 +64,7 @@ import { getCachedOrgApiVersion } from "./services/organizations.ts";
 import { getAppConfig, initAppConfig } from "./lib/app-config.ts";
 import { applyAuthPipeline, skipAuth } from "./lib/auth-pipeline.ts";
 import type { AppEnv } from "./types/index.ts";
+import { apiCors } from "./lib/cors.ts";
 
 // Fail-fast: validate all env vars at startup
 const env = getEnv();
@@ -93,7 +93,7 @@ app.use("*", clientIp());
 // Middleware
 const trustedOrigins = env.TRUSTED_ORIGINS;
 
-app.use("*", cors({ origin: trustedOrigins, credentials: true }));
+app.use("*", apiCors(trustedOrigins));
 
 // Global body-size cap. Skipped for the public FS upload sink — that route
 // authenticates via a signed token whose payload encodes its own size limit
@@ -171,6 +171,7 @@ let shuttingDown = false;
 // arriving mid-shutdown would otherwise slip past the gate and race the
 // in-flight wait, leaving a half-applied write behind.
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const SHUTDOWN_RETRY_AFTER_SECONDS = 5;
 
 app.use("*", async (c, next) => {
   if (shuttingDown && MUTATING_METHODS.has(c.req.method)) {
@@ -179,6 +180,9 @@ app.use("*", async (c, next) => {
       code: "shutting_down",
       title: "Service Unavailable",
       detail: "Server is shutting down",
+      // Short on purpose: behind a load balancer the retry lands on a live
+      // replica (or this one's successor) within seconds, not after the drain.
+      retryAfter: SHUTDOWN_RETRY_AFTER_SECONDS,
     });
   }
   return next();

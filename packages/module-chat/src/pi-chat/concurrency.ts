@@ -10,7 +10,7 @@
  * connection + MCP client) and exhaust memory/CPU for the whole instance. This
  * is a simple counting gate (one counter per instance); when saturated
  * `acquirePiChatSlot()` returns `null` so the engine can 429
- * (see {@link chatCapacityResponse}) and the client backs off instead of piling
+ * (see {@link chatCapacityError}) and the client backs off instead of piling
  * on more sessions.
  *
  * The cap is `CHAT_PI_MAX_CONCURRENCY` (positive integer, default 6), parsed
@@ -19,10 +19,12 @@
  * have been validated.
  */
 
+import { ApiError } from "@appstrate/core/api-errors";
 import { getChatEnv } from "../env.ts";
 import { logger } from "../logger.ts";
 
 const DEFAULT_MAX_CONCURRENCY = 6;
+const CHAT_CAPACITY_RETRY_AFTER_SECONDS = 5;
 
 /** A reserved session slot. `release()` is idempotent (safe to call twice). */
 export interface PiChatSlot {
@@ -158,31 +160,20 @@ export function warnIfDefaultChatConcurrency(): boolean {
 }
 
 /**
- * RFC 9457 `429` returned (instead of a stream) when the Pi chat engine is at
- * its session cap, so the client backs off rather than the instance spinning up
+ * RFC 9457 `429` thrown (instead of a stream) when the Pi chat engine is at its
+ * session cap, so the client backs off rather than the instance spinning up
  * unbounded sessions.
  */
-export function chatCapacityResponse(): Response {
-  const retryAfterSeconds = 5;
+export function chatCapacityError(): ApiError {
   // The one line an operator needs to size the cap: a refusal is only
   // actionable next to the ceiling that produced it and how often it has been
   // hit. Logged here rather than at the call site so every refusal reports it.
   logger.warn("chat at capacity — turn refused", piChatConcurrencyStats());
-  return new Response(
-    JSON.stringify({
-      type: "https://docs.appstrate.dev/errors/chat-capacity",
-      title: "Too Many Requests",
-      status: 429,
-      detail: `Le service de chat est temporairement saturé. Réessayez dans quelques instants.`,
-      code: "chat_capacity",
-      retry_after: retryAfterSeconds,
-    }),
-    {
-      status: 429,
-      headers: {
-        "content-type": "application/problem+json",
-        "retry-after": String(retryAfterSeconds),
-      },
-    },
-  );
+  return new ApiError({
+    status: 429,
+    code: "chat_capacity",
+    title: "Too Many Requests",
+    detail: "The chat service is temporarily at capacity. Retry shortly.",
+    retryAfter: CHAT_CAPACITY_RETRY_AFTER_SECONDS,
+  });
 }

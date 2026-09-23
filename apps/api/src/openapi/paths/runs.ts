@@ -121,7 +121,7 @@ const canonicalRunsPaths = {
                 connection_overrides: {
                   type: "object",
                   description:
-                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
+                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 409 `missing_integration_connection` if the chosen id is not accessible to the actor.',
                   additionalProperties: { type: "string", minLength: 1 },
                 },
                 dependency_overrides: {
@@ -239,7 +239,7 @@ const canonicalRunsPaths = {
         },
         "409": {
           description:
-            "Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference)",
+            "Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference), or a declared integration has no usable connection for the caller (`missing_integration_connection` — one `errors[]` item per integration, `must_choose_connection` items carrying `candidate_connections`)",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
@@ -266,14 +266,6 @@ const canonicalRunsPaths = {
             'provisioned; distinct codes so a client can tell "one file too big" from "too ' +
             'many files".',
           headers: REQUEST_ID_ONLY_HEADERS,
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-        "412": {
-          description: "Missing integration connection (`missing_integration_connection`)",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -474,7 +466,7 @@ const canonicalRunsPaths = {
                 connection_overrides: {
                   type: "object",
                   description:
-                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
+                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 409 `missing_integration_connection` if the chosen id is not accessible to the actor.',
                   additionalProperties: { type: "string", minLength: 1 },
                 },
                 modelId: { type: ["string", "null"] },
@@ -627,14 +619,6 @@ const canonicalRunsPaths = {
             'provisioned; distinct codes so a client can tell "one file too big" from "too ' +
             'many files".',
           headers: REQUEST_ID_ONLY_HEADERS,
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-        "412": {
-          description: "Missing integration connection (`missing_integration_connection`)",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -1316,14 +1300,6 @@ const canonicalRunsPaths = {
         },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": { $ref: "#/components/responses/RunAdmissionConflict" },
-        "412": {
-          description: "Missing integration connection (`missing_integration_connection`)",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
         "422": { $ref: "#/components/responses/IdempotencyConflict" },
         "429": { $ref: "#/components/responses/RateLimited" },
         "500": { $ref: "#/components/responses/InternalServerError" },

@@ -120,7 +120,7 @@ export function useCreateWebhook() {
 
 export function useUpdateWebhook() {
   const invalidate = useInvalidateWebhooks();
-  return $api.useMutation("put", "/api/webhooks/{id}", { onSuccess: invalidate });
+  return $api.useMutation("patch", "/api/webhooks/{id}", { onSuccess: invalidate });
 }
 
 export function useDeleteWebhook() {

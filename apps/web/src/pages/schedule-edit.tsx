@@ -66,13 +66,13 @@ export function ScheduleEditPage() {
           // shows the real value (not a "default" placeholder). Submit still
           // only sends it when it differs from currentActor.
           actor: {
-            user_id: schedule.userId ?? undefined,
-            end_user_id: schedule.endUserId ?? undefined,
+            userId: schedule.userId ?? undefined,
+            endUserId: schedule.endUserId ?? undefined,
           },
         }}
         currentActor={{
-          user_id: schedule.userId ?? undefined,
-          end_user_id: schedule.endUserId ?? undefined,
+          userId: schedule.userId ?? undefined,
+          endUserId: schedule.endUserId ?? undefined,
         }}
         inputWrapper={deps.inputWrapper}
         persistedModelId={deps.persistedModelId}

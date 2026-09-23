@@ -780,7 +780,7 @@ async function warnOnUnserveableApiVersionPins(): Promise<void> {
   logger.error(
     `${offenders.length} organization(s) are pinned to an API version this build cannot serve. ` +
       `Every org-scoped route will answer 400 unsupported_api_version for them until the pin is ` +
-      `repaired (PUT /api/orgs/:orgId/settings with a supported api_version).`,
+      `repaired (PATCH /api/orgs/:orgId/settings with a supported api_version).`,
     {
       supportedVersions: supported,
       currentVersion: CURRENT_API_VERSION,

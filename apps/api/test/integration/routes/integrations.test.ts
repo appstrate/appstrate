@@ -668,7 +668,7 @@ describe("api_key connection flow", () => {
     // connection's id on the fields flow so the write UPDATEs that row instead
     // of INSERTing a duplicate (single-writer contract). Without the route
     // threading connection_id into the strategy ctx, a non-OAuth renew left the
-    // dead row behind and the 412 modal never cleared its CTA.
+    // dead row behind and the 409 modal never cleared its CTA.
     const first = await app.request("/api/integrations/@myorg/gmail/auths/api/connect/fields", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
