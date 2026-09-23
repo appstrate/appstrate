@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.61] - 2026-09-23
+
 ### Added
 
 - **Edit a package in a local folder with `appstrate packages`** (#1499). `pull`
