@@ -852,6 +852,99 @@ describe("realtime SSE routes (integration)", () => {
     });
   });
 
+  // ── connection_update under the credential ceiling ─────────
+  //
+  // The channel carries the caller's own connection rows, which the HTTP
+  // surface caps with `integrations:read`; a key opened with `runs:read` alone
+  // must not receive them.
+  describe("owner-row channels under the credential ceiling", () => {
+    async function openStream(token?: string): Promise<Response> {
+      const res = token
+        ? await app.request(`/api/realtime/runs?token=${token}`)
+        : await sseRequest("/api/realtime/runs", ctx);
+      expect(res.status).toBe(200);
+      await wait();
+      return res;
+    }
+
+    async function keyToken(scopes: string[]): Promise<string> {
+      const key = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes,
+      });
+      return key.rawKey;
+    }
+
+    const fireConnection = () =>
+      pgNotify("connection_update", {
+        operation: "UPDATE",
+        id: "conn-ceiling",
+        integration_package_id: "@x/svc",
+        auth_key: "primary",
+        user_id: ctx.user.id,
+        end_user_id: null,
+        space_id: ctx.defaultSpaceId,
+        needs_reconnection: true,
+        deleted: false,
+      });
+    const fireChat = () =>
+      pgNotify("chat_session_update", {
+        session_id: "chs-ceiling",
+        org_id: ctx.orgId,
+        user_id: ctx.user.id,
+      });
+
+    /** One lead frame then one run frame, both the caller's own. */
+    async function fireBoth(lead: () => Promise<void>): Promise<void> {
+      await lead();
+      await wait();
+      await pgNotify("run_update", {
+        org_id: ctx.orgId,
+        space_id: ctx.defaultSpaceId,
+        id: run.id,
+        user_id: ctx.user.id,
+        status: "running",
+        package_id: agentPkg.id,
+      });
+    }
+
+    async function firstEvent(res: Response, lead = fireConnection): Promise<string> {
+      await fireBoth(lead);
+      const events = await collectSSEEvents(res.body!, 1, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
+      return events[0]!.event;
+    }
+
+    it("a key without integrations:read does not receive it", async () => {
+      const res = await openStream(await keyToken(["runs:read"]));
+      // The run frame arrives first: the connection frame was dropped, not delayed.
+      expect(await firstEvent(res)).toBe("run_update");
+    });
+
+    it("a key with integrations:read receives it", async () => {
+      const res = await openStream(await keyToken(["runs:read", "integrations:read"]));
+      expect(await firstEvent(res)).toBe("connection_update");
+    });
+
+    it("a cookie session, which carries no ceiling, receives it", async () => {
+      expect(await firstEvent(await openStream())).toBe("connection_update");
+    });
+
+    // `chat:read` is never key-grantable, so no key receives chat signals.
+    it("chat_session_update: a key never receives it", async () => {
+      const res = await openStream(await keyToken(["runs:read", "integrations:read"]));
+      expect(await firstEvent(res, fireChat)).toBe("run_update");
+    });
+
+    it("chat_session_update: a cookie session receives it", async () => {
+      expect(await firstEvent(await openStream(), fireChat)).toBe("chat_session_update");
+    });
+  });
+
   // ── ?channels= subscription filter ──────────────────────────
 
   describe("?channels= subscription filter", () => {

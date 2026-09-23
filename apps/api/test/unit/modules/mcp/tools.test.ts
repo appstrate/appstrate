@@ -459,6 +459,15 @@ describe("describe_operation", () => {
       expect(body.required_permissions).toEqual([]);
       expect(body.granted).toBe(true);
     });
+
+    it("names a credential-ceiling requirement in its own field, never filtering on it", async () => {
+      // `DELETE /api/me/connections/{id}` is authorized by ownership: only a
+      // delegated credential's scopes are asked, so a caller holding nothing is granted.
+      const body = await describeOp(["mcp:read"], "deleteMyConnection");
+      expect(body.ceiling_permissions).toEqual(["integrations:disconnect"]);
+      expect(body.required_permissions).toEqual([]);
+      expect(body.granted).toBe(true);
+    });
   });
 
   it("throws InvalidParams (-32602) on an unknown operationId — protocol error, not tool error", async () => {

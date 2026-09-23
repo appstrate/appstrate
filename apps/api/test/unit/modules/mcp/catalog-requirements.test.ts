@@ -228,12 +228,6 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
     why: "the person's own membership, dashboard session only (`orgRole`); last owner decided under lock",
   },
 
-  // ── No org data at all.
-  {
-    path: "/api/models/openrouter",
-    why: "proxies OpenRouter's public model catalog, rate-limited; nothing of the org's",
-  },
-
   // ── The row the handler loads decides, and refuses with the route's own error.
   // Method-precise: the other methods at these paths carry a mounted guard.
   ...rowDecided("the caller's own org role (owner/admin), read in the handler", [
@@ -369,7 +363,41 @@ describe("requirement anchors", () => {
     expect(op("createSpace").requirement).toEqual({
       requirements: ["spaces:write"],
       targetSpaceRequirements: [],
+      ceilingRequirements: [],
     });
+  });
+
+  it("reads the ownership-authorized routes as ceiling requirements, never as grants", () => {
+    // A session holder without the permission still acts on its own rows, so
+    // these must not filter; only a delegated credential's scopes are asked.
+    const expected = {
+      listMyConnections: req(["integrations:read"]),
+      deleteMyConnection: req(["integrations:disconnect"]),
+      getMyConnectionHandoff: req(["integrations:disconnect"]),
+      listMyIntegrationPins: req(["integrations:read"]),
+      upsertMyIntegrationPin: req(["integrations:connect"]),
+      deleteMyIntegrationPin: req(["integrations:connect"]),
+      listNotifications: req(["runs:read|runs:read-all"]),
+      getUnreadNotificationCount: req(["runs:read|runs:read-all"]),
+      getUnreadCountsByAgent: req(["runs:read|runs:read-all"]),
+      markNotificationReadById: req(["runs:read|runs:read-all"]),
+      markNotificationRead: req(["runs:read|runs:read-all"]),
+      markAllNotificationsRead: req(["runs:read|runs:read-all"]),
+      createUpload: req(["agents:run"]),
+    };
+    const ceilings = Object.fromEntries(
+      Object.keys(expected).map((operationId) => [operationId, op(operationId).requirement]),
+    );
+    expect(ceilings).toEqual(expected);
+    expect(isGranted(op("deleteMyConnection").requirement, new Set())).toBe(true);
+
+    function req(ceilingRequirements: string[]) {
+      return { requirements: [], targetSpaceRequirements: [], ceilingRequirements };
+    }
+  });
+
+  it("reads the OpenRouter catalogue proxy as a `models:read` grant, like the model list", () => {
+    expect(op("searchOpenRouterModels").requirement.requirements).toEqual(["models:read"]);
   });
 
   it("reads `listSpaceMembers` as a requirement of the space the PATH names", () => {
