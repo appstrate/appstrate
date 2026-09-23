@@ -44,6 +44,7 @@ import {
 import { PROJECT_FILE_RELPATH } from "../lib/install/project.ts";
 import { listOrgs } from "../lib/orgs.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
+import { DRAFT_SELECTOR, splitPackageSpec } from "../lib/package-spec.ts";
 import { ExplainedError, formatError } from "../lib/ui.ts";
 import {
   draftRefusal,
@@ -57,7 +58,6 @@ import {
   diffFiles,
   draftStateOf,
   folderManifest,
-  DRAFT_SELECTOR,
   forgetLock,
   isIgnoredPath,
   listFolderFiles,
@@ -69,7 +69,6 @@ import {
   readSpaceOf,
   recordLock,
   resolvePackage,
-  splitPackageSpec,
   toOperations,
   typeOfFolder,
   type DraftDetail,
@@ -733,7 +732,7 @@ export async function packagesPushCommand(
         );
       }
       if (err instanceof ApiError) {
-        throw new ExplainedError(`Push of ${packageId} refused: ${describeProblem(err)}`, {
+        throw new Error(`Push of ${packageId} refused: ${describeProblem(err)}`, {
           cause: err,
         });
       }
@@ -814,7 +813,7 @@ async function createPackage(
     });
   } catch (err) {
     if (err instanceof ApiError) {
-      throw new ExplainedError(`Creating ${packageId} was refused: ${describeProblem(err)}`, {
+      throw new Error(`Creating ${packageId} was refused: ${describeProblem(err)}`, {
         cause: err,
       });
     }
@@ -1048,7 +1047,7 @@ function publishRefusal(err: ApiError, packageId: string, target: string | undef
         cause: err,
       });
     default:
-      return new ExplainedError(`Publishing ${packageId} was refused: ${describeProblem(err)}`, {
+      return new Error(`Publishing ${packageId} was refused: ${describeProblem(err)}`, {
         cause: err,
       });
   }

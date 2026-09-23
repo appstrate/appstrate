@@ -313,11 +313,8 @@ export async function withSpinner<T>(
 }
 
 /**
- * An error whose message already says what its cause means: a refusal the CLI
- * translated into what happened and what to do next. {@link formatError} prints
- * the message alone — appending the cause would restate it in the server's
- * words ("…or push --force to replace it. Skill was modified concurrently.
- * Reload and try again."), #1517. The cause stays attached for a debugger.
+ * A refusal the CLI translated: its message says what the cause means, so
+ * {@link formatError} prints it alone (#1517). The cause stays attached.
  */
 export class ExplainedError extends Error {
   constructor(message: string, options: { cause: unknown }) {

@@ -1175,9 +1175,7 @@ function parseSinkTtl(raw: unknown): number | undefined {
   return n;
 }
 
-// `-V, --version` is answered here, from the top level only: registered with
-// commander it would be a program option, parsed after any command word too,
-// and shadow a subcommand's own flag (#1516). See `lib/root-version.ts`.
+// Top-level only — see `lib/root-version.ts`.
 showVersionFlagInHelp(program);
 if (asksForVersion(process.argv.slice(2), valueFlagsOf(program))) {
   process.stdout.write(`${CLI_VERSION}\n`);

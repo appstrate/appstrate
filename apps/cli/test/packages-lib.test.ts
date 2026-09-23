@@ -18,11 +18,11 @@ import {
   readPackageFolder,
   readSpaceOf,
   recordLock,
-  splitPackageSpec,
   toOperations,
   writeOperation,
 } from "../src/lib/packages.ts";
 import { lineDiff } from "../src/commands/packages.ts";
+import { splitPackageSpec } from "../src/lib/package-spec.ts";
 import type { PackageHome } from "@appstrate/shared-types";
 
 const utf8 = (text: string) => new TextEncoder().encode(text);

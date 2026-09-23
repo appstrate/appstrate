@@ -92,11 +92,7 @@ export function formatErrorChain(err: unknown): string {
   return out;
 }
 
-/**
- * Whether `text` already quotes `message` whole — not inside a longer word, so
- * a cause `"timeout"` is still written after `"2 timeouts"`. An empty message
- * has nothing to add.
- */
+/** Whether `text` quotes `message` as whole words ("timeout" is not in "2 timeouts"). */
 function carries(text: string, message: string): boolean {
   if (message.length === 0) return true;
   const word = /[\p{L}\p{N}_]/u;
