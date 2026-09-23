@@ -152,6 +152,16 @@ export async function onOrgDelete(orgId: string): Promise<void> {
  * the Stripe customer's email.
  */
 export async function onOrgMemberRemove(orgId: string, userId: string): Promise<void> {
+  // Awaited: this IS the grant, and it must be gone before the platform answers.
   await deleteBillingManagers(orgId, userId);
-  await resyncOwnerFallbackToStripe(orgId);
+  // Not awaited: the platform awaits this handler inside the leave/remove
+  // request, and a Stripe round-trip has no business on that latency. The
+  // resync is best-effort anyway (the next checkout re-sends the address), so
+  // the catch only has to keep a failure out of the unhandled-rejection path.
+  void resyncOwnerFallbackToStripe(orgId).catch((err: unknown) => {
+    logger.error("Failed to resync the billing contact to Stripe after a member left", {
+      orgId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
 }

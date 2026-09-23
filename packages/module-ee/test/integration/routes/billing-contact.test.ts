@@ -7,6 +7,7 @@ import { seedOrgMembers } from "../../helpers/org-queries.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { resetStripeMock, requests } from "../../helpers/stripe.ts";
 import { resolveBillingRecipients } from "../../../src/emails/recipients.ts";
+import { resyncOwnerFallbackToStripe } from "../../../src/billing/contact.ts";
 import { createCheckoutSession } from "../../../src/stripe/checkout.ts";
 import { useEeTestSeams } from "../../helpers/setup.ts";
 import eeModule from "../../../src/index.ts";
@@ -264,6 +265,10 @@ describe("billing contact", () => {
    * so an owner who was that fallback and leaves must be replaced there too.
    * The platform emits `onOrgMemberRemove` after its commit: the directory
    * seeded below is the org as it stands once the owner is gone.
+   *
+   * The handler fires the resync without awaiting it (it sits on the leave
+   * request's latency), so the positive case polls the Stripe double; the
+   * negative cases await the resync itself, since an absence cannot be polled.
    */
   describe("onOrgMemberRemove", () => {
     const onOrgMemberRemove = eeModule.events!.onOrgMemberRemove!;
@@ -277,13 +282,21 @@ describe("billing contact", () => {
       ]);
     }
 
+    async function waitForCustomerUpdate(timeoutMs = 2000) {
+      const deadline = Date.now() + timeoutMs;
+      while (customerUpdates().length === 0 && Date.now() < deadline) {
+        await Bun.sleep(10);
+      }
+      return customerUpdates();
+    }
+
     it("re-pushes the next owner when the fallback owner leaves", async () => {
       await seedBillingAccount({ orgId, stripeCustomerId: "cus_test_contact" });
       ownerLeft();
 
       await onOrgMemberRemove(orgId, "user-owner");
 
-      const updates = customerUpdates();
+      const updates = await waitForCustomerUpdate();
       expect(updates).toHaveLength(1);
       expect(updates[0]!.path).toBe("/v1/customers/cus_test_contact");
       expect(updates[0]!.body?.email).toBe("owner2@example.com");
@@ -297,7 +310,7 @@ describe("billing contact", () => {
       });
       ownerLeft();
 
-      await onOrgMemberRemove(orgId, "user-owner");
+      await resyncOwnerFallbackToStripe(orgId);
 
       expect(customerUpdates()).toHaveLength(0);
     });
@@ -306,7 +319,7 @@ describe("billing contact", () => {
       await seedBillingAccount({ orgId });
       ownerLeft();
 
-      await onOrgMemberRemove(orgId, "user-owner");
+      await resyncOwnerFallbackToStripe(orgId);
 
       expect(requests.filter((r) => r.path.startsWith("/v1/customers"))).toHaveLength(0);
     });

@@ -599,7 +599,9 @@ Two consumers:
   record, and a Stripe outage must not refuse an address change. The owner
   fallback is live for EE's emails but COPIED into Stripe, so `onOrgMemberRemove`
   also re-pushes it when `billing_email` is NULL and a customer exists: otherwise
-  an owner who was the fallback and left keeps receiving Stripe's receipts.
+  an owner who was the fallback and left keeps receiving Stripe's receipts. That
+  push is fire-and-forget (logged on failure) because the platform awaits the
+  handler inside the leave/remove request; the billing-manager delete is not.
 - **`sendBillingEmail`.** Recipients are
   `billing_email ?? owner emails` ∪ `billing_cc` ∪ emails of billing managers,
   composed by the pure `composeBillingRecipients` in `emails/recipients.ts`
