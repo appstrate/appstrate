@@ -673,10 +673,10 @@ describe("formatCallerContext", () => {
     ).toBe("");
   });
 
-  it("is byte-identical for the same inputs, index and catalogue included", () => {
-    // The whole block is ONE prompt-cache breakpoint. A skills section that
-    // re-ordered itself between two turns of the same session would invalidate
-    // the cached prefix and the conversation history behind it.
+  it("is byte-identical whatever order the resolved pins arrive in", () => {
+    // The whole block is ONE prompt-cache breakpoint, and `requested_skills`
+    // comes back in no particular order: a section that followed the payload's
+    // order would invalidate the cached prefix between two turns of one session.
     const ctx = {
       user: { name: "Ada" },
       org: { role: "member" },
@@ -695,7 +695,8 @@ describe("formatCallerContext", () => {
       },
     };
     const at = new Date("2026-06-25T09:05:00.000Z");
-    expect(formatCallerContext(ctx, { ...opts, now: at })).toBe(
+    const reversed = { ...ctx, requested_skills: [...ctx.requested_skills].reverse() };
+    expect(formatCallerContext(reversed, { ...opts, now: at })).toBe(
       formatCallerContext(ctx, { ...opts, now: at }),
     );
     // And the rendered section is the one the resolver decided, in id order.

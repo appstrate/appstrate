@@ -878,9 +878,6 @@ export async function listActiveSkills(
   return { skills: items, truncated, total };
 }
 
-/** Cap on one {@link resolveSkillsByIds} call; above the chat's pin ceiling, it bounds one query. */
-export const MAX_REQUESTED_SKILLS = 30;
-
 /** Exact-id resolution of skill hints, past the listing's cap; an id that resolves nothing is absent. */
 export async function resolveSkillsByIds(
   scope: SpaceScope,

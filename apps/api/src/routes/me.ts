@@ -66,9 +66,9 @@ import { logger } from "../lib/logger.ts";
 import {
   listRunnableAgents,
   listActiveSkills,
-  MAX_REQUESTED_SKILLS,
   resolveSkillsByIds,
 } from "../services/space-packages.ts";
+import { MAX_REQUESTED_SKILLS } from "../lib/skill-requests.ts";
 import { packageIdSchema } from "@appstrate/core/validation";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { listRecentForActor } from "../services/state/runs.ts";

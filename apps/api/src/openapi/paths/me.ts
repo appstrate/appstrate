@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
-import { MAX_REQUESTED_SKILLS } from "../../services/space-packages.ts";
+import { MAX_REQUESTED_SKILLS } from "../../lib/skill-requests.ts";
 
 /**
  * User-scoped identity routes (`/api/me/*`).

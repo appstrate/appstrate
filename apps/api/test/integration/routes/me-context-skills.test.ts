@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // `GET /api/me/context?skills=`: exact-id resolution of the skills a chat pins.
-// Fixtures pair two skills and an unknown id so a read returning everything or
-// nothing cannot pass.
+// Fixtures pair two resolvable skills with three that must not resolve — unknown,
+// another organization's, and one switched off in this space — so a read that
+// drops the tenant or activation filter, or returns nothing, cannot pass.
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
-import { MAX_REQUESTED_SKILLS } from "../../../src/services/space-packages.ts";
+import { MAX_REQUESTED_SKILLS } from "../../../src/lib/skill-requests.ts";
 import { MAX_PINNED_SKILLS } from "../../../../../packages/module-chat/src/skills.ts";
 
 const app = getTestApp();
@@ -17,6 +18,8 @@ const app = getTestApp();
 const FIRST = "@ctxskill/first";
 const SECOND = "@ctxskill/second";
 const UNKNOWN = "@ctxskill/nope";
+const FOREIGN = "@ctxother/foreign";
+const SWITCHED_OFF = "@ctxskill/off";
 
 interface ContextBody {
   skills: { package_id: string }[];
@@ -53,8 +56,16 @@ describe("GET /api/me/context?skills=", () => {
     await createSkill(ctx, SECOND);
   });
 
-  it("resolves both skills by exact id, and leaves the unknown one out", async () => {
-    const query = encodeURIComponent([UNKNOWN, FIRST, SECOND].join(","));
+  it("resolves this space's active skills by exact id, and nothing else", async () => {
+    await createSkill(await createTestContext(), FOREIGN);
+    await createSkill(ctx, SWITCHED_OFF);
+    const off = await app.request(`/api/spaces/${ctx.defaultSpaceId}/packages/${SWITCHED_OFF}`, {
+      method: "DELETE",
+      headers: authHeaders(ctx),
+    });
+    expect(off.status).toBe(204);
+
+    const query = encodeURIComponent([UNKNOWN, FIRST, FOREIGN, SWITCHED_OFF, SECOND].join(","));
     const res = await app.request(`/api/me/context?skills=${query}`, {
       headers: authHeaders(ctx),
     });

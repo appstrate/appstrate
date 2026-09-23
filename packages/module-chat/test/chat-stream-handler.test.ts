@@ -761,7 +761,7 @@ describe("handleChatStream", () => {
     const RUN_MARKER = "run_and_wait";
     /** The one authoring rule that needs no run — taught on `agents:write` ∧ invoke. */
     const SKILLS_MARKER = "Skills are not run on their own";
-    /** A skill the context block lists only to a turn that may author an agent. */
+    /** A skill the context block lists only to a turn that reads skills (`readsSkills`). */
     const SKILL_ID = "@acme/research";
 
     // A builder as the platform grants it: running needs the MCP pair
@@ -897,7 +897,7 @@ describe("handleChatStream", () => {
       );
       expect(system).not.toContain(SKILLS_MARKER);
       expect(system).not.toContain(SKILL_ID);
-      expect(system).not.toContain("## Skills you can attach to an agent");
+      expect(system).not.toContain("## Skills");
       // Control: the same set plus `mcp:invoke` IS taught both.
       const { system: invoking } = await turn(
         new Set(["mcp:read", "mcp:invoke", "agents:write", "skills:read"]),
