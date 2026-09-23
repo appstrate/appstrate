@@ -449,7 +449,7 @@ export const orgSettingsSchema = z.object({
   // `<type>:share` in the source's home space — without it, personal spaces
   // open "fork it into mine, then share it on" to every reader, i.e. `share`
   // would protect the link and not the content. SKILLS are exempt: the CLI's
-  // skills sync is a local copy by design and its audience is already the space.
+  // `packages sync` is a local copy by design and its audience is already the space.
   restrict_package_copy: z.boolean().optional(),
 });
 

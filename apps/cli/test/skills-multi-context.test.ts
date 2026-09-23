@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { skillsSyncCommand } from "../src/commands/skills.ts";
+import { packagesSyncCommand } from "../src/commands/packages-sync.ts";
 import { getDataDir, getProfile, updateProfile } from "../src/lib/config.ts";
 import { getStatePath } from "../src/lib/skills-sync/state.ts";
 import {
@@ -162,7 +162,7 @@ describe("multi-space skill distribution regressions", () => {
       { seen },
     );
 
-    await skillsSyncCommand({ space: ["spc_library"], source: "draft" }, createMemoryIO().io);
+    await packagesSyncCommand({ space: ["spc_library"], source: "draft" }, createMemoryIO().io);
 
     expect(server.indexReads()).toBe(1);
     expect(server.draftDownloads()).toBe(1);
@@ -180,14 +180,14 @@ describe("multi-space skill distribution regressions", () => {
   it("preserves the full installation and ledger if any selected space listing fails", async () => {
     const fixtures = [{ id: "@acme/retained", skillMd: skillMd("retained") }];
     installSpaces(fixtures, { spc_active: ["@acme/retained"] });
-    await skillsSyncCommand({}, createMemoryIO().io);
+    await packagesSyncCommand({}, createMemoryIO().io);
     const before = await snapshot(pluginRoot());
     const ledger = await readFile(getStatePath(), "utf8");
     installSpaces(fixtures, { spc_active: [], spc_library: [] }, { failingSpace: "spc_library" });
     const { io, stdout } = createMemoryIO();
 
     await expect(
-      skillsSyncCommand({ space: ["spc_active", "spc_library"], printPath: true }, io),
+      packagesSyncCommand({ space: ["spc_active", "spc_library"], printPath: true }, io),
     ).rejects.toBeInstanceOf(ExitError);
 
     expect(stdout()).toBe("");
@@ -204,11 +204,11 @@ describe("multi-space skill distribution regressions", () => {
       { spc_active: ["@acme/shared"], spc_library: ["@acme/shared", "@acme/exclusive"] },
     );
     await updateProfile("default", { syncSpaces: ["spc_active", "spc_library"] });
-    await skillsSyncCommand({}, createMemoryIO().io);
+    await packagesSyncCommand({}, createMemoryIO().io);
     expect(server.downloads()).toBe(2);
 
     await updateProfile("default", { syncSpaces: ["spc_active"] });
-    await skillsSyncCommand({}, createMemoryIO().io);
+    await packagesSyncCommand({}, createMemoryIO().io);
 
     expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual(["shared"]);
     expect(server.downloads()).toBe(2);
@@ -222,13 +222,13 @@ describe("multi-space skill distribution regressions", () => {
       { spc_active: ["@acme/retained"], spc_library: [] },
       { duplicateNames: true },
     );
-    await skillsSyncCommand({}, createMemoryIO().io);
+    await packagesSyncCommand({}, createMemoryIO().io);
     const before = await snapshot(pluginRoot());
     const ledger = await readFile(getStatePath(), "utf8");
     const { io, stderr, stdout } = createMemoryIO();
 
     await expect(
-      skillsSyncCommand({ space: ["Duplicate"], printPath: true }, io),
+      packagesSyncCommand({ space: ["Duplicate"], printPath: true }, io),
     ).rejects.toBeInstanceOf(ExitError);
 
     expect(stderr()).toMatch(/ambiguous/i);
@@ -252,7 +252,7 @@ describe("multi-space skill distribution — access decides the sources", () => 
   it("installs the union of every reachable space, downloading a shared package once", async () => {
     const server = installSpaces(TWO_SPACES, BOTH);
 
-    await skillsSyncCommand({}, createMemoryIO().io);
+    await packagesSyncCommand({}, createMemoryIO().io);
 
     expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual([
       "active-only",
@@ -265,11 +265,11 @@ describe("multi-space skill distribution — access decides the sources", () => 
 
   it("picks up a newly reachable space, and drops one that is taken away", async () => {
     installSpaces(TWO_SPACES, BOTH, { reachable: ["spc_active"] });
-    await skillsSyncCommand({}, createMemoryIO().io);
+    await packagesSyncCommand({}, createMemoryIO().io);
     expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual(["active-only", "shared"]);
 
     installSpaces(TWO_SPACES, BOTH);
-    await skillsSyncCommand({}, createMemoryIO().io);
+    await packagesSyncCommand({}, createMemoryIO().io);
     expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual([
       "active-only",
       "library-only",
@@ -280,7 +280,7 @@ describe("multi-space skill distribution — access decides the sources", () => 
     // the other space still supplies it.
     installSpaces(TWO_SPACES, BOTH, { reachable: ["spc_active"] });
     const { io, stderr } = createMemoryIO();
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
     expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual(["active-only", "shared"]);
     expect(stderr()).not.toMatch(/not accessible/);
   });
@@ -291,7 +291,7 @@ describe("multi-space skill distribution — access decides the sources", () => 
     installSpaces(TWO_SPACES, BOTH, { reachable: ["spc_library"] });
     const { io, stderr } = createMemoryIO();
 
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
 
     expect(stderr()).toContain('Pinned space "spc_active" is not accessible');
     expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual([
@@ -312,7 +312,7 @@ describe("multi-space skill distribution — access decides the sources", () => 
     installSpaces(CLOSED_SPACES, WITH_CLOSED, { unjoined: ["spc_closed"] });
     const { io, stderr } = createMemoryIO();
 
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
 
     expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual([
       "active-only",
@@ -326,7 +326,7 @@ describe("multi-space skill distribution — access decides the sources", () => 
     installSpaces(CLOSED_SPACES, WITH_CLOSED, { withoutSkillsRead: ["spc_closed"] });
     const { io, stderr } = createMemoryIO();
 
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
 
     expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual([
       "active-only",
@@ -341,7 +341,7 @@ describe("multi-space skill distribution — access decides the sources", () => 
     await updateProfile("default", { syncSpaces: ["spc_active", "spc_closed"] });
     const { io, stderr } = createMemoryIO();
 
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
 
     expect(stderr()).toContain('Configured sync space "spc_closed" cannot supply skills');
     expect(stderr()).toContain("you are not a member of it");
@@ -350,13 +350,13 @@ describe("multi-space skill distribution — access decides the sources", () => 
 
   it("fails an explicit --space naming a space this member never joined", async () => {
     installSpaces(CLOSED_SPACES, WITH_CLOSED, { unjoined: ["spc_closed"] });
-    await skillsSyncCommand({}, createMemoryIO().io);
+    await packagesSyncCommand({}, createMemoryIO().io);
     const before = await snapshot(pluginRoot());
     const ledger = await readFile(getStatePath(), "utf8");
     const { io, stderr, stdout } = createMemoryIO();
 
     await expect(
-      skillsSyncCommand({ space: ["spc_closed"], printPath: true }, io),
+      packagesSyncCommand({ space: ["spc_closed"], printPath: true }, io),
     ).rejects.toBeInstanceOf(ExitError);
 
     // Distinct from "no space matches": the id IS listed, it just cannot be used.
@@ -371,7 +371,7 @@ describe("multi-space skill distribution — access decides the sources", () => 
     installSpaces(CLOSED_SPACES, WITH_CLOSED, { unjoined: ["spc_closed"] });
     const { io, stderr } = createMemoryIO();
 
-    await expect(skillsSyncCommand({ space: ["Closed"] }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesSyncCommand({ space: ["Closed"] }, io)).rejects.toBeInstanceOf(ExitError);
 
     expect(stderr()).toContain('Space "Closed" (spc_closed) cannot supply skills');
   });
@@ -382,7 +382,7 @@ describe("multi-space skill distribution — access decides the sources", () => 
     installSpaces(CLOSED_SPACES, WITH_CLOSED, { unjoined: ["spc_active"] });
     const { io, stderr } = createMemoryIO();
 
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
 
     expect(stderr()).toContain('Pinned space "spc_active" is not accessible');
     // The pin supplies nothing any more; the spaces this member did join do.
@@ -401,7 +401,7 @@ describe("multi-space skill distribution — access decides the sources", () => 
     await updateProfile("default", { syncSpaces: { invalid: "spc_library" } });
     const { io, stderr } = createMemoryIO();
 
-    await expect(skillsSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
 
     expect(stderr()).toContain('Invalid syncSpaces for profile "default"');
   });
@@ -409,7 +409,7 @@ describe("multi-space skill distribution — access decides the sources", () => 
   it("narrows to syncSpaces, and skips a configured space that access no longer covers", async () => {
     installSpaces(TWO_SPACES, BOTH);
     await updateProfile("default", { syncSpaces: ["spc_library"] });
-    await skillsSyncCommand({}, createMemoryIO().io);
+    await packagesSyncCommand({}, createMemoryIO().io);
     expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual([
       "library-only",
       "shared",
@@ -418,7 +418,7 @@ describe("multi-space skill distribution — access decides the sources", () => 
     installSpaces(TWO_SPACES, BOTH, { reachable: ["spc_active"] });
     await updateProfile("default", { syncSpaces: ["spc_active", "spc_library"] });
     const { io, stderr } = createMemoryIO();
-    await skillsSyncCommand({}, io);
+    await packagesSyncCommand({}, io);
 
     // A stored id the grant no longer covers is a note, not a run failure: the
     // spaces that ARE reachable still sync.

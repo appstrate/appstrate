@@ -952,7 +952,7 @@ export function holdsHomeAuthority(
  * mandatory and the two rows it exempts are refused above. An owner or admin
  * governs a package by reaching its home space (RBAC spec §13.7).
  *
- * Three exemptions. SKILLS, in both settings: the CLI's skills sync downloads
+ * Three exemptions. SKILLS, in both settings: the CLI's `packages sync` downloads
  * them into a local checkout by design (`apps/cli/src/lib/skills-sync/plan.ts`).
  * RUNS, since a run's bundle is assembled server-side and never travels as a
  * copy. SYSTEM packages, stated HERE rather than left to the home rule — they

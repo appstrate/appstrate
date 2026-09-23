@@ -638,7 +638,7 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
 
     it("refuses a name only a case-insensitive filesystem would merge with another", async () => {
       // `skill.md` beside `SKILL.md` is two entries in a ZIP and ONE file once
-      // `skills sync` writes it to APFS — where `skill.md` lands last by sort
+      // `packages sync` writes it to APFS — where `skill.md` lands last by sort
       // order, so the runtime would load a body this route never gated.
       const res = await saveFiles([{ op: "write", path: "skill.md", text: "not the real one" }]);
       expect(res.status).toBe(400);

@@ -8,7 +8,7 @@ available locally as `/appstrate:<skill>`, kept up to date without a manual
 step. The connected plugin also supplies the organization's MCP endpoint. The
 same sync feeds OpenAI Codex skills; Codex MCP is configured separately.
 
-**How it behaves is documented in `apps/cli/README.md` → `appstrate skills`**
+**How it behaves is documented in `apps/cli/README.md` → `appstrate packages sync`**
 — flags, targets, failure modes, ownership rules, the marketplace command
 string, and the cron / `launchd` fallback. This file records only the choices
 behind it and what is still open.

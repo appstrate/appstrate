@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Server half of `appstrate skills sync`. No bulk endpoint exists, so it is one
+ * Server half of `appstrate packages sync`. No bulk endpoint exists, so it is one
  * list call, one resolution call per skill, and downloads only for what
  * changed; concurrency is capped because the package routes are rate limited.
  */

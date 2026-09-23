@@ -13,7 +13,7 @@ import { FileLockBusyError, withFileLock, type FileLockOptions } from "../file-l
 
 type SyncLockOptions = Omit<FileLockOptions, "busyError">;
 
-const LABEL = "skills sync";
+const LABEL = "packages sync";
 
 export class SyncLockBusyError extends FileLockBusyError {
   constructor() {

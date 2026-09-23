@@ -12,8 +12,8 @@
  *   - `appstrate token`:   print access + refresh token metadata (debug).
  *   - `appstrate org`:     manage the pinned organization (`X-Org-Id`).
  *   - `appstrate space`:   manage the pinned space (`X-Space-Id`).
- *   - `appstrate skills`:  sync the space's skills to Claude Code / Codex.
- *   - `appstrate packages`: pull a package into a folder, push it to its draft, publish it.
+ *   - `appstrate packages`: sync the spaces' skills to Claude Code / Codex; pull a package
+ *                           into a folder, push it to its draft, publish it.
  *   - `appstrate api`:     authenticated HTTP passthrough for coding agents.
  *
  * Global flags:
@@ -51,7 +51,7 @@ import {
   spaceCurrentCommand,
   spaceCreateCommand,
 } from "./commands/space.ts";
-import { skillsSyncCommand } from "./commands/skills.ts";
+import { packagesSyncCommand } from "./commands/packages-sync.ts";
 import {
   packagesPublishCommand,
   packagesPullCommand,
@@ -139,7 +139,7 @@ function collectTarget(val: string, prev: SyncTarget[] | undefined): SyncTarget[
   return [...(prev ?? []), val as SyncTarget];
 }
 
-/** `--source` on `appstrate skills sync`. */
+/** `--source` on `appstrate packages sync`. */
 function parseSkillSource(val: string): SkillSource {
   if (val !== "published" && val !== "draft") {
     throw new InvalidArgumentError(`expected published or draft, got "${val}"`);
@@ -532,13 +532,15 @@ spaceGroup
     });
   });
 
-// ─── `appstrate skills …` — sync org skills to Claude Code / Codex ─────
+// ─── `appstrate packages …` — sync skills to Claude Code / Codex; the authoring loop ─
 
-const skillsGroup = program
-  .command("skills")
-  .description("Sync the skills of every space you belong to, to Claude Code and Codex");
+const packagesGroup = program
+  .command("packages")
+  .description(
+    "Packages on this machine: sync your spaces' skills to Claude Code and Codex; edit a package (skill, agent, integration, MCP server) in a local folder, push it back, publish it",
+  );
 
-skillsGroup
+packagesGroup
   .command("sync")
   .description(
     "Materialize the skills of every space this profile is a member of as Agent Skills directories. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
@@ -568,7 +570,7 @@ skillsGroup
       dryRun?: boolean;
     }) => {
       const globalOpts = program.opts<{ profile?: string }>();
-      await skillsSyncCommand({
+      await packagesSyncCommand({
         profile: globalOpts.profile,
         target: opts.target,
         space: opts.space,
@@ -577,14 +579,6 @@ skillsGroup
         dryRun: opts.dryRun,
       });
     },
-  );
-
-// ─── `appstrate packages …` — the authoring loop: pull, status, push, publish ─
-
-const packagesGroup = program
-  .command("packages")
-  .description(
-    "Edit a package (skill, agent, integration, MCP server) in a local folder: pull its draft, push it back, publish it",
   );
 
 packagesGroup

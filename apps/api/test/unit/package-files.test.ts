@@ -735,7 +735,7 @@ describe("applyFileOperations — the refusals", () => {
       "",
       "a\\b.md",
       "n\0.md",
-      // A `.` segment and a drive prefix: the CLI's `skills sync` materializer
+      // A `.` segment and a drive prefix: the CLI's `packages sync` materializer
       // refuses both when it writes the file, so a `200` here would publish a
       // skill whose sync aborts with "the artifact is malformed".
       "./notes.md",
@@ -923,7 +923,7 @@ describe("applyFileOperations — the refusals", () => {
   });
 
   it("path_conflict: a name that is indistinct from another on the target filesystem", () => {
-    // `skills sync` materializes onto APFS/NTFS, where these pairs are one file:
+    // `packages sync` materializes onto APFS/NTFS, where these pairs are one file:
     // the later one by sort order wins, so the `SKILL.md` the platform gated is
     // not the `SKILL.md` the runtime loads.
     expectRefusal(
