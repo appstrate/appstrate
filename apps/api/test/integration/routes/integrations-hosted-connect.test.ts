@@ -32,6 +32,7 @@ import {
   buildConnectUrl,
   connectClaimsFor,
 } from "../../../src/services/connect/connect-session.ts";
+import { generateOpenSshEd25519PrivateKey } from "../../../src/lib/openssh-key.ts";
 import {
   _setSystemPackagesForTesting,
   type SystemPackageEntry,
@@ -677,6 +678,15 @@ const SSH_FORM_FIELDS = {
 } as const;
 
 /**
+ * The same fields plus a well-formed key the CALLER holds: what the fields
+ * route refuses for `@appstrate/ssh` and accepts for a copy under another id.
+ */
+const CALLER_KEYED_FIELDS = {
+  ...SSH_FORM_FIELDS,
+  private_key: generateOpenSshEd25519PrivateKey(),
+};
+
+/**
  * Mint a session, follow the dispatch, and come back with the page cookie +
  * CSRF nonce. `mint` is the mint body — `{ connection_id }` for a reconnect.
  */
@@ -783,12 +793,7 @@ describe("hosted connect portal — credential provisioning", () => {
    * the pair. Any credential named in `provides` is refused at the door.
    */
   it("refuses a caller-supplied private_key on the programmatic import", async () => {
-    const res = await importFields({
-      private_key: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n-----END OPENSSH PRIVATE KEY-----\n",
-      host: "ssh.example.test",
-      user: "agent",
-      host_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5",
-    });
+    const res = await importFields(CALLER_KEYED_FIELDS);
     expect(res.status).toBe(400);
     expect(JSON.stringify(await res.json())).toMatch(/private_key.*minted by the platform/);
 
@@ -890,9 +895,27 @@ describe("hosted connect portal — the same manifest under another package id",
     // here nothing fills `private_key`, so `required` refuses it.
     const res = await submitConnectForm(ctx, "@myorg/ssh-fork", "primary", SSH_FORM_FIELDS);
     expect(res.status).toBe(400);
+    expect(JSON.stringify(await res.json())).toMatch(/declared schema:.*private_key/);
 
     const rows = await db.select().from(integrationConnections);
     expect(rows).toHaveLength(0);
+  });
+
+  it("accepts a caller-held private_key on the programmatic import", async () => {
+    // The body `@appstrate/ssh` refuses as platform-minted: on a copy it is
+    // an ordinary custom-auth bag.
+    const res = await app.request(
+      "/api/integrations/@myorg/ssh-fork/auths/primary/connect/fields",
+      {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ credentials: CALLER_KEYED_FIELDS }),
+      },
+    );
+    expect(res.status).toBe(200);
+
+    const rows = await db.select().from(integrationConnections);
+    expect(rows).toHaveLength(1);
   });
 });
 
