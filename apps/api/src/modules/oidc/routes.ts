@@ -27,7 +27,7 @@ import {
   enterSpaceContext,
 } from "@appstrate/core/permissions";
 import { pinnedSpaceScopeGuard } from "../../middleware/guards.ts";
-import { markSpaceRescope, rowAuthority } from "../../middleware/require-permission.ts";
+import { markSpaceRescope } from "../../middleware/require-permission.ts";
 import { conflict, notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
 import { spaceAssignmentSchema } from "../../lib/space-role-assignment.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
@@ -489,14 +489,12 @@ export function createOidcRouter() {
 
   // ── Admin: CRUD ─────────────────────────────────────────────────────────────
 
-  // `rowAuthority()` on create and update: `isFirstParty` skips consent, so the
-  // handler asks for owner/admin on top of the mounted write permission
-  // (`requireAdminForFirstParty`) — an authority the route table cannot show.
+  // Create and update: `isFirstParty` skips consent, so the handler asks for
+  // owner/admin on top of the mounted write permission (`requireAdminForFirstParty`).
   router.post(
     "/api/oauth/clients",
     rateLimit(10),
     requireModulePermission("oauth-clients", "write"),
-    rowAuthority(),
     idempotency(),
     async (c) => {
       const orgId = c.get("orgId");
@@ -603,7 +601,6 @@ export function createOidcRouter() {
     "/api/oauth/clients/:clientId",
     rateLimit(10),
     requireModulePermission("oauth-clients", "write"),
-    rowAuthority(),
     async (c) => {
       const orgId = c.get("orgId");
       const clientId = c.req.param("clientId")!;

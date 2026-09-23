@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`withByteCap(maxBytes)`** (`@appstrate/core/safe-json`) — Zod refinement
   capping the UTF-8 size of a value's JSON serialization, so a module can cap a
   JSONB payload it persists with the same idiom and wording as the platform.
+- **`scopesNotCovered`** (`@appstrate/core/integration`) — the required OAuth
+  scopes a grant does not cover once expanded through `scope_catalog[].implies`,
+  so an alias a provider echoes (Google `userinfo.email` for `email`) counts as
+  granted. One diff for the connection-gap check, the refresh shrink check and
+  the OAuth callback.
 - **`PACKAGE_TYPE_ROUTE_SEGMENT`** (`@appstrate/core/package-files`) — the URL
   segment of each package type's collection (`skill` → `skills`, …), declared
   once for the API router, the dashboard and the CLI.
@@ -74,14 +79,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already quotes as a whole word — a wrapper that quoted it printed it twice
   (`"gone: gone"` is now `"gone"`), and an empty cause message adds nothing.
   An error with no cause renders exactly as before.
-- **A guard carrying the boolean `appstrate.permissionGuard` marker but no
-  `PERMISSION_REQUIREMENT_MARKER` requirement is no longer read as row-aware**
-  — the platform now reads it as naming no requirement, where 11.1.0 read it as
-  conditional. A middleware whose verdict comes from the row it loads declares
-  that with the registry symbol `Symbol.for("appstrate.rowAuthority")` set to
-  `true` on the mounted function
-  (`Object.defineProperty(mw, Symbol.for("appstrate.rowAuthority"), { value: true })`);
-  being a registry symbol, a module stamps it without importing the platform.
+- **BREAKING: a guard carrying the boolean `appstrate.permissionGuard` marker
+  but no `PERMISSION_REQUIREMENT_MARKER` requirement names no requirement**;
+  11.1.0 read it as conditional. The platform reports no per-operation
+  `conditional` flag, so a module declares nothing for a route that decides on
+  the row it loads: the route's own refusal is what the caller sees.
 - **BREAKING: every operation a module's `openApiPaths()` documents must be
   served by a terminal route handler, or the platform refuses to boot.** A
   documented operation no route served used to fail only in the MCP tool
@@ -94,7 +96,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING: `SpaceAssignment.space_id` is renamed `spaceId`**
   (`@appstrate/core/permissions`), the universal-id carve-out of the casing
   conventions. The role keys (`preset_role`, `custom_role_id`) are unchanged.
-  Stored rows move with it: `scripts/migration/0020-space-assignments-spaceid-key.sql`.
+  Stored rows move with it: `scripts/migration/0021-space-assignments-spaceid-key.sql`.
 - **BREAKING: the MCP tool-name grammar keeps the upstream body**
   (`@appstrate/core/naming`). `isValidToolName` now accepts
   `{namespace}__{body}` with `body` in `[A-Za-z0-9_-]+` (case, `-`, a leading

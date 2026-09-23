@@ -44,14 +44,13 @@ Anything else is `transient` — retry the request, not the entire OAuth flow.
 
 ## Scope validation
 
-`parseTokenResponse` returns two diff arrays alongside `scopesGranted`:
-
-- `scopeShortfall` — scopes requested but not granted (upstream narrowing).
-  The platform flags the affected `integration_connections` row
-  `needsReconnection: true` (`apps/api/src/services/integration-credentials-resolver.ts`).
-- `scopeCreep` — scopes granted that were never requested (upstream over-grant).
-  Some IdPs (Slack, GitHub) always return all owner scopes; logged
-  as a warning, not blocked.
+`parseTokenResponse` returns `scopesGranted` as the provider echoed it (or the
+requested set when the response omits `scope`), and the integration callback
+result carries `scopesRequested` from the signed state. The comparison is left
+to the platform: a shortfall is only meaningful after expanding the grant
+through the manifest's `scope_catalog[].implies` aliases (Google echoes `email`
+as `https://www.googleapis.com/auth/userinfo.email`), which this package does
+not see.
 
 ## Credential encryption — versioned envelope
 

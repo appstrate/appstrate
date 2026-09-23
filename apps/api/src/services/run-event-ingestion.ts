@@ -34,6 +34,8 @@ import {
 } from "@appstrate/afps-runtime/runner";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
+import { toPgSafe } from "@appstrate/db/pg-safe";
+import { rowValueErrorCode, type Tx } from "../lib/db-helpers.ts";
 import { getCache, getEventBuffer } from "../infra/index.ts";
 import type { EventBuffer } from "../infra/event-buffer/interface.ts";
 import { getEnv } from "@appstrate/env";
@@ -337,7 +339,9 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
 }
 
 async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
-  const { run, result } = input;
+  const { run } = input;
+  // Single choke point for the runner's finalize body and every synthesised one.
+  const result = toPgSafe(input.result);
   const scope = { orgId: run.orgId, spaceId: run.spaceId };
 
   // 1. Flush any buffered events before we close the sink.
@@ -1073,36 +1077,62 @@ async function persistEventAndAdvance(
   // event's CAS would tolerate without retrying the dropped one.
   const scope = { orgId: run.orgId, spaceId: run.spaceId };
   const firstEvent = run.lastEventSequence === 0;
-  const claimed = await db.transaction(async (tx) => {
-    const rows = await tx
-      .update(runs)
-      // `isNull(sinkClosedAt)` is load-bearing (CRIT-12): the middleware's
-      // `assertSinkOpen` runs on a SNAPSHOT, so a concurrent finalize can
-      // close the sink between that read and this commit. Putting the
-      // closure check inside the CAS WHERE makes a lost race a no-op —
-      // a closed run can never gain new events or be flipped back to
-      // `running` by the firstEvent branch below.
-      .set({ lastEventSequence: sequence, lastHeartbeatAt: new Date() })
-      .where(and(eq(runs.id, run.id), isNull(runs.sinkClosedAt), predicate))
-      .returning({ id: runs.id });
-    if (rows.length === 0) return false;
+  const claim = (write: (tx: Tx) => Promise<unknown>) =>
+    db.transaction(async (tx) => {
+      const rows = await tx
+        .update(runs)
+        // `isNull(sinkClosedAt)` is load-bearing (CRIT-12): the middleware's
+        // `assertSinkOpen` runs on a SNAPSHOT, so a concurrent finalize can
+        // close the sink between that read and this commit. Putting the
+        // closure check inside the CAS WHERE makes a lost race a no-op —
+        // a closed run can never gain new events or be flipped back to
+        // `running` by the firstEvent branch below.
+        .set({ lastEventSequence: sequence, lastHeartbeatAt: new Date() })
+        .where(and(eq(runs.id, run.id), isNull(runs.sinkClosedAt), predicate))
+        .returning({ id: runs.id });
+      if (rows.length === 0) return false;
 
-    await persistRunEvent(tx, scope, run.id, event, {
-      writeLedger: true,
-      modelSource: run.modelSource,
-      modelCost: run.modelCost,
+      await write(tx);
+
+      // No runner emits `run.started`, so flip status → running on the
+      // first ingested sequence regardless of type. Terminal status is
+      // owned by finalizeRun. (`updateRun` additionally enforces the
+      // monotone status invariant — a terminal run can never re-enter
+      // `running` even from paths that bypass this CAS.)
+      if (firstEvent) {
+        await updateRun(scope, run.id, { status: "running" }, tx);
+      }
+      return true;
     });
 
-    // No runner emits `run.started`, so flip status → running on the
-    // first ingested sequence regardless of type. Terminal status is
-    // owned by finalizeRun. (`updateRun` additionally enforces the
-    // monotone status invariant — a terminal run can never re-enter
-    // `running` even from paths that bypass this CAS.)
-    if (firstEvent) {
-      await updateRun(scope, run.id, { status: "running" }, tx);
+  let claimed: boolean;
+  try {
+    claimed = await claim((tx) =>
+      persistRunEvent(tx, scope, run.id, event, {
+        writeLedger: true,
+        modelSource: run.modelSource,
+        modelCost: run.modelCost,
+      }),
+    );
+  } catch (err) {
+    // A row-value failure (22xxx/23514) replays identically and would wedge the stream
+    // (#1501): claim the sequence with a placeholder. After sanitisation only a platform
+    // bug lands here, hence error level — logged only if we claimed (a lost race drops nothing).
+    const sqlState = rowValueErrorCode(err);
+    if (sqlState === null) throw err;
+    const message = `Event "${event.type}" #${sequence} could not be stored (SQLSTATE ${sqlState}) and was dropped`;
+    claimed = await claim((tx) =>
+      appendRunLog(scope, run.id, "system", "event_dropped", message, null, "warn", tx),
+    );
+    if (claimed) {
+      logger.error("run event could not be stored and was dropped", {
+        runId: run.id,
+        sequence,
+        eventType: event.type,
+        sqlState,
+      });
     }
-    return true;
-  });
+  }
 
   if (!claimed) {
     // Zero rows matched — distinguish WHY in one re-read: the sink closed

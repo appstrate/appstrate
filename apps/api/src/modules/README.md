@@ -179,7 +179,7 @@ where the resource's rows live. Listing the same resource twice with different
 `actions` is how per-action granularity is expressed, and both entries must
 declare the same level.
 
-**At boot, the platform validates each contribution** (resource name format, no collision with a core resource or another module, action format, one level per resource, role/preset validity) and aggregates them into:
+**At boot, the platform validates each contribution** (resource name format, no collision with a core resource or another module, action format, one level per resource, role/preset validity, read coherence: a preset granted an action on a resource that has a `read` action must be granted that `read` too, RBAC spec §3.5) and aggregates them into:
 
 - `orgPermissions(role)` / `presetPermissions(preset)` — module entries reach the org role or the space preset they listed.
 - `getApiKeyAllowedScopes()` — entries with `apiKeyGrantable: true` become grantable through API keys (filtered against the creator's role at issuance).

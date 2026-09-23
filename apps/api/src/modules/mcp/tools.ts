@@ -300,10 +300,9 @@ function describePayload(
     summary: op.summary,
     description: op.description,
     // Only caller-space requirements decide `granted` — merging target-space ones
-    // would pre-refuse an allowed cross-space call. `conditional`: a lower bound.
+    // would pre-refuse an allowed cross-space call.
     required_permissions: op.requirement.requirements,
     target_space_permissions: op.requirement.targetSpaceRequirements,
-    conditional: op.requirement.conditional,
     granted: operationGranted(op, permissions),
     parameters: op.operation.parameters ?? [],
     request_body: op.operation.requestBody ?? null,
@@ -424,7 +423,8 @@ function buildDescribeTool(ctx: McpToolContext, invokes: boolean): AppstrateTool
       "It also reports whether your role clears the route's guards (`granted`) and which " +
       "permissions the route requires in YOUR space (`required_permissions`). " +
       "`target_space_permissions` is separate on purpose: those are decided in the space the " +
-      "path names, not here, so they never make an operation unavailable to you.",
+      "path names, not here, so they never make an operation unavailable to you. A granted " +
+      "operation can still be refused on the record it acts on; that refusal names its reason.",
     annotations: {
       title: "Describe API operation",
       readOnlyHint: true,

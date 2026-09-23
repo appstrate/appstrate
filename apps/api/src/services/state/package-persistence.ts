@@ -21,6 +21,7 @@
 
 import { and, asc, count, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
+import { toPgSafe } from "@appstrate/db/pg-safe";
 import { packagePersistence } from "@appstrate/db/schema";
 import type { PackagePersistenceRow } from "@appstrate/db/schema";
 import type { Actor } from "../../lib/actor.ts";
@@ -213,7 +214,7 @@ export async function upsertPinned(
   assertValidContent(content, key === CHECKPOINT_KEY ? "checkpoint" : "pinned slot");
 
   const { actorType, actorId } = storageActor(scope);
-  const contentJson = sql`${JSON.stringify(content ?? null)}::jsonb`;
+  const contentJson = sql`${JSON.stringify(toPgSafe(content ?? null))}::jsonb`;
 
   await db.execute(sql`
     INSERT INTO ${packagePersistence}
@@ -438,10 +439,12 @@ export async function addMemories(
   if (available === 0) return 0;
 
   const toInsert = contents.slice(0, available).map((c) => {
-    const trimmed =
+    // Sanitised after the trim: the slice can split a surrogate pair.
+    const trimmed = toPgSafe(
       typeof c === "string"
         ? (c.slice(0, MAX_MEMORY_CONTENT) as unknown as Record<string, unknown>)
-        : (c as Record<string, unknown>);
+        : (c as Record<string, unknown>),
+    );
     assertValidContent(trimmed, "memory");
     return {
       packageId,

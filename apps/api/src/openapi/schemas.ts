@@ -2221,13 +2221,22 @@ export const schemas = {
         type: "array",
         items: {
           type: "object",
-          required: ["permission", "action", "api_key_grantable"],
+          required: ["permission", "action", "api_key_grantable", "requires_one_of"],
           properties: {
             permission: { type: "string" },
             action: { type: "string" },
             api_key_grantable: {
               type: "boolean",
               description: "Can also be carried by an API key.",
+            },
+            requires_one_of: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "The reads a role holding this permission must also hold, any one of them sufficing; " +
+                "the first is the canonical one to add. Usually the resource's own `read`, not always " +
+                "(`agents:run` needs a runs read). Empty when the permission needs none. " +
+                "The authority on the rule: a create or update breaking it is a 400.",
             },
           },
         },

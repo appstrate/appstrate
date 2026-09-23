@@ -1023,6 +1023,20 @@ export function expandScopesGranted(
 }
 
 /**
+ * The `required` scopes that `granted`, expanded through `scope_catalog[].implies`
+ * (see {@link expandScopesGranted}), does not cover. Order of `required` is kept.
+ */
+export function scopesNotCovered(
+  required: readonly string[],
+  granted: readonly string[],
+  manifest: IntegrationManifest,
+  authKey: string,
+): string[] {
+  const expanded = new Set(expandScopesGranted(granted, manifest, authKey));
+  return required.filter((s) => !expanded.has(s));
+}
+
+/**
  * Scopes the agent's selected tools/scopes require on `authKey` that the
  * connection's `granted` set lacks. Non-oauth2 auths short-circuit to no gap
  * (they grant access wholesale and carry no scope catalog).
@@ -1037,8 +1051,7 @@ export function missingScopesForConnection(input: {
   if (input.manifest.auths?.[input.authKey]?.type !== "oauth2") return [];
   const required = requiredScopesForAgent(input);
   if (required.length === 0) return [];
-  const expanded = new Set(expandScopesGranted(input.granted, input.manifest, input.authKey));
-  return required.filter((s) => !expanded.has(s));
+  return scopesNotCovered(required, input.granted, input.manifest, input.authKey);
 }
 
 /**

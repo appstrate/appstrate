@@ -20,12 +20,15 @@ import {
   findMaterialisableBareNames,
   findPassThroughGaps,
   findTableGaps,
-  findUnroutedModules,
   ORCHESTRATED_COMPOSE_FILES,
   readSchemaDefaults,
   suppliesValue,
 } from "../verify-compose-defaults.ts";
-import { analyzeComposeDefaults, CODE_DEFAULTS } from "../../apps/cli/src/lib/compose-defaults.ts";
+import {
+  analyzeComposeDefaults,
+  CODE_DEFAULTS,
+  extractComposeDefaults,
+} from "../../apps/cli/src/lib/compose-defaults.ts";
 import { envSchema } from "../../packages/env/src/index.ts";
 
 /**
@@ -314,29 +317,18 @@ describe("findPassThroughGaps", () => {
 });
 
 /**
- * The two classes that exist because of one production outage, and the one fact behind both:
- * `deploy/docker-compose.yml` runs under an orchestrator that MATERIALISES every key an
- * `environment:` block names — a bare `- FOO` becomes `FOO: ''` in the compose it generates. So
- * the form this gate prescribes everywhere else, "name the variable and let the schema default
- * apply", is not merely unnecessary there: it is unavailable.
+ * The class that exists because of one production outage: `deploy/docker-compose.yml` runs under
+ * an orchestrator that MATERIALISES every key an `environment:` block names — a bare `- FOO`
+ * becomes `FOO: ''` in the compose it generates. So the form this gate prescribes everywhere else,
+ * "name the variable and let the schema default apply", is not merely unnecessary there: it is
+ * unavailable.
  *
  * 2026-09-18, measured. `EE_RECONCILIATION_BATCH_SIZE` arrived as `''`, `z.coerce.number("")` is
  * 0, the module's `.min(1)` refused it, the platform crash-looped. Seven of that block's bare
  * names would have refused to boot and four more would have degraded in SILENCE — a zero
  * interval pauses metering, a zero replay window disables the scan that keeps usage from going
  * unbilled.
- *
- * The fix was to stop passing operator variables through that block at all: `env_file` delivers
- * them, which is why production booted for months with two hard-required secrets absent from the
- * file. What that leaves behind is a second, quieter hazard — a compose file that boots a module
- * and forwards nothing is either correct (it uses `env_file`) or broken (the module's whole
- * contract is undefined at boot), and the pass-through rule reads both as "out of scope".
- * `findUnroutedModules` is what tells them apart.
  */
-const MODULE = [
-  { id: "ee", file: "packages/module-ee/src/env.ts", keys: ["ALPHA", "BETA"] },
-] as const;
-
 const composeWith = (body: string): string =>
   ["services:", "  appstrate:", "    image: ghcr.io/appstrate/appstrate:1.0.0", body].join("\n");
 
@@ -364,51 +356,6 @@ describe("findMaterialisableBareNames", () => {
     expect(
       findMaterialisableBareNames(composeWith("    depends_on:\n      - appstrate-redis")),
     ).toEqual([]);
-  });
-});
-
-describe("findUnroutedModules", () => {
-  it("reports a module booted by default whose variables have no route", () => {
-    const content = composeWith(
-      [
-        "    environment:",
-        "      - MODULES=${MODULES:-@appstrate/module-ee}",
-        "      - PORT=3000",
-      ].join("\n"),
-    );
-    expect(findUnroutedModules(content, MODULE)).toEqual([
-      { module: "ee", declaredIn: "packages/module-ee/src/env.ts", keys: 2 },
-    ]);
-  });
-
-  it("reports nothing when env_file delivers them — the form deploy/ actually uses", () => {
-    const content = composeWith(
-      [
-        "    env_file:",
-        "      - .env",
-        "    environment:",
-        "      - MODULES=${MODULES:-@appstrate/module-ee}",
-      ].join("\n"),
-    );
-    expect(findUnroutedModules(content, MODULE)).toEqual([]);
-  });
-
-  it("reports nothing when the file does not boot the module", () => {
-    // The case the pass-through rule's old comment assumed was the only one.
-    const content = composeWith(["    environment:", "      - MODULES"].join("\n"));
-    expect(findUnroutedModules(content, MODULE)).toEqual([]);
-  });
-
-  it("reports nothing when the variables are forwarded explicitly", () => {
-    const content = composeWith(
-      [
-        "    environment:",
-        "      - MODULES=${MODULES:-@appstrate/module-ee}",
-        "      - ALPHA",
-        "      - BETA",
-      ].join("\n"),
-    );
-    expect(findUnroutedModules(content, MODULE)).toEqual([]);
   });
 });
 
@@ -440,5 +387,35 @@ describe("the orchestrated files themselves", () => {
     for (const file of ORCHESTRATED_COMPOSE_FILES) {
       expect(readFileSync(join(import.meta.dir, "..", "..", file), "utf-8")).toContain("env_file:");
     }
+  });
+});
+
+/**
+ * The deployment that bills requires `MODULES` instead of defaulting it. With no value at all the
+ * code default applies, and it names no billing module; a default list here would be a second copy
+ * of the operator's choice, kept in step by hand. `${MODULES:?}` makes an unset or empty value
+ * refuse to deploy (Coolify) or to start (raw compose) — never a silent run without billing.
+ */
+describe("deploy/docker-compose.yml's MODULES", () => {
+  const content = readFileSync(
+    join(import.meta.dir, "..", "..", "deploy", "docker-compose.yml"),
+    "utf-8",
+  );
+
+  it("is required, with no default to fall back to", () => {
+    const declarations = content.split("\n").filter((line) => /^\s*-\s*MODULES=/.test(line));
+    expect(declarations.map((line) => line.trim())).toEqual(["- MODULES=${MODULES:?}"]);
+  });
+
+  it("is neither a pinned default nor a bare name to the other classes", () => {
+    expect(extractComposeDefaults(content).map((m) => m.varName)).not.toContain("MODULES");
+    expect(findMaterialisableBareNames(content).map((f) => f.varName)).not.toContain("MODULES");
+
+    // Both assertions above also pass on a reader that matched nothing. Prove each one fires, on
+    // a default and on a bare name.
+    const defaulted = content.replace("${MODULES:?}", "${MODULES:-oidc}");
+    expect(extractComposeDefaults(defaulted).map((m) => m.varName)).toContain("MODULES");
+    const bare = content.replace("- MODULES=${MODULES:?}", "- MODULES");
+    expect(findMaterialisableBareNames(bare).map((f) => f.varName)).toContain("MODULES");
   });
 });

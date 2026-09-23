@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
-import { requirePermission, rowAuthority } from "../middleware/require-permission.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
 import { auditSpaceAssignments, spaceAssignmentSchema } from "../lib/space-role-assignment.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
 import { resolveListingViewAs } from "../lib/view-as.ts";
@@ -521,87 +521,77 @@ router.patch(
 );
 
 // DELETE /api/orgs/:orgId/members/:userId — remove a member (admin+)
-// `rowAuthority()`: the guard answers "may remove members at all"; the target's
+// The guard answers "may remove members at all"; the target's
 // row, read by the service under lock, answers "may remove THIS one".
-router.delete(
-  "/:orgId/members/:userId",
-  requirePermission("members", "remove"),
-  rowAuthority(),
-  async (c) => {
-    const orgId = c.req.param("orgId")!;
-    const targetUserId = c.req.param("userId")!;
+router.delete("/:orgId/members/:userId", requirePermission("members", "remove"), async (c) => {
+  const orgId = c.req.param("orgId")!;
+  const targetUserId = c.req.param("userId")!;
 
-    const { orphanedSpaceIds, revokedApiKeyIds } = await removeMember(
-      orgId,
-      targetUserId,
-      memberActor(c),
-    );
-    await recordAuditFromContext(c, {
-      action: "org.member_removed",
-      resourceType: "member",
-      resourceId: targetUserId,
-      orgIdOverride: orgId,
-      // The personal space(s) the removal put on the 30-day clock (RBAC spec
-      // §3.6). Named here because this is the event an owner comes back to when
-      // deciding whether to convert one or sweep it: the sweeper's own log line
-      // arrives 30 days later, and by then the space is gone.
-      after: { orphanedSpaceIds, revokedApiKeyIds },
-    });
-    return c.body(null, 204);
-  },
-);
+  const { orphanedSpaceIds, revokedApiKeyIds } = await removeMember(
+    orgId,
+    targetUserId,
+    memberActor(c),
+  );
+  await recordAuditFromContext(c, {
+    action: "org.member_removed",
+    resourceType: "member",
+    resourceId: targetUserId,
+    orgIdOverride: orgId,
+    // The personal space(s) the removal put on the 30-day clock (RBAC spec
+    // §3.6). Named here because this is the event an owner comes back to when
+    // deciding whether to convert one or sweep it: the sweeper's own log line
+    // arrives 30 days later, and by then the space is gone.
+    after: { orphanedSpaceIds, revokedApiKeyIds },
+  });
+  return c.body(null, 204);
+});
 
 // PUT /api/orgs/:orgId/members/:userId — change role (owner/admin hierarchy)
-// `rowAuthority()`: the assignable roles are read off the target's row, by the
+// The assignable roles are read off the target's row, by the
 // service under lock, not off the mounted guard.
-router.put(
-  "/:orgId/members/:userId",
-  requirePermission("members", "change-role"),
-  rowAuthority(),
-  async (c) => {
-    const orgId = c.req.param("orgId")!;
-    const targetUserId = c.req.param("userId")!;
-    const data = await readJsonBody(c, updateRoleSchema);
+router.put("/:orgId/members/:userId", requirePermission("members", "change-role"), async (c) => {
+  const orgId = c.req.param("orgId")!;
+  const targetUserId = c.req.param("userId")!;
+  const data = await readJsonBody(c, updateRoleSchema);
 
-    // Promoting to owner/admin drops the member's explicit space grants; the audit
-    // is the only record of what a later demotion will NOT restore.
-    const { previousRole, revoked } = await updateMemberRole(
-      orgId,
-      targetUserId,
-      data.role,
-      memberActor(c),
-    );
-    await recordAuditFromContext(c, {
-      action: "org.member_role_updated",
-      resourceType: "member",
-      resourceId: targetUserId,
-      before: {
-        role: previousRole,
-        revokedSpaceAssignments: revoked.map((row) => ({
-          spaceId: row.spaceId,
-          presetRole: row.presetRole,
-          customRoleId: row.customRoleId,
-        })),
-      },
-      after: { role: data.role },
-      orgIdOverride: orgId,
-    });
+  // Promoting to owner/admin drops the member's explicit space grants; the audit
+  // is the only record of what a later demotion will NOT restore.
+  const { previousRole, revoked } = await updateMemberRole(
+    orgId,
+    targetUserId,
+    data.role,
+    memberActor(c),
+  );
+  await recordAuditFromContext(c, {
+    action: "org.member_role_updated",
+    resourceType: "member",
+    resourceId: targetUserId,
+    before: {
+      role: previousRole,
+      revokedSpaceAssignments: revoked.map((row) => ({
+        spaceId: row.spaceId,
+        presetRole: row.presetRole,
+        customRoleId: row.customRoleId,
+      })),
+    },
+    after: { role: data.role },
+    orgIdOverride: orgId,
+  });
 
-    // Bare updated resource — same serializer as the members list in
-    // GET /orgs/:orgId (issue #657).
-    const updated = await getOrgMemberWithProfile(orgId, targetUserId);
-    if (!updated) {
-      throw notFound("Member not found");
-    }
-    return c.json({
-      userId: updated.userId,
-      role: updated.role,
-      joinedAt: updated.joinedAt,
-      displayName: updated.displayName,
-      email: updated.email,
-    });
-  },
-);
+  // Bare updated resource — same serializer as the members list in
+  // GET /orgs/:orgId (issue #657).
+  const updated = await getOrgMemberWithProfile(orgId, targetUserId);
+  if (!updated) {
+    throw notFound("Member not found");
+  }
+  return c.json({
+    userId: updated.userId,
+    role: updated.role,
+    joinedAt: updated.joinedAt,
+    displayName: updated.displayName,
+    email: updated.email,
+  });
+});
 
 // POST /api/orgs/:orgId/leave — the caller leaves the organization (any member)
 // No `requirePermission`: membership is the only precondition; the service

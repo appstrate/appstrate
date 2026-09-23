@@ -106,7 +106,7 @@ import {
   CLIENT_SECRET_REQUIRED_MESSAGE,
   PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
 } from "../services/integration-manifest-helpers.ts";
-import { partitionScopesByAuthCatalog } from "@appstrate/core/integration";
+import { partitionScopesByAuthCatalog, scopesNotCovered } from "@appstrate/core/integration";
 import {
   deleteIntegrationPin,
   listAgentsConsumingIntegration,
@@ -527,7 +527,7 @@ export function createIntegrationsRouter() {
     // single credential writer.
     try {
       const scope = { orgId: result.orgId, spaceId: result.spaceId };
-      const { auth } = await readIntegrationAuth(scope, result.packageId, result.authKey);
+      const { manifest, auth } = await readIntegrationAuth(scope, result.packageId, result.authKey);
       const strategy = resolveStrategy(auth);
       const conn = await strategy.complete(
         {
@@ -547,7 +547,12 @@ export function createIntegrationsRouter() {
       logger.info("Integration OAuth callback success", {
         packageId: result.packageId,
         authKey: result.authKey,
-        scopeShortfall: result.scopeShortfall,
+        scopeShortfall: scopesNotCovered(
+          result.scopesRequested,
+          result.scopesGranted,
+          manifest,
+          result.authKey,
+        ),
       });
     } catch (err) {
       logger.error("Integration OAuth callback persistence failed", {
@@ -728,12 +733,11 @@ export function createIntegrationsRouter() {
   // form, no end-user interaction. The interactive path is the Connect portal
   // (`connect/session`) — use that whenever a human/agent supplies the secret.
   //
-  // No provisioner runs here, so an auth that declares provisioning
-  // (`@appstrate/ssh`) never connects through this door: a platform-minted
-  // name is refused below (see `services/connect/provisioning.ts`), and
-  // omitting it fails `required`. Runtime invariants therefore live in the
-  // auth's `credentials.schema`, validated on both doors — not in the
-  // provisioner.
+  // No provisioner runs here, so a provisioned auth (`@appstrate/ssh`) never
+  // connects through this door: a platform-minted name is refused below (see
+  // `services/connect/provisioning.ts`), and omitting it fails `required`.
+  // Runtime invariants therefore live in the auth's `credentials.schema`,
+  // validated on both doors — not in the provisioner.
   router.post(
     "/:packageId{@[^/]+/[^/]+}/auths/:authKey/connect/fields",
     requirePermission("integrations", "connect"),
@@ -757,7 +761,7 @@ export function createIntegrationsRouter() {
             `Auth '${authKey}' is type '${auth.type}' — use the OAuth flow, not the fields flow`,
           );
         }
-        const minted = readProvisioning(packageId, auth)?.provides.find(
+        const minted = readProvisioning(packageId, authKey)?.provides.find(
           (name) => name in body.credentials,
         );
         if (minted) {
@@ -1089,7 +1093,7 @@ export function createIntegrationsRouter() {
       auth_key: claims.auth_key,
       display_name: manifest.display_name ?? claims.package_id,
       icon: manifest.icon ?? null,
-      auth: authWithoutMintedCredentials(claims.package_id, auth),
+      auth: authWithoutMintedCredentials(claims.package_id, claims.auth_key, auth),
       connection_id: claims.connection_id ?? null,
       csrf: claims.csrf ?? null,
     });
@@ -1114,7 +1118,7 @@ export function createIntegrationsRouter() {
       if (auth.type === "oauth2") {
         throw invalidRequest("This integration uses OAuth — open the connect link instead");
       }
-      const provisioning = readProvisioning(claims.package_id, auth);
+      const provisioning = readProvisioning(claims.package_id, claims.auth_key);
       // On a reconnect, the stored bundle, so the provisioner can reuse the key
       // already installed on the target. Decrypted only for a provisioning
       // auth; safe because `connection_id` rides SIGNED claims minted after
@@ -1127,7 +1131,7 @@ export function createIntegrationsRouter() {
       // provisioning failure is a 400 on the form, not an unusable connection.
       const provisioned = await provisionCredentials(
         claims.package_id,
-        auth,
+        claims.auth_key,
         body.credentials,
         existing,
       );
@@ -1157,7 +1161,7 @@ export function createIntegrationsRouter() {
         ok: true,
         connection: conn,
         ...(provisioning
-          ? { handoff_steps: handoffStepsFor(claims.package_id, auth, credentials) }
+          ? { handoff_steps: handoffStepsFor(claims.package_id, claims.auth_key, credentials) }
           : {}),
       });
     } catch (err) {

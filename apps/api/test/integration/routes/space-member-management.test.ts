@@ -130,7 +130,11 @@ describe("delegated space membership management", () => {
 
   it("filters the catalog using the path space's effective grants", async () => {
     const targetSpace = await seedSpace({ orgId: owner.orgId, visibility: "private" });
-    const permissions = [...presetPermissions("viewer"), "space-members:change-role"];
+    const permissions = [
+      ...presetPermissions("viewer"),
+      "space-members:read",
+      "space-members:change-role",
+    ];
     const delegatedRole = await seedSpaceRole({ orgId: owner.orgId, permissions });
     const smallRole = await seedSpaceRole({
       orgId: owner.orgId,
@@ -140,7 +144,7 @@ describe("delegated space membership management", () => {
     const forbiddenRole = await seedSpaceRole({
       orgId: owner.orgId,
       key: "writer",
-      permissions: ["agents:write"],
+      permissions: ["agents:read", "agents:write"],
     });
     await seedSpaceMember({
       spaceId: targetSpace.id,

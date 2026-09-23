@@ -555,7 +555,6 @@ describe("mcp tool round-trip", () => {
     };
 
     const described = await call(1, "describe_operation", { operation_id: "listSpaceMembers" });
-    expect(described.data.conditional).toBe(true);
     // The two halves are reported apart: nothing is asked in the caller's own
     // space, `space-members:read` is asked in the one the path names.
     expect(described.data.target_space_permissions).toContain("space-members:read");
@@ -582,7 +581,7 @@ describe("mcp tool round-trip", () => {
     expect(inForeign.data.required_permissions).toBeUndefined();
     expect(inForeign.data.hint).toBeUndefined();
 
-    // A conditional operation is a listed one: searching must offer it rather
+    // A target-space operation is a listed one: searching must offer it rather
     // than bury it under `denied`, which is where a caller-space reading of the
     // requirement would have put it.
     const searched = await call(4, "search_operations", { query: "members", limit: 100 });

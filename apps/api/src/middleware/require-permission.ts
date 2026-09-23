@@ -19,7 +19,7 @@
  * @see docs/architecture/RBAC_PERMISSIONS_SPEC.md §4.3
  */
 
-import type { Context, MiddlewareHandler, Next } from "hono";
+import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import {
   makePermissionGuard,
@@ -51,22 +51,6 @@ export function markSpaceRescope<T extends object>(handler: T): T {
 
 export function isSpaceRescope(handler: unknown): boolean {
   return hasHandlerMarker(handler, SPACE_RESCOPE);
-}
-
-const ROW_AUTHORITY = Symbol.for("appstrate.rowAuthority");
-
-/** Mark a middleware whose verdict comes from the row it loads, not a static permission. */
-export function markRowAuthority<T extends object>(handler: T): T {
-  return markHandler(handler, ROW_AUTHORITY);
-}
-
-/** A passthrough declaring that the handler after it decides on the row it loads. */
-export function rowAuthority(): MiddlewareHandler<AppEnv> {
-  return markRowAuthority(async (_c: Context<AppEnv>, next: Next) => next());
-}
-
-export function isRowAuthority(handler: unknown): boolean {
-  return hasHandlerMarker(handler, ROW_AUTHORITY);
 }
 
 /**

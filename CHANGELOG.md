@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **The conformance monitor now probes the provider API of seven
+  credential-only integrations without a credential** (`auth-reject`, tier
+  `mcp`). A 401 alone proves little — most providers answer 401 with or
+  without the header, and some authenticate before routing — so each
+  `AUTH_PROBES` endpoint gets three requests: an invalid credential rendered
+  through the manifest's own `delivery.http`, the same on a sibling path that
+  cannot exist, and none at all. The probe must refuse the credential (a
+  404/410 or an accepted invalid credential fails the run), and its answer must
+  differ from the no-credential answer — otherwise the provider never read the
+  header the manifest declares, and the run fails. A sibling path answering 404
+  verifies the path too; when it answers 401 the report says only the host was
+  verified. New probes: brevo, fathom, firecrawl, shortcut, twilio (stripe and
+  google-calendar gain the credential-free half). The run also names the
+  credential-only integrations whose API nothing probes.
+- **`identity-source` conformance check** (every tier, WARN): an `oauth2` auth
+  declaring none of `identity_claims`, `userinfo_endpoint` or `issuer` resolves
+  every connection to accountId `"default"` unless its token response happens
+  to carry `email`/`sub`. Nine shipped integrations are in that state today:
+  dropbox, dynamics365, hubspot, linear, mailchimp, monday, notion,
+  quickbooks-online, youtube.
+- **`@appstrate/gmail` 1.1.4 and `@appstrate/gmail-mcp` 2.3.3 declare
+  `issuer: https://accounts.google.com`**, like the other Google integrations.
+  Their explicit endpoints still win; the issuer lets the conformance monitor
+  verify them against Google's published metadata, which it reported as
+  UNVERIFIED until now.
+
 ### Changed
 
 - **BREAKING (API keys): keys use a checksummed `apst_` format, and every
@@ -106,9 +134,47 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   per-organization run rate limit (`429 org_run_rate_limited`, which only put
   the delay in `detail`), the shutdown refusal (`503 shutting_down`, 5 s) and
   chat's `429 chat_capacity`.
+- **Credential provisioning is a platform table, not a manifest declaration**
+  (#1528). `_meta["dev.appstrate/provisioning"]` is no longer read; the platform
+  mints `@appstrate/ssh`'s `primary` key only for the system package, so the
+  400s for provisioning on a non-system package are gone and a copy of the SSH
+  manifest is an ordinary custom auth whose `private_key` the user supplies.
+  `POST …/connect/fields` still refuses a caller-supplied key for
+  `@appstrate/ssh`. The published `@appstrate/ssh` 1.0.0 still carries the
+  now-ignored key until its next version.
+- **BREAKING (operators): `deploy/docker-compose.yml` declares
+  `- MODULES=${MODULES:?}` instead of pinning a default list** (#1528). Set
+  `MODULES` on the Coolify resource, or in `.env` for a raw `docker compose`,
+  with `@appstrate/module-ee` for the deployment to bill. Unset or empty, a raw
+  `docker compose` refuses to start and Coolify documents `${VAR:?}` as
+  blocking the deploy, instead of falling back to the code default, which has
+  no billing. Production already sets `MODULES` on its resource. See
+  `deploy/README.md`.
+
+### Removed
+
+- **BREAKING (MCP): `describe_operation` no longer returns `conditional`**
+  (#1528). `granted`, `required_permissions` and `target_space_permissions` are
+  unchanged; an operation refused on the record it loads answers with its own
+  problem+json reason (RBAC spec §13.10, §13.13), so clients learn it from the
+  call.
 
 ### Fixed
 
+- **Google connections are ready again, and their agents launch** (#1131).
+  Google's token endpoint echoes the requested OIDC `email` scope as
+  `https://www.googleapis.com/auth/userinfo.email`, and no manifest declared the
+  equivalence, so readiness kept asking for a reconnect and any agent whose
+  integration config uses `tools: "*"` failed to launch with
+  `412 missing_integration_connection`. `@appstrate/gmail` 1.1.5,
+  `@appstrate/gmail-mcp` 2.3.4 and
+  `@appstrate/google-{calendar,contacts,drive,forms,sheets}` 1.0.4 add that
+  canonical scope to their catalog with `implies: ["email"]`; the OAuth callback
+  no longer logs a false scope shortfall for such echoes; a new gate-tier
+  conformance check, `scope-echo`, fails any oauth2 auth whose `issuer` is
+  `https://accounts.google.com` and requests `email`/`profile` without the
+  alias. No data migration: existing connections
+  already store the echoed form.
 - **`appstrate … --version` after a command no longer prints the CLI's version
   and exits 0** (#1516). `-V, --version` was a program option, which commander
   recognises anywhere on the line, so it shadowed every subcommand:
@@ -121,6 +187,15 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   (`…or push --force to replace it.`) is printed alone, not followed by the
   server's own wording of it, and any other error chain starts its cause as a
   new sentence after a full stop.
+- **`@appstrate/clickup-mcp` 1.2.3 matches ClickUp's live tool surface again**
+  (#1480). The upstream server (public beta) dropped `clickup_merge_document`
+  and `clickup_merge_document_page`, and added
+  `clickup_list_document_page_attachments`,
+  `clickup_download_document_page_attachment`, `clickup_get_schema`,
+  `clickup_get_operators` and `clickup_execute_operator`. The last two are
+  declared for parity but listed in `hidden_tools`: `clickup_execute_operator`
+  runs whatever operators ClickUp enables server-side, a surface the per-tool
+  allowlist cannot bound, so it stays out of the picker and off `tools/list`.
 - **The npm `appstrate` CLI knows it was installed from npm** (#1518). Every
   npm release up to 1.0.0-beta.61 shipped a bundle stamped with install source
   `unknown` instead of `bun`: the publish step rebuilt it without the stamp, so
@@ -130,6 +205,19 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   good release no longer fails while npm propagates it (the check waits up to
   12 minutes on what bun resolves), and its GitHub Release is created whenever
   the npm publish succeeded.
+- **The conformance monitor only opens, comments on or closes its tracking
+  issue from `main`.** A run dispatched on a fix branch to check the fix
+  against the live servers closed #1480 while `main` still shipped the drift.
+  A branch run still goes red on drift; it no longer touches the issue.
+- **A run event Postgres refuses no longer wedges the run** (#1501). A NUL byte
+  or lone UTF-16 surrogate in a runner string (binary tool output, a model
+  cutting an emoji) made the `run_logs` insert fail identically on every retry:
+  the event 500'd forever, every later event buffered behind it failed too, and
+  the run could not finalize until the watchdog killed it. Those characters are
+  now replaced with U+FFFD wherever run logs, run results, memories and chat
+  messages are written, and any other write refused for its own values
+  (SQLSTATE class 22 or `23514`) is recorded as a `system`/`event_dropped` log
+  row instead, so the stream moves on.
 
 ## [1.0.0-beta.61] - 2026-09-23
 

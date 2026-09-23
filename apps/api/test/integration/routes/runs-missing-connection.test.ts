@@ -898,7 +898,7 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
       });
       await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
       // PUBLISHED, because `launchAs` below launches as members who hold
-      // `agents:run` and nothing else: the draft runs for whoever can WRITE the
+      // `agents:run` and no `agents:write`: the draft runs for whoever can WRITE the
       // agent (plan decision 4), so a `?version=draft` launch by them would be
       // a `403 draft_not_writable` — a refusal about the wrong thing in a suite
       // about `integrations:connect`.
@@ -1015,7 +1015,7 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
     describe("permission gate at the request boundary", () => {
       it("mints nothing for an actor without integrations:connect", async () => {
         await seedOauthIntegration();
-        const body = await launchAs(await memberHolding(["agents:run"]));
+        const body = await launchAs(await memberHolding(["agents:run", "runs:read"]));
 
         // Not merely absent from the item we look at — absent from the whole
         // envelope, so no other item smuggles one in.
@@ -1030,7 +1030,9 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
         // Discriminating control: everything else about the request is equal,
         // so the difference above is the permission and not the fixture.
         await seedOauthIntegration();
-        const body = await launchAs(await memberHolding(["agents:run", "integrations:connect"]));
+        const body = await launchAs(
+          await memberHolding(["agents:run", "runs:read", "integrations:connect"]),
+        );
 
         const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
         expect(err.connect_url).toStartWith("http");
@@ -1202,7 +1204,14 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
         await seedOauthIntegration();
         await blockUserConnections();
 
-        const body = await launchAs(await memberHolding(["agents:run", "integrations:connect"]));
+        const body = await launchAs(
+          await memberHolding([
+            "agents:run",
+            "runs:read",
+            "integrations:read",
+            "integrations:connect",
+          ]),
+        );
         expect(relayItem(body).code).toBe("not_connected");
         // Not merely absent from the item we look at — absent from the whole
         // envelope, so no other item smuggles a way around the block in.
@@ -1216,7 +1225,13 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
         await blockUserConnections();
 
         const body = await launchAs(
-          await memberHolding(["agents:run", "integrations:connect", "integrations:configure"]),
+          await memberHolding([
+            "agents:run",
+            "runs:read",
+            "integrations:read",
+            "integrations:connect",
+            "integrations:configure",
+          ]),
         );
         expect(relayItem(body).connect_url).toStartWith("http");
       });

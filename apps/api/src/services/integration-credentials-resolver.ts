@@ -28,7 +28,7 @@ import {
   type IntegrationCredentialsWire,
 } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
-import { expandScopesGranted } from "@appstrate/core/integration";
+import { scopesNotCovered } from "@appstrate/core/integration";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import { getEnv } from "@appstrate/env";
@@ -420,12 +420,9 @@ export async function resolveLiveIntegrationCredentials(
           integrationId: integrationId,
           authKey,
         });
-        // Expand the granted set through the manifest `implies` hierarchy
-        // before diffing — a parent grant (e.g. GitHub `repo`) covers the
-        // children it implies (`public_repo`), so a raw membership check
-        // would falsely flag the connection as below the required floor.
-        const expandedGranted = expandScopesGranted(granted, manifest, authKey);
-        const missing = required.filter((s) => !expandedGranted.includes(s));
+        // Diff through the manifest `implies` hierarchy: a parent grant (e.g.
+        // GitHub `repo`) covers the children it implies (`public_repo`).
+        const missing = scopesNotCovered(required, granted, manifest, authKey);
         if (missing.length > 0) {
           await markIntegrationConnectionNeedsReconnection(connection.id);
           logger.warn("Integration scope shrink dropped below required floor", {

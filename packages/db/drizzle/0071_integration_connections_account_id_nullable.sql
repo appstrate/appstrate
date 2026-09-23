@@ -8,7 +8,7 @@
 -- not arise.
 --
 -- The rows still carrying 'default' are rewritten by
--- `scripts/migration/0021-integration-connections-null-account-id.sql`, not
+-- `scripts/migration/0022-integration-connections-null-account-id.sql`, not
 -- here: DROP NOT NULL scans nothing, so it licenses no write
 -- (docs/NO_TRANSITIONAL_CODE.md §2). Until that script runs, such rows read as
 -- an account literally named 'default'.

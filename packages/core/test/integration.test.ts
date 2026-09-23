@@ -24,6 +24,7 @@ import {
   partitionScopesByAuthCatalog,
   scopesContributedByTools,
   expandScopesGranted,
+  scopesNotCovered,
   missingScopesForConnection,
   validateAgentIntegrationScopes,
   RESERVED_INTEGRATION_UPLOAD_PROTOCOLS,
@@ -1304,6 +1305,45 @@ describe("expandScopesGranted", () => {
 
   it("returns granted unchanged for an unknown auth key", () => {
     expect(expandScopesGranted(["x"], scopedManifest(), "nope")).toEqual(["x"]);
+  });
+});
+
+describe("scopesNotCovered", () => {
+  const USERINFO_EMAIL = "https://www.googleapis.com/auth/userinfo.email";
+  const GMAIL_READONLY = "https://www.googleapis.com/auth/gmail.readonly";
+  const m = baseManifest();
+  const auths = m.auths as Record<string, Record<string, unknown>>;
+  auths.oauth!.scope_catalog = [
+    { value: USERINFO_EMAIL, label: "Email", implies: ["email"] },
+    { value: "email", label: "Email (short)" },
+    { value: GMAIL_READONLY, label: "Read mail" },
+  ];
+  auths.plain = {
+    ...auths.oauth!,
+    scope_catalog: [
+      { value: USERINFO_EMAIL, label: "Email" },
+      { value: "email", label: "Email (short)" },
+    ],
+  };
+  const google = parse(m);
+
+  it("counts a scope as covered by the alias the catalog declares", () => {
+    // Google echoes `userinfo.email` for a requested `email` (issue #1131).
+    expect(
+      scopesNotCovered(["openid", "email"], ["openid", USERINFO_EMAIL], google, "oauth"),
+    ).toEqual([]);
+  });
+
+  it("reports a required scope the grant genuinely lacks", () => {
+    expect(scopesNotCovered(["email", GMAIL_READONLY], [USERINFO_EMAIL], google, "oauth")).toEqual([
+      GMAIL_READONLY,
+    ]);
+  });
+
+  it("compares verbatim for an auth key without the alias", () => {
+    // The alias is per auth: `plain` lists the same scopes without `implies`.
+    expect(scopesNotCovered(["email"], [USERINFO_EMAIL], google, "oauth")).toEqual([]);
+    expect(scopesNotCovered(["email"], [USERINFO_EMAIL], google, "plain")).toEqual(["email"]);
   });
 });
 

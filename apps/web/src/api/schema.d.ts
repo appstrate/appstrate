@@ -1541,7 +1541,7 @@ export interface paths {
          * Import a connection by submitting credentials directly (programmatic)
          * @description Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).
          *
-         *     A credential the platform mints (auth declaring `_meta["dev.appstrate/provisioning"]`) is refused with a 400 naming the field; such an auth connects through the Connect portal (`initiateIntegrationConnect`). An auth that declares provisioning on a non-system package, or names an unknown provisioning kind, is refused with a 400 whatever the body carries.
+         *     A credential the platform mints (the `private_key` of `@appstrate/ssh`) is refused with a 400 naming the field; such an auth connects through the Connect portal (`initiateIntegrationConnect`).
          */
         post: operations["importIntegrationConnection"];
         delete?: never;
@@ -3857,7 +3857,7 @@ export interface paths {
         put?: never;
         /**
          * Create a custom space role
-         * @description Define an organization-scoped bundle of space-level permissions. Requires `roles:write` (owner/admin) and nothing else — custom roles ship with the open-source platform. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop.
+         * @description Define an organization-scoped bundle of space-level permissions. Requires `roles:write` (owner/admin) and nothing else — custom roles ship with the open-source platform. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop. The set must also be coherent: a permission whose vocabulary entry has a non-empty `requires_one_of` comes with one of those reads, and a set missing one is a 400 naming each missing read. `requires_one_of` is the authority on which permissions need a read and which reads satisfy it. The read is never added for you.
          */
         post: operations["createRole"];
         delete?: never;
@@ -3875,7 +3875,7 @@ export interface paths {
         };
         /**
          * List the permissions a custom role may hold
-         * @description The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`.
+         * @description The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`; `requires_one_of` names the reads a role holding the permission must also hold.
          */
         get: operations["listRoleVocabulary"];
         put?: never;
@@ -3905,7 +3905,7 @@ export interface paths {
         head?: never;
         /**
          * Update a custom space role
-         * @description Rename, re-describe or re-scope a bundle. Requires `roles:write`. The `srl_` id never changes, so assignments follow the edit.
+         * @description Rename, re-describe or re-scope a bundle. Requires `roles:write`. The `srl_` id never changes, so assignments follow the edit. A `permissions` array is validated as on create: an unknown string is a 400 naming it, and a set holding a permission without one of the reads its vocabulary entry's `requires_one_of` names is a 400 naming each missing read. A request without `permissions` is not re-judged.
          */
         patch: operations["updateRole"];
         trace?: never;
@@ -6115,6 +6115,8 @@ export interface components {
                 action: string;
                 /** @description Can also be carried by an API key. */
                 api_key_grantable: boolean;
+                /** @description The reads a role holding this permission must also hold, any one of them sufficing; the first is the canonical one to add. Usually the resource's own `read`, not always (`agents:run` needs a runs read). Empty when the permission needs none. The authority on the rule: a create or update breaking it is a 400. */
+                requires_one_of: string[];
             }[];
         };
         Run: {
@@ -11481,7 +11483,7 @@ export interface operations {
                         auth_key: string;
                         display_name: string;
                         icon?: string | null;
-                        /** @description The auth declaration the form renders. Credentials the platform mints (`_meta["dev.appstrate/provisioning"]`, AFPS §10) are removed from `credentials.schema` — display only; submissions are validated against the full schema. */
+                        /** @description The auth declaration the form renders. Credentials the platform mints (the `private_key` of `@appstrate/ssh`) are removed from `credentials.schema` — display only; submissions are validated against the full schema. */
                         auth: {
                             [key: string]: unknown;
                         };
@@ -11490,8 +11492,6 @@ export interface operations {
                     };
                 };
             };
-            /** @description The auth declares credential provisioning (`_meta["dev.appstrate/provisioning"]`, AFPS §10) on a non-system package, or names an unknown provisioning kind. */
-            400: components["responses"]["ValidationError"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -11610,7 +11610,7 @@ export interface operations {
                             /** Format: date-time */
                             updatedAt: string;
                         };
-                        /** @description Present when the auth declares `_meta["dev.appstrate/provisioning"]`: what the user must do with the material the platform minted, in order. Never contains a secret. Steps flagged `deferred` are due at deletion and are served again by `getMyConnectionHandoff`. */
+                        /** @description Present when the platform minted credentials for this auth (`@appstrate/ssh`): what the user must do with the material the platform minted, in order. Never contains a secret. Steps flagged `deferred` are due at deletion and are served again by `getMyConnectionHandoff`. */
                         handoff_steps?: components["schemas"]["HandoffStep"][];
                     };
                 };

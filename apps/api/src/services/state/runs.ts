@@ -20,6 +20,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { db, type Db } from "@appstrate/db/client";
+import { toPgSafe } from "@appstrate/db/pg-safe";
 import {
   runs,
   runLogs,
@@ -1178,7 +1179,8 @@ export async function getLastRun(
  * Append a log entry for a run. Only org-scoped — `run_logs` is keyed on
  * `runId` (unique globally) + `orgId` only; no space column exists.
  * Callers that hold a `SpaceScope` can still pass it — `OrgScope` is the
- * structural supertype so `SpaceScope` flows through naturally.
+ * structural supertype so `SpaceScope` flows through naturally. Message and
+ * data are made Postgres-safe here, for every writer.
  */
 export async function appendRunLog(
   scope: OrgScope,
@@ -1197,8 +1199,8 @@ export async function appendRunLog(
       orgId: scope.orgId,
       type,
       event,
-      message,
-      data: safeRunLogData(data),
+      message: toPgSafe(message),
+      data: toPgSafe(safeRunLogData(data)),
       level,
     })
     .returning({ id: runLogs.id });

@@ -759,7 +759,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Import a connection by submitting credentials directly (programmatic)",
       description:
-        'Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).\n\nA credential the platform mints (auth declaring `_meta["dev.appstrate/provisioning"]`) is refused with a 400 naming the field; such an auth connects through the Connect portal (`initiateIntegrationConnect`). An auth that declares provisioning on a non-system package, or names an unknown provisioning kind, is refused with a 400 whatever the body carries.',
+        "Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).\n\nA credential the platform mints (the `private_key` of `@appstrate/ssh`) is refused with a 400 naming the field; such an auth connects through the Connect portal (`initiateIntegrationConnect`).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -982,7 +982,7 @@ export const integrationsPaths = {
                     type: "object",
                     additionalProperties: true,
                     description:
-                      'The auth declaration the form renders. Credentials the platform mints (`_meta["dev.appstrate/provisioning"]`, AFPS §10) are removed from `credentials.schema` — display only; submissions are validated against the full schema.',
+                      "The auth declaration the form renders. Credentials the platform mints (the `private_key` of `@appstrate/ssh`) are removed from `credentials.schema` — display only; submissions are validated against the full schema.",
                   },
                   connection_id: { type: ["string", "null"] },
                   csrf: { type: ["string", "null"] },
@@ -990,11 +990,6 @@ export const integrationsPaths = {
               },
             },
           },
-        },
-        "400": {
-          $ref: "#/components/responses/ValidationError",
-          description:
-            'The auth declares credential provisioning (`_meta["dev.appstrate/provisioning"]`, AFPS §10) on a non-system package, or names an unknown provisioning kind.',
         },
         "404": { $ref: "#/components/responses/NotFound" },
       },
@@ -1046,7 +1041,7 @@ export const integrationsPaths = {
                   handoff_steps: {
                     type: "array",
                     description:
-                      'Present when the auth declares `_meta["dev.appstrate/provisioning"]`: what the user must do with the material the platform minted, in order. Never contains a secret. Steps flagged `deferred` are due at deletion and are served again by `getMyConnectionHandoff`.',
+                      "Present when the platform minted credentials for this auth (`@appstrate/ssh`): what the user must do with the material the platform minted, in order. Never contains a secret. Steps flagged `deferred` are due at deletion and are served again by `getMyConnectionHandoff`.",
                     items: { $ref: "#/components/schemas/HandoffStep" },
                   },
                 },

@@ -14,22 +14,20 @@ import { PERMISSION_REQUIREMENT_MARKER } from "@appstrate/core/permissions";
 import { findTargetHandler, isMiddleware } from "hono/utils/handler";
 import { getPattern, splitPath, splitRoutingPath } from "hono/utils/url";
 import { hasHandlerMarker, markHandler, readHandlerMarker } from "../middleware/handler-marker.ts";
-import { isRowAuthority, isSpaceRescope } from "../middleware/require-permission.ts";
+import { isSpaceRescope } from "../middleware/require-permission.ts";
 
 export interface RouteRequirement {
   /** One per guard evaluated in the caller's own space, mount order, all required; `"a|b"` is a disjunction. Filters. */
   readonly requirements: readonly string[];
   /** Guards mounted after a space re-scope: enforced in the space the path names. Shown, never filtered. */
   readonly targetSpaceRequirements: readonly string[];
-  /** The row, or the target space, decides: `requirements` is a lower bound. */
-  readonly conditional: boolean;
 }
 
-/** A route no guard narrows — granted to anyone who reached the transport. */
+/** A route whose mounts state no permission string — the handler, or a guard
+ *  that names none, may still refuse. */
 const UNGUARDED: RouteRequirement = Object.freeze({
   requirements: Object.freeze([]) as readonly string[],
   targetSpaceRequirements: Object.freeze([]) as readonly string[],
-  conditional: false,
 });
 
 /** Answers the requirement for `METHOD pathTemplate`; `undefined` when no route serves it. */
@@ -58,7 +56,6 @@ interface TableEntry {
   readonly prefix: boolean;
   readonly serves: boolean;
   readonly requirement: string | null;
-  readonly rowDecides: boolean;
   readonly rescope: boolean;
 }
 
@@ -110,7 +107,6 @@ export function deriveRouteRequirements(
       prefix,
       serves: servesOperation(route.handler),
       requirement: typeof required === "string" && required.length > 0 ? required : null,
-      rowDecides: isRowAuthority(route.handler),
       rescope: isSpaceRescope(route.handler),
     });
   }
@@ -125,7 +121,6 @@ function lookup(
 ): RouteRequirement | undefined {
   let served = false;
   let rescoped = false;
-  let conditional = false;
   const requirements: string[] = [];
   const targetSpaceRequirements: string[] = [];
   // Mount order, so a guard is attributed to the space in force where it sits.
@@ -134,7 +129,6 @@ function lookup(
     const match = matches(entry, template);
     if (match === "none") continue;
     if (entry.rescope) rescoped = true;
-    if (entry.rowDecides) conditional = true;
     if (entry.requirement !== null) {
       // A guard reached twice is one requirement to the model.
       const into = rescoped ? targetSpaceRequirements : requirements;
@@ -148,12 +142,10 @@ function lookup(
     }
   }
   if (!served) return undefined;
-  if (targetSpaceRequirements.length > 0) conditional = true;
-  if (requirements.length === 0 && !conditional) return UNGUARDED;
+  if (requirements.length === 0 && targetSpaceRequirements.length === 0) return UNGUARDED;
   return Object.freeze({
     requirements: Object.freeze(requirements) as readonly string[],
     targetSpaceRequirements: Object.freeze(targetSpaceRequirements) as readonly string[],
-    conditional,
   });
 }
 
@@ -187,8 +179,9 @@ function tokenCovers(token: Token, segment: TemplateSegment): Match {
   }
 }
 
-/** Every requirement holds, a `|` entry on any alternative. Target-space and
- *  row-conditional routes count as granted: only that space or row can refuse. */
+/** Every requirement holds, a `|` entry on any alternative. Target-space
+ *  requirements never count: only that space can refuse them. The row a handler
+ *  loads may still refuse, with the route's own error. */
 export function isGranted(
   requirement: RouteRequirement,
   permissions: ReadonlySet<string>,

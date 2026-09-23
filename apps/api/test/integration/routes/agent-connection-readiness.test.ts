@@ -17,10 +17,12 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedPackage } from "../../helpers/seed.ts";
+import { seedAgent, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { createVersionFromDraft } from "../../../src/services/package-versions.ts";
 import { eq } from "drizzle-orm";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { integrationConnections, packages } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
@@ -255,5 +257,131 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
       { method: "GET", headers: authHeaders(ctx) },
     );
     expect(((await draftExplicit.json()) as ReadinessBody).blocks_run).toBe(true);
+  });
+});
+
+// #1131 — Google's token endpoint echoes the OIDC scope `email` as
+// `https://www.googleapis.com/auth/userinfo.email`. A wildcard agent
+// (`tools: "*"`) requires the raw `default_scopes`, so without the catalog
+// alias the connection read as missing `email` and every launch 409'd. Uses
+// the REAL `@appstrate/gmail-mcp` source manifest, located by name (a version
+// bump renames its directory), and the grant Google actually stores.
+describe("connection-readiness — Google-echoed `email` scope (#1131)", () => {
+  const GMAIL = "@appstrate/gmail-mcp";
+  const GMAIL_AGENT = "@rdyorg/gmail-agent";
+  const SOURCES_DIR = join(import.meta.dir, "../../../../../scripts/system-packages");
+  const GOOGLE_GRANT = [
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.compose",
+    "openid",
+  ];
+
+  function loadGmailMcpManifest(): Record<string, unknown> {
+    const dirs = readdirSync(SOURCES_DIR).filter((d) =>
+      /^integration-gmail-mcp-\d+\.\d+\.\d+$/.test(d),
+    );
+    if (dirs.length !== 1) throw new Error(`expected one gmail-mcp source, got [${dirs}]`);
+    return JSON.parse(readFileSync(join(SOURCES_DIR, dirs[0]!, "manifest.json"), "utf8"));
+  }
+
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "rdyorg" });
+  });
+
+  async function seedWildcardGmailAgent(grant: string[]) {
+    const manifest = loadGmailMcpManifest();
+    await seedPackage({
+      id: GMAIL,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: manifest,
+    });
+    // Published so the run's version freeze judges the pinned manifest, as in prod.
+    await seedPackageVersion({
+      packageId: GMAIL,
+      version: manifest.version as string,
+      manifest,
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, GMAIL);
+
+    await seedAgent({
+      id: GMAIL_AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: {
+        name: GMAIL_AGENT,
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.2",
+        display_name: "Gmail Wildcard Agent",
+        dependencies: { integrations: { [GMAIL]: `^${manifest.version as string}` } },
+        integrations_configuration: { [GMAIL]: { tools: "*" } },
+      },
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, GMAIL_AGENT);
+
+    await db.insert(integrationConnections).values({
+      integrationId: GMAIL,
+      authKey: "primary",
+      accountId: "user@example.com",
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      endUserId: null,
+      credentialsEncrypted: encryptCredentialEnvelope({ outputs: { access_token: "live" } }),
+      scopesGranted: grant,
+    });
+  }
+
+  async function readiness(): Promise<ReadinessBody> {
+    const res = await app.request(`/api/agents/${GMAIL_AGENT}/connection-readiness`, {
+      method: "GET",
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+    return (await res.json()) as ReadinessBody;
+  }
+
+  function launch() {
+    return app.request(`/api/agents/${GMAIL_AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+  }
+
+  it("the real Google grant satisfies a wildcard agent — readiness clean, launch not 409", async () => {
+    await seedWildcardGmailAgent(GOOGLE_GRANT);
+
+    const body = await readiness();
+    expect(body.errors).toEqual([]);
+    expect(body.blocks_run).toBe(false);
+
+    // The launch clears the connection gate and dies at the NEXT one (no model
+    // is seeded) — before any run row exists, so nothing races the truncate.
+    const res = await launch();
+    expect(res.status).not.toBe(409);
+    expect(((await res.json()) as { code?: string }).code).toBe("model_not_configured");
+  });
+
+  it("still blocks when a real non-email scope is missing (discriminating control)", async () => {
+    const compose = "https://www.googleapis.com/auth/gmail.compose";
+    await seedWildcardGmailAgent(GOOGLE_GRANT.filter((s) => s !== compose));
+
+    const body = await readiness();
+    expect(body.blocks_run).toBe(true);
+    const err = body.errors.find((e) => e.field === `integrations.${GMAIL}`) as
+      { code: string; missing_scopes?: string[] } | undefined;
+    expect(err?.code).toBe("insufficient_scopes");
+    // Only the genuinely absent scope — `email` must not ride along.
+    expect(err?.missing_scopes).toEqual([compose]);
+
+    expect((await launch()).status).toBe(409);
   });
 });

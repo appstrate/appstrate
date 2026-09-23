@@ -271,6 +271,9 @@ export interface AppstrateModule {
    *   - `presets` is upward-closed: naming a preset also names every preset
    *     that already grants a superset of it. `runner` and `viewer` are
    *     incomparable, so neither implies the other.
+   *   - a preset granted an action on a space resource that has a `read`
+   *     action is granted that `read` too — the rule custom space roles
+   *     follow (RBAC spec §3.3).
    *
    * No-op on platforms that don't load this module — neither the type
    * augmentation nor the runtime grants reach core, preserving the

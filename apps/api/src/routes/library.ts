@@ -2,7 +2,6 @@
 
 import { Hono } from "hono";
 import { forbidden } from "../lib/errors.ts";
-import { rowAuthority } from "../middleware/require-permission.ts";
 import { callerOrgRole } from "../lib/view-as.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import { getPackageLibrary } from "../services/package-library.ts";
@@ -30,7 +29,7 @@ function mayOpenOrganizationLibrary(c: Parameters<typeof callerOrgRole>[0]): boo
 export function createLibraryRouter() {
   const router = new Hono<AppEnv>();
   // The caller's org role decides, not a grant: no permission names this page.
-  router.get("/", rowAuthority(), async (c) => {
+  router.get("/", async (c) => {
     if (!mayOpenOrganizationLibrary(c))
       throw forbidden(
         "The organization library requires the user's own credential holding owner or admin",
