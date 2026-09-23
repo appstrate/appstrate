@@ -1777,7 +1777,6 @@ async function downloadDraftArchive(c: Context<AppEnv>, pkg: PackageFileSource):
     headers: {
       ...headers,
       ...buildDownloadHeaders({
-        yanked: false,
         scope: c.req.param("scope")!,
         name: c.req.param("name")!,
         version: VERSION_SELECTOR_DRAFT,

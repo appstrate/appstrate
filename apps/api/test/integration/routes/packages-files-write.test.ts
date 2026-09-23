@@ -555,6 +555,12 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
       });
     });
 
+    it("refuses a non-writer before any 304, so a validator confirms nothing", async () => {
+      const etag = (await downloadDraft()).headers.get("ETag")!;
+      const headers = { ...(await viewerHeaders()), "If-None-Match": etag };
+      await expectProblem(await downloadDraft(headers), 403, { code: "draft_not_writable" });
+    });
+
     it("tags the archive with its content, so a save changes the ETag and a match is a 304", async () => {
       const first = await downloadDraft();
       expect(first.status).toBe(200);

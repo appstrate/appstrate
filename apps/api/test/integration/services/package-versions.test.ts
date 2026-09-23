@@ -687,6 +687,41 @@ describe("package-versions service", () => {
       expect(await downloadVersionZip(pkg.id, "2.0.0", row!.integrity)).not.toBeNull();
     });
 
+    it("createVersionFromDraft answers no_changes to a bump over an unchanged draft", async () => {
+      const id = `@${orgSlug}/bump-only`;
+      const pkg = await seedPackage({
+        orgId,
+        id,
+        draftManifest: { name: id, version: "1.0.0", type: "agent" },
+        draftContent: "v1 prompt",
+      });
+      const first = await createVersionFromDraft({ packageId: pkg.id, orgId, userId });
+      expect("error" in first).toBe(false);
+
+      // The publish dialog's bump is a number, not a change: the same content
+      // is not cut again under 1.0.1.
+      const bumped = await createVersionFromDraft({
+        packageId: pkg.id,
+        orgId,
+        userId,
+        version: "1.0.1",
+      });
+      expect(bumped).toEqual({ error: "no_changes" });
+
+      // With a real change, the bump publishes.
+      await db
+        .update(packages)
+        .set({ draftContent: "v2 prompt — changed" })
+        .where(eq(packages.id, pkg.id));
+      const changed = await createVersionFromDraft({
+        packageId: pkg.id,
+        orgId,
+        userId,
+        version: "1.0.1",
+      });
+      expect(changed).toMatchObject({ version: "1.0.1" });
+    });
+
     it("createVersionFromDraft answers version_exists when content changed without a version bump", async () => {
       const id = `@${orgSlug}/needs-bump`;
       const pkg = await seedPackage({

@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   what publishing a draft would cut (`bump` | `direct` | `blocked` | `none`)
   from the draft's version and the latest published one, shared by the
   dashboard's publish dialog and `appstrate packages publish`.
-- **`buildDownloadHeaders`**: `integrity` is optional. A draft archive has no
+- **`buildDownloadHeaders`** takes a DRAFT input (`version: "draft"`, no `integrity`) beside a version input, which still requires its digest. A draft archive has no
   digest to publish, so it is served without `X-Integrity`.
 
 ### Changed

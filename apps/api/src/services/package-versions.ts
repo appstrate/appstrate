@@ -655,20 +655,24 @@ export async function createVersionFromDraft(params: {
 
   await params.validateManifest?.(finalManifest, pkg.type);
 
-  // Build ZIP depending on package type
-  let zipBuffer: Buffer;
-  let frozenEntries: Record<string, Uint8Array> | undefined;
-  if (pkg.type === "agent") {
-    if (storedFiles) {
-      const entries: Record<string, Uint8Array> = { ...storedFiles };
-      entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(finalManifest, null, 2));
-      entries["prompt.md"] = new TextEncoder().encode(content);
-      zipBuffer = Buffer.from(zipArtifact(entries, 6));
-    } else {
+  // Build ZIP depending on package type. A function of the manifest, because
+  // the duplicate-content check below freezes the same draft a second time
+  // under a different `version`.
+  const buildArtifact = (
+    frozenManifest: Record<string, unknown>,
+  ): { zip: Buffer; entries?: Record<string, Uint8Array> } => {
+    if (pkg.type === "agent") {
+      if (storedFiles) {
+        const entries: Record<string, Uint8Array> = { ...storedFiles };
+        entries["manifest.json"] = new TextEncoder().encode(
+          JSON.stringify(frozenManifest, null, 2),
+        );
+        entries["prompt.md"] = new TextEncoder().encode(content);
+        return { zip: Buffer.from(zipArtifact(entries, 6)) };
+      }
       // Locally-created agents have no stored files — minimal ZIP is correct
-      zipBuffer = buildMinimalZip(finalManifest, content);
+      return { zip: buildMinimalZip(frozenManifest, content) };
     }
-  } else {
     // pkg.type === "skill" | "integration" | "mcp-server" — all three bundle
     // their stored files (skill content / integration entrypoint+bundle /
     // MCPB payload) plus the rewritten manifest, from their respective storage
@@ -682,10 +686,10 @@ export async function createVersionFromDraft(params: {
       );
     }
     const entries: Record<string, Uint8Array> = { ...storedFiles };
-    entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(finalManifest, null, 2));
-    zipBuffer = Buffer.from(zipArtifact(entries, 6));
-    frozenEntries = entries;
-  }
+    entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(frozenManifest, null, 2));
+    return { zip: Buffer.from(zipArtifact(entries, 6)), entries };
+  };
+  const { zip: zipBuffer, entries: frozenEntries } = buildArtifact(finalManifest);
 
   // The bytes that ACTUALLY get frozen: the artifact's content entry comes from
   // STORAGE, and `packages.draft_content` is a second copy that can drift.
@@ -714,8 +718,19 @@ export async function createVersionFromDraft(params: {
     }
   }
 
-  // Check for duplicate content — reject if identical to the latest version
-  const newIntegrity = computeIntegrity(new Uint8Array(zipBuffer));
+  // Check for duplicate content — reject if identical to the latest version.
+  // A version OVERRIDE is not a change of content: it is the number the
+  // publish dialog (or `appstrate packages publish --bump`) picks for a draft
+  // still carrying the published version. Compared as sent, the new number
+  // alone changes the archive's digest, and the same content was cut again
+  // under every bump. So the comparison freezes the draft under its OWN
+  // version — what an unchanged draft published without an override would be.
+  const ownVersion = baseManifest.version;
+  const comparable =
+    params.version !== undefined && params.version !== ownVersion
+      ? buildArtifact({ ...finalManifest, version: ownVersion }).zip
+      : zipBuffer;
+  const newIntegrity = computeIntegrity(new Uint8Array(comparable));
   const latestIntegrity = await getLatestVersionIntegrity(packageId);
   if (latestIntegrity && newIntegrity === latestIntegrity) {
     return { error: "no_changes" };

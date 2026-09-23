@@ -25,6 +25,7 @@ import {
 } from "../../helpers/auth.ts";
 import {
   seedAgent,
+  seedApiKey,
   seedSpacePackage,
   seedPackageShare,
   seedPackage,
@@ -1282,6 +1283,23 @@ describe("GET /api/packages/{scope}/{name}/home", () => {
       home_shareable: false,
       read_space_ids: [betaId],
     });
+  });
+
+  it("keeps an API key to its own space: a package placed elsewhere is a 404", async () => {
+    const pinned = async (spaceId: string) => {
+      const key = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId,
+        createdBy: ctx.user.id,
+        scopes: ["skills:read"],
+      });
+      return { Authorization: `Bearer ${key.rawKey}`, "X-Org-Id": ctx.orgId };
+    };
+    // Gamma is a space the key's creator reaches, but nothing places the skill there.
+    expect((await locate(await pinned(gammaId))).status).toBe(404);
+    const fromBeta = await located(await pinned(betaId));
+    expect(fromBeta.read_space_ids).toEqual([betaId]);
+    expect(fromBeta.home_space_id).toBeNull();
   });
 
   it("404s an id the caller cannot reach, exactly as the catalog does", async () => {
