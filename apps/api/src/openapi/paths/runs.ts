@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
-import { terminalRunStatusValues } from "@appstrate/db/run-status";
+import { runStatusValues, terminalRunStatusValues } from "@appstrate/db/run-status";
 
 const inlineDependencyAuthorization =
   " Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.";
@@ -804,7 +804,7 @@ const canonicalRunsPaths = {
           in: "query",
           schema: {
             type: "string",
-            enum: ["pending", "running", "success", "failed", "timeout", "cancelled"],
+            enum: [...runStatusValues],
           },
           description:
             "Filter runs by lifecycle status. Omit (or send an empty value) for every status. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened.",

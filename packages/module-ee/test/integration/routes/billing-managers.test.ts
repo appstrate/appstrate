@@ -57,11 +57,12 @@ describe("billing managers", () => {
       const res = await app.request("/api/billing/managers", { headers: headers() });
       expect(res.status).toBe(200);
 
-      const body = (await res.json()) as { managers: Array<Record<string, unknown>> };
-      expect(body.managers).toHaveLength(1);
-      expect(body.managers[0]!.user_id).toBe("user-finance");
-      expect(body.managers[0]!.added_by).toBe("user-owner");
-      expect(typeof body.managers[0]!.created_at).toBe("string");
+      const body = (await res.json()) as { object: string; data: Array<Record<string, unknown>> };
+      expect(body.object).toBe("list");
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0]!.user_id).toBe("user-finance");
+      expect(body.data[0]!.added_by).toBe("user-owner");
+      expect(typeof body.data[0]!.created_at).toBe("string");
     });
 
     it("refuses a plain member", async () => {
@@ -95,8 +96,8 @@ describe("billing managers", () => {
       });
       expect(res.status).toBe(200);
 
-      const body = (await res.json()) as { managers: Array<{ user_id: string }> };
-      expect(body.managers.map((m) => m.user_id).sort()).toEqual(["user-dev", "user-finance"]);
+      const body = (await res.json()) as { data: Array<{ user_id: string }> };
+      expect(body.data.map((m) => m.user_id).sort()).toEqual(["user-dev", "user-finance"]);
       expect(await isBillingManager(orgId, "user-finance")).toBe(true);
       expect((await listBillingManagers(orgId))[0]!.addedBy).toBe("user-owner");
     });

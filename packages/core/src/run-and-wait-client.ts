@@ -3,6 +3,7 @@
 import { isFileProducedByRun } from "./file-uri.ts";
 import { asRecordOrNull } from "./safe-json.ts";
 import { encodePackageIdPath, toSlug } from "./naming.ts";
+import { terminalRunStatusValues } from "./run-status.ts";
 
 /**
  * Fallback wait ceiling for a caller that has no deadline of its own.
@@ -46,12 +47,7 @@ const TEXT_ENCODER = new TextEncoder();
 /** Non-fatal: a head cut mid-codepoint yields U+FFFD rather than throwing. */
 const TEXT_DECODER = new TextDecoder();
 
-export const RUN_AND_WAIT_TERMINAL_STATUSES = new Set([
-  "success",
-  "failed",
-  "timeout",
-  "cancelled",
-]);
+export const RUN_AND_WAIT_TERMINAL_STATUSES = new Set<string>(terminalRunStatusValues);
 
 export interface RunAndWaitStep {
   payload: Record<string, unknown>;

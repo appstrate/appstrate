@@ -5,7 +5,7 @@ import type { Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { requirePermission, rowAuthority } from "../middleware/require-permission.ts";
-import { spaceAssignmentSchema } from "../lib/space-role-assignment.ts";
+import { auditSpaceAssignments, spaceAssignmentSchema } from "../lib/space-role-assignment.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
 import { resolveListingViewAs } from "../lib/view-as.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
@@ -397,7 +397,11 @@ router.post("/:orgId/members", requirePermission("members", "invite"), async (c)
       action: "org.invitation_created",
       resourceType: "invitation",
       resourceId: invitation.id,
-      after: { email: invitation.email, role, space_assignments: invitation.spaceAssignments },
+      after: {
+        email: invitation.email,
+        role,
+        spaceAssignments: auditSpaceAssignments(invitation.spaceAssignments),
+      },
       orgIdOverride: orgId,
     });
 
@@ -484,7 +488,7 @@ router.put(
       action: "org.invitation_role_updated",
       resourceType: "invitation",
       resourceId: invitationId,
-      after: { role: data.role, space_assignments: spaceAssignments },
+      after: { role: data.role, spaceAssignments: auditSpaceAssignments(spaceAssignments) },
       orgIdOverride: orgId,
     });
 
@@ -559,10 +563,10 @@ router.put(
       resourceId: targetUserId,
       before: {
         role: previousRole,
-        revoked_space_assignments: revoked.map((row) => ({
-          space_id: row.spaceId,
-          preset_role: row.presetRole,
-          custom_role_id: row.customRoleId,
+        revokedSpaceAssignments: revoked.map((row) => ({
+          spaceId: row.spaceId,
+          presetRole: row.presetRole,
+          customRoleId: row.customRoleId,
         })),
       },
       after: { role: data.role },

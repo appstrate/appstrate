@@ -25,6 +25,7 @@ import type {
 } from "./chat-contract.ts";
 import type { OrchestratorRegistration } from "./platform-types.ts";
 import type { ModelGenerationCapabilitiesOverride } from "./model-generation.ts";
+import type { TerminalRunStatus } from "./run-status.ts";
 
 // ---------------------------------------------------------------------------
 // Module contract
@@ -1229,7 +1230,7 @@ export interface RunStatusChangeParams {
    */
   packageId: string | null;
   spaceId: string;
-  status: "started" | "success" | "failed" | "timeout" | "cancelled";
+  status: "started" | TerminalRunStatus;
   /** Cost in dollars (only on terminal status). */
   cost?: number;
   /** Duration in ms (only on terminal status). */

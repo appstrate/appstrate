@@ -400,7 +400,7 @@ export function usePackageVersions(type: PackageType, packageId: string | undefi
         `/api/packages/${PACKAGE_TYPE_ROUTE_SEGMENT[type]}/{scope}/{name}/versions`,
         { params: { path: splitPackageRef(packageId!) } },
       );
-      return data!.versions;
+      return data!.data;
     },
     enabled: !!orgId && !!spaceId && !!packageId,
   });

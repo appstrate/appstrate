@@ -1007,7 +1007,7 @@ index CREATE INDEX idx_uploads_end_user ON public.uploads USING btree (end_user_
 index CREATE INDEX idx_uploads_expires_unconsumed ON public.uploads USING btree (expires_at) WHERE (consumed_at IS NULL)
 index CREATE INDEX idx_uploads_org ON public.uploads USING btree (org_id)
 index CREATE INDEX idx_uploads_space ON public.uploads USING btree (space_id)
-index CREATE INDEX idx_webhook_deliveries_webhook_id ON public.webhook_deliveries USING btree (webhook_id)
+index CREATE INDEX idx_webhook_deliveries_webhook_created ON public.webhook_deliveries USING btree (webhook_id, created_at, id)
 index CREATE INDEX idx_webhooks_org_id ON public.webhooks USING btree (org_id)
 index CREATE INDEX idx_webhooks_space_enabled ON public.webhooks USING btree (space_id, enabled)
 index CREATE INDEX pkp_lookup ON public.package_persistence USING btree (package_id, space_id, actor_type, actor_id, key, pinned)

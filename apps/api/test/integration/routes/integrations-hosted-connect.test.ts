@@ -197,13 +197,13 @@ describe("hosted connect portal — dispatch + submit", () => {
     });
     expect(ctxRes.status).toBe(200);
     const context = (await ctxRes.json()) as {
-      package_id: string;
+      packageId: string;
       auth_key: string;
       display_name: string;
       auth: { type: string };
       csrf: string;
     };
-    expect(context.package_id).toBe("@myorg/gmail");
+    expect(context.packageId).toBe("@myorg/gmail");
     expect(context.auth_key).toBe("api");
     expect(context.display_name).toBe("Gmail");
     expect(context.auth.type).toBe("api_key");

@@ -2356,8 +2356,7 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.versions).toBeArray();
-      expect(body.versions).toHaveLength(0);
+      expect(body).toEqual({ object: "list", data: [], hasMore: false });
     });
 
     it("returns seeded versions", async () => {
@@ -2383,8 +2382,8 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.versions).toBeArray();
-      expect(body.versions.length).toBeGreaterThanOrEqual(2);
+      expect(body.data).toBeArray();
+      expect(body.data.length).toBeGreaterThanOrEqual(2);
     });
 
     it("returns 404 for non-existent package", async () => {
@@ -2494,8 +2493,8 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.versions).toBeArray();
-      expect(body.versions.length).toBeGreaterThanOrEqual(1);
+      expect(body.data).toBeArray();
+      expect(body.data.length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -3656,8 +3655,8 @@ describe("Packages API", () => {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(200);
-      return ((await res.json()) as { entries: { path: string; size: number; inline?: string }[] })
-        .entries;
+      return ((await res.json()) as { data: { path: string; size: number; inline?: string }[] })
+        .data;
     }
 
     it("carries a forked integration's INTEGRATION.md through to the explorer", async () => {

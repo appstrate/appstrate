@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { filePurposeValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 
 // Shared File object schema (mirrors FileDto in services/files.ts).
@@ -35,7 +36,7 @@ const fileSchema = {
       type: "string",
       description: "Stable `appfile://file_…` reference — pass in a run's file input field.",
     },
-    purpose: { type: "string", enum: ["user_upload", "agent_output"] },
+    purpose: { type: "string", enum: [...filePurposeValues] },
     spaceId: { type: "string" },
     run_id: { type: ["string", "null"], description: "Run container, or null." },
     chat_session_id: { type: ["string", "null"], description: "Chat-session container, or null." },
@@ -186,7 +187,7 @@ export const filesPaths = {
           name: "purpose",
           in: "query",
           required: false,
-          schema: { type: "string", enum: ["user_upload", "agent_output"] },
+          schema: { type: "string", enum: [...filePurposeValues] },
           description: "Filter by file purpose.",
         },
         {

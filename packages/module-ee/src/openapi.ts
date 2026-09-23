@@ -79,9 +79,11 @@ export function openApiComponentSchemas(): Record<string, unknown> {
     },
     EeBillingManagerList: {
       type: "object",
-      required: ["managers"],
+      required: ["object", "data", "hasMore"],
       properties: {
-        managers: { type: "array", items: billingManagerSchemaRef },
+        object: { type: "string", enum: ["list"] },
+        data: { type: "array", items: billingManagerSchemaRef },
+        hasMore: { type: "boolean", description: "Always `false`: the set is never paginated." },
       },
     },
     EeBillingContact: {

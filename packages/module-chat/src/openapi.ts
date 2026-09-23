@@ -12,6 +12,17 @@ const stdHeaders = {
   "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
 } as const;
 
+const pagedHeaders = { ...stdHeaders, Link: { $ref: "#/components/headers/Link" } } as const;
+
+function limitParam(defaultLimit: number, maxLimit: number) {
+  return {
+    name: "limit",
+    in: "query",
+    description: `Page size. Out-of-range or non-numeric values fall back to ${defaultLimit}.`,
+    schema: { type: "integer", minimum: 1, maximum: maxLimit, default: defaultLimit },
+  } as const;
+}
+
 export const chatComponentSchemas = {
   ChatSession: {
     type: "object",
@@ -37,21 +48,26 @@ export const chatComponentSchemas = {
   // client can seed `useChat({ messages })` on load. Written server-side
   // (user turn before inference, assistant turn on finalize); `content` is the
   // ai-sdk/v6 format-encoded message (UIMessage minus its id). The list is
-  // returned in insertion order — the transcript carries no ordering field of
-  // its own.
+  // returned in insertion order; `seq` is that order's cursor (`?since=`).
   //
   // `parent_id` and `format` were removed in `0054` along with the columns
   // behind them: a re-encoding of `seq` order and a server constant, neither
   // read by any client.
   ChatMessage: {
     type: "object",
-    required: ["id", "content"],
+    required: ["id", "seq", "content"],
     properties: {
       id: {
         type: "string",
         minLength: 1,
         maxLength: 200,
         description: "Server-generated message id",
+      },
+      seq: {
+        type: "integer",
+        format: "int64",
+        description:
+          "Insertion order (one sequence across all sessions, so a thread's values are not contiguous). Pass the last one as `?since=` to read the next page.",
       },
       content: { description: "Opaque encoded message" },
     },
@@ -65,15 +81,23 @@ export const chatPaths = {
       tags: ["Chat"],
       summary: "List chat sessions",
       description:
-        "List the caller's chat sessions in the current organization (most recent first).",
+        "List the caller's chat sessions in the current space, most recent activity (`updatedAt`) first. Keyset-paginated: when `hasMore` is `true`, pass the last session's `id` as `?startingAfter=`, or follow the RFC 5988 `Link: <…>; rel=\"next\"` response header. A session whose activity moves it to the head while you page is not repeated later in that walk; re-read the first page to see it.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
+        limitParam(100, 100),
+        {
+          name: "startingAfter",
+          in: "query",
+          description:
+            "Keyset cursor — the `id` of the last session of the previous page. An id that is not one of the caller's sessions in this space is a 400.",
+          schema: { type: "string" },
+        },
       ],
       responses: {
         "200": {
-          description: "Sessions list",
-          headers: stdHeaders,
+          description: "Sessions page",
+          headers: pagedHeaders,
           content: {
             "application/json": {
               schema: {
@@ -82,12 +106,16 @@ export const chatPaths = {
                 properties: {
                   object: { type: "string", enum: ["list"] },
                   data: { type: "array", items: { $ref: "#/components/schemas/ChatSession" } },
-                  hasMore: { type: "boolean" },
+                  hasMore: {
+                    type: "boolean",
+                    description: "True when older sessions follow this page.",
+                  },
                 },
               },
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
@@ -129,16 +157,25 @@ export const chatPaths = {
     get: {
       operationId: "getChatSession",
       tags: ["Chat"],
-      summary: "Get a chat session with its messages",
+      summary: "Get a chat session with a page of its messages",
+      description:
+        'The session and its messages in insertion order, one page at a time: when `hasMore` is `true`, pass the last message\'s `seq` as `?since=`, or follow the RFC 5988 `Link: <…?since=<seq>>; rel="next"` response header. A malformed `since` is ignored (the page starts at the first message).',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "since",
+          in: "query",
+          description: "Sequence cursor — return only messages with `seq` greater than this.",
+          schema: { type: "integer", format: "int64", minimum: 0 },
+        },
+        limitParam(100, 500),
       ],
       responses: {
         "200": {
-          description: "Session with full message tree",
-          headers: stdHeaders,
+          description: "Session with a page of its messages",
+          headers: pagedHeaders,
           content: {
             "application/json": {
               schema: {
@@ -146,11 +183,15 @@ export const chatPaths = {
                   { $ref: "#/components/schemas/ChatSession" },
                   {
                     type: "object",
-                    required: ["messages"],
+                    required: ["messages", "hasMore"],
                     properties: {
                       messages: {
                         type: "array",
                         items: { $ref: "#/components/schemas/ChatMessage" },
+                      },
+                      hasMore: {
+                        type: "boolean",
+                        description: "True when later messages follow this page.",
                       },
                     },
                   },

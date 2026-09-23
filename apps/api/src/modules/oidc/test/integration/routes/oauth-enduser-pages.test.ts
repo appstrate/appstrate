@@ -742,7 +742,7 @@ describe("Public end-user pages — /api/oauth/*", () => {
       const { clientId } = await registerOrgClient(ctx, {
         allowSignup: true,
         signupRole: "guest",
-        signupSpaceAssignments: [{ space_id: ctx.defaultSpaceId, preset_role: "viewer" }],
+        signupSpaceAssignments: [{ spaceId: ctx.defaultSpaceId, preset_role: "viewer" }],
       });
       await db.delete(spaces).where(eq(spaces.id, ctx.defaultSpaceId));
       const url = `/api/oauth/login?client_id=${encodeURIComponent(clientId)}&state=x`;
@@ -784,7 +784,7 @@ describe("Public end-user pages — /api/oauth/*", () => {
       const { clientId } = await registerOrgClient(ctx, {
         allowSignup: true,
         signupRole: "guest",
-        signupSpaceAssignments: [{ space_id: ctx.defaultSpaceId, preset_role: "viewer" }],
+        signupSpaceAssignments: [{ spaceId: ctx.defaultSpaceId, preset_role: "viewer" }],
       });
       await db.delete(spaces).where(eq(spaces.id, ctx.defaultSpaceId));
       const url = `/api/oauth/register?client_id=${encodeURIComponent(clientId)}&state=x`;

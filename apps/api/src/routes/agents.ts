@@ -531,7 +531,10 @@ export function createAgentsRouter() {
         wantsMemory ? listMemories(agent.id, spaceId, scope, runIdParam) : Promise.resolve([]),
       ]);
 
+      // One resource, not a list: a snapshot of both halves under the SAME
+      // actor-scope resolution, never paginated; `kind` narrows it.
       return c.json({
+        object: "agent_persistence",
         pinned: wantsPinned
           ? pinned.map((slot) => ({
               id: slot.id,

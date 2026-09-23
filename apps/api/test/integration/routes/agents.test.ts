@@ -1107,7 +1107,8 @@ describe("Agents API", () => {
         { headers: authHeaders(ctx) },
       );
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { memories: Array<{ runId: string }> };
+      const body = (await res.json()) as { object: string; memories: Array<{ runId: string }> };
+      expect(body.object).toBe("agent_persistence");
       expect(body.memories).toHaveLength(2);
       expect(body.memories.every((m) => m.runId === r1.id)).toBe(true);
     });

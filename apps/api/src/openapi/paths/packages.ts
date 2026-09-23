@@ -77,6 +77,19 @@ function packageUpdateResponseSchema(detailRef: string) {
   };
 }
 
+/** `GET /packages/{type}/.../versions` → the standard list envelope of versions. */
+function versionListResponseSchema() {
+  return {
+    type: "object",
+    required: ["object", "data", "hasMore"],
+    properties: {
+      object: { type: "string", enum: ["list"] },
+      data: { type: "array", items: { $ref: "#/components/schemas/AgentVersion" } },
+      hasMore: { type: "boolean" },
+    },
+  };
+}
+
 /** `POST /packages/{type}/.../versions` → the created version resource, bare. */
 function versionCreateResponseSchema() {
   return {
@@ -963,16 +976,7 @@ export const packagesPaths = {
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                required: ["versions"],
-                properties: {
-                  versions: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/AgentVersion" },
-                  },
-                },
-              },
+              schema: versionListResponseSchema(),
             },
           },
         },
@@ -1568,16 +1572,7 @@ export const packagesPaths = {
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                required: ["versions"],
-                properties: {
-                  versions: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/AgentVersion" },
-                  },
-                },
-              },
+              schema: versionListResponseSchema(),
             },
           },
         },
@@ -2246,16 +2241,7 @@ export const packagesPaths = {
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                required: ["versions"],
-                properties: {
-                  versions: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/AgentVersion" },
-                  },
-                },
-              },
+              schema: versionListResponseSchema(),
             },
           },
         },
@@ -2692,16 +2678,7 @@ export const packagesPaths = {
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                required: ["versions"],
-                properties: {
-                  versions: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/AgentVersion" },
-                  },
-                },
-              },
+              schema: versionListResponseSchema(),
             },
           },
         },

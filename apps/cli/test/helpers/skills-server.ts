@@ -377,8 +377,8 @@ export function createSkillServer(
       const refusal = draftSelectorRefusal(found, url);
       if (refusal) return refusal;
       indexReads += 1;
-      // `buildFileIndex` shape: sorted entries of { path, size, media_kind },
-      // with `inline` carrying the full text of these small text files.
+      // `buildFileIndex` shape in the list envelope: sorted entries of
+      // { path, size, media_kind }, with `inline` carrying the full text.
       const entries = Object.entries(entriesFor(found, url))
         .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
         .map(([entryPath, text]) => ({
@@ -387,7 +387,9 @@ export function createSkillServer(
           media_kind: "text",
           inline: text,
         }));
-      return json({ entries }, 200, { ETag: `"${indexEtag(found, url)}"` });
+      return json({ object: "list", data: entries, hasMore: false }, 200, {
+        ETag: `"${indexEtag(found, url)}"`,
+      });
     }
 
     return json({ code: "not_found", message: `not stubbed: ${path}` }, 404);

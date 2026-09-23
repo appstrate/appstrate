@@ -27,11 +27,12 @@
 
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { z } from "zod";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { enterSpaceContext, requireModulePermission } from "@appstrate/core/permissions";
-import { notFound, parseBody } from "@appstrate/core/api-errors";
+import { invalidRequest, notFound, parseBody } from "@appstrate/core/api-errors";
+import { setCursorLinkHeader, setSinceLinkHeader } from "@appstrate/core/pagination-link";
 import { UI_MESSAGE_STREAM_HEADERS } from "ai";
 import { handleChatStream, type ChatEnv } from "./chat-stream.ts";
 import { stopStream } from "./stop-registry.ts";
@@ -41,8 +42,22 @@ import { notifySessionUpdate } from "./realtime.ts";
 import { logger } from "./logger.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 
-/** Page size for the session list — one row past this is fetched to derive `hasMore`. */
+/** Session-list page size (default = max): one row past it is fetched to derive `hasMore`. */
 const SESSIONS_PAGE_SIZE = 100;
+/** Message page bounds for the history read; the SPA asks for the max and follows `since`. */
+const MESSAGES_DEFAULT_LIMIT = 100;
+export const MESSAGES_MAX_LIMIT = 500;
+
+/** `?limit=` with the platform's lenient idiom: out-of-range or unparseable → default. */
+function pageLimit(c: Context, defaultLimit: number, maxLimit: number): number {
+  return z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(maxLimit)
+    .catch(defaultLimit)
+    .parse(c.req.query("limit") ?? defaultLimit);
+}
 
 export const createSessionSchema = z.object({
   title: z.string().min(1).max(200).optional(),
@@ -78,6 +93,8 @@ function toSessionDto(row: SessionRow) {
 function toMessageDto(row: MessageRow) {
   return {
     id: row.messageId,
+    // The `?since=` cursor, so a body-only reader (CLI, MCP) can page too.
+    seq: row.seq,
     content: row.content,
   };
 }
@@ -119,12 +136,19 @@ async function getOwnedSession(
   return session;
 }
 
-async function loadMessages(sessionId: string): Promise<MessageRow[]> {
+async function loadMessages(
+  sessionId: string,
+  sinceSeq: number | undefined,
+  limit: number,
+): Promise<MessageRow[]> {
+  const conditions: SQL[] = [eq(chatMessages.sessionId, sessionId)];
+  if (sinceSeq !== undefined) conditions.push(gt(chatMessages.seq, sinceSeq));
   return db
     .select()
     .from(chatMessages)
-    .where(eq(chatMessages.sessionId, sessionId))
-    .orderBy(asc(chatMessages.seq));
+    .where(and(...conditions))
+    .orderBy(asc(chatMessages.seq))
+    .limit(limit);
 }
 
 // ---------------------------------------------------------------------------
@@ -151,26 +175,43 @@ export function createChatRouter(deps: ChatPlatformDeps) {
   // traffic). The platform always supplies it via deps — no unlimited fallback.
   const rateLimited = (limitPerMinute: number): MiddlewareHandler => deps.rateLimit(limitPerMinute);
 
-  // GET /api/chat/sessions — list the caller's sessions in the current org
+  // GET /api/chat/sessions — the caller's sessions in this space, most recent
+  // activity first, keyset-paginated on `(updatedAt, id)` via
+  // `?startingAfter=<session id>` (the platform's cursor idiom, so a body-only
+  // reader can page). The bound is the cursor ROW, compared in SQL at full
+  // precision. A session whose activity moves it mid-walk leaves the unseen
+  // tail and reappears at the head — inherent to an activity-ordered list, and
+  // the SPA re-walks on every `chat_session_update`. If the moved row is the
+  // cursor itself, the walk resumes from the head: duplicates, never a skip.
   router.get("/api/chat/sessions", requireModulePermission("chat", "read"), async (c) => {
-    // Fetch one past the page so `hasMore` reflects reality: previously it was
-    // hardcoded `false`, so a caller with more than a page of sessions had no
-    // signal that older conversations existed beyond the window.
     const scope = sessionScope(c);
+    const limit = pageLimit(c, SESSIONS_PAGE_SIZE, SESSIONS_PAGE_SIZE);
+    const conditions: SQL[] = [
+      eq(chatSessions.orgId, scope.orgId),
+      eq(chatSessions.userId, scope.userId),
+      eq(chatSessions.spaceId, scope.spaceId),
+    ];
+    const startingAfter = c.req.query("startingAfter");
+    if (startingAfter) {
+      if (!(await findOwnedSession(startingAfter, scope))) {
+        throw invalidRequest(
+          "startingAfter must be the id of one of your sessions in this space",
+          "startingAfter",
+        );
+      }
+      conditions.push(
+        sql`(${chatSessions.updatedAt}, ${chatSessions.id}) < (select cur.updated_at, cur.id from ${chatSessions} cur where cur.id = ${startingAfter})`,
+      );
+    }
     const rows = await db
       .select()
       .from(chatSessions)
-      .where(
-        and(
-          eq(chatSessions.orgId, scope.orgId),
-          eq(chatSessions.userId, scope.userId),
-          eq(chatSessions.spaceId, scope.spaceId),
-        ),
-      )
-      .orderBy(desc(chatSessions.updatedAt))
-      .limit(SESSIONS_PAGE_SIZE + 1);
-    const hasMore = rows.length > SESSIONS_PAGE_SIZE;
-    const page = hasMore ? rows.slice(0, SESSIONS_PAGE_SIZE) : rows;
+      .where(and(...conditions))
+      .orderBy(desc(chatSessions.updatedAt), desc(chatSessions.id))
+      .limit(limit + 1);
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    setCursorLinkHeader({ c, publicOrigin: deps.publicOrigin, hasMore, lastId: page.at(-1)?.id });
     return c.json({ object: "list", data: page.map(toSessionDto), hasMore });
   });
 
@@ -197,11 +238,25 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     },
   );
 
-  // GET /api/chat/sessions/:id — the conversation's messages, in seq order (history load)
+  // GET /api/chat/sessions/:id — the conversation with a page of its messages
+  // in `seq` order. Bounded like run logs: `?since=<seq>` returns messages past
+  // that cursor, `hasMore` + `Link: rel="next"` say another page follows. A
+  // malformed `since` is ignored rather than 400'd, as on run logs.
   router.get("/api/chat/sessions/:id", requireModulePermission("chat", "read"), async (c) => {
     const session = await getOwnedSession(c.req.param("id"), sessionScope(c));
-    const messages = await loadMessages(session.id);
-    return c.json({ ...toSessionDto(session), messages: messages.map(toMessageDto) });
+    const since = Number(c.req.query("since") || Number.NaN);
+    const sinceSeq = Number.isSafeInteger(since) && since >= 0 ? since : undefined;
+    const limit = pageLimit(c, MESSAGES_DEFAULT_LIMIT, MESSAGES_MAX_LIMIT);
+    const rows = await loadMessages(session.id, sinceSeq, limit + 1);
+    const hasMore = rows.length > limit;
+    const messages = hasMore ? rows.slice(0, limit) : rows;
+    setSinceLinkHeader({
+      c,
+      publicOrigin: deps.publicOrigin,
+      hasMore,
+      lastId: messages.at(-1)?.seq,
+    });
+    return c.json({ ...toSessionDto(session), messages: messages.map(toMessageDto), hasMore });
   });
 
   // PATCH /api/chat/sessions/:id — rename

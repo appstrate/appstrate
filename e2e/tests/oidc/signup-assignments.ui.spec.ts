@@ -46,7 +46,7 @@ test("OAuth signup assignments survive create, edit, and temporary role changes"
   expect(client).toMatchObject({
     signupRole: "guest",
     allowSignup: false,
-    signupSpaceAssignments: [{ space_id: space.id, preset_role: "viewer" }],
+    signupSpaceAssignments: [{ spaceId: space.id, preset_role: "viewer" }],
   });
   await page.keyboard.press("Escape");
 

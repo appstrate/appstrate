@@ -20,7 +20,7 @@ interface FileEntry {
 async function listFiles(client: ApiClient, id: string): Promise<FileEntry[]> {
   const response = await client.get(`/packages/${id}/files`);
   expect(response.status()).toBe(200);
-  return (await response.json()).entries;
+  return (await response.json()).data;
 }
 async function writeElsewhere(client: ApiClient, id: string, path: string, text: string) {
   const before = await (await client.get(`/packages/skills/${id}`)).json();
@@ -451,9 +451,7 @@ for (const type of ["skills", "agents", "integrations"]) {
     expect(await binary.body()).toEqual(Buffer.from([0, 255, 128]));
     const version = await apiClient.get(`/packages/${id}/files?version=1.0.0`);
     expect(version.status()).toBe(200);
-    expect((await version.json()).entries.map((file: FileEntry) => file.path)).toContain(
-      "README.md",
-    );
+    expect((await version.json()).data.map((file: FileEntry) => file.path)).toContain("README.md");
   });
 }
 
@@ -508,8 +506,8 @@ test("a MCP home author edits files while browsing a read-only placement", async
     email: author.email,
     role: "guest",
     space_assignments: [
-      { space_id: homeId, preset_role: "builder" },
-      { space_id: destinationId, preset_role: "viewer" },
+      { spaceId: homeId, preset_role: "builder" },
+      { spaceId: destinationId, preset_role: "viewer" },
     ],
   });
   expect(invitation.status()).toBe(201);

@@ -314,13 +314,16 @@ export const agentsPaths = {
       ],
       responses: {
         "200": {
-          description: "Persistence rows",
+          description:
+            "The agent's persistence snapshot: one resource holding both kinds, each omitted when `kind` names the other.",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object"],
                 properties: {
+                  object: { type: "string", enum: ["agent_persistence"] },
                   pinned: {
                     type: "array",
                     items: {

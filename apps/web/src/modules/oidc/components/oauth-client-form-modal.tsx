@@ -106,7 +106,7 @@ function OAuthClientFormBody({
   const [signupRole, setSignupRole] = useState<AssignableOrgRole>(client?.signupRole ?? "member");
   const [assignments, setAssignments] = useState<AssignmentDraft[]>(() =>
     (client?.signupSpaceAssignments ?? []).map((assignment) => ({
-      space_id: assignment.space_id,
+      spaceId: assignment.spaceId,
       role: spaceRoleValue(assignment),
     })),
   );

@@ -44,6 +44,7 @@
     "./ajv": "./src/ajv.ts",
     "./api-errors": "./src/api-errors.ts",
     "./request-body": "./src/request-body.ts",
+    "./pagination-link": "./src/pagination-link.ts",
     "./safe-json": "./src/safe-json.ts",
     "./storage": "./src/storage.ts",
     "./storage-s3": "./src/storage-s3.ts",
@@ -100,6 +101,7 @@
     "./oauth-bearer-swap": "./src/oauth-bearer-swap.ts",
     "./url": "./src/url.ts",
     "./run-and-wait-client": "./src/run-and-wait-client.ts",
+    "./run-status": "./src/run-status.ts",
     "./connect-handshake": "./src/connect-handshake.ts"
   },
   "dependencies": {

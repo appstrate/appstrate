@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { packageTypeValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 
 /**
@@ -38,7 +39,7 @@ const SPACES_SCHEMA = {
 const PACKAGES_SCHEMA = {
   type: "object",
   description: "Packages grouped by type. Every group is always present (possibly empty).",
-  required: ["agent", "skill", "mcp-server", "integration"],
+  required: [...packageTypeValues],
   properties: {
     agent: { $ref: "#/components/schemas/LibraryPackageList" },
     skill: { $ref: "#/components/schemas/LibraryPackageList" },

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`runStatusValues`**, **`terminalRunStatusValues`**, **`activeRunStatusValues`**,
+  **`RunStatus`** and **`TerminalRunStatus`** (`@appstrate/core/run-status`, new
+  import-free subpath) — the canonical run-status tuples, moved here from
+  `@appstrate/db/run-status` (which now derives from them) so core can use them.
+  `RUN_AND_WAIT_TERMINAL_STATUSES` is now built from `terminalRunStatusValues`
+  (same members), and the module event's `status` is typed
+  `"started" | TerminalRunStatus` (same union).
+- **`setCursorLinkHeader`** and **`setSinceLinkHeader`** (`@appstrate/core/pagination-link`,
+  new subpath) — set the RFC 5988 `Link` header of a cursor-paginated list
+  (`?startingAfter=`/`?endingBefore=` keyset or `?since=` sequence), rooted on
+  a caller-supplied public origin, so a module router pages with the same
+  header as the platform's own lists.
 - **`MODEL_INPUT_MODALITIES`**, **`modelInputModalitySchema`** and
   **`ModelInputModality`** (`@appstrate/core/module`) — the closed set of model
   input modalities (`text`, `image`) the Pi runtime accepts, shared by the model
@@ -71,6 +83,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each such operation from a route handler,
   `router.all("/x/*", (c) => handler(c.req.raw))`, or remove it from
   `openApiPaths()`.
+- **BREAKING: `SpaceAssignment.space_id` is renamed `spaceId`**
+  (`@appstrate/core/permissions`), the universal-id carve-out of the casing
+  conventions. The role keys (`preset_role`, `custom_role_id`) are unchanged.
+  Stored rows move with it: `scripts/migration/0020-space-assignments-spaceid-key.sql`.
 
 ## [11.1.0] — 2026-09-22
 

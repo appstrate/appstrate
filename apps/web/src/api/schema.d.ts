@@ -1060,7 +1060,7 @@ export interface paths {
         };
         /**
          * List chat sessions
-         * @description List the caller's chat sessions in the current organization (most recent first).
+         * @description List the caller's chat sessions in the current space, most recent activity (`updatedAt`) first. Keyset-paginated: when `hasMore` is `true`, pass the last session's `id` as `?startingAfter=`, or follow the RFC 5988 `Link: <…>; rel="next"` response header. A session whose activity moves it to the head while you page is not repeated later in that walk; re-read the first page to see it.
          */
         get: operations["listChatSessions"];
         put?: never;
@@ -1079,7 +1079,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get a chat session with its messages */
+        /**
+         * Get a chat session with a page of its messages
+         * @description The session and its messages in insertion order, one page at a time: when `hasMore` is `true`, pass the last message's `seq` as `?since=`, or follow the RFC 5988 `Link: <…?since=<seq>>; rel="next"` response header. A malformed `since` is ignored (the page starts at the first message).
+         */
         get: operations["getChatSession"];
         put?: never;
         post?: never;
@@ -4688,7 +4691,7 @@ export interface paths {
         };
         /**
          * Delivery history
-         * @description List recent delivery attempts for a webhook (status, latency, response code).
+         * @description Delivery attempts for a webhook (status, latency, response code), newest first. Keyset-paginated: when `hasMore` is `true`, an RFC 5988 `Link: <…?startingAfter=<id>>; rel="next"` response header points at the next page.
          */
         get: operations["listWebhookDeliveries"];
         put?: never;
@@ -5001,7 +5004,7 @@ export interface components {
             display_name?: string;
             description?: string;
             /** @enum {string} */
-            source: "system" | "local";
+            source: "local" | "system";
             /** @description Scope from manifest name, including the leading `@` (e.g. `@myorg`). Directly usable as the `{scope}` path parameter of package/agent operations. */
             scope: string | null;
             /** @description Version from manifest */
@@ -5100,7 +5103,7 @@ export interface components {
             author?: string;
             keywords: string[];
             /** @enum {string} */
-            source: "system" | "local";
+            source: "local" | "system";
             /** @description Scope from manifest name, including the leading `@` (e.g. `@myorg` from `@myorg/name`). Directly usable as the `{scope}` path parameter of package/agent operations. */
             scope: string | null;
             /** @description Version from manifest */
@@ -5109,7 +5112,7 @@ export interface components {
              * @description Package type from manifest
              * @enum {string}
              */
-            type: "agent" | "skill" | "mcp-server" | "integration";
+            type: "agent" | "skill" | "integration" | "mcp-server";
             running_runs: number;
             dependencies: {
                 /** @description Withheld from a summary read (`agents:run` without `agents:read`). */
@@ -5313,6 +5316,11 @@ export interface components {
         ChatMessage: {
             /** @description Server-generated message id */
             id: string;
+            /**
+             * Format: int64
+             * @description Insertion order (one sequence across all sessions, so a thread's values are not contiguous). Pass the last one as `?since=` to read the next page.
+             */
+            seq: number;
             /** @description Opaque encoded message */
             content: unknown;
         };
@@ -5373,7 +5381,11 @@ export interface components {
             created_at: string;
         };
         EeBillingManagerList: {
-            managers: components["schemas"]["EeBillingManager"][];
+            /** @enum {string} */
+            object: "list";
+            data: components["schemas"]["EeBillingManager"][];
+            /** @description Always `false`: the set is never paginated. */
+            hasMore: boolean;
         };
         EeBillingPlan: {
             /** @enum {string} */
@@ -5532,7 +5544,7 @@ export interface components {
             /** @description Package id (`@scope/name`). */
             id: string;
             /** @enum {string} */
-            type: "agent" | "skill" | "mcp-server" | "integration";
+            type: "agent" | "skill" | "integration" | "mcp-server";
             /** @description Package origin (`local` for org-owned packages, `system` for built-in system packages). */
             source: string;
             /** @description Display name from the package draft manifest (`manifest.display_name`); falls back to the package id. */
@@ -5756,7 +5768,7 @@ export interface components {
             /** @description The manifest's `keywords`, `[]` when it declares none — what an index page's search matches on beyond the name and the description. */
             keywords: string[];
             /** @enum {string} */
-            source: "system" | "local";
+            source: "local" | "system";
             created_by: string | null;
             created_by_name?: string;
             used_by_agents: number;
@@ -5792,7 +5804,7 @@ export interface components {
             /** @description The package's primary content: `SKILL.md` for a skill, `INTEGRATION.md` for an integration, the manifest text for an mcp-server (which has no companion file of its own) and for an integration published without one. Read from the draft or from the published archive according to `definition`. */
             content: string | null;
             /** @enum {string} */
-            source: "system" | "local";
+            source: "local" | "system";
             created_by: string | null;
             auto_installed: boolean;
             /** @description Optimistic lock version */
@@ -5892,8 +5904,12 @@ export interface components {
             inline?: string;
         };
         PackageFileIndex: {
+            /** @enum {string} */
+            object: "list";
             /** @description Files in the artifact, sorted by `path`. */
-            entries: components["schemas"]["PackageFileEntry"][];
+            data: components["schemas"]["PackageFileEntry"][];
+            /** @description Always `false`: the index is never paginated. */
+            hasMore: boolean;
         };
         PackageFileMoveEntry: {
             /**
@@ -5925,7 +5941,7 @@ export interface components {
             /** @description Package id (`@scope/name`). */
             id: string;
             /** @enum {string} */
-            type: "agent" | "skill" | "mcp-server" | "integration";
+            type: "agent" | "skill" | "integration" | "mcp-server";
             /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: a colleague's personal space, for instance, which is readable through a placement but never nameable, or a system package, which the platform ships into every space instead of housing in one. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority. */
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that. */
@@ -5968,7 +5984,7 @@ export interface components {
                 name: string;
             } | null;
             /** Format: date-time */
-            created_at: string;
+            createdAt: string;
         };
         PackageVersionDetail: {
             /** @description Version row id */
@@ -6307,21 +6323,21 @@ export interface components {
             /** @enum {string} */
             kind: "user";
             /** @description Organization member's user id. */
-            user_id: string;
+            userId: string;
         } | {
             /** @enum {string} */
             kind: "space";
             /** @description Space id (`spc_…`) the caller can reach. */
-            space_id: string;
+            spaceId: string;
         };
         /** @description A share's subject as the server renders it back. A personal-space target comes back as its OWNER — never as a space id, which is the one fact a personal space withholds. */
         ShareTargetView: {
             /** @enum {string} */
             kind: "user" | "space";
             /** @description Present when `kind` is `user`. */
-            user_id?: string;
+            userId?: string;
             /** @description Present when `kind` is `space`. */
-            space_id?: string;
+            spaceId?: string;
             /** @description The member's display name, or the space's name. */
             name: string;
         };
@@ -6353,7 +6369,7 @@ export interface components {
         };
         /** @description A space membership the invitation applies when it is accepted. Exactly one of `preset_role` / `custom_role_id` is set. */
         SpaceAssignment: {
-            space_id: string;
+            spaceId: string;
             /** @enum {string} */
             preset_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
             custom_role_id?: string;
@@ -6471,9 +6487,9 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
             /** @enum {string} */
-            package_type: "agent" | "skill" | "mcp-server" | "integration";
+            package_type: "agent" | "skill" | "integration" | "mcp-server";
             /** @enum {string} */
-            package_source: "system" | "local";
+            package_source: "local" | "system";
             /** @description Raw draft manifest JSONB for the placed package. */
             draft_manifest: Record<string, never> | null;
         };
@@ -6481,7 +6497,7 @@ export interface components {
             /** @enum {string} */
             object: "space_sweep";
             /** @description The personal space that was swept and deleted */
-            space_id: string;
+            spaceId: string;
             /** @description Packages this space homed that another space has placed: re-homed to the organization's default space rather than deleted */
             rehomed_packages: number;
             /** @description Packages this space homed that no other space had placed: deleted */
@@ -7575,7 +7591,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Persistence rows */
+            /** @description The agent's persistence snapshot: one resource holding both kinds, each omitted when `kind` names the other. */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -7584,6 +7600,8 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        /** @enum {string} */
+                        object: "agent_persistence";
                         pinned?: {
                             id: number;
                             key: string;
@@ -9863,7 +9881,12 @@ export interface operations {
     };
     listChatSessions: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Page size. Out-of-range or non-numeric values fall back to 100. */
+                limit?: number;
+                /** @description Keyset cursor — the `id` of the last session of the previous page. An id that is not one of the caller's sessions in this space is a 400. */
+                startingAfter?: string;
+            };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
@@ -9875,11 +9898,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Sessions list */
+            /** @description Sessions page */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    Link: components["headers"]["Link"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -9887,10 +9911,12 @@ export interface operations {
                         /** @enum {string} */
                         object: "list";
                         data: components["schemas"]["ChatSession"][];
+                        /** @description True when older sessions follow this page. */
                         hasMore: boolean;
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
         };
     };
@@ -9938,7 +9964,12 @@ export interface operations {
     };
     getChatSession: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Sequence cursor — return only messages with `seq` greater than this. */
+                since?: number;
+                /** @description Page size. Out-of-range or non-numeric values fall back to 100. */
+                limit?: number;
+            };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
@@ -9952,16 +9983,19 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Session with full message tree */
+            /** @description Session with a page of its messages */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    Link: components["headers"]["Link"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["ChatSession"] & {
                         messages: components["schemas"]["ChatMessage"][];
+                        /** @description True when later messages follow this page. */
+                        hasMore: boolean;
                     };
                 };
             };
@@ -11407,7 +11441,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        package_id: string;
+                        packageId: string;
                         auth_key: string;
                         display_name: string;
                         icon?: string | null;
@@ -13394,7 +13428,7 @@ export interface operations {
                             /** @description Whether THIS caller may write the agent, i.e. whether its draft is theirs to run with `version=draft` (403 `draft_not_writable` otherwise). Read with `published`: false/false is an agent this caller cannot execute at all until its author publishes one. */
                             home_writable: boolean;
                             /** @enum {string} */
-                            source: "system" | "local";
+                            source: "local" | "system";
                         }[];
                         /** @description True when the agent list was capped (full list via `listAgents`). */
                         agents_truncated: boolean;
@@ -13413,7 +13447,7 @@ export interface operations {
                             /** @description Whether THIS caller may write the skill, i.e. whether its draft is theirs to run — `dependency_overrides` with `draft` answers 403 `draft_not_writable` otherwise. */
                             home_writable: boolean;
                             /** @enum {string} */
-                            source: "system" | "local";
+                            source: "local" | "system";
                         }[];
                         /** @description True when the skill list was capped (full list via `listSkills`). */
                         skills_truncated: boolean;
@@ -15397,7 +15431,10 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        /** @enum {string} */
+                        object: "list";
                         data: string[];
+                        hasMore: boolean;
                     };
                 };
             };
@@ -15936,7 +15973,7 @@ export interface operations {
                      *       "role": "member",
                      *       "space_assignments": [
                      *         {
-                     *           "space_id": "spc_...",
+                     *           "spaceId": "spc_...",
                      *           "preset_role": "operator"
                      *         }
                      *       ],
@@ -16375,7 +16412,10 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        versions: components["schemas"]["AgentVersion"][];
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["AgentVersion"][];
+                        hasMore: boolean;
                     };
                 };
             };
@@ -17091,7 +17131,10 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        versions: components["schemas"]["AgentVersion"][];
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["AgentVersion"][];
+                        hasMore: boolean;
                     };
                 };
             };
@@ -17561,7 +17604,10 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        versions: components["schemas"]["AgentVersion"][];
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["AgentVersion"][];
+                        hasMore: boolean;
                     };
                 };
             };
@@ -18084,7 +18130,10 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        versions: components["schemas"]["AgentVersion"][];
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["AgentVersion"][];
+                        hasMore: boolean;
                     };
                 };
             };
@@ -22216,7 +22265,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description Filter by package type */
-                type?: "agent" | "skill" | "mcp-server" | "integration";
+                type?: "agent" | "skill" | "integration" | "mcp-server";
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -22951,7 +23000,10 @@ export interface operations {
     listWebhookDeliveries: {
         parameters: {
             query?: {
+                /** @description Page size. Out-of-range or non-numeric values fall back to 20. */
                 limit?: number;
+                /** @description Keyset cursor — the `id` of the last delivery of the previous page. Supplied by the `Link: rel="next"` header. An id that is not a delivery of this webhook is a 400. */
+                startingAfter?: string;
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -22966,11 +23018,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Delivery history */
+            /** @description Delivery history page */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    Link: components["headers"]["Link"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -22979,7 +23032,7 @@ export interface operations {
                      *       "object": "list",
                      *       "data": [
                      *         {
-                     *           "id": "dlv_cm3ghi789",
+                     *           "id": "0b6f3c1e-8f0a-4c52-9d7e-2a1b3c4d5e6f",
                      *           "eventId": "evt_cm3ghi790",
                      *           "eventType": "run.success",
                      *           "status": "success",
@@ -23010,10 +23063,12 @@ export interface operations {
                             /** Format: date-time */
                             createdAt: string;
                         }[];
+                        /** @description True when older deliveries follow this page. */
                         hasMore: boolean;
                     };
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -23735,7 +23790,7 @@ export interface operations {
                      *       "role": "member",
                      *       "space_assignments": [
                      *         {
-                     *           "space_id": "spc_...",
+                     *           "spaceId": "spc_...",
                      *           "preset_role": "operator"
                      *         }
                      *       ],

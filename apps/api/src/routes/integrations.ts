@@ -1085,7 +1085,7 @@ export function createIntegrationsRouter() {
     const scope = scopeFromClaims(claims);
     const { manifest, auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key);
     return c.json({
-      package_id: claims.package_id,
+      packageId: claims.package_id,
       auth_key: claims.auth_key,
       display_name: manifest.display_name ?? claims.package_id,
       icon: manifest.icon ?? null,

@@ -101,8 +101,8 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
   ): Promise<{ res: Response; entries: FileEntry[]; etag: string }> {
     const res = await app.request(`/api/packages/${id}/files`, { headers: authHeaders(ctx) });
     expect(res.status).toBe(200);
-    const body = (await res.clone().json()) as { entries: FileEntry[] };
-    return { res, entries: body.entries, etag: res.headers.get("ETag")! };
+    const body = (await res.clone().json()) as { data: FileEntry[] };
+    return { res, entries: body.data, etag: res.headers.get("ETag")! };
   }
 
   async function fileBytes(path: string, id = SKILL_ID): Promise<Uint8Array> {
@@ -394,7 +394,7 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
         { lockVersion: before.lockVersion },
       );
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { entries: FileEntry[]; lock_version: number };
+      const body = (await res.json()) as { lock_version: number };
 
       const after = await listFiles();
       expect(after.entries.map((e) => e.path)).toEqual([
@@ -966,14 +966,14 @@ describe("file operations at package creation", () => {
           headers: authHeaders(ctx),
         });
         expect(index.status, await index.clone().text()).toBe(200);
-        const body = (await index.json()) as { entries: FileEntry[] };
-        expect(body.entries.map((entry) => entry.path)).toEqual(
+        const body = (await index.json()) as { data: FileEntry[] };
+        expect(body.data.map((entry) => entry.path)).toEqual(
           expect.arrayContaining(["manifest.json", "docs/README.md", "asset.bin"]),
         );
-        expect(body.entries.map((entry) => entry.path)).not.toContain("removed.txt");
-        expect(body.entries.find((entry) => entry.path === "docs/README.md")?.inline).toBe("Notes");
+        expect(body.data.map((entry) => entry.path)).not.toContain("removed.txt");
+        expect(body.data.find((entry) => entry.path === "docs/README.md")?.inline).toBe("Notes");
         if (type === "integration")
-          expect(body.entries.find((entry) => entry.path === "INTEGRATION.md")?.inline).toBe(
+          expect(body.data.find((entry) => entry.path === "INTEGRATION.md")?.inline).toBe(
             "Integration docs",
           );
         const binary = await app.request(

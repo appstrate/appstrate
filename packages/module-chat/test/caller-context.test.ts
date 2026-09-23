@@ -37,6 +37,7 @@ function fakeDeps(respond: (req: Request) => Response): {
         return respond(req);
       },
       rateLimit: () => async (_c, next) => next(),
+      publicOrigin: "http://localhost:3000",
       resolveChatModel: async () => ({ subscription: false }),
       recordChatUsage: async () => {},
       checkUsageAllowed: async () => null,

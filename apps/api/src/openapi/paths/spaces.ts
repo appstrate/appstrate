@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { packageTypeValues } from "@appstrate/db/schema";
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { SPACE_ROLE_ID_PATTERN } from "../schemas.ts";
@@ -385,7 +386,7 @@ export const spacesPaths = {
           name: "type",
           in: "query",
           required: false,
-          schema: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
+          schema: { type: "string", enum: [...packageTypeValues] },
           description: "Filter by package type",
         },
       ],

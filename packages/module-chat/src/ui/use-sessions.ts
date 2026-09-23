@@ -11,13 +11,14 @@
  */
 
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { infiniteQueryOptions, useInfiniteQuery } from "@tanstack/react-query";
 import { useChatHeaders, type GetHeaders } from "./runtime-context.ts";
 import {
-  fetchSessions,
+  fetchSessionsPage,
+  flattenSessions,
   sessionsQueryKey,
   spaceIdFromHeaders,
-  type SessionSummary,
+  type SessionsCache,
 } from "./sessions.ts";
 
 // Re-exported for the app shell: the SSE dispatcher invalidates this PREFIX on
@@ -46,49 +47,55 @@ export const GENERATING_REFETCH_MS = 10_000;
  * test; the two constants above are the only thing it decides between.
  */
 export function sessionsRefetchInterval(query: {
-  state: { data?: SessionSummary[] | undefined };
+  state: { data?: SessionsCache | undefined };
 }): number {
-  return query.state.data?.some((s) => s.generating)
+  return query.state.data?.pages.some((p) => p.data.some((s) => s.generating))
     ? GENERATING_REFETCH_MS
     : SAFETY_NET_REFETCH_MS;
+}
+
+/**
+ * The ONE definition of the session-list query, shared by the list and the nav
+ * badge so both observers agree on key, fetcher and paging. Keyset pages
+ * (`startingAfter` = the last row's id); a refetch re-walks every loaded page
+ * from the head, so an invalidation leaves no stale page behind.
+ */
+function sessionsQuery(getHeaders: GetHeaders | null | undefined, enabled: boolean) {
+  const spaceId = spaceIdFromHeaders(getHeaders);
+  return infiniteQueryOptions({
+    queryKey: sessionsQueryKey(spaceId),
+    queryFn: ({ pageParam }) => fetchSessionsPage(getHeaders, pageParam),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) =>
+      last.hasMore ? (last.data[last.data.length - 1]?.id ?? null) : null,
+    select: flattenSessions,
+    // The route requires `X-Space-Id`. Firing before the host's space store
+    // resolves (first login, org switch) would be a guaranteed 400; the key
+    // carries the space, so it refetches the moment one arrives.
+    enabled: enabled && !!spaceId,
+    refetchInterval: sessionsRefetchInterval,
+    refetchIntervalInBackground: false,
+  });
 }
 
 export function useSessions(headers?: GetHeaders) {
   const contextHeaders = useChatHeaders();
   // ChatPage owns the provider below its render, so its own observer receives
   // the host headers directly. Descendants read the same headers from context.
-  const getHeaders = headers ?? contextHeaders;
-  const spaceId = spaceIdFromHeaders(getHeaders);
-  return useQuery({
-    queryKey: sessionsQueryKey(spaceId),
-    queryFn: () => fetchSessions(getHeaders),
-    // The route requires `X-Space-Id`. Firing before the host's space store
-    // resolves (first login, org switch) would be a guaranteed 400; the key
-    // carries the space, so it refetches the moment one arrives.
-    enabled: !!spaceId,
-    refetchInterval: sessionsRefetchInterval,
-    refetchIntervalInBackground: false,
-  });
+  return useInfiniteQuery(sessionsQuery(headers ?? contextHeaders, true));
 }
 
 /**
  * Count of conversations with an unread reply, for the app-shell nav badge.
  * `unread` is server-computed per session; this shares the sessions query (same
  * key → one request) with the in-chat list, so the badge and the sidebar dots
- * stay consistent. The conversation the user is currently viewing is kept read
- * by ChatPage (server mark-read), so it is not counted. Pass `enabled: false`
- * when the chat feature is off.
+ * stay consistent. It counts the LOADED pages: an unread reply bumps its
+ * session to the head of the list, so it is on the first one. The conversation
+ * the user is currently viewing is kept read by ChatPage (server mark-read), so
+ * it is not counted. Pass `enabled: false` when the chat feature is off.
  */
 export function useChatUnreadCount(getHeaders?: GetHeaders, enabled = true): number {
-  const spaceId = spaceIdFromHeaders(getHeaders);
-  const { data } = useQuery({
-    queryKey: sessionsQueryKey(spaceId),
-    queryFn: () => fetchSessions(getHeaders),
-    refetchInterval: sessionsRefetchInterval,
-    refetchIntervalInBackground: false,
-    // The badge is mounted on every page, including before a space is picked.
-    // Same gate as the list — and the same key, so both share one request.
-    enabled: enabled && !!spaceId,
-  });
+  // The badge is mounted on every page, including before a space is picked.
+  const { data } = useInfiniteQuery(sessionsQuery(getHeaders, enabled));
   return useMemo(() => (data ?? []).filter((s) => s.unread).length, [data]);
 }

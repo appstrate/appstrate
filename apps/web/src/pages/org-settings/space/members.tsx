@@ -465,7 +465,7 @@ function AddSpaceMemberModal({
         body: {
           email: email.trim(),
           role: "guest",
-          space_assignments: [{ space_id: spaceId, ...spaceRoleAssignment(effectiveRole) }],
+          space_assignments: [{ spaceId, ...spaceRoleAssignment(effectiveRole) }],
         },
       });
       return;

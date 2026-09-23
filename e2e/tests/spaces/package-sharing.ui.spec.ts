@@ -287,7 +287,7 @@ test("an offer is taken up from the library and lands on an already visited inde
   expect(joined.status()).toBe(200);
   const personalId = await personalSpaceOf(request, member.cookie, orgId);
   const shared = await authorClient.post(`/packages/${scope}/${name}/shares`, {
-    target: { kind: "user", user_id: member.userId },
+    target: { kind: "user", userId: member.userId },
   });
   expect(shared.status(), await shared.text()).toBe(200);
 
@@ -452,7 +452,7 @@ test("a non-admin builder switches a team offer on and off from the space packag
   const invite = await orgOnlyClient.post(`/orgs/${orgId}/members`, {
     email: member.email,
     role: "guest",
-    space_assignments: [{ space_id: spaceId, preset_role: "builder" }],
+    space_assignments: [{ spaceId, preset_role: "builder" }],
   });
   expect(invite.status()).toBe(201);
   expect(
@@ -465,7 +465,7 @@ test("a non-admin builder switches a team offer on and off from the space packag
   expect(
     (
       await author.post(`/packages/${scope}/${name}/shares`, {
-        target: { kind: "space", space_id: spaceId },
+        target: { kind: "space", spaceId },
       })
     ).status(),
   ).toBe(200);

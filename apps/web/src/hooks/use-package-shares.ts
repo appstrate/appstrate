@@ -10,9 +10,7 @@ export type PackageShare = components["schemas"]["PackageShare"];
 
 /** The `target` a revoke addresses: the space id, or the member's user id. */
 export function shareTargetHandle(share: PackageShare): string {
-  return share.target.kind === "user"
-    ? (share.target.user_id ?? "")
-    : (share.target.space_id ?? "");
+  return share.target.kind === "user" ? (share.target.userId ?? "") : (share.target.spaceId ?? "");
 }
 
 /**

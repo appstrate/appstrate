@@ -123,6 +123,7 @@ function fakeDeps(o: DepsOverrides): ChatPlatformDeps {
       return new Response("unexpected dispatch: " + path, { status: 500 });
     },
     rateLimit: () => async (_c, next) => next(),
+    publicOrigin: "http://localhost:3000",
     resolveChatModel:
       o.resolveChatModel ?? (async (): Promise<ChatModelResolution> => ({ subscription: false })),
     recordChatUsage: async () => {},

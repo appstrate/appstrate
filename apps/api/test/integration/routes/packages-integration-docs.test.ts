@@ -79,8 +79,8 @@ interface FileEntry {
 async function listFiles(ctx: TestContext, id: string): Promise<FileEntry[]> {
   const res = await app.request(`/api/packages/${id}/files`, { headers: authHeaders(ctx) });
   expect(res.status).toBe(200);
-  const body = (await res.json()) as { entries: FileEntry[] };
-  return body.entries;
+  const body = (await res.json()) as { data: FileEntry[] };
+  return body.data;
 }
 
 async function lockVersionOf(ctx: TestContext, id: string): Promise<number> {

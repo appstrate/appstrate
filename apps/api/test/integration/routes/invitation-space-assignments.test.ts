@@ -62,12 +62,12 @@ describe("Invitation space assignments", () => {
       const res = await invite({
         email: "guest@test.com",
         role: "guest",
-        space_assignments: [{ space_id: space.id, preset_role: "viewer" }],
+        space_assignments: [{ spaceId: space.id, preset_role: "viewer" }],
       });
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as { space_assignments: unknown[] };
-      expect(body.space_assignments).toEqual([{ space_id: space.id, preset_role: "viewer" }]);
+      expect(body.space_assignments).toEqual([{ spaceId: space.id, preset_role: "viewer" }]);
     });
 
     it("refuses an admin invitation that names a space (400)", async () => {
@@ -76,7 +76,7 @@ describe("Invitation space assignments", () => {
       const res = await invite({
         email: "admin@test.com",
         role: "admin",
-        space_assignments: [{ space_id: space.id, preset_role: "builder" }],
+        space_assignments: [{ spaceId: space.id, preset_role: "builder" }],
       });
 
       expect(res.status).toBe(400);
@@ -96,7 +96,7 @@ describe("Invitation space assignments", () => {
       const res = await invite({
         email: "cross@test.com",
         role: "member",
-        space_assignments: [{ space_id: foreign.id, preset_role: "viewer" }],
+        space_assignments: [{ spaceId: foreign.id, preset_role: "viewer" }],
       });
 
       expect(res.status).toBe(404);
@@ -112,7 +112,7 @@ describe("Invitation space assignments", () => {
       const res = await invite({
         email: "cross-role@test.com",
         role: "member",
-        space_assignments: [{ space_id: space.id, custom_role_id: foreignRole.id }],
+        space_assignments: [{ spaceId: space.id, custom_role_id: foreignRole.id }],
       });
 
       expect(res.status).toBe(404);
@@ -128,7 +128,7 @@ describe("Invitation space assignments", () => {
         email: "legacy-id@test.com",
         role: "member",
         space_assignments: [
-          { space_id: "app_2c9f7f60-6a4b-4a3f-9c1f-2f0a1f3c5d77", preset_role: "viewer" },
+          { spaceId: "app_2c9f7f60-6a4b-4a3f-9c1f-2f0a1f3c5d77", preset_role: "viewer" },
         ],
       });
 
@@ -144,7 +144,7 @@ describe("Invitation space assignments", () => {
       const res = await invite({
         email: "own-role@test.com",
         role: "member",
-        space_assignments: [{ space_id: space.id, custom_role_id: role.id }],
+        space_assignments: [{ spaceId: space.id, custom_role_id: role.id }],
       });
 
       expect(res.status).toBe(201);
@@ -159,7 +159,7 @@ describe("Invitation space assignments", () => {
         orgId: ctx.orgId,
         email: "edit@test.com",
         invitedBy: ctx.user.id,
-        spaceAssignments: [{ space_id: first.id, preset_role: "viewer" }],
+        spaceAssignments: [{ spaceId: first.id, preset_role: "viewer" }],
       });
 
       const res = await app.request(`/api/orgs/${ctx.orgId}/invitations/${inv.id}`, {
@@ -167,14 +167,14 @@ describe("Invitation space assignments", () => {
         headers: { ...orgOnlyHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           role: "guest",
-          space_assignments: [{ space_id: second.id, preset_role: "operator" }],
+          space_assignments: [{ spaceId: second.id, preset_role: "operator" }],
         }),
       });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as { role: string; space_assignments: unknown[] };
       expect(body.role).toBe("guest");
-      expect(body.space_assignments).toEqual([{ space_id: second.id, preset_role: "operator" }]);
+      expect(body.space_assignments).toEqual([{ spaceId: second.id, preset_role: "operator" }]);
     });
 
     it("re-checks the role rules against the stored list when the body omits it", async () => {
@@ -183,7 +183,7 @@ describe("Invitation space assignments", () => {
         orgId: ctx.orgId,
         email: "promote@test.com",
         invitedBy: ctx.user.id,
-        spaceAssignments: [{ space_id: space.id, preset_role: "viewer" }],
+        spaceAssignments: [{ spaceId: space.id, preset_role: "viewer" }],
       });
 
       // The surviving role rule is the admin one — an admin runs every space,
@@ -208,7 +208,7 @@ describe("Invitation space assignments", () => {
         email: "applied@test.com",
         role: "guest",
         invitedBy: ctx.user.id,
-        spaceAssignments: [{ space_id: granted.id, preset_role: "builder" }],
+        spaceAssignments: [{ spaceId: granted.id, preset_role: "builder" }],
       });
 
       const res = await app.request(`/invite/${inv.token}/accept`, {
@@ -234,7 +234,7 @@ describe("Invitation space assignments", () => {
         and(eq(auditEvents.action, "org.invitation_accepted"), eq(auditEvents.resourceId, inv.id))!,
       );
       expect(audit.after).toMatchObject({
-        space_assignments: [{ space_id: granted.id, preset_role: "builder" }],
+        spaceAssignments: [{ spaceId: granted.id, presetRole: "builder", customRoleId: null }],
       });
     });
 
@@ -247,7 +247,7 @@ describe("Invitation space assignments", () => {
         email: "custom@test.com",
         role: "guest",
         invitedBy: ctx.user.id,
-        spaceAssignments: [{ space_id: space.id, custom_role_id: role.id }],
+        spaceAssignments: [{ spaceId: space.id, custom_role_id: role.id }],
       });
 
       const res = await app.request(`/invite/${inv.token}/accept`, {
@@ -274,8 +274,8 @@ describe("Invitation space assignments", () => {
         role: "guest",
         invitedBy: ctx.user.id,
         spaceAssignments: [
-          { space_id: kept.id, preset_role: "viewer" },
-          { space_id: doomed.id, preset_role: "builder" },
+          { spaceId: kept.id, preset_role: "viewer" },
+          { spaceId: doomed.id, preset_role: "builder" },
         ],
       });
       await db.delete(spaces).where(eq(spaces.id, doomed.id));
@@ -300,7 +300,7 @@ describe("Invitation space assignments", () => {
         and(eq(auditEvents.action, "org.invitation_accepted"), eq(auditEvents.resourceId, inv.id))!,
       );
       expect(audit.after).toMatchObject({
-        space_assignments: [{ space_id: kept.id, preset_role: "viewer" }],
+        spaceAssignments: [{ spaceId: kept.id, presetRole: "viewer", customRoleId: null }],
       });
     });
 
@@ -313,7 +313,7 @@ describe("Invitation space assignments", () => {
         email: "stale-role@test.com",
         role: "guest",
         invitedBy: ctx.user.id,
-        spaceAssignments: [{ space_id: space.id, custom_role_id: role.id }],
+        spaceAssignments: [{ spaceId: space.id, custom_role_id: role.id }],
       });
       await db.delete(spaceRoles).where(eq(spaceRoles.id, role.id));
 

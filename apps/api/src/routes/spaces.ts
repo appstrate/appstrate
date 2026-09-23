@@ -76,6 +76,7 @@ import {
   rowAuthority,
 } from "../middleware/require-permission.ts";
 import {
+  auditSpaceRole,
   exactlyOneRole,
   spaceRoleAssignmentShape,
   toAssignment,
@@ -354,14 +355,14 @@ async function gateSpacePackageWrite(
   return type;
 }
 
-/** snake_case on the wire, camelCase in the service that counted them. */
+/** Counts go snake_case on the wire; `spaceId` is the universal-id carve-out. */
 function toSweepWire(
   spaceId: string,
   counts: { rehomedPackages: number; deletedPackages: number },
 ): SpaceSweepResult {
   return {
     object: "space_sweep",
-    space_id: spaceId,
+    spaceId,
     rehomed_packages: counts.rehomedPackages,
     deleted_packages: counts.deletedPackages,
   };
@@ -688,7 +689,7 @@ export function createSpacesRouter() {
       action: "space.member_added",
       resourceType: "space_member",
       resourceId: `${spaceId}:${userId}`,
-      after: assignment,
+      after: auditSpaceRole(assignment),
     });
     return c.json({ object: "space_member", userId, ...assignment }, 201);
   });
@@ -717,7 +718,7 @@ export function createSpacesRouter() {
         action: "space.member_role_changed",
         resourceType: "space_member",
         resourceId: `${spaceId}:${userId}`,
-        after: assignment,
+        after: auditSpaceRole(assignment),
       });
       return c.json({ object: "space_member", userId, ...assignment });
     },

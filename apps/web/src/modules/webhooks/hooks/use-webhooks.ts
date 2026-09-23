@@ -137,15 +137,13 @@ export function useRotateWebhookSecret() {
   return $api.useMutation("post", "/api/webhooks/{id}/rotate", { onSuccess: invalidate });
 }
 
-export function useWebhookDeliveries(webhookId: string) {
+/** One keyset page of a webhook's delivery history (`startingAfter` = last id seen). */
+export function useWebhookDeliveries(webhookId: string, startingAfter?: string) {
   const scope = useWebhookScope();
   return $api.useQuery(
     "get",
     "/api/webhooks/{id}/deliveries",
-    { params: { path: { id: webhookId }, header: scope.header } },
-    {
-      enabled: scope.enabled && !!webhookId,
-      select: (e) => e.data ?? [],
-    },
+    { params: { path: { id: webhookId }, query: { startingAfter }, header: scope.header } },
+    { enabled: scope.enabled && !!webhookId },
   );
 }

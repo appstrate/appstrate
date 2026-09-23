@@ -6,6 +6,7 @@
  * no client message-write helper — only session list/CRUD + history load.
  */
 
+import type { InfiniteData } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import type { GetHeaders } from "./runtime-context.ts";
 
@@ -59,15 +60,51 @@ function headers(getHeaders: GetHeaders | null | undefined, json = false): Recor
   return { ...(json ? { "Content-Type": "application/json" } : {}), ...getHeaders?.() };
 }
 
-export async function fetchSessions(
+/** One page of `GET /api/chat/sessions`. */
+export interface SessionsPage {
+  data: SessionSummary[];
+  hasMore: boolean;
+}
+
+/** The session-list cache: the pages loaded so far, keyed by their `startingAfter` cursor. */
+export type SessionsCache = InfiniteData<SessionsPage, string | null>;
+
+export async function fetchSessionsPage(
   getHeaders: GetHeaders | null | undefined,
-): Promise<SessionSummary[]> {
-  const res = await fetch("/api/chat/sessions", {
+  startingAfter: string | null,
+): Promise<SessionsPage> {
+  const query = startingAfter ? `?startingAfter=${encodeURIComponent(startingAfter)}` : "";
+  const res = await fetch(`/api/chat/sessions${query}`, {
     credentials: "include",
     headers: headers(getHeaders),
   });
   if (!res.ok) throw new Error(`Failed to load sessions (HTTP ${res.status})`);
-  return ((await res.json()) as { data?: SessionSummary[] }).data ?? [];
+  const body = (await res.json()) as Partial<SessionsPage>;
+  return { data: body.data ?? [], hasMore: body.hasMore ?? false };
+}
+
+/**
+ * Patch the loaded rows of a session-list cache in place, page by page (`first`
+ * marks the head page). An absent cache stays absent unless `seed` is given.
+ */
+export function patchSessionsCache(
+  prev: SessionsCache | undefined,
+  fn: (rows: SessionSummary[], first: boolean) => SessionSummary[],
+  seed?: SessionSummary,
+): SessionsCache | undefined {
+  if (!prev) return seed ? { pages: [{ data: [seed], hasMore: false }], pageParams: [null] } : prev;
+  return { ...prev, pages: prev.pages.map((p, i) => ({ ...p, data: fn(p.data, i === 0) })) };
+}
+
+/**
+ * Flatten the loaded pages. A row can appear twice when the cursor session was
+ * bumped between two page loads (the server then resumes the walk from the
+ * head); the first occurrence wins, and the refetch that same change pushes
+ * re-walks the list in order.
+ */
+export function flattenSessions(cache: SessionsCache): SessionSummary[] {
+  const seen = new Set<string>();
+  return cache.pages.flatMap((p) => p.data.filter((s) => !seen.has(s.id) && seen.add(s.id)));
 }
 
 export async function renameSession(
@@ -125,11 +162,18 @@ export async function stopSession(
 /** A stored message node as returned by `GET /sessions/:id`. */
 interface StoredMessage {
   id: string;
+  seq: number;
   content: Record<string, unknown>;
 }
 
+/** The route's maximum page size (`MESSAGES_MAX_LIMIT` in `routes.ts`). */
+const HISTORY_PAGE_SIZE = 500;
+
 /**
  * Session history as `UIMessage[]`, ready to seed `useChat({ messages })`.
+ * The route pages its messages; this walks every page (`?since=<seq>`) so the
+ * thread opens whole — the runtime is seeded once and has no "prepend older"
+ * path, and the server's bound holds per request.
  * Stored `content` is the ai-sdk/v6 UIMessage minus its id (the id rides in the
  * row), so we reconstruct `{ id, ...content }`. A not-yet-persisted session
  * (a freshly-minted id whose first message hasn't been sent) 404s → empty.
@@ -138,16 +182,26 @@ export async function loadHistory(
   getHeaders: GetHeaders | null | undefined,
   id: string,
 ): Promise<UIMessage[]> {
-  const res = await fetch(`/api/chat/sessions/${id}`, {
-    credentials: "include",
-    headers: headers(getHeaders),
-  });
-  if (res.status === 404) return [];
-  if (!res.ok) throw new Error(`Failed to load session (HTTP ${res.status})`);
-  const body = (await res.json()) as { messages?: StoredMessage[] };
+  const stored: StoredMessage[] = [];
+  let since: number | null = null;
+  for (;;) {
+    const cursor = since === null ? "" : `&since=${since}`;
+    const res = await fetch(`/api/chat/sessions/${id}?limit=${HISTORY_PAGE_SIZE}${cursor}`, {
+      credentials: "include",
+      headers: headers(getHeaders),
+    });
+    if (res.status === 404) return [];
+    if (!res.ok) throw new Error(`Failed to load session (HTTP ${res.status})`);
+    const body = (await res.json()) as { messages?: StoredMessage[]; hasMore?: boolean };
+    const page = body.messages ?? [];
+    stored.push(...page);
+    const last = page[page.length - 1];
+    if (!body.hasMore || !last) break;
+    since = last.seq;
+  }
   // Spread `content` FIRST, then apply the authoritative row `id` — the id
   // lives in `message_id` and `content` is stored without it, but if a stored
   // payload ever carried a stray `id` key, a trailing spread would clobber the
   // real id. Ordering id last makes the row id win.
-  return (body.messages ?? []).map((e) => ({ ...e.content, id: e.id }) as UIMessage);
+  return stored.map((e) => ({ ...e.content, id: e.id }) as UIMessage);
 }

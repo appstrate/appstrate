@@ -91,7 +91,7 @@ describe("custom space roles", () => {
     req("POST", `/api/orgs/${owner.orgId}/members`, {
       email: `invitee-${crypto.randomUUID().slice(0, 8)}@test.com`,
       role: "guest",
-      space_assignments: [{ space_id: owner.defaultSpaceId, custom_role_id: customRoleId }],
+      space_assignments: [{ spaceId: owner.defaultSpaceId, custom_role_id: customRoleId }],
     });
 
   describe("GET /api/roles", () => {
@@ -411,7 +411,7 @@ describe("custom space roles", () => {
       const invited = await invite(role.id);
       expect(invited.status).toBe(201);
       expect((await invited.json()) as { space_assignments: unknown[] }).toMatchObject({
-        space_assignments: [{ space_id: owner.defaultSpaceId, custom_role_id: role.id }],
+        space_assignments: [{ spaceId: owner.defaultSpaceId, custom_role_id: role.id }],
       });
 
       // The control: a bundle belonging to ANOTHER org is refused, so the

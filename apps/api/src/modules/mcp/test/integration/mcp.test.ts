@@ -446,7 +446,7 @@ describe("mcp tool round-trip", () => {
         arguments: {
           operation_id: "sharePackage",
           path_params: { scope: "@mcpshare", name: "worker" },
-          body: { target: { kind: "space", space_id: ctx.defaultSpaceId } },
+          body: { target: { kind: "space", spaceId: ctx.defaultSpaceId } },
         },
       },
     });

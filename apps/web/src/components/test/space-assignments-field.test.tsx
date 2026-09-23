@@ -10,7 +10,7 @@ await i18nReady;
 
 const spaces = [{ id: "spc_support", name: "Assistance clients Europe et Amérique" }];
 const roles = [{ value: "custom:srl_support", label: "Responsable assistance" }];
-const assignments = [{ space_id: spaces[0]!.id, role: roles[0]!.value }];
+const assignments = [{ spaceId: spaces[0]!.id, role: roles[0]!.value }];
 
 function field({
   loading = false,

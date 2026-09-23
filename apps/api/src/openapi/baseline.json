@@ -1024,7 +1024,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Persistence rows",
+            "description": "The agent's persistence snapshot: one resource holding both kinds, each omitted when `kind` names the other.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -1037,7 +1037,12 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object"],
                   "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["agent_persistence"]
+                    },
                     "pinned": {
                       "type": "array",
                       "items": {
@@ -6524,9 +6529,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["package_id", "auth_key", "display_name", "auth"],
+                  "required": ["packageId", "auth_key", "display_name", "auth"],
                   "properties": {
-                    "package_id": {
+                    "packageId": {
                       "type": "string"
                     },
                     "auth_key": {
@@ -11012,7 +11017,7 @@
                   "role": "member",
                   "space_assignments": [
                     {
-                      "space_id": "spc_...",
+                      "spaceId": "spc_...",
                       "preset_role": "operator"
                     }
                   ],
@@ -12509,7 +12514,7 @@
                           },
                           "source": {
                             "type": "string",
-                            "enum": ["system", "local"]
+                            "enum": ["local", "system"]
                           }
                         }
                       }
@@ -12561,7 +12566,7 @@
                           },
                           "source": {
                             "type": "string",
-                            "enum": ["system", "local"]
+                            "enum": ["local", "system"]
                           }
                         }
                       }
@@ -12724,7 +12729,7 @@
                   "role": "member",
                   "space_assignments": [
                     {
-                      "space_id": "spc_...",
+                      "spaceId": "spc_...",
                       "preset_role": "operator"
                     }
                   ],
@@ -15097,13 +15102,20 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["versions"],
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "versions": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/AgentVersion"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -16075,13 +16087,20 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["versions"],
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "versions": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/AgentVersion"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -17085,13 +17104,20 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["versions"],
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "versions": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/AgentVersion"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -17811,13 +17837,20 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["versions"],
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "versions": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/AgentVersion"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -18882,7 +18915,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["agent", "skill", "mcp-server", "integration"]
+              "enum": ["agent", "skill", "integration", "mcp-server"]
             },
             "description": "Filter by package type"
           }
@@ -23210,7 +23243,7 @@
                     "packages": {
                       "type": "object",
                       "description": "Packages grouped by type. Every group is always present (possibly empty).",
-                      "required": ["agent", "skill", "mcp-server", "integration"],
+                      "required": ["agent", "skill", "integration", "mcp-server"],
                       "properties": {
                         "agent": {
                           "$ref": "#/components/schemas/LibraryPackageList"
@@ -23379,7 +23412,7 @@
                     "packages": {
                       "type": "object",
                       "description": "Packages grouped by type. Every group is always present (possibly empty).",
-                      "required": ["agent", "skill", "mcp-server", "integration"],
+                      "required": ["agent", "skill", "integration", "mcp-server"],
                       "properties": {
                         "agent": {
                           "$ref": "#/components/schemas/LibraryPackageList"
@@ -24013,11 +24046,11 @@
           },
           "package_type": {
             "type": "string",
-            "enum": ["agent", "skill", "mcp-server", "integration"]
+            "enum": ["agent", "skill", "integration", "mcp-server"]
           },
           "package_source": {
             "type": "string",
-            "enum": ["system", "local"]
+            "enum": ["local", "system"]
           },
           "draft_manifest": {
             "type": ["object", "null"],
@@ -24141,7 +24174,7 @@
       "SpaceAssignment": {
         "type": "object",
         "description": "A space membership the invitation applies when it is accepted. Exactly one of `preset_role` / `custom_role_id` is set.",
-        "required": ["space_id"],
+        "required": ["spaceId"],
         "oneOf": [
           {
             "required": ["preset_role"]
@@ -24151,7 +24184,7 @@
           }
         ],
         "properties": {
-          "space_id": {
+          "spaceId": {
             "type": "string"
           },
           "preset_role": {
@@ -24313,7 +24346,7 @@
           },
           "source": {
             "type": "string",
-            "enum": ["system", "local"]
+            "enum": ["local", "system"]
           },
           "scope": {
             "type": ["string", "null"],
@@ -24326,7 +24359,7 @@
           "type": {
             "type": "string",
             "description": "Package type from manifest",
-            "enum": ["agent", "skill", "mcp-server", "integration"]
+            "enum": ["agent", "skill", "integration", "mcp-server"]
           },
           "running_runs": {
             "type": "integer"
@@ -24410,7 +24443,7 @@
           },
           "source": {
             "type": "string",
-            "enum": ["system", "local"]
+            "enum": ["local", "system"]
           },
           "scope": {
             "type": ["string", "null"],
@@ -24748,14 +24781,22 @@
       },
       "PackageFileIndex": {
         "type": "object",
-        "required": ["entries"],
+        "required": ["object", "data", "hasMore"],
         "properties": {
-          "entries": {
+          "object": {
+            "type": "string",
+            "enum": ["list"]
+          },
+          "data": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/PackageFileEntry"
             },
             "description": "Files in the artifact, sorted by `path`."
+          },
+          "hasMore": {
+            "type": "boolean",
+            "description": "Always `false`: the index is never paginated."
           }
         }
       },
@@ -25481,7 +25522,7 @@
           },
           "source": {
             "type": "string",
-            "enum": ["system", "local"]
+            "enum": ["local", "system"]
           },
           "created_by": {
             "type": ["string", "null"]
@@ -25575,7 +25616,7 @@
           },
           "source": {
             "type": "string",
-            "enum": ["system", "local"]
+            "enum": ["local", "system"]
           },
           "created_by": {
             "type": ["string", "null"]
@@ -26279,13 +26320,13 @@
       },
       "SpaceSweepResult": {
         "type": "object",
-        "required": ["object", "space_id", "rehomed_packages", "deleted_packages"],
+        "required": ["object", "spaceId", "rehomed_packages", "deleted_packages"],
         "properties": {
           "object": {
             "type": "string",
             "enum": ["space_sweep"]
           },
-          "space_id": {
+          "spaceId": {
             "type": "string",
             "description": "The personal space that was swept and deleted"
           },
@@ -26725,7 +26766,7 @@
             },
             "type": {
               "type": "string",
-              "enum": ["agent", "skill", "mcp-server", "integration"]
+              "enum": ["agent", "skill", "integration", "mcp-server"]
             },
             "source": {
               "type": "string",
@@ -26806,13 +26847,13 @@
         "oneOf": [
           {
             "type": "object",
-            "required": ["kind", "user_id"],
+            "required": ["kind", "userId"],
             "properties": {
               "kind": {
                 "type": "string",
                 "enum": ["user"]
               },
-              "user_id": {
+              "userId": {
                 "type": "string",
                 "description": "Organization member's user id."
               }
@@ -26821,13 +26862,13 @@
           },
           {
             "type": "object",
-            "required": ["kind", "space_id"],
+            "required": ["kind", "spaceId"],
             "properties": {
               "kind": {
                 "type": "string",
                 "enum": ["space"]
               },
-              "space_id": {
+              "spaceId": {
                 "type": "string",
                 "description": "Space id (`spc_…`) the caller can reach."
               }
@@ -26845,11 +26886,11 @@
             "type": "string",
             "enum": ["user", "space"]
           },
-          "user_id": {
+          "userId": {
             "type": "string",
             "description": "Present when `kind` is `user`."
           },
-          "space_id": {
+          "spaceId": {
             "type": "string",
             "description": "Present when `kind` is `space`."
           },
@@ -26862,7 +26903,7 @@
       "PackageShare": {
         "type": "object",
         "description": "One entry of a package's AUDIENCE (`package_shares`): a space the package is offered to. A share grants READ and the affordance to activate; it is never an activation, and no execution path consults it.",
-        "required": ["object", "target", "shared_by", "created_at"],
+        "required": ["object", "target", "shared_by", "createdAt"],
         "properties": {
           "object": {
             "type": "string",
@@ -26884,7 +26925,7 @@
               }
             }
           },
-          "created_at": {
+          "createdAt": {
             "type": "string",
             "format": "date-time"
           }
@@ -26909,7 +26950,7 @@
           },
           "type": {
             "type": "string",
-            "enum": ["agent", "skill", "mcp-server", "integration"]
+            "enum": ["agent", "skill", "integration", "mcp-server"]
           },
           "home_space_id": {
             "type": ["string", "null"],

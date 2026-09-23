@@ -112,7 +112,7 @@ function seed({ permissions, managers = [], contact, orgError }: SeedOptions): Q
   }
   queryClient.setQueryData(
     $api.queryOptions("get", "/api/billing/managers", { params: { header } }).queryKey,
-    { managers },
+    { object: "list", data: managers, hasMore: false },
   );
   queryClient.setQueryData(
     $api.queryOptions("get", "/api/billing/contact", { params: { header } }).queryKey,

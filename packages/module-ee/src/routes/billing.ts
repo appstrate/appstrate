@@ -167,6 +167,11 @@ function managerDetail(m: BillingManager) {
   return { user_id: m.userId, added_by: m.addedBy, created_at: m.createdAt.toISOString() };
 }
 
+/** The platform's list envelope; the set is small and never paginated. */
+function managerList(managers: BillingManager[]) {
+  return { object: "list" as const, data: managers.map(managerDetail), hasMore: false };
+}
+
 /**
  * The wire projection of one org's billing account — plan, usage, status and upgrades —
  * shared by `GET /api/billing` and the answer to a plan change; `null` when the org has
@@ -343,7 +348,7 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
   // GET /api/billing/managers — the org users granted billing:* outside RBAC
   router.get("/api/billing/managers", requireModulePermission("billing", "manage"), async (c) => {
     const managers = await listBillingManagers(c.get("orgId"));
-    return c.json({ managers: managers.map(managerDetail) });
+    return c.json(managerList(managers));
   });
 
   // PUT /api/billing/managers — replace the whole set (the dashboard saves a list)
@@ -385,7 +390,7 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
 
     const managers = await replaceBillingManagers(orgId, wanted, c.get("user").id);
     await auditBilling(c, "billing.managers_updated", { userIds: wanted });
-    return c.json({ managers: managers.map(managerDetail) });
+    return c.json(managerList(managers));
   });
 
   // GET /api/billing/contact — where invoices and payment alerts go

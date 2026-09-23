@@ -843,6 +843,7 @@
   "webhooks.active": "Active",
   "webhooks.inactive": "Inactive",
   "webhooks.noDeliveries": "No deliveries.",
+  "webhooks.loadMoreDeliveries": "Load more",
   "webhooks.secret": "Secret",
   "webhooks.payloadMode": "Payload mode",
   "webhooks.createBtn": "Create webhook",

@@ -582,7 +582,7 @@ export function createOidcRouter() {
     "/api/oauth/scopes",
     rateLimit(300),
     requireModulePermission("oauth-clients", "read"),
-    async (c) => c.json({ data: [...getAppstrateScopes()] }),
+    async (c) => c.json(listResponse([...getAppstrateScopes()])),
   );
 
   router.get(

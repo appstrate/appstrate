@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Send } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
+import { Button } from "@appstrate/ui/components/button";
 import { LoadingState, ErrorState, EmptyState } from "@/components/page-states";
 import { useWebhookDeliveries } from "../hooks/use-webhooks";
 import type { WebhookDelivery } from "../hooks/use-webhooks";
@@ -35,13 +37,30 @@ function deliveryStatusLabel(d: WebhookDelivery): string {
 }
 
 export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
-  const { t } = useTranslation(["settings", "common"]);
-  const { data: deliveries, isLoading, error } = useWebhookDeliveries(webhookId);
+  // Remount per webhook so the cursor + accumulated pages reset.
+  return <DeliveryPages key={webhookId} webhookId={webhookId} />;
+}
 
-  if (isLoading) return <LoadingState />;
+function DeliveryPages({ webhookId }: { webhookId: string }) {
+  const { t } = useTranslation(["settings", "common"]);
+  const [cursor, setCursor] = useState<string | undefined>(undefined);
+  const [loadedPages, setLoadedPages] = useState<WebhookDelivery[]>([]);
+  const { data, isLoading, error } = useWebhookDeliveries(webhookId, cursor);
+
+  const currentPage = useMemo(() => data?.data ?? [], [data?.data]);
+  const hasMore = data?.hasMore ?? false;
+
+  // Merge accumulated pages with the current one, deduping by id (the current
+  // page briefly overlaps the accumulator between "Load more" and the fetch).
+  const deliveries = useMemo(() => {
+    const seen = new Set<string>();
+    return [...loadedPages, ...currentPage].filter((d) => !seen.has(d.id) && seen.add(d.id));
+  }, [loadedPages, currentPage]);
+
+  if (isLoading && deliveries.length === 0) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
 
-  if (!deliveries || deliveries.length === 0) {
+  if (deliveries.length === 0) {
     return <EmptyState message={t("settings:webhooks.noDeliveries")} icon={Send} compact />;
   }
 
@@ -65,6 +84,21 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
           </div>
         );
       })}
+      {hasMore && (
+        <Button
+          variant="outline"
+          className="mt-2"
+          onClick={() => {
+            const last = currentPage[currentPage.length - 1];
+            if (last) {
+              setLoadedPages((prev) => [...prev, ...currentPage]);
+              setCursor(last.id);
+            }
+          }}
+        >
+          {t("settings:webhooks.loadMoreDeliveries")}
+        </Button>
+      )}
     </div>
   );
 }

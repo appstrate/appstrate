@@ -75,8 +75,8 @@ async function listFiles(
 ): Promise<{ res: Response; entries: FileEntry[] }> {
   const res = await app.request(`/api/packages/${id}/files${query}`, { headers: authHeaders(ctx) });
   if (res.status !== 200) return { res, entries: [] };
-  const body = (await res.clone().json()) as { entries: FileEntry[] };
-  return { res, entries: body.entries };
+  const body = (await res.clone().json()) as { data: FileEntry[] };
+  return { res, entries: body.data };
 }
 
 async function fetchContent(
@@ -124,6 +124,7 @@ describe("package file explorer", () => {
 
       const { res, entries } = await listFiles(ctx, id);
       expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ object: "list", hasMore: false });
       expect(entries.map((e) => e.path)).toEqual(["docs/notes.md", "manifest.json", "prompt.md"]);
 
       // The DB draft columns WIN over the stored ZIP — the editor writes the

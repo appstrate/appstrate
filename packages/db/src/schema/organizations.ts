@@ -140,9 +140,9 @@ export const orgInvitations = pgTable(
     role: orgRoleEnum("role").notNull(),
     /**
      * Space memberships applied when the invitation is accepted (RBAC spec
-     * §5). Wire-shaped (snake_case keys) because it is written straight from
-     * the validated invite body and read straight back onto it:
-     * `[{ space_id, preset_role } | { space_id, custom_role_id }]`.
+     * §5). Wire-shaped because it is written straight from the validated
+     * invite body and read straight back onto it:
+     * `[{ spaceId, preset_role } | { spaceId, custom_role_id }]`.
      */
     spaceAssignments: jsonb("space_assignments")
       .$type<ReadonlyArray<SpaceAssignment>>()

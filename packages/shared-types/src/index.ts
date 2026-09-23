@@ -1153,7 +1153,7 @@ export interface SpaceInfo {
 /** What `POST /api/spaces/:id/sweep-now` did to an orphaned personal space. */
 export interface SpaceSweepResult {
   object: "space_sweep";
-  space_id: string;
+  spaceId: string;
   /** Homed packages another space had placed: handed to the org catalogue. */
   rehomed_packages: number;
   /** Homed packages nothing else had placed: deleted. */

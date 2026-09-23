@@ -7,7 +7,8 @@
  * echoed that chain to the client; migration 0054 dropped both, because every
  * read is `ORDER BY seq` and nothing ever walked the chain. What is pinned here
  * is the property the column looked like it was providing: `GET /sessions/{id}`
- * returns the messages in insertion order, as bare `{ id, content }` nodes.
+ * returns the messages in insertion order, as `{ id, seq, content }` nodes —
+ * `seq` being the `?since=` page cursor, the same role `id` plays on run logs.
  *
  * The second test falsifies `created_at` deliberately. Two messages of one turn
  * can share a clock tick, so a transcript sorted by it would be unstable — and
@@ -78,10 +79,10 @@ describe("chat transcript ordering", () => {
 
     const messages = await history(id);
     expect(messages.map((m) => m.id)).toEqual(["u1", "a1", "notice_1", "u2", "a2"]);
-    // An identity and an opaque payload, nothing else: no ordering field for a
-    // client to sort by, and no chain for it to walk.
+    // An identity, the page cursor and an opaque payload, nothing else: no
+    // chain for a client to walk.
     for (const message of messages) {
-      expect(Object.keys(message).sort()).toEqual(["content", "id"]);
+      expect(Object.keys(message).sort()).toEqual(["content", "id", "seq"]);
     }
   });
 

@@ -94,8 +94,8 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
   const shares = await apiClient.get(`/packages/${scope}/${name}/shares`);
   expect(shares.status()).toBe(200);
   expect(
-    ((await shares.json()).data as Array<{ target: { space_id?: string } }>).map(
-      (entry) => entry.target.space_id,
+    ((await shares.json()).data as Array<{ target: { spaceId?: string } }>).map(
+      (entry) => entry.target.spaceId,
     ),
   ).toContain(target.id);
   expect((await packagesIn(target.id)).map((p) => p.packageId)).toContain(`${scope}/${name}`);

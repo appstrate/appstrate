@@ -39,6 +39,7 @@ import { getOrgScope, type SpaceScope, type OrgScope } from "../../lib/scope.ts"
 import { assertSpaceId } from "../../lib/ids.ts";
 import { validateSpaceInOrg } from "../../lib/space-lookup.ts";
 import { parseListPagination } from "../../lib/list-query.ts";
+import { setCursorLinkHeader } from "../../lib/pagination-link.ts";
 
 /**
  * Assert that a space belongs to the given org.
@@ -378,15 +379,21 @@ export function createWebhooksRouter() {
     return c.json(result);
   });
 
-  // GET /api/webhooks/:id/deliveries — delivery history
+  // GET /api/webhooks/:id/deliveries — delivery history, keyset-paginated on
+  // `?startingAfter=<delivery id>` (follow the `Link: rel="next"` header).
   router.get("/api/webhooks/:id/deliveries", rateLimit(300), rowAuthority(), async (c) => {
     await loadWebhookForAction(c, "read");
     // Coerce + bound the limit: a raw `Number("-5")`/`Number("x")` (NaN)
     // would otherwise reach the query and 500. Out-of-range / unparseable
     // falls back to 20 — `parseListPagination` owns that idiom.
     const { limit } = parseListPagination(c, { defaultLimit: 20 });
-    const result = await listDeliveries(webhookScope(c), c.req.param("id")!, limit);
-    return c.json(listResponse(result));
+    const startingAfter = c.req.query("startingAfter");
+    const { data, hasMore } = await listDeliveries(webhookScope(c), c.req.param("id")!, {
+      limit,
+      ...(startingAfter ? { startingAfter } : {}),
+    });
+    setCursorLinkHeader({ c, hasMore, lastId: data.at(-1)?.id });
+    return c.json(listResponse(data, { hasMore }));
   });
 
   return router;

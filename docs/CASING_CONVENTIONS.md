@@ -439,7 +439,7 @@ This is the single canonical contract for frontend, SDK, github-action, and MCP 
 - `createdBy` → **`created_by`** (it is `*By`, an actor reference, not a timestamp/id; resembles `createdAt` but is NOT carved out).
 - `createdByName` → **`created_by_name`** (already snake_case in the domain list above).
 
-The carve-out has ONE documented counter-exception, and it is enumerated rather than inferable: the package **placement / share** family spells its ids snake_case — `home_space_id` on every package read, `space_id` on `PackagePlacement`, `user_id` inside `shared_by` on both `PackagePlacement` and `PackageShare`. The list is those four names on those objects, and nothing generalises from it: elsewhere `spaceId` and `userId` stay camelCase.
+The carve-out has ONE documented counter-exception, and it is enumerated rather than inferable: the package **placement / share** family spells its ids snake_case — `home_space_id` on every package read, `space_id` on `PackagePlacement`, `user_id` inside `shared_by` on both `PackagePlacement` and `PackageShare`. The list is those four names on those objects, and nothing generalises from it: elsewhere `spaceId` and `userId` stay camelCase. That includes the rest of the same family: a share's `target` (`ShareTarget` / `ShareTargetView`: `userId`, `spaceId`), `PackageShare.createdAt`, `SpaceAssignment.spaceId` (invitations, OAuth signup policies) and `SpaceSweepResult.spaceId`.
 
 Rule of thumb: a field qualifies for the camelCase carve-out only if its literal name appears in the list above (universal DB convention) — never by suffix similarity.
 
@@ -548,6 +548,8 @@ rg "(\.|:\s+)(displayName|schemaVersion|forkedFrom|runningRuns|usedByAgents|reus
 # Universal DB convention should stay camelCase
 rg "(\.|:\s+)(created_at|updated_at|user_id|org_id|space_id|package_id|end_user_id|api_key_id|schedule_id|expires_at|revoked_at|last_used_at|run_number|run_origin|context_snapshot|model_credential_id)\b" -t ts -t tsx
 ```
+
+For the wire this is enforced, not grepped: `apps/api/test/unit/openapi-casing-carve-out.test.ts` walks the full OpenAPI spec (core + modules) and fails on any property or query parameter spelled as one of these snake_case twins. Its `ALLOWED` list holds the exceptions this document records and the deviations not yet reconciled; an entry that stops matching fails the test too, so the list only shrinks. The `rg` above stays useful for TS code, where it cannot tell a wire key from a SQL column.
 
 ### Find Drizzle pgTable with snake_case TS fields (bug)
 

@@ -62,6 +62,7 @@ import {
 import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
 import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
+import { filePurposeValues } from "@appstrate/db/schema";
 import { asString, textResult } from "./tool-results.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 
@@ -1209,7 +1210,7 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
         },
         purpose: {
           type: "string",
-          enum: ["user_upload", "agent_output"],
+          enum: [...filePurposeValues],
           description: "`user_upload` = files you attached; `agent_output` = agent deliverables.",
         },
         limit: {

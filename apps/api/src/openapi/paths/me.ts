@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { packageSourceValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 
 /**
@@ -566,7 +567,7 @@ export const mePaths = {
                             "otherwise). Read with `published`: false/false is an agent this " +
                             "caller cannot execute at all until its author publishes one.",
                         },
-                        source: { type: "string", enum: ["system", "local"] },
+                        source: { type: "string", enum: [...packageSourceValues] },
                       },
                     },
                   },
@@ -625,7 +626,7 @@ export const mePaths = {
                             "theirs to run — `dependency_overrides` with `draft` answers 403 " +
                             "`draft_not_writable` otherwise.",
                         },
-                        source: { type: "string", enum: ["system", "local"] },
+                        source: { type: "string", enum: [...packageSourceValues] },
                       },
                     },
                   },

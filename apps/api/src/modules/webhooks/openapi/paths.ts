@@ -488,7 +488,8 @@ export const webhooksPaths = {
       operationId: "listWebhookDeliveries",
       tags: ["Webhooks"],
       summary: "Delivery history",
-      description: "List recent delivery attempts for a webhook (status, latency, response code).",
+      description:
+        'Delivery attempts for a webhook (status, latency, response code), newest first. Keyset-paginated: when `hasMore` is `true`, an RFC 5988 `Link: <…?startingAfter=<id>>; rel="next"` response header points at the next page.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -496,15 +497,24 @@ export const webhooksPaths = {
         {
           name: "limit",
           in: "query",
+          description: "Page size. Out-of-range or non-numeric values fall back to 20.",
           schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+        },
+        {
+          name: "startingAfter",
+          in: "query",
+          description:
+            'Keyset cursor — the `id` of the last delivery of the previous page. Supplied by the `Link: rel="next"` header. An id that is not a delivery of this webhook is a 400.',
+          schema: { type: "string", format: "uuid" },
         },
       ],
       responses: {
         "200": {
-          description: "Delivery history",
+          description: "Delivery history page",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            Link: { $ref: "#/components/headers/Link" },
           },
           content: {
             "application/json": {
@@ -544,14 +554,17 @@ export const webhooksPaths = {
                       },
                     },
                   },
-                  hasMore: { type: "boolean" },
+                  hasMore: {
+                    type: "boolean",
+                    description: "True when older deliveries follow this page.",
+                  },
                 },
               },
               example: {
                 object: "list",
                 data: [
                   {
-                    id: "dlv_cm3ghi789",
+                    id: "0b6f3c1e-8f0a-4c52-9d7e-2a1b3c4d5e6f",
                     eventId: "evt_cm3ghi790",
                     eventType: "run.success",
                     status: "success",
@@ -567,6 +580,7 @@ export const webhooksPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },

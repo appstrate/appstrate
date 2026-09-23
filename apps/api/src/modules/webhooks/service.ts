@@ -5,7 +5,7 @@
  */
 
 import { z } from "zod";
-import { eq, or, desc, isNull, type InferSelectModel } from "drizzle-orm";
+import { and, eq, or, desc, isNull, sql, type InferSelectModel } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { webhooks, webhookDeliveries } from "@appstrate/db/schema";
 import { logger } from "../../lib/logger.ts";
@@ -473,21 +473,52 @@ export async function rotateSecret(
   };
 }
 
+/**
+ * One page of a webhook's delivery history, newest first, keyset-paginated on
+ * `(createdAt, id)` — `createdAt` never changes, so the order is stable across
+ * page loads. The cursor is compared in SQL against the cursor ROW rather than
+ * a value read back into JS: `created_at` carries microseconds a JS `Date`
+ * would truncate, and a truncated bound would skip rows sharing its millisecond.
+ */
 export async function listDeliveries(
   scope: OrgScope | SpaceScope,
   webhookId: string,
-  limit = 20,
-): Promise<WebhookDeliveryInfo[]> {
+  params: { limit?: number; startingAfter?: string } = {},
+): Promise<{ data: WebhookDeliveryInfo[]; hasMore: boolean }> {
   await getWebhook(scope, webhookId);
+  const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
+
+  const ownDelivery = eq(webhookDeliveries.webhookId, webhookId);
+  const conditions = [ownDelivery];
+  if (params.startingAfter !== undefined) {
+    const cursorId = params.startingAfter;
+    const [cursor] = z.uuid().safeParse(cursorId).success
+      ? await db
+          .select({ id: webhookDeliveries.id })
+          .from(webhookDeliveries)
+          .where(and(ownDelivery, eq(webhookDeliveries.id, cursorId)))
+          .limit(1)
+      : [];
+    if (!cursor) {
+      throw invalidRequest(
+        "startingAfter must be the id of a delivery of this webhook",
+        "startingAfter",
+      );
+    }
+    conditions.push(
+      sql`(${webhookDeliveries.createdAt}, ${webhookDeliveries.id}) < (select cur.created_at, cur.id from ${webhookDeliveries} cur where cur.id = ${cursorId})`,
+    );
+  }
 
   const rows = await db
     .select()
     .from(webhookDeliveries)
-    .where(eq(webhookDeliveries.webhookId, webhookId))
-    .orderBy(desc(webhookDeliveries.createdAt))
-    .limit(Math.min(limit, 100));
+    .where(and(...conditions))
+    .orderBy(desc(webhookDeliveries.createdAt), desc(webhookDeliveries.id))
+    .limit(limit + 1);
 
-  return rows.map(toWebhookDeliveryResponse);
+  const hasMore = rows.length > limit;
+  return { data: rows.slice(0, limit).map(toWebhookDeliveryResponse), hasMore };
 }
 
 // ---------------------------------------------------------------------------

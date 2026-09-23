@@ -421,11 +421,11 @@ export const packageHomeSpaceSchema = z
 export const shareTargetSchema = z
   .object({
     target: z.discriminatedUnion("kind", [
-      z.object({ kind: z.literal("user"), user_id: z.string().min(1) }).strict(),
+      z.object({ kind: z.literal("user"), userId: z.string().min(1) }).strict(),
       z
         .object({
           kind: z.literal("space"),
-          space_id: z.string().refine(isSpaceId, {
+          spaceId: z.string().refine(isSpaceId, {
             message: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
           }),
         })
@@ -1278,7 +1278,7 @@ function makeListVersionsHandler(rcfg: PackageRouteConfig) {
     await loadOrgItemOr404(rcfg, orgId, itemId);
     await assertCatalogPackageAccess(c, itemId);
     const versions = await listPackageVersions(itemId);
-    return c.json({ versions });
+    return c.json(listResponse(versions));
   };
 }
 
@@ -2386,17 +2386,17 @@ export function createPackagesRouter() {
       // the member picker needs. A `guest` does not hold it, which is why a
       // guest shares to a space they reach and not to a colleague.
       await makePermissionGuard("members:read")(c, async () => {});
-      const membership = await getOrgMember(orgId, target.user_id);
-      if (!membership) throw notFound(`User '${target.user_id}' not found in this organization`);
-      const space = await ensurePersonalSpaceFor(orgId, target.user_id);
+      const membership = await getOrgMember(orgId, target.userId);
+      if (!membership) throw notFound(`User '${target.userId}' not found in this organization`);
+      const space = await ensurePersonalSpaceFor(orgId, target.userId);
       spaceId = space.id;
-      recipientUserId = target.user_id;
+      recipientUserId = target.userId;
     } else {
       // A space the caller cannot reach must not be confirmed to exist. Since
       // `packageAccessSpaces` never loads somebody else's personal space, this
       // is also what makes such a space untargetable by a guessed id.
-      const destination = accessible.find((space) => space.id === target.space_id);
-      if (!destination) throw notFound(`Space '${target.space_id}' not found`);
+      const destination = accessible.find((space) => space.id === target.spaceId);
+      if (!destination) throw notFound(`Space '${target.spaceId}' not found`);
       spaceId = destination.id;
     }
 
@@ -2980,7 +2980,7 @@ export function createPackagesRouter() {
     if (ifNoneMatchSatisfied(inm, etag)) {
       return new Response(null, { status: 304, headers });
     }
-    return c.json({ entries: buildFileIndex(snapshot) }, 200, headers);
+    return c.json(listResponse(buildFileIndex(snapshot)), 200, headers);
   });
 
   // GET /api/packages/:scope/:name/files/content — raw bytes of ONE file.

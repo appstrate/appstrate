@@ -256,7 +256,7 @@ export const organizationsPaths = {
                 id: "inv_abc123",
                 email: "newuser@example.com",
                 role: "member",
-                space_assignments: [{ space_id: "spc_...", preset_role: "operator" }],
+                space_assignments: [{ spaceId: "spc_...", preset_role: "operator" }],
                 token: "inv_abc123def456",
                 expiresAt: "2026-02-01T00:00:00Z",
                 createdAt: "2026-01-25T00:00:00Z",

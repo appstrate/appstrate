@@ -270,7 +270,7 @@ Colors are validated by `SpaceBrandingSchema` at resolve time, so a misconfigure
 
 The plaintext `clientSecret` is returned exactly once on create and on `POST /:clientId/rotate`.
 
-Organization clients may configure `signupSpaceAssignments`, an array of `{ "space_id": "spc_…", "preset_role": "viewer" }` or `{ "space_id": "spc_…", "custom_role_id": "srl_…" }`. References must belong to the client's organization. Guest signup requires at least one assignment (even with signup disabled), admins require an empty list, and members may have explicit grants. Other client levels cannot set these org grants.
+Organization clients may configure `signupSpaceAssignments`, an array of `{ "spaceId": "spc_…", "preset_role": "viewer" }` or `{ "spaceId": "spc_…", "custom_role_id": "srl_…" }`. References must belong to the client's organization. Guest signup requires at least one assignment (even with signup disabled), admins require an empty list, and members may have explicit grants. Other client levels cannot set these org grants.
 
 The first org signup applies membership and space grants in one transaction. An assignment whose space or custom role was deleted rejects new signup with a configuration error and leaves no partial membership; repair the client's assignment list in the admin UI. Existing members authenticate with their current memberships and receive no repeat grants, even if the configured policy is stale. Legacy viewer policies snapshot current viewer spaces during migration rather than extending access to future spaces.
 
