@@ -483,8 +483,8 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     });
   }
 
-  // 7. Fallback — actor's accessible connections on this integration,
-  // any auth shape. The chosen connection carries its own authKey.
+  // 7. Fallback — actor's accessible connections on this integration, on an
+  // auth serving the selection. The chosen connection carries its own authKey.
   const candidates = args.accessibleConnections.filter(
     (c) => c.integrationId === args.integrationId,
   );
@@ -492,6 +492,18 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   // A connection whose auth serves none of the selected tools is never a
   // candidate: with only those, the remedy is connecting on an auth that does.
   const serving = candidates.filter((c) => servesSelection(args, c));
+  const pinnedAuth =
+    args.requiredAuthKey === undefined
+      ? null
+      : declaredAuthKey(args.manifest, args.requiredAuthKey);
+  if (pinnedAuth !== null && !servesAuth(args, pinnedAuth)) {
+    // No connection can fix this: the agent's own `auth_key` pin excludes every
+    // auth that exposes its selected tools.
+    return errorOf(args, {
+      code: "auth_serves_no_selected_tool",
+      message: `The agent pins auth '${pinnedAuth}' for ${args.integrationId}, which exposes none of its selected tools (auths that do: ${[...args.servingAuthKeys!].join(", ")}) — change the agent's auth_key or its tool selection.`,
+    });
+  }
   if (serving.length === 0) {
     // Nothing usable carries an `authKey` — name the auth the connect flow must
     // target and the scopes that consent has to cover, or the user connects

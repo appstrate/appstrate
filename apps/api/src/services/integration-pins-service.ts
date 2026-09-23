@@ -710,10 +710,11 @@ async function resolveAgentIntegrationPick(args: {
       case "override_connection_unavailable":
         status = "stale";
         break;
-      // Only an explicit set raises it (the fallback says `not_connected`): a pick to change.
+      // With a connection: an explicit pick to change. Without: the agent's own
+      // `auth_key` pin excludes every serving auth — no connection can fix it.
       case "auth_serves_no_selected_tool":
         resolvedConnectionIds = err.boundConnectionIds ?? [];
-        status = "stale";
+        status = err.connectionId ? "stale" : "none";
         break;
       default:
         status = "none";

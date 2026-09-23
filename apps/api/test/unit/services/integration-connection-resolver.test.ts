@@ -1699,7 +1699,7 @@ describe("resolveConnections — auth_serves_no_selected_tool", () => {
     });
   });
 
-  it("names no connect target on an auth that serves none of the selection", () => {
+  it("names no connect target when the lone serving auth is not oauth2", () => {
     const result = resolveConnections({
       requirements: [selecting(serverlessManifest(), ["api_call__pat"])],
       accessibleConnections: [],
@@ -1709,6 +1709,23 @@ describe("resolveConnections — auth_serves_no_selected_tool", () => {
     const err = result.errors[0]!;
     expect(err.code).toBe("not_connected");
     expect(err.authKey).toBeUndefined();
+  });
+
+  it("names the agent's auth_key pin when it excludes every serving auth", () => {
+    const b = conn({ authKey: "pat", label: "spare" });
+    const result = resolveConnections({
+      requirements: [
+        { ...selecting(serverlessManifest(), ["api_call__oauth"]), requiredAuthKey: "pat" },
+      ],
+      accessibleConnections: [b],
+      pins: [],
+      actorUserId: USER_ID,
+    });
+    const err = result.errors[0]!;
+    expect(err.code).toBe("auth_serves_no_selected_tool");
+    expect(err.connectionId).toBeUndefined();
+    expect(err.message).toContain("'pat'");
+    expect(err.message).toContain("oauth");
   });
 
   it("refuses nothing when no auth serves the selection — not a connection problem", () => {
