@@ -159,7 +159,7 @@ export async function loadHistory(
   return {
     // Row `id` LAST: a stray `id` inside a stored `content` must not win.
     messages: (body.messages ?? []).map((e) => ({ ...e.content, id: e.id }) as UIMessage),
-    skills: { catalogue: body.skill_catalogue, pinned: body.pinned_skills },
+    skills: { skillCatalogue: body.skill_catalogue, pinnedSkills: body.pinned_skills },
   };
 }
 
@@ -198,8 +198,8 @@ export async function putSessionSkills(
     credentials: "include",
     headers: headers(getHeaders, true),
     body: JSON.stringify({
-      skill_catalogue: selection.catalogue,
-      pinned_skills: selection.pinned,
+      skill_catalogue: selection.skillCatalogue,
+      pinned_skills: selection.pinnedSkills,
     }),
   });
   if (!res.ok) throw new Error(`Failed to save chat skills (HTTP ${res.status})`);

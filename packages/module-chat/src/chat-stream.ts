@@ -267,10 +267,7 @@ export async function handleChatStream(
   // what keeps a rejection from ever going unhandled.
   const sessionSkills: Promise<ChatSkillSelection> =
     sessionId && lastMessage?.id
-      ? ensureSession(sessionId, orgId, user.id, spaceId).then((row) => ({
-          catalogue: row.skillCatalogue,
-          pinned: row.pinnedSkills,
-        }))
+      ? ensureSession(sessionId, orgId, user.id, spaceId)
       : Promise.resolve(DEFAULT_SKILL_SELECTION);
 
   const origin = selfOrigin();

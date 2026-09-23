@@ -34,7 +34,7 @@ function resolve(
 describe("resolveChatSkills", () => {
   it("indexes the pins, sorted by package id whatever order they arrive in", () => {
     const out = resolve({
-      selection: { pinned: ["@a/mike", "@a/alpha", "@a/zulu"] },
+      selection: { pinnedSkills: ["@a/mike", "@a/alpha", "@a/zulu"] },
       requested: [hint("@a/mike"), hint("@a/zulu"), hint("@a/alpha")],
     });
     expect(out.pinned.map((s) => s.package_id)).toEqual(["@a/alpha", "@a/mike", "@a/zulu"]);
@@ -42,7 +42,7 @@ describe("resolveChatSkills", () => {
 
   it("drops a requested hint nothing pinned, and de-duplicates the rest", () => {
     const out = resolve({
-      selection: { pinned: ["@a/alpha"] },
+      selection: { pinnedSkills: ["@a/alpha"] },
       requested: [hint("@a/alpha"), hint("@a/alpha"), hint("@a/stray")],
     });
     expect(out.pinned.map((s) => s.package_id)).toEqual(["@a/alpha"]);
@@ -50,7 +50,7 @@ describe("resolveChatSkills", () => {
 
   it("catalogue on: shows the catalogue minus what is pinned, with its truncation", () => {
     const out = resolve({
-      selection: { pinned: ["@a/alpha"] },
+      selection: { pinnedSkills: ["@a/alpha"] },
       requested: [hint("@a/alpha")],
       catalogue: [hint("@a/alpha"), hint("@a/other")],
       catalogueTruncated: true,
@@ -61,7 +61,7 @@ describe("resolveChatSkills", () => {
 
   it("catalogue off: still indexes the pins, and shows no catalogue at all", () => {
     const out = resolve({
-      selection: { catalogue: false, pinned: ["@a/mine"] },
+      selection: { skillCatalogue: false, pinnedSkills: ["@a/mine"] },
       requested: [hint("@a/mine")],
       catalogue: [hint("@a/other")],
       catalogueTruncated: true,
@@ -73,7 +73,7 @@ describe("resolveChatSkills", () => {
 
   it("notices a pin the context did not resolve, and nothing else", () => {
     const out = resolve({
-      selection: { pinned: ["@a/gone-pin", "@a/here"] },
+      selection: { pinnedSkills: ["@a/gone-pin", "@a/here"] },
       requested: [hint("@a/here")],
       catalogue: [hint("@a/other")],
     });
@@ -84,7 +84,7 @@ describe("resolveChatSkills", () => {
 
   it("orders notices deterministically and de-duplicates the pin list", () => {
     const out = resolve({
-      selection: { pinned: ["@a/zulu", "@a/alpha", "@a/zulu"] },
+      selection: { pinnedSkills: ["@a/zulu", "@a/alpha", "@a/zulu"] },
     });
     expect(out.notices).toHaveLength(2);
     expect(out.notices[0]).toContain("@a/alpha");

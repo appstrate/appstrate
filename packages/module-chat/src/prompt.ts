@@ -535,7 +535,7 @@ export async function buildCallerContextBlock(
 
   // Pins are stored sorted and deduped: the same session asks the same question.
   const url = new URL("/api/me/context", origin);
-  const requested = capabilities.readsSkills ? skills.pinned : [];
+  const requested = capabilities.readsSkills ? skills.pinnedSkills : [];
   if (requested.length > 0) url.searchParams.set("skills", requested.join(","));
   try {
     const ctxHeaders = new Headers();

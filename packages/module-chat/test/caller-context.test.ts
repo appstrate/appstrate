@@ -312,7 +312,10 @@ describe("formatCallerContext", () => {
           { package_id: "@acme/mine", display_name: "Mine", description: "Pinned.", version: null },
         ],
       },
-      { ...BASE_OPTS, skills: { catalogue: true, pinned: ["@acme/mine", "@acme/zeta"] } },
+      {
+        ...BASE_OPTS,
+        skills: { skillCatalogue: true, pinnedSkills: ["@acme/mine", "@acme/zeta"] },
+      },
     );
     expect(out).toContain("## Skills");
     expect(out).toContain("- `@acme/mine` (pinned) — Mine: Pinned.");
@@ -332,7 +335,7 @@ describe("formatCallerContext", () => {
         ],
         skills_truncated: true,
       },
-      { ...BASE_OPTS, skills: { catalogue: true, pinned: ["@acme/mine"] } },
+      { ...BASE_OPTS, skills: { skillCatalogue: true, pinnedSkills: ["@acme/mine"] } },
     );
     expect(out).toContain("Other skills in this space (not loaded):");
     expect(out).toContain("- `@acme/pdf` — PDF: Reads PDFs.");
@@ -352,7 +355,7 @@ describe("formatCallerContext", () => {
         requested_skills: [],
         skills: [{ package_id: "@acme/pdf", display_name: "PDF" }],
       },
-      { ...BASE_OPTS, skills: { catalogue: true, pinned: [] } },
+      { ...BASE_OPTS, skills: { skillCatalogue: true, pinnedSkills: [] } },
     );
     expect(out.split("## Skills")).toHaveLength(2);
     expect(out).not.toContain("###");
@@ -373,7 +376,7 @@ describe("formatCallerContext", () => {
         skills: [{ package_id: "@acme/pdf", display_name: "PDF" }],
         skills_truncated: true,
       },
-      { ...BASE_OPTS, skills: { catalogue: false, pinned: ["@acme/mine"] } },
+      { ...BASE_OPTS, skills: { skillCatalogue: false, pinnedSkills: ["@acme/mine"] } },
     );
     expect(out).toContain("- `@acme/mine` (pinned) — Mine: Pinned.");
     expect(out).not.toContain("Other skills in this space");
@@ -388,7 +391,7 @@ describe("formatCallerContext", () => {
         org: { role: "member" },
         requested_skills: [],
       },
-      { ...BASE_OPTS, skills: { catalogue: true, pinned: ["@acme/gone"] } },
+      { ...BASE_OPTS, skills: { skillCatalogue: true, pinnedSkills: ["@acme/gone"] } },
     );
     expect(out).toContain("`@acme/gone` is pinned to this conversation but is not available here");
   });
@@ -396,7 +399,7 @@ describe("formatCallerContext", () => {
   it("omits the heading entirely when nothing resolves and nothing is catalogued", () => {
     const out = formatCallerContext(
       { user: { name: "Ada" }, org: { role: "member" }, skills: [], requested_skills: [] },
-      { ...BASE_OPTS, skills: { catalogue: true, pinned: [] } },
+      { ...BASE_OPTS, skills: { skillCatalogue: true, pinnedSkills: [] } },
     );
     expect(out).not.toContain("## Skills");
   });
@@ -686,7 +689,10 @@ describe("formatCallerContext", () => {
     };
     const opts = {
       ...BASE_OPTS,
-      skills: { catalogue: true, pinned: ["@acme/beta", "@acme/gone", "@acme/mine", "@acme/zeta"] },
+      skills: {
+        skillCatalogue: true,
+        pinnedSkills: ["@acme/beta", "@acme/gone", "@acme/mine", "@acme/zeta"],
+      },
     };
     const at = new Date("2026-06-25T09:05:00.000Z");
     expect(formatCallerContext(ctx, { ...opts, now: at })).toBe(
@@ -781,7 +787,7 @@ describe("buildCallerContextBlock", () => {
       user,
       deps,
       permissions: ["mcp:read", "mcp:invoke"],
-      skills: { catalogue: true, pinned: ["@acme/a", "@acme/b"] },
+      skills: { skillCatalogue: true, pinnedSkills: ["@acme/a", "@acme/b"] },
     };
     await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
       ...args,
@@ -906,7 +912,7 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
       // Nothing was resolved, so a pin must not read as unavailable.
-      skills: { catalogue: true, pinned: ["@acme/mine"] },
+      skills: { skillCatalogue: true, pinnedSkills: ["@acme/mine"] },
     });
     expect(out).toContain("Ada (ada@acme.com)");
     expect(out).toContain("Current space: `spc_1`");

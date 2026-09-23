@@ -82,8 +82,8 @@ describe("putSessionSkills", () => {
     const capture = scripted(() => new Response(null, { status: 204 }));
 
     await putSessionSkills(() => ({ "X-Space-Id": "spc_a" }), "chs_1", {
-      catalogue: false,
-      pinned: ["@scope/a", "@scope/b"],
+      skillCatalogue: false,
+      pinnedSkills: ["@scope/a", "@scope/b"],
     });
 
     expect(String(capture.input)).toBe("/api/chat/sessions/chs_1/skills");
@@ -102,7 +102,7 @@ describe("putSessionSkills", () => {
   it("throws when the server refuses the write", async () => {
     scripted(() => new Response(null, { status: 400 }));
     await expect(
-      putSessionSkills(() => ({}), "chs_1", { catalogue: true, pinned: [] }),
+      putSessionSkills(() => ({}), "chs_1", { skillCatalogue: true, pinnedSkills: [] }),
     ).rejects.toThrow("HTTP 400");
   });
 });

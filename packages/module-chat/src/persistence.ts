@@ -47,14 +47,20 @@ function toContent(message: UIMessage): Record<string, unknown> {
 /**
  * Create the session row if it does not exist yet (idempotent). The client
  * mints the id; the stream route and `PUT …/skills` (a pin before the first
- * message, so zero messages) both create the row. Returns its skill selection.
+ * message, so zero messages) both create the row — the latter writing
+ * `selection` in the same statement. Returns the row's skill selection.
  */
 export async function ensureSession(
   id: string,
   orgId: string,
   userId: string,
   spaceId: string,
-): Promise<{ skillCatalogue: boolean; pinnedSkills: string[] }> {
+  selection?: ChatSkillSelection,
+): Promise<ChatSkillSelection> {
+  const skills = selection && {
+    skillCatalogue: selection.skillCatalogue,
+    pinnedSkills: [...selection.pinnedSkills],
+  };
   // The id is client-minted, so a caller could send an id that already belongs
   // to another tenant; a plain `DO NOTHING` would leave that row intact and we'd
   // then persist a message into it. `DO UPDATE … SET id = id` is a no-op write
@@ -76,10 +82,11 @@ export async function ensureSession(
   // 404, not 403, so we don't reveal that the id exists for someone else.
   const [row] = await db
     .insert(chatSessions)
-    .values({ id, orgId, userId, spaceId, title: null })
+    .values({ id, orgId, userId, spaceId, title: null, ...skills })
     .onConflictDoUpdate({
       target: chatSessions.id,
-      set: { id: sql`${chatSessions.id}` },
+      // `updatedAt` stays either way, so a pin never reorders the sidebar.
+      set: skills ?? { id: sql`${chatSessions.id}` },
       setWhere: and(
         eq(chatSessions.orgId, orgId),
         eq(chatSessions.userId, userId),
@@ -98,17 +105,6 @@ export async function ensureSession(
     throw notFound("Chat session not found");
   }
   return { skillCatalogue: row.skillCatalogue, pinnedSkills: row.pinnedSkills };
-}
-
-/** Wholesale, after {@link ensureSession}; `updatedAt` stays, so a pin never reorders the sidebar. */
-export async function setSessionSkills(
-  sessionId: string,
-  selection: ChatSkillSelection,
-): Promise<void> {
-  await db
-    .update(chatSessions)
-    .set({ skillCatalogue: selection.catalogue, pinnedSkills: [...selection.pinned] })
-    .where(eq(chatSessions.id, sessionId));
 }
 
 /** Most recent message id in a session — the one a new message follows, or null. */

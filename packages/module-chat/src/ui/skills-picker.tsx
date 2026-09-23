@@ -44,7 +44,7 @@ export function SkillsPicker({ sessionId, getHeaders, initialSelection }: Skills
   // A disabled query stays `isPending` forever; no space reads as "nothing".
   const loading = !!spaceId && catalogue.isPending;
 
-  const pinned = selection.pinned;
+  const pinned = selection.pinnedSkills;
   const pinnedSet = new Set(pinned);
   const atPinCap = pinned.length >= MAX_PINNED_SKILLS;
   const rows = skillPickerRows(skills, pinned);
@@ -59,7 +59,7 @@ export function SkillsPicker({ sessionId, getHeaders, initialSelection }: Skills
   };
 
   const togglePin = (packageId: string) => {
-    apply({ ...selection, pinned: togglePinned(pinned, packageId) });
+    apply({ ...selection, pinnedSkills: togglePinned(pinned, packageId) });
   };
 
   return (
@@ -122,9 +122,9 @@ export function SkillsPicker({ sessionId, getHeaders, initialSelection }: Skills
           <Checkbox
             id="skills-catalogue"
             data-testid="skills-catalogue-toggle"
-            checked={selection.catalogue}
+            checked={selection.skillCatalogue}
             disabled={saving}
-            onCheckedChange={(checked) => apply({ ...selection, catalogue: checked === true })}
+            onCheckedChange={(checked) => apply({ ...selection, skillCatalogue: checked === true })}
             className="mt-0.5"
           />
           <label htmlFor="skills-catalogue" className="min-w-0 cursor-pointer">

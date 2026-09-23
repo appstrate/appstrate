@@ -40,7 +40,7 @@ import { clearActiveStream, getResumableContext, STALE_MARKER_MIN_AGE_MS } from 
 import { mintSessionId } from "./session-id.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import { logger } from "./logger.ts";
-import { ensureSession, setSessionSkills } from "./persistence.ts";
+import { ensureSession } from "./persistence.ts";
 import { MAX_PINNED_SKILLS } from "./skills.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 
@@ -254,9 +254,9 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     },
   );
 
-  // PUT /api/chat/sessions/:id/skills — replace the skill selection.
-  // `ensureSession` first: the client mints the id and creates the row lazily,
-  // so choosing skills before the first message is the normal case.
+  // PUT /api/chat/sessions/:id/skills — replace the skill selection, creating
+  // the row for a client-minted id: choosing skills before the first message is
+  // the normal case.
   router.put(
     "/api/chat/sessions/:id/skills",
     rateLimited(60),
@@ -265,10 +265,9 @@ export function createChatRouter(deps: ChatPlatformDeps) {
       const scope = sessionScope(c);
       const id = c.req.param("id");
       const data = parseBody(sessionSkillsSchema, await c.req.json().catch(() => null));
-      await ensureSession(id, scope.orgId, scope.userId, scope.spaceId);
-      await setSessionSkills(id, {
-        catalogue: data.skill_catalogue,
-        pinned: [...new Set(data.pinned_skills)].sort(),
+      await ensureSession(id, scope.orgId, scope.userId, scope.spaceId, {
+        skillCatalogue: data.skill_catalogue,
+        pinnedSkills: [...new Set(data.pinned_skills)].sort(),
       });
       notifySessionUpdate(id, scope.orgId, scope.userId);
       return c.body(null, 204);

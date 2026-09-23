@@ -13,13 +13,17 @@ export interface SkillHint {
 /** Every pin is rendered on every turn, so this is a context-budget bound. */
 export const MAX_PINNED_SKILLS = 20;
 
+/** Named as the `chat_sessions` columns, so a session row is a selection. */
 export interface ChatSkillSelection {
   /** Whether the turn also lists the space's catalogue (pins always are). */
-  catalogue: boolean;
-  pinned: readonly string[];
+  skillCatalogue: boolean;
+  pinnedSkills: readonly string[];
 }
 
-export const DEFAULT_SKILL_SELECTION: ChatSkillSelection = { catalogue: true, pinned: [] };
+export const DEFAULT_SKILL_SELECTION: ChatSkillSelection = {
+  skillCatalogue: true,
+  pinnedSkills: [],
+};
 
 export interface ResolveChatSkillsInput {
   selection: ChatSkillSelection;
@@ -42,7 +46,7 @@ function byPackageId(a: { package_id: string }, b: { package_id: string }): numb
 
 export function resolveChatSkills(input: ResolveChatSkillsInput): ResolvedChatSkills {
   const { selection } = input;
-  const wanted = new Set(selection.pinned);
+  const wanted = new Set(selection.pinnedSkills);
 
   const byId = new Map<string, SkillHint>();
   for (const hint of input.requested) {
@@ -60,10 +64,10 @@ export function resolveChatSkills(input: ResolveChatSkillsInput): ResolvedChatSk
 
   return {
     pinned: [...byId.values()].sort(byPackageId),
-    catalogue: selection.catalogue
+    catalogue: selection.skillCatalogue
       ? input.catalogue.filter((hint) => !byId.has(hint.package_id))
       : [],
-    catalogueTruncated: selection.catalogue && input.catalogueTruncated,
+    catalogueTruncated: selection.skillCatalogue && input.catalogueTruncated,
     notices,
   };
 }
