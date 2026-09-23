@@ -70,6 +70,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Google integrations no longer report the `email` scope as missing** (#1131).
+  Google's token endpoint echoes the requested OIDC `email` scope as
+  `https://www.googleapis.com/auth/userinfo.email`, and no manifest declared the
+  equivalence. `@appstrate/gmail` 1.1.5, `@appstrate/gmail-mcp` 2.3.4 and
+  `@appstrate/google-{calendar,contacts,drive,forms,sheets}` 1.0.4 add that
+  canonical scope to their catalog with `implies: ["email"]`.
 - **`appstrate … --version` after a command no longer prints the CLI's version
   and exits 0** (#1516). `-V, --version` was a program option, which commander
   recognises anywhere on the line, so it shadowed every subcommand:

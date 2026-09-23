@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/gmail",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "Gmail (API)",
@@ -62,6 +62,12 @@
         {
           "value": "email",
           "label": "Email address"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/userinfo.email",
+          "label": "Email address (Google canonical scope)",
+          "description": "Google's canonical form of the OIDC `email` scope — returned in token responses in place of `email`.",
+          "implies": ["email"]
         },
         {
           "value": "https://www.googleapis.com/auth/gmail.readonly",

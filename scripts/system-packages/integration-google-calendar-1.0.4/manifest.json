@@ -1,13 +1,13 @@
 {
-  "name": "@appstrate/google-drive",
-  "version": "1.0.3",
+  "name": "@appstrate/google-calendar",
+  "version": "1.0.4",
   "type": "integration",
   "schema_version": "0.1",
-  "display_name": "Google Drive (API)",
-  "description": "Cloud file storage and synchronization",
-  "keywords": ["storage", "productivity"],
+  "display_name": "Google Calendar (API)",
+  "description": "Calendar and scheduling service by Google",
+  "keywords": ["calendar", "productivity"],
   "license": "Apache-2.0",
-  "icon": "logos:google-drive",
+  "icon": "logos:google-calendar",
   "source": {
     "kind": "none"
   },
@@ -32,7 +32,7 @@
     "primary": {
       "type": "oauth2",
       "issuer": "https://accounts.google.com",
-      "default_scopes": ["openid", "email", "https://www.googleapis.com/auth/drive.file"],
+      "default_scopes": ["openid", "email", "https://www.googleapis.com/auth/calendar.readonly"],
       "authorization_params": {
         "access_type": "offline",
         "prompt": "consent"
@@ -55,34 +55,37 @@
           "label": "Email address"
         },
         {
-          "value": "https://www.googleapis.com/auth/drive.file",
-          "label": "Per-file access (recommended)"
+          "value": "https://www.googleapis.com/auth/userinfo.email",
+          "label": "Email address (Google canonical scope)",
+          "description": "Google's canonical form of the OIDC `email` scope — returned in token responses in place of `email`.",
+          "implies": ["email"]
         },
         {
-          "value": "https://www.googleapis.com/auth/drive.readonly",
-          "label": "Read-only access"
+          "value": "https://www.googleapis.com/auth/calendar.readonly",
+          "label": "Read-only access to calendars and events"
         },
         {
-          "value": "https://www.googleapis.com/auth/drive",
-          "label": "Full access"
+          "value": "https://www.googleapis.com/auth/calendar",
+          "label": "Full calendar access (read & write)"
         },
         {
-          "value": "https://www.googleapis.com/auth/drive.metadata.readonly",
-          "label": "Read metadata only"
+          "value": "https://www.googleapis.com/auth/calendar.events",
+          "label": "Manage events on all calendars"
         },
         {
-          "value": "https://www.googleapis.com/auth/drive.appdata",
-          "label": "App data folder"
+          "value": "https://www.googleapis.com/auth/calendar.events.readonly",
+          "label": "Read events only"
         },
         {
-          "value": "https://www.googleapis.com/auth/drive.photos.readonly",
-          "label": "Read photos/videos"
+          "value": "https://www.googleapis.com/auth/calendar.settings.readonly",
+          "label": "Read calendar settings"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/calendar.freebusy",
+          "label": "Read free/busy information"
         }
       ],
-      "authorized_uris": [
-        "https://www.googleapis.com/drive/**",
-        "https://www.googleapis.com/upload/drive/**"
-      ],
+      "authorized_uris": ["https://www.googleapis.com/calendar/**"],
       "delivery": {
         "http": {
           "in": "header",
@@ -107,9 +110,7 @@
     },
     "dev.appstrate/api": {
       "auths": {
-        "primary": {
-          "upload_protocols": ["google-resumable"]
-        }
+        "primary": {}
       }
     }
   }
