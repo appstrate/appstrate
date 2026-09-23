@@ -107,18 +107,16 @@ interface CallToolCapture {
 }
 
 /**
- * Fake McpHost exposing only `getUpstreamClient`. The fake client records
- * the `callTool` args (so tests can assert the secret never travels as a
+ * Fake runner client. It records the `callTool` args (so tests can assert the secret never travels as a
  * tool argument) and returns a canned JSON content block. It also records
  * the credentials source's `activeInputs()` at call time so we can prove
  * the substitution window was open during the tool call.
  */
-function makeFakeHost(
-  namespace: string,
+function makeFakeClient(
   cannedResult: { content: Array<{ type: string; text: string }> },
   observeActiveInputs?: () => ActiveConnectInputs | null,
 ): {
-  host: { getUpstreamClient(ns: string): unknown };
+  client: { callTool(args: { name: string; arguments?: Record<string, unknown> }): unknown };
   capture: CallToolCapture;
   activeDuringCall: { value: ActiveConnectInputs | null };
 } {
@@ -132,11 +130,7 @@ function makeFakeHost(
     },
   };
   return {
-    host: {
-      getUpstreamClient(ns: string) {
-        return ns === namespace ? client : undefined;
-      },
-    },
+    client,
     capture,
     activeDuringCall,
   };
@@ -153,12 +147,12 @@ describe("runConnectLogin", () => {
         },
       ],
     };
-    const { host, capture, activeDuringCall } = makeFakeHost("ns", canned, () =>
+    const { client, capture, activeDuringCall } = makeFakeClient(canned, () =>
       source.activeInputs(),
     );
 
     const bundle = await runConnectLogin({
-      host: host as any,
+      client: client as any,
       namespace: "ns",
       toolName: "login",
       inputs: { password: "s3cret" },
@@ -209,9 +203,9 @@ describe("runConnectLogin", () => {
         },
       ],
     };
-    const { host } = makeFakeHost("ns", canned, () => source.activeInputs());
+    const { client } = makeFakeClient(canned, () => source.activeInputs());
     const bundle = await runConnectLogin({
-      host: host as any,
+      client: client as any,
       namespace: "ns",
       toolName: "login",
       inputs: {},
@@ -234,14 +228,9 @@ describe("runConnectLogin", () => {
         return Promise.reject(new Error("boom"));
       },
     };
-    const host = {
-      getUpstreamClient(ns: string) {
-        return ns === "ns" ? client : undefined;
-      },
-    };
     await expect(
       runConnectLogin({
-        host: host as any,
+        client: client as any,
         namespace: "ns",
         toolName: "login",
         inputs: { password: "s3cret" },
@@ -265,11 +254,11 @@ describe("runConnectLogin", () => {
         },
       ],
     };
-    const { host } = makeFakeHost("ns", canned);
+    const { client } = makeFakeClient(canned);
 
     await expect(
       runConnectLogin({
-        host: host as any,
+        client: client as any,
         namespace: "ns",
         toolName: "login",
         produces: ["access_token"],
@@ -295,10 +284,10 @@ describe("runConnectLogin", () => {
         },
       ],
     };
-    const { host } = makeFakeHost("ns", canned);
+    const { client } = makeFakeClient(canned);
 
     await runConnectLogin({
-      host: host as any,
+      client: client as any,
       namespace: "ns",
       toolName: "login",
       inputs: {},
@@ -334,11 +323,11 @@ describe("runConnectLogin", () => {
         },
       ],
     };
-    const { host } = makeFakeHost("ns", canned);
+    const { client } = makeFakeClient(canned);
 
     await expect(
       runConnectLogin({
-        host: host as any,
+        client: client as any,
         namespace: "ns",
         toolName: "login",
         inputs: {},
@@ -354,24 +343,6 @@ describe("runConnectLogin", () => {
 
     // The substitution window must still be closed after the rejection.
     expect(source.activeInputs()).toBeNull();
-  });
-
-  it("throws when the upstream client is missing", async () => {
-    const source = makeSource();
-    const host = { getUpstreamClient: () => undefined };
-    await expect(
-      runConnectLogin({
-        host: host as any,
-        namespace: "absent",
-        toolName: "login",
-        inputs: {},
-        source,
-        authKey: "primary",
-        authType: "oauth2",
-        authorizedUris: [],
-        deliveryHttp: DELIVERY_HTTP,
-      }),
-    ).rejects.toThrow("no upstream client");
   });
 });
 

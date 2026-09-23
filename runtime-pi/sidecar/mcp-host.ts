@@ -35,6 +35,7 @@ import {
   normaliseMcpToolBody,
   normaliseMcpToolNamespace,
 } from "@appstrate/core/naming";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
 import {
   sanitiseTextField,
@@ -107,10 +108,8 @@ interface McpHostUpstream {
    * allocating a fresh (possibly suffixed) one. Used to attach the in-process
    * `api_call` tool to an integration that ALSO spawns its own MCP server, so
    * the agent sees `{ns}__api_call` alongside `{ns}__<native tools>` under one
-   * namespace. The pre-existing upstream stays the namespace's PRIMARY (what
-   * {@link McpHost.getUpstreamClient} returns, e.g. for the connect-login
-   * tool); these merged tools route to THIS client via the per-tool index.
-   * The namespace must already exist (register the primary server first).
+   * namespace. These merged tools route to THIS client via the per-tool index.
+   * The namespace must already exist (register the server first).
    */
   intoNamespace?: string;
 }
@@ -123,11 +122,19 @@ interface McpHostOptions {
 /** Reserved: an upstream that declares it cannot be served by N connections. */
 const CONNECTION_PARAM = "connection";
 
-/**
- * Sized so the label → account mapping of 10 connections (80-char labels,
- * email-length account ids) is never truncated.
- */
-const CONNECTION_DESCRIPTION_MAX_BYTES = 4096;
+const CONNECTION_DESCRIPTION_PREFIX = "Connection to use for this call. ";
+/** 80 UTF-16 units (the platform's label cap), each at most 3 UTF-8 bytes. */
+const CONNECTION_LABEL_MAX_BYTES = 80 * 3;
+/** An email address. A longer account id truncates the description's tail, never an enum value. */
+const CONNECTION_ACCOUNT_ID_MAX_BYTES = 254;
+const utf8Bytes = (text: string): number => new TextEncoder().encode(text).byteLength;
+const CONNECTION_DESCRIPTION_MAX_BYTES =
+  utf8Bytes(CONNECTION_DESCRIPTION_PREFIX) +
+  MAX_CONNECTIONS_PER_INTEGRATION *
+    (CONNECTION_LABEL_MAX_BYTES +
+      utf8Bytes(" → ") +
+      CONNECTION_ACCOUNT_ID_MAX_BYTES +
+      utf8Bytes("; "));
 
 /** `null` keys only a connect run's sole upstream, which never gains a sibling route. */
 type ConnectionKey = string | null;
@@ -160,7 +167,7 @@ function withConnectionParam(descriptor: Tool, routes: Map<ConnectionKey, ToolRo
     // provider-supplied, so the description goes through the text sanitiser.
     enum: labels,
     description: sanitiseTextField(
-      `Connection to use for this call. ${labels
+      `${CONNECTION_DESCRIPTION_PREFIX}${labels
         .map((label) => `${label} → ${routes.get(label)!.accountId ?? "no account id"}`)
         .join("; ")}`,
       CONNECTION_DESCRIPTION_MAX_BYTES,
@@ -214,14 +221,14 @@ function connectionSelectionError(
  * exceed the schema-size cap after sanitisation are rejected.
  */
 export class McpHost {
-  private readonly upstreams = new Map<string, McpHostUpstream>();
+  // No namespace → client map: one namespace holds several connections' clients.
+  private readonly namespaces = new Set<string>();
   // Requested (raw) namespace → its allocated slot + the labels already there.
   // Keyed on the RAW id so another connection of the same integration reuses
   // the slot, while two different packages sharing a slug still get `_2`.
   private readonly namespaceSlots = new Map<string, { slot: string; labels: Set<ConnectionKey> }>();
   private readonly toolToNamespace = new Map<string, string>();
-  // Per-tool → per-connection-label → owning client. Decoupled from `upstreams`
-  // so one namespace can aggregate several clients AND several connections.
+  // Per-tool → per-connection-label → owning client.
   private readonly toolRoutes = new Map<string, Map<ConnectionKey, ToolRoute>>();
   // Slot → (trust, ORIGINAL upstream name) → final name, so a later connection
   // lands on the name the first one got, fallback and suffix included.
@@ -248,10 +255,7 @@ export class McpHost {
   /**
    * Ingest an upstream MCP server. Returns the ALLOCATED namespace — the
    * normalised slug, possibly disambiguated with a `_2`/`_3`/… suffix on
-   * collision. This is the value {@link getUpstreamClient} keys against, so
-   * callers that need to reach the raw client afterwards (e.g. the P2
-   * connect-login hook) must use the returned namespace, not the one they
-   * passed in.
+   * collision — the `{namespace}__` prefix of every tool it advertises.
    */
   async register(upstream: McpHostUpstream): Promise<string> {
     if (this.disposed) throw new Error("McpHost: cannot register after dispose()");
@@ -267,15 +271,14 @@ export class McpHost {
     // `intoNamespace` merges into an existing namespace (no allocation, no
     // suffix); otherwise allocate a fresh slot, disambiguating on collision.
     const merging = upstream.intoNamespace !== undefined;
-    if (merging && !this.upstreams.has(upstream.intoNamespace!)) {
+    if (merging && !this.namespaces.has(upstream.intoNamespace!)) {
       throw new Error(
         `McpHost: intoNamespace '${upstream.intoNamespace}' is not a registered namespace`,
       );
     }
     const label: ConnectionKey = upstream.connection?.label ?? null;
     const slot = this.namespaceSlots.get(upstream.namespace);
-    // A member can rename a connection after the kickoff-time distinct-label
-    // check, and routing a duplicate leaves one permanently unaddressable.
+    // Invariant: a duplicate label would leave one connection unaddressable.
     if (!merging && slot?.labels.has(label)) {
       throw new Error(
         `McpHost: duplicate connection ${JSON.stringify(label)} for ${JSON.stringify(upstream.namespace)} — two spawn specs of one integration cannot share a label`,
@@ -331,7 +334,7 @@ export class McpHost {
 
     if (capabilities && !capabilities.tools) {
       // Server explicitly does NOT support tools — no point asking.
-      if (!merging) this.upstreams.set(normalisedNs, effectiveUpstream);
+      this.namespaces.add(normalisedNs);
       return normalisedNs;
     }
 
@@ -526,11 +529,7 @@ export class McpHost {
       if (!siblings.has(key)) siblings.set(key, finalName);
     }
 
-    // Merged upstreams (`intoNamespace`) contribute tools but never become the
-    // namespace's primary client — keep the pre-existing primary in place.
-    // Another connection DOES become the primary: connect-login calls
-    // `getUpstreamClient` right after its own register, so last-wins is right.
-    if (!merging) this.upstreams.set(normalisedNs, effectiveUpstream);
+    this.namespaces.add(normalisedNs);
     return normalisedNs;
   }
 
@@ -580,10 +579,10 @@ export class McpHost {
    * Find a free namespace slot. The base slug is tried first; if it is
    * already in use we suffix `_2`, `_3`, … until we find an unused slot.
    * The chosen slot is what every subsequent index ({@link toolToNamespace},
-   * {@link upstreams}) keys against.
+   * {@link namespaces}) keys against.
    */
   private allocateNamespace(base: string): string {
-    return allocateMcpToolNamespace(base, new Set(this.upstreams.keys()));
+    return allocateMcpToolNamespace(base, this.namespaces);
   }
 
   /** Routes, not descriptors: a second connection adds no descriptor but is not zero tools. */
@@ -591,23 +590,6 @@ export class McpHost {
     let total = 0;
     for (const routes of this.toolRoutes.values()) total += routes.size;
     return total;
-  }
-
-  /**
-   * Connect-login primitive (P1) — return the underlying MCP client for a
-   * registered upstream so a caller can invoke a tool directly (bypassing
-   * the namespaced tool-dispatch surface). `namespace` is the normalised
-   * form used as the `{namespace}__tool` prefix (the same value
-   * {@link normaliseNamespace} produces, after any collision-disambiguation
-   * suffix). Returns `undefined` when no upstream is registered under it.
-   *
-   * The returned client exposes `.callTool({ name, arguments }, { signal? })`
-   * — the connect-login primitive uses it to call the integration's `login`
-   * tool while the credential source's transient-input substitution window
-   * is open.
-   */
-  getUpstreamClient(namespace: string): AppstrateMcpClient | undefined {
-    return this.upstreams.get(namespace)?.client;
   }
 
   /**
@@ -682,7 +664,7 @@ export class McpHost {
         }),
       ),
     );
-    this.upstreams.clear();
+    this.namespaces.clear();
     this.namespaceSlots.clear();
     this.toolToNamespace.clear();
     this.toolRoutes.clear();

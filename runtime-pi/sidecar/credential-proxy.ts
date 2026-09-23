@@ -96,7 +96,6 @@ export type ApiCallRequestBody =
 
 interface ApiCallArgs {
   integrationId: string;
-  /** Bound connection the credentials belong to; see {@link credentialScope}. */
   connectionId?: string;
   targetUrl: string;
   method: string;
@@ -175,10 +174,10 @@ export interface ApiCallBaseDeps {
   cookieJar: Map<string, string[]>;
   fetchFn: typeof fetch;
   /**
-   * {@link credentialScope}s that already had a persistent auth failure
-   * logged in this run. Mutated by the function — shared across calls so a
-   * flapping connection only logs once and so the 401-retry path skips the
-   * refresh after the first failure.
+   * Set tracking which credential scopes already had a persistent auth
+   * failure logged in this run. Mutated by the function — shared
+   * across calls so a flapping connection only logs once and so the
+   * 401-retry path skips the refresh after the first failure.
    */
   reportedAuthFailures: Set<string>;
   /**
@@ -260,18 +259,13 @@ function assertNever(value: never): never {
 type CookieGate = "allowlist" | "open";
 
 /**
- * Separator for {@link credentialScope} and {@link cookieBucketKey}. NUL cannot
- * occur in a package id (`INTEGRATION_ID_RE`), a connection uuid nor a WHATWG
- * origin, so the parts of a key are unambiguous and no integration id can be
- * crafted to forge another's bucket.
+ * Separator for {@link cookieBucketKey}. NUL cannot occur in a package id
+ * (`INTEGRATION_ID_RE`), a connection uuid nor a WHATWG origin, so the parts of a key are
+ * unambiguous and no integration id can be crafted to forge another's bucket.
  */
 const COOKIE_KEY_SEP = "\u0000";
 
-/**
- * One credential's identity in the run-wide state: N bound connections of one
- * integration share `integrationId` but never a cookie (for a cookie-session
- * login the cookie IS the credential) nor a persistent-401 verdict.
- */
+/** Per-connection key of the cookie jar and 401 verdicts; see SIDECAR.md, cookie jar scoping. */
 function credentialScope(integrationId: string, connectionId?: string): string {
   return connectionId === undefined
     ? integrationId
@@ -281,11 +275,8 @@ function credentialScope(integrationId: string, connectionId?: string): string {
 /**
  * Key of one bucket in the run-wide cookie jar.
  *
- * `mergeSetCookieIntoJar` strips the cookie attributes (Domain, Path, Secure,
- * …), so the key is the only record of WHERE a cookie came from. A bucket keyed
- * on the credential alone would re-attach every cookie to every later
- * `api_call`, and under `allow_all_uris` the agent picks the host, shipping a
- * live provider session cookie wherever the model named it. The
+ * The key is the only record of WHERE a cookie was captured, so a credential-only key would
+ * replay a live session cookie to any host the model names under `allow_all_uris`. The
  * `substitutesCredential` exfiltration guard does not cover this: it only sees
  * `{{field}}` templating, and a replayed cookie is never templated.
  *

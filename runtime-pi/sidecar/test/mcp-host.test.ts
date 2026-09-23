@@ -900,7 +900,7 @@ describe("McpHost — intoNamespace (attachable api_call)", () => {
     ];
   }
 
-  it("merges tools into an existing namespace, keeping the primary upstream", async () => {
+  it("merges tools into an existing namespace", async () => {
     const server = await makeUpstream(notionTool()); // native: search_pages
     const apiCall = await makeUpstream(apiCallTool());
     const host = new McpHost();
@@ -922,9 +922,6 @@ describe("McpHost — intoNamespace (attachable api_call)", () => {
       const names = host.buildTools().map((t) => t.descriptor.name);
       expect(names).toContain("kijiji__search_pages");
       expect(names).toContain("kijiji__api_call");
-      // The primary upstream (getUpstreamClient / connect-login) stays the
-      // spawned server, NOT the merged api_call client.
-      expect(host.getUpstreamClient("kijiji")).toBe(server.client);
     } finally {
       await host.dispose();
     }
@@ -1288,11 +1285,13 @@ describe("McpHost — one integration, several connections", () => {
     }
   });
 
-  it("describes all ten connections of 80-char labels without truncating", async () => {
+  it("describes ten connections at the byte bounds (3-byte 80-unit labels, 254-byte ids) whole", async () => {
     const connections = Array.from({ length: 10 }, (_, i) => ({
-      label: `${String(i).padStart(2, "0")}-${"x".repeat(77)}`,
-      accountId: `account-${i}@example.com`,
+      label: `${String.fromCharCode(0x4e00 + i)}${"漢".repeat(79)}`,
+      accountId: `${"a".repeat(241)}${i}@example.com`,
     }));
+    expect(new TextEncoder().encode(connections[0]!.label).byteLength).toBe(240);
+    expect(connections[0]!.accountId.length).toBe(254);
     const upstreams = await Promise.all(connections.map((c) => makeUpstream(sshTool(c.label))));
     try {
       const host = new McpHost();
@@ -1303,6 +1302,7 @@ describe("McpHost — one integration, several connections", () => {
         properties: Record<string, { description?: string }>;
       };
       const last = connections[9]!;
+      expect(schema.properties.connection!.description).not.toContain("[truncated]");
       expect(schema.properties.connection!.description).toEndWith(
         `${last.label} → ${last.accountId}`,
       );

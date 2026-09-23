@@ -178,7 +178,6 @@ interface BootIntegrationsResult {
    * as trusted in-process MCP servers on the same host — one pipeline.
    */
   tools: AppstrateToolDefinition[];
-  /** Per-CONNECTION outcome — one entry per spec. Shape: {@link IntegrationBootReport}. */
   spawned: IntegrationBootReport["spawned"];
   failed: IntegrationBootReport["failed"];
   /**
@@ -325,9 +324,8 @@ export async function extractBundle(bytes: Uint8Array, namespace: string): Promi
  *      refresh storms) and retry once. Caller-override 401s pass through.
  *
  * Auth selection: in practice the credentials payload carries EXACTLY ONE
- * auth — a spec is bound to ONE `integration_connections` row, and the
- * resolver returns only that row's auth (see
- * `integration-credentials-resolver.ts`, asserted by its
+ * auth — each spec binds ONE `integration_connections` row, and the resolver returns only that
+ * row's auth (see `integration-credentials-resolver.ts`, asserted by its
  * `auths.length === 1` test). So this is a trivial pick, not a second policy
  * site: the oauth2-first / first-with-a-plan ordering is just a defensive
  * tie-breaker should the payload ever surface more than one. Throws when no
@@ -576,14 +574,11 @@ export async function connectRemoteHttpIntegration(
  * result's `failed[]` list. Exported for unit testing; production callers go
  * through {@link bootIntegrations}.
  *
- * `allocatedNamespace` is the value {@link McpHost.register} returned for this
- * integration — the host may have disambiguated `spec.namespace` with a
- * suffix, and {@link McpHost.getUpstreamClient} keys against the allocated
- * form.
+ * `client` is this spec's own runner; `allocatedNamespace` only labels diagnostics.
  */
 export async function runConnectLoginHook(
   spec: IntegrationSpawnSpec,
-  host: McpHost,
+  client: AppstrateMcpClient,
   mitmSource: IntegrationCredentialsSource | null,
   allocatedNamespace: string,
 ): Promise<void> {
@@ -594,11 +589,9 @@ export async function runConnectLoginHook(
       "connect-login requires the integration's MITM credentials source, but none was created (CA bring-up may have failed)",
     );
   }
-  // Same opts drive the initial login AND every mid-run re-login. The
-  // namespace MUST be the ALLOCATED one (McpHost may have suffixed it) so the
-  // re-login closure resolves the same upstream client.
+  // Boot login and every re-login share these opts: THIS runner, never a sibling's.
   const loginOpts = {
-    host,
+    client,
     namespace: allocatedNamespace,
     toolName: cl.toolName,
     ...(cl.produces ? { produces: cl.produces } : {}),
@@ -820,8 +813,8 @@ async function spawnAndConnectLocalIntegration(params: {
 }): Promise<SpawnAndConnectResult> {
   const { spec, runId, adapter, adapterCtx, host, bundleFetchOpts, ca, logLabel } = params;
 
-  // One listener per spec (bound connection), picked MITM-first (#543).
-  // `egressCtx` is handed to the adapter as the runner's HTTPS_PROXY:
+  // One listener per connection, picked MITM-first (#543). `egressCtx` is
+  // handed to the adapter as the runner's HTTPS_PROXY:
   //   - MITM listener   → caCertHostPath set (TLS terminate + inject).
   //   - plain CONNECT    → caCertHostPath null (tunnel + SSRF floor only).
   //   - neither          → null (mtls / delivery.files reach upstream directly).
@@ -1162,12 +1155,11 @@ export function pushServerlessReadyBreadcrumb(
 }
 
 /**
- * Spawn each spec (one per bound connection) sequentially, register the
- * surviving ones on a shared {@link McpHost}, and return the materialised tool
- * list. Per-connection failures are captured in `result.failed` so a single
- * broken connection doesn't black-hole the entire run. The one fatal
- * exception is runtime adapter selection (no adapter → nothing can spawn):
- * that rethrows.
+ * Spawn each spec (one per bound connection) sequentially, register the surviving ones on a
+ * shared {@link McpHost}, and return the materialised tool list. Per-connection
+ * failures are captured in `result.failed` so a single broken connection
+ * doesn't black-hole the entire run. The one fatal exception is runtime
+ * adapter selection (no adapter → nothing can spawn): that rethrows.
  */
 export async function bootIntegrations(
   specs: IntegrationSpawnSpec[],
@@ -1316,8 +1308,6 @@ export async function bootIntegrations(
     // reaches operators instead of living only in `docker logs`.
     const stderrTail: string[] = [];
     try {
-      // A connect run boots through `runConnectOnce`; here, no connection
-      // would mean an uncredentialed runner.
       const connection = spec.connection;
       if (!connection) throw new Error("agent-run spawn spec binds no connection");
       const nativeHiddenTools = hiddenToolsForNativeUpstream(spec);
@@ -1568,6 +1558,7 @@ export async function bootIntegrations(
         spec.httpDeliveryAuths !== undefined && Object.keys(spec.httpDeliveryAuths).length > 0;
       const wantsEgress = spec.needsEgress === true;
       const {
+        wrapped: runnerClient,
         allocatedNs,
         mitmSource,
         toolCount: added,
@@ -1607,10 +1598,8 @@ export async function bootIntegrations(
       // A failure here throws into the outer catch → the integration lands
       // on `failed` and is NOT pushed to `spawned`; the agent gets a
       // tool-error if it tries to use it rather than a silent half-session.
-      // The connect-login tool is reached via the ALLOCATED namespace (the
-      // host may have disambiguated `spec.namespace` with a suffix).
       if (spec.connectLogin) {
-        await runConnectLoginHook(spec, host, mitmSource, allocatedNs);
+        await runConnectLoginHook(spec, runnerClient, mitmSource, allocatedNs);
       }
 
       // Attach the in-process api_call tool alongside the spawned server's
@@ -1849,10 +1838,9 @@ export async function runConnectOnce(
     });
 
     // Same spawn→connect→register pipeline the agent-run path uses, but
-    // `allowedTools: []` (connect-run never serves an agent; register() is only
-    // needed so `getUpstreamClient` resolves the login tool) and `wantsMitm`
+    // `allowedTools: []` (connect-run never serves an agent) and `wantsMitm`
     // forced on.
-    const { allocatedNs, mitmSource } = await spawnAndConnectLocalIntegration({
+    const { wrapped, allocatedNs, mitmSource } = await spawnAndConnectLocalIntegration({
       // connect-run never reaches an agent — the integration spawns only
       // long enough to mint a session, so workspace exposure is a
       // non-goal. Strip any `workspaceMount` the resolver attached so the
@@ -1888,7 +1876,7 @@ export async function runConnectOnce(
     // Run the login tool ONCE and capture the bundle. The secret in
     // `cl.inputs` is substituted proxy-side by the MITM source.
     const bundle = await runConnectLogin({
-      host,
+      client: wrapped,
       namespace: allocatedNs,
       toolName: cl.toolName,
       ...(cl.produces ? { produces: cl.produces } : {}),
