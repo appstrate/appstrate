@@ -3,6 +3,7 @@
 // Skill picker: local selection seeded once; one PUT at a time, reverted on failure.
 
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { BookOpenIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
@@ -15,14 +16,9 @@ import {
 } from "@appstrate/ui/components/tooltip";
 import { cn } from "@appstrate/ui/cn";
 import { MAX_PINNED_SKILLS, type ChatSkillSelection } from "../skills.ts";
-import { putSessionSkills, skillPickerRows, togglePinned } from "./chat-skills.ts";
+import { skillPickerRows, togglePinned } from "./chat-skills.ts";
 import { useChatHost, type GetHeaders } from "./runtime-context.ts";
-import { useChatSkillsCatalog } from "./use-chat-skills.ts";
-
-/** `@acme/x` → `-acme-x`: `@` and `/` in an `id` break CSS selectors. */
-function domIdPart(packageId: string): string {
-  return packageId.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-}
+import { fetchSkills, putSessionSkills, spaceIdFromHeaders } from "./sessions.ts";
 
 interface SkillsPickerProps {
   sessionId: string;
@@ -36,7 +32,17 @@ export function SkillsPicker({ sessionId, getHeaders, initialSelection }: Skills
   const [selection, setSelection] = useState(initialSelection);
   // Controls are disabled while a PUT is in flight, so writes never race.
   const [saving, setSaving] = useState(false);
-  const { skills, loading, failed } = useChatSkillsCatalog();
+  // Space-scoped: the listing reads `X-Space-Id`, so the key carries the space.
+  const spaceId = spaceIdFromHeaders(getHeaders);
+  const catalogue = useQuery({
+    queryKey: ["chat", "skills", spaceId],
+    queryFn: () => fetchSkills(getHeaders),
+    enabled: !!spaceId,
+    staleTime: 60_000,
+  });
+  const skills = catalogue.data ?? [];
+  // A disabled query stays `isPending` forever; no space reads as "nothing".
+  const loading = !!spaceId && catalogue.isPending;
 
   const pinned = selection.pinned;
   const pinnedSet = new Set(pinned);
@@ -53,8 +59,7 @@ export function SkillsPicker({ sessionId, getHeaders, initialSelection }: Skills
   };
 
   const togglePin = (packageId: string) => {
-    const next = togglePinned(pinned, packageId);
-    if (next !== pinned) apply({ ...selection, pinned: next });
+    apply({ ...selection, pinned: togglePinned(pinned, packageId) });
   };
 
   return (
@@ -144,15 +149,17 @@ export function SkillsPicker({ sessionId, getHeaders, initialSelection }: Skills
             <p className="text-muted-foreground px-1 py-3 text-center text-xs">
               {t("skills.loading")}
             </p>
-          ) : failed ? (
+          ) : catalogue.isError ? (
             <p className="text-destructive px-1 py-3 text-center text-xs">{t("skills.error")}</p>
           ) : rows.length === 0 ? (
             <p className="text-muted-foreground px-1 py-3 text-center text-xs">
               {t("skills.empty")}
             </p>
           ) : (
-            rows.map(({ skill, available }) => {
-              const id = `skills-pin-${domIdPart(skill.package_id)}`;
+            rows.map(({ skill, available }, index) => {
+              // By row: a package id's `@` and `/` break selectors, and a slug
+              // of it can collide (`@a-b/c`, `@a/b-c`).
+              const id = `skills-pin-${index}`;
               const checked = pinnedSet.has(skill.package_id);
               return (
                 <div key={skill.package_id} className="flex items-start gap-2 rounded-md p-1">

@@ -48,6 +48,11 @@ export function canAuthorAgents(ctx: Pick<ChatAccessContext, "can">): boolean {
   return ctx.can("chat:write") && turnCapabilities(ctx.can).authors;
 }
 
+/** The skill picker writes the conversation (`chat:write`) and lists skills the turn can load. */
+export function canPinSkills(ctx: Pick<ChatAccessContext, "can">): boolean {
+  return ctx.can("chat:write") && turnCapabilities(ctx.can).readsSkills;
+}
+
 const CHAT_CAPABILITIES: readonly ChatCapability[] = [
   {
     id: "callApi",

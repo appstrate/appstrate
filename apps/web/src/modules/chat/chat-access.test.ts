@@ -12,7 +12,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { resolveChatCapabilities, type ChatAccessContext } from "./chat-access.ts";
+import { canPinSkills, resolveChatCapabilities, type ChatAccessContext } from "./chat-access.ts";
 import { PACKAGE_PERMISSIONS, type SpaceGrant } from "../../lib/package-permissions.ts";
 
 /** The grant `maySetPackageActive` reads for an integration in a team space. */
@@ -313,5 +313,17 @@ describe("a caller who may read the chat but not write to it", () => {
       ),
     );
     expect(Object.values(readOnlyEverything)).toEqual(ROW_IDS.map(() => false));
+  });
+});
+
+describe("pinning skills", () => {
+  it("needs the turn to write the conversation, dispatch, and read skills", () => {
+    const pinner = [...CONVERSES, "skills:read"];
+    expect(canPinSkills(context(pinner))).toBe(true);
+    // Each conjunct on its own: `getSkill` dispatches through `mcp:invoke`, the
+    // selection is a `chat:write`, and the picker lists `skills:read` rows.
+    for (const missing of ["chat:write", "mcp:invoke", "skills:read"]) {
+      expect(canPinSkills(context(pinner.filter((p) => p !== missing)))).toBe(false);
+    }
   });
 });

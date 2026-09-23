@@ -124,7 +124,7 @@ describe("chat session skills", () => {
   });
 
   it("reads the picker's four fields off the real skills listing", async () => {
-    // `fetchChatSkills` hand-types this row; this is what keeps it honest.
+    // `fetchSkills` hand-types this row; this is what keeps it honest.
     const created = await app.request("/api/packages/skills", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },

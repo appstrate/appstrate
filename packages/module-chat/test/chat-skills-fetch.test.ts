@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The two chat-skill requests, pinned against a scripted `fetch`: nothing
- * else checks their URL, method, or the snake_case body the server parses.
+ * The two skill requests of the picker, pinned against a scripted `fetch`:
+ * nothing else checks their URL, method, or the snake_case body the server parses.
  */
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { fetchChatSkills, putSessionSkills } from "../src/ui/chat-skills.ts";
+import { fetchSkills, putSessionSkills } from "../src/ui/sessions.ts";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -34,7 +34,7 @@ const json = (body: unknown) =>
     headers: { "content-type": "application/json" },
   });
 
-describe("fetchChatSkills", () => {
+describe("fetchSkills", () => {
   it("GETs the space listing with the scoping headers and projects each row", async () => {
     const capture = scripted(() =>
       json({
@@ -55,7 +55,7 @@ describe("fetchChatSkills", () => {
       }),
     );
 
-    const got = await fetchChatSkills(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
+    const got = await fetchSkills(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
 
     expect(String(capture.input)).toBe("/api/packages/skills");
     expect(capture.init?.credentials).toBe("include");
@@ -71,14 +71,9 @@ describe("fetchChatSkills", () => {
     ]);
   });
 
-  it("reads a 403 (no `skills:read`) as nothing to offer", async () => {
+  it("throws on a refusal: the picker is not mounted for a caller who cannot read skills", async () => {
     scripted(() => new Response(null, { status: 403 }));
-    expect(await fetchChatSkills(() => ({}))).toEqual([]);
-  });
-
-  it("throws on any other refusal", async () => {
-    scripted(() => new Response(null, { status: 500 }));
-    await expect(fetchChatSkills(() => ({}))).rejects.toThrow("HTTP 500");
+    await expect(fetchSkills(() => ({}))).rejects.toThrow("HTTP 403");
   });
 });
 

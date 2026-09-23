@@ -151,6 +151,8 @@ export interface ChatPageProps {
   t: ChatTranslate;
   /** Whether the caller may create agents, resolved by the shell: the module resolves no RBAC. */
   canAuthorAgents: boolean;
+  /** Whether the caller may pin skills to a conversation (write it, read skills), same resolution. */
+  canPinSkills: boolean;
 }
 
 export function ChatPage({
@@ -166,6 +168,7 @@ export function ChatPage({
   uploadFile,
   t,
   canAuthorAgents,
+  canPinSkills,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -363,6 +366,7 @@ export function ChatPage({
                   onConversationChange={onConversationChange}
                   attachments={attachments}
                   composerSlot={composerSlot}
+                  canPinSkills={canPinSkills}
                   serverGenerating={serverGenerating}
                   serverUpdatedAt={serverUpdatedAt}
                 />
@@ -383,6 +387,7 @@ interface ConversationProps {
   /** Composer attachment adapter, built once by `ChatPage` from the host props. */
   attachments: AttachmentAdapter;
   composerSlot?: React.ReactNode;
+  canPinSkills: boolean;
   /** Server session row `generating`, from the shared list; `undefined` = no row. */
   serverGenerating: boolean | undefined;
   /** Server session row `updatedAt`, from the shared list; `undefined` = no row. */
@@ -409,6 +414,7 @@ const Conversation = memo(function Conversation({
   getHeaders,
   isPersisted,
   composerSlot,
+  canPinSkills,
   ...rest
 }: ConversationProps) {
   // Freeze persistence at mount. The runtime key (`id`) is stable across the
@@ -436,17 +442,17 @@ const Conversation = memo(function Conversation({
   // Seeded once per conversation (`key={id}` remount). No picker on a failed
   // read: its first click would PUT defaults over the stored pins.
   const initialSkills = history.data?.skills ?? DEFAULT_SKILL_SELECTION;
-  const skillsReadable = !history.isError;
+  const showPicker = canPinSkills && !history.isError;
   const slot = useMemo(
     () => (
       <div className="flex items-center gap-2">
-        {skillsReadable && (
+        {showPicker && (
           <SkillsPicker sessionId={id} getHeaders={getHeaders} initialSelection={initialSkills} />
         )}
         {composerSlot}
       </div>
     ),
-    [id, getHeaders, initialSkills, skillsReadable, composerSlot],
+    [id, getHeaders, initialSkills, showPicker, composerSlot],
   );
 
   if (persistedAtMount && history.isPending) {
@@ -478,7 +484,7 @@ function ConversationInner({
   composerSlot,
   serverGenerating,
   serverUpdatedAt,
-}: ConversationProps & { initialMessages: UIMessage[] }) {
+}: Omit<ConversationProps, "canPinSkills"> & { initialMessages: UIMessage[] }) {
   const queryClient = useQueryClient();
   const spaceId = spaceIdFromHeaders(getHeaders);
 

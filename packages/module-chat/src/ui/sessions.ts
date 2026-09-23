@@ -7,8 +7,7 @@
  */
 
 import type { UIMessage } from "ai";
-import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
-import { requestHeaders } from "./request-headers.ts";
+import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection, type SkillHint } from "../skills.ts";
 import type { GetHeaders } from "./runtime-context.ts";
 
 /** Fresh session id, minted client-side (`chs_` shape) — re-exported from the shared module. */
@@ -57,12 +56,16 @@ export function spaceIdFromHeaders(getHeaders: GetHeaders | null | undefined): s
   return getHeaders?.()["X-Space-Id"] ?? null;
 }
 
+function headers(getHeaders: GetHeaders | null | undefined, json = false): Record<string, string> {
+  return { ...(json ? { "Content-Type": "application/json" } : {}), ...getHeaders?.() };
+}
+
 export async function fetchSessions(
   getHeaders: GetHeaders | null | undefined,
 ): Promise<SessionSummary[]> {
   const res = await fetch("/api/chat/sessions", {
     credentials: "include",
-    headers: requestHeaders(getHeaders),
+    headers: headers(getHeaders),
   });
   if (!res.ok) throw new Error(`Failed to load sessions (HTTP ${res.status})`);
   return ((await res.json()) as { data?: SessionSummary[] }).data ?? [];
@@ -76,7 +79,7 @@ export async function renameSession(
   const res = await fetch(`/api/chat/sessions/${id}`, {
     method: "PATCH",
     credentials: "include",
-    headers: requestHeaders(getHeaders, true),
+    headers: headers(getHeaders, true),
     body: JSON.stringify({ title }),
   });
   if (!res.ok) throw new Error(`Failed to rename session (HTTP ${res.status})`);
@@ -89,7 +92,7 @@ export async function deleteSession(
   const res = await fetch(`/api/chat/sessions/${id}`, {
     method: "DELETE",
     credentials: "include",
-    headers: requestHeaders(getHeaders),
+    headers: headers(getHeaders),
   });
   if (!res.ok) throw new Error(`Failed to delete session (HTTP ${res.status})`);
 }
@@ -102,7 +105,7 @@ export async function markSessionRead(
   const res = await fetch(`/api/chat/sessions/${id}/read`, {
     method: "PUT",
     credentials: "include",
-    headers: requestHeaders(getHeaders),
+    headers: headers(getHeaders),
   });
   if (!res.ok) throw new Error(`Failed to mark session read (HTTP ${res.status})`);
 }
@@ -115,7 +118,7 @@ export async function stopSession(
   const res = await fetch(`/api/chat/sessions/${id}/stop`, {
     method: "POST",
     credentials: "include",
-    headers: requestHeaders(getHeaders),
+    headers: headers(getHeaders),
   });
   if (!res.ok) throw new Error(`Failed to stop session (HTTP ${res.status})`);
 }
@@ -144,7 +147,7 @@ export async function loadHistory(
 ): Promise<SessionHistory> {
   const res = await fetch(`/api/chat/sessions/${id}`, {
     credentials: "include",
-    headers: requestHeaders(getHeaders),
+    headers: headers(getHeaders),
   });
   if (res.status === 404) return { messages: [], skills: DEFAULT_SKILL_SELECTION };
   if (!res.ok) throw new Error(`Failed to load session (HTTP ${res.status})`);
@@ -158,4 +161,46 @@ export async function loadHistory(
     messages: (body.messages ?? []).map((e) => ({ ...e.content, id: e.id }) as UIMessage),
     skills: { catalogue: body.skill_catalogue, pinned: body.pinned_skills },
   };
+}
+
+/** The fields read off an `OrgPackageItem` row of the space's skill listing. */
+interface SkillListRow {
+  id: string;
+  name: string;
+  description: string | null;
+  version: string | null;
+}
+
+/** The space's skills, the catalogue the picker pins from. */
+export async function fetchSkills(getHeaders: GetHeaders | null | undefined): Promise<SkillHint[]> {
+  const res = await fetch("/api/packages/skills", {
+    credentials: "include",
+    headers: headers(getHeaders),
+  });
+  if (!res.ok) throw new Error(`Failed to load skills (HTTP ${res.status})`);
+  const body = (await res.json()) as { data: SkillListRow[] };
+  return body.data.map((row) => ({
+    package_id: row.id,
+    display_name: row.name,
+    description: row.description,
+    version: row.version,
+  }));
+}
+
+/** Works on an id with no row yet — the route creates it as turn one would. */
+export async function putSessionSkills(
+  getHeaders: GetHeaders | null | undefined,
+  sessionId: string,
+  selection: ChatSkillSelection,
+): Promise<void> {
+  const res = await fetch(`/api/chat/sessions/${sessionId}/skills`, {
+    method: "PUT",
+    credentials: "include",
+    headers: headers(getHeaders, true),
+    body: JSON.stringify({
+      skill_catalogue: selection.catalogue,
+      pinned_skills: selection.pinned,
+    }),
+  });
+  if (!res.ok) throw new Error(`Failed to save chat skills (HTTP ${res.status})`);
 }

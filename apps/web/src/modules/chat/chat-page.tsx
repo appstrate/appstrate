@@ -25,7 +25,7 @@ import {
 import { ConversationContextActions, ConversationSidebar } from "./conversation-sidebar";
 import { ChatAccessChip } from "./chat-access-chip";
 import { usePermissions } from "../../hooks/use-permissions";
-import { canAuthorAgents } from "./chat-access";
+import { canAuthorAgents, canPinSkills } from "./chat-access";
 
 // One element for the page's lifetime: it sits in the composer slot, which the
 // chat memoizes, and the chip keeps itself current through its own hooks.
@@ -137,6 +137,7 @@ export function ChatModulePage() {
           uploadFile={uploadFile}
           t={translate}
           canAuthorAgents={canAuthorAgents({ can })}
+          canPinSkills={canPinSkills({ can })}
         />
       </div>
       <ConversationSidebar

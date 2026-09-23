@@ -14,11 +14,6 @@ describe("togglePinned", () => {
     expect(togglePinned(["@a/y", "@b/x"], "@a/y")).toEqual(["@b/x"]);
   });
 
-  it("refuses a pin past the cap by returning the SAME array", () => {
-    const full = fullSet();
-    expect(togglePinned(full, "@s/extra")).toBe(full);
-  });
-
   it("still unpins when the set is full", () => {
     const full = fullSet();
     expect(togglePinned(full, full[0]!)).toHaveLength(MAX_PINNED_SKILLS - 1);

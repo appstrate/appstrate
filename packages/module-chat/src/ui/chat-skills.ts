@@ -1,34 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The conversation's skill selection: the space catalogue it is picked from,
- * the write that stores it, and the pure rules the picker applies.
- */
+/** The pure rules the skill picker applies to the conversation's selection. */
 
-import { MAX_PINNED_SKILLS, type ChatSkillSelection, type SkillHint } from "../skills.ts";
-import { requestHeaders } from "./request-headers.ts";
-import type { GetHeaders } from "./runtime-context.ts";
+import type { SkillHint } from "../skills.ts";
 
-/** The fields read off an `OrgPackageItem` listing row. */
-interface SkillListRow {
-  id: string;
-  name: string;
-  description: string | null;
-  version: string | null;
-}
-
-/** Space-scoped: the listing reads `X-Space-Id`, so a bare key crosses spaces. */
-export function chatSkillsQueryKey(spaceId: string | null): readonly unknown[] {
-  return ["chat", "skills", spaceId];
-}
-
-export const SKILLS_STALE_MS = 60_000;
-
-/** Pin/unpin, sorted. Returns `pinned` ITSELF at the cap, so refusal is detectable. */
+/** Pin/unpin, sorted. The picker disables a new pin at the cap; the route refuses one past it. */
 export function togglePinned(pinned: readonly string[], packageId: string): readonly string[] {
   const set = new Set(pinned);
   if (set.has(packageId)) set.delete(packageId);
-  else if (set.size >= MAX_PINNED_SKILLS) return pinned;
   else set.add(packageId);
   return [...set].sort();
 }
@@ -50,41 +29,4 @@ export function skillPickerRows(
     ...catalogue.map((skill) => ({ skill, available: true })),
     ...dead.map((id) => ({ skill: { package_id: id }, available: false })),
   ];
-}
-
-/** The space's listed skills. A 403 (no `skills:read`) means nothing to offer. */
-export async function fetchChatSkills(
-  getHeaders: GetHeaders | null | undefined,
-): Promise<SkillHint[]> {
-  const res = await fetch("/api/packages/skills", {
-    credentials: "include",
-    headers: requestHeaders(getHeaders),
-  });
-  if (res.status === 403) return [];
-  if (!res.ok) throw new Error(`Failed to load skills (HTTP ${res.status})`);
-  const body = (await res.json()) as { data: SkillListRow[] };
-  return body.data.map((row) => ({
-    package_id: row.id,
-    display_name: row.name,
-    description: row.description,
-    version: row.version,
-  }));
-}
-
-/** Works on an id with no row yet — the route creates it as turn one would. */
-export async function putSessionSkills(
-  getHeaders: GetHeaders | null | undefined,
-  sessionId: string,
-  selection: ChatSkillSelection,
-): Promise<void> {
-  const res = await fetch(`/api/chat/sessions/${sessionId}/skills`, {
-    method: "PUT",
-    credentials: "include",
-    headers: requestHeaders(getHeaders, true),
-    body: JSON.stringify({
-      skill_catalogue: selection.catalogue,
-      pinned_skills: selection.pinned,
-    }),
-  });
-  if (!res.ok) throw new Error(`Failed to save chat skills (HTTP ${res.status})`);
 }
