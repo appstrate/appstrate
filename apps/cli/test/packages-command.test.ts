@@ -1108,9 +1108,11 @@ describe("packages publish", () => {
     expect(stderr()).toContain("no valid `version`");
   });
 
-  for (const [code, message] of [
-    ["no_changes", "Nothing changed in the draft of @acme/pdf"],
-    ["agent_in_use", "has runs in progress; retry when they finish"],
+  for (const [code, message, keepsDetail] of [
+    // The translation says it all: the server's wording would only repeat it.
+    ["no_changes", "Nothing changed in the draft of @acme/pdf", false],
+    // The server's detail carries what the translation cannot: the run count.
+    ["agent_in_use", "has runs in progress; retry when they finish. Refused by the stand-in", true],
   ] as const) {
     it(`explains ${code}`, async () => {
       createPackageServer([skill({ publishError: { status: 409, code } })]).install();
@@ -1121,7 +1123,8 @@ describe("packages publish", () => {
       );
 
       expect(stderr()).toContain(message);
-      expect(stderr()).not.toContain("Refused by the stand-in");
+      expect(stderr().includes("Refused by the stand-in")).toBe(keepsDetail);
+      expect(stderr()).not.toContain(".:");
     });
   }
 });

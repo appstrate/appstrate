@@ -84,12 +84,32 @@ export function formatErrorChain(err: unknown): string {
     }
     seen.add(cursor);
     const message = getErrorMessage(cursor);
-    if (!out.includes(message)) out = appendCause(out, message);
+    if (!carries(out, message)) out = appendCause(out, message);
     depth += 1;
     cursor = cursor instanceof Error ? cursor.cause : undefined;
   }
 
   return out;
+}
+
+/**
+ * Whether `text` already quotes `message` whole — not inside a longer word, so
+ * a cause `"timeout"` is still written after `"2 timeouts"`. An empty message
+ * has nothing to add.
+ */
+function carries(text: string, message: string): boolean {
+  if (message.length === 0) return true;
+  const word = /[\p{L}\p{N}_]/u;
+  const opensWord = word.test(message[0]!);
+  const closesWord = word.test(message[message.length - 1]!);
+  for (let at = text.indexOf(message); at !== -1; at = text.indexOf(message, at + 1)) {
+    const before = text[at - 1];
+    const after = text[at + message.length];
+    const cleanStart = !opensWord || before === undefined || !word.test(before);
+    const cleanEnd = !closesWord || after === undefined || !word.test(after);
+    if (cleanStart && cleanEnd) return true;
+  }
+  return false;
 }
 
 /** `text: cause`, or `text cause` when `text` already ends a sentence. */

@@ -1023,11 +1023,7 @@ async function carryVersion(
   }
 }
 
-function publishRefusal(
-  err: ApiError,
-  packageId: string,
-  target: string | undefined,
-): ExplainedError {
+function publishRefusal(err: ApiError, packageId: string, target: string | undefined): Error {
   const { code } = problemFields(err.body);
   const cut = target ? ` ${target}` : "";
   switch (code) {
@@ -1047,7 +1043,8 @@ function publishRefusal(
         { cause: err },
       );
     case "agent_in_use":
-      return new ExplainedError(`${packageId} has runs in progress; retry when they finish.`, {
+      // A plain Error on purpose: the server's detail carries the run count.
+      return new Error(`${packageId} has runs in progress; retry when they finish.`, {
         cause: err,
       });
     default:

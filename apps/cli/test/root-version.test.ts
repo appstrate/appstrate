@@ -29,6 +29,7 @@ describe("asksForVersion", () => {
       ["--profile", "prod", "--version"],
       ["--profile=prod", "--version"],
       ["--version", "packages", "pull"],
+      ["-Vp", "prod"],
     ]) {
       expect(asksForVersion(args, VALUE_FLAGS)).toBe(true);
     }
@@ -49,6 +50,8 @@ describe("asksForVersion", () => {
     // `appstrate -p --version whoami` names a profile called `--version`, as
     // commander parses it; the scan must not disagree with the parser.
     expect(asksForVersion(["-p", "--version", "whoami"], VALUE_FLAGS)).toBe(false);
+    // A cluster is split left to right: `-pV` names the profile `V`.
+    expect(asksForVersion(["-pV", "whoami"], VALUE_FLAGS)).toBe(false);
   });
 
   it("stops at `--` and at a bare `-`", () => {
@@ -62,12 +65,14 @@ describe("asksForVersion", () => {
 });
 
 describe("valueFlagsOf", () => {
-  it("collects every spelling of the options that take a value, and no boolean", () => {
+  it("collects every spelling of the options that require a value, and nothing else", () => {
+    // An optional value (`[n]`) never swallows a following `-…` argument in
+    // commander, so it cannot hide a `--version` and must not be skipped over.
     const program = new Command()
       .option("-p, --profile <name>", "profile")
       .option("--level [n]", "optional value")
       .option("--insecure", "boolean");
-    expect([...valueFlagsOf(program)].sort()).toEqual(["--level", "--profile", "-p"]);
+    expect([...valueFlagsOf(program)].sort()).toEqual(["--profile", "-p"]);
   });
 });
 
@@ -105,7 +110,7 @@ describe("the real CLI", () => {
   }
 
   it("prints its version for -V / --version at the top level", async () => {
-    for (const args of [["--version"], ["-V"], ["--profile", "prod", "--version"]]) {
+    for (const args of [["--version"], ["-V"], ["--profile", "prod", "--version"], ["-Vp", "x"]]) {
       const out = await cli(...args);
       expect(out).toEqual({ stdout: `${CLI_VERSION}\n`, stderr: "", exitCode: 0 });
     }
@@ -123,6 +128,8 @@ describe("the real CLI", () => {
       const out = await cli(...args);
       expect(out.exitCode).toBe(1);
       expect(out.stderr).toMatch(/error: unknown option '(--version|-V)/);
+      // The help-only flag must not come back as a suggestion for itself.
+      expect(out.stderr).not.toContain("Did you mean");
       expect(out.stdout).not.toContain(CLI_VERSION);
     }
   });

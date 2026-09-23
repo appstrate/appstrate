@@ -81,6 +81,17 @@ describe("formatErrorChain", () => {
     expect(formatErrorChain(sameMessage)).toBe("gone");
   });
 
+  it("only drops a cause the text quotes as a whole", () => {
+    // A short cause inside a longer word is not a quote of it.
+    expect(formatErrorChain(new Error("2 timeouts", { cause: new Error("timeout") }))).toBe(
+      "2 timeouts: timeout",
+    );
+    expect(formatErrorChain(new Error("upstream said 500", { cause: new Error("500") }))).toBe(
+      "upstream said 500",
+    );
+    expect(formatErrorChain(new Error("failed", { cause: new Error("") }))).toBe("failed");
+  });
+
   it("renders a non-Error cause", () => {
     // A `cause` is typed `unknown` — a string or a rejected non-Error value
     // reaches here, and the walk must stop there rather than read `.cause`
