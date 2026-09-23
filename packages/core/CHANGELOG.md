@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`PACKAGE_TYPE_ROUTE_SEGMENT`** (`@appstrate/core/package-files`) — the URL
+  segment of each package type's collection (`skill` → `skills`, …), declared
+  once for the API router, the dashboard and the CLI.
+- **`decodePackageFileText`** (`@appstrate/core/package-file-operations`) — the
+  text a package file's bytes are (strict UTF-8, BOM kept), or `null`: the one
+  test behind a file's `text` vs `bytes_base64` on every end of the wire.
+- **`planPublishVersion`** and **`VersionBump`** (`@appstrate/core/semver`) —
+  what publishing a draft would cut (`bump` | `direct` | `blocked` | `none`)
+  from the draft's version and the latest published one, shared by the
+  dashboard's publish dialog and `appstrate packages publish`.
+
 ### Changed
 
 - **A guard carrying the boolean `appstrate.permissionGuard` marker but no

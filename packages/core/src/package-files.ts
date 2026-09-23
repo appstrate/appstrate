@@ -48,6 +48,22 @@ export const PACKAGE_FILE_INLINE_MAX_BYTES = 1_048_576;
  */
 export const PACKAGE_MANIFEST_FILE = "manifest.json";
 
+/**
+ * The URL segment of each type's collection — `/api/packages/<segment>/…`, the
+ * per-type create, detail, update and versions routes.
+ *
+ * Declared, never derived: `mcp-server` → `mcp-servers` happens to add an `s`,
+ * but a rule that builds a plural by appending a letter is one new type away
+ * from a route that does not exist. The API mounts its routers on these
+ * segments, and the SPA and the CLI address them through this same map.
+ */
+export const PACKAGE_TYPE_ROUTE_SEGMENT = {
+  agent: "agents",
+  skill: "skills",
+  integration: "integrations",
+  "mcp-server": "mcp-servers",
+} as const satisfies Record<PackageType, string>;
+
 /** One package type's primary-content entry: which file, and whether it is mandatory. */
 export interface PackageContentEntry {
   /** Archive path of the entry, at the bundle root. */

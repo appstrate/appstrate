@@ -31,6 +31,24 @@ export class PackageFileWriteError extends Error {
   }
 }
 
+/**
+ * The text a package file's bytes ARE, or `null` when they are not text.
+ *
+ * Strict UTF-8 with the BOM kept (`ignoreBOM: true`): the default decoder drops
+ * a leading U+FEFF, so text decoded that way and written back loses it. Every
+ * end that chooses between a file's `text` and its `bytes_base64` asks this one
+ * question — the file index deciding what to inline, the editor projecting a
+ * staged write, the CLI encoding a local file — so a file cannot be text on one
+ * side of the wire and binary on the other.
+ */
+export function decodePackageFileText(bytes: Uint8Array): string | null {
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
 export function isProtectedPackageFile(type: PackageType, path: string): boolean {
   const entry = PACKAGE_CONTENT_ENTRY[type];
   return path === PACKAGE_MANIFEST_FILE || (entry?.required === true && path === entry.path);

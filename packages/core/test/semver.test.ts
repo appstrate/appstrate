@@ -5,6 +5,7 @@ import {
   isValidVersion,
   compareVersionsDesc,
   matchVersion,
+  planPublishVersion,
   resolveVersionFromCatalog,
 } from "../src/semver.ts";
 
@@ -150,5 +151,38 @@ describe("resolveVersionFromCatalog", () => {
     expect(resolveVersionFromCatalog("1.0.0", [], [])).toBeNull();
     expect(resolveVersionFromCatalog("latest", [], [])).toBeNull();
     expect(resolveVersionFromCatalog("^1.0.0", [], [])).toBeNull();
+  });
+});
+
+describe("planPublishVersion", () => {
+  it("bumps the published version when the draft still carries it", () => {
+    expect(planPublishVersion("1.2.3", "1.2.3", "minor")).toEqual({
+      kind: "bump",
+      target: "1.3.0",
+      override: "1.3.0",
+    });
+  });
+
+  it("cuts the draft's own version when it is ahead, or when nothing is published", () => {
+    expect(planPublishVersion("2.0.0", "1.2.3", "patch")).toEqual({
+      kind: "direct",
+      target: "2.0.0",
+      override: undefined,
+    });
+    expect(planPublishVersion("1.0.0", null, "patch").kind).toBe("direct");
+  });
+
+  it("blocks a draft behind the latest published version", () => {
+    expect(planPublishVersion("1.0.0", "1.2.3", "patch").kind).toBe("blocked");
+  });
+
+  it("orders by semver precedence, not by string", () => {
+    expect(planPublishVersion("1.10.0", "1.9.0", "patch").kind).toBe("direct");
+    expect(planPublishVersion("1.0.0-beta.1", "1.0.0", "patch").kind).toBe("blocked");
+  });
+
+  it("has nothing to plan without a valid draft version", () => {
+    expect(planPublishVersion(undefined, "1.0.0", "patch").kind).toBe("none");
+    expect(planPublishVersion("next", "1.0.0", "patch").kind).toBe("none");
   });
 });
