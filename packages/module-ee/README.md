@@ -188,7 +188,7 @@ appstrate (OSS)                          EE (this module)
 boot.ts → loadModules()  ──import──→     src/index.ts (default export: AppstrateModule)
   module-loader.ts                         ├── init(ctx) — DB, Redis, migrations, billing sweeper
   ↓ success                                ├── hooks: { beforeUsage } — unified admission gate (run|chat)
-  extendAppConfig → "ee"                   ├── events: { onOrgCreate, onOrgDelete } — free-tier + final drain + cleanup
+  extendAppConfig → "ee"                   ├── events: { onOrgCreate, onOrgDelete, onOrgMemberRemove } — free tier, drain, cleanup
   callHook("beforeUsage", ...)             ├── createRouter() — billing routes
   emitEvent("onOrgCreate", ...)            ├── openApiPaths / openApiTags — spec contribution
   ↓ failure (module absent)                ├── permissionsContribution() — `billing:read|manage` (level: "org")
@@ -280,10 +280,11 @@ These seven tables live in the **platform** database (`DATABASE_URL`). `migrateE
 
 **Module events** (broadcast-to-all, via `events` property):
 
-| Event         | Description                                          |
-| ------------- | ---------------------------------------------------- |
-| `onOrgCreate` | Free tier credit allocation                          |
-| `onOrgDelete` | Billing account cleanup + Stripe subscription cancel |
+| Event               | Description                                                                     |
+| ------------------- | ------------------------------------------------------------------------------- |
+| `onOrgCreate`       | Free tier credit allocation                                                     |
+| `onOrgDelete`       | Billing account cleanup + Stripe subscription cancel                            |
+| `onOrgMemberRemove` | Drops the member's billing-manager row + re-pushes the owner fallback to Stripe |
 
 **Module features** (merged into `AppConfig.features` at boot):
 
@@ -567,6 +568,12 @@ than to a merge neither chose) and refuses two things with a 400:
   as "these people can act on billing" while the people who actually can are the
   ones missing from it.
 
+A manager who leaves the org, or is removed from it, loses the row too:
+`onOrgMemberRemove` (emitted by the platform after the membership is gone)
+deletes that `(org_id, user_id)` row and invalidates the principal. The grant is
+keyed on the pair, not on the membership, so without it the same user invited
+back would hold `billing:manage` again without anyone granting it.
+
 **Billing contact.** `ee_billing_accounts.billing_email` (nullable) plus
 `billing_cc text[]` (capped at 5 by the route, not by a CHECK — the cap is a
 product decision that may move). `GET`/`PATCH /api/billing/contact`, both
@@ -589,7 +596,10 @@ Two consumers:
   `billing_email ?? the org's first owner`. Without it Stripe has no address at
   all and every payment notice depends on EE noticing the webhook first. The
   update is best-effort and runs AFTER the local commit — the contact is EE's
-  record, and a Stripe outage must not refuse an address change.
+  record, and a Stripe outage must not refuse an address change. The owner
+  fallback is live for EE's emails but COPIED into Stripe, so `onOrgMemberRemove`
+  also re-pushes it when `billing_email` is NULL and a customer exists: otherwise
+  an owner who was the fallback and left keeps receiving Stripe's receipts.
 - **`sendBillingEmail`.** Recipients are
   `billing_email ?? owner emails` ∪ `billing_cc` ∪ emails of billing managers,
   composed by the pure `composeBillingRecipients` in `emails/recipients.ts`

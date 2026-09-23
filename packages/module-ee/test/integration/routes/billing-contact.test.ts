@@ -9,6 +9,7 @@ import { resetStripeMock, requests } from "../../helpers/stripe.ts";
 import { resolveBillingRecipients } from "../../../src/emails/recipients.ts";
 import { createCheckoutSession } from "../../../src/stripe/checkout.ts";
 import { useEeTestSeams } from "../../helpers/setup.ts";
+import eeModule from "../../../src/index.ts";
 
 useEeTestSeams();
 
@@ -255,6 +256,59 @@ describe("billing contact", () => {
       const create = requests.find((r) => r.method === "POST" && r.path === "/v1/customers");
       expect(create?.body?.email).toBeUndefined();
       expect(create?.body?.["metadata[orgId]"]).toBe(orgId);
+    });
+  });
+
+  /**
+   * The owner fallback is resolved live for EE's emails but copied into Stripe,
+   * so an owner who was that fallback and leaves must be replaced there too.
+   * The platform emits `onOrgMemberRemove` after its commit: the directory
+   * seeded below is the org as it stands once the owner is gone.
+   */
+  describe("onOrgMemberRemove", () => {
+    const onOrgMemberRemove = eeModule.events!.onOrgMemberRemove!;
+    const customerUpdates = () =>
+      requests.filter((r) => r.method === "POST" && r.path.startsWith("/v1/customers/"));
+
+    function ownerLeft() {
+      seedOrgMembers(orgId, [
+        { userId: "user-owner-2", email: "owner2@example.com", role: "owner" },
+        { userId: "user-finance", email: "finance@example.com", role: "member" },
+      ]);
+    }
+
+    it("re-pushes the next owner when the fallback owner leaves", async () => {
+      await seedBillingAccount({ orgId, stripeCustomerId: "cus_test_contact" });
+      ownerLeft();
+
+      await onOrgMemberRemove(orgId, "user-owner");
+
+      const updates = customerUpdates();
+      expect(updates).toHaveLength(1);
+      expect(updates[0]!.path).toBe("/v1/customers/cus_test_contact");
+      expect(updates[0]!.body?.email).toBe("owner2@example.com");
+    });
+
+    it("does not touch Stripe when an explicit contact is set", async () => {
+      await seedBillingAccount({
+        orgId,
+        stripeCustomerId: "cus_test_contact",
+        billingEmail: "billing@example.com",
+      });
+      ownerLeft();
+
+      await onOrgMemberRemove(orgId, "user-owner");
+
+      expect(customerUpdates()).toHaveLength(0);
+    });
+
+    it("does not touch Stripe when the org has no Stripe customer", async () => {
+      await seedBillingAccount({ orgId });
+      ownerLeft();
+
+      await onOrgMemberRemove(orgId, "user-owner");
+
+      expect(requests.filter((r) => r.path.startsWith("/v1/customers"))).toHaveLength(0);
     });
   });
 });
