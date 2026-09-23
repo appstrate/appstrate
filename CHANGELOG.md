@@ -15,44 +15,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   not aliased: `--version` after a command is now refused as an unknown option.
   `<package>@draft` pulls the draft explicitly, and is refused to someone who
   cannot write the package instead of falling back to the published version.
-- **Credential provisioning is a platform table, no longer a manifest
-  declaration** (#1528). `_meta["dev.appstrate/provisioning"]` is no longer
-  read: the auths the platform mints credentials for are listed in
-  `apps/api/src/services/connect/provisioning.ts` by package id and auth key
-  (`@appstrate/ssh` / `primary`), and answer only for a package the platform
-  loaded as a system package. The 400 that
-  `GET /api/integrations/connect/context`, the hosted submit and
-  `POST …/connect/fields` returned for provisioning declared on a non-system
-  package or of an unknown kind is gone: a copy of the SSH manifest under
-  another package id is an ordinary custom auth whose `private_key` the user
-  supplies. `POST …/connect/fields` still refuses a caller-supplied
-  `private_key` for `@appstrate/ssh`. The published `@appstrate/ssh` 1.0.0
-  manifest still carries the key, now ignored; it goes at the package's next
-  version.
-- **BREAKING (operators): `deploy/docker-compose.yml` no longer pins a default
-  `MODULES` list; it declares `- MODULES=${MODULES:?}`** (#1528). Set `MODULES`
-  explicitly, on the Coolify resource or in `.env` for a raw `docker compose`
-  run, and include `@appstrate/module-ee` for the deployment to bill. Unset or
-  empty, a raw `docker compose` refuses to start and Coolify documents
-  `${VAR:?}` as blocking the deploy until a value is set, instead of silently
-  falling back to the code default, which has no billing. Production already
-  sets `MODULES` on its resource. The gate code that only
-  read the pinned list back is removed (`scripts/lib/compose-modules.ts`,
-  `verify:compose-defaults`'s unrouted-module class, `verify:env-docs`'s
-  per-file required sets); the bare-name class is renumbered from 6 to 5. The
-  trade: `verify:env-docs` no longer forces `deploy/.env.example` to list
-  module-ee's Stripe keys — the file documents them, and the module refuses to
-  boot without them.
+- **Credential provisioning is a platform table, not a manifest declaration**
+  (#1528). `_meta["dev.appstrate/provisioning"]` is no longer read; the platform
+  mints `@appstrate/ssh`'s `primary` key only for the system package, so the
+  400s for provisioning on a non-system package are gone and a copy of the SSH
+  manifest is an ordinary custom auth whose `private_key` the user supplies.
+  `POST …/connect/fields` still refuses a caller-supplied key for
+  `@appstrate/ssh`. The published `@appstrate/ssh` 1.0.0 still carries the
+  now-ignored key until its next version.
+- **BREAKING (operators): `deploy/docker-compose.yml` declares
+  `- MODULES=${MODULES:?}` instead of pinning a default list** (#1528). Set
+  `MODULES` on the Coolify resource, or in `.env` for a raw `docker compose`,
+  with `@appstrate/module-ee` for the deployment to bill. Unset or empty, a raw
+  `docker compose` refuses to start and Coolify documents `${VAR:?}` as
+  blocking the deploy, instead of falling back to the code default, which has
+  no billing. Production already sets `MODULES` on its resource. See
+  `deploy/README.md`.
 
 ### Removed
 
-- **MCP `describe_operation` no longer returns `conditional`** (#1528). The
-  flag told a client in advance that a granted operation might still be refused
-  on the record it loads; it is gone with the no-op route markers that fed it.
-  `granted`, `required_permissions` and `target_space_permissions` are
-  unchanged. A route that decides on its record still answers with its own
-  problem+json refusal naming the reason (RBAC spec §13.10): MCP clients and
-  models learn of such a refusal from the call, not from the description.
+- **BREAKING (MCP): `describe_operation` no longer returns `conditional`**
+  (#1528). `granted`, `required_permissions` and `target_space_permissions` are
+  unchanged; an operation refused on the record it loads answers with its own
+  problem+json reason (RBAC spec §13.10, §13.13), so clients learn it from the
+  call.
 
 ### Fixed
 

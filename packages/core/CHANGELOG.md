@@ -39,9 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already quotes as a whole word — a wrapper that quoted it printed it twice
   (`"gone: gone"` is now `"gone"`), and an empty cause message adds nothing.
   An error with no cause renders exactly as before.
-- **A guard carrying the boolean `appstrate.permissionGuard` marker but no
-  `PERMISSION_REQUIREMENT_MARKER` requirement reads as naming no requirement**,
-  where 11.1.0 read it as conditional. The platform reports no per-operation
+- **BREAKING: a guard carrying the boolean `appstrate.permissionGuard` marker
+  but no `PERMISSION_REQUIREMENT_MARKER` requirement names no requirement**;
+  11.1.0 read it as conditional. The platform reports no per-operation
   `conditional` flag, so a module declares nothing for a route that decides on
   the row it loads: the route's own refusal is what the caller sees.
 - **BREAKING: every operation a module's `openApiPaths()` documents must be
