@@ -432,9 +432,12 @@ jobs:
           #  - @appstrate/module-claude-code: registers `claude-code` so the
           #    parallel pairing-lifecycle e2e (`providerId: "claude-code"`)
           #    passes the same checks for the Anthropic OAuth surface.
+          #  - @appstrate/module-chat: the chat surface (`tests/chat/*.ui.spec.ts`);
+          #    without it `/api/chat/*` does not exist and the shell grants no
+          #    `chat:*`, so the composer's controls never render.
           # oidc is kept in lockstep with .env.example / packages/env defaults so
           # the suite stays representative of a default self-host install.
-          MODULES: oidc,webhooks,mcp,core-providers,@appstrate/module-codex,@appstrate/module-claude-code
+          MODULES: oidc,webhooks,mcp,core-providers,@appstrate/module-chat,@appstrate/module-codex,@appstrate/module-claude-code
           # Default system model so run-acceptance passes in specs that POST
           # /agents/:id/run (e.g. upload-flow). The run pipeline only needs a
           # resolvable model at acceptance time — the dummy apiKey is never
