@@ -9,6 +9,7 @@ import { remoteUrl, toolsPolicyKeys, allowsUndeclared } from "./remote-parity.ts
 import { applyAuth, checkAuthLiveness, requiredCredentialFields } from "./auth-live.ts";
 import { checkAuthRejection } from "./auth-reject.ts";
 import { checkIdentitySource } from "./identity-source.ts";
+import { checkScopeEcho } from "./scope-echo.ts";
 import { metadataCandidates, compareAuth } from "./oauth-metadata.ts";
 import {
   checkRefreshStrategy,
@@ -558,6 +559,75 @@ describe("checkIdentitySource", () => {
     });
     expect(checkIdentitySource(apiKey)).toEqual([]);
     expect(checkIdentitySource(oauth({ identity_claims: {} }))).toHaveLength(1);
+  });
+});
+
+describe("checkScopeEcho", () => {
+  const GOOGLE = "https://accounts.google.com";
+  const USERINFO_EMAIL = "https://www.googleapis.com/auth/userinfo.email";
+  const USERINFO_PROFILE = "https://www.googleapis.com/auth/userinfo.profile";
+  const oauth = (auth: Record<string, unknown>) =>
+    entry({
+      packageId: "@appstrate/x",
+      manifest: { auths: { primary: { type: "oauth2", issuer: GOOGLE, ...auth } } },
+    });
+
+  it("FAILs a Google auth requesting email without the echo alias", () => {
+    const f = checkScopeEcho(
+      oauth({ default_scopes: ["openid", "email"], scope_catalog: [{ value: "email" }] }),
+    );
+    expect(f).toHaveLength(1);
+    expect(f[0]!.severity).toBe("fail");
+    expect(f[0]!.message).toContain("primary");
+    expect(f[0]!.message).toContain(`{ "value": "${USERINFO_EMAIL}", "implies": ["email"] }`);
+  });
+
+  it("accepts the alias, including a transitive implies chain", () => {
+    expect(
+      checkScopeEcho(
+        oauth({
+          default_scopes: ["email"],
+          scope_catalog: [{ value: "email" }, { value: USERINFO_EMAIL, implies: ["email"] }],
+        }),
+      ),
+    ).toEqual([]);
+    expect(
+      checkScopeEcho(
+        oauth({
+          default_scopes: ["email"],
+          scope_catalog: [
+            { value: "email" },
+            { value: "mid", implies: ["email"] },
+            { value: USERINFO_EMAIL, implies: ["mid"] },
+          ],
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("checks the profile rewrite too", () => {
+    const f = checkScopeEcho(oauth({ default_scopes: ["profile"] }));
+    expect(f).toHaveLength(1);
+    expect(f[0]!.message).toContain(USERINFO_PROFILE);
+  });
+
+  it("checks a scope declared only in scope_catalog", () => {
+    const f = checkScopeEcho(oauth({ default_scopes: [], scope_catalog: [{ value: "email" }] }));
+    expect(f).toHaveLength(1);
+    expect(f[0]!.message).toContain('"email"');
+  });
+
+  it("ignores unlisted issuers, issuer-less and non-oauth2 auths", () => {
+    const other = oauth({ issuer: "https://idp.example", default_scopes: ["email"] });
+    expect(checkScopeEcho(other)).toEqual([]);
+    expect(checkScopeEcho(oauth({ issuer: undefined, default_scopes: ["email"] }))).toEqual([]);
+    const apiKey = entry({
+      packageId: "@appstrate/x",
+      manifest: {
+        auths: { primary: { type: "api_key", issuer: GOOGLE, default_scopes: ["email"] } },
+      },
+    });
+    expect(checkScopeEcho(apiKey)).toEqual([]);
   });
 });
 
