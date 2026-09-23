@@ -22,8 +22,8 @@ The Pi SDK is a peer, pinned exactly — the runner tracks its event and session
 shapes closely enough that a floating range would break silently:
 
 ```json
-"@earendil-works/pi-coding-agent": "0.85.1",
-"@earendil-works/pi-ai": "0.85.1"
+"@earendil-works/pi-coding-agent": "0.86.1",
+"@earendil-works/pi-ai": "0.86.1"
 ```
 
 ## Exports

@@ -46,7 +46,7 @@ interface PiToolResult {
    * `afterToolCall` hook — `finalizeExecutedToolCall` SPREADS the original
    * result (`{...result, content, details, usage, terminate}`, `agent-loop.js`),
    * so a configured hook can no longer strip this field. Verified against the
-   * pinned `@earendil-works/pi-agent-core@0.85.1`; re-check on an SDK bump,
+   * pinned `@earendil-works/pi-agent-core@0.86.1`; re-check on an SDK bump,
    * because `details` is redacted and nothing would fall back.
    */
   connectOffers?: ConnectOffer[];
