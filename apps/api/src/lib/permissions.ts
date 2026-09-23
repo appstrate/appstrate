@@ -232,7 +232,8 @@ const READ_REQUIREMENT_OVERRIDES: Partial<
   "space-members:invite": [],
   // A launcher connects accounts from the missing-connection flow (RBAC spec §3.4).
   "integrations:connect": [],
-  // Gates no route: a connection is removed by its owner (`DELETE /api/me/connections/:id`).
+  // No role grant gates it: a connection is removed by its owner
+  // (`DELETE /api/me/connections/:id`); it caps a delegated credential there.
   "integrations:disconnect": [],
 };
 
@@ -535,6 +536,16 @@ export function effectivePermissions(input: {
  */
 export function callerPermissions(c: Context<AppEnv>): ReadonlySet<string> {
   return c.get("permissions") ?? new Set<string>();
+}
+
+/**
+ * Whether the credential's scope ceiling leaves `permission` in reach. For an
+ * act authorized by ownership rather than a role grant, which `permissions`
+ * therefore cannot cap (RBAC spec §7.1). A cookie session carries no ceiling.
+ */
+export function ceilingAllows(c: Context<AppEnv>, permission: Permission): boolean {
+  const ceiling = c.get("scopeCeiling");
+  return ceiling === undefined || ceiling.has(permission);
 }
 
 /**

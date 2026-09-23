@@ -302,6 +302,8 @@ function describePayload(
     // would pre-refuse an allowed cross-space call.
     required_permissions: op.requirement.requirements,
     target_space_permissions: op.requirement.targetSpaceRequirements,
+    // Asked of a delegated credential's scopes only, never of the role; shown, never filtered.
+    ceiling_permissions: op.requirement.ceilingRequirements,
     granted: operationGranted(op, permissions),
     parameters: op.operation.parameters ?? [],
     request_body: op.operation.requestBody ?? null,
@@ -422,7 +424,10 @@ function buildDescribeTool(ctx: McpToolContext, invokes: boolean): AppstrateTool
       "It also reports whether your role clears the route's guards (`granted`) and which " +
       "permissions the route requires in YOUR space (`required_permissions`). " +
       "`target_space_permissions` is separate on purpose: those are decided in the space the " +
-      "path names, not here, so they never make an operation unavailable to you. A granted " +
+      "path names, not here, so they never make an operation unavailable to you. " +
+      "`ceiling_permissions` apply only when you act through a delegated credential (API key, " +
+      "OAuth token): its scopes must include each; they never make an operation unavailable " +
+      "to you either. A granted " +
       "operation can still be refused on the record it acts on; that refusal names its reason.",
     annotations: {
       title: "Describe API operation",

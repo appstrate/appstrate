@@ -7,7 +7,10 @@ import {
   type SpaceLevelPermission,
 } from "@appstrate/core/permissions";
 import { describe, it, expect } from "bun:test";
+import type { Context } from "hono";
+import type { AppEnv } from "../../src/types/index.ts";
 import {
+  ceilingAllows,
   effectivePermissions,
   orgPermissions,
   presetPermissions,
@@ -512,5 +515,26 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
     for (const perm of moduleOwned) {
       expect(API_KEY_ALLOWED_SCOPES.has(perm as never)).toBe(false);
     }
+  });
+});
+
+describe("ceilingAllows", () => {
+  function withCeiling(ceiling: string[] | undefined): Context<AppEnv> {
+    const scopeCeiling = ceiling && new Set(ceiling);
+    return { get: (key: string) => (key === "scopeCeiling" ? scopeCeiling : undefined) } as never;
+  }
+
+  it("allows everything when the request carries no ceiling (cookie session)", () => {
+    expect(ceilingAllows(withCeiling(undefined), "files:delete")).toBe(true);
+  });
+
+  it("allows exactly what the ceiling lists", () => {
+    const c = withCeiling(["files:read", "files:delete"]);
+    expect(ceilingAllows(c, "files:delete")).toBe(true);
+    expect(ceilingAllows(c, "integrations:disconnect")).toBe(false);
+  });
+
+  it("allows nothing under an empty ceiling", () => {
+    expect(ceilingAllows(withCeiling([]), "files:read")).toBe(false);
   });
 });
