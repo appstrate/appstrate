@@ -198,6 +198,7 @@ describe("custom space roles", () => {
             permission: string;
             action: string;
             api_key_grantable: boolean;
+            requires_one_of: string[];
           }[];
         }[];
       };
@@ -215,6 +216,11 @@ describe("custom space roles", () => {
       expect(byName.get("agents:run")!.api_key_grantable).toBe(true);
       expect(byName.get("integrations:configure")!.api_key_grantable).toBe(false);
       expect(byName.get("agents:read")!.action).toBe("read");
+
+      // The read each entry needs travels on the wire, empty when none.
+      expect(byName.get("schedules:write")!.requires_one_of).toEqual(["schedules:read"]);
+      expect(byName.get("agents:run")!.requires_one_of).toEqual(["runs:read", "runs:read-all"]);
+      expect(byName.get("integrations:connect")!.requires_one_of).toEqual([]);
 
       // And every offered string is accepted by the create route.
       expect((await post(validBody({ permissions: offered }))).status).toBe(201);
@@ -283,6 +289,48 @@ describe("custom space roles", () => {
       expect((await post(validBody({ key: "Support Team" }))).status).toBe(400);
     });
 
+    it("refuses an action on a resource the role cannot read, and accepts it with the read", async () => {
+      const bad = await post(validBody({ permissions: ["schedules:write"] }));
+      const problem = await expectProblem(bad, 400, { param: "permissions" });
+      expect(problem.detail).toContain("'schedules:write' requires 'schedules:read'");
+
+      expect(
+        (await post(validBody({ permissions: ["schedules:write", "schedules:read"] }))).status,
+      ).toBe(201);
+    });
+
+    it("names every missing read, not just the first", async () => {
+      const bad = await post(validBody({ permissions: ["skills:write", "agents:delete"] }));
+      const { detail } = await expectProblem(bad, 400, { param: "permissions" });
+      expect(detail).toContain("'agents:delete' requires 'agents:read'");
+      expect(detail).toContain("'skills:write' requires 'skills:read'");
+    });
+
+    it("asks a launch for either runs read, and accepts it without the agent's", async () => {
+      const bad = await post(validBody({ key: "launcher", permissions: ["agents:run"] }));
+      expect((await expectProblem(bad, 400, { param: "permissions" })).detail).toContain(
+        "'agents:run' requires one of 'runs:read', 'runs:read-all'",
+      );
+
+      // The twin: the cross-resource read is honoured end to end, no `agents:read`.
+      const ok = await post(
+        validBody({ key: "launcher", permissions: ["agents:run", "runs:read"] }),
+      );
+      expect(ok.status).toBe(201);
+    });
+
+    it("holds a module resource to the same rule", async () => {
+      const bad = await post(validBody({ key: "mcp-caller", permissions: ["mcp:invoke"] }));
+      expect((await expectProblem(bad, 400, { param: "permissions" })).detail).toContain(
+        "'mcp:invoke' requires 'mcp:read'",
+      );
+
+      const ok = await post(
+        validBody({ key: "mcp-caller", permissions: ["mcp:read", "mcp:invoke"] }),
+      );
+      expect(ok.status).toBe(201);
+    });
+
     it("409 role_key_taken on a collision within the org, but not across orgs", async () => {
       expect((await post(validBody())).status).toBe(201);
       await expectProblem(await post(validBody({ name: "Support 2" })), 409, {
@@ -316,12 +364,35 @@ describe("custom space roles", () => {
 
       const ok = await patch(role.id, {
         name: "Support",
-        permissions: ["agents:read", "agents:run"],
+        permissions: ["agents:read", "agents:run", "runs:read"],
       });
       expect(ok.status).toBe(200);
       const body = (await ok.json()) as RoleWire;
       expect(body.name).toBe("Support");
-      expect(body.permissions).toEqual(["agents:read", "agents:run"]);
+      expect(body.permissions).toEqual(["agents:read", "agents:run", "runs:read"]);
+    });
+
+    it("PATCH judges the permissions it is sent, not a row stored before the rule", async () => {
+      // A row the validator never saw: seeded straight to the table.
+      const unjudged = await seedSpaceRole({
+        orgId: owner.orgId,
+        key: "planner",
+        permissions: ["schedules:write"],
+      });
+
+      const renamed = await patch(unjudged.id, { name: "Planner" });
+      expect(renamed.status).toBe(200);
+      const body = (await renamed.json()) as RoleWire;
+      expect(body.name).toBe("Planner");
+      expect(body.permissions).toEqual(["schedules:write"]);
+
+      // The twin: sending the same set back makes it judged, and refused.
+      const problem = await expectProblem(
+        await patch(unjudged.id, { permissions: ["schedules:write"] }),
+        400,
+        { param: "permissions" },
+      );
+      expect(problem.detail).toContain("'schedules:write' requires 'schedules:read'");
     });
   });
 
@@ -397,9 +468,12 @@ describe("custom space roles", () => {
       const ran = await runAgent(asGuest);
       expect((await expectProblem(ran, 403)).detail).toContain("agents:run");
 
-      // The control: the same bundle plus `agents:run` clears that guard —
-      // so the 403 above was the permission, not the agent or the space.
-      await patch(role.id, { permissions: ["agents:read", "agents:run"] });
+      // The control: the same bundle plus `agents:run` (and the runs read it
+      // needs) clears that guard — so the 403 above was the permission.
+      const widened = await patch(role.id, {
+        permissions: ["agents:read", "agents:run", "runs:read"],
+      });
+      expect(widened.status).toBe(200);
       // Past the guard and into the handler, which stops on the fixture having
       // no published version — a refusal about the agent, not about the caller.
       await expectProblem(await runAgent(asGuest), 404, { code: "no_published_version" });

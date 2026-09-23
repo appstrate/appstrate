@@ -332,7 +332,7 @@ export function PackageActionsDropdown({
                   {t("schedule.titleNew")}
                 </DropdownMenuItem>
               )}
-              {can("runs:delete") && hasRuns && onDeleteRuns && (
+              {can("runs:delete") && can("runs:read-all") && hasRuns && onDeleteRuns && (
                 <DropdownMenuItem
                   onSelect={onDeleteRuns}
                   disabled={runningRuns > 0}
