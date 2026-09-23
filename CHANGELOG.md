@@ -43,6 +43,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   dashboard as in the CLI. Before, the new number alone changed the archive's
   digest and the same content was published again under every bump.
 
+### Fixed
+
+- **A change to a package's annex files alone can be published from the
+  dashboard.** Its publish button compared only the manifest and the main
+  content file, so an edit to any other file left it disabled. It now follows
+  the server's own change flag, like `appstrate packages publish`, and the
+  server judges the content (annexes included) when the version is cut.
+
 ## [1.0.0-beta.60] - 2026-09-23
 
 ### Added
