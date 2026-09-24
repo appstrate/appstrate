@@ -278,7 +278,7 @@ describe("assignSlugs — agent commands (D23)", () => {
     const { planned } = assignSlugs(
       [resolved({ packageId: "@zed/run-foo", frontmatterName: "run-foo" })],
       [view("@acme/foo"), view("@other/acme-foo")],
-      new Set(["run-acme-foo"]),
+      new Map([["run-acme-foo", "@gone/unresolved"]]),
     );
 
     expect(planned.map((entry) => entry.slug)).toEqual([
@@ -307,10 +307,77 @@ describe("assignSlugs — agent commands (D23)", () => {
   });
 
   it("honours a slug the ledger reserves for an unresolved package", () => {
-    const { planned } = assignSlugs([], [view("@acme/foo")], new Set(["run-foo"]));
+    const { planned } = assignSlugs(
+      [],
+      [view("@acme/foo")],
+      new Map([["run-foo", "@gone/unresolved"]]),
+    );
 
     expect(planned[0]?.slug).toBe("run-acme-foo");
     expect(planned[0]?.renamedFrom).toBe("run-foo");
+  });
+});
+
+describe("assignSlugs — an installed name stays with its package", () => {
+  const slugsOf = (planned: { packageId: string; slug: string }[]) =>
+    Object.fromEntries(planned.map((entry) => [entry.packageId, entry.slug]));
+
+  it("keeps an agent on its name when a newcomer sorts first", () => {
+    const { planned } = assignSlugs(
+      [],
+      [view("@alpha/report"), view("@zeta/report")],
+      new Map([["run-report", "@zeta/report"]]),
+    );
+
+    expect(slugsOf(planned)).toEqual({
+      "@alpha/report": "run-alpha-report",
+      "@zeta/report": "run-report",
+    });
+  });
+
+  it("keeps a skill on its name when a newcomer sorts first", () => {
+    const { planned } = assignSlugs(
+      [
+        resolved({ packageId: "@alpha/report", frontmatterName: "report" }),
+        resolved({ packageId: "@zeta/report", frontmatterName: "report" }),
+      ],
+      [],
+      new Map([["report", "@zeta/report"]]),
+    );
+
+    expect(slugsOf(planned)).toEqual({ "@alpha/report": "alpha-report", "@zeta/report": "report" });
+  });
+
+  it("gives a fallback holder the same fallback, and the name once its holder left", () => {
+    const agents = [view("@alpha/report"), view("@zeta/report")];
+    const both = new Map([
+      ["run-report", "@zeta/report"],
+      ["run-alpha-report", "@alpha/report"],
+    ]);
+    expect(slugsOf(assignSlugs([], agents, both).planned)).toEqual({
+      "@alpha/report": "run-alpha-report",
+      "@zeta/report": "run-report",
+    });
+
+    const left = new Map([["run-alpha-report", "@alpha/report"]]);
+    expect(slugsOf(assignSlugs([], [view("@alpha/report")], left).planned)).toEqual({
+      "@alpha/report": "run-report",
+    });
+  });
+
+  it("releases a name that is no longer one its holder would get", () => {
+    // `@zed/tools` was installed as `pdf`, then renamed its frontmatter; it sorts
+    // after the newcomer, so only an upfront check can free `pdf` in time.
+    const { planned } = assignSlugs(
+      [
+        resolved({ packageId: "@acme/pdf", frontmatterName: "pdf" }),
+        resolved({ packageId: "@zed/tools", frontmatterName: "tools" }),
+      ],
+      [],
+      new Map([["pdf", "@zed/tools"]]),
+    );
+
+    expect(slugsOf(planned)).toEqual({ "@acme/pdf": "pdf", "@zed/tools": "tools" });
   });
 });
 

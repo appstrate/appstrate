@@ -28,6 +28,7 @@ import {
   assignSlugs,
   diffTarget,
   fetchSkillFiles,
+  isDraftRefusal,
   listSyncableAgents,
   listSyncableSkills,
   MAX_CONCURRENCY,
@@ -58,6 +59,7 @@ import {
   removeManagedDir,
   setupPluginFiles,
   skillDir,
+  SYNC_TARGETS,
   targetRoot,
   writePluginTree,
   writeSetupPlugin,
@@ -351,7 +353,8 @@ async function resolveAll(
   for (const entry of resolutions) {
     const { packageId, kind } = entry.job;
     if ("error" in entry) {
-      unresolved.set(packageId, kind);
+      // A refused draft is refused again next run: it goes, like a failed render.
+      if (!isDraftRefusal(entry.error)) unresolved.set(packageId, kind);
       report.skill(`Skipped ${packageId}: ${formatError(entry.error)}`);
     } else if (!entry.resolved) {
       const what = entry.job.source === "draft" ? "draft" : "published version";
@@ -363,19 +366,20 @@ async function resolveAll(
     }
   }
 
-  // A slug the ledger assigns to a package that failed to resolve stays
-  // reserved: handing `/appstrate:<slug>` to another skill would be a rename
-  // caused by nothing but a transient error.
-  const reserved = new Set<string>();
-  for (const target of targets) {
-    for (const [slug, managed] of Object.entries(
-      ownedLedger(target, state, source, context).managed,
-    )) {
-      if (unresolved.has(managed.packageId)) reserved.add(slug);
+  // Installed names of the packages still wanted; the first ledger in `SYNC_TARGETS` wins.
+  const wanted = new Set([
+    ...unresolved.keys(),
+    ...[...skills, ...views].map((resolved) => resolved.packageId),
+  ]);
+  const incumbents = new Map<string, string>();
+  for (const target of SYNC_TARGETS.filter((target) => targets.includes(target))) {
+    const { managed } = ownedLedger(target, state, source, context);
+    for (const [slug, { packageId }] of Object.entries(managed)) {
+      if (wanted.has(packageId) && !incumbents.has(slug)) incumbents.set(slug, packageId);
     }
   }
 
-  const { planned, failed } = assignSlugs(skills, views, reserved);
+  const { planned, failed } = assignSlugs(skills, views, incumbents);
   // Not `unresolved`: the next run fails the same way, so an installed copy goes.
   for (const { packageId, error } of failed) {
     report.skill(`Skipped ${packageId}: ${formatError(error)}`);

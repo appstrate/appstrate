@@ -164,11 +164,8 @@ export function normalizeSkillMd(content: string, slug: string): string {
 }
 
 // ─── Agent launch commands ───────────────────────────────────────────────────
-//
-// Claude Code preprocesses a SKILL.md body (`$ARGUMENTS`, `$N`, `${VAR}`, and
-// injected shell commands), so the body holds generator text plus the package
-// id and version validated below. Org-authored text lives in the sidecar or in JSON-quoted
-// frontmatter scalars, never in the body.
+// Claude Code preprocesses a SKILL.md body (`$ARGUMENTS`, `${VAR}`, injected shell
+// commands), so org-authored text goes to the sidecar or JSON-quoted frontmatter only.
 
 export const AGENT_CONTRACT_ENTRY = "input.json";
 
@@ -184,7 +181,6 @@ const IDENTIFIER_HINT =
   "Check the instance the CLI is logged in to.";
 
 export interface AgentLaunchView {
-  /** `@scope/name`. */
   packageId: string;
   /** Frontmatter only: the MCP session is already bound to it by `X-Space-Id`. */
   spaceId: string;
@@ -193,7 +189,6 @@ export interface AgentLaunchView {
   /** The human name of the command, already resolved. */
   title: string;
   description: string;
-  /** The agent detail's `input`: the schema wrapper plus the space's stored values and locks. */
   input: Partial<SchemaWrapper> & AgentInputSettings;
 }
 
@@ -215,11 +210,7 @@ function launchTarget(view: AgentLaunchView): { scope: string; name: string } {
   return { scope: `@${parsed.scope}`, name: parsed.name };
 }
 
-/**
- * A YAML 1.2 double-quoted scalar: JSON escapes every quote and line break. The
- * line terminators JSON leaves raw are escaped too, so a regex frontmatter
- * splitter cannot see a `---` line inside the value.
- */
+/** JSON is a YAML double-quoted scalar; escape the terminators a regex splitter would split on. */
 function yamlString(value: string): string {
   return JSON.stringify(value).replace(
     /[\u0085\u2028\u2029]/g,
@@ -286,6 +277,12 @@ function agentBody(view: AgentLaunchView, scope: string, name: string, files: bo
     [`Call \`${RUN_AND_WAIT}\` with:`, "", "```json", ...call.split("\n"), "```"],
     [
       "Handle the outcome:",
+      `- \`done: false\`, even with an \`error\`: the run is still going. Wait with ` +
+        `\`${INVOKE_OPERATION}\` ` +
+        '`{ "operation_id": "getRun", "path_params": { "id": "<returned id>" }, ' +
+        '"query": { "wait": true } }` until `status` is `success`, `failed`, `timeout` or ' +
+        `\`cancelled\`. Its files are not in that answer: list them with \`${LIST_FILES}\` ` +
+        '`{ "runId": "<returned id>" }`.',
       "- A `connect_url` or a connection choice (`must_choose_connection`): follow the " +
         "Appstrate server's instructions.",
       "- A `404` with code `agent_not_found`, `agent_not_active_in_space` or " +
@@ -294,11 +291,6 @@ function agentBody(view: AgentLaunchView, scope: string, name: string, files: bo
       "- Any other `404`, or a `400`: the input is wrong (e.g. an unreadable file URI). Fix " +
         "`input` with the user, then retry.",
       "- Any other error: report it and stop.",
-      `- \`done: false\`: the run is still going. Wait with \`${INVOKE_OPERATION}\` ` +
-        '`{ "operation_id": "getRun", "path_params": { "id": "<returned id>" }, ' +
-        '"query": { "wait": true } }` until `status` is `success`, `failed`, `timeout` or ' +
-        `\`cancelled\`. Its files are not in that answer: list them with \`${LIST_FILES}\` ` +
-        '`{ "runId": "<returned id>" }`.',
       `Call \`${RUN_AND_WAIT}\` again only for the retries above; once a run \`id\` exists, ` +
         "never launch again. Use `getRun` only after `done: false`, never on a finished run.",
     ],
@@ -322,11 +314,7 @@ function agentBody(view: AgentLaunchView, scope: string, name: string, files: bo
   ].join("\n");
 }
 
-/**
- * One slash command per agent: `SKILL.md` plus the space's launch contract in
- * `input.json`. Stored values never reach an output byte, only which fields
- * have one.
- */
+/** Stored values never reach an output byte, only which fields have one. */
 export function materializeAgent(slug: string, view: AgentLaunchView): Record<string, Uint8Array> {
   if (!isValidSkillName(slug)) {
     throw new SkillMaterializeError(

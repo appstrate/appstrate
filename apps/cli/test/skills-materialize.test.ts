@@ -451,6 +451,10 @@ describe("materializeAgent", () => {
     expect(body).toContain("Ask the user only for missing fields listed in `schema.required`");
     expect(body).toContain("`no_published_version`");
     expect(body).toContain("never launch again");
+    // run_and_wait's time cap answers `done: false` WITH an `error`: waiting must win.
+    const waitRule = body.indexOf("`done: false`, even with an `error`");
+    expect(waitRule).toBeGreaterThan(0);
+    expect(waitRule).toBeLessThan(body.indexOf("Any other error"));
     expect(body).not.toContain("Weekly report");
     expect(body).not.toContain("Summarize the week.");
     expect(body).not.toContain("topic");

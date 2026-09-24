@@ -413,6 +413,26 @@ describe("packages sync — agents under --source draft", () => {
     expect(await exists(join(pluginSkills(), "run-report"))).toBe(false);
   });
 
+  it("lets a context switch through when a draft is refused, removing it", async () => {
+    serve([REPORT]);
+    await packagesSyncCommand({ source: "draft" }, createMemoryIO().io);
+    expect(await ledgerVersion("run-report")).toBe("draft");
+
+    // A refusal is authority, not chance: it must not hold the old context forever.
+    await seedLoggedInProfile("default", { orgId: "org_1", spaceId: PINNED, userId: "u_2" });
+    serve([{ ...REPORT, draft: { notWritable: true } }]);
+    const { io, stdout, stderr } = createMemoryIO();
+    await packagesSyncCommand({ source: "draft", printPath: true }, io);
+
+    expect(stdout()).toBe(`${pluginRoot()}\n`);
+    expect(stderr()).toContain("author's working copy");
+    const state = JSON.parse(await readText(getStatePath())) as {
+      targets: Record<string, { context: { userId: string } }>;
+    };
+    expect(state.targets["claude-plugin"]?.context.userId).toBe("u_2");
+    expect(await exists(commandFile("run-report"))).toBe(false);
+  });
+
   it("words a skipped system agent by the selector it was read with", async () => {
     serve([{ id: "@appstrate/assistant", source: "system", detailError: 404 }]);
     const { io, stderr } = createMemoryIO();
@@ -452,6 +472,49 @@ describe("packages sync — agent command names (D23)", () => {
     expect(stderr()).toContain(
       'Renamed @team/pdf-tools to "run-team-pdf-tools" — "run-pdf-tools" is already taken.',
     );
+  });
+});
+
+describe("packages sync — an installed name stays with its package", () => {
+  it("never hands an agent's command to a newcomer that sorts first", async () => {
+    const zeta: AgentFixture = { ...REPORT, id: "@zeta/report", description: "Zeta." };
+    const alpha: AgentFixture = { ...REPORT, id: "@alpha/report", description: "Alpha." };
+    serve([zeta]);
+    await packagesSyncCommand({}, createMemoryIO().io);
+
+    serve([alpha, zeta]);
+    const { io, stderr } = createMemoryIO();
+    await packagesSyncCommand({}, io);
+
+    expect(await readText(commandFile("run-report"))).toContain("@zeta/report");
+    expect(await readText(commandFile("run-alpha-report"))).toContain("@alpha/report");
+    expect(stderr()).toContain('Renamed @alpha/report to "run-alpha-report"');
+
+    // Once the incumbent leaves, the name goes to the newcomer.
+    serve([alpha]);
+    await packagesSyncCommand({}, createMemoryIO().io);
+
+    expect((await readdir(pluginSkills())).sort()).toEqual(["pdf-tools", "run-report"]);
+    expect(await readText(commandFile("run-report"))).toContain("@alpha/report");
+  });
+
+  it("never hands a skill's name to a newcomer that sorts first", async () => {
+    const zeta: SkillFixture = { id: "@zeta/report", skillMd: skillMd("report", "Zeta.") };
+    const alpha: SkillFixture = { id: "@alpha/report", skillMd: skillMd("report", "Alpha.") };
+    serve([], { skills: [zeta] });
+    await packagesSyncCommand({}, createMemoryIO().io);
+
+    serve([], { skills: [alpha, zeta] });
+    await packagesSyncCommand({}, createMemoryIO().io);
+
+    expect(await readText(commandFile("report"))).toContain("Zeta.");
+    expect(await readText(commandFile("alpha-report"))).toContain("Alpha.");
+
+    serve([], { skills: [alpha] });
+    await packagesSyncCommand({}, createMemoryIO().io);
+
+    expect(await readdir(pluginSkills())).toEqual(["report"]);
+    expect(await readText(commandFile("report"))).toContain("Alpha.");
   });
 });
 

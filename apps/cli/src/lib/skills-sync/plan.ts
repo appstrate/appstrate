@@ -12,7 +12,11 @@ import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
 import { extractSkillMeta } from "@appstrate/core/validation";
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
-import { draftRefusal, fetchPackageDefinition } from "../package-definition.ts";
+import {
+  draftRefusal,
+  fetchPackageDefinition,
+  PackageDefinitionError,
+} from "../package-definition.ts";
 import {
   AGENT_SLUG_PREFIX,
   agentSlug,
@@ -55,6 +59,13 @@ class SkillSyncError extends Error {
  * thinner message than one whose grant is revoked mid-sync.
  */
 const DRAFT_REMEDY = "Sync the published artifact with `--source published`.";
+
+const DRAFT_NOT_WRITABLE = "draft_not_writable";
+
+/** The author-only refusal: authority, not chance, so the next run is refused the same way. */
+export function isDraftRefusal(err: unknown): boolean {
+  return err instanceof PackageDefinitionError && err.code === DRAFT_NOT_WRITABLE;
+}
 
 interface PackageListRow {
   id: string;
@@ -146,7 +157,7 @@ async function readDetail<T>(
   } catch (err) {
     if (err instanceof ApiError) {
       if (err.status === 404) return null;
-      if (problemFields(err.body).code === "draft_not_writable") {
+      if (problemFields(err.body).code === DRAFT_NOT_WRITABLE) {
         throw draftRefusal(packageId, type, DRAFT_REMEDY);
       }
     }
@@ -235,7 +246,7 @@ async function resolveDraft(
   );
   if (!res.ok) {
     const problem = problemFields(await res.json().catch(() => undefined));
-    if (problem.code === "draft_not_writable") {
+    if (problem.code === DRAFT_NOT_WRITABLE) {
       throw draftRefusal(packageId, "skill", DRAFT_REMEDY);
     }
     throw new SkillSyncError(
@@ -318,35 +329,74 @@ interface SlugAssignment {
   failed: { packageId: string; error: unknown }[];
 }
 
+interface Claimant {
+  packageId: string;
+  preferred: string;
+  prefix: string;
+}
+
 /**
- * Input order decides collisions, and callers pass lists sorted by package id,
- * so the assignment never depends on request timing. Every skill is assigned
- * before any agent (D23): an agent never renames a skill.
+ * Newcomers collide in input order (sorted by package id); every skill before
+ * any agent (D23). `incumbents` (slug → package id) keeps a wanted package on
+ * its installed PREFERRED name: an unattended sync must never make
+ * `/appstrate:<slug>` launch ANOTHER package. A fallback is derived from the
+ * package id, so it simply re-derives. An unresolved incumbent (absent here)
+ * keeps its name unconditionally.
  */
 export function assignSlugs(
   skills: ResolvedSkill[],
   agents: AgentLaunchView[] = [],
-  reserved: ReadonlySet<string> = new Set(),
+  incumbents: ReadonlyMap<string, string> = new Map(),
 ): SlugAssignment {
-  // `reserved` = catalogued packages whose resolution failed: their directories
-  // are on disk, so a transient 500 must not reassign `/appstrate:<slug>`.
-  const taken = new Set<string>(reserved);
-  // Picked, then taken: an agent claims its name only once its command renders.
-  const pick = (packageId: string, preferred: string, prefix?: string): SlugClaim => {
-    const slug = taken.has(preferred) ? collisionSlug(packageId, taken, prefix) : preferred;
+  const nameOf = (packageId: string): string => parseScopedName(packageId)?.name ?? packageId;
+  const failed: SlugAssignment["failed"] = [];
+  const skillClaims = skills.map((skill) => ({
+    skill,
+    packageId: skill.packageId,
+    preferred: skillSlug(skill.frontmatterName, nameOf(skill.packageId)),
+    prefix: "",
+  }));
+  const agentClaims = agents.flatMap((view) => {
+    try {
+      const preferred = agentSlug(nameOf(view.packageId));
+      return [{ view, packageId: view.packageId, preferred, prefix: AGENT_SLUG_PREFIX }];
+    } catch (error) {
+      failed.push({ packageId: view.packageId, error });
+      return [];
+    }
+  });
+
+  const preferredOf = new Map(
+    [...skillClaims, ...agentClaims].map(({ packageId, preferred }): [string, string] => [
+      packageId,
+      preferred,
+    ]),
+  );
+  const reserved = new Map(
+    [...incumbents].filter(([slug, packageId]) => {
+      const preferred = preferredOf.get(packageId);
+      return preferred === undefined || slug === preferred;
+    }),
+  );
+  const taken = new Set<string>();
+  const pick = (claimant: Claimant): SlugClaim => {
+    const blocked = new Set(taken);
+    for (const [slug, holder] of reserved) if (holder !== claimant.packageId) blocked.add(slug);
+    const { packageId, preferred, prefix } = claimant;
+    const slug = blocked.has(preferred) ? collisionSlug(packageId, blocked, prefix) : preferred;
     return slug === preferred ? { slug } : { slug, renamedFrom: preferred };
   };
-  const nameOf = (packageId: string): string => parseScopedName(packageId)?.name ?? packageId;
 
-  const planned: PlannedEntry[] = skills.map((skill) => {
-    const naming = pick(skill.packageId, skillSlug(skill.frontmatterName, nameOf(skill.packageId)));
+  const planned: PlannedEntry[] = skillClaims.map((claimant) => {
+    const naming = pick(claimant);
     taken.add(naming.slug);
-    return { ...skill, kind: "skill" as const, ...naming };
+    return { ...claimant.skill, kind: "skill" as const, ...naming };
   });
-  const failed: SlugAssignment["failed"] = [];
-  for (const view of agents) {
+  for (const claimant of agentClaims) {
+    const { view } = claimant;
     try {
-      const naming = pick(view.packageId, agentSlug(nameOf(view.packageId)), AGENT_SLUG_PREFIX);
+      const naming = pick(claimant);
+      // Rendered before it is taken: a command that fails leaves its name free.
       const files = materializeAgent(naming.slug, view);
       taken.add(naming.slug);
       planned.push({
@@ -358,6 +408,7 @@ export function assignSlugs(
         ...naming,
       });
     } catch (error) {
+      if (reserved.get(claimant.preferred) === view.packageId) reserved.delete(claimant.preferred);
       failed.push({ packageId: view.packageId, error });
     }
   }
