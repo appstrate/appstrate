@@ -89,7 +89,7 @@ export const createPairingBody = z
       (id) => isOAuthModelProvider(id),
       "providerId must be a registered OAuth model provider",
     ),
-    credential_id: z.uuid().optional(),
+    credentialId: z.uuid().optional(),
   })
   .strict();
 
@@ -174,7 +174,7 @@ async function handlePairRedeem(c: Context<AppEnv>) {
   // to print two different lists for one connection. The dashboard gets the
   // created credential via GET /pairing/:id polling.
   return c.json({
-    credential_id: result.credentialId,
+    credentialId: result.credentialId,
     providerId: result.providerId,
     ...(result.email !== undefined ? { email: result.email } : {}),
     available_model_ids: result.availableModelIds,
@@ -219,8 +219,8 @@ export function createModelProvidersOAuthRouter() {
       const user = c.get("user");
       const input = await readJsonBody(c, createPairingBody, { allowEmpty: true });
 
-      if (input.credential_id) {
-        const credential = await getOrgModelProviderCredential(orgId, input.credential_id);
+      if (input.credentialId) {
+        const credential = await getOrgModelProviderCredential(orgId, input.credentialId);
         if (
           !credential ||
           credential.source !== "custom" ||
@@ -228,8 +228,8 @@ export function createModelProvidersOAuthRouter() {
           credential.providerId !== input.providerId
         ) {
           throw invalidRequest(
-            "credential_id must identify an OAuth credential for providerId in the current organization",
-            "credential_id",
+            "credentialId must identify an OAuth credential for providerId in the current organization",
+            "credentialId",
           );
         }
       }
@@ -239,7 +239,7 @@ export function createModelProvidersOAuthRouter() {
         userId: user.id,
         orgId,
         providerId: input.providerId,
-        ...(input.credential_id ? { reconnectCredentialId: input.credential_id } : {}),
+        ...(input.credentialId ? { reconnectCredentialId: input.credentialId } : {}),
         platformUrl,
         ttlSeconds: PAIRING_TTL_SECONDS,
       });
@@ -252,7 +252,7 @@ export function createModelProvidersOAuthRouter() {
         resourceId: id,
         after: {
           providerId: input.providerId,
-          reconnectCredentialId: input.credential_id ?? null,
+          reconnectCredentialId: input.credentialId ?? null,
           expiresAt: expiresAt.toISOString(),
           // No raw token in audit — leaks the bearer secret otherwise.
         },
@@ -292,7 +292,7 @@ export function createModelProvidersOAuthRouter() {
       status,
       consumed_at: row.consumedAt ? row.consumedAt.toISOString() : null,
       expiresAt: row.expiresAt.toISOString(),
-      credential_id: row.credentialId,
+      credentialId: row.credentialId,
     });
   });
 

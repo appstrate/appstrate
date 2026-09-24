@@ -111,17 +111,17 @@ describe("chatStreamSchema role validation", () => {
 describe("chatStreamSchema body fields", () => {
   const messages = [{ role: "user", parts: [{ type: "text", text: "salut" }] }];
 
-  it("accepts the snake_case model_id and reasoning_level", () => {
+  it("accepts modelId and the snake_case reasoning_level", () => {
     const result = chatStreamSchema.safeParse({
       messages,
-      model_id: "preset_1",
+      modelId: "preset_1",
       generation: { reasoning_level: "high" },
     });
     expect(result.success).toBe(true);
   });
 
-  it("rejects the camelCase modelId and reasoningLevel instead of dropping them", () => {
-    expect(chatStreamSchema.safeParse({ messages, modelId: "preset_1" }).success).toBe(false);
+  it("rejects model_id and reasoningLevel instead of dropping them", () => {
+    expect(chatStreamSchema.safeParse({ messages, model_id: "preset_1" }).success).toBe(false);
     expect(
       chatStreamSchema.safeParse({ messages, generation: { reasoningLevel: "high" } }).success,
     ).toBe(false);

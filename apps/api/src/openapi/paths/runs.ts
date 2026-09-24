@@ -51,10 +51,10 @@ const canonicalRunsPaths = {
         "magic-byte sniffing in both forms. " +
         "Send `rerun_from` instead of `input` to replay a previous run's input — same files, " +
         "new overrides — without re-uploading. " +
-        "The effective model is resolved at run creation with precedence: request `model_id` > " +
-        "agent model setting > org default model > system default. Without an explicit `model_id`, " +
+        "The effective model is resolved at run creation with precedence: request `modelId` > " +
+        "agent model setting > org default model > system default. Without an explicit `modelId`, " +
         "a change to the org default model between triggers applies to the next run — send " +
-        "`model_id` to pin a specific model per run. " +
+        "`modelId` to pin a specific model per run. " +
         "A run against a published version assembles its bundle from stored artifacts before " +
         "the container starts, so a bad artifact fails the trigger rather than the run: `422 " +
         "dependency_unresolved` (a pin with no published version), `422 bundle_invalid` (the " +
@@ -103,17 +103,17 @@ const canonicalRunsPaths = {
                   description:
                     "Run id whose persisted `input` to replay on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + space scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). Staged `upload://` inputs are materialized on the original run and rewritten in its persisted input as durable `appfile://` references, so later reruns reuse the same files without depending on upload retention. Existing `appfile://` inputs remain unchanged. **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Stage the file with `createUpload` when the input must be replayable.",
                 },
-                model_id: {
+                modelId: {
                   type: "string",
                   description:
-                    "Model ID override for this run — a system model key or an org-model UUID. Pins THIS run to that model, taking priority over the full resolution cascade (request `model_id` > agent model setting > org default model > system default). Without it, the org default is resolved at run creation — not ahead of time — so changing the org default between triggers silently changes the model used by subsequent runs. Returns 404 when the referenced model does not exist. The response echoes the resolved `model_label` + `model_source` so callers can verify which model the run actually uses.",
+                    "Model ID override for this run — a system model key or an org-model UUID. Pins THIS run to that model, taking priority over the full resolution cascade (request `modelId` > agent model setting > org default model > system default). Without it, the org default is resolved at run creation — not ahead of time — so changing the org default between triggers silently changes the model used by subsequent runs. Returns 404 when the referenced model does not exist. The response echoes the resolved `model_label` + `model_source` so callers can verify which model the run actually uses.",
                 },
                 generation: {
                   $ref: "#/components/schemas/ModelGenerationSettings",
                   description:
                     "Per-run temperature/reasoning override. A custom temperature is rejected only when explicitly unsupported; a reasoning level is accepted only when explicitly supported. Omitted properties inherit the agent defaults.",
                 },
-                proxy_id: {
+                proxyId: {
                   type: "string",
                   description:
                     'Proxy ID override for this run, or "none" to disable proxying. Takes priority over agent and org defaults.',
@@ -469,8 +469,8 @@ const canonicalRunsPaths = {
                     'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 409 `missing_integration_connection` if the chosen id is not accessible to the actor.',
                   additionalProperties: { type: "string", minLength: 1 },
                 },
-                model_id: { type: ["string", "null"] },
-                proxy_id: { type: ["string", "null"] },
+                modelId: { type: ["string", "null"] },
+                proxyId: { type: ["string", "null"] },
                 generation: {
                   $ref: "#/components/schemas/ModelGenerationSettings",
                   description:
@@ -696,8 +696,8 @@ const canonicalRunsPaths = {
                     "real launch too. Never persisted; no run is created. Values must be " +
                     "non-empty, same rule and same reason as on the launch surfaces.",
                 },
-                model_id: { type: ["string", "null"] },
-                proxy_id: { type: ["string", "null"] },
+                modelId: { type: ["string", "null"] },
+                proxyId: { type: ["string", "null"] },
                 generation: {
                   $ref: "#/components/schemas/ModelGenerationSettings",
                   description:
@@ -1154,7 +1154,7 @@ const canonicalRunsPaths = {
                       // Mirrors the `.strict()` Zod variant in
                       // `routes/runs-remote.ts` — an unknown key inside
                       // `source` is a 400, not a silent drop. In particular
-                      // `model_id`/`proxy_id` are NOT accepted here (a remote
+                      // `modelId`/`proxyId` are NOT accepted here (a remote
                       // run resolves no platform model); they remain valid on
                       // the classic agent-run endpoint only.
                       additionalProperties: false,

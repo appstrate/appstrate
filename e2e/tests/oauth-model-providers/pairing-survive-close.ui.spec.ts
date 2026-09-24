@@ -83,8 +83,7 @@ async function helperRedeem(page: Page, token: string) {
     },
   });
   expect(res.status()).toBe(200);
-  const { credential_id } = (await res.json()) as { credential_id: string };
-  return { credentialId: credential_id };
+  return (await res.json()) as { credentialId: string };
 }
 
 async function readStore(page: Page): Promise<string | null> {

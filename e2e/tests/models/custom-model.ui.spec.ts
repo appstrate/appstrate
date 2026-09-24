@@ -190,7 +190,7 @@ test.describe("Custom endpoint model — UI", () => {
       modelId: SERVED_MODEL,
       contextWindow: SERVED_CONTEXT,
       apiShape: "openai-completions",
-      baseUrl,
+      base_url: baseUrl,
     });
   });
 
@@ -312,7 +312,7 @@ test.describe("Custom endpoint model — UI", () => {
     await expect(dialog).toBeHidden();
     const created = (await listModels(apiClient)).find((m) => m.modelId === SERVED_MODEL);
     // Bound to the key that was picked — no second credential was minted.
-    expect(created).toMatchObject({ credentialId: credential.id, baseUrl });
+    expect(created).toMatchObject({ credentialId: credential.id, base_url: baseUrl });
   });
 
   test("reports a key the endpoint rejects", async ({ authedPage: page }) => {

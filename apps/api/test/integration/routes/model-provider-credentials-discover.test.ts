@@ -8,7 +8,7 @@
  * The invariants under test: the endpoint spends the supplied key on
  * `GET <base_url>/models` and on nothing else — once for a listing that fits in
  * one page, once more per page a paginated listing declares — writes NOTHING (a
- * `credential_id` round must
+ * `credentialId` round must
  * leave `available_model_ids` alone), never returns a per-token cost, and never
  * reads a subscription (OAuth) token. The harness also validates every JSON
  * body against the OpenAPI response schema, so these tests gate the documented
@@ -25,6 +25,7 @@ import { createTestContext, authHeaders, type TestContext } from "../../helpers/
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import { registerModelProvider } from "../../../src/services/model-providers/registry.ts";
+import { expectRejectedField } from "../../helpers/body-validation.ts";
 
 const app = getTestApp();
 
@@ -431,7 +432,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
       .from(modelProviderCredentials)
       .where(eq(modelProviderCredentials.id, id));
 
-    const res = await discover(ctx, { credential_id: id });
+    const res = await discover(ctx, { credentialId: id });
     expect(res.status).toBe(200);
     const body = (await res.json()) as DiscoverBody;
     expect(body.outcome).toBe("ok");
@@ -445,9 +446,9 @@ describe("POST /api/model-provider-credentials/discover", () => {
     expect(after?.ids ?? null).toEqual(before?.ids ?? null);
   });
 
-  it("returns 404 for an unknown credential_id", async () => {
+  it("returns 404 for an unknown credentialId", async () => {
     const res = await discover(ctx, {
-      credential_id: "00000000-0000-0000-0000-000000000000",
+      credentialId: "00000000-0000-0000-0000-000000000000",
     });
     expect(res.status).toBe(404);
   });
@@ -467,11 +468,16 @@ describe("POST /api/model-provider-credentials/discover", () => {
 
   it("refuses both forms at once", async () => {
     const res = await discover(ctx, {
-      credential_id: "00000000-0000-0000-0000-000000000000",
+      credentialId: "00000000-0000-0000-0000-000000000000",
       providerId: "openai-compatible",
       api_key: "good-key",
     });
     expect(res.status).toBe(400);
+  });
+
+  it("refuses the snake_case credential_id — the id keeps its camelCase name", async () => {
+    const id = await createCustomCredential(ctx, GOOD_BASE_URL);
+    await expectRejectedField(await discover(ctx, { credential_id: id }), "credential_id");
   });
 
   it("refuses neither form", async () => {

@@ -95,9 +95,9 @@ export const runAgentBodySchema = z
      * naming the field — neither is a shape.
      */
     rerun_from: z.string().optional(),
-    model_id: z.string().optional(),
+    modelId: z.string().optional(),
     generation: modelGenerationSettingsSchema.optional(),
-    proxy_id: z.string().optional(),
+    proxyId: z.string().optional(),
     connection_overrides: connectionOverridesSchema.optional(),
     dependency_overrides: z.record(z.string(), z.string()).optional(),
   })
@@ -122,9 +122,9 @@ const inlineRunBodySchema = z
     manifest: z.unknown().optional(),
     prompt: z.unknown().optional(),
     input: z.record(z.string(), z.unknown()).optional(),
-    model_id: z.string().nullable().optional(),
+    modelId: z.string().nullable().optional(),
     generation: modelGenerationSettingsSchema.optional(),
-    proxy_id: z.string().nullable().optional(),
+    proxyId: z.string().nullable().optional(),
     /**
      * `appfile://` URIs to mount read-only into the run's input-file directory
      * without declaring a file field in the manifest (fan-in by reference). Entry
@@ -328,7 +328,7 @@ export function createRunsRouter() {
           effectiveAgent.manifest as unknown as Record<string, unknown>,
         );
 
-        // An explicit per-run `model_id` override must reference a real model
+        // An explicit per-run `modelId` override must reference a real model
         // (system key or org-model UUID). Reject unknown/malformed values with a
         // clean 404 rather than letting them silently fall through to the org
         // default downstream (or crash the uuid cast — see loadModel).

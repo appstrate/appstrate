@@ -396,7 +396,7 @@ export async function triggerInlineRun(params: {
     : undefined;
   assertPromptFilesCoveredByInput(prompt, effectiveInput, inputSchema);
 
-  // Reject an unknown/malformed explicit `model_id` with a clean 404 before we
+  // Reject an unknown/malformed explicit `modelId` with a clean 404 before we
   // mint a shadow package — avoids both a leaked shadow row and the downstream
   // uuid-cast crash.
   await assertExplicitModelExists(orgId, modelIdOverride);

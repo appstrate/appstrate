@@ -408,7 +408,7 @@ export interface paths {
         put?: never;
         /**
          * Execute an agent
-         * @description Start an agent run (fire-and-forget — the response does not wait for execution). Returns `201` + the created run resource — same shape as `GET /runs/{id}` — including the resolved `model_label` / `model_source`. Rate-limited to 20/min. The body is JSON. File-typed input fields (`format: uri` + `contentMediaType` in the agent's input schema) accept either of two forms: (1) an `upload://upl_xxx` reference from `createUpload` — stage the bytes first by PUTting them to the signed URL (see `createUpload` for the step-by-step recipe); or (2) an inline RFC 2397 data URI `data:<mime>;name=<filename>;base64,<payload>` with up to 4 MiB of decoded content (`name` is optional) — the single-call path for JSON-only clients such as MCP. Inline bytes are written to the run workspace as a file and the payload is stripped from the persisted run input (the stored value keeps only a `data:<mime>;name=<doc>;base64,` marker). Declared binary MIMEs are verified by magic-byte sniffing in both forms. Send `rerun_from` instead of `input` to replay a previous run's input — same files, new overrides — without re-uploading. The effective model is resolved at run creation with precedence: request `model_id` > agent model setting > org default model > system default. Without an explicit `model_id`, a change to the org default model between triggers applies to the next run — send `model_id` to pin a specific model per run. A run against a published version assembles its bundle from stored artifacts before the container starts, so a bad artifact fails the trigger rather than the run: `422 dependency_unresolved` (a pin with no published version), `422 bundle_invalid` (the stored archive cannot be assembled), `422 bundle_signature_invalid` (rejected by `AFPS_SIGNATURE_POLICY`), or `500 bundle_integrity_mismatch` (the stored bytes no longer match the integrity hash recorded at publish time — republish the package). No run row is created in any of those cases. The body is closed: an unknown field, or a field whose type does not match, is a `400` rather than a silently ignored value, and a malformed JSON body is a `400` rather than an input-less run. Send no body at all for a run whose input resolves entirely from stored values.
+         * @description Start an agent run (fire-and-forget — the response does not wait for execution). Returns `201` + the created run resource — same shape as `GET /runs/{id}` — including the resolved `model_label` / `model_source`. Rate-limited to 20/min. The body is JSON. File-typed input fields (`format: uri` + `contentMediaType` in the agent's input schema) accept either of two forms: (1) an `upload://upl_xxx` reference from `createUpload` — stage the bytes first by PUTting them to the signed URL (see `createUpload` for the step-by-step recipe); or (2) an inline RFC 2397 data URI `data:<mime>;name=<filename>;base64,<payload>` with up to 4 MiB of decoded content (`name` is optional) — the single-call path for JSON-only clients such as MCP. Inline bytes are written to the run workspace as a file and the payload is stripped from the persisted run input (the stored value keeps only a `data:<mime>;name=<doc>;base64,` marker). Declared binary MIMEs are verified by magic-byte sniffing in both forms. Send `rerun_from` instead of `input` to replay a previous run's input — same files, new overrides — without re-uploading. The effective model is resolved at run creation with precedence: request `modelId` > agent model setting > org default model > system default. Without an explicit `modelId`, a change to the org default model between triggers applies to the next run — send `modelId` to pin a specific model per run. A run against a published version assembles its bundle from stored artifacts before the container starts, so a bad artifact fails the trigger rather than the run: `422 dependency_unresolved` (a pin with no published version), `422 bundle_invalid` (the stored archive cannot be assembled), `422 bundle_signature_invalid` (rejected by `AFPS_SIGNATURE_POLICY`), or `500 bundle_integrity_mismatch` (the stored bytes no longer match the integrity hash recorded at publish time — republish the package). No run row is created in any of those cases. The body is closed: an unknown field, or a field whose type does not match, is a `400` rather than a silently ignored value, and a malformed JSON body is a `400` rather than an input-less run. Send no body at all for a run whose input resolves entirely from stored values.
          */
         post: operations["runAgent"];
         delete?: never;
@@ -2186,7 +2186,7 @@ export interface paths {
         put?: never;
         /**
          * Mint a one-shot pairing token for the connect helper
-         * @description Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. Pass `credential_id` to reconnect that exact org credential in place; omit it to create a new connection. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Space-Id` — the resulting credential lives in `model_provider_credentials`, which has no space affinity).
+         * @description Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. Pass `credentialId` to reconnect that exact org credential in place; omit it to create a new connection. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Space-Id` — the resulting credential lives in `model_provider_credentials`, which has no space affinity).
          */
         post: operations["createOAuthModelProviderPairing"];
         delete?: never;
@@ -6131,7 +6131,7 @@ export interface components {
             proxy_label: string | null;
             /** @description Model label used at run time */
             model_label: string | null;
-            /** @description Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `model_id` override. */
+            /** @description Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override. */
             model_source: string | null;
             /** @description Run cost in dollars */
             cost: number | null;
@@ -7886,12 +7886,12 @@ export interface operations {
                     input?: Record<string, never>;
                     /** @description Run id whose persisted `input` to replay on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + space scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). Staged `upload://` inputs are materialized on the original run and rewritten in its persisted input as durable `appfile://` references, so later reruns reuse the same files without depending on upload retention. Existing `appfile://` inputs remain unchanged. **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Stage the file with `createUpload` when the input must be replayable. */
                     rerun_from?: string;
-                    /** @description Model ID override for this run — a system model key or an org-model UUID. Pins THIS run to that model, taking priority over the full resolution cascade (request `model_id` > agent model setting > org default model > system default). Without it, the org default is resolved at run creation — not ahead of time — so changing the org default between triggers silently changes the model used by subsequent runs. Returns 404 when the referenced model does not exist. The response echoes the resolved `model_label` + `model_source` so callers can verify which model the run actually uses. */
-                    model_id?: string;
+                    /** @description Model ID override for this run — a system model key or an org-model UUID. Pins THIS run to that model, taking priority over the full resolution cascade (request `modelId` > agent model setting > org default model > system default). Without it, the org default is resolved at run creation — not ahead of time — so changing the org default between triggers silently changes the model used by subsequent runs. Returns 404 when the referenced model does not exist. The response echoes the resolved `model_label` + `model_source` so callers can verify which model the run actually uses. */
+                    modelId?: string;
                     /** @description Per-run temperature/reasoning override. A custom temperature is rejected only when explicitly unsupported; a reasoning level is accepted only when explicitly supported. Omitted properties inherit the agent defaults. */
                     generation?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Proxy ID override for this run, or "none" to disable proxying. Takes priority over agent and org defaults. */
-                    proxy_id?: string;
+                    proxyId?: string;
                     /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 409 `missing_integration_connection` if the chosen id is not accessible to the actor. */
                     connection_overrides?: {
                         [key: string]: string;
@@ -9771,7 +9771,7 @@ export interface operations {
             content: {
                 "application/json": {
                     messages: Record<string, never>[];
-                    model_id?: string;
+                    modelId?: string;
                     generation?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Lets the assistant author agents (create, edit, compose inline) this turn; absent = on. Narrows the caller's own grants, never widens them. */
                     agent_authoring?: boolean;
@@ -13727,7 +13727,7 @@ export interface operations {
                      * Format: uuid
                      * @description An existing organization credential to enumerate. Built-in/system credentials are refused (`operation_not_allowed`).
                      */
-                    credential_id?: string;
+                    credentialId?: string;
                     /** @description Canonical registry providerId (`openai-compatible`, `openai`, …). Discovered via `GET /api/model-provider-credentials/registry`. */
                     providerId?: string;
                     /** @description API key for the endpoint. Used for this one request and never stored or echoed back. */
@@ -13794,7 +13794,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Forbidden — caller lacks `model-provider-credentials:write` (generic RBAC), or `operation_not_allowed` when `credential_id` refers to a built-in/system credential. */
+            /** @description Forbidden — caller lacks `model-provider-credentials:write` (generic RBAC), or `operation_not_allowed` when `credentialId` refers to a built-in/system credential. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -14117,7 +14117,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Credential created or reconnected in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, so the models the helper prints in its terminal summary have to travel back in this response. `available_model_ids` is therefore a projection of the credential's own servable set — byte-for-byte what `available_model_ids` reports for this `credential_id` on `GET /api/model-provider-credentials`, resolved through the same accessor, so the terminal and the dashboard can never disagree. For subscription providers (`codex`, `claude-code`) that set is derived from the provider definition ∩ the pricing catalog with no upstream call; for probe-validated providers a reconnect preserves the credential's empirically discovered list. The dashboard obtains the resulting credential via `GET /pairing/{id}` polling (`credential_id`) + the credentials list. */
+            /** @description Credential created or reconnected in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, so the models the helper prints in its terminal summary have to travel back in this response. `available_model_ids` is therefore a projection of the credential's own servable set — byte-for-byte what `available_model_ids` reports for this `credentialId` on `GET /api/model-provider-credentials`, resolved through the same accessor, so the terminal and the dashboard can never disagree. For subscription providers (`codex`, `claude-code`) that set is derived from the provider definition ∩ the pricing catalog with no upstream call; for probe-validated providers a reconnect preserves the credential's empirically discovered list. The dashboard obtains the resulting credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -14125,7 +14125,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         /** Format: uuid */
-                        credential_id: string;
+                        credentialId: string;
                         providerId: string;
                         /** Format: email */
                         email?: string;
@@ -14166,7 +14166,7 @@ export interface operations {
                      * Format: uuid
                      * @description Existing OAuth credential to reconnect in place. It must belong to the current organization and match `providerId`; omit it when connecting a new account.
                      */
-                    credential_id?: string;
+                    credentialId?: string;
                 };
             };
         };
@@ -14235,7 +14235,7 @@ export interface operations {
                          * Format: uuid
                          * @description ID of the model_provider_credentials row created by the helper. Null while the pairing is still pending or expired without consumption.
                          */
-                        credential_id: string | null;
+                        credentialId: string | null;
                     };
                 };
             };
@@ -14804,7 +14804,7 @@ export interface operations {
                      *           "type": "run_completed",
                      *           "runId": "run_cm4jkl012",
                      *           "payload": {
-                     *             "agent_id": "@acme/email-sorter",
+                     *             "packageId": "@acme/email-sorter",
                      *             "status": "success"
                      *           },
                      *           "read_at": null,
@@ -14827,7 +14827,7 @@ export interface operations {
                             type: string;
                             /** @description Originating run id, when the notification references one */
                             runId: string | null;
-                            /** @description Render-without-join data. `run_completed`: `agent_id`, `status`. `package_shared`: `packageId`, `package_type`, `shared_by_name`. */
+                            /** @description Render-without-join data. `run_completed`: `packageId`, `status`. `package_shared`: `packageId`, `package_type`, `shared_by_name`. */
                             payload: {
                                 [key: string]: unknown;
                             } | null;
@@ -19711,8 +19711,8 @@ export interface operations {
                     connection_overrides?: {
                         [key: string]: string;
                     };
-                    model_id?: string | null;
-                    proxy_id?: string | null;
+                    modelId?: string | null;
+                    proxyId?: string | null;
                     /** @description Per-run temperature/reasoning override, same contract as `POST /api/agents/{scope}/{name}/run`. Omitted properties inherit the manifest's model settings. */
                     generation?: components["schemas"]["ModelGenerationSettings"];
                 };
@@ -19881,8 +19881,8 @@ export interface operations {
                     connection_overrides?: {
                         [key: string]: string;
                     };
-                    model_id?: string | null;
-                    proxy_id?: string | null;
+                    modelId?: string | null;
+                    proxyId?: string | null;
                     /** @description Same field as `POST /api/runs/inline` — validated for shape, never applied; no run is created. */
                     generation?: components["schemas"]["ModelGenerationSettings"];
                 };

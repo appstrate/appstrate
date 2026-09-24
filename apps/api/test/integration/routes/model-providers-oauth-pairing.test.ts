@@ -12,6 +12,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import { expectRejectedField } from "../../helpers/body-validation.ts";
 
 const app = getTestApp();
 
@@ -52,17 +53,20 @@ describe("POST /api/model-providers-oauth/pairing", () => {
     expect(res.status).toBe(401);
   });
 
-  it("keeps the carve-out name `providerId`: `provider_id` and `credentialId` are 400", async () => {
-    for (const body of [
-      { provider_id: "test-oauth" },
-      { providerId: "test-oauth", credentialId: "00000000-0000-4000-8000-000000000000" },
-    ]) {
+  it("keeps the carve-out names `providerId` / `credentialId`: `provider_id` and `credential_id` are 400", async () => {
+    for (const [field, body] of [
+      ["provider_id", { provider_id: "test-oauth" }],
+      [
+        "credential_id",
+        { providerId: "test-oauth", credential_id: "00000000-0000-4000-8000-000000000000" },
+      ],
+    ] as const) {
       const res = await app.request("/api/model-providers-oauth/pairing", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify(body),
       });
-      expect(res.status).toBe(400);
+      await expectRejectedField(res, field);
     }
   });
 

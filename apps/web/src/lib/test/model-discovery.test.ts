@@ -27,7 +27,7 @@ describe("buildDiscoverBody — a saved credential", () => {
         inlineApiKey: "sk-typed",
         baseUrl: "http://localhost:11434/v1",
       }),
-    ).toEqual({ credential_id: "cred_1" });
+    ).toEqual({ credentialId: "cred_1" });
   });
 });
 

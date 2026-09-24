@@ -79,10 +79,10 @@ export const updateSchema = z
   })
   .strict();
 
-/** Exactly one of `credential_id` or inline `providerId` + `api_key`; the route enforces which. */
+/** Exactly one of `credentialId` or inline `providerId` + `api_key`; the route enforces which. */
 export const discoverSchema = z
   .object({
-    credential_id: z.uuid().optional(),
+    credentialId: z.uuid().optional(),
     providerId: z.string().min(1).optional(),
     api_key: z.string().min(1).optional(),
     base_url_override: z.url().optional(),
@@ -125,21 +125,21 @@ async function resolveDiscoverTarget(
     body.api_key !== undefined ||
     body.base_url_override !== undefined;
 
-  if (body.credential_id !== undefined) {
+  if (body.credentialId !== undefined) {
     if (inline) {
       throw invalidRequest(
-        "Provide either credential_id or an inline providerId + api_key, not both",
-        "credential_id",
+        "Provide either credentialId or an inline providerId + api_key, not both",
+        "credentialId",
       );
     }
-    if (isSystemModelProviderCredential(body.credential_id)) {
-      throw systemEntityForbidden("model provider credential", body.credential_id);
+    if (isSystemModelProviderCredential(body.credentialId)) {
+      throw systemEntityForbidden("model provider credential", body.credentialId);
     }
-    const creds = await loadInferenceCredentials(orgId, body.credential_id);
+    const creds = await loadInferenceCredentials(orgId, body.credentialId);
     if (!creds) throw notFound("Model provider credential not found");
     const cfg = getModelProvider(creds.providerId);
-    if (!cfg) throw invalidRequest(`Unknown providerId: ${creds.providerId}`, "credential_id");
-    assertEnumerableProvider(cfg, "credential_id");
+    if (!cfg) throw invalidRequest(`Unknown providerId: ${creds.providerId}`, "credentialId");
+    assertEnumerableProvider(cfg, "credentialId");
     return {
       providerId: creds.providerId,
       apiShape: creds.apiShape,
@@ -150,8 +150,8 @@ async function resolveDiscoverTarget(
 
   if (!inline) {
     throw invalidRequest(
-      "Provide either credential_id or an inline providerId + api_key",
-      "credential_id",
+      "Provide either credentialId or an inline providerId + api_key",
+      "credentialId",
     );
   }
   if (body.providerId === undefined) throw invalidRequest("providerId is required", "providerId");
@@ -380,7 +380,7 @@ export function createModelProviderCredentialsRouter() {
       await recordAuditFromContext(c, {
         action: "model_provider_credential.discovered",
         resourceType: "model_provider_credential",
-        resourceId: body.credential_id ?? null,
+        resourceId: body.credentialId ?? null,
         after: {
           providerId: target.providerId,
           baseUrl: target.baseUrl,

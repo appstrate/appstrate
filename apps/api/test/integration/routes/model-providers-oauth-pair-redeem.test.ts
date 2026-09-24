@@ -31,7 +31,7 @@ async function mintPairing(ctx: TestContext, providerId = "test-oauth", credenti
     headers: authHeaders(ctx, { "Content-Type": "application/json" }),
     body: JSON.stringify({
       providerId,
-      ...(credentialId ? { credential_id: credentialId } : {}),
+      ...(credentialId ? { credentialId } : {}),
     }),
   });
   expect(res.status).toBe(200);
@@ -77,9 +77,9 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.providerId).toBe("test-oauth");
-    expect(body.credential_id).toBeTruthy();
+    expect(body.credentialId).toBeTruthy();
     expect(Array.isArray(body.available_model_ids)).toBe(true);
-    for (const retired of ["provider_id", "credentialId", "availableModelIds"]) {
+    for (const retired of ["provider_id", "credential_id", "availableModelIds"]) {
       expect(body).not.toHaveProperty(retired);
     }
   });
@@ -117,8 +117,8 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
       }),
     });
     expect(reconnect.status).toBe(200);
-    const reconnected = (await reconnect.json()) as { credential_id: string };
-    expect(reconnected.credential_id).toBe(originalCredentialId);
+    const reconnected = (await reconnect.json()) as { credentialId: string };
+    expect(reconnected.credentialId).toBe(originalCredentialId);
 
     const credentialsResponse = await app.request("/api/model-provider-credentials", {
       headers: authHeaders(ctx),
@@ -247,7 +247,7 @@ describe("POST /api/model-providers-oauth/pair/redeem — reported model list", 
     });
     expect(redeem.status).toBe(200);
     const redeemed = (await redeem.json()) as {
-      credential_id: string;
+      credentialId: string;
       available_model_ids: string[];
     };
 
@@ -258,7 +258,7 @@ describe("POST /api/model-providers-oauth/pair/redeem — reported model list", 
     const { data } = (await list.json()) as {
       data: { id: string; available_model_ids?: string[] | null }[];
     };
-    const credential = data.find((c) => c.id === redeemed.credential_id);
+    const credential = data.find((c) => c.id === redeemed.credentialId);
     expect(credential).toBeDefined();
 
     // The invariant: one connection, one answer. Order included — the head of

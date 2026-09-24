@@ -83,7 +83,7 @@ export const CreateRemoteRunBodySchema = z
     //                  catalog. Deterministic attribution, no fingerprint
     //                  reconciliation, no spoof surface.
     //
-    // Neither shape accepts `model_id` / `proxy_id`. A remote run resolves no
+    // Neither shape accepts `modelId` / `proxyId`. A remote run resolves no
     // platform model at creation — the runner executes on its own host with
     // its own model + credentials, so `runs.model_label` / `runs.model_source`
     // stay NULL and inference routed through `/api/llm-proxy` is resolved from

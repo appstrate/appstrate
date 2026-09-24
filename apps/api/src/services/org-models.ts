@@ -984,7 +984,7 @@ export async function modelNeedsReconnection(orgId: string, modelDbId: string): 
 }
 
 /**
- * Validate an explicit, caller-supplied model id (run body `model_id` / schedule row).
+ * Validate an explicit, caller-supplied `modelId` (run body / schedule row).
  *
  * `loadModel` resolves both system-model keys and org-model UUIDs, returning
  * null for anything else (including non-UUID strings, which it now swallows

@@ -563,8 +563,8 @@ async function triggerRun(opts: RunRemoteOptions, deps: HttpDeps): Promise<strin
   const body: Record<string, unknown> = {
     input: opts.input,
   };
-  if (opts.modelId != null) body.model_id = opts.modelId;
-  if (opts.proxyId != null) body.proxy_id = opts.proxyId;
+  if (opts.modelId != null) body.modelId = opts.modelId;
+  if (opts.proxyId != null) body.proxyId = opts.proxyId;
 
   const headers = platformHeaders(opts, { "Content-Type": "application/json" });
   // ALWAYS attach an Idempotency-Key before the retry loop. Prefer the

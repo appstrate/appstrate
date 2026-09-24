@@ -95,9 +95,9 @@ describe("POST /api/agents/:scope/:name/run — body validation", () => {
     expect(((await res.json()) as { code: string }).code).toBe("invalid_request");
   });
 
-  it("rejects the camelCase modelId, proxyId and reasoningLevel with 400", async () => {
-    await expectRejectedField(await post({ input: {}, modelId: "claude-sonnet-4" }), "modelId");
-    await expectRejectedField(await post({ input: {}, proxyId: "none" }), "proxyId");
+  it("rejects the snake_case model_id, proxy_id and camelCase reasoningLevel with 400", async () => {
+    await expectRejectedField(await post({ input: {}, model_id: "claude-sonnet-4" }), "model_id");
+    await expectRejectedField(await post({ input: {}, proxy_id: "none" }), "proxy_id");
     await expectRejectedField(
       await post({ input: {}, generation: { reasoningLevel: "high" } }),
       "generation.reasoningLevel",
@@ -144,9 +144,9 @@ describe("POST /api/agents/:scope/:name/run — body validation", () => {
     // version resolution (404) rather than being refused by the schema.
     const res = await post({
       input: { topic: "ops" },
-      model_id: "claude-sonnet-4",
-      generation: { temperature: 0.2 },
-      proxy_id: "none",
+      modelId: "claude-sonnet-4",
+      generation: { temperature: 0.2, reasoning_level: "high" },
+      proxyId: "none",
       connection_overrides: { "@acme/gmail": "conn_1" },
       dependency_overrides: { "@acme/skill": "draft" },
     });
@@ -205,11 +205,11 @@ describe("POST /api/runs/inline/validate — body validation", () => {
     await expectRejectedField(res, "dependency_overrides");
   });
 
-  it("rejects the camelCase modelId and proxyId, accepts model_id and proxy_id", async () => {
+  it("rejects the snake_case model_id and proxy_id, accepts modelId and proxyId", async () => {
     const base = { manifest: validManifest(), prompt: "do" };
-    await expectRejectedField(await post({ ...base, modelId: null }), "modelId");
-    await expectRejectedField(await post({ ...base, proxyId: null }), "proxyId");
-    expect((await post({ ...base, model_id: null, proxy_id: null })).status).toBe(200);
+    await expectRejectedField(await post({ ...base, model_id: null }), "model_id");
+    await expectRejectedField(await post({ ...base, proxy_id: null }), "proxy_id");
+    expect((await post({ ...base, modelId: null, proxyId: null })).status).toBe(200);
   });
 
   it("accepts `generation` — honoured on this surface, now documented too", async () => {

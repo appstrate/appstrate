@@ -77,9 +77,10 @@ describe("POST /api/model-providers-oauth/pair/redeem — pairing-bearer track",
       body: JSON.stringify(VALID_BODY("test-oauth")),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { providerId: string; credential_id: string };
+    const body = (await res.json()) as Record<string, unknown>;
     expect(body.providerId).toBe("test-oauth");
-    expect(body.credential_id).toBeTruthy();
+    expect(body.credentialId).toBeTruthy();
+    expect(body).not.toHaveProperty("credential_id");
   });
 
   it("flips the pairing's consumed_at on success (single-use)", async () => {
@@ -100,14 +101,14 @@ describe("POST /api/model-providers-oauth/pair/redeem — pairing-bearer track",
     expect(row?.consumedAt).toBeInstanceOf(Date);
   });
 
-  it("surfaces the redeemed credential on the pairing poll as snake_case", async () => {
+  it("surfaces the redeemed credential on the pairing poll", async () => {
     const pairing = await mintPairing(ctx, "test-oauth");
     const redeem = await app.request("/api/model-providers-oauth/pair/redeem", {
       method: "POST",
       headers: bearerHeaders(pairing.token),
       body: JSON.stringify(VALID_BODY("test-oauth")),
     });
-    const { credential_id } = (await redeem.json()) as { credential_id: string };
+    const { credentialId } = (await redeem.json()) as { credentialId: string };
 
     const res = await app.request(`/api/model-providers-oauth/pairing/${pairing.id}`, {
       headers: authHeaders(ctx),
@@ -116,9 +117,9 @@ describe("POST /api/model-providers-oauth/pair/redeem — pairing-bearer track",
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.status).toBe("consumed");
     expect(typeof body.consumed_at).toBe("string");
-    expect(body.credential_id).toBe(credential_id);
+    expect(body.credentialId).toBe(credentialId);
     expect(body).not.toHaveProperty("consumedAt");
-    expect(body).not.toHaveProperty("credentialId");
+    expect(body).not.toHaveProperty("credential_id");
   });
 
   it("rejects the retired camelCase token fields with 400", async () => {

@@ -141,7 +141,7 @@ export const chatStreamSchema = z
         });
         withByteCap(CHAT_MESSAGE_MAX_BYTES)(messages.at(-1), ctx);
       }),
-    model_id: z.string().optional(),
+    modelId: z.string().optional(),
     generation: modelGenerationSettingsSchema.optional(),
     /** The composer's agent-authoring switch; absent = on. See {@link turnPermissions}. */
     agent_authoring: z.boolean().optional(),
@@ -308,7 +308,7 @@ export async function handleChatStream(
   // so `c.get("space")` is the one the caller's `chat:write` was checked
   // against — reading it again from `/api/spaces` would be a second, divergent
   // answer (it also ignored an API key's pinned space).
-  const modelId = c.req.header("X-Model-Id") ?? body.model_id;
+  const modelId = c.req.header("X-Model-Id") ?? body.modelId;
 
   // Flipping the switch changes the system prompt and, through the narrowed token, the
   // MCP `run_and_wait` descriptor on the same turn: one prompt-cache miss.

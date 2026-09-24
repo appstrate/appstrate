@@ -342,9 +342,9 @@ export const modelProviderCredentialsPaths = {
             schema: {
               type: "object",
               description:
-                "Exactly one of the two forms: `credential_id` alone, or `providerId` + `api_key` (+ optional `base_url_override`). Both forms together, or neither, is a 400.",
+                "Exactly one of the two forms: `credentialId` alone, or `providerId` + `api_key` (+ optional `base_url_override`). Both forms together, or neither, is a 400.",
               properties: {
-                credential_id: {
+                credentialId: {
                   type: "string",
                   format: "uuid",
                   description:
@@ -476,7 +476,7 @@ export const modelProviderCredentialsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           description:
-            "Forbidden — caller lacks `model-provider-credentials:write` (generic RBAC), or `operation_not_allowed` when `credential_id` refers to a built-in/system credential.",
+            "Forbidden — caller lacks `model-provider-credentials:write` (generic RBAC), or `operation_not_allowed` when `credentialId` refers to a built-in/system credential.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

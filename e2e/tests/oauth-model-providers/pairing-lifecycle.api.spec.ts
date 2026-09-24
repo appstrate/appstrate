@@ -20,7 +20,7 @@
  *      bypasses the JWT identity hook when present — exact path used by
  *      `@appstrate/connect-helper` when the upstream provider returns the
  *      identity in the OAuth response body)
- *   5. GET  /pairing/:id        → consumed + credential_id populated
+ *   5. GET  /pairing/:id        → consumed + credentialId populated
  *   6. GET  /model-provider-credentials → new row carries
  *                                 `authMode:"oauth2"`, `source:"custom"`,
  *                                 `providerId:"<provider>"`,
@@ -43,7 +43,7 @@ import { test, expect } from "../../fixtures/api.fixture.ts";
 
 interface ProviderCase {
   id: string;
-  // `accountId` is only forwarded for providers that declare an
+  // `account_id` is only forwarded for providers that declare an
   // `extractTokenIdentity` hook + `requiredIdentityClaims: ["accountId"]`
   // (codex). Hook-less providers (claude-code) reject the import if a
   // body field they don't understand is required, so we omit it.
@@ -67,11 +67,11 @@ interface PairingStatusResponse {
   status: "pending" | "consumed" | "expired";
   consumed_at: string | null;
   expiresAt: string;
-  credential_id: string | null;
+  credentialId: string | null;
 }
 
 interface ImportResponse {
-  credential_id: string;
+  credentialId: string;
   providerId: string;
   available_model_ids: string[];
   email?: string;
@@ -110,7 +110,7 @@ for (const provider of PROVIDER_CASES) {
       const pending = (await pendingRes.json()) as PairingStatusResponse;
       expect(pending.status).toBe("pending");
       expect(pending.consumed_at).toBeNull();
-      expect(pending.credential_id).toBeNull();
+      expect(pending.credentialId).toBeNull();
 
       // 3. Replay-proof bearer: a token-shaped string that didn't come from
       //    a real mint MUST 410, not 401 (single error code, no enumeration).
@@ -156,7 +156,7 @@ for (const provider of PROVIDER_CASES) {
       expect(importRes.status()).toBe(200);
       const imported = (await importRes.json()) as ImportResponse;
       expect(imported.providerId).toBe(provider.id);
-      expect(imported.credential_id).toBeTruthy();
+      expect(imported.credentialId).toBeTruthy();
       expect(Array.isArray(imported.available_model_ids)).toBe(true);
       expect(imported.available_model_ids.length).toBeGreaterThan(0);
 
@@ -167,14 +167,14 @@ for (const provider of PROVIDER_CASES) {
         const consumed = (await consumedRes.json()) as PairingStatusResponse;
         expect(consumed.status).toBe("consumed");
         expect(consumed.consumed_at).not.toBeNull();
-        expect(consumed.credential_id).toBe(imported.credential_id);
+        expect(consumed.credentialId).toBe(imported.credentialId);
 
         // 6. The credential surfaces in the org-wide list with the OAuth-extended
         //    shape the UI reads to render the badge.
         const listRes = await apiClient.get("/model-provider-credentials");
         expect(listRes.status()).toBe(200);
         const list = (await listRes.json()) as { data: CredentialRow[] };
-        const row = list.data.find((r) => r.id === imported.credential_id);
+        const row = list.data.find((r) => r.id === imported.credentialId);
         expect(row).toBeDefined();
         expect(row?.authMode).toBe("oauth2");
         expect(row?.source).toBe("custom");
@@ -204,13 +204,13 @@ for (const provider of PROVIDER_CASES) {
         // 8. Always revoke the credential we created so this test is rerunnable
         //    against a long-lived `reuseExistingServer` instance.
         const deleteRes = await apiClient.delete(
-          `/model-provider-credentials/${imported.credential_id}`,
+          `/model-provider-credentials/${imported.credentialId}`,
         );
         expect([204, 404]).toContain(deleteRes.status());
 
         const listAfter = await apiClient.get("/model-provider-credentials");
         const after = (await listAfter.json()) as { data: CredentialRow[] };
-        expect(after.data.find((r) => r.id === imported.credential_id)).toBeUndefined();
+        expect(after.data.find((r) => r.id === imported.credentialId)).toBeUndefined();
       }
 
       // 9. Cancelling a pairing is idempotent — wrong/unknown id is silent 204

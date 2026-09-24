@@ -106,10 +106,10 @@ export function OAuthPairingBody({
       void qc.invalidateQueries({ queryKey: ["get", "/api/model-provider-credentials"] });
       void qc.invalidateQueries({ queryKey: ["get", "/api/models"] });
     }
-    const credentialId = pairingStatus.data.credential_id;
+    const credentialId = pairingStatus.data.credentialId;
     if (credentialId && onConnected) queueMicrotask(() => onConnected(credentialId));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pairingStatus.data?.status, pairingStatus.data?.credential_id]);
+  }, [pairingStatus.data?.status, pairingStatus.data?.credentialId]);
 
   // Report "busy" while a token is minted and still pending — hosts use it
   // to confirm before an accidental dismiss. Ref keeps the latest callback
@@ -131,7 +131,7 @@ export function OAuthPairingBody({
     registeredRef.current = false;
     try {
       const res = await createPairing.mutateAsync({
-        body: { providerId, ...(credentialId ? { credential_id: credentialId } : {}) },
+        body: { providerId, ...(credentialId ? { credentialId } : {}) },
       });
       setPairing({ id: res.id, command: res.command });
       // Register so `<PendingPairingsWatcher>` can poll this to completion

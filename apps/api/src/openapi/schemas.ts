@@ -1135,7 +1135,7 @@ export const schemas = {
       model_source: {
         type: ["string", "null"],
         description:
-          "Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `model_id` override.",
+          "Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override.",
       },
       cost: { type: ["number", "null"], description: "Run cost in dollars" },
       cost_pricing_status: {
