@@ -9,6 +9,7 @@ import { ApiError } from "../lib/errors.ts";
 import {
   uploadPackageZip,
   downloadVersionZip,
+  downloadVersionZipForExecution,
   deleteVersionZip,
   buildMinimalZip,
 } from "./package-storage.ts";
@@ -326,10 +327,12 @@ export interface VersionDetail {
 export async function getVersionDetail(
   packageId: string,
   versionSpec: string,
+  /** The version will run: apply the AFPS signature policy to its bytes. */
+  opts: { forExecution?: boolean } = {},
 ): Promise<VersionDetail | null> {
   const row = await getVersionRow(packageId, versionSpec);
   if (!row) return null;
-  return { ...row, content: await readVersionArchive(packageId, row.version) };
+  return { ...row, content: await readVersionArchive(packageId, row.version, opts) };
 }
 
 /** A version's catalog row — {@link getVersionDetail} without reading its archive. */
@@ -371,15 +374,18 @@ export async function getVersionRow(
 /**
  * A published version's files: null when the object is absent or will not unzip — a
  * reader that needs the bytes goes through {@link requirePublishedArchive}. Storage errors
- * propagate; bundle-layer refusals (the signature gate inside the download) are coded (#878).
+ * propagate; bundle-layer refusals (the signature gate of an execution read) are coded (#878).
  */
 export async function readVersionArchive(
   packageId: string,
   version: string,
+  /** The version will run: apply the AFPS signature policy to its bytes. */
+  opts: { forExecution?: boolean } = {},
 ): Promise<Record<string, Uint8Array> | null> {
+  const download = opts.forExecution ? downloadVersionZipForExecution : downloadVersionZip;
   let zipBuffer: Buffer | null;
   try {
-    zipBuffer = await downloadVersionZip(packageId, version);
+    zipBuffer = await download(packageId, version);
   } catch (err) {
     throw toBundleApiError(err) ?? err;
   }
@@ -631,8 +637,7 @@ async function getLatestVersionIntegrity(packageId: string): Promise<string | nu
   return row?.integrity ?? null;
 }
 
-type CreateVersionError =
-  "invalid_version" | "invalid_bundle" | "no_changes" | "version_exists" | "conflict";
+type CreateVersionError = "invalid_version" | "invalid_bundle" | "no_changes" | "version_exists";
 type CreateVersionResult =
   { id: number; version: string } | { error: CreateVersionError; detail?: string };
 
@@ -648,10 +653,10 @@ export async function createVersionFromDraft(params: {
   userId: string;
   version?: string;
   /**
-   * The draft `lock_version` the caller read. When set and the draft has moved
-   * since, nothing is cut (`conflict`): the version is the draft they saw.
+   * Asserts the draft version the caller read (the route's `If-Match`) against
+   * the snapshot taken under the draft lock; when it throws, nothing is cut.
    */
-  lockVersion?: number;
+  assertVersion?: (current: number) => void;
   /** Context-dependent publish gates must validate the captured manifest. */
   validateManifest?: (manifest: Record<string, unknown>, type: PackageType) => Promise<unknown>;
 }): Promise<CreateVersionResult> {
@@ -681,9 +686,7 @@ export async function createVersionFromDraft(params: {
   });
   if (!snapshot) return { error: "invalid_version" };
   const { pkg, storedFiles } = snapshot;
-  if (params.lockVersion !== undefined && params.lockVersion !== pkg.lockVersion) {
-    return { error: "conflict" };
-  }
+  params.assertVersion?.(pkg.lockVersion);
 
   const baseManifest = asRecord(pkg.draftManifest);
   const content = (pkg.draftContent ?? "") as string;

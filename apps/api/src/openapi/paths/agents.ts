@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+import {
+  ETAG_RESPONSE_HEADERS,
+  STD_RESPONSE_HEADERS,
+  REQUEST_ID_ONLY_HEADERS,
+} from "../headers.ts";
 import { AGENT_INPUT_SETTINGS_PROPERTIES } from "../schemas.ts";
 
 /**
@@ -236,7 +240,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "Bulk integration connection readiness for an agent",
       description:
-        "Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict: the run-kickoff 412 (run semantics, includeInert false + required-auth carve-out), plus `agent_not_active` when the SPACE has switched the agent off. This is a READ and answers 200 either way — the execution doors answer `404 agent_not_active_in_space` for the same state, and a panel that 404s cannot tell anyone what to fix. `integrations[]` lists every declared integration with its management verdict (includeInert true) so the Connexions tab and the launch badge share one source of truth.",
+        "Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict: the run-kickoff 409 (run semantics, includeInert false + required-auth carve-out), plus `agent_not_active` when the SPACE has switched the agent off. This is a READ and answers 200 either way — the execution doors answer `404 agent_not_active_in_space` for the same state, and a panel that 404s cannot tell anyone what to fix. `integrations[]` lists every declared integration with its management verdict (includeInert true) so the Connexions tab and the launch badge share one source of truth.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -315,13 +319,16 @@ export const agentsPaths = {
       ],
       responses: {
         "200": {
-          description: "Persistence rows",
+          description:
+            "The agent's persistence snapshot: one resource holding both kinds, each omitted when `kind` names the other.",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["object"],
                 properties: {
+                  object: { type: "string", enum: ["agent_persistence"] },
                   pinned: {
                     type: "array",
                     items: {
@@ -522,12 +529,12 @@ export const agentsPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
-    put: {
+    patch: {
       operationId: "setAgentModel",
       tags: ["Agents"],
       summary: "Set agent model override",
       description:
-        "Set a model override and optional generation defaults for this agent. Pass a model ID or null to revert to org default; null generation settings inherit runtime defaults. The model ID must name a system model preset or an org model owned by the organization — unknown or cross-org IDs are rejected with 404.",
+        "Set a model override and optional generation defaults for this agent. Pass a model ID or null to revert to org default; null generation settings inherit runtime defaults. The model ID must name a system model preset or an org model owned by the organization — unknown or cross-org IDs are rejected with 404. Merge semantics (RFC 7396): an absent `generation` keeps the stored settings, reconciled against the selected model.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -625,7 +632,7 @@ export const agentsPaths = {
       responses: {
         "200": {
           description: "Skills updated",
-          headers: STD_RESPONSE_HEADERS,
+          headers: ETAG_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {

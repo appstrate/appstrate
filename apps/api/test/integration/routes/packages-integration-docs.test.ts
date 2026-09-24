@@ -6,6 +6,7 @@
  * must preserve real documentation in both the file explorer and agent prompts.
  */
 
+import { etagVersion, ifMatch } from "../../helpers/etag.ts";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { packages, packageDistTags } from "@appstrate/db/schema";
@@ -79,14 +80,14 @@ interface FileEntry {
 async function listFiles(ctx: TestContext, id: string): Promise<FileEntry[]> {
   const res = await app.request(`/api/packages/${id}/files`, { headers: authHeaders(ctx) });
   expect(res.status).toBe(200);
-  const body = (await res.json()) as { entries: FileEntry[] };
-  return body.entries;
+  const body = (await res.json()) as { data: FileEntry[] };
+  return body.data;
 }
 
 async function lockVersionOf(ctx: TestContext, id: string): Promise<number> {
   const res = await app.request(`/api/packages/integrations/${id}`, { headers: authHeaders(ctx) });
   expect(res.status).toBe(200);
-  return ((await res.json()) as { lock_version: number }).lock_version;
+  return etagVersion(res);
 }
 
 /** Exercise the public content field with a manifest-shaped value. */
@@ -96,12 +97,14 @@ async function saveManifestContent(
   manifest: Record<string, unknown>,
 ): Promise<Response> {
   return app.request(`/api/packages/integrations/${id}`, {
-    method: "PUT",
-    headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+    method: "PATCH",
+    headers: authHeaders(ctx, {
+      "Content-Type": "application/json",
+      ...ifMatch(await lockVersionOf(ctx, id)),
+    }),
     body: JSON.stringify({
       manifest,
       content: JSON.stringify(manifest, null, 2),
-      lock_version: await lockVersionOf(ctx, id),
     }),
   });
 }
@@ -201,11 +204,13 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
       // INTEGRATION.md. Echoing that into `rcfg.storageFileName()` would
       // replace the package's manifest with its documentation.
       const res = await app.request(`/api/packages/integrations/${id}`, {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(await lockVersionOf(ctx, id)),
+        }),
         body: JSON.stringify({
           manifest: integrationManifest(id, "3.0.0"),
-          lock_version: await lockVersionOf(ctx, id),
         }),
       });
       expect(res.status).toBe(200);
@@ -257,11 +262,13 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
 
     it("REFRESHES the manifest-text fallback on a manifest-only PUT", async () => {
       const res = await app.request(`/api/packages/integrations/${id}`, {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(await lockVersionOf(ctx, id)),
+        }),
         body: JSON.stringify({
           manifest: integrationManifest(id, "4.3.0"),
-          lock_version: await lockVersionOf(ctx, id),
         }),
       });
       expect(res.status).toBe(200);

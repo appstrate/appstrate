@@ -374,6 +374,8 @@ const config: KnipConfig = {
         // package.json. Delete the `bun run` script and the file goes back to
         // being reported as unused — which is the claim we wanted anchored.
         "scripts/conformance/grab-token.ts",
+        // Operator data scripts, run by hand (`bun scripts/migration/…`); nothing imports them.
+        "scripts/migration/*.ts",
         // System-package sources: `build:system-packages` reads them off disk
         // and bundles them, so nothing imports them.
         "scripts/system-packages/**/server/index.ts",

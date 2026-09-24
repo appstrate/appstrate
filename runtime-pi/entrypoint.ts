@@ -72,21 +72,18 @@ import {
 import { provisionWorkspace, provisionFiles, type ProvisionDeps } from "./provision.ts";
 import { createRunFileUploader, sweepOutputs, summarizeArtifacts } from "./publish.ts";
 import type { SweepResult } from "./publish.ts";
+import { formatLogLine } from "@appstrate/core/log-line";
 
 /**
- * One pino-shaped JSON line on stdout — the shape every structured diagnostic
- * in this file already uses (`{"level":…,"event":…,…}`). Factored out so a new
- * caller cannot invent a second shape.
+ * The entrypoint's structured diagnostics, on stdout in the shared pino shape.
  *
  * Reach: the platform ring-buffers container stdout but only emits it when the
  * container exits NON-ZERO (`run-launcher/pi.ts`), so on a successful run this
- * line lives in the docker/Firecracker log only — same as the pre-existing
- * `mcp_connect_retry` line. Enough for an operator reading container logs; it
- * is NOT the run's audit trail. The queryable record of a pricing gap is
- * `llm_usage.pricing_status`, written server-side.
+ * line lives in the docker/Firecracker log only: not an audit trail (a pricing
+ * gap's record is `llm_usage.pricing_status`).
  */
-function logLine(level: "warn" | "error", event: string, data?: Record<string, unknown>): void {
-  process.stdout.write(`${JSON.stringify({ level, event, ...(data ?? {}) })}\n`);
+function logLine(level: "warn" | "error", msg: string, data?: Record<string, unknown>): void {
+  process.stdout.write(formatLogLine(level, msg, data));
 }
 
 /**
@@ -235,10 +232,7 @@ async function emitError(message: string, data?: Record<string, unknown>): Promi
 async function die(message: string, data?: Record<string, unknown>): Promise<never> {
   await emitError(message, data);
   try {
-    const failureResult = emptyRunResult();
-    failureResult.error = { message };
-    failureResult.status = "failed";
-    await sink.finalize(failureResult);
+    await sink.finalize({ ...emptyRunResult(), status: "failed", error: { message } });
   } catch (finalizeErr) {
     // fall through — server-side synthesis covers us, but leave a trace.
     lastResortStderr(1, `failed-finalize POST failed — dying on: ${message}`, finalizeErr);
@@ -814,6 +808,11 @@ function buildPiRunner(): PiRunner {
     extensionFactories,
     authStoragePath: "/tmp/pi-auth/auth.json",
     ...(declaredRuntimeTools.includes("output") ? { terminalTools: ["output"] } : {}),
+    modelRetry: env.modelRetry,
+    modelCompaction: env.modelCompaction,
+    ...(env.toolResultByteLimit !== undefined
+      ? { toolResultByteLimit: env.toolResultByteLimit }
+      : {}),
   });
 }
 
@@ -946,11 +945,12 @@ try {
   const message = getErrorMessage(err);
   await emitError(message);
   try {
-    const failureResult = emptyRunResult();
-    failureResult.error = { message, stack: err instanceof Error ? err.stack : undefined };
-    failureResult.status = "failed";
-    failureResult.durationMs = Date.now() - startTime;
-    await sink.finalize(failureResult);
+    await sink.finalize({
+      ...emptyRunResult(),
+      status: "failed",
+      error: { message, stack: err instanceof Error ? err.stack : undefined },
+      durationMs: Date.now() - startTime,
+    });
   } catch (finalizeErr) {
     // swallow — container exit code + server-side synthesis cover us,
     // but leave a last-resort trace for the serial console.

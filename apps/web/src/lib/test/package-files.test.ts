@@ -71,7 +71,7 @@ describe("packageFilesErrorKey", () => {
   const refusal = (code: string, status: number) => new ApiError(code, "detail", status);
 
   it("names the concurrency loss, which is the one refusal with a recovery", () => {
-    expect(packageFilesErrorKey(refusal("conflict", 409))).toBe("files.errorConflict");
+    expect(packageFilesErrorKey(refusal("precondition_failed", 412))).toBe("files.errorConflict");
   });
 
   it("translates the shared local path errors", () => {

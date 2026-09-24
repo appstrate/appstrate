@@ -86,14 +86,14 @@ describe("per-principal org permissions", () => {
 
   it("grants it on the /api/orgs/:orgId path resolver too", async () => {
     const ok = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
-      method: "PUT",
+      method: "PATCH",
       headers: { Cookie: granted.cookie, "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
     expect(ok.status).toBe(200);
 
     const denied = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
-      method: "PUT",
+      method: "PATCH",
       headers: { Cookie: plain.cookie, "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });

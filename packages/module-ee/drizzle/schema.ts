@@ -143,8 +143,8 @@ export const stripeEvents = pgTable("ee_stripe_events", {
  * column on `llm_usage` — that would leak a billing concept into the OSS schema.
  *
  * Contract:
- *   - `llmUsageId` — PRIMARY KEY, type `integer` to match the OSS
- *     `llm_usage.id` column (declared `serial`, i.e. `INTEGER`). Cross-
+ *   - `llmUsageId` — PRIMARY KEY, type `bigint` to match the OSS
+ *     `llm_usage.id` column (declared `bigserial`). Cross-
  *     table FKs are intentionally avoided: EE schemas never
  *     `.references()` platform-owned tables (no ownership inversion).
  *     The primary key gives us idempotent inserts via
@@ -152,11 +152,11 @@ export const stripeEvents = pgTable("ee_stripe_events", {
  *     cursor sweep re-read already-processed rows safely.
  *
  * Lifecycle: rows are inserted by the billing sweep and never deleted. One
- * `(integer, timestamptz)` row per billed ledger row is small enough that
+ * `(bigint, timestamptz)` row per billed ledger row is small enough that
  * unbounded growth is not a concern at any plausible scale.
  */
 export const eeBilledLlmUsage = pgTable("ee_billed_llm_usage", {
-  llmUsageId: integer("llm_usage_id").primaryKey(),
+  llmUsageId: bigint("llm_usage_id", { mode: "number" }).primaryKey(),
   /** What the claim is WORTH: `PricingFaults` in `src/billing/usage-recorder.ts`. */
   pricingStatus: text("pricing_status", { enum: ["priced", "partial", "unpriced", "unknown"] })
     .default("priced")
@@ -190,10 +190,10 @@ export const billingCursor = pgTable(
   "ee_billing_cursor",
   {
     id: boolean("id").primaryKey().default(true),
-    lastLlmUsageId: integer("last_llm_usage_id").notNull(),
+    lastLlmUsageId: bigint("last_llm_usage_id", { mode: "number" }).notNull(),
     /** The settled frontier this cursor was SEEDED at, written once and never moved.
      * What it bounds: `ledgerScanStart` in `src/billing/usage-recorder.ts`. */
-    floorId: integer("floor_id").default(0).notNull(),
+    floorId: bigint("floor_id", { mode: "number" }).default(0).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [check("ee_billing_cursor_single_row", sql`${table.id}`)],

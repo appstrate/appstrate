@@ -83,7 +83,7 @@ export class RunPackageCatalog implements PackageCatalog {
   private readonly owners = new Map<PackageIdentity, PackageCatalog>();
 
   constructor(opts: RunPackageCatalogOptions) {
-    this.db = opts.deps?.db ?? new DbPackageCatalog({ orgId: opts.orgId });
+    this.db = opts.deps?.db ?? new DbPackageCatalog({ orgId: opts.orgId, forExecution: true });
     this.makeDraft = opts.deps?.makeDraft ?? (() => new DraftPackageCatalog({ orgId: opts.orgId }));
     this.overrides = new Map(Object.entries(opts.dependencyOverrides ?? {}));
   }

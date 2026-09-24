@@ -92,8 +92,8 @@ export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | und
  * for API consumers (as everywhere else in this API) and must NOT be shown in
  * a localized UI. Return the code so the caller can pick its own sentence.
  *
- * Only a REFUSAL carries a code worth displaying: 401/402/403 mean "you must
- * act". Any other status (a module failing closed with a 500) describes an
+ * Only a REFUSAL carries a code worth displaying: 401/402/403/409 mean "you
+ * must act". Any other status (a module failing closed with a 500) describes an
  * internal fault the user can do nothing about.
  */
 export function refusalCode(value: unknown): string | undefined {
@@ -105,6 +105,6 @@ export function refusalCode(value: unknown): string | undefined {
   }
   if (!doc || typeof doc !== "object") return undefined;
   const { status, code } = doc as { status?: unknown; code?: unknown };
-  if (status !== 401 && status !== 402 && status !== 403) return undefined;
+  if (status !== 401 && status !== 402 && status !== 403 && status !== 409) return undefined;
   return typeof code === "string" && code ? code : undefined;
 }

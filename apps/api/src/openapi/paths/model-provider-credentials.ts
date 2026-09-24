@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 
 export const modelProviderCredentialsPaths = {
@@ -415,8 +416,8 @@ export const modelProviderCredentialsPaths = {
                         max_tokens: { type: ["integer", "null"] },
                         input: {
                           type: ["array", "null"],
-                          items: { type: "string" },
-                          description: "Accepted input modalities (`text`, `image`).",
+                          items: { type: "string", enum: [...MODEL_INPUT_MODALITIES] },
+                          description: "Accepted input modalities.",
                         },
                         reasoning: { type: ["boolean", "null"] },
                         source: {
@@ -436,7 +437,7 @@ export const modelProviderCredentialsPaths = {
                             input: {
                               type: "array",
                               minItems: 1,
-                              items: { type: "string", enum: ["text", "image"] },
+                              items: { type: "string", enum: [...MODEL_INPUT_MODALITIES] },
                             },
                             reasoning: { type: "boolean" },
                           },
@@ -485,12 +486,12 @@ export const modelProviderCredentialsPaths = {
     },
   },
   "/api/model-provider-credentials/{id}": {
-    put: {
+    patch: {
       operationId: "updateModelProviderCredential",
       tags: ["Model Provider Credentials"],
       summary: "Update a model provider credential",
       description:
-        "Update a model provider credential's mutable fields. The `apiShape` and `baseUrl` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers.",
+        "Update a model provider credential's mutable fields. The `apiShape` and `baseUrl` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },

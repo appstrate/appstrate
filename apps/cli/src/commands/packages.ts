@@ -7,7 +7,7 @@
  *
  *   pull     the draft (or a published version) → a working folder
  *   status   what the folder would change in the draft, computed on demand
- *   push     the folder → the draft, in one atomic write, under the lock this
+ *   push     the folder → the draft, in one atomic write, under the ETag this
  *            folder last saw
  *   publish  the draft → a version, by the dashboard's version rule
  *
@@ -32,7 +32,7 @@ import {
 import { planPublishVersion, type VersionBump } from "@appstrate/core/semver";
 import { extractSkillMeta, packageTypeEnum, type PackageType } from "@appstrate/core/validation";
 import { isSafeArchivePath, zipArtifact } from "@appstrate/core/zip";
-import { apiFetch, ApiError, problemFields } from "../lib/api.ts";
+import { apiFetch, apiFetchWithHeaders, ApiError, problemFields } from "../lib/api.ts";
 import {
   expandHome,
   packageWorkDir,
@@ -313,11 +313,11 @@ export async function packagesPullCommand(
     // what is published.
     const readsDraft = home.home_writable && (spec === undefined || spec === DRAFT_SELECTOR);
     let files: PackageFiles;
-    let lock: number | undefined;
+    let lock: string | undefined;
     if (readsDraft) {
-      // Read BEFORE the archive: a lock older than the bytes costs a spurious
-      // 409 on the next push, a newer one would hide an edit.
-      lock = (await readDraftState(session.profileName, home)).lockVersion;
+      // Read BEFORE the archive: a version older than the bytes costs a spurious
+      // 412 on the next push, a newer one would hide an edit.
+      lock = (await readDraftState(session.profileName, home)).etag;
       files = await fetchPackageDefinition(session.profileName, {
         packageId,
         type: home.type,
@@ -525,7 +525,7 @@ export async function packagesStatusCommand(
 
     let remote: PackageFiles;
     if (home.home_writable) {
-      const now = (await readDraftState(session.profileName, home)).lockVersion;
+      const now = (await readDraftState(session.profileName, home)).etag;
       remote = await fetchPackageDefinition(session.profileName, {
         packageId: home.id,
         type: home.type,
@@ -540,7 +540,7 @@ export async function packagesStatusCommand(
         );
       } else if (seen !== now) {
         lines.push(
-          `  ! the draft was edited elsewhere since this folder last saw it (lock ${seen} → ${now}): pull it into another folder to compare, or push --force to replace it`,
+          `  ! the draft was edited elsewhere since this folder last saw it (${seen} → ${now}): pull it into another folder to compare, or push --force to replace it`,
         );
       }
     } else {
@@ -685,7 +685,7 @@ export async function packagesPushCommand(
       );
     }
     const state = await readDraftState(session.profileName, home);
-    const lock = opts.force ? state.lockVersion : known!;
+    const lock = opts.force ? state.etag : known!;
     const draft = await fetchPackageDefinition(session.profileName, {
       packageId,
       type,
@@ -699,7 +699,7 @@ export async function packagesPushCommand(
     const manifestChanged = changes.some((change) => change.path === PACKAGE_MANIFEST_FILE);
     if (operations.length === 0 && !manifestChanged) {
       // The folder IS the current draft, so it has seen it.
-      if (!opts.dryRun) await recordLock(session.profileName, dir, packageId, state.lockVersion);
+      if (!opts.dryRun) await recordLock(session.profileName, dir, packageId, state.etag);
       io.stdout.write(`Nothing to push: ${packageId} matches its draft.\n`);
       return;
     }
@@ -709,25 +709,26 @@ export async function packagesPushCommand(
       return;
     }
 
-    const body: Record<string, unknown> = { lock_version: lock };
+    const body: Record<string, unknown> = {};
     if (manifestChanged) body.manifest = folderManifest(files);
     if (operations.length > 0) body.operations = operations;
-    let written: DraftDetail;
+    let written: { body: DraftDetail; headers: Headers };
     try {
-      written = await apiFetch<DraftDetail>(session.profileName, packageRoute(type, packageId), {
-        method: "PUT",
-        body: JSON.stringify(body),
-        ...(home.home_space_id ? { spaceId: home.home_space_id } : {}),
-      });
+      written = await apiFetchWithHeaders<DraftDetail>(
+        session.profileName,
+        packageRoute(type, packageId),
+        {
+          method: "PATCH",
+          headers: { "If-Match": lock },
+          body: JSON.stringify(body),
+          ...(home.home_space_id ? { spaceId: home.home_space_id } : {}),
+        },
+      );
     } catch (err) {
-      // 409 `conflict` is the stale lock; any other refusal is the problem it names.
-      if (err instanceof ApiError && problemFields(err.body).code === "conflict") {
-        const now = await readDraftState(session.profileName, home).then(
-          (s) => ` → ${s.lockVersion}`,
-          () => "",
-        );
+      // 412 is the stale version; any other refusal is the problem it names.
+      if (err instanceof ApiError && err.status === 412) {
         throw new ExplainedError(
-          `The draft of ${packageId} was edited elsewhere since this folder last saw it (lock ${lock}${now}). Pull it into another folder to compare, or push --force to replace it.`,
+          `The draft of ${packageId} was edited elsewhere since this folder last saw it. Pull it into another folder to compare, or push --force to replace it.`,
           { cause: err },
         );
       }
@@ -738,22 +739,12 @@ export async function packagesPushCommand(
       }
       throw err;
     }
-    // The write moved the lock by exactly one: that is the draft this folder
-    // now holds. The response is read back AFTER the write, so a later write by
-    // someone else can already show in it — recording its lock would let this
-    // folder's next push overwrite an edit it never saw.
-    const ours = lock + 1;
-    const after = draftStateOf(packageId, written);
-    await recordLock(session.profileName, dir, packageId, ours);
-    if (after.lockVersion === ours) {
-      // The server stores the VALIDATED manifest, which may normalize what the
-      // author wrote: writing it back keeps the next status clean.
-      if (PACKAGE_MANIFEST_FILE in files) await rewriteManifest(dir, after.manifest);
-    } else {
-      io.stderr.write(
-        `warning: the draft of ${packageId} moved again right after this push (lock ${ours} → ${after.lockVersion}): someone else wrote it. Pull it into another folder to compare.\n`,
-      );
-    }
+    // This write's own ETag: a later foreign write still refuses the next push.
+    const after = draftStateOf(packageId, written.body, written.headers);
+    await recordLock(session.profileName, dir, packageId, after.etag);
+    // The server stores the VALIDATED manifest, which may normalize what the
+    // author wrote: writing it back keeps the next status clean.
+    if (PACKAGE_MANIFEST_FILE in files) await rewriteManifest(dir, after.manifest);
 
     io.stdout.write(`Pushed ${summary} to the draft of ${packageId}.\n`);
     io.stderr.write(
@@ -826,7 +817,7 @@ async function createPackage(
   const home = await resolvePackage(session.profileName, createdId);
   if (!home) throw new Error(`${createdId} was created, but it cannot be read back.`);
   const state = await readDraftState(session.profileName, home);
-  await recordLock(session.profileName, dir, createdId, state.lockVersion);
+  await recordLock(session.profileName, dir, createdId, state.etag);
   await rewriteManifest(dir, state.manifest);
 
   const version = typeof created.version === "string" ? ` ${created.version}` : "";
@@ -910,7 +901,7 @@ export async function packagesPublishCommand(
         source: "draft",
         refusalRemedy: draftRemedyPull(packageId),
       });
-      if (seen !== before.lockVersion || diffFiles(folder.files, draft).length > 0) {
+      if (seen !== before.etag || diffFiles(folder.files, draft).length > 0) {
         throw new Error(
           `${folder.dir} has changes the draft does not have: push them first, or publish by id (${packageId}) to publish the draft as it is.`,
         );
@@ -944,16 +935,13 @@ export async function packagesPublishCommand(
     }
     const { override, target } = plan;
 
-    // `lock_version`: the version cut is the draft read above — a draft moved
-    // since (a push landing in between) is refused, never published unseen.
+    // `If-Match`: a draft moved since the read above is refused (412), never published unseen.
     let created: { version?: unknown };
     try {
       created = await apiFetch<{ version?: unknown }>(session.profileName, `${route}/versions`, {
         method: "POST",
-        body: JSON.stringify({
-          ...(override !== undefined ? { version: override } : {}),
-          lock_version: before.lockVersion,
-        }),
+        headers: { "If-Match": before.etag },
+        body: JSON.stringify(override !== undefined ? { version: override } : {}),
         ...inHome,
       });
     } catch (err) {
@@ -965,17 +953,12 @@ export async function packagesPublishCommand(
     }
     const version = created.version;
 
-    // The server rewrote the draft's version only if the lock moved by exactly
-    // one AND the draft now carries it; anything else is an edit folders never saw.
+    // Only the publish's own rewrite advances folder locks, never a foreign edit.
     if (override !== undefined && before.manifest.version !== version) {
       const after = await readDraftState(session.profileName, home);
-      if (after.lockVersion === before.lockVersion + 1 && after.manifest.version === version) {
-        await advanceLocks(
-          session.profileName,
-          packageId,
-          before.lockVersion,
-          after.lockVersion,
-          (dir) => carryVersion(dir, before.manifest.version, version, io),
+      if (!after.hasUnpublishedChanges && after.manifest.version === version) {
+        await advanceLocks(session.profileName, packageId, before.etag, after.etag, (dir) =>
+          carryVersion(dir, before.manifest.version, version, io),
         );
       }
     }
@@ -1036,7 +1019,7 @@ function publishRefusal(err: ApiError, packageId: string, target: string | undef
         `Nothing changed in the draft of ${packageId} since its latest version: there is nothing to publish.`,
         { cause: err },
       );
-    case "conflict":
+    case "precondition_failed":
       return new ExplainedError(
         `The draft of ${packageId} changed while this command read it (a push or an edit landed in between): nothing was published. Check it and publish again.`,
         { cause: err },

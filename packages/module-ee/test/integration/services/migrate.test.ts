@@ -59,6 +59,11 @@ const LEGACY_TABLES = [
 ];
 
 const MIGRATIONS_DIR = resolve(import.meta.dir, "../../../drizzle/migrations");
+const JOURNAL_TAGS = (
+  JSON.parse(readFileSync(resolve(MIGRATIONS_DIR, "meta/_journal.json"), "utf8")) as {
+    entries: { tag: string }[];
+  }
+).entries.map((entry) => entry.tag);
 
 /**
  * Split a migration file into individual statements on drizzle's
@@ -82,6 +87,13 @@ async function applyMigration(tag: string): Promise<void> {
   for (const statement of migrationStatements(tag)) {
     await db.execute(sql.raw(statement));
   }
+}
+
+/** Apply the journal in order through `lastTag`, which must be one of its entries. */
+async function applyThrough(lastTag: string): Promise<void> {
+  const end = JOURNAL_TAGS.indexOf(lastTag);
+  if (end < 0) throw new Error(`ee journal has no entry tagged ${lastTag}`);
+  for (const tag of JOURNAL_TAGS.slice(0, end + 1)) await applyMigration(tag);
 }
 
 async function resetToBlankSlate(): Promise<void> {
@@ -166,8 +178,7 @@ describe("migration chain upgrades", () => {
 
   it("0001 → 0002 converts cost_usd to numeric without losing a stored value", async () => {
     await resetToBlankSlate();
-    await applyMigration("0000_init");
-    await applyMigration("0001_cursor_billing");
+    await applyThrough("0001_cursor_billing");
 
     const [before] = await db.execute(
       sql.raw(
@@ -207,9 +218,7 @@ describe("migration chain upgrades", () => {
 
   it("0002 → 0003 normalizes legacy free accounts without an attached subscription", async () => {
     await resetToBlankSlate();
-    await applyMigration("0000_init");
-    await applyMigration("0001_cursor_billing");
-    await applyMigration("0002_numeric_cost");
+    await applyThrough("0002_numeric_cost");
 
     const canceledOrg = "00000000-0000-4000-a000-0000000000d1";
     const incompleteOrg = "00000000-0000-4000-a000-0000000000d2";
@@ -279,15 +288,7 @@ describe("migration chain upgrades", () => {
 
   it("0004 → 0005 renames every table, index and constraint off the cloud_ prefix", async () => {
     await resetToBlankSlate();
-    for (const tag of [
-      "0000_init",
-      "0001_cursor_billing",
-      "0002_numeric_cost",
-      "0003_normalize_free_subscription_status",
-      "0004_billing_managers_and_contact",
-    ]) {
-      await applyMigration(tag);
-    }
+    await applyThrough("0004_billing_managers_and_contact");
 
     const org = "00000000-0000-4000-a000-0000000000e1";
     await db.execute(sql.raw(`INSERT INTO cloud_billing_accounts (org_id) VALUES ('${org}')`));
@@ -315,17 +316,7 @@ describe("migration chain upgrades", () => {
 
   it("0006 → 0007 widens cost_credits to bigint past the int4 ceiling", async () => {
     await resetToBlankSlate();
-    for (const tag of [
-      "0000_init",
-      "0001_cursor_billing",
-      "0002_numeric_cost",
-      "0003_normalize_free_subscription_status",
-      "0004_billing_managers_and_contact",
-      "0005_rename_ee_tables",
-      "0006_cutover_floor_and_pricing_status",
-    ]) {
-      await applyMigration(tag);
-    }
+    await applyThrough("0006_cutover_floor_and_pricing_status");
 
     const [before] = await db.execute(
       sql.raw(
@@ -377,6 +368,28 @@ describe("migration chain upgrades", () => {
     // Re-runnable: applying it a second time is a no-op, not an error.
     await applyMigration("0007_bigint_cost_credits");
   });
+
+  it("0008 widens every column holding an llm_usage id to bigint", async () => {
+    await resetToBlankSlate();
+    await applyThrough("0008_bigint_llm_usage_ids");
+
+    const columns = await db.execute(
+      sql.raw(
+        `SELECT table_name || '.' || column_name AS col, data_type FROM information_schema.columns
+         WHERE (table_name, column_name) IN (('ee_billed_llm_usage', 'llm_usage_id'),
+           ('ee_billing_cursor', 'last_llm_usage_id'), ('ee_billing_cursor', 'floor_id'))
+         ORDER BY 1`,
+      ),
+    );
+    expect([...columns]).toEqual([
+      { col: "ee_billed_llm_usage.llm_usage_id", data_type: "bigint" },
+      { col: "ee_billing_cursor.floor_id", data_type: "bigint" },
+      { col: "ee_billing_cursor.last_llm_usage_id", data_type: "bigint" },
+    ]);
+
+    // Past the int4 ceiling, as the platform's `llm_usage.id` can now be.
+    await db.execute(sql.raw(`INSERT INTO ee_billed_llm_usage (llm_usage_id) VALUES (3000000000)`));
+  });
 });
 
 // The proof of the header's claim, held where a future edit that re-points this
@@ -393,6 +406,6 @@ describe("isolation from the platform test database", () => {
     const [applied] = await live.execute<{ count: number }>(sql`
       SELECT count(*)::int AS count FROM drizzle.ee_migrations
     `);
-    expect(applied?.count).toBe(8);
+    expect(applied?.count).toBe(JOURNAL_TAGS.length);
   });
 });

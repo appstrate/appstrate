@@ -175,7 +175,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Create model",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/models/{id}",
     jsonSchema: toJsonSchema(updateModelSchema),
     description: "Update model",
@@ -243,7 +243,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Create an agent schedule",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/schedules/{id}",
     jsonSchema: toJsonSchema(updateScheduleSchema),
     description: "Update a schedule",
@@ -273,7 +273,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Create organization",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/orgs/{orgId}",
     jsonSchema: toJsonSchema(updateOrgSchema),
     description: "Update organization",
@@ -291,13 +291,13 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Update member role",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/orgs/{orgId}/invitations/{invitationId}",
     jsonSchema: toJsonSchema(updateInvitationSchema),
     description: "Update invitation role and space assignments",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/orgs/{orgId}/settings",
     jsonSchema: toJsonSchema(orgSettingsPatchSchema),
     description: "Update org settings",
@@ -327,7 +327,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Create proxy",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/proxies/{id}",
     jsonSchema: toJsonSchema(updateProxySchema),
     description: "Update proxy",
@@ -347,7 +347,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Set agent proxy",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/agents/{scope}/{name}/model",
     jsonSchema: toJsonSchema(modelIdSchema),
     description: "Set agent model",
@@ -367,7 +367,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Create model provider credential",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/model-provider-credentials/{id}",
     jsonSchema: toJsonSchema(updateModelProviderCredentialSchema),
     description: "Update model provider credential",
@@ -454,7 +454,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Activate a package in a space",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/spaces/{spaceId}/packages/{scope}/{name}",
     jsonSchema: toJsonSchema(updatePackageSchema),
     description: "Configure a space package",
@@ -490,25 +490,25 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Create a draft skill package",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/packages/agents/{scope}/{name}",
     jsonSchema: toJsonSchema(packageJsonUpdateSchema),
     description: "Update a draft agent package",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/packages/integrations/{scope}/{name}",
     jsonSchema: toJsonSchema(packageJsonUpdateSchema),
     description: "Update a draft integration package",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/packages/mcp-servers/{scope}/{name}",
     jsonSchema: toJsonSchema(packageJsonUpdateSchema),
     description: "Update a draft mcp-server package",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/packages/skills/{scope}/{name}",
     jsonSchema: toJsonSchema(packageJsonUpdateSchema),
     description: "Update a draft skill package",
@@ -693,11 +693,10 @@ export const EXEMPT_REQUEST_BODIES: Record<string, string> = {
     "wire-shape guard only; manifest/prompt are z.unknown() and validated by the run preflight",
   "POST /api/runs/inline/validate":
     "wire-shape guard only; manifest/prompt are z.unknown() and validated by the run preflight",
-  // The finalize body is deliberately permissive: it reports the outcome of an
-  // already-completed run, so a malformed field must degrade to absent rather
-  // than 400 a run that has no way to retry. See routes/runs-events.ts.
+  // The finalize body (conditional `usage`, `.catch`-degrading fields) is not a
+  // comparable Zod object. See routes/runs-events.ts.
   "POST /api/runs/{runId}/events/finalize":
-    "tolerance-by-design body: fields degrade to absent instead of rejecting an already-finished run",
+    "strict outcome fields (status; usage required on success) plus cosmetic fields that degrade to absent — conditional requirement, not field-comparable",
 
   // ─── Empty bodies (documented for shape, never parsed) ──────────────────
   "POST /api/runs/{runId}/events/heartbeat":

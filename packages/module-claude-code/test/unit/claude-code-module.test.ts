@@ -33,7 +33,6 @@ describe("claude-code module", () => {
     expect(cc?.oauth?.tokenUrl).toBe("https://platform.claude.com/v1/oauth/token");
     expect(cc?.oauth?.refreshUrl).toBe("https://platform.claude.com/v1/oauth/token");
     expect(cc?.oauth?.pkce).toBe("S256");
-    expect(cc?.oauth?.scopes).toEqual(["org:create_api_key", "user:profile", "user:inference"]);
   });
 
   it("derives its featured list from the anthropic catalog", () => {

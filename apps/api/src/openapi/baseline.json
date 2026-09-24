@@ -3,7 +3,7 @@
   "info": {
     "title": "Appstrate API",
     "version": "1.0.0",
-    "description": "API for Appstrate — an open-source platform for running autonomous AI agents in sandboxed Docker containers. Manage agents, runs, schedules, providers, API keys, and more.\n\n## Common Response Headers\n\nAll API responses include a `Request-Id` header (`req_` prefix) for tracing. All authenticated responses additionally include an `Appstrate-Version` header with the resolved API version (format: `YYYY-MM-DD`). Rate-limited endpoints return `RateLimit` and `RateLimit-Policy` headers on every response (not just 429).\n\n## Viewing as a role\n\nAn organization owner or administrator can preview the API as a lesser role by sending the `X-View-As` header (grammar, refusal codes and examples: the `X-View-As` parameter, declared on the operations a client derives its permission gates from). **Every authenticated operation that resolves an organization honours it**, not only the ones that declare it: the persona is applied where permissions are resolved, so every subsequent guard, listing and write answers as the previewed role would. It is documented on those few operations rather than on all of them for the same reason `Idempotency-Key` is documented here.\n\nTwo exceptions, both by design. Personal operations that resolve no organization — `/api/profile*`, `/api/me/connections*`, `/api/welcome/*` — accept the header and ignore it: they answer about the person, not about a role in an organization, so there is nothing for a persona to narrow. And the Server-Sent-Events routes (`/api/realtime/*`) take the persona as the `view_as` QUERY parameter rather than the header, because `EventSource` cannot send headers; the value, the validation and the refusals are identical.\n\nThe persona only ever REMOVES: it is intersected with what the caller really holds, it carries no per-principal grants, and it is refused — never silently ignored — when the credential cannot carry it or the caller is not eligible. The authenticated identity is unchanged; audit rows keep the real actor and record the persona under `after.view_as`. Responses produced under a validated persona carry `X-View-As-Active: 1`.\n\n## Idempotency\n\n`Idempotency-Key` is honoured **only** on the operations that declare it as a parameter. Sending it anywhere else is refused, not ignored: any other request with an unsafe method (`POST`, `PUT`, `PATCH`, `DELETE`, …) that carries the header is rejected before it reaches the handler with `400` `application/problem+json`, `code: \"idempotency_not_supported\"`. Safe methods (`GET`, `HEAD`, `OPTIONS`) ignore the header — replaying them is already free of effect (RFC 9110 §9.2.1), so there is no guarantee to correct.\n\nThis response is produced by a request-level middleware rather than by any operation, so it is documented here instead of on each of the ~130 operations that can emit it. A client that never sends `Idempotency-Key` outside the operations declaring it will never see it. Do not stamp the header onto every outbound request: on this API that turns a working call into a `400`.\n\nOn the operations that do honour it, the key is stored for 24h scoped to the organization and space: a repeat with the same key and the same method, URL and body replays the original response with `Idempotent-Replayed: true`; the same key with a different method, URL or body is `422` `idempotency_conflict`; a concurrent in-flight duplicate is `409` `idempotency_in_progress`.\n\n**Not covered:** `/api/auth/*` (Better Auth) terminates the request chain before this middleware runs. Those endpoints — sign-up/sign-in/sign-out, the device flow, `cli/token`, `cli/revoke`, `organization/*` — neither honour nor refuse the header; they ignore it.",
+    "description": "API for Appstrate — an open-source platform for running autonomous AI agents in sandboxed Docker containers. Manage agents, runs, schedules, providers, API keys, and more.\n\n## Common Response Headers\n\nAll API responses include a `Request-Id` header (`req_` prefix) for tracing. All authenticated responses additionally include an `Appstrate-Version` header with the resolved API version (format: `YYYY-MM-DD`). Rate-limited endpoints return `RateLimit` and `RateLimit-Policy` headers on every response (not just 429).\n\n## Viewing as a role\n\nAn organization owner or administrator can preview the API as a lesser role by sending the `X-View-As` header (grammar, refusal codes and examples: the `X-View-As` parameter, declared on the operations a client derives its permission gates from). **Every authenticated operation that resolves an organization honours it**, not only the ones that declare it: the persona is applied where permissions are resolved, so every subsequent guard, listing and write answers as the previewed role would. It is documented on those few operations rather than on all of them for the same reason `Idempotency-Key` is documented here.\n\nTwo exceptions, both by design. Personal operations that resolve no organization — `/api/profile*`, `/api/me/connections*`, `/api/welcome/*` — accept the header and ignore it: they answer about the person, not about a role in an organization, so there is nothing for a persona to narrow. And the Server-Sent-Events routes (`/api/realtime/*`) take the persona as the `view_as` QUERY parameter rather than the header, because `EventSource` cannot send headers; the value, the validation and the refusals are identical.\n\nThe persona only ever REMOVES: it is intersected with what the caller really holds, it carries no per-principal grants, and it is refused — never silently ignored — when the credential cannot carry it or the caller is not eligible. The authenticated identity is unchanged; audit rows keep the real actor and record the persona under `after.viewAs`. Responses produced under a validated persona carry `X-View-As-Active: 1`.\n\n## Idempotency\n\n`Idempotency-Key` is honoured **only** on the operations that declare it as a parameter. Sending it anywhere else is refused, not ignored: any other request with an unsafe method (`POST`, `PUT`, `PATCH`, `DELETE`, …) that carries the header is rejected before it reaches the handler with `400` `application/problem+json`, `code: \"idempotency_not_supported\"`. Safe methods (`GET`, `HEAD`, `OPTIONS`) ignore the header — replaying them is already free of effect (RFC 9110 §9.2.1), so there is no guarantee to correct.\n\nThis response is produced by a request-level middleware rather than by any operation, so it is documented here instead of on each of the ~130 operations that can emit it. A client that never sends `Idempotency-Key` outside the operations declaring it will never see it. Do not stamp the header onto every outbound request: on this API that turns a working call into a `400`.\n\nOn the operations that do honour it, the key is stored for 24h scoped to the organization and space: a repeat with the same key and the same method, URL and body replays the original response with `Idempotent-Replayed: true`; the same key with a different method, URL or body is `422` `idempotency_conflict`; a concurrent in-flight duplicate is `409` `idempotency_in_progress`.\n\n**Not covered:** `/api/auth/*` (Better Auth) terminates the request chain before this middleware runs. Those endpoints — sign-up/sign-in/sign-out, the device flow, `cli/token`, `cli/revoke`, `organization/*` — neither honour nor refuse the header; they ignore it.",
     "contact": {
       "name": "Appstrate",
       "url": "https://appstrate.dev",
@@ -908,7 +908,7 @@
         "operationId": "getAgentConnectionReadiness",
         "tags": ["Agents"],
         "summary": "Bulk integration connection readiness for an agent",
-        "description": "Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict: the run-kickoff 412 (run semantics, includeInert false + required-auth carve-out), plus `agent_not_active` when the SPACE has switched the agent off. This is a READ and answers 200 either way — the execution doors answer `404 agent_not_active_in_space` for the same state, and a panel that 404s cannot tell anyone what to fix. `integrations[]` lists every declared integration with its management verdict (includeInert true) so the Connexions tab and the launch badge share one source of truth.",
+        "description": "Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict: the run-kickoff 409 (run semantics, includeInert false + required-auth carve-out), plus `agent_not_active` when the SPACE has switched the agent off. This is a READ and answers 200 either way — the execution doors answer `404 agent_not_active_in_space` for the same state, and a panel that 404s cannot tell anyone what to fix. `integrations[]` lists every declared integration with its management verdict (includeInert true) so the Connexions tab and the launch badge share one source of truth.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1027,7 +1027,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Persistence rows",
+            "description": "The agent's persistence snapshot: one resource holding both kinds, each omitted when `kind` names the other.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -1040,7 +1040,12 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["object"],
                   "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["agent_persistence"]
+                    },
                     "pinned": {
                       "type": "array",
                       "items": {
@@ -1396,11 +1401,11 @@
           }
         }
       },
-      "put": {
+      "patch": {
         "operationId": "setAgentModel",
         "tags": ["Agents"],
         "summary": "Set agent model override",
-        "description": "Set a model override and optional generation defaults for this agent. Pass a model ID or null to revert to org default; null generation settings inherit runtime defaults. The model ID must name a system model preset or an org model owned by the organization — unknown or cross-org IDs are rejected with 404.",
+        "description": "Set a model override and optional generation defaults for this agent. Pass a model ID or null to revert to org default; null generation settings inherit runtime defaults. The model ID must name a system model preset or an org model owned by the organization — unknown or cross-org IDs are rejected with 404. Merge semantics (RFC 7396): an absent `generation` keeps the stored settings, reconciled against the selected model.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1543,6 +1548,9 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
@@ -1770,7 +1778,7 @@
                   },
                   "connection_overrides": {
                     "type": "object",
-                    "description": "Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ \"@scope/integration\": \"<connection_id>\" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.",
+                    "description": "Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ \"@scope/integration\": \"<connection_id>\" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 409 `missing_integration_connection` if the chosen id is not accessible to the actor.",
                     "additionalProperties": {
                       "type": "string",
                       "minLength": 1
@@ -1916,7 +1924,7 @@
             "description": "`agent_not_found` when this space holds no placement for the agent (homed here, offered here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{spaceId}/packages`."
           },
           "409": {
-            "description": "Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference)",
+            "description": "Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference), or a declared integration has no usable connection for the caller (`missing_integration_connection` — one `errors[]` item per integration, `must_choose_connection` items carrying `candidate_connections`)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -1932,16 +1940,6 @@
           },
           "410": {
             "description": "A referenced upload has expired before consume, or its post-consume reuse window has elapsed (`upload_expired`) — stage a fresh upload and retry",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "Missing integration connection (`missing_integration_connection`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2211,7 +2209,7 @@
                   },
                   "connection_overrides": {
                     "type": "object",
-                    "description": "Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ \"@scope/integration\": \"<connection_id>\" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.",
+                    "description": "Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ \"@scope/integration\": \"<connection_id>\" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 409 `missing_integration_connection` if the chosen id is not accessible to the actor.",
                     "additionalProperties": {
                       "type": "string",
                       "minLength": 1
@@ -2371,16 +2369,6 @@
           },
           "409": {
             "$ref": "#/components/responses/RunAdmissionConflict"
-          },
-          "412": {
-            "description": "Missing integration connection (`missing_integration_connection`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            }
           },
           "413": {
             "description": "`payload_too_large` — an inline `data:` input file exceeds the per-file inline cap (4 MiB decoded), or the run's input files together exceed `WORKSPACE_MAX_FILES_BYTES`. Or `file_count_exceeded` — the run would carry more than `RUN_MAX_FILES` input files (uploads + inline + `appfile://` refs). Both are refused before the run launches, so nothing is charged and no workspace is provisioned; distinct codes so a client can tell \"one file too big\" from \"too many files\".",
@@ -2869,7 +2857,7 @@
         "operationId": "getRunLogs",
         "tags": ["Runs"],
         "summary": "Get run logs",
-        "description": "Get persisted log entries for a run, wrapped in the standard list envelope `{ object: \"list\", data, hasMore }`. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI's polling tail to bound per-poll payload growth, and the pagination cursor when combined with `?limit=`. Pass `?level=` to filter by minimum severity (`level=info` skips debug breadcrumbs). `limit` defaults to 1000 when omitted — the response is never unbounded; when more entries follow, `hasMore` is `true` and an RFC 5988 `Link: <…?since=<lastId>>; rel=\"next\"` response header points at the next page. `id` is a monotonic BIGSERIAL; invalid `since`/`level`/`limit` values fall back to the default rather than 400 so a stale cursor never breaks a polling tail. Rate-limited to 120/min per identity. Note: tool-result payloads inside `data` are truncated at write time by the runner (default 2048 bytes, operator-tunable via `TOOL_RESULT_BYTE_LIMIT`) — entries already persisted truncated cannot be recovered by this endpoint.",
+        "description": "Get persisted log entries for a run, wrapped in the standard list envelope `{ object: \"list\", data, hasMore }`. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI's polling tail to bound per-poll payload growth, and the pagination cursor when combined with `?limit=`. Pass `?level=` to filter by minimum severity (`level=info` skips debug breadcrumbs). `limit` defaults to 1000 when omitted — the response is never unbounded; when more entries follow, `hasMore` is `true` and an RFC 5988 `Link: <…?since=<lastId>>; rel=\"next\"` response header points at the next page. `id` is a monotonic int64 (one sequence across all runs, so consecutive entries of a run are not contiguous); invalid `since`/`level`/`limit` values fall back to the default rather than 400 so a stale cursor never breaks a polling tail. Rate-limited to 120/min per identity. Note: tool-result payloads inside `data` are truncated at write time by the runner (default 2048 bytes, operator-tunable via `TOOL_RESULT_BYTE_LIMIT`) — entries already persisted truncated cannot be recovered by this endpoint.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -3299,18 +3287,8 @@
           "409": {
             "$ref": "#/components/responses/RunAdmissionConflict"
           },
-          "412": {
-            "description": "Missing integration connection (`missing_integration_connection`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            }
-          },
           "422": {
-            "description": "Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), a dependency pin or `dependency_overrides` entry resolves to no published version (`dependency_unresolved`), or — `registry` source with `stage: \"published\"` (the default) only — the archive of the selected version is missing, corrupt or without `prompt.md` (`version_artifact_unavailable`); the working copy is never substituted. When `AFPS_SIGNATURE_POLICY` is not `off`, a corrupt archive answers `bundle_invalid` instead and an unsigned or untrusted one `bundle_signature_invalid`. An archive past the decompression ceiling answers `package_archive_unreadable`",
+            "description": "Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), a dependency pin or `dependency_overrides` entry resolves to no published version (`dependency_unresolved`), or — `registry` source with `stage: \"published\"` (the default) only — the archive of the selected version is missing, corrupt or without `prompt.md` (`version_artifact_unavailable`); the working copy is never substituted. When `AFPS_SIGNATURE_POLICY` is `required`, a corrupt archive answers `bundle_invalid` instead and an unsigned or untrusted one `bundle_signature_invalid`. An archive past the decompression ceiling answers `package_archive_unreadable`",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -3479,7 +3457,7 @@
         "operationId": "finalizeRemoteRun",
         "tags": ["Runs"],
         "summary": "Terminal RunResult — close the sink (HMAC, idempotent)",
-        "description": "Closes the run. Flushes any buffered events (accepting sequence gaps — no more will arrive), sets terminal status/result/cost/duration on the `runs` row, broadcasts the `onRunStatusChange` module event. Idempotent: a replay after the sink is closed returns `200 { ok: true }` without re-broadcasting.",
+        "description": "Closes the run. Flushes any buffered events (accepting sequence gaps — no more will arrive), sets terminal status/result/cost/duration on the `runs` row, broadcasts the `onRunStatusChange` module event. Idempotent: a replay after the sink is closed returns `200 { ok: true }` without re-broadcasting.\n\nThe runner declares the outcome; the platform infers none of it. `status` is required, and `usage` is required when `status` is `success` — either missing is a 400. Two rules can still turn a reported `success` into `failed`: an output that violates the agent's declared output schema, and a `usage` with zero `input_tokens` and zero `output_tokens`, which means the LLM was never reached (the run is failed with a \"could not reach the LLM API\" error). On any other status, a missing `usage` keeps the last cumulative usage the run reported through `appstrate.metric` events.",
         "parameters": [
           {
             "name": "runId",
@@ -3520,7 +3498,8 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "description": "AFPS runtime `RunResult` — `memories`, `pinned`, `output`, `logs` plus optional terminal `status`/`error`/`durationMs` and authoritative `usage`/`cost`. Unknown keys are ignored, so a runner older than the platform still finalizes cleanly.",
+                "description": "AFPS runtime `TerminalRunResult` — `memories`, `pinned`, `output`, `logs`, the required terminal `status`, optional `error`/`durationMs`, and authoritative `usage`/`cost`. Unknown keys are ignored.",
+                "required": ["status"],
                 "properties": {
                   "memories": {
                     "type": "array"
@@ -3545,7 +3524,8 @@
                   },
                   "status": {
                     "type": "string",
-                    "enum": ["success", "failed", "timeout", "cancelled"]
+                    "enum": ["success", "failed", "timeout", "cancelled"],
+                    "description": "Terminal outcome as the runner saw it."
                   },
                   "durationMs": {
                     "type": "integer",
@@ -3553,7 +3533,7 @@
                   },
                   "usage": {
                     "type": "object",
-                    "description": "Authoritative terminal token usage written to the `runs` row.",
+                    "description": "Authoritative terminal token usage written to the `runs` row. Required when `status` is `success`; a success with zero `input_tokens` and `output_tokens` is recorded as `failed` (LLM never reached).",
                     "properties": {
                       "input_tokens": {
                         "type": "integer",
@@ -4215,7 +4195,7 @@
         "operationId": "streamAllRuns",
         "tags": ["Realtime"],
         "summary": "SSE: all run status changes",
-        "description": "Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent format: `event: run_update\\ndata: {\"id\":\"run_...\",\"status\":\"running\",\"packageId\":\"@scope/name\",...}\\n\\n`\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.\n\nRun visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.",
+        "description": "Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=apst_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent format: `event: run_update\\ndata: {\"id\":\"run_...\",\"status\":\"running\",\"packageId\":\"@scope/name\",...}\\n\\n`\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.\n\nRun visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/SseOrgId"
@@ -4267,7 +4247,7 @@
         "operationId": "streamRun",
         "tags": ["Realtime"],
         "summary": "SSE: single run events",
-        "description": "Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.\n\nRun visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.",
+        "description": "Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=apst_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.\n\nRun visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.",
         "parameters": [
           {
             "name": "id",
@@ -4327,7 +4307,7 @@
         "operationId": "streamAgentRuns",
         "tags": ["Realtime"],
         "summary": "SSE: agent run changes",
-        "description": "Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=ask_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.\n\nRun visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.",
+        "description": "Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=apst_... query parameter. API keys must carry the `runs:read` scope — a valid key without it is rejected with 403.\n\nEvent types: `run_update` (status change), `run_log` (log entry), `run_metric` (running cumulative cost + token usage), `connection_update` (INSERT/UPDATE/DELETE on integration_connections, actor-scoped to the caller's own rows). Heartbeat: a named SSE `event: ping` frame (empty data) sent immediately on connect and every 30s thereafter.\n\nEach SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.\n\nChannel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.\n\nRun visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.",
         "parameters": [
           {
             "name": "packageId",
@@ -4579,22 +4559,22 @@
                   },
                   "actor": {
                     "type": "object",
-                    "description": "Execution identity for runs this schedule fires (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this space). Omit to default to the calling identity. Requires `schedules:write`.",
+                    "description": "Execution identity for runs this schedule fires (#738). Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to default to the calling identity. Requires `schedules:write`.",
                     "properties": {
-                      "user_id": {
+                      "userId": {
                         "type": "string"
                       },
-                      "end_user_id": {
+                      "endUserId": {
                         "type": "string"
                       }
                     },
                     "additionalProperties": false,
                     "oneOf": [
                       {
-                        "required": ["user_id"]
+                        "required": ["userId"]
                       },
                       {
-                        "required": ["end_user_id"]
+                        "required": ["endUserId"]
                       }
                     ]
                   }
@@ -4767,11 +4747,11 @@
           }
         }
       },
-      "put": {
+      "patch": {
         "operationId": "updateSchedule",
         "tags": ["Schedules"],
         "summary": "Update a schedule",
-        "description": "Update a cron schedule (expression, timezone, enabled state, or input).",
+        "description": "Update a cron schedule (expression, timezone, enabled state, or input). Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -4848,22 +4828,22 @@
                   },
                   "actor": {
                     "type": "object",
-                    "description": "Re-point the schedule's execution identity (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this space). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`.",
+                    "description": "Re-point the schedule's execution identity (#738). Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`.",
                     "properties": {
-                      "user_id": {
+                      "userId": {
                         "type": "string"
                       },
-                      "end_user_id": {
+                      "endUserId": {
                         "type": "string"
                       }
                     },
                     "additionalProperties": false,
                     "oneOf": [
                       {
-                        "required": ["user_id"]
+                        "required": ["userId"]
                       },
                       {
-                        "required": ["end_user_id"]
+                        "required": ["endUserId"]
                       }
                     ]
                   }
@@ -6453,15 +6433,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["connect_url", "expires_at"],
+                  "required": ["connect_url", "expiresAt"],
                   "properties": {
                     "connect_url": {
                       "type": "string",
                       "format": "uri"
                     },
-                    "expires_at": {
-                      "type": "integer",
-                      "description": "Absolute expiry of the connect session (epoch ms)."
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "Absolute expiry of the connect session (RFC 3339)."
                     }
                   }
                 }
@@ -6543,9 +6524,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["package_id", "auth_key", "display_name", "auth"],
+                  "required": ["packageId", "auth_key", "display_name", "auth"],
                   "properties": {
-                    "package_id": {
+                    "packageId": {
                       "type": "string"
                     },
                     "auth_key": {
@@ -8002,7 +7983,8 @@
                   "input": {
                     "type": "array",
                     "items": {
-                      "type": "string"
+                      "type": "string",
+                      "enum": ["text", "image"]
                     },
                     "description": "Supported input types"
                   },
@@ -8316,7 +8298,8 @@
                           "input": {
                             "type": "array",
                             "items": {
-                              "type": "string"
+                              "type": "string",
+                              "enum": ["text", "image"]
                             },
                             "description": "Supported input types"
                           },
@@ -8502,11 +8485,11 @@
       }
     },
     "/api/models/{id}": {
-      "put": {
+      "patch": {
         "operationId": "updateModel",
         "tags": ["Models"],
         "summary": "Update a custom model",
-        "description": "Update a custom model configuration. Built-in models cannot be modified.",
+        "description": "Update a custom model configuration. Built-in models cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -8545,7 +8528,8 @@
                   "input": {
                     "type": ["array", "null"],
                     "items": {
-                      "type": "string"
+                      "type": "string",
+                      "enum": ["text", "image"]
                     }
                   },
                   "contextWindow": {
@@ -9248,9 +9232,10 @@
                           "input": {
                             "type": ["array", "null"],
                             "items": {
-                              "type": "string"
+                              "type": "string",
+                              "enum": ["text", "image"]
                             },
-                            "description": "Accepted input modalities (`text`, `image`)."
+                            "description": "Accepted input modalities."
                           },
                           "reasoning": {
                             "type": ["boolean", "null"]
@@ -9338,11 +9323,11 @@
       }
     },
     "/api/model-provider-credentials/{id}": {
-      "put": {
+      "patch": {
         "operationId": "updateModelProviderCredential",
         "tags": ["Model Provider Credentials"],
         "summary": "Update a model provider credential",
-        "description": "Update a model provider credential's mutable fields. The `apiShape` and `baseUrl` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers.",
+        "description": "Update a model provider credential's mutable fields. The `apiShape` and `baseUrl` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -10135,11 +10120,11 @@
       }
     },
     "/api/proxies/{id}": {
-      "put": {
+      "patch": {
         "operationId": "updateProxy",
         "tags": ["Proxies"],
         "summary": "Update a custom proxy",
-        "description": "Update a custom proxy (label, url, enabled). Built-in proxies cannot be modified.",
+        "description": "Update a custom proxy (label, url, enabled). Built-in proxies cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -10434,7 +10419,7 @@
                     {
                       "id": "cm8vwx234",
                       "name": "Production CI",
-                      "keyPrefix": "ask_prod",
+                      "keyPrefix": "apst_k3x9M2pq",
                       "scopes": ["agents:run", "runs:read"],
                       "created_by": "user_abc",
                       "created_by_name": "Jane Doe",
@@ -10523,11 +10508,11 @@
                     },
                     "key": {
                       "type": "string",
-                      "description": "Raw API key (prefix: ask_). Store it securely — it will not be shown again."
+                      "description": "Raw API key (prefix: apst_). Store it securely — it will not be shown again."
                     },
                     "keyPrefix": {
                       "type": "string",
-                      "description": "First 8 characters for identification"
+                      "description": "The `apst_` prefix and the first 8 characters after it, for identification"
                     },
                     "scopes": {
                       "type": "array",
@@ -10540,8 +10525,8 @@
                 },
                 "example": {
                   "id": "cm8vwx235",
-                  "key": "ask_prod_k3x9m2pq7r4t1w6y0a5d8g",
-                  "keyPrefix": "ask_prod",
+                  "key": "apst_k3x9M2pq7R4t1W6y0a5D8gHs2LmQ4v4WVgvC",
+                  "keyPrefix": "apst_k3x9M2pq",
                   "scopes": ["agents:run", "runs:read"]
                 }
               }
@@ -10847,11 +10832,11 @@
           }
         }
       },
-      "put": {
+      "patch": {
         "operationId": "updateOrganization",
         "tags": ["Organizations"],
         "summary": "Update organization",
-        "description": "Update organization name and/or slug. Owner only.",
+        "description": "Update organization name and/or slug. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
         "parameters": [
           {
             "name": "orgId",
@@ -11023,7 +11008,7 @@
                   "role": "member",
                   "space_assignments": [
                     {
-                      "space_id": "spc_...",
+                      "spaceId": "spc_...",
                       "preset_role": "operator"
                     }
                   ],
@@ -11047,7 +11032,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Conflict — this email already holds a pending invitation in the organization. `invitation_id` names it; edit it (PUT /api/orgs/{orgId}/invitations/{invitationId}) to change the role or add a space instead of creating a second token.",
+            "description": "Conflict — this email already holds a pending invitation in the organization. `invitation_id` names it; edit it (PATCH /api/orgs/{orgId}/invitations/{invitationId}) to change the role or add a space instead of creating a second token.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11256,11 +11241,11 @@
       }
     },
     "/api/orgs/{orgId}/invitations/{invitationId}": {
-      "put": {
+      "patch": {
         "operationId": "changeInvitationRole",
         "tags": ["Organizations"],
         "summary": "Change invitation role",
-        "description": "Change the role and/or the space assignments of a pending invitation. Admin or owner required. Omitting `space_assignments` keeps the ones already stored, and the role rules are re-checked against them.",
+        "description": "Change the role and/or the space assignments of a pending invitation. Admin or owner required. Merge semantics (RFC 7396): omitting `space_assignments` keeps the ones already stored, and the role rules are re-checked against them.",
         "parameters": [
           {
             "name": "orgId",
@@ -11439,11 +11424,11 @@
           }
         }
       },
-      "put": {
+      "patch": {
         "operationId": "updateOrgSettings",
         "tags": ["Organizations"],
         "summary": "Update organization settings",
-        "description": "Update organization settings (merge — only provided fields are updated).",
+        "description": "Update organization settings. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
         "parameters": [
           {
             "name": "orgId",
@@ -12420,15 +12405,15 @@
                       "description": "The caller's own most recent runs (actor-scoped), newest first — lets an agent reference a recent or failed run without a discovery round-trip.",
                       "items": {
                         "type": "object",
-                        "required": ["package_id", "status"],
+                        "required": ["packageId", "status"],
                         "properties": {
-                          "package_id": {
+                          "packageId": {
                             "type": "string"
                           },
                           "status": {
                             "type": "string"
                           },
-                          "run_number": {
+                          "runNumber": {
                             "type": ["integer", "null"]
                           },
                           "started_at": {
@@ -12487,7 +12472,7 @@
                       "items": {
                         "type": "object",
                         "required": [
-                          "package_id",
+                          "packageId",
                           "display_name",
                           "description",
                           "takes_input",
@@ -12496,7 +12481,7 @@
                           "source"
                         ],
                         "properties": {
-                          "package_id": {
+                          "packageId": {
                             "type": "string",
                             "description": "Invokable identifier, e.g. \"@appstrate/triage\"."
                           },
@@ -12520,7 +12505,7 @@
                           },
                           "source": {
                             "type": "string",
-                            "enum": ["system", "local"]
+                            "enum": ["local", "system"]
                           }
                         }
                       }
@@ -12539,7 +12524,7 @@
                       "items": {
                         "type": "object",
                         "required": [
-                          "package_id",
+                          "packageId",
                           "display_name",
                           "description",
                           "version",
@@ -12548,7 +12533,7 @@
                           "source"
                         ],
                         "properties": {
-                          "package_id": {
+                          "packageId": {
                             "type": "string",
                             "description": "Attachable identifier, e.g. \"@appstrate/web-research\". Declare under dependencies.skills."
                           },
@@ -12572,7 +12557,7 @@
                           },
                           "source": {
                             "type": "string",
-                            "enum": ["system", "local"]
+                            "enum": ["local", "system"]
                           }
                         }
                       }
@@ -12613,16 +12598,16 @@
                   ],
                   "recent_runs": [
                     {
-                      "package_id": "@appstrate/triage",
+                      "packageId": "@appstrate/triage",
                       "status": "failed",
-                      "run_number": 7,
+                      "runNumber": 7,
                       "started_at": "2026-06-25T09:12:00.000Z",
                       "error": "Gmail token expired"
                     }
                   ],
                   "agents": [
                     {
-                      "package_id": "@appstrate/triage",
+                      "packageId": "@appstrate/triage",
                       "display_name": "Inbox Triage",
                       "description": "Sorts and labels incoming email.",
                       "takes_input": false,
@@ -12635,7 +12620,7 @@
                   "agents_total": 1,
                   "skills": [
                     {
-                      "package_id": "@appstrate/web-research",
+                      "packageId": "@appstrate/web-research",
                       "display_name": "Web Research",
                       "description": "Multi-source web search and synthesis.",
                       "version": "1.2.0",
@@ -12735,7 +12720,7 @@
                   "role": "member",
                   "space_assignments": [
                     {
-                      "space_id": "spc_...",
+                      "spaceId": "spc_...",
                       "preset_role": "operator"
                     }
                   ],
@@ -13331,7 +13316,7 @@
             "$ref": "#/components/responses/InternalServerError"
           },
           "502": {
-            "description": "Transient OAuth refresh failure upstream — same semantics as the GET endpoint.",
+            "description": "Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected fewer than `INTEGRATION_REFRESH_MAX_FAILURES` consecutive times; the rejection is counted and the connection is flagged (`410`) once the streak reaches the threshold.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13609,7 +13594,7 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["id", "type", "run_id", "payload", "read_at", "created_at"],
+                        "required": ["id", "type", "run_id", "payload", "read_at", "createdAt"],
                         "properties": {
                           "id": {
                             "type": "string",
@@ -13634,7 +13619,7 @@
                             "format": "date-time",
                             "description": "When the recipient marked it read; null if unread"
                           },
-                          "created_at": {
+                          "createdAt": {
                             "type": "string",
                             "format": "date-time"
                           }
@@ -13658,7 +13643,7 @@
                         "status": "success"
                       },
                       "read_at": null,
-                      "created_at": "2026-01-15T10:31:12Z"
+                      "createdAt": "2026-01-15T10:31:12Z"
                     }
                   ],
                   "has_more": false
@@ -14887,7 +14872,7 @@
                     "items": {
                       "$ref": "#/components/schemas/PackageFileWriteOperation"
                     },
-                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations."
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates are guarded by the same `If-Match` as the manifest; a stale draft returns 412 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations."
                   },
                   "manifest": {
                     "type": "object",
@@ -14913,13 +14898,16 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OrgPackageItemDetail",
-                  "description": "The created package resource — same shape as its GET detail. The resource carries `lock_version`, the optimistic-lock token to send with the next update. No follow-up GET needed."
+                  "description": "The created package resource — same shape as its GET detail. Its `ETag` header is the draft version to send in `If-Match` on the next update. No follow-up GET needed."
                 }
               }
             }
@@ -15058,13 +15046,20 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["versions"],
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "versions": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/AgentVersion"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -15099,6 +15094,9 @@
           },
           {
             "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
           }
         ],
         "requestBody": {
@@ -15112,10 +15110,6 @@
                     "type": "string",
                     "minLength": 1,
                     "description": "Optional semver version override (e.g. from bump selector)"
-                  },
-                  "lock_version": {
-                    "type": "integer",
-                    "description": "Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at."
                   }
                 },
                 "additionalProperties": false
@@ -15154,7 +15148,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "409": {
-            "description": "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`, or `conflict`.",
+            "description": "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -15162,6 +15156,9 @@
                 }
               }
             }
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
           }
         }
       }
@@ -15186,6 +15183,9 @@
             "$ref": "#/components/parameters/PackageName"
           },
           {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
             "name": "version",
             "in": "path",
             "required": true,
@@ -15204,13 +15204,16 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OrgPackageItemDetail",
-                  "description": "The updated package resource after the restore — same shape as the package GET detail. The restored version is reflected in `version` / `manifest` / `content`, and the resource carries the package's NEW `lock_version` — read it back before the next draft edit."
+                  "description": "The updated package resource after the restore — same shape as the package GET detail. The restored version is reflected in `version` / `manifest` / `content`, and its `ETag` header is the draft's NEW version — send it in `If-Match` on the next draft edit."
                 }
               }
             }
@@ -15228,15 +15231,8 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
-          "409": {
-            "description": "Concurrent modification. RFC 9457 problem+json with `code` of `conflict`.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            }
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
           },
           "422": {
             "$ref": "#/components/responses/VersionArtifactUnavailable"
@@ -15392,6 +15388,9 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
@@ -15417,7 +15416,7 @@
           }
         }
       },
-      "put": {
+      "patch": {
         "operationId": "updateSkill",
         "tags": ["Packages"],
         "summary": "Update a skill",
@@ -15434,6 +15433,9 @@
           },
           {
             "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatchRequired"
           }
         ],
         "requestBody": {
@@ -15442,7 +15444,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["lock_version"],
                 "properties": {
                   "manifest": {
                     "type": "object",
@@ -15458,11 +15459,7 @@
                     "items": {
                       "$ref": "#/components/schemas/PackageFileWriteOperation"
                     },
-                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations."
-                  },
-                  "lock_version": {
-                    "type": "integer",
-                    "description": "Optimistic lock version"
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates are guarded by the same `If-Match` as the manifest; a stale draft returns 412 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations."
                   }
                 },
                 "additionalProperties": false
@@ -15479,13 +15476,16 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OrgPackageItemDetail",
-                  "description": "The updated package resource — same shape as its GET detail. The resource carries the NEW `lock_version` — read it back before the next edit. No follow-up GET needed."
+                  "description": "The updated package resource — same shape as its GET detail. Its `ETag` header is the draft's NEW version — send it in `If-Match` on the next edit. No follow-up GET needed."
                 }
               }
             }
@@ -15503,15 +15503,8 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
-          "409": {
-            "description": "Draft was changed concurrently; reload before retrying",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            }
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
           },
           "413": {
             "description": "Written file or resulting tree exceeds its byte/count limit",
@@ -15522,6 +15515,9 @@
                 }
               }
             }
+          },
+          "428": {
+            "$ref": "#/components/responses/PreconditionRequired"
           }
         }
       },
@@ -15659,7 +15655,7 @@
                     "items": {
                       "$ref": "#/components/schemas/PackageFileWriteOperation"
                     },
-                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations."
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates are guarded by the same `If-Match` as the manifest; a stale draft returns 412 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations."
                   },
                   "manifest": {
                     "$ref": "#/components/schemas/AgentManifest"
@@ -15683,13 +15679,16 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AgentDetail",
-                  "description": "The created package resource — same shape as its GET detail. The resource carries `lock_version`, the optimistic-lock token to send with the next update. No follow-up GET needed."
+                  "description": "The created package resource — same shape as its GET detail. Its `ETag` header is the draft version to send in `If-Match` on the next update. No follow-up GET needed."
                 }
               }
             }
@@ -15735,7 +15734,7 @@
         "operationId": "getAgentPackage",
         "tags": ["Packages"],
         "summary": "Get agent detail",
-        "description": "Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `home_space_id`, `home_writable`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).",
+        "description": "Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `home_space_id`, `home_writable`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, the `ETag`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -15768,6 +15767,9 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
@@ -15793,11 +15795,11 @@
           }
         }
       },
-      "put": {
+      "patch": {
         "operationId": "updateAgent",
         "tags": ["Packages"],
         "summary": "Update a user agent",
-        "description": "Update manifest and content of a user agent with optimistic locking. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.",
+        "description": "Update manifest and content of a user agent, under its `If-Match`. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -15810,6 +15812,9 @@
           },
           {
             "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatchRequired"
           }
         ],
         "requestBody": {
@@ -15818,7 +15823,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["lock_version"],
                 "properties": {
                   "manifest": {
                     "$ref": "#/components/schemas/AgentManifest"
@@ -15832,11 +15836,7 @@
                     "items": {
                       "$ref": "#/components/schemas/PackageFileWriteOperation"
                     },
-                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations."
-                  },
-                  "lock_version": {
-                    "type": "integer",
-                    "description": "Optimistic lock version"
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates are guarded by the same `If-Match` as the manifest; a stale draft returns 412 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations."
                   }
                 },
                 "additionalProperties": false
@@ -15853,13 +15853,16 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AgentDetail",
-                  "description": "The updated package resource — same shape as its GET detail. The resource carries the NEW `lock_version` — read it back before the next edit. No follow-up GET needed."
+                  "description": "The updated package resource — same shape as its GET detail. Its `ETag` header is the draft's NEW version — send it in `If-Match` on the next edit. No follow-up GET needed."
                 }
               }
             }
@@ -15876,15 +15879,8 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
-          "409": {
-            "description": "Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            }
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
           },
           "413": {
             "description": "Written file or resulting tree exceeds its byte/count limit",
@@ -15895,6 +15891,9 @@
                 }
               }
             }
+          },
+          "428": {
+            "$ref": "#/components/responses/PreconditionRequired"
           }
         }
       },
@@ -16042,13 +16041,20 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["versions"],
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "versions": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/AgentVersion"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -16083,6 +16089,9 @@
           },
           {
             "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
           }
         ],
         "requestBody": {
@@ -16096,10 +16105,6 @@
                     "type": "string",
                     "minLength": 1,
                     "description": "Optional semver version override (e.g. from bump selector)"
-                  },
-                  "lock_version": {
-                    "type": "integer",
-                    "description": "Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at."
                   }
                 },
                 "additionalProperties": false
@@ -16137,7 +16142,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "409": {
-            "description": "Agent in use (runs in progress), no changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `agent_in_use`, `no_changes`, `version_exists`, or `conflict`.",
+            "description": "Agent in use (runs in progress), no changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `agent_in_use`, `no_changes`, `version_exists`.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -16145,6 +16150,9 @@
                 }
               }
             }
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
           }
         }
       }
@@ -16169,6 +16177,9 @@
             "$ref": "#/components/parameters/PackageName"
           },
           {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
             "name": "version",
             "in": "path",
             "required": true,
@@ -16186,13 +16197,16 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AgentDetail",
-                  "description": "The updated package resource after the restore — same shape as the package GET detail. The restored version is reflected in `version` / `manifest` / `content`, and the resource carries the package's NEW `lock_version` — read it back before the next draft edit."
+                  "description": "The updated package resource after the restore — same shape as the package GET detail. The restored version is reflected in `version` / `manifest` / `content`, and its `ETag` header is the draft's NEW version — send it in `If-Match` on the next draft edit."
                 }
               }
             }
@@ -16207,7 +16221,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`.",
+            "description": "Agent in use. RFC 9457 problem+json with `code` `agent_in_use`.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -16215,6 +16229,9 @@
                 }
               }
             }
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
           },
           "422": {
             "$ref": "#/components/responses/VersionArtifactUnavailable"
@@ -16396,7 +16413,7 @@
         "operationId": "movePackageHome",
         "tags": ["Packages"],
         "summary": "Move a package to another home space",
-        "description": "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it, and every member but a guest holds `admin` (hence `<type>:write`) in their own, so the move would otherwise put a team's package beyond every administrator's reach (RBAC spec §3.6 gives no admin a way in) for as long as its owner stays a member. `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. It also reconciles PLACEMENT in the same transaction: every space that holds the package and is not the new home gains the `package_shares` row that now places it there (a package is present in a space through its home or a share, never through its `space_packages` row alone), the destination's own share, if any, is dropped since a package is not offered to the space it lives in, and the destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would, and refuses the whole move with `422 bundle_invalid` for an mcp-server whose `latest` archive is not executable. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. Those reconciling shares carry `shared_by: null` — nobody offered them, the home did until this call — so `GET /api/packages/{scope}/{name}/shares` lists them with a null sharer, and revoking one removes the package from that space like any other revocation. The draft itself is edited through `PUT /api/packages/{type}/{scope}/{name}`, under its optimistic lock.",
+        "description": "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it, and every member but a guest holds `admin` (hence `<type>:write`) in their own, so the move would otherwise put a team's package beyond every administrator's reach (RBAC spec §3.6 gives no admin a way in) for as long as its owner stays a member. `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. It also reconciles PLACEMENT in the same transaction: every space that holds the package and is not the new home gains the `package_shares` row that now places it there (a package is present in a space through its home or a share, never through its `space_packages` row alone), the destination's own share, if any, is dropped since a package is not offered to the space it lives in, and the destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would, and refuses the whole move with `422 bundle_invalid` for an mcp-server whose `latest` archive is not executable. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. Those reconciling shares carry `shared_by: null` — nobody offered them, the home did until this call — so `GET /api/packages/{scope}/{name}/shares` lists them with a null sharer, and revoking one removes the package from that space like any other revocation. The draft itself is edited through `PATCH /api/packages/{type}/{scope}/{name}`, under its `If-Match`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -16443,6 +16460,9 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
@@ -16748,6 +16768,9 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
@@ -16888,7 +16911,7 @@
                     "items": {
                       "$ref": "#/components/schemas/PackageFileWriteOperation"
                     },
-                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations."
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates are guarded by the same `If-Match` as the manifest; a stale draft returns 412 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations."
                   },
                   "manifest": {
                     "type": "object",
@@ -16914,13 +16937,16 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OrgPackageItemDetail",
-                  "description": "The created package resource — same shape as its GET detail. The resource carries `lock_version`, the optimistic-lock token to send with the next update. No follow-up GET needed."
+                  "description": "The created package resource — same shape as its GET detail. Its `ETag` header is the draft version to send in `If-Match` on the next update. No follow-up GET needed."
                 }
               }
             }
@@ -17058,13 +17084,20 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["versions"],
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "versions": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/AgentVersion"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -17099,6 +17132,9 @@
           },
           {
             "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
           }
         ],
         "requestBody": {
@@ -17112,10 +17148,6 @@
                     "type": "string",
                     "minLength": 1,
                     "description": "Optional semver version override (e.g. from bump selector)"
-                  },
-                  "lock_version": {
-                    "type": "integer",
-                    "description": "Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at."
                   }
                 },
                 "additionalProperties": false
@@ -17153,7 +17185,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "409": {
-            "description": "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`, or `conflict`.",
+            "description": "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -17161,6 +17193,9 @@
                 }
               }
             }
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
           }
         }
       }
@@ -17185,6 +17220,9 @@
             "$ref": "#/components/parameters/PackageName"
           },
           {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
             "name": "version",
             "in": "path",
             "required": true,
@@ -17203,13 +17241,16 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OrgPackageItemDetail",
-                  "description": "The updated package resource after the restore — same shape as the package GET detail. The restored version is reflected in `version` / `manifest` / `content`, and the resource carries the package's NEW `lock_version` — read it back before the next draft edit."
+                  "description": "The updated package resource after the restore — same shape as the package GET detail. The restored version is reflected in `version` / `manifest` / `content`, and its `ETag` header is the draft's NEW version — send it in `If-Match` on the next draft edit."
                 }
               }
             }
@@ -17223,15 +17264,8 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
-          "409": {
-            "description": "Concurrent modification. RFC 9457 problem+json with `code` of `conflict`.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            }
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
           },
           "422": {
             "$ref": "#/components/responses/VersionArtifactUnavailable"
@@ -17387,6 +17421,9 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
@@ -17412,7 +17449,7 @@
           }
         }
       },
-      "put": {
+      "patch": {
         "operationId": "updateIntegrationPackage",
         "tags": ["Packages"],
         "summary": "Update an integration package",
@@ -17429,6 +17466,9 @@
           },
           {
             "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatchRequired"
           }
         ],
         "requestBody": {
@@ -17437,7 +17477,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["lock_version"],
                 "properties": {
                   "manifest": {
                     "type": "object",
@@ -17453,11 +17492,7 @@
                     "items": {
                       "$ref": "#/components/schemas/PackageFileWriteOperation"
                     },
-                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations."
-                  },
-                  "lock_version": {
-                    "type": "integer",
-                    "description": "Optimistic lock version"
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates are guarded by the same `If-Match` as the manifest; a stale draft returns 412 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations."
                   }
                 },
                 "additionalProperties": false
@@ -17474,13 +17509,16 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OrgPackageItemDetail",
-                  "description": "The updated package resource — same shape as its GET detail. The resource carries the NEW `lock_version` — read it back before the next edit. No follow-up GET needed."
+                  "description": "The updated package resource — same shape as its GET detail. Its `ETag` header is the draft's NEW version — send it in `If-Match` on the next edit. No follow-up GET needed."
                 }
               }
             }
@@ -17497,15 +17535,8 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
-          "409": {
-            "description": "Draft was changed concurrently; reload before retrying",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            }
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
           },
           "413": {
             "description": "Written file or resulting tree exceeds its byte/count limit",
@@ -17516,6 +17547,9 @@
                 }
               }
             }
+          },
+          "428": {
+            "$ref": "#/components/responses/PreconditionRequired"
           }
         }
       },
@@ -17667,13 +17701,16 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OrgPackageItemDetail",
-                  "description": "The created package resource — same shape as its GET detail. The resource carries `lock_version`, the optimistic-lock token to send with the next update. No follow-up GET needed."
+                  "description": "The created package resource — same shape as its GET detail. Its `ETag` header is the draft version to send in `If-Match` on the next update. No follow-up GET needed."
                 }
               }
             }
@@ -17790,13 +17827,20 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["versions"],
+                  "required": ["object", "data", "hasMore"],
                   "properties": {
-                    "versions": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/AgentVersion"
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -17831,6 +17875,9 @@
           },
           {
             "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
           }
         ],
         "requestBody": {
@@ -17844,10 +17891,6 @@
                     "type": "string",
                     "minLength": 1,
                     "description": "Optional semver version override (e.g. from bump selector)"
-                  },
-                  "lock_version": {
-                    "type": "integer",
-                    "description": "Optional precondition: the draft's `lock_version` the caller read. When the draft has moved since, nothing is published and the answer is `409 conflict` — the version cut is the draft the caller looked at."
                   }
                 },
                 "additionalProperties": false
@@ -17885,7 +17928,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "409": {
-            "description": "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`, or `conflict`.",
+            "description": "No changes to snapshot, or version already published (immutable — bump the version). RFC 9457 problem+json with `code` one of `no_changes`, `version_exists`, `agent_in_use`.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -17893,6 +17936,9 @@
                 }
               }
             }
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
           }
         }
       }
@@ -17917,6 +17963,9 @@
             "$ref": "#/components/parameters/PackageName"
           },
           {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
             "name": "version",
             "in": "path",
             "required": true,
@@ -17935,13 +17984,16 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OrgPackageItemDetail",
-                  "description": "The updated package resource after the restore — same shape as the package GET detail. The restored version is reflected in `version` / `manifest` / `content`, and the resource carries the package's NEW `lock_version` — read it back before the next draft edit."
+                  "description": "The updated package resource after the restore — same shape as the package GET detail. The restored version is reflected in `version` / `manifest` / `content`, and its `ETag` header is the draft's NEW version — send it in `If-Match` on the next draft edit."
                 }
               }
             }
@@ -17955,15 +18007,8 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
-          "409": {
-            "description": "Concurrent modification. RFC 9457 problem+json with `code` of `conflict`.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            }
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
           },
           "422": {
             "$ref": "#/components/responses/VersionArtifactUnavailable"
@@ -18119,6 +18164,9 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
@@ -18144,7 +18192,7 @@
           }
         }
       },
-      "put": {
+      "patch": {
         "operationId": "updateMcpServerPackage",
         "tags": ["Packages"],
         "summary": "Update an MCP-server package",
@@ -18161,6 +18209,9 @@
           },
           {
             "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatchRequired"
           }
         ],
         "requestBody": {
@@ -18169,7 +18220,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["lock_version"],
                 "properties": {
                   "manifest": {
                     "type": "object",
@@ -18185,11 +18235,7 @@
                     "items": {
                       "$ref": "#/components/schemas/PackageFileWriteOperation"
                     },
-                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations."
-                  },
-                  "lock_version": {
-                    "type": "integer",
-                    "description": "Optimistic lock version"
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates are guarded by the same `If-Match` as the manifest; a stale draft returns 412 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations."
                   }
                 },
                 "additionalProperties": false
@@ -18206,13 +18252,16 @@
               },
               "Appstrate-Version": {
                 "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
             },
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OrgPackageItemDetail",
-                  "description": "The updated package resource — same shape as its GET detail. The resource carries the NEW `lock_version` — read it back before the next edit. No follow-up GET needed."
+                  "description": "The updated package resource — same shape as its GET detail. Its `ETag` header is the draft's NEW version — send it in `If-Match` on the next edit. No follow-up GET needed."
                 }
               }
             }
@@ -18229,15 +18278,8 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
-          "409": {
-            "description": "Draft was changed concurrently; reload before retrying",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            }
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
           },
           "413": {
             "description": "Written file or resulting tree exceeds its byte/count limit",
@@ -18248,6 +18290,9 @@
                 }
               }
             }
+          },
+          "428": {
+            "$ref": "#/components/responses/PreconditionRequired"
           }
         }
       },
@@ -18867,7 +18912,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["agent", "skill", "mcp-server", "integration"]
+              "enum": ["agent", "skill", "integration", "mcp-server"]
             },
             "description": "Filter by package type"
           }
@@ -19075,11 +19120,11 @@
           }
         }
       },
-      "put": {
+      "patch": {
         "operationId": "updateSpacePackage",
         "tags": ["Space Packages"],
         "summary": "Configure how this space runs a placed package",
-        "description": "Update the model/proxy overrides and generation settings of a package PLACED in this space. Requires the package type's `configure` grant, personal space included: selecting a model spends the organization's budget. There is no `enabled` field: activating and deactivating are their own acts, on `POST /api/spaces/{spaceId}/packages` and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`, where the placement rule and the offer that may have to be created with it are stated once. Sending it is a `400`. There is no version field either: a placement carries no version — outside its home space a package runs its latest published version, and its draft runs for whoever can write it. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.",
+        "description": "Update the model/proxy overrides and generation settings of a package PLACED in this space. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. Requires the package type's `configure` grant, personal space included: selecting a model spends the organization's budget. There is no `enabled` field: activating and deactivating are their own acts, on `POST /api/spaces/{spaceId}/packages` and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`, where the placement rule and the offer that may have to be created with it are stated once. Sending it is a `400`. There is no version field either: a placement carries no version — outside its home space a package runs its latest published version, and its draft runs for whoever can write it. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -21851,7 +21896,7 @@
         "operationId": "credentialProxyGet",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a GET request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.",
         "security": [
           {
             "bearerApiKey": []
@@ -21902,10 +21947,10 @@
             "name": "X-Substitute-Body",
             "in": "header",
             "required": false,
-            "description": "When `true`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "description": "When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
             "schema": {
               "type": "string",
-              "enum": ["true", "false"]
+              "enum": ["0", "1"]
             }
           },
           {
@@ -22033,7 +22078,7 @@
         "operationId": "credentialProxyPost",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a POST request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.",
         "security": [
           {
             "bearerApiKey": []
@@ -22084,10 +22129,10 @@
             "name": "X-Substitute-Body",
             "in": "header",
             "required": false,
-            "description": "When `true`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "description": "When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
             "schema": {
               "type": "string",
-              "enum": ["true", "false"]
+              "enum": ["0", "1"]
             }
           },
           {
@@ -22222,7 +22267,7 @@
         "operationId": "credentialProxyPut",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a PUT request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.",
         "security": [
           {
             "bearerApiKey": []
@@ -22273,10 +22318,10 @@
             "name": "X-Substitute-Body",
             "in": "header",
             "required": false,
-            "description": "When `true`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "description": "When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
             "schema": {
               "type": "string",
-              "enum": ["true", "false"]
+              "enum": ["0", "1"]
             }
           },
           {
@@ -22411,7 +22456,7 @@
         "operationId": "credentialProxyPatch",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a PATCH request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.",
         "security": [
           {
             "bearerApiKey": []
@@ -22462,10 +22507,10 @@
             "name": "X-Substitute-Body",
             "in": "header",
             "required": false,
-            "description": "When `true`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "description": "When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
             "schema": {
               "type": "string",
-              "enum": ["true", "false"]
+              "enum": ["0", "1"]
             }
           },
           {
@@ -22600,7 +22645,7 @@
         "operationId": "credentialProxyDelete",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a DELETE request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.",
         "security": [
           {
             "bearerApiKey": []
@@ -22651,10 +22696,10 @@
             "name": "X-Substitute-Body",
             "in": "header",
             "required": false,
-            "description": "When `true`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "description": "When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
             "schema": {
               "type": "string",
-              "enum": ["true", "false"]
+              "enum": ["0", "1"]
             }
           },
           {
@@ -23195,7 +23240,7 @@
                     "packages": {
                       "type": "object",
                       "description": "Packages grouped by type. Every group is always present (possibly empty).",
-                      "required": ["agent", "skill", "mcp-server", "integration"],
+                      "required": ["agent", "skill", "integration", "mcp-server"],
                       "properties": {
                         "agent": {
                           "$ref": "#/components/schemas/LibraryPackageList"
@@ -23364,7 +23409,7 @@
                     "packages": {
                       "type": "object",
                       "description": "Packages grouped by type. Every group is always present (possibly empty).",
-                      "required": ["agent", "skill", "mcp-server", "integration"],
+                      "required": ["agent", "skill", "integration", "mcp-server"],
                       "properties": {
                         "agent": {
                           "$ref": "#/components/schemas/LibraryPackageList"
@@ -23485,7 +23530,7 @@
       "bearerApiKey": {
         "type": "http",
         "scheme": "bearer",
-        "description": "API key authentication. Use `Authorization: Bearer ask_...` header. The org is resolved from the key — no `X-Org-Id` header needed."
+        "description": "API key authentication. Use `Authorization: Bearer apst_...` header. The org is resolved from the key — no `X-Org-Id` header needed. A key is `apst_` + 30 base62 characters + a 6-character base62 CRC32 of those 30, so a malformed key is refused without a lookup."
       },
       "bearerJwt": {
         "type": "http",
@@ -23509,6 +23554,26 @@
           "type": "integer",
           "minimum": 0,
           "default": 0
+        }
+      },
+      "IfMatch": {
+        "name": "If-Match",
+        "in": "header",
+        "required": false,
+        "description": "Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins.",
+        "schema": {
+          "type": "string",
+          "example": "\"42\""
+        }
+      },
+      "IfMatchRequired": {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "description": "The `ETag` of the draft the write is based on (read it from the package GET, or from the previous write's response). Mandatory: absent is `428 precondition_required`; stale is `412 precondition_failed` and nothing is written. `*` writes over whatever is current.",
+        "schema": {
+          "type": "string",
+          "example": "\"42\""
         }
       },
       "XOrgId": {
@@ -23582,7 +23647,7 @@
         "name": "X-Appstrate-Connect-Offers",
         "in": "header",
         "required": false,
-        "description": "Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 412 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human.",
+        "description": "Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human.",
         "schema": {
           "type": "string",
           "enum": ["1"]
@@ -23601,7 +23666,7 @@
         "name": "view_as",
         "in": "query",
         "required": false,
-        "description": "Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=ask_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`.",
+        "description": "Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=apst_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`.",
         "schema": {
           "type": "string",
           "example": "org_role=member; space=spc_…; role=preset:viewer"
@@ -23611,7 +23676,7 @@
         "name": "token",
         "in": "query",
         "required": false,
-        "description": "API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead.",
+        "description": "API key (`apst_` prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead.",
         "schema": {
           "type": "string"
         }
@@ -23620,7 +23685,7 @@
         "name": "X-View-As",
         "in": "header",
         "required": false,
-        "description": "Preview the API as a lesser role (\"view as\"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:\n\n- `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.\n- `space` (optional) — a `spc_` space id. Must be paired with `role`.\n- `role` (optional) — `preset:<admin|builder|operator|runner|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.\n\nExample: `org_role=member; space=spc_…; role=preset:viewer`.\n\nThe persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.\n\nRefusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.\n\nOn `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.\n\nThe Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.\n\nEvery response produced under a validated persona carries `X-View-As-Active: 1`.",
+        "description": "Preview the API as a lesser role (\"view as\"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:\n\n- `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.\n- `space` (optional) — a `spc_` space id. Must be paired with `role`.\n- `role` (optional) — `preset:<admin|builder|operator|runner|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.\n\nExample: `org_role=member; space=spc_…; role=preset:viewer`.\n\nThe persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.viewAs`.\n\nRefusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.\n\nOn `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.\n\nThe Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.\n\nEvery response produced under a validated persona carries `X-View-As-Active: 1`.",
         "schema": {
           "type": "string",
           "example": "org_role=member; space=spc_…; role=preset:viewer"
@@ -23691,7 +23756,7 @@
         }
       },
       "RetryAfter": {
-        "description": "Seconds to wait before retrying. Present on 429 responses.",
+        "description": "Seconds to wait before retrying. Present on every 429, and on any error whose problem body carries `retryAfter` (the two always agree), such as the 503 `shutting_down`.",
         "schema": {
           "type": "integer"
         }
@@ -23701,6 +23766,13 @@
         "schema": {
           "type": "string",
           "example": "Bearer error=\"invalid_token\""
+        }
+      },
+      "ETag": {
+        "description": "Strong entity-tag of the resource version this response carries (RFC 9110 §8.8.3). Send it back verbatim in `If-Match` on the next write to that resource: a write based on a stale read is refused with `412 precondition_failed`.",
+        "schema": {
+          "type": "string",
+          "example": "\"42\""
         }
       },
       "Link": {
@@ -23794,13 +23866,14 @@
           "connect_url": {
             "type": "string",
             "format": "uri",
-            "description": "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 412 whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link."
+            "description": "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link."
           },
-          "expires_at": {
-            "type": "integer",
-            "description": "Absolute expiry of `connect_url`, epoch ms."
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Absolute expiry of `connect_url` (RFC 3339)."
           },
-          "package_id": {
+          "packageId": {
             "type": "string",
             "description": "Integration package id `connect_url` connects (`@scope/name`)."
           }
@@ -23846,7 +23919,7 @@
           },
           "retryAfter": {
             "type": "integer",
-            "description": "Seconds before retry (on 429)"
+            "description": "Seconds before retry; mirrored in the `Retry-After` header"
           },
           "errors": {
             "type": "array",
@@ -23998,11 +24071,11 @@
           },
           "package_type": {
             "type": "string",
-            "enum": ["agent", "skill", "mcp-server", "integration"]
+            "enum": ["agent", "skill", "integration", "mcp-server"]
           },
           "package_source": {
             "type": "string",
-            "enum": ["system", "local"]
+            "enum": ["local", "system"]
           },
           "draft_manifest": {
             "type": ["object", "null"],
@@ -24126,7 +24199,7 @@
       "SpaceAssignment": {
         "type": "object",
         "description": "A space membership the invitation applies when it is accepted. Exactly one of `preset_role` / `custom_role_id` is set.",
-        "required": ["space_id"],
+        "required": ["spaceId"],
         "oneOf": [
           {
             "required": ["preset_role"]
@@ -24136,7 +24209,7 @@
           }
         ],
         "properties": {
-          "space_id": {
+          "spaceId": {
             "type": "string"
           },
           "preset_role": {
@@ -24298,7 +24371,7 @@
           },
           "source": {
             "type": "string",
-            "enum": ["system", "local"]
+            "enum": ["local", "system"]
           },
           "scope": {
             "type": ["string", "null"],
@@ -24311,7 +24384,7 @@
           "type": {
             "type": "string",
             "description": "Package type from manifest",
-            "enum": ["agent", "skill", "mcp-server", "integration"]
+            "enum": ["agent", "skill", "integration", "mcp-server"]
           },
           "running_runs": {
             "type": "integer"
@@ -24395,7 +24468,7 @@
           },
           "source": {
             "type": "string",
-            "enum": ["system", "local"]
+            "enum": ["local", "system"]
           },
           "scope": {
             "type": ["string", "null"],
@@ -24426,10 +24499,6 @@
             "type": "string",
             "format": "date-time",
             "description": "Last updated timestamp (user agents only)"
-          },
-          "lock_version": {
-            "type": "integer",
-            "description": "Optimistic lock version (user agents only)"
           },
           "input": {
             "type": "object",
@@ -24733,14 +24802,22 @@
       },
       "PackageFileIndex": {
         "type": "object",
-        "required": ["entries"],
+        "required": ["object", "data", "hasMore"],
         "properties": {
-          "entries": {
+          "object": {
+            "type": "string",
+            "enum": ["list"]
+          },
+          "data": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/PackageFileEntry"
             },
             "description": "Files in the artifact, sorted by `path`."
+          },
+          "hasMore": {
+            "type": "boolean",
+            "description": "Always `false`: the index is never paginated."
           }
         }
       },
@@ -25188,7 +25265,8 @@
         "required": ["id", "runId", "type", "level", "createdAt"],
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
           },
           "runId": {
             "type": "string"
@@ -25384,7 +25462,7 @@
           },
           "keyPrefix": {
             "type": "string",
-            "description": "First 8 chars of the key for identification"
+            "description": "The first characters of the key, for identification: `apst_` + 8."
           },
           "scopes": {
             "type": "array",
@@ -25465,7 +25543,7 @@
           },
           "source": {
             "type": "string",
-            "enum": ["system", "local"]
+            "enum": ["local", "system"]
           },
           "created_by": {
             "type": ["string", "null"]
@@ -25559,17 +25637,13 @@
           },
           "source": {
             "type": "string",
-            "enum": ["system", "local"]
+            "enum": ["local", "system"]
           },
           "created_by": {
             "type": ["string", "null"]
           },
           "auto_installed": {
             "type": "boolean"
-          },
-          "lock_version": {
-            "type": "integer",
-            "description": "Optimistic lock version"
           },
           "version": {
             "type": ["string", "null"],
@@ -25765,7 +25839,8 @@
           "input": {
             "type": ["array", "null"],
             "items": {
-              "type": "string"
+              "type": "string",
+              "enum": ["text", "image"]
             }
           },
           "contextWindow": {
@@ -26076,16 +26151,16 @@
       },
       "AgentConnectionReadiness": {
         "type": "object",
-        "description": "What stands between this agent and a run, in one call: the connection verdict (mirroring the run-kickoff 412, run semantics) plus the space's own activation switch. `integrations[]` carries every declared integration's management verdict for the Connexions tab.",
+        "description": "What stands between this agent and a run, in one call: the connection verdict (mirroring the run-kickoff 409, run semantics) plus the space's own activation switch. `integrations[]` carries every declared integration's management verdict for the Connexions tab.",
         "required": ["blocks_run", "errors", "integrations"],
         "properties": {
           "blocks_run": {
             "type": "boolean",
-            "description": "True iff `POST /api/agents/{scope}/{name}/run` would refuse — a connection the resolver rejects (412), or the agent being switched off in this space (404 `agent_not_active_in_space`). Equivalently: `errors` is non-empty."
+            "description": "True iff `POST /api/agents/{scope}/{name}/run` would refuse — a connection the resolver rejects (409), or the agent being switched off in this space (404 `agent_not_active_in_space`). Equivalently: `errors` is non-empty."
           },
           "errors": {
             "type": "array",
-            "description": "What blocks the run. The integration portion of the 412 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors), plus, FIRST when it applies, `{ field: \"agent\", code: \"agent_not_active\" }` — the space has switched the agent off, so the run doors answer `404 agent_not_active_in_space` while this read answers 200 and says why. The remedy is `POST /api/spaces/{spaceId}/packages`. Shares the single ResolutionFieldError component so the shape can't drift from the 412 error items.",
+            "description": "What blocks the run. The integration portion of the 409 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors), plus, FIRST when it applies, `{ field: \"agent\", code: \"agent_not_active\" }` — the space has switched the agent off, so the run doors answer `404 agent_not_active_in_space` while this read answers 200 and says why. The remedy is `POST /api/spaces/{spaceId}/packages`. Shares the single ResolutionFieldError component so the shape can't drift from the 409 error items.",
             "items": {
               "$ref": "#/components/schemas/ResolutionFieldError"
             }
@@ -26262,13 +26337,13 @@
       },
       "SpaceSweepResult": {
         "type": "object",
-        "required": ["object", "space_id", "rehomed_packages", "deleted_packages"],
+        "required": ["object", "spaceId", "rehomed_packages", "deleted_packages"],
         "properties": {
           "object": {
             "type": "string",
             "enum": ["space_sweep"]
           },
-          "space_id": {
+          "spaceId": {
             "type": "string",
             "description": "The personal space that was swept and deleted"
           },
@@ -26715,7 +26790,7 @@
             },
             "type": {
               "type": "string",
-              "enum": ["agent", "skill", "mcp-server", "integration"]
+              "enum": ["agent", "skill", "integration", "mcp-server"]
             },
             "source": {
               "type": "string",
@@ -26796,13 +26871,13 @@
         "oneOf": [
           {
             "type": "object",
-            "required": ["kind", "user_id"],
+            "required": ["kind", "userId"],
             "properties": {
               "kind": {
                 "type": "string",
                 "enum": ["user"]
               },
-              "user_id": {
+              "userId": {
                 "type": "string",
                 "description": "Organization member's user id."
               }
@@ -26811,13 +26886,13 @@
           },
           {
             "type": "object",
-            "required": ["kind", "space_id"],
+            "required": ["kind", "spaceId"],
             "properties": {
               "kind": {
                 "type": "string",
                 "enum": ["space"]
               },
-              "space_id": {
+              "spaceId": {
                 "type": "string",
                 "description": "Space id (`spc_…`) the caller can reach."
               }
@@ -26835,11 +26910,11 @@
             "type": "string",
             "enum": ["user", "space"]
           },
-          "user_id": {
+          "userId": {
             "type": "string",
             "description": "Present when `kind` is `user`."
           },
-          "space_id": {
+          "spaceId": {
             "type": "string",
             "description": "Present when `kind` is `space`."
           },
@@ -26852,7 +26927,7 @@
       "PackageShare": {
         "type": "object",
         "description": "One entry of a package's AUDIENCE (`package_shares`): a space the package is offered to. A share grants READ and the affordance to activate; it is never an activation, and no execution path consults it.",
-        "required": ["object", "target", "shared_by", "created_at"],
+        "required": ["object", "target", "shared_by", "createdAt"],
         "properties": {
           "object": {
             "type": "string",
@@ -26874,7 +26949,7 @@
               }
             }
           },
-          "created_at": {
+          "createdAt": {
             "type": "string",
             "format": "date-time"
           }
@@ -26899,7 +26974,7 @@
           },
           "type": {
             "type": "string",
-            "enum": ["agent", "skill", "mcp-server", "integration"]
+            "enum": ["agent", "skill", "integration", "mcp-server"]
           },
           "home_space_id": {
             "type": ["string", "null"],
@@ -26929,7 +27004,7 @@
     },
     "responses": {
       "VersionArtifactUnavailable": {
-        "description": "The selected published version's archive is missing, corrupt, or lacks the content entry its type requires (`prompt.md` for an agent, `SKILL.md` for a skill) — `version_artifact_unavailable`. Nothing is substituted for it, not even the working copy, and nothing is written. When `AFPS_SIGNATURE_POLICY` is not `off`, the signature gate answers first: a corrupt archive is `bundle_invalid` and an unsigned or untrusted one `bundle_signature_invalid`, both 422. An archive past the decompression ceiling answers `422 package_archive_unreadable`.",
+        "description": "The selected published version's archive is missing, corrupt, or lacks the content entry its type requires (`prompt.md` for an agent, `SKILL.md` for a skill) — `version_artifact_unavailable`. Nothing is substituted for it, not even the working copy, and nothing is written. When the version is about to run (a run or schedule) and `AFPS_SIGNATURE_POLICY` is `required`, the signature gate answers first: a corrupt archive is `bundle_invalid` and an unsigned or untrusted one `bundle_signature_invalid`, both 422. An archive past the decompression ceiling answers `422 package_archive_unreadable`.",
         "headers": {
           "Request-Id": {
             "$ref": "#/components/headers/RequestId"
@@ -26997,6 +27072,55 @@
               "status": 404,
               "detail": "Resource not found",
               "code": "not_found",
+              "requestId": "req_abc123"
+            }
+          }
+        }
+      },
+      "PreconditionFailed": {
+        "description": "`If-Match` does not match the resource's current `ETag`: it changed since it was read. Nothing was written. The response carries the current `ETag`; re-read, reapply, retry.",
+        "headers": {
+          "Request-Id": {
+            "$ref": "#/components/headers/RequestId"
+          },
+          "ETag": {
+            "$ref": "#/components/headers/ETag"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "example": {
+              "type": "https://docs.appstrate.dev/errors/precondition-failed",
+              "title": "Precondition Failed",
+              "status": 412,
+              "detail": "The resource changed since you read it: If-Match does not match its current ETag. Re-read it, reapply your change, and send the new ETag.",
+              "code": "precondition_failed",
+              "requestId": "req_abc123"
+            }
+          }
+        }
+      },
+      "PreconditionRequired": {
+        "description": "The write requires an `If-Match` header and none was sent (RFC 6585 §3).",
+        "headers": {
+          "Request-Id": {
+            "$ref": "#/components/headers/RequestId"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "example": {
+              "type": "https://docs.appstrate.dev/errors/precondition-required",
+              "title": "Precondition Required",
+              "status": 428,
+              "detail": "This write requires an If-Match header carrying the ETag of the representation you read. GET the resource, then send its ETag.",
+              "code": "precondition_required",
               "requestId": "req_abc123"
             }
           }
@@ -27129,7 +27253,7 @@
         }
       },
       "RunAdmissionConflict": {
-        "description": "`idempotency_in_progress` — a request with the same `Idempotency-Key` is already being processed; wait and retry. Or `org_deleting` — the organization's deletion is reserved, so no new work is admitted and a retry will not succeed.",
+        "description": "`idempotency_in_progress` — a request with the same `Idempotency-Key` is already being processed; wait and retry. Or `org_deleting` — the organization's deletion is reserved, so no new work is admitted and a retry will not succeed. Or `missing_integration_connection` — a declared integration has no usable connection for the caller: `errors[]` carries one item per integration (`field: integrations.<id>`), and a `must_choose_connection` item lists `candidate_connections` to pick from via `connection_overrides`.",
         "headers": {
           "Request-Id": {
             "$ref": "#/components/headers/RequestId"
@@ -27161,6 +27285,24 @@
                   "detail": "This organization is being deleted; no new work can be admitted.",
                   "code": "org_deleting",
                   "requestId": "req_abc123"
+                }
+              },
+              "missingIntegrationConnection": {
+                "summary": "A declared integration has no usable connection",
+                "value": {
+                  "type": "https://docs.appstrate.dev/errors/missing-integration-connection",
+                  "title": "Missing Integration Connection",
+                  "status": 409,
+                  "detail": "Integration '@acme/gmail' is not connected",
+                  "code": "missing_integration_connection",
+                  "requestId": "req_abc123",
+                  "errors": [
+                    {
+                      "field": "integrations.@acme/gmail",
+                      "code": "not_connected",
+                      "message": "Integration '@acme/gmail' is not connected"
+                    }
+                  ]
                 }
               }
             }
@@ -27242,7 +27384,7 @@
         }
       },
       "NoPublishedVersion": {
-        "description": "Resource not found. On `PUT /api/schedules/{id}`, most commonly the schedule id itself does not exist (or belongs to another space) — that check runs first. Both writes also answer 404 when the target agent does not exist, or has no published version (`no_published_version`): on `POST` always, on `PUT` when the patch carries `input` or `version_override`. A schedule with no `version_override` fires the PUBLISHED manifest, so a never-published agent is refused at the write rather than 404ing on every tick; pin the working copy with `version_override: \"draft\"` to schedule it anyway.",
+        "description": "Resource not found. On `PATCH /api/schedules/{id}`, most commonly the schedule id itself does not exist (or belongs to another space) — that check runs first. Both writes also answer 404 when the target agent does not exist, or has no published version (`no_published_version`): on `POST` always, on `PATCH` when the patch carries `input` or `version_override`. A schedule with no `version_override` fires the PUBLISHED manifest, so a never-published agent is refused at the write rather than 404ing on every tick; pin the working copy with `version_override: \"draft\"` to schedule it anyway.",
         "content": {
           "application/problem+json": {
             "schema": {

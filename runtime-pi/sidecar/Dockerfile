@@ -60,6 +60,8 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 #   - @appstrate/core/{errors,ssrf}           getErrorMessage + isBlockedHost/Url,
 #                                             imported by credential-proxy.ts /
 #                                             mcp.ts / ssrf.ts
+#   - @appstrate/core/{url,log-line}          env.ts's URL check and logger.ts's
+#                                             pino-compatible line (import-free)
 #   - @earendil-works/pi-ai (npm, via     re-originates an aliased run's call against
 #     the `pi-sdk.ts` barrel)             the real backing, so pi-ai keeps deriving
 #                                         every vendor quirk itself. Only the five

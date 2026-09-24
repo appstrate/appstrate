@@ -107,8 +107,8 @@ describe("Pi tool result → chat UI (producer/consumer boundary)", () => {
 
   it("still surfaces a failed forwarded call as an error", () => {
     const envelope = {
-      status: 412,
-      body: { title: "Missing Integration Connection", status: 412 },
+      status: 409,
+      body: { title: "Missing Integration Connection", status: 409 },
     };
     const result = withTurnBudgetNote(
       mcpResultToPi({ content: [{ type: "text", text: JSON.stringify(envelope) }] }),

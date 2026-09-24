@@ -106,7 +106,7 @@ export function HostedConnectPage() {
       // The connection exists: announce it now. The popup opener does not close
       // this window, so an install block below stays up until the user is done.
       publishConnectCompletion(
-        { ok: true, packageId: context.package_id },
+        { ok: true, packageId: context.packageId },
         window.opener as Window | null,
         window.location.origin,
       );

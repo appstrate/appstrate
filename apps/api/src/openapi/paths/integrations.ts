@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { packageSourceValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 
 /**
@@ -91,7 +92,7 @@ const integrationSummarySchema = {
     id: { type: "string" },
     manifest: { type: "object", additionalProperties: true },
     orgId: { type: ["string", "null"] },
-    source: { type: "string", enum: ["local", "system"] },
+    source: { type: "string", enum: [...packageSourceValues] },
     active: { type: "boolean" },
     block_user_connections: { type: "boolean" },
   },
@@ -887,12 +888,13 @@ export const integrationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["connect_url", "expires_at"],
+                required: ["connect_url", "expiresAt"],
                 properties: {
                   connect_url: { type: "string", format: "uri" },
-                  expires_at: {
-                    type: "integer",
-                    description: "Absolute expiry of the connect session (epoch ms).",
+                  expiresAt: {
+                    type: "string",
+                    format: "date-time",
+                    description: "Absolute expiry of the connect session (RFC 3339).",
                   },
                 },
               },
@@ -966,9 +968,9 @@ export const integrationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["package_id", "auth_key", "display_name", "auth"],
+                required: ["packageId", "auth_key", "display_name", "auth"],
                 properties: {
-                  package_id: { type: "string" },
+                  packageId: { type: "string" },
                   auth_key: { type: "string" },
                   display_name: { type: "string" },
                   icon: { type: ["string", "null"] },

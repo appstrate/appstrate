@@ -127,7 +127,8 @@ export const LLM_STREAM_IDLE_TIMEOUT_MS = readPositiveIntEnv(
  * The abort reason NEVER reaches the agent: `fetch` rejects with this
  * DOMException, the `app.all("/llm/*")` handler's `catch` hands it to
  * `llmFetchErrorResponse` (`./app.ts`), which reads only `err.code` and answers
- * a generic `502 {"error":"LLM request failed…"}` — the message is dropped. On
+ * a generic 502 `LLM request failed…` in the provider-shaped envelope
+ * (`llmProxyErrorBody`) — the message is dropped. On
  * the aliased `pi-messages` path it is replaced by `syntheticAliasClassifierMessage`
  * for the same reason. It is worded for OUR logs.
  *

@@ -164,7 +164,7 @@ const shareWithUser = (headers: Headers, packageId: string, userId: string) =>
   app.request(`/api/packages/${packageId}/shares`, {
     method: "POST",
     headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify({ target: { kind: "user", user_id: userId } }),
+    body: JSON.stringify({ target: { kind: "user", userId: userId } }),
   });
 
 /** `POST …/shares` with a `space` target. */
@@ -172,7 +172,7 @@ const shareWithSpace = (headers: Headers, packageId: string, spaceId: string) =>
   app.request(`/api/packages/${packageId}/shares`, {
     method: "POST",
     headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify({ target: { kind: "space", space_id: spaceId } }),
+    body: JSON.stringify({ target: { kind: "space", spaceId } }),
   });
 
 const listShares = (headers: Headers, packageId: string) =>
@@ -360,7 +360,7 @@ describe("authority — `<type>:share` in the home space", () => {
     const res = await app.request(`/api/packages/${AGENT}/shares`, {
       method: "POST",
       headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ target: { kind: "space", space_id: teamId } }),
+      body: JSON.stringify({ target: { kind: "space", spaceId: teamId } }),
     });
     await expectProblem(res, 403);
 
@@ -372,13 +372,13 @@ describe("authority — `<type>:share` in the home space", () => {
     await expectProblem(minted, 400, { code: "invalid_request" });
   });
 
-  it("refuses a malformed `space_id` with 400, not the 404 an unreachable space gets", async () => {
+  it("refuses a malformed `spaceId` with 400, not the 404 an unreachable space gets", async () => {
     // A retired `app_` spelling resolves to no space. Without the shape check
     // the route reports it as "space not found", which reads as a permission
     // problem and sends the caller looking in the wrong place.
     await expectRejectedField(
       await shareWithSpace(author.headers(homeId), AGENT, "app_legacy"),
-      "target.space_id",
+      "target.spaceId",
     );
     await assertDbMissing(packageShares, eq(packageShares.packageId, AGENT));
   });
@@ -398,7 +398,7 @@ describe("authority — `<type>:share` in the home space", () => {
       await app.request(`/api/packages/${AGENT}/shares`, {
         method: "POST",
         headers: { ...author.headers(homeId), "Content-Type": "application/json" },
-        body: JSON.stringify({ target: { kind: "user", user_id: recipient.userId }, note: "hi" }),
+        body: JSON.stringify({ target: { kind: "user", userId: recipient.userId }, note: "hi" }),
       }),
       "note",
     );
@@ -494,8 +494,8 @@ describe("authority — `<type>:share` in the home space", () => {
     expect(body.data).toHaveLength(1);
     const [entry] = body.data;
     expect(entry!.target.kind).toBe("user");
-    expect(entry!.target.user_id).toBe(recipient.userId);
-    expect(entry!.target.space_id).toBeUndefined();
+    expect(entry!.target.userId).toBe(recipient.userId);
+    expect(entry!.target.spaceId).toBeUndefined();
     expect(JSON.stringify(entry)).not.toContain(recipient.personalSpaceId);
     expect(entry!.shared_by?.user_id).toBe(author.userId);
   });
@@ -527,7 +527,7 @@ describe("authority — `<type>:share` in the home space", () => {
     // The offer still stands, and its target is still named — only the sharer
     // is withheld.
     expect(anonymous.data).toHaveLength(1);
-    expect(anonymous.data[0]!.target.user_id).toBe(recipient.userId);
+    expect(anonymous.data[0]!.target.userId).toBe(recipient.userId);
     expect(anonymous.data[0]!.shared_by).toBeNull();
   });
 
@@ -1074,7 +1074,7 @@ describe("offered is not activated", () => {
     // field of this body at all — sending it is a 400 from `.strict()`.
     const patch = (body: Record<string, unknown>) =>
       app.request(`/api/spaces/${guest.personalSpaceId}/packages/${AGENT}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...guest.headers(), "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });

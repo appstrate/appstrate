@@ -7,7 +7,7 @@
  * Single source of truth behind the launch badge, the Connexions tab pickers,
  * and the pre-run check. The authoritative invariant asserted here:
  *
- *   body.blocks_run === true  ⇔  POST /api/agents/:scope/:name/run → 412
+ *   body.blocks_run === true  ⇔  POST /api/agents/:scope/:name/run → 409
  *
  * plus per-integration `run_blocking` flags and the management `resolution`
  * DTO for every declared integration (even inert ones).
@@ -154,7 +154,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     });
   }
 
-  it("active integration with no connection → blocks_run + run_blocking, and run 412s (parity)", async () => {
+  it("active integration with no connection → blocks_run + run_blocking, and run 409s (parity)", async () => {
     await seedAgentWith(buildAgentManifest([INTEGRATION], true));
     await seedIntegration(false);
 
@@ -171,8 +171,8 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     expect(integ?.run_blocking).toBe(true);
     expect(integ?.resolution.status).toBe("none");
 
-    // Parity: the run gate rejects with 412.
-    expect((await postRun()).status).toBe(412);
+    // Parity: the run gate rejects with 409.
+    expect((await postRun()).status).toBe(409);
   });
 
   it("inert OPTIONAL integration (no tools, not required) → present but not blocking", async () => {
@@ -187,7 +187,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     expect(integ!.run_blocking).toBe(false);
   });
 
-  it("inert REQUIRED integration (no tools, required auth) → blocks_run + run 412s (parity)", async () => {
+  it("inert REQUIRED integration (no tools, required auth) → blocks_run + run 409s (parity)", async () => {
     await seedAgentWith(buildAgentManifest([INTEGRATION], false));
     await seedIntegration(true);
 
@@ -196,7 +196,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     const integ = body.integrations.find((i) => i.integration_id === INTEGRATION);
     expect(integ!.run_blocking).toBe(true);
 
-    expect((await postRun()).status).toBe(412);
+    expect((await postRun()).status).toBe(409);
   });
 
   it("active integration with one healthy connection → not blocking", async () => {
@@ -263,7 +263,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
 // #1131 — Google's token endpoint echoes the OIDC scope `email` as
 // `https://www.googleapis.com/auth/userinfo.email`. A wildcard agent
 // (`tools: "*"`) requires the raw `default_scopes`, so without the catalog
-// alias the connection read as missing `email` and every launch 412'd. Uses
+// alias the connection read as missing `email` and every launch 409'd. Uses
 // the REAL `@appstrate/gmail-mcp` source manifest, located by name (a version
 // bump renames its directory), and the grant Google actually stores.
 describe("connection-readiness — Google-echoed `email` scope (#1131)", () => {
@@ -356,7 +356,7 @@ describe("connection-readiness — Google-echoed `email` scope (#1131)", () => {
     });
   }
 
-  it("the real Google grant satisfies a wildcard agent — readiness clean, launch not 412", async () => {
+  it("the real Google grant satisfies a wildcard agent — readiness clean, launch not 409", async () => {
     await seedWildcardGmailAgent(GOOGLE_GRANT);
 
     const body = await readiness();
@@ -366,7 +366,7 @@ describe("connection-readiness — Google-echoed `email` scope (#1131)", () => {
     // The launch clears the connection gate and dies at the NEXT one (no model
     // is seeded) — before any run row exists, so nothing races the truncate.
     const res = await launch();
-    expect(res.status).not.toBe(412);
+    expect(res.status).not.toBe(409);
     expect(((await res.json()) as { code?: string }).code).toBe("model_not_configured");
   });
 
@@ -382,6 +382,6 @@ describe("connection-readiness — Google-echoed `email` scope (#1131)", () => {
     // Only the genuinely absent scope — `email` must not ride along.
     expect(err?.missing_scopes).toEqual([compose]);
 
-    expect((await launch()).status).toBe(412);
+    expect((await launch()).status).toBe(409);
   });
 });

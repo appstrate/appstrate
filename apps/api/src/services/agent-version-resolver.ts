@@ -132,7 +132,7 @@ export async function resolveAgentRunVersion(
         detail: `Agent '${agent.id}' has no published version — publish one or run with version=draft`,
       });
     }
-    const detail = await getVersionDetail(agent.id, latest.version);
+    const detail = await getVersionDetail(agent.id, latest.version, { forExecution: true });
     if (!detail) {
       throw notFound(`Version '${latest.version}' of '${agent.id}' is not available`);
     }
@@ -140,7 +140,7 @@ export async function resolveAgentRunVersion(
   }
 
   // Explicit spec: exact version → dist-tag → semver range.
-  const detail = await getVersionDetail(agent.id, sel);
+  const detail = await getVersionDetail(agent.id, sel, { forExecution: true });
   if (!detail) {
     throw notFound(`Version '${sel}' not found`);
   }

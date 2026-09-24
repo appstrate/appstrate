@@ -27,7 +27,6 @@ describe("codex module", () => {
     expect(codex?.oauth?.tokenUrl).toBe("https://auth.openai.com/oauth/token");
     expect(codex?.oauth?.refreshUrl).toBe("https://auth.openai.com/oauth/token");
     expect(codex?.oauth?.pkce).toBe("S256");
-    expect(codex?.oauth?.scopes).toEqual(["openid", "profile", "email"]);
   });
 
   it("exposes a non-empty featured catalog", () => {

@@ -786,7 +786,7 @@ interface AgentConnectionReadiness {
   /** True iff the run would be refused — an inactive agent, or a connection the resolver rejects. */
   blocks_run: boolean;
   /**
-   * What blocks the run. The integration portion of the 412 envelope (same
+   * What blocks the run. The integration portion of the 409 envelope (same
    * `field: integrations.<id>` shape), plus `agent_not_active` when the SPACE
    * has switched the agent off: the three execution doors answer that with a
    * 404, and this read reports it instead, because a panel that 404s cannot
@@ -808,7 +808,7 @@ interface AgentConnectionReadiness {
  *
  * `blocks_run` / `errors` come from `resolveConnectionsForRun` with the RUN
  * semantics (`includeInert: false` + the required-auth carve-out) — the exact
- * resolver call the run-kickoff 412 uses — so the UI's pre-run signal can never
+ * resolver call the run-kickoff 409 uses — so the UI's pre-run signal can never
  * disagree with the actual gate. The per-integration `resolution` DTOs come
  * from a second `includeInert: true` cascade over the same manifest, so every
  * declared integration, even an inert one, stays manageable in the Connexions
@@ -856,7 +856,7 @@ export async function resolveAgentConnectionReadiness(args: {
   // `buildRequirement` falls through to `fetchIntegrationManifest`, which reads
   // `packages.draft_manifest`: the readiness verdict would then judge auth keys
   // and required scopes against the integration author's LIVE DRAFT while the
-  // run-kickoff 412 judges them against the pinned published version — exactly
+  // run-kickoff 409 judges them against the pinned published version — exactly
   // the disagreement this function's contract above forbids. (#1178 closed the
   // agent-manifest half of it; this is the integration-manifest half.)
   //

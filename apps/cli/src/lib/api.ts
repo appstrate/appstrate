@@ -348,6 +348,15 @@ export async function apiFetch<T>(
   path: string,
   init: ApiFetchInit = {},
 ): Promise<T> {
+  return (await apiFetchWithHeaders<T>(profileName, path, init)).body;
+}
+
+/** {@link apiFetch}, keeping the response headers — an `ETag` to send back as `If-Match`. */
+export async function apiFetchWithHeaders<T>(
+  profileName: string,
+  path: string,
+  init: ApiFetchInit = {},
+): Promise<{ body: T; headers: Headers }> {
   const res = await apiFetchRaw(profileName, path, init);
 
   if (res.status === 401) {
@@ -372,8 +381,8 @@ export async function apiFetch<T>(
     throw new ApiError(res.status, message, body);
   }
 
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  if (res.status === 204) return { body: undefined as T, headers: res.headers };
+  return { body: (await res.json()) as T, headers: res.headers };
 }
 
 /**

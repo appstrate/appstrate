@@ -19,7 +19,8 @@
  */
 
 import { z } from "zod";
-import { runStatusValues, TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
+import { TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
+import type { RunStatus } from "@appstrate/core/run-status";
 import {
   fileUri,
   isFileProducedByRun,
@@ -32,7 +33,6 @@ import { asRecord, unwrapResult } from "./tool-result.ts";
 /** Operation ids whose result launches a run we can follow. */
 const RUN_LAUNCH_OPS = ["runAgent", "runInline", "run_and_wait"] as const;
 type RunLaunchOp = (typeof RUN_LAUNCH_OPS)[number];
-export type RunStatus = (typeof runStatusValues)[number];
 
 export function isTerminalStatus(status: string | null | undefined): status is RunStatus {
   return typeof status === "string" && TERMINAL_RUN_STATUSES.has(status as RunStatus);

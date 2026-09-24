@@ -25,6 +25,7 @@ import type {
 } from "./chat-contract.ts";
 import type { OrchestratorRegistration } from "./platform-types.ts";
 import type { ModelGenerationCapabilitiesOverride } from "./model-generation.ts";
+import type { TerminalRunStatus } from "./run-status.ts";
 
 // ---------------------------------------------------------------------------
 // Module contract
@@ -141,7 +142,7 @@ export interface AppstrateModule {
   /**
    * Custom authentication strategies contributed by this module.
    *
-   * Strategies are tried in module load order, BEFORE core auth (Bearer ask_
+   * Strategies are tried in module load order, BEFORE core auth (Bearer apst_
    * API key → session cookie). The first strategy whose `authenticate()` returns
    * a non-null `AuthResolution` claims the request; subsequent strategies and
    * core auth are skipped.
@@ -591,6 +592,13 @@ export const modelCostSchema = z.object({
   cacheRead: z.number().nonnegative().optional(),
   cacheWrite: z.number().nonnegative().optional(),
 });
+
+/** Input modalities a model can declare — exactly what the Pi runtime accepts. */
+export const MODEL_INPUT_MODALITIES = ["text", "image"] as const;
+
+export const modelInputModalitySchema = z.enum(MODEL_INPUT_MODALITIES);
+
+export type ModelInputModality = z.infer<typeof modelInputModalitySchema>;
 
 /** OAuth2 endpoints + client config for OAuth-authenticated providers. */
 export interface ModelProviderOAuthConfig {
@@ -1222,7 +1230,7 @@ export interface RunStatusChangeParams {
    */
   packageId: string | null;
   spaceId: string;
-  status: "started" | "success" | "failed" | "timeout" | "cancelled";
+  status: "started" | TerminalRunStatus;
   /** Cost in dollars (only on terminal status). */
   cost?: number;
   /** Duration in ms (only on terminal status). */
@@ -1601,4 +1609,21 @@ export interface PlatformServices {
    * 400 for a negative / non-integer `bytes`.
    */
   setFileStorageLimit(orgId: string, bytes: number | null): Promise<void>;
+  /**
+   * Append one `audit_events` row for a module route's state change; org, space,
+   * actor and request metadata come from `c`. `action` e.g. `billing.plan_changed`;
+   * `before` / `after` use camelCase keys, never a secret. Best-effort (never throws).
+   */
+  audit: {
+    record(
+      c: Context,
+      entry: {
+        action: string;
+        resourceType: string;
+        resourceId?: string | null;
+        before?: Record<string, unknown> | null;
+        after?: Record<string, unknown> | null;
+      },
+    ): Promise<void>;
+  };
 }

@@ -6,9 +6,9 @@
  * Builds a test app with a stub module that contributes an `AuthStrategy`,
  * then issues real HTTP requests to prove that:
  *   1. The stub strategy's resolution is applied to `c` (user, orgId, …)
- *   2. Requests matching the strategy bypass core Bearer ask_ / cookie auth
+ *   2. Requests matching the strategy bypass core Bearer apst_ / cookie auth
  *   3. Requests NOT matching the strategy fall through to core auth
- *   4. Core API key auth (Bearer ask_) still works when strategies don't claim
+ *   4. Core API key auth (Bearer apst_) still works when strategies don't claim
  *   5. A strategy-set `endUser` flows through to `c.get("endUser")`
  *   6. A strategy that misdeclares its `principalKind` is a 500, not a bucket
  *   7. Identity-shaped gates read that kind, never the transport that carried it
@@ -253,9 +253,9 @@ describe("module auth strategy pipeline", () => {
       expect(res.status).toBe(403);
     });
 
-    it("403s PUT /api/orgs/:orgId/settings and POST /api/orgs/:orgId/members too", async () => {
+    it("403s PATCH /api/orgs/:orgId/settings and POST /api/orgs/:orgId/members too", async () => {
       const settings = await app.request(`/api/orgs/${currentCtx!.orgId}/settings`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { "X-Test-Strategy": "valid", "Content-Type": "application/json" },
         body: JSON.stringify({ dashboard_sso_enabled: true }),
       });
@@ -303,7 +303,7 @@ describe("module auth strategy pipeline", () => {
       // Proves the refusals above come from the strategy's ceiling, not from
       // the org routes being closed or the subject lacking the role.
       const res = await app.request(`/api/orgs/${currentCtx!.orgId}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { Cookie: currentCtx!.cookie, "Content-Type": "application/json" },
         body: JSON.stringify({ name: "Renamed By Owner" }),
       });

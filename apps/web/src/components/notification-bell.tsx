@@ -27,7 +27,7 @@ type NotificationItem = {
   type: string;
   run_id: string | null;
   payload: Record<string, unknown> | null;
-  created_at: string;
+  createdAt: string;
 };
 
 /** Narrow a jsonb payload field to a string. */
@@ -132,7 +132,7 @@ export function NotificationContent({
                     {status && <Badge status={status} />}
                   </div>
                   <p className="text-muted-foreground text-xs">
-                    {formatDateField(notification.created_at)}
+                    {formatDateField(notification.createdAt)}
                   </p>
                 </div>
               </Link>

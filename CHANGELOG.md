@@ -36,6 +36,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING (API keys): keys use a checksummed `apst_` format, and every
+  existing `ask_` key stops authenticating.** A key is now `apst_` + 30 base62
+  characters + a 6-character base62 CRC32 of those 30, so a secret scanner can
+  recognise and validate a leaked key offline, and a malformed key is refused
+  before any database lookup. Keys are stored hashed and cannot be converted:
+  an `ask_` key stops working; create a new `apst_` key. **Every API-key
+  client (CI, GitHub Action secrets, MCP clients) fails from the moment of the
+  upgrade until a new key, created after it, is swapped in.**
+  Run `scripts/migration/0022-revoke-retired-api-keys.sql` after the deploy: it
+  revokes the stored `ask_` keys, so Settings → API keys stops listing them. The
+  display prefix grows from `ask_` + 4 to `apst_` + 8 characters.
 - **BREAKING (CLI): `appstrate packages pull --version <spec>` is now
   `appstrate packages pull <package>@<spec>`** — the shape `appstrate run` and
   npm already take: `@acme/pdf@1.2.0`, `pdf@latest`, `@acme/pdf@^1.2`. The flag
@@ -43,6 +54,102 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   not aliased: `--version` after a command is now refused as an unknown option.
   `<package>@draft` pulls the draft explicitly, and is refused to someone who
   cannot write the package instead of falling back to the published version.
+- **BREAKING (API): partial updates are served on `PATCH`, and the `PUT`
+  spelling of each is removed** (RFC 9110 §9.3.4: `PUT` replaces). Same bodies,
+  same `operationId`s, merge semantics (RFC 7396): an absent field is left
+  unchanged, `null` clears a nullable one. A `PUT` to these paths now answers
+  `404` (`API endpoint not found`). Moved: `/api/schedules/{id}`, `/api/webhooks/{id}`,
+  `/api/proxies/{id}`, `/api/models/{id}`, `/api/model-provider-credentials/{id}`,
+  `/api/orgs/{orgId}`, `/api/orgs/{orgId}/settings`,
+  `/api/spaces/{spaceId}/packages/{scope}/{name}`, the package draft save
+  `/api/packages/{agents|skills|mcp-servers|integrations}/{scope}/{name}`,
+  `/api/agents/{scope}/{name}/model` (an absent `generation` keeps the stored
+  settings) and `/api/orgs/{orgId}/invitations/{invitationId}` (an absent
+  `space_assignments` keeps the stored ones). The
+  dashboard and the CLI (`packages push`) send `PATCH`. `PUT` stays on routes
+  whose body is the whole resource (`…/input-settings`, `…/home`,
+  `/api/billing/managers`, the `…/default` pointers, and
+  `…/oauth-clients/{clientId}`, whose absent secret is write-only, …).
+- **BREAKING (API, CLI): drafts are versioned by `ETag` + `If-Match`, and
+  `lock_version` leaves the wire.** The package detail, create, update,
+  restore, fork and home-move responses carry the draft version as a strong
+  `ETag` and no longer have a `lock_version` field. The draft save
+  (`PATCH /api/packages/{type}/{scope}/{name}`) requires `If-Match` with that
+  ETag — absent is `428 precondition_required`, stale is `412
+precondition_failed` (it was `409 conflict`), and a body still sending
+  `lock_version` is a `400` (unknown field). Publishing
+  (`POST …/versions`) and restoring take an optional `If-Match` in place of
+  the body's `lock_version`. MCP: `invoke_operation` results carry
+  `etag`, and the tool takes `if_match`. CLI: `appstrate packages` records
+  ETags per working folder; a lock table written by an older CLI is refused as
+  invalid, with the steps to rebuild it — delete it, then re-pull or
+  `push --force` each folder.
+- **BREAKING (API): a run refused for a missing or ambiguous integration
+  connection answers `409`, not `412`.** `missing_integration_connection`
+  (including its `must_choose_connection` items with `candidate_connections`)
+  keeps its code and body on every run door (`POST …/run`, `POST /api/runs/inline`,
+  `POST /api/runs/remote`) and through the MCP `run_and_wait` tool. `412` is
+  reserved for failed conditional requests (RFC 9110 §15.5.13). Clients should
+  branch on `code`.
+- **BREAKING (API): chat answers `409 needs_reconnection`, not `401`, when the
+  selected model's subscription credential is dead** (`POST /api/chat`). The
+  caller's own token is valid, so the response no longer carries a
+  `WWW-Authenticate: Bearer error="invalid_token"` challenge that generic 401
+  handlers read as "log out".
+- **BREAKING (API): chat's capacity refusal (`429 chat_capacity`) is a standard
+  problem document**: `retryAfter` replaces the non-standard `retry_after`, and
+  `instance`/`requestId` are present.
+- **BREAKING (API): timestamps named `expiresAt` / `createdAt` are RFC 3339
+  strings, and the universal ids and timestamps are spelled camelCase on the
+  surfaces that still used snake_case.** The hosted-connect session
+  (`POST /api/integrations/{packageId}/auths/{authKey}/connect/session`) returns
+  `{ connect_url, expiresAt }`, and each connect offer on a `409
+missing_integration_connection` item carries `connect_url`, `expiresAt` and
+  `packageId`: `expires_at` (epoch ms) and `package_id` are gone. Also renamed:
+  `GET /api/me/context` (`recent_runs[].packageId`, `recent_runs[].runNumber`,
+  `agents[].packageId`, `skills[].packageId`), `GET /api/notifications`
+  (`data[].createdAt`), the schedule `actor` request field on
+  `POST /api/agents/{scope}/{name}/schedules` and `PATCH /api/schedules/{id}`
+  (`{ userId }` or `{ endUserId }`; the snake_case keys are refused with a 400) and, with `@appstrate/module-ee`, the billing managers (`userId`,
+  `createdAt`). Chat connect cards saved before the upgrade lose
+  their integration icon and name; their links had already expired.
+- **BREAKING (API): the remaining snake_case ids and timestamps take the
+  carve-out casing.** `SpaceAssignment.space_id` is `spaceId` on invitation
+  bodies, member bodies and OIDC clients' `signup_space_assignments`; the schema
+  is strict, so the old key is a `400`. Also renamed: `ShareTarget` /
+  `ShareTargetView` `userId` / `spaceId`, `PackageShare.createdAt`,
+  `SpaceSweepResult.spaceId`, and `packageId` on
+  `GET /api/integrations/connect/context`. Stored assignments move with
+  `scripts/migration/0021` (see the operators entries below).
+- **BREAKING (audit): audit payload keys are camelCase** — `after.viewAs` (with
+  `orgRole` and `space.spaceId`), `before.revokedSpaceAssignments` on
+  `org.member_role_updated`, and the space-role payloads. Rows written before
+  the upgrade keep their snake_case keys (`after.view_as`, …) and are not
+  rewritten: a reader of the history meets both.
+- **BREAKING (API): four more lists use the list envelope**
+  (`{ object: "list", data, hasMore }`): a package's versions
+  (`GET /api/packages/{type}/{scope}/{name}/versions`), its file index
+  (`GET /api/packages/{scope}/{name}/files`), `GET /api/oauth/scopes` and, with
+  `@appstrate/module-ee`, `GET /api/billing/managers`. The agent persistence
+  response gains `object: "agent_persistence"`.
+- **BREAKING (webhooks): the delivery envelope's `created` (Unix seconds) is
+  replaced by `timestamp`, an RFC 3339 string** — the Standard Webhooks
+  payload field. The `webhook-timestamp` signing header is unchanged (Unix
+  seconds, as the spec requires).
+- **The sidecar's own `/llm/*` refusals are provider-shaped**
+  (`{ "type": "error", "error": { "type", "message" } }`) instead of
+  `{ "error": "…" }`, so the agent's model SDK reports the message (LLM proxy
+  not configured, blocked base URL, OAuth token failures, oversized body,
+  upstream unreachable) rather than an opaque status.
+- **Browser clients on `TRUSTED_ORIGINS` can read the API's response headers.**
+  CORS now sends `Access-Control-Expose-Headers` for `Link`, `Request-Id`,
+  `RateLimit`, `RateLimit-Policy`, `Retry-After`, `ETag`, `Location`,
+  `Appstrate-Version`, `Idempotent-Replayed`, `WWW-Authenticate` and the other
+  non-safelisted headers the API sets.
+- **`Retry-After` is sent with every error that carries `retryAfter`**: the
+  per-organization run rate limit (`429 org_run_rate_limited`, which only put
+  the delay in `detail`), the shutdown refusal (`503 shutting_down`, 5 s) and
+  chat's `429 chat_capacity`.
 - **Credential provisioning is a platform table, not a manifest declaration**
   (#1528). `_meta["dev.appstrate/provisioning"]` is no longer read; the platform
   mints `@appstrate/ssh`'s `primary` key only for the system package, so the
@@ -63,6 +170,72 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   fork answer `422 version_artifact_unavailable` when a published version's
   archive is missing from storage** (#1533). They answered 404 — fork `400` "no
   published version" — which read as an unknown package or version.
+- **BREAKING (runs): the finalize contract is explicit.**
+  `POST /api/runs/{runId}/events/finalize` requires `status`, and `usage` when
+  it is `success`; the API no longer infers a status from `error`. Every
+  in-tree runner sends both, but an out-of-tree runner, an older runner image
+  or a CLI published before this release (`appstrate run` reporting to an
+  instance) gets a `400`.
+- **BREAKING (CLI): upgrade the CLI and the server together.** A CLI published
+  before this release cannot author packages on it (its draft save is a `PUT`
+  carrying `lock_version`, now a `404`), and this CLI cannot author on an older
+  server (it sends `PATCH` + `If-Match`).
+- **BREAKING (integrations): manifest JSONPaths are strict, on import AND on
+  every read of a stored manifest.** `identity_claims` and the
+  `connect.login` `jsonpath` selectors and success criteria are parsed with one
+  subset (`$`, `.name`, `['name']`, `[0]`, `[-1]`). Forms the previous release
+  evaluated fine are refused: a bare claim (`"sub"`), a member name that is not
+  an identifier (`$.x-auth-token`), a digit dot segment (`$.data.0`), a
+  leading-zero index (`$.data[00]`). Write `$.sub`, `$['x-auth-token']`,
+  `$.data[0]`. Because the schema also runs when a stored draft or published
+  version is read, an organization's integration holding one of these fails
+  every connect and run with `invalid_manifest` from the deploy on, and a
+  published version cannot be rewritten: publish a fixed version.
+  `scripts/migration/0023-verify-integration-jsonpaths.ts` lists every one,
+  and is step 1 of the deploy (see the operators entry
+  below). `@appstrate/wrike` 1.0.5 is updated accordingly.
+- **BREAKING (credential proxy): the `X-Substitute-Body`, `X-Stream-Request`
+  and `X-Stream-Response` flags take `1` or `0` only**; any other value
+  (`true`, `yes`, …) is a `400` naming the header.
+- **BREAKING (MCP servers): one grammar for exposed tool names** —
+  `{namespace}__{body}`, `body` in `[A-Za-z0-9_-]+`, at most 56 characters.
+  Upstream case and hyphens are kept, and a name too long or already taken is
+  truncated with an 8-hex FNV-1a suffix instead of `tool_N` (the description
+  names the upstream tool). Exposed names of such tools change; manifests keep
+  referencing upstream names and are unaffected.
+- **BREAKING (chat): `POST /api/chat` validates the new message** with the AI
+  SDK's `safeValidateUIMessages` and caps it at 256 KB; a malformed or larger
+  message is a `400` on `messages`.
+- **Bundle signatures: `AFPS_SIGNATURE_POLICY` defaults to `warn`** (was
+  `off`). Verification runs only where a bundle is loaded for execution, never
+  refuses under `warn`, and skips the image-shipped system packages.
+  `AFPS_TRUST_ROOT` is parsed at boot — an invalid value fails boot instead of
+  the first run — and the effective policy is logged.
+- **Log lines of the sidecar, the agent container and the runner are
+  pino-shaped**: numeric `level` on pino's scale (`40` = warn), epoch-ms
+  `time`, `msg`. They used to carry a string `level` and an ISO `time`; a
+  collector filtering on `level >= 40` now sees their errors.
+- **BREAKING (operators): schema migrations and data scripts of this release.**
+  Drizzle `0069` widens `run_logs.id`, `llm_usage.id`, `chat_messages.seq` and
+  the `chat_sessions` read pointers to `bigint` — it rewrites `run_logs` and
+  `llm_usage` under `ACCESS EXCLUSIVE`, so rehearse it on a production dump to
+  size the window. `0070` replaces the webhook-deliveries index with a keyset
+  one.
+  `@appstrate/module-ee` applies its own `0008` (the `llm_usage` id columns of
+  its ledger, cursor and floor, to `bigint`) at init. Scripts, in
+  `scripts/migration/`, in order: **1. `0023` BEFORE the deploy**, read-only —
+  it must exit 0 (every integration draft and published version whose
+  JSONPath the release refuses on read is fixed or superseded, see the
+  integrations entry above); `0021` inside the deploy window (old application
+  stopped, new one not started), `0022` right after the deploy.
+- **BREAKING (operators): more env values fail boot instead of falling back.**
+  A `CHAT_PI_MAX_CONCURRENCY` that is not a positive integer
+  (`@appstrate/module-chat`), `MODEL_RETRY_ENABLED` / `MODEL_COMPACTION_ENABLED`
+  that are not booleans and a `TOOL_RESULT_BYTE_LIMIT` that is not a positive
+  integer (platform and agent container), and a sidecar missing `RUN_TOKEN`,
+  `PLATFORM_API_URL` or `PORT`. The CLI's local `appstrate run` now refuses the
+  same malformed `MODEL_RETRY_ENABLED` / `MODEL_COMPACTION_ENABLED` /
+  `TOOL_RESULT_BYTE_LIMIT` values from the shell; it used to ignore them.
 
 ### Removed
 
@@ -79,7 +252,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `https://www.googleapis.com/auth/userinfo.email`, and no manifest declared the
   equivalence, so readiness kept asking for a reconnect and any agent whose
   integration config uses `tools: "*"` failed to launch with
-  `412 missing_integration_connection`. `@appstrate/gmail` 1.1.5,
+  `missing_integration_connection`. `@appstrate/gmail` 1.1.5,
   `@appstrate/gmail-mcp` 2.3.4 and
   `@appstrate/google-{calendar,contacts,drive,forms,sheets}` 1.0.4 add that
   canonical scope to their catalog with `implies: ["email"]`; the OAuth callback
@@ -133,12 +306,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   row instead, so the stream moves on.
 - **BREAKING (API): a published version with a broken archive is refused,
   not half-served** (#1533). `POST /api/runs/remote` answers `422
-version_artifact_unavailable`, not `400 empty_prompt`/`412
-missing_integration_connection`; restore refuses instead of writing an empty
-  draft; `GET …/versions/{v}` refuses, not 200 `content: null`; `appstrate run`
-  no longer says "package not found"; the version page shows an error. On runs,
-  schedules, input-settings, package/version reads and restore, a storage
-  outage is now 5xx and a signature-policy refusal its coded 422, not that 422.
+version_artifact_unavailable`, not `400 empty_prompt` or
+  `missing_integration_connection`; restore refuses instead of writing an
+  empty draft; `GET …/versions/{v}` refuses, not 200 `content: null`;
+  `appstrate run` no longer says "package not found"; the version page shows an
+  error. On runs, schedules, input-settings, package/version reads and restore,
+  a storage outage is now 5xx, not that 422; on the doors that run the version,
+  a signature-policy refusal keeps its own coded 422.
 
 ## [1.0.0-beta.61] - 2026-09-23
 

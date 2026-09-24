@@ -12,6 +12,7 @@ import { extractDependencies } from "@appstrate/core/dependencies";
 import { assertCatalogPackageAccess } from "../lib/package-access.ts";
 import { requireOrgAgent, requireMutableAgent, requirePackageInOrg } from "../middleware/guards.ts";
 import { buildAgentDetailDto } from "./agent-detail-handler.ts";
+import { sendPackageDetail } from "./packages.ts";
 import { internalError, invalidRequest } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { logger } from "../lib/logger.ts";
@@ -50,8 +51,8 @@ async function resolveCaretRanges(orgId: string, ids: string[]): Promise<Record<
 
 /**
  * Update the skills dep section in the manifest. A write to the DRAFT like any
- * other, so it takes the draft lock and moves `lock_version`: a client holding
- * the previous token (the editor, `appstrate packages push`) must be refused,
+ * other, so it takes the draft lock and moves the draft version: a client holding
+ * the previous `ETag` (the editor, `appstrate packages push`) must be refused,
  * not allowed to write its stale manifest back over this change.
  */
 async function updateManifestDeps(orgId: string, packageId: string, ids: string[]): Promise<void> {
@@ -135,7 +136,7 @@ export function createUserAgentsRouter() {
         });
         throw internalError();
       }
-      return c.json(detail);
+      return sendPackageDetail(c, detail);
     },
   );
 

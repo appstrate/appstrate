@@ -74,7 +74,7 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { rateLimitByIp } from "../middleware/rate-limit.ts";
 import { getActor, type Actor } from "../lib/actor.ts";
 import { getSpaceScope } from "../lib/scope.ts";
-import { recordAuditFromContext } from "./../services/audit.ts";
+import { recordAuditAs, recordAuditFromContext } from "./../services/audit.ts";
 import { listIntegrations } from "../services/integration-service.ts";
 import {
   assertIsIntegration,
@@ -397,6 +397,24 @@ function assertScopesInAuthCatalog(
   ]);
 }
 
+/**
+ * Audit fields for a connection written by a connect door. A `connection_id`
+ * target means the credential was renewed in place, not a new connection.
+ */
+function connectionPersistedAudit(
+  conn: { id: string; account_id: string },
+  packageId: string,
+  authKey: string,
+  reconnected: boolean,
+) {
+  return {
+    action: reconnected ? "integration.connection.reconnected" : "integration.connection.created",
+    resourceType: "integration_connection",
+    resourceId: conn.id,
+    after: { packageId, authKey, accountId: conn.account_id },
+  };
+}
+
 // ─────────────────────────────────────────────
 // Router
 // ─────────────────────────────────────────────
@@ -511,7 +529,7 @@ export function createIntegrationsRouter() {
       const scope = { orgId: result.orgId, spaceId: result.spaceId };
       const { manifest, auth } = await readIntegrationAuth(scope, result.packageId, result.authKey);
       const strategy = resolveStrategy(auth);
-      await strategy.complete(
+      const conn = await strategy.complete(
         {
           scope,
           actor: result.actor,
@@ -520,6 +538,11 @@ export function createIntegrationsRouter() {
           ...(result.connectionId ? { connectionId: result.connectionId } : {}),
         },
         { kind: "oauth2-result", result },
+      );
+      await recordAuditAs(
+        c,
+        { ...scope, actorType: result.actor.type, actorId: result.actor.id },
+        connectionPersistedAudit(conn, result.packageId, result.authKey, !!result.connectionId),
       );
       logger.info("Integration OAuth callback success", {
         packageId: result.packageId,
@@ -763,12 +786,10 @@ export function createIntegrationsRouter() {
           },
           { kind: "fields", credentials: body.credentials },
         );
-        await recordAuditFromContext(c, {
-          action: "integration.connection.created",
-          resourceType: "integration_connection",
-          resourceId: conn.id,
-          after: { packageId, authKey, accountId: conn.account_id },
-        });
+        await recordAuditFromContext(
+          c,
+          connectionPersistedAudit(conn, packageId, authKey, !!body.connection_id),
+        );
         return c.json(conn);
       } catch (err) {
         if (err instanceof ApiError) throw err;
@@ -888,7 +909,7 @@ export function createIntegrationsRouter() {
           ...(body.force_account_select ? { forceAccountSelect: true } : {}),
         }),
       );
-      return c.json({ connect_url: connectUrl, expires_at: expiresAt });
+      return c.json({ connect_url: connectUrl, expiresAt });
     },
   );
 
@@ -1068,7 +1089,7 @@ export function createIntegrationsRouter() {
     const scope = scopeFromClaims(claims);
     const { manifest, auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key);
     return c.json({
-      package_id: claims.package_id,
+      packageId: claims.package_id,
       auth_key: claims.auth_key,
       display_name: manifest.display_name ?? claims.package_id,
       icon: manifest.icon ?? null,
@@ -1127,6 +1148,11 @@ export function createIntegrationsRouter() {
           ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
         },
         { kind: "fields", credentials },
+      );
+      await recordAuditAs(
+        c,
+        { ...scope, actorType: actor.type, actorId: actor.id },
+        connectionPersistedAudit(conn, claims.package_id, claims.auth_key, !!claims.connection_id),
       );
       clearConnectPageCookie(c);
       // Carried on the response, not fetched: the page cookie that authenticates

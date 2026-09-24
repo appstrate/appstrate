@@ -7,7 +7,7 @@ import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgOnlyScope } from "./use-org-scope";
-import type { ModelCost } from "@appstrate/core/module";
+import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { ModelFormSubmission, ModelFormSubmitOutcome } from "../lib/model-form-payload";
 import { submitModelForm } from "../lib/model-form-submit";
 import { useCreateModelProviderCredential } from "./use-model-provider-credentials";
@@ -50,7 +50,7 @@ function useCreateModel() {
 
 function useUpdateModel() {
   const invalidate = useInvalidateModels();
-  return $api.useMutation("put", "/api/models/{id}", { onSuccess: invalidate });
+  return $api.useMutation("patch", "/api/models/{id}", { onSuccess: invalidate });
 }
 
 export function useDeleteModel() {
@@ -75,7 +75,7 @@ export interface OpenRouterModel {
   name: string;
   contextWindow: number | null;
   maxTokens: number | null;
-  input: string[];
+  input: ModelInputModality[];
   reasoning: boolean;
   cost: ModelCost | null;
 }
@@ -138,7 +138,7 @@ export function useSetAgentModel(packageId: string) {
         string | null | { modelId: string | null; generation?: ModelGenerationSettings | null },
     ) => {
       const body = typeof input === "object" && input !== null ? input : { modelId: input };
-      const { data } = await client.PUT("/api/agents/{scope}/{name}/model", {
+      const { data } = await client.PATCH("/api/agents/{scope}/{name}/model", {
         params: { path: splitPackageRef(packageId) },
         body,
       });

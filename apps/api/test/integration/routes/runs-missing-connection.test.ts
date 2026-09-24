@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * POST /api/agents/:scope/:name/run — 412 missing_integration_connection envelope.
+ * POST /api/agents/:scope/:name/run — 409 missing_integration_connection envelope.
  *
  * When an agent declares `dependencies.integrations[X]` but the calling
  * actor has no resolvable connection for X (or the integration is in an
- * unhealthy state), the run is refused upfront with a 412 envelope
+ * unhealthy state), the run is refused upfront with a 409 envelope
  * carrying every integration failure on `errors[]`. This is the CONTRACT
  * the frontend's `MissingConnectionsModal` consumes — its parsing logic
  * keys off `errors[].field.startsWith("integrations.")` to render the
@@ -13,7 +13,7 @@
  *
  * Wire shape (must hold):
  *   { type, title: "Missing Integration Connection",
- *     status: 412, code: "missing_integration_connection",
+ *     status: 409, code: "missing_integration_connection",
  *     detail: <first error's message>,
  *     errors: [
  *       { field: "integrations.{packageId}",
@@ -149,8 +149,8 @@ interface ValidationFieldError {
   auth_key?: string;
   required_scopes?: string[];
   connect_url?: string;
-  expires_at?: number;
-  package_id?: string;
+  expiresAt?: string;
+  packageId?: string;
 }
 
 interface ProblemDetails {
@@ -162,7 +162,7 @@ interface ProblemDetails {
   errors?: ValidationFieldError[];
 }
 
-describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connection", () => {
+describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connection", () => {
   let ctx: TestContext;
 
   async function seedIntegration(id: string) {
@@ -204,7 +204,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     ctx = await createTestContext({ orgSlug: "runorg" });
   });
 
-  it("returns 412 with the envelope shape when an integration dep has no connection (not_connected)", async () => {
+  it("returns 409 with the envelope shape when an integration dep has no connection (not_connected)", async () => {
     await seedAgent({
       id: AGENT,
       homeSpaceId: ctx.defaultSpaceId,
@@ -222,11 +222,11 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       body: JSON.stringify({}),
     });
 
-    expect(res.status).toBe(412);
+    expect(res.status).toBe(409);
     const body = (await res.json()) as ProblemDetails;
 
     // Top-level envelope.
-    expect(body.status).toBe(412);
+    expect(body.status).toBe(409);
     expect(body.code).toBe("missing_integration_connection");
     expect(body.title).toBe("Missing Integration Connection");
     expect(body.detail).toBeTruthy();
@@ -243,7 +243,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     expect(err.message).toBeTruthy();
   });
 
-  it("returns 412 for a required-auth integration declared with no tools selected (inert) and no connection", async () => {
+  it("returns 409 for a required-auth integration declared with no tools selected (inert) and no connection", async () => {
     await seedAgent({
       id: AGENT,
       homeSpaceId: ctx.defaultSpaceId,
@@ -270,7 +270,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       body: JSON.stringify({}),
     });
 
-    expect(res.status).toBe(412);
+    expect(res.status).toBe(409);
     const body = (await res.json()) as ProblemDetails;
     expect(body.code).toBe("missing_integration_connection");
     expect(body.errors).toHaveLength(1);
@@ -297,7 +297,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       body: JSON.stringify({}),
     });
 
-    expect(res.status).toBe(412);
+    expect(res.status).toBe(409);
     const body = (await res.json()) as ProblemDetails;
     expect(body.code).toBe("missing_integration_connection");
 
@@ -315,7 +315,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     }
   });
 
-  it("emits 412 with must_choose_connection + candidate_connections when actor has >1 candidate", async () => {
+  it("emits 409 with must_choose_connection + candidate_connections when actor has >1 candidate", async () => {
     await seedAgent({
       id: AGENT,
       homeSpaceId: ctx.defaultSpaceId,
@@ -344,7 +344,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       body: JSON.stringify({}),
     });
 
-    expect(res.status).toBe(412);
+    expect(res.status).toBe(409);
     const body = (await res.json()) as ProblemDetails;
     expect(body.code).toBe("missing_integration_connection");
 
@@ -353,7 +353,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     expect(err!.code).toBe("must_choose_connection");
 
     // End-to-end: the candidates reach the wire carrying what tells them apart,
-    // so a caller with no picker (API, MCP) chooses from the 412 alone instead
+    // so a caller with no picker (API, MCP) chooses from the 409 alone instead
     // of fetching the connection list to learn which uuid is which account.
     expect(err!.candidate_connections).toBeDefined();
     expect([...err!.candidate_connections!].sort((a, b) => a.id.localeCompare(b.id))).toEqual(
@@ -364,8 +364,8 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     );
   });
 
-  it("must_choose retry: posting connection_overrides exits the 412 loop", async () => {
-    // The whole UX recovery loop: 412 → modal picks a candidate → retry the
+  it("must_choose retry: posting connection_overrides exits the 409 loop", async () => {
+    // The whole UX recovery loop: 409 → modal picks a candidate → retry the
     // POST with `connection_overrides: { [integ]: connId }` → resolver
     // honours mechanism #2 (run override) → run kickoff proceeds. A
     // regression in the override→resolver wiring would silently strand
@@ -384,13 +384,13 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     // enter must_choose; the retry must NOT re-surface it once a pick exists.
     await seedConnection(INTEGRATION, ctx.user.id);
 
-    // Sanity: same setup as the must_choose test fires 412.
+    // Sanity: same setup as the must_choose test fires 409.
     const first = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
-    expect(first.status).toBe(412);
+    expect(first.status).toBe(409);
 
     // Retry with the picked override (flat wire format).
     const retry = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
@@ -398,16 +398,16 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ connection_overrides: { [INTEGRATION]: conn1 } }),
     });
-    // 412 is reserved exclusively for the missing_integration_connection
-    // envelope, so asserting the retry is NOT 412 directly proves the
+    // This door's other 409s (Idempotency-Key, org deletion, rerun) cannot
+    // arise here, so asserting the retry is NOT 409 directly proves the
     // resolver consumed the override and exited the must_choose loop. A
-    // regression in the override→resolver wiring would re-fire 412 here.
-    // (Downstream model-config errors surface as 400, not 412 — fine.)
-    expect(retry.status).not.toBe(412);
+    // regression in the override→resolver wiring would re-fire 409 here.
+    // (Downstream model-config errors surface as 400, not 409 — fine.)
+    expect(retry.status).not.toBe(409);
     expect(retry.status).toBeLessThan(500);
   });
 
-  it("emits 412 with needs_reconnection + connection_id when actor's only candidate is flagged", async () => {
+  it("emits 409 with needs_reconnection + connection_id when actor's only candidate is flagged", async () => {
     // The reconnect CTA in MissingConnectionsModal forwards `connection_id`
     // to InlineConnectButton → OAuth state, so the callback UPDATEs the
     // existing row in `integration-connections.ts:persistCredentialBundle`
@@ -444,7 +444,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       body: JSON.stringify({}),
     });
 
-    expect(res.status).toBe(412);
+    expect(res.status).toBe(409);
     const body = (await res.json()) as ProblemDetails;
     expect(body.code).toBe("missing_integration_connection");
 
@@ -456,7 +456,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     expect(err!.connection_id).toBe(deadConnectionId);
   });
 
-  it("returns 412 integration_not_active when a declared integration is installed but DISABLED, even with a live connection", async () => {
+  it("returns 409 integration_not_active when a declared integration is installed but DISABLED, even with a live connection", async () => {
     // The exact prod regression: a declared integration is switched off on the
     // space (enabled=false) while a resolvable connection lingers. The connection
     // gate alone would PASS (the connection resolves), so the run used to launch
@@ -490,7 +490,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       body: JSON.stringify({}),
     });
 
-    expect(res.status).toBe(412);
+    expect(res.status).toBe(409);
     const body = (await res.json()) as ProblemDetails;
     expect(body.code).toBe("missing_integration_connection");
     const err = body.errors!.find((e) => e.field === `integrations.${INTEGRATION}`);
@@ -498,7 +498,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     expect(err!.code).toBe("integration_not_active");
   });
 
-  it("returns 412 integration_not_active when a declared integration is NOT installed on the space", async () => {
+  it("returns 409 integration_not_active when a declared integration is NOT installed on the space", async () => {
     await seedAgent({
       id: AGENT,
       homeSpaceId: ctx.defaultSpaceId,
@@ -523,7 +523,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       body: JSON.stringify({}),
     });
 
-    expect(res.status).toBe(412);
+    expect(res.status).toBe(409);
     const body = (await res.json()) as ProblemDetails;
     const err = body.errors!.find((e) => e.field === `integrations.${INTEGRATION}`);
     expect(err).toBeDefined();
@@ -567,14 +567,14 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       body: JSON.stringify({}),
     });
 
-    expect(res.status).toBe(412);
+    expect(res.status).toBe(409);
     const body = (await res.json()) as ProblemDetails;
     const forIntegration = body.errors!.filter((e) => e.field === `integrations.${INTEGRATION}`);
     expect(forIntegration.map((e) => e.code)).toEqual(["integration_not_active"]);
     expect(JSON.stringify(body)).not.toContain("connect/start");
   });
 
-  it("returns 412 integration_not_found when a declared integration package does not exist (#737)", async () => {
+  it("returns 409 integration_not_found when a declared integration package does not exist (#737)", async () => {
     // The agent declares `@runorg/svc` but no such package was ever seeded.
     // resolveOne would `fetchIntegrationManifest` → `not_found` → skip silently
     // at spawn, leaving the agent without the tools it depends on yet finishing
@@ -595,7 +595,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       body: JSON.stringify({}),
     });
 
-    expect(res.status).toBe(412);
+    expect(res.status).toBe(409);
     const body = (await res.json()) as ProblemDetails;
     expect(body.code).toBe("missing_integration_connection");
     // Exactly one error — the manifest failure, NOT a piled-on
@@ -609,7 +609,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     expect(err.message).toBeTruthy();
   });
 
-  it("returns 412 integration_wrong_type when the declared package is not an integration (#737)", async () => {
+  it("returns 409 integration_wrong_type when the declared package is not an integration (#737)", async () => {
     await seedAgent({
       id: AGENT,
       homeSpaceId: ctx.defaultSpaceId,
@@ -634,7 +634,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       body: JSON.stringify({}),
     });
 
-    expect(res.status).toBe(412);
+    expect(res.status).toBe(409);
     const body = (await res.json()) as ProblemDetails;
     expect(body.code).toBe("missing_integration_connection");
     expect(body.errors).toHaveLength(1);
@@ -643,7 +643,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     expect(err.code).toBe("integration_wrong_type");
   });
 
-  it("returns 412 integration_invalid_manifest when the integration manifest fails validation (#737)", async () => {
+  it("returns 409 integration_invalid_manifest when the integration manifest fails validation (#737)", async () => {
     await seedAgent({
       id: AGENT,
       homeSpaceId: ctx.defaultSpaceId,
@@ -670,7 +670,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       body: JSON.stringify({}),
     });
 
-    expect(res.status).toBe(412);
+    expect(res.status).toBe(409);
     const body = (await res.json()) as ProblemDetails;
     expect(body.code).toBe("missing_integration_connection");
     expect(body.errors).toHaveLength(1);
@@ -679,10 +679,10 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     expect(err.code).toBe("integration_invalid_manifest");
   });
 
-  it("happy path: returns NON-412 status when the actor has exactly one accessible connection", async () => {
-    // Sanity foil — proves the 412 only fires when there's a real gap.
+  it("happy path: returns NON-409 status when the actor has exactly one accessible connection", async () => {
+    // Sanity foil — proves the 409 only fires when there's a real gap.
     // Note: the run may still hit a downstream error (e.g. no model
-    // configured) — we assert only that it is NOT the 412 missing-connection
+    // configured) — we assert only that it is NOT the 409 missing-connection
     // envelope, so the contract is bidirectionally exercised.
     await seedAgent({
       id: AGENT,
@@ -701,12 +701,12 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       body: JSON.stringify({}),
     });
 
-    // Not the 412 envelope — readiness passed. (Downstream model-config
+    // Not the 409 envelope — readiness passed. (Downstream model-config
     // errors may still 400; that's a different code path.)
-    // 412 is reserved for the missing_integration_connection envelope, so
-    // "not 412" is the discriminating assertion; "< 500" keeps a crashed
+    // This door's other 409s (Idempotency-Key, org deletion, rerun) cannot
+    // arise here, so "not 409" is the discriminating assertion; "< 500" keeps a crashed
     // pipeline from passing as "readiness passed".
-    expect(res.status).not.toBe(412);
+    expect(res.status).not.toBe(409);
     expect(res.status).toBeLessThan(500);
   });
 
@@ -724,7 +724,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
   // defaults, run/schedule overrides and member pins. The run executed against
   // an arbitrary account, silently. Both sites now call
   // `resolveEffectiveToolSelection`, so anything that will be spawned gets a
-  // verdict or a loud 412.
+  // verdict or a loud 409.
 
   /** Same integration, plus the `default_tools` an agent inherits with no config. */
   function buildDefaultToolsIntegrationManifest(id: string) {
@@ -748,7 +748,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
   /**
    * Seeds the integration, a PUBLISHED version of it, and its referenced
    * mcp-server — the whole chain the run kickoff walks. The other suites here
-   * skip all that because they 412 at readiness first; these tests must be
+   * skip all that because they 409 at readiness first; these tests must be
    * able to get PAST readiness when the fix is absent, otherwise the control
    * fails on an unrelated `422 dependency_unresolved` and proves nothing about
    * the silent auto-pick.
@@ -772,7 +772,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
   }
 
-  it("412s an agent that declares the dependency only, when the integration's default_tools make it active", async () => {
+  it("409s an agent that declares the dependency only, when the integration's default_tools make it active", async () => {
     await seedAgent({
       id: AGENT,
       homeSpaceId: ctx.defaultSpaceId,
@@ -791,7 +791,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       body: JSON.stringify({}),
     });
 
-    expect(res.status).toBe(412);
+    expect(res.status).toBe(409);
     const body = (await res.json()) as ProblemDetails;
     expect(body.code).toBe("missing_integration_connection");
     expect(body.errors).toHaveLength(1);
@@ -799,7 +799,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     expect(body.errors![0]!.code).toBe("not_connected");
   });
 
-  it("412s must_choose_connection instead of silently auto-picking, for a bare dependency with 2 candidates", async () => {
+  it("409s must_choose_connection instead of silently auto-picking, for a bare dependency with 2 candidates", async () => {
     // The wrong-account bug in its purest form: two accessible connections and
     // no verdict meant the spawn resolver picked one on its own. The run must
     // stop and ask instead.
@@ -821,7 +821,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       body: JSON.stringify({}),
     });
 
-    expect(res.status).toBe(412);
+    expect(res.status).toBe(409);
     const body = (await res.json()) as ProblemDetails;
     const err = body.errors!.find((e) => e.field === `integrations.${INTEGRATION}`);
     expect(err).toBeDefined();
@@ -850,10 +850,10 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       body: JSON.stringify({}),
     });
 
-    // 412 is reserved for the missing_integration_connection envelope, so
-    // "not 412" is the discriminating assertion; "< 500" keeps a crashed
+    // This door's other 409s (Idempotency-Key, org deletion, rerun) cannot
+    // arise here, so "not 409" is the discriminating assertion; "< 500" keeps a crashed
     // pipeline from passing as "readiness passed".
-    expect(res.status).not.toBe(412);
+    expect(res.status).not.toBe(409);
     expect(res.status).toBeLessThan(500);
   });
 
@@ -861,7 +861,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
   //
   // The preflight mints the hosted-connect session itself and hands it back on
   // the error item, so a chat surface renders the connect card straight off the
-  // 412 with zero model action. Strictly opt-in: the header is what separates a
+  // 409 with zero model action. Strictly opt-in: the header is what separates a
   // caller that renders the card from one whose payload a model reads.
   describe("connect_url relay", () => {
     const OAUTH_INTEGRATION = "@runorg/oauth-svc";
@@ -911,7 +911,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
         headers: { ...authHeaders(ctx), "Content-Type": "application/json", ...headers },
         body: JSON.stringify({}),
       });
-      expect(res.status).toBe(412);
+      expect(res.status).toBe(409);
       return (await res.json()) as ProblemDetails;
     }
 
@@ -926,8 +926,8 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       // `search.read` — the relay phase the link is built on.
       expect(err.required_scopes).toEqual(["search.read"]);
       expect(err.connect_url).toStartWith("http");
-      expect(err.package_id).toBe(OAUTH_INTEGRATION);
-      expect(err.expires_at).toBeGreaterThan(Date.now());
+      expect(err.packageId).toBe(OAUTH_INTEGRATION);
+      expect(Date.parse(err.expiresAt!)).toBeGreaterThan(Date.now());
       // The link targets the hosted dispatcher, not a provider screen — the
       // scope union and the oauth kickoff both happen at redemption.
       expect(new URL(err.connect_url!).pathname).toBe("/api/integrations/connect/start");
@@ -947,15 +947,15 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       });
     });
 
-    it("mints nothing without the header — the ordinary 412 is unchanged", async () => {
+    it("mints nothing without the header — the ordinary 409 is unchanged", async () => {
       await seedOauthIntegration();
       const body = await launch({});
 
       const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
       expect(err.code).toBe("not_connected");
       expect(err.connect_url).toBeUndefined();
-      expect(err.expires_at).toBeUndefined();
-      expect(err.package_id).toBeUndefined();
+      expect(err.expiresAt).toBeUndefined();
+      expect(err.packageId).toBeUndefined();
       // The relay phase 1 shipped is untouched either way.
       expect(err.auth_key).toBe("primary");
     });
@@ -1000,7 +1000,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
         },
         body: JSON.stringify({}),
       });
-      expect(res.status).toBe(412);
+      expect(res.status).toBe(409);
       return (await res.json()) as ProblemDetails;
     }
 
@@ -1022,7 +1022,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
         expect(JSON.stringify(body)).not.toContain("connect/start");
         for (const err of body.errors ?? []) {
           expect(err.connect_url).toBeUndefined();
-          expect(err.expires_at).toBeUndefined();
+          expect(err.expiresAt).toBeUndefined();
         }
       });
 
@@ -1103,7 +1103,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
         expect(err.code).toBe("needs_reconnection");
         expect(err.owned_by_actor).toBe(false);
         expect(err.connect_url).toBeUndefined();
-        expect(err.expires_at).toBeUndefined();
+        expect(err.expiresAt).toBeUndefined();
       });
     });
 
@@ -1178,7 +1178,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
         expect(err.code).toBe("insufficient_scopes");
         expect(err.owned_by_actor).toBe(false);
         expect(err.connect_url).toBeUndefined();
-        expect(err.expires_at).toBeUndefined();
+        expect(err.expiresAt).toBeUndefined();
       });
     });
 
@@ -1241,7 +1241,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     // BEFORE `attachConnectOffers` runs, and projects only field/code/title/
     // message into the payload. A webhook delivery leaves the platform, so a
     // bearer capability that connects AS the actor must never ride it. Proving
-    // that on a 412 that carries NO link proves nothing; this exercises the one
+    // that on a 409 that carries NO link proves nothing; this exercises the one
     // case where the response really does carry one.
     describe("webhook projection", () => {
       let events: RunConnectionMissingParams[] = [];
@@ -1302,7 +1302,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
         throw new Error("onRunConnectionMissing was never emitted");
       }
 
-      it("keeps the emitted event link-free while the 412 itself carries the link", async () => {
+      it("keeps the emitted event link-free while the 409 itself carries the link", async () => {
         await seedOauthIntegration();
         const body = await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" });
 
@@ -1316,8 +1316,8 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
         const item = event.errors.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
         expect(item.code).toBe("not_connected");
         expect(item).not.toHaveProperty("connect_url");
-        expect(item).not.toHaveProperty("expires_at");
-        expect(item).not.toHaveProperty("package_id");
+        expect(item).not.toHaveProperty("expiresAt");
+        expect(item).not.toHaveProperty("packageId");
         // And nothing anywhere else in the payload either.
         expect(JSON.stringify(event)).not.toContain("connect/start");
       });

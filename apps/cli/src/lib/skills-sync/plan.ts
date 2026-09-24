@@ -6,7 +6,14 @@
  * changed; concurrency is capped because the package routes are rate limited.
  */
 
-import { apiFetch, apiFetchRaw, apiList, ApiError, problemFields } from "../api.ts";
+import {
+  apiFetch,
+  apiFetchRaw,
+  apiFetchWithHeaders,
+  apiList,
+  ApiError,
+  problemFields,
+} from "../api.ts";
 import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
 import { extractSkillMeta } from "@appstrate/core/validation";
 import { lstat } from "node:fs/promises";
@@ -55,7 +62,7 @@ export interface ResolvedSkill {
   packageId: string;
   spaceId?: string;
   version: string;
-  /** SRI for a published artifact, ETag + `lock_version` for a draft. */
+  /** SRI for a published artifact, the draft and file-index ETags for a draft. */
   integrity: string;
   /** Frontmatter `name` of the skill's `SKILL.md`, empty when it has none. */
   frontmatterName: string;
@@ -142,15 +149,17 @@ async function resolveDraft(
 ): Promise<ResolvedSkill | null> {
   interface DraftDetail {
     content?: unknown;
-    lock_version?: unknown;
   }
   let detail: DraftDetail;
+  let detailEtag: string;
   try {
-    detail = await apiFetch<DraftDetail>(
+    const read = await apiFetchWithHeaders<DraftDetail>(
       profileName,
       `/api/packages/skills/${encodePackageIdPath(packageId)}?version=draft`,
       { spaceId },
     );
+    detail = read.body;
+    detailEtag = read.headers.get("etag") ?? "";
   } catch (err) {
     if (err instanceof ApiError) {
       if (err.status === 404) return null;
@@ -165,7 +174,7 @@ async function resolveDraft(
     throw err;
   }
   // A draft has no immutable digest: the change token is the index ETag and
-  // `lock_version`, the two values that DO move with its content.
+  // the draft's own ETag, the two values that DO move with its content.
   // BOTH requests name `?version=draft`, never leaving it to the route's
   // default: omitted, detail and file routes alike serve the definition the
   // DETAIL page renders — the published version for anyone who cannot write
@@ -188,12 +197,11 @@ async function resolveDraft(
     );
   }
   const etag = res.headers.get("etag") ?? "";
-  const lock = typeof detail.lock_version === "number" ? String(detail.lock_version) : "0";
   return {
     packageId,
     ...(spaceId ? { spaceId } : {}),
     version: "draft",
-    integrity: `draft:${lock}:${etag}`,
+    integrity: `draft:${detailEtag}:${etag}`,
     frontmatterName: frontmatterNameOf(detail.content),
   };
 }

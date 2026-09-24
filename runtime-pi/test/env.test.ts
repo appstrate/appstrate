@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
+import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
 import { parseRuntimeEnv, RuntimeEnvError, scrubSinkEnv } from "../env.ts";
 
 const VALID = {
@@ -243,6 +244,13 @@ describe("parseRuntimeEnv — fail-fast errors", () => {
     );
   });
 
+  it("accepts exactly the modalities the platform API accepts", () => {
+    // The API validates `org_models.input` against the same core tuple, so a
+    // model it saves can never be refused here at container boot.
+    const env = parseRuntimeEnv({ ...VALID, MODEL_INPUT: JSON.stringify(MODEL_INPUT_MODALITIES) });
+    expect(env.modelInput).toEqual([...MODEL_INPUT_MODALITIES]);
+  });
+
   it("rejects non-positive MODEL_CONTEXT_WINDOW", () => {
     expect(() => parseRuntimeEnv({ ...VALID, MODEL_CONTEXT_WINDOW: "0" })).toThrow(
       /MODEL_CONTEXT_WINDOW: must be a positive integer/,
@@ -340,5 +348,14 @@ describe("scrubSinkEnv", () => {
     expect(process.env.APPSTRATE_SINK_SECRET).toBeUndefined();
     expect(process.env.APPSTRATE_SINK_URL).toBeUndefined();
     expect(process.env.APPSTRATE_SINK_FINALIZE_URL).toBeUndefined();
+  });
+});
+
+// The knob grammar is tested in packages/runner-pi/test/loop-env.test.ts.
+describe("parseRuntimeEnv — Pi loop knobs", () => {
+  it("fails boot with a RuntimeEnvError naming a malformed knob", () => {
+    const parse = () => parseRuntimeEnv({ ...VALID, TOOL_RESULT_BYTE_LIMIT: "12.5" });
+    expect(parse).toThrow(RuntimeEnvError);
+    expect(parse).toThrow(/TOOL_RESULT_BYTE_LIMIT/);
   });
 });

@@ -7,7 +7,7 @@ import { listResponse } from "../lib/list-response.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { isSystemModel, getSystemModelProviderCredentials } from "../services/model-registry.ts";
-import { modelCostSchema } from "@appstrate/core/module";
+import { modelCostSchema, modelInputModalitySchema } from "@appstrate/core/module";
 import {
   listOrgModels,
   getOrgModel,
@@ -70,7 +70,7 @@ export const createModelSchema = z
      * read path fall back to the live catalog — keeps existing rows in sync
      * with the weekly `refresh-pricing-catalog.ts` bump.
      */
-    input: z.array(z.string()).optional(),
+    input: z.array(modelInputModalitySchema).optional(),
     contextWindow: z.number().int().positive().optional(),
     maxTokens: z.number().int().positive().optional(),
     reasoning: z.boolean().optional(),
@@ -105,7 +105,7 @@ export const updateModelSchema = z
     modelId: z.string().min(1).optional(),
     credentialId: z.uuid({ message: "credentialId must be a valid UUID" }).optional(),
     enabled: z.boolean().optional(),
-    input: z.array(z.string()).nullable().optional(),
+    input: z.array(modelInputModalitySchema).nullable().optional(),
     contextWindow: z.number().int().positive().nullable().optional(),
     maxTokens: z.number().int().positive().nullable().optional(),
     reasoning: z.boolean().nullable().optional(),
@@ -155,7 +155,7 @@ export const testInlineSchema = z
 
 /**
  * Map an alias-invariant violation to its 400 — shared by the create and
- * update handlers so PUT cannot accept a state POST rejects (issue #727).
+ * update handlers so PATCH cannot accept a state POST rejects (issue #727).
  */
 function throwOnAliasViolation(violation: AliasInvariantViolation | null, apiShape: string): void {
   // 1. Require an explicit label. The derive-from-catalog fallback (POST) —
@@ -634,8 +634,8 @@ export function createModelsRouter() {
     }
   });
 
-  // PUT /api/models/:id — update a custom model
-  router.put("/:id", requirePermission("models", "write"), async (c) => {
+  // PATCH /api/models/:id — update a custom model
+  router.patch("/:id", requirePermission("models", "write"), async (c) => {
     const orgId = c.get("orgId");
     const modelId = c.req.param("id")!;
     const data = await readJsonBody(c, updateModelSchema);
@@ -670,7 +670,7 @@ export function createModelsRouter() {
     }
 
     // Model-alias guards on the EFFECTIVE post-update state (issue #727) —
-    // without this, PUT is a bypass of every invariant POST enforces: flip
+    // without this, PATCH is a bypass of every invariant POST enforces: flip
     // `aliased` on an oauth-subscription or url-model row, or re-point an
     // aliased row to such a credential, and the row becomes a state creation
     // rejects (runs then fail-close late at launch; chat would diverge).
@@ -693,7 +693,7 @@ export function createModelsRouter() {
           // A false→true flip must carry a fresh explicit label: the row's
           // existing label may be catalog-derived and name the backing. An
           // already-aliased row's label is explicit by construction (POST
-          // enforced it), so it stays valid when this PUT omits `label`.
+          // enforced it), so it stays valid when this PATCH omits `label`.
           label: data.label ?? (current.aliased ? current.label : undefined),
           apiShape: creds.apiShape,
           authMode: isOAuthModelProvider(creds.providerId) ? "oauth2" : "api_key",
@@ -747,7 +747,7 @@ export function createModelsRouter() {
       // The asymmetry with POST is deliberate, not an oversight. A create
       // response echoes a binding the operator just sent in the request body,
       // so it discloses nothing the caller did not already hold. An update
-      // does not: `PUT {"enabled":true}` names no binding field, yet the raw
+      // does not: `PATCH {"enabled":true}` names no binding field, yet the raw
       // row answers with `apiShape`, `providerId`, `baseUrl`, `modelId`,
       // `contextWindow` and `cost`. `isSystemModel` above does not cover this
       // — it rejects env-declared models, while an alias is an ordinary DB row

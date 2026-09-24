@@ -15,9 +15,11 @@ import { useChatHeaders, useSelectConversation } from "./runtime-context.ts";
 import {
   renameSession,
   deleteSession,
+  patchSessionsCache,
   sessionsQueryKey,
   spaceIdFromHeaders,
   SESSIONS_QUERY_KEY,
+  type SessionsCache,
   type SessionSummary,
 } from "./sessions.ts";
 import { useSessions } from "./use-sessions.ts";
@@ -66,7 +68,13 @@ export function ThreadList({
   unreadIds?: ReadonlySet<string>;
 }) {
   const select = useSelectConversation();
-  const { data: sessions, isLoading } = useSessions();
+  const {
+    data: sessions,
+    isLoading,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  } = useSessions();
   const now = useNowTick();
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -92,6 +100,16 @@ export function ThreadList({
             now={now}
           />
         ))}
+        {hasNextPage && (
+          <button
+            type="button"
+            disabled={isFetchingNextPage}
+            onClick={() => void fetchNextPage()}
+            className="text-muted-foreground hover:text-foreground hover:bg-accent/50 w-full rounded-md px-2 py-1 text-xs disabled:opacity-50"
+          >
+            {isFetchingNextPage ? "Chargement…" : "Afficher plus"}
+          </button>
+        )}
         {!isLoading && (sessions ?? []).length === 0 && (
           <p className="text-muted-foreground px-2 py-6 text-center text-xs">
             Envoie un message ! Ton historique de conversations apparaîtra ici.
@@ -141,9 +159,9 @@ function ConversationRow({
     // row; then drop the row. The server is already updated and the periodic
     // poll reconciles any later drift.
     await queryClient.cancelQueries({ queryKey: SESSIONS_QUERY_KEY });
-    queryClient.setQueryData<SessionSummary[]>(
+    queryClient.setQueryData<SessionsCache>(
       sessionsQueryKey(spaceIdFromHeaders(getHeaders)),
-      (prev) => (prev ?? []).filter((s) => s.id !== session.id),
+      (prev) => patchSessionsCache(prev, (rows) => rows.filter((s) => s.id !== session.id)),
     );
     if (active) select?.(null);
   };

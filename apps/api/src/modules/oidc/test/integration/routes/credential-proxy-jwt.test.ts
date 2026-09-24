@@ -178,8 +178,8 @@ describe("POST /api/credential-proxy/proxy — auth gate", () => {
   });
 
   it("rejects an unknown bearer shape with 401 (falls through the OIDC strategy)", async () => {
-    // Not a JWT, not an ask_ key — the OIDC strategy returns null, core
-    // Bearer API-key path doesn't match either (no `ask_` prefix), the
+    // Not a JWT, not an apst_ key — the OIDC strategy returns null, core
+    // Bearer API-key path doesn't match either (no `apst_` prefix), the
     // cookie fallback fails to resolve a session.
     const res = await app.request("/api/credential-proxy/proxy", {
       method: "POST",

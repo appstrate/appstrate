@@ -20,6 +20,7 @@ import { orgRoleEnum, invitationStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { spaces } from "./spaces.ts";
 import type { SpaceAssignment } from "@appstrate/core/permissions";
+import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 
 export const organizations = pgTable(
   "organizations",
@@ -139,9 +140,9 @@ export const orgInvitations = pgTable(
     role: orgRoleEnum("role").notNull(),
     /**
      * Space memberships applied when the invitation is accepted (RBAC spec
-     * §5). Wire-shaped (snake_case keys) because it is written straight from
-     * the validated invite body and read straight back onto it:
-     * `[{ space_id, preset_role } | { space_id, custom_role_id }]`.
+     * §5). Wire-shaped because it is written straight from the validated
+     * invite body and read straight back onto it:
+     * `[{ spaceId, preset_role } | { spaceId, custom_role_id }]`.
      */
     spaceAssignments: jsonb("space_assignments")
       .$type<ReadonlyArray<SpaceAssignment>>()
@@ -366,7 +367,7 @@ export const modelProviderCredentials = pgTable(
 export const modelProviderPairings = pgTable(
   "model_provider_pairings",
   {
-    /** App-generated id with `pair_` prefix (matches existing `ask_`/`pair_` log conventions). */
+    /** App-generated id with `pair_` prefix (matches the `apst_`/`pair_` log conventions). */
     id: text("id").primaryKey(),
     /** SHA-256 of the secret portion, base64url-encoded. The plaintext is never stored. */
     tokenHash: text("token_hash").notNull().unique(),
@@ -468,11 +469,11 @@ export const orgModels = pgTable(
     credentialId: uuid("credential_id")
       .notNull()
       .references(() => modelProviderCredentials.id, { onDelete: "restrict" }),
-    input: jsonb("input"), // ["text", "image"] | null
+    input: jsonb("input").$type<ModelInputModality[]>(),
     contextWindow: integer("context_window"), // 200000 | null
     maxTokens: integer("max_tokens"), // 16384 | null
     reasoning: boolean("reasoning"), // true | null
-    cost: jsonb("cost"), // { input, output, cacheRead, cacheWrite } in $/M tokens | null
+    cost: jsonb("cost").$type<ModelCost>(), // $/M tokens
     enabled: boolean("enabled").notNull().default(true),
     // Model-alias flag (LLM-gateway alias pattern). When true, this row's `id`
     // is a public alias and its real binding (`modelId` + the credential's

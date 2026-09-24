@@ -44,13 +44,9 @@
 
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
-import type { RunResult } from "@appstrate/afps-runtime/runner";
-import {
-  TERMINAL_RUN_STATUSES,
-  type RunStatus,
-  type TerminalRunStatus,
-  type TokenUsage,
-} from "@appstrate/shared-types";
+import type { TerminalRunResult } from "@appstrate/afps-runtime/runner";
+import { TERMINAL_RUN_STATUSES, type TokenUsage } from "@appstrate/shared-types";
+import type { RunStatus, TerminalRunStatus } from "@appstrate/core/run-status";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { createConsoleSink } from "./sink.ts";
 import type { Verbosity } from "./format.ts";
@@ -168,7 +164,7 @@ export class RemoteRunError extends Error {
 export interface RunRemoteOptions {
   /** Pinned instance origin (e.g. `https://app.example.com`). */
   instance: string;
-  /** Bearer token (`ask_…` or OIDC JWT). */
+  /** Bearer token (`apst_…` or OIDC JWT). */
   bearerToken: string;
   /** Space id (`X-Space-Id`). */
   spaceId: string;
@@ -865,9 +861,12 @@ function buildMetricEvent(record: RemoteRunRecord): RunEvent | null {
  * `output` carries `runs.result` (the AFPS `output()` value),
  * matching `RunResult.output`. The status is mapped one-to-one.
  */
-function buildRunResultPayload(record: RemoteRunRecord, status: TerminalRunStatus): RunResult {
+function buildRunResultPayload(
+  record: RemoteRunRecord,
+  status: TerminalRunStatus,
+): TerminalRunResult {
   const storedResult = isPlainObject(record.result) ? record.result : null;
-  const result: RunResult = {
+  const result: TerminalRunResult = {
     memories: [],
     pinned: {},
     output: storedResult && "output" in storedResult ? storedResult.output : null,

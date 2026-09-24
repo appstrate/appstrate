@@ -13,6 +13,7 @@ import {
   buildModelsBatchPayload,
   toCreateModelBody,
   type ModelFormFields,
+  type ModelFormModelEntry,
   type ModelFormPayloadInput,
   type ModelFormProvider,
 } from "../model-form-payload.ts";
@@ -413,7 +414,7 @@ describe("buildModelFormPayload — missing credential", () => {
 });
 
 describe("toCreateModelBody", () => {
-  it("drops the `null` clears, which only PUT understands", () => {
+  it("drops the `null` clears, which only PATCH understands", () => {
     const body = toCreateModelBody(
       {
         modelId: "qwen3:8b",
@@ -489,7 +490,7 @@ const DESCRIBED: Partial<ModelPickRow> = {
 };
 
 describe("buildModelsBatchPayload — what a row ships, per describer", () => {
-  it.each([
+  it.each<[string, ModelPickRow, ModelFormModelEntry]>([
     [
       "catalog: the id only, so the catalog keeps answering",
       row({ id: "m", origin: "catalog", ...DESCRIBED, source: "catalog", featured: true }),

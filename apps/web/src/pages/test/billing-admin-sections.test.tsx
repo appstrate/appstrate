@@ -62,7 +62,7 @@ const MEMBERS = [
 
 interface SeedOptions {
   permissions: string[];
-  managers?: { user_id: string; added_by: string; created_at: string }[];
+  managers?: { userId: string; added_by: string; createdAt: string }[];
   contact?: { billing_email: string | null; billing_cc: string[] };
   orgError?: boolean;
 }
@@ -112,7 +112,7 @@ function seed({ permissions, managers = [], contact, orgError }: SeedOptions): Q
   }
   queryClient.setQueryData(
     $api.queryOptions("get", "/api/billing/managers", { params: { header } }).queryKey,
-    { managers },
+    { object: "list", data: managers, hasMore: false },
   );
   queryClient.setQueryData(
     $api.queryOptions("get", "/api/billing/contact", { params: { header } }).queryKey,
@@ -169,7 +169,7 @@ describe("billing managers section", () => {
     const html = renderPage({
       permissions: ADMIN,
       managers: [
-        { user_id: "usr_member", added_by: "usr_owner", created_at: "2026-02-01T00:00:00Z" },
+        { userId: "usr_member", added_by: "usr_owner", createdAt: "2026-02-01T00:00:00Z" },
       ],
     });
     expect(html).toContain("Manon Bloch");
@@ -188,9 +188,7 @@ describe("billing managers section", () => {
   it("says why a manager promoted to admin can no longer be saved", () => {
     const html = renderPage({
       permissions: ADMIN,
-      managers: [
-        { user_id: "usr_admin", added_by: "usr_owner", created_at: "2026-02-01T00:00:00Z" },
-      ],
+      managers: [{ userId: "usr_admin", added_by: "usr_owner", createdAt: "2026-02-01T00:00:00Z" }],
     });
     expect(html).toContain("Adam Vidal");
     expect(html).toContain("gère déjà la facturation via son rôle");
@@ -201,9 +199,7 @@ describe("billing managers section", () => {
   it("says why a manager who left the organization can no longer be saved", () => {
     const html = renderPage({
       permissions: ADMIN,
-      managers: [
-        { user_id: "usr_gone", added_by: "usr_owner", created_at: "2026-02-01T00:00:00Z" },
-      ],
+      managers: [{ userId: "usr_gone", added_by: "usr_owner", createdAt: "2026-02-01T00:00:00Z" }],
     });
     expect(html).toContain("usr_gone");
     expect(html).toContain("n'est plus membre de l'organisation");
@@ -216,7 +212,7 @@ describe("billing managers section", () => {
       permissions: ADMIN,
       orgError: true,
       managers: [
-        { user_id: "usr_member", added_by: "usr_owner", created_at: "2026-02-01T00:00:00Z" },
+        { userId: "usr_member", added_by: "usr_owner", createdAt: "2026-02-01T00:00:00Z" },
       ],
     });
     // The card is replaced by its error state, so it has no header to slice on.

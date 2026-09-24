@@ -18,7 +18,7 @@
 import { describe, it, expect } from "bun:test";
 import type { RunEvent } from "@afps-spec/types";
 import type { EventSink } from "../../src/interfaces/event-sink.ts";
-import type { RunResult } from "../../src/types/run-result.ts";
+import type { RunResult, TerminalRunResult } from "../../src/types/run-result.ts";
 import { emptyRunResult } from "../../src/runner/reducer.ts";
 import {
   attachStdoutBridge,
@@ -126,6 +126,8 @@ describe("isStdoutEventLine", () => {
 // ---------------------------------------------------------------------------
 
 describe("mergeTerminalResult", () => {
+  const bareSuccess = (): TerminalRunResult => ({ ...emptyRunResult(), status: "success" });
+
   it("prefers aggregate values when present, falls back to runner values", () => {
     const aggregate: RunResult = {
       memories: [{ content: "hello" }],
@@ -133,7 +135,7 @@ describe("mergeTerminalResult", () => {
       output: { foo: "bar" },
       logs: [{ level: "info", message: "x", timestamp: 100 }],
     };
-    const runner: RunResult = {
+    const runner: TerminalRunResult = {
       memories: [{ content: "old" }],
       pinned: { checkpoint: { content: { step: 1 } } },
       output: { foo: "baz" },
@@ -153,7 +155,7 @@ describe("mergeTerminalResult", () => {
 
   it("falls back to runner values for every field the aggregate left empty", () => {
     const aggregate = emptyRunResult();
-    const runner: RunResult = {
+    const runner: TerminalRunResult = {
       memories: [{ content: "r" }],
       pinned: { checkpoint: { content: { ok: true } } },
       output: { answer: 42 },
@@ -170,9 +172,9 @@ describe("mergeTerminalResult", () => {
     expect(merged.error).toEqual({ message: "boom" });
   });
 
-  it("omits status / error / durationMs when runner did not provide them", () => {
-    const merged = mergeTerminalResult(emptyRunResult(), emptyRunResult());
-    expect("status" in merged).toBe(false);
+  it("omits error / durationMs when runner did not provide them", () => {
+    const merged = mergeTerminalResult(emptyRunResult(), bareSuccess());
+    expect(merged.status).toBe("success");
     expect("error" in merged).toBe(false);
     expect("durationMs" in merged).toBe(false);
   });
@@ -183,7 +185,7 @@ describe("mergeTerminalResult", () => {
     // platform's finalize endpoint can read authoritative token counts
     // without waiting on the side-channel metric event.
     const aggregate = emptyRunResult();
-    const runner: RunResult = {
+    const runner: TerminalRunResult = {
       ...emptyRunResult(),
       status: "success",
       usage: {
@@ -203,13 +205,13 @@ describe("mergeTerminalResult", () => {
   });
 
   it("omits usage when runner did not provide it", () => {
-    const merged = mergeTerminalResult(emptyRunResult(), emptyRunResult());
+    const merged = mergeTerminalResult(emptyRunResult(), bareSuccess());
     expect("usage" in merged).toBe(false);
   });
 
   it("forwards runner.cost onto the merged result", () => {
     const aggregate = emptyRunResult();
-    const runner: RunResult = {
+    const runner: TerminalRunResult = {
       ...emptyRunResult(),
       status: "success",
       cost: 0.0123,
@@ -219,8 +221,20 @@ describe("mergeTerminalResult", () => {
   });
 
   it("omits cost when runner did not provide it", () => {
-    const merged = mergeTerminalResult(emptyRunResult(), emptyRunResult());
+    const merged = mergeTerminalResult(emptyRunResult(), bareSuccess());
     expect("cost" in merged).toBe(false);
+  });
+
+  it("forwards runner.artifacts onto the merged result", () => {
+    // runtime-pi stamps the outputs-sweep summary on the result it hands the
+    // bridge; the merge is the last step before the finalize POST.
+    const artifacts = {
+      status: "partial" as const,
+      published: 1,
+      failed: [{ name: "big.bin", code: "file_too_large" }],
+    };
+    const merged = mergeTerminalResult(emptyRunResult(), { ...bareSuccess(), artifacts });
+    expect(merged.artifacts).toEqual(artifacts);
   });
 });
 

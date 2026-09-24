@@ -247,12 +247,12 @@ describe("Webhooks API", () => {
     });
   });
 
-  describe("PUT /api/webhooks/:id", () => {
+  describe("PATCH /api/webhooks/:id", () => {
     it("updates webhook URL", async () => {
       const created = await createWebhook();
 
       const res = await app.request(`/api/webhooks/${created.id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ url: "https://example.com/updated" }),
       });
@@ -496,10 +496,10 @@ describe("Webhooks API", () => {
       expect(res.status).toBe(404);
     });
 
-    it("PUT /api/webhooks/:otherSpaceWebhookId returns 404", async () => {
+    it("PATCH /api/webhooks/:otherSpaceWebhookId returns 404", async () => {
       const { otherWebhookId, bearer } = await setupCrossSpaceFixture();
       const res = await app.request(`/api/webhooks/${otherWebhookId}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...bearer, "Content-Type": "application/json" },
         body: JSON.stringify({ url: "https://attacker.example.com/" }),
       });
@@ -672,7 +672,7 @@ describe("webhooks vs org-webhooks (level-dependent guard)", () => {
       expect(read.status).toBe(200);
 
       const updated = await app.request(`/api/webhooks/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: false }),
       });

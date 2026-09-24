@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { z } from "zod";
-import type { ModelCost } from "@appstrate/core/module";
+import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { TokenUsage } from "@appstrate/core/token-usage";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import type { ModelGenerationCapabilities } from "@appstrate/core/model-generation";
@@ -59,7 +59,7 @@ export interface ListEnvelope<T> {
   limit?: number;
 }
 
-import type { RunStatus as _RunStatus } from "@appstrate/db/run-status";
+import type { RunStatus as _RunStatus } from "@appstrate/core/run-status";
 import type { PricingStatus as _PricingStatus } from "@appstrate/db/pricing-status";
 
 /**
@@ -300,10 +300,8 @@ export interface ResourceEntry {
 // barrel: this module is consumed by the SPA, and a value import from
 // `@appstrate/db/schema` cannot be elided by the bundler — it shipped
 // drizzle-orm plus all 18 schema files (table + column names included) to
-// the browser. `run-status.ts` is import-free and is what `runStatusEnum`
-// itself derives from, so there is still exactly one list of statuses.
+// the browser. `run-status.ts` is import-free, so there is one list of statuses.
 export { TERMINAL_RUN_STATUSES, ACTIVE_RUN_STATUSES } from "@appstrate/db/run-status";
-export type { RunStatus, TerminalRunStatus } from "@appstrate/db/run-status";
 
 // --- Auth policy ---
 
@@ -590,8 +588,6 @@ export interface AgentDetail {
   } | null;
   /** Omitted for system agents (the SPA treats absence as "no timestamp"). */
   updatedAt?: string | null;
-  /** Omitted for system agents — absence means "no optimistic-lock token". */
-  lock_version?: number;
   prompt?: string;
   scope: string | null;
   version: string | null;
@@ -764,7 +760,6 @@ export interface OrgPackageItemDetail extends Omit<
   agents: { id: string; display_name: string }[];
   manifest?: Record<string, unknown>;
   manifest_name?: string | null;
-  lock_version?: number;
   version_count?: number;
   has_unarchived_changes?: boolean;
 }
@@ -901,7 +896,7 @@ export interface ModelMetadata {
   contextWindow?: number | null;
   maxTokens?: number | null;
   /** Input modalities this model supports (e.g. `["text", "image"]`). */
-  input?: string[] | null;
+  input?: ModelInputModality[] | null;
   /** Whether the model exposes a reasoning/thinking mode. */
   reasoning?: boolean | null;
   /** Per-1M-token pricing in USD. */
@@ -1006,7 +1001,7 @@ export interface ModelProviderCredentialInfo {
   providerId?: string | null;
   /** Surface email of the OAuth account (extracted from the access-token identity claim). UI shows it as transparency hint. */
   oauth_email?: string | null;
-  /** True when the worker (or token-resolver) detected an `invalid_grant`. UI surfaces a "Reconnect" badge. */
+  /** True when the credential is dead (an OAuth `invalid_grant`, or undecryptable). */
   needs_reconnection?: boolean;
   /**
    * Model ids empirically verified against this credential by the
@@ -1153,7 +1148,7 @@ export interface SpaceInfo {
 /** What `POST /api/spaces/:id/sweep-now` did to an orphaned personal space. */
 export interface SpaceSweepResult {
   object: "space_sweep";
-  space_id: string;
+  spaceId: string;
   /** Homed packages another space had placed: handed to the org catalogue. */
   rehomed_packages: number;
   /** Homed packages nothing else had placed: deleted. */

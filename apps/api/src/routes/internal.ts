@@ -7,7 +7,7 @@ import { db } from "@appstrate/db/client";
 import { modelProviderCredentials, packages, packageVersions, runs } from "@appstrate/db/schema";
 import { asRecord } from "@appstrate/core/safe-json";
 import { parseBearer } from "@appstrate/core/bearer";
-import { downloadVersionZip } from "../services/package-storage.ts";
+import { downloadVersionZipForExecution } from "../services/package-storage.ts";
 import { getSystemPackages } from "../services/system-packages.ts";
 import { logger } from "../lib/logger.ts";
 import { isInvalidTextRepresentation } from "../lib/db-helpers.ts";
@@ -751,7 +751,11 @@ export function createInternalRouter() {
     if (!resolved) {
       throw notFound(`Version '${requestedVersion}' not found for '${mcpServerId}'`);
     }
-    const bytes = await downloadVersionZip(mcpServerId, resolved.version, resolved.integrity);
+    const bytes = await downloadVersionZipForExecution(
+      mcpServerId,
+      resolved.version,
+      resolved.integrity,
+    );
     if (!bytes) throw notFound(`Bundle bytes unavailable for '${mcpServerId}'`);
     logger.info("mcp-server bundle delivered (storage)", {
       ...caller,

@@ -103,11 +103,11 @@ describe("auth pipeline — stale cookie cleanup", () => {
   });
 
   it('answers an invalid API key 401 with WWW-Authenticate: Bearer error="invalid_token"', async () => {
-    // A credential WAS presented (Authorization: Bearer ask_…) and failed
+    // A credential WAS presented (Authorization: Bearer apst_…) and failed
     // validation — RFC 6750 §3.1 says the challenge names the error.
     const res = await app.request("/api/agents", {
       headers: {
-        Authorization: "Bearer ask_definitely-not-a-valid-key",
+        Authorization: "Bearer apst_definitely-not-a-valid-key",
         "X-Org-Id": "00000000-0000-0000-0000-000000000000",
       },
     });

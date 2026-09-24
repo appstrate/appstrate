@@ -137,8 +137,8 @@ export function createProxiesRouter() {
     }
   });
 
-  // PUT /api/proxies/:id — update a custom proxy
-  router.put("/:id", requirePermission("proxies", "write"), async (c) => {
+  // PATCH /api/proxies/:id — update a custom proxy
+  router.patch("/:id", requirePermission("proxies", "write"), async (c) => {
     const orgId = c.get("orgId");
     const proxyId = c.req.param("id")!;
     const data = await readJsonBody(c, updateProxySchema);

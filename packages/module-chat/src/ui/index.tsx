@@ -59,11 +59,13 @@ import {
   loadHistory,
   markSessionRead,
   mintSessionId,
+  patchSessionsCache,
   sessionQueryKey,
   sessionsQueryKey,
   spaceIdFromHeaders,
   SESSIONS_QUERY_KEY,
   stopSession,
+  type SessionsCache,
   type SessionSummary,
 } from "./sessions.ts";
 import { useSessions } from "./use-sessions.ts";
@@ -238,8 +240,10 @@ export function ChatPage({
     if (!visible) return;
     const active = sessions.data?.find((s) => s.id === activeId);
     if (!active?.unread) return;
-    queryClient.setQueryData<SessionSummary[]>(sessionsQueryKey(pageSpaceId), (prev) =>
-      prev?.map((s) => (s.id === activeId ? { ...s, unread: false } : s)),
+    queryClient.setQueryData<SessionsCache>(sessionsQueryKey(pageSpaceId), (prev) =>
+      patchSessionsCache(prev, (rows) =>
+        rows.map((s) => (s.id === activeId ? { ...s, unread: false } : s)),
+      ),
     );
     void markSessionRead(getHeaders, activeId).catch(() => {});
   }, [sessions.data, activeId, getHeaders, pageSpaceId, queryClient, visible]);
@@ -613,19 +617,24 @@ function ConversationInner({
   const wasGenerating = useRef(false);
   useEffect(() => {
     if (generating) {
-      queryClient.setQueryData<SessionSummary[]>(sessionsQueryKey(spaceId), (prev) => {
-        const list = prev ?? [];
-        const existing = list.find((s) => s.id === id);
+      queryClient.setQueryData<SessionsCache>(sessionsQueryKey(spaceId), (prev) => {
+        const existing = prev?.pages.flatMap((p) => p.data).find((s) => s.id === id);
         const row: SessionSummary = {
           ...(existing ?? { id, title: null, unread: false }),
           generating: true,
           updatedAt: new Date().toISOString(),
         };
-        return [row, ...list.filter((s) => s.id !== id)];
+        return patchSessionsCache(
+          prev,
+          (rows, first) => [...(first ? [row] : []), ...rows.filter((s) => s.id !== id)],
+          row,
+        );
       });
     } else if (wasGenerating.current) {
-      queryClient.setQueryData<SessionSummary[]>(sessionsQueryKey(spaceId), (prev) =>
-        prev?.map((s) => (s.id === id ? { ...s, generating: false } : s)),
+      queryClient.setQueryData<SessionsCache>(sessionsQueryKey(spaceId), (prev) =>
+        patchSessionsCache(prev, (rows) =>
+          rows.map((s) => (s.id === id ? { ...s, generating: false } : s)),
+        ),
       );
       void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
     }

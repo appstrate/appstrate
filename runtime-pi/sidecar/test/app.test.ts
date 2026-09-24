@@ -159,6 +159,9 @@ const LLM_CONFIG: LlmProxyConfig = {
   placeholder: "sk-placeholder",
 };
 
+/** The envelope every `/llm/*` refusal the sidecar answers itself carries. */
+type LlmErrorBody = { type: string; error: { type: string; message: string } };
+
 describe("ALL /llm/* — SSRF protection", () => {
   it("returns 403 when oauth baseUrl targets a blocked network range", async () => {
     const deps = makeDeps();
@@ -170,8 +173,10 @@ describe("ALL /llm/* — SSRF protection", () => {
     const app = createTestApp(deps);
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toContain("blocked network range");
+    const body = (await res.json()) as LlmErrorBody;
+    expect(body.type).toBe("error");
+    expect(body.error.type).toBe("permission_error");
+    expect(body.error.message).toContain("blocked network range");
   });
 
   it("returns 403 when api_key baseUrl targets a blocked network range", async () => {
@@ -185,8 +190,10 @@ describe("ALL /llm/* — SSRF protection", () => {
     const app = createTestApp(deps);
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toContain("blocked network range");
+    const body = (await res.json()) as LlmErrorBody;
+    expect(body.type).toBe("error");
+    expect(body.error.type).toBe("permission_error");
+    expect(body.error.message).toContain("blocked network range");
   });
 });
 
@@ -195,8 +202,28 @@ describe("ALL /llm/* — basic routing", () => {
     const app = createTestApp(makeDeps());
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(503);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toContain("not configured");
+    const body = (await res.json()) as LlmErrorBody;
+    // Provider-shaped, so the in-container SDK surfaces the message.
+    expect(body).toEqual({
+      type: "error",
+      error: { type: "api_error", message: "LLM proxy not configured" },
+    });
+  });
+
+  it("answers an oauth refusal in the same provider-shaped envelope", async () => {
+    const deps = makeDeps();
+    deps.config.llm = {
+      authMode: "oauth",
+      baseUrl: "https://api.anthropic.com",
+      credentialId: "cred_1",
+    };
+    const res = await createTestApp(deps).request("/llm/v1/messages", { method: "POST" });
+    expect(res.status).toBe(503);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    expect(await res.json()).toEqual({
+      type: "error",
+      error: { type: "api_error", message: "OAuth token cache not configured" },
+    });
   });
 
   it("forwards path and query string to baseUrl", async () => {
@@ -229,8 +256,9 @@ describe("ALL /llm/* — basic routing", () => {
     const app = createTestApp(deps);
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(502);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toContain("api.anthropic.com");
+    const body = (await res.json()) as LlmErrorBody;
+    expect(body.type).toBe("error");
+    expect(body.error.message).toContain("api.anthropic.com");
   });
 
   it("forwards upstream error status transparently", async () => {

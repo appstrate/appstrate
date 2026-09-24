@@ -3,7 +3,7 @@
 
 import type { EventSink } from "../interfaces/event-sink.ts";
 import type { RunEvent } from "@afps-spec/types";
-import type { RunResult } from "../types/run-result.ts";
+import type { TerminalRunResult } from "../types/run-result.ts";
 
 /**
  * Fan-out sink: broadcasts each `handle` / `finalize` call to all child
@@ -29,7 +29,7 @@ export class CompositeSink implements EventSink {
     );
   }
 
-  async finalize(result: RunResult): Promise<void> {
+  async finalize(result: TerminalRunResult): Promise<void> {
     await this.runAll(
       this.children.map((c) => c.finalize(result)),
       "finalize",

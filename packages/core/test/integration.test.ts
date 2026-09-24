@@ -187,7 +187,7 @@ describe("integrationManifestSchema — oauth2 discovery + manual", () => {
     auths.oauth!.code_challenge_methods_supported = ["S256"];
     auths.oauth!.authorization_params = { access_type: "offline" };
     auths.oauth!.token_endpoint_auth_method = "client_secret_post";
-    auths.oauth!.identity_claims = { account_id: "sub", email: "email" };
+    auths.oauth!.identity_claims = { account_id: "$.sub", email: "$.email" };
     auths.oauth!.required_identity_claims = ["sub"];
     expect(integrationManifestSchema.safeParse(m).success).toBe(true);
   });
@@ -584,6 +584,32 @@ describe("integrationManifestSchema — delivery.http.prefix install gate", () =
   });
 });
 
+describe("integrationManifestSchema — identity_claims JSONPath install gate", () => {
+  const withClaims = (identity_claims: Record<string, string>) =>
+    baseManifest({
+      source: { kind: "none" },
+      auths: {
+        key: {
+          type: "api_key",
+          credentials: { schema: { type: "object", properties: {} } },
+          authorized_uris: ["https://api.example.com/**"],
+          delivery: { http: { in: "header", name: "X-Api-Key", value: "{$credential.api_key}" } },
+          identity_claims,
+        },
+      },
+    });
+
+  // The grammar itself is tested in packages/afps-shared/test/jsonpath.test.ts.
+  it("accepts a path in the subset and refuses one outside it on the claim's own path", () => {
+    expect(integrationManifestSchema.safeParse(withClaims({ a: "$.data[0].id" })).success).toBe(
+      true,
+    );
+    expect(errorPaths(withClaims({ accountId: "$..email" }))).toContain(
+      "auths.key.identity_claims.accountId",
+    );
+  });
+});
+
 // ─────────────────────────────────────────────
 // mtls + delivery.http install gate (§7.6)
 // ─────────────────────────────────────────────
@@ -734,6 +760,41 @@ describe("integrationManifestSchema — connect.login", () => {
         }),
       ),
     ).toContain("auths.session.connect.login.expires_in_output");
+  });
+
+  it("rejects a jsonpath output selector outside the subset at import", () => {
+    expect(
+      errorPaths(
+        customWithConnect({
+          login: {
+            request: { method: "POST", url: "https://x" },
+            outputs: {
+              token: { context: "$response.body", selector: "$..token", type: "jsonpath" },
+            },
+          },
+        }),
+      ),
+    ).toContain("auths.session.connect.login.outputs.token.selector");
+  });
+
+  it("rejects a jsonpath success criterion outside the subset, and leaves other types alone", () => {
+    const paths = errorPaths(
+      customWithConnect({
+        login: {
+          request: { method: "POST", url: "https://x" },
+          success_criteria: [
+            { condition: "$statusCode == 200" },
+            { condition: "$[?(@.ok)]", type: "jsonpath" },
+            { condition: "[a-z]+", type: "regex" },
+          ],
+          outputs: {
+            token: { context: "$response.body", selector: "$.session['id']", type: "jsonpath" },
+            raw: { context: "$response.body", selector: "/token", type: "jsonpointer" },
+          },
+        },
+      }),
+    );
+    expect(paths).toEqual(["auths.session.connect.login.success_criteria.1.condition"]);
   });
 
   it("rejects identity_outputs that are not declared outputs", () => {

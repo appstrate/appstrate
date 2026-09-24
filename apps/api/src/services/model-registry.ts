@@ -4,7 +4,7 @@ import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
 import { loadSystemRegistry } from "../lib/system-registry.ts";
-import { modelCostSchema } from "@appstrate/core/module";
+import { modelCostSchema, modelInputModalitySchema } from "@appstrate/core/module";
 import { checkAliasInvariants } from "@appstrate/core/model-swap";
 import type { ModelMetadata } from "@appstrate/shared-types";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
@@ -77,7 +77,7 @@ const rawModelSchema = z.object({
   modelId: z.string().min(1),
   /** Optional — falls back to the vendored catalog label at resolve time. */
   label: z.string().min(1).optional(),
-  input: z.array(z.string()).nullable().optional(),
+  input: z.array(modelInputModalitySchema).nullable().optional(),
   contextWindow: z.number().positive().nullable().optional(),
   maxTokens: z.number().positive().nullable().optional(),
   reasoning: z.boolean().nullable().optional(),

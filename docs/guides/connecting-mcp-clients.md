@@ -34,7 +34,7 @@ organization, so use that org's endpoint — no `X-Org-Id` header:
 
 ```sh
 claude mcp add --transport http appstrate-<org> https://YOUR_INSTANCE/api/mcp/o/<orgId> \
-  --header "Authorization: Bearer ask_xxx"
+  --header "Authorization: Bearer apst_xxx"
 ```
 
 The `<orgId>` in the URL must be the key's own organization (the dashboard gives

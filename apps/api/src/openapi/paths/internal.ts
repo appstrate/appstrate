@@ -320,7 +320,7 @@ export const internalPaths = {
         },
         "502": {
           description:
-            "Transient OAuth refresh failure upstream — same semantics as the GET endpoint.",
+            "Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected fewer than `INTEGRATION_REFRESH_MAX_FAILURES` consecutive times; the rejection is counted and the connection is flagged (`410`) once the streak reaches the threshold.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

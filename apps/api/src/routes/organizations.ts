@@ -5,7 +5,7 @@ import type { Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { spaceAssignmentSchema } from "../lib/space-role-assignment.ts";
+import { auditSpaceAssignments, spaceAssignmentSchema } from "../lib/space-role-assignment.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
 import { resolveListingViewAs } from "../lib/view-as.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
@@ -214,7 +214,7 @@ router.post("/", async (c) => {
 
 // --- Routes below require org context (orgId from params, verified via membership) ---
 
-// OrgDetail serializer — shared by GET /:orgId and PUT /:orgId so the update
+// OrgDetail serializer — shared by GET /:orgId and PATCH /:orgId so the update
 // response is the exact same resource shape as the detail read.
 async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
   const permissions = c.get("permissions");
@@ -279,8 +279,8 @@ router.get("/:orgId", async (c) => {
   return c.json(await buildOrgDetail(c, orgId));
 });
 
-// PUT /api/orgs/:orgId — update name/slug (owner only — org routes skip org context)
-router.put("/:orgId", requirePermission("org", "update"), async (c) => {
+// PATCH /api/orgs/:orgId — update name/slug (owner only — org routes skip org context)
+router.patch("/:orgId", requirePermission("org", "update"), async (c) => {
   const orgId = c.req.param("orgId")!;
   const data = await readJsonBody(c, updateOrgSchema);
 
@@ -375,7 +375,7 @@ router.delete("/:orgId", requirePermission("org", "delete"), async (c) => {
 //
 // One pending invitation per (org, email): a duplicate is a 409
 // `invitation_already_pending` carrying `invitation_id`; the caller edits that
-// one (PUT /invitations/:id) instead — the space Members page relies on this.
+// one (PATCH /invitations/:id) instead — the space Members page relies on this.
 router.post("/:orgId/members", requirePermission("members", "invite"), async (c) => {
   const user = c.get("user");
   const orgId = c.req.param("orgId")!;
@@ -397,7 +397,11 @@ router.post("/:orgId/members", requirePermission("members", "invite"), async (c)
       action: "org.invitation_created",
       resourceType: "invitation",
       resourceId: invitation.id,
-      after: { email: invitation.email, role, space_assignments: invitation.spaceAssignments },
+      after: {
+        email: invitation.email,
+        role,
+        spaceAssignments: auditSpaceAssignments(invitation.spaceAssignments),
+      },
       orgIdOverride: orgId,
     });
 
@@ -455,8 +459,8 @@ router.delete(
   },
 );
 
-// PUT /api/orgs/:orgId/invitations/:invitationId — change invitation role (admin+)
-router.put(
+// PATCH /api/orgs/:orgId/invitations/:invitationId — merge-update an invitation (admin+)
+router.patch(
   "/:orgId/invitations/:invitationId",
   requirePermission("members", "change-role"),
   async (c) => {
@@ -484,7 +488,7 @@ router.put(
       action: "org.invitation_role_updated",
       resourceType: "invitation",
       resourceId: invitationId,
-      after: { role: data.role, space_assignments: spaceAssignments },
+      after: { role: data.role, spaceAssignments: auditSpaceAssignments(spaceAssignments) },
       orgIdOverride: orgId,
     });
 
@@ -550,10 +554,10 @@ router.put("/:orgId/members/:userId", requirePermission("members", "change-role"
     resourceId: targetUserId,
     before: {
       role: previousRole,
-      revoked_space_assignments: revoked.map((row) => ({
-        space_id: row.spaceId,
-        preset_role: row.presetRole,
-        custom_role_id: row.customRoleId,
+      revokedSpaceAssignments: revoked.map((row) => ({
+        spaceId: row.spaceId,
+        presetRole: row.presetRole,
+        customRoleId: row.customRoleId,
       })),
     },
     after: { role: data.role },
@@ -613,8 +617,8 @@ router.get("/:orgId/settings", async (c) => {
   return c.json(settings);
 });
 
-// PUT /api/orgs/:orgId/settings — update org settings (owner/admin)
-router.put("/:orgId/settings", requirePermission("org", "settings"), async (c) => {
+// PATCH /api/orgs/:orgId/settings — update org settings (owner/admin)
+router.patch("/:orgId/settings", requirePermission("org", "settings"), async (c) => {
   const orgId = c.req.param("orgId")!;
   const data = await readJsonBody(c, orgSettingsPatchSchema);
 
@@ -628,12 +632,12 @@ router.put("/:orgId/settings", requirePermission("org", "settings"), async (c) =
   //   - **Session (cookie) callers can always recover.** `skipOrgContext()`
   //     (`lib/auth-pipeline.ts`) returns true for `/api/orgs/`, so
   //     `requireOrgContext` never runs on this route and `c.get("orgId")` is
-  //     unset — the middleware's org-pin branch is skipped entirely and the PUT
+  //     unset — the middleware's org-pin branch is skipped entirely and the PATCH
   //     answers 200. Reproduced against an org pinned to "2020-01-01" directly
-  //     in the DB: `GET /api/runs` → 400, `PUT /api/orgs/:orgId/settings` → 200.
+  //     in the DB: `GET /api/runs` → 400, `PATCH /api/orgs/:orgId/settings` → 200.
   //   - **API-key callers cannot.** `applyAuthPipeline` sets `orgId` inline from
   //     the key, before any path-based skip, so the pin branch runs on *every*
-  //     route including this one. Same reproduction: `PUT` → 400. A headless
+  //     route including this one. Same reproduction: `PATCH` → 400. A headless
   //     operator with no dashboard session is locked out with no self-serve
   //     remedy.
   //

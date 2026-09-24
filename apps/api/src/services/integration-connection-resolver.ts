@@ -454,7 +454,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     // >1 healthy — caller must pick. Surface the LIVE candidates, each with the
     // fields that tell them apart (label, accountId, owned/shared), not just
     // their ids: a caller with no picker — an API client, an MCP model reading
-    // the 412 — chooses from the error alone instead of fetching the connection
+    // the 409 — chooses from the error alone instead of fetching the connection
     // list to learn which uuid is which account. The dashboard is not that
     // caller: its modal embeds the shared picker, whose candidate list is a
     // superset (it also offers the dead rows, with a renew button). That picker
@@ -553,7 +553,7 @@ function isOwnedByActor(args: ResolveOneArgs, conn: ConnectionRow): boolean {
   );
 }
 
-/** Project a candidate row onto the picker-facing shape carried by the 412. */
+/** Project a candidate row onto the picker-facing shape carried by the 409. */
 function candidateOf(args: ResolveOneArgs, conn: ConnectionRow): ConnectionCandidate {
   return {
     id: conn.id,
@@ -746,13 +746,13 @@ export async function resolveConnectionsForRun(
 }
 
 /**
- * The fully-formed `missing_integration_connection` 412 payload, transport-
+ * The fully-formed `missing_integration_connection` 409 payload, transport-
  * agnostic. Both run-kickoff paths (run-pipeline throws an `ApiError`,
  * run-creation returns a result object) surface the identical shape; this is
  * the single definition of that shape.
  */
 interface MissingConnectionError {
-  status: 412;
+  status: 409;
   code: "missing_integration_connection";
   title: "Missing Integration Connection";
   detail: string;
@@ -765,12 +765,12 @@ type ResolveRunConnectionsOutcome =
 
 /**
  * Resolve the per-run connection snapshot and fold any resolver errors into
- * the canonical `missing_integration_connection` 412 payload. Returns a
+ * the canonical `missing_integration_connection` 409 payload. Returns a
  * discriminated union so each caller adapts the error to its own transport —
  * `run-pipeline.ts` rethrows it as an `ApiError`, `run-creation.ts` maps it
  * into its `{ ok: false, error }` result convention. The resolution + the
  * empty→null projection + the error mapping live here once so the two
- * kickoff paths can never drift on the 412 shape.
+ * kickoff paths can never drift on the 409 shape.
  */
 export async function resolveRunConnectionsOrError(
   input: ResolveConnectionsForRunInput,
@@ -780,7 +780,7 @@ export async function resolveRunConnectionsOrError(
     return {
       ok: false,
       error: {
-        status: 412,
+        status: 409,
         code: "missing_integration_connection",
         title: "Missing Integration Connection",
         detail: resolution.errors[0]!.message,
@@ -807,7 +807,7 @@ const CONNECT_FLOW_CODES: ReadonlySet<ConnectionResolutionError["code"]> = new S
 /**
  * Map a `ConnectionResolutionError` to the wire-format `ResolutionFieldError`
  * (a `ValidationFieldError` plus the resolution smuggle fields) the upstream
- * 412 envelope expects.
+ * 409 envelope expects.
  *
  * Field path: `integrations.{packageId}` — one error per integration in
  * the flat model. The dashboard's MissingConnectionsModal parses on the
@@ -926,7 +926,7 @@ async function buildRequirement(
   // defaults, run/schedule overrides and member pins were all bypassed and the
   // run silently executed against an arbitrary shared-with-org account. One
   // definition of "used" is the fix: every integration that will be spawned now
-  // gets a verdict here — a resolved connection, or a loud 412.
+  // gets a verdict here — a resolved connection, or a loud 409.
   const effectiveTools = resolveEffectiveToolSelection(entry.tools, res.manifest);
   const hasSelectedTools =
     isToolsWildcard(effectiveTools) || (Array.isArray(effectiveTools) && effectiveTools.length > 0);
@@ -937,7 +937,7 @@ async function buildRequirement(
     hasRequiredAuth: manifestHasRequiredAuth(res.manifest),
     // Scope INFERENCE deliberately stays on the agent's own selection: it
     // drives the stricter `insufficient_scopes` gate, and widening it to the
-    // inherited defaults would newly 412 runs whose connection works today.
+    // inherited defaults would newly 409 runs whose connection works today.
     // Activeness (above) and scope requirements are different questions.
     agentTools: wildcard ? "*" : (entry.tools ?? []),
     agentScopes: entry.scopes ?? [],

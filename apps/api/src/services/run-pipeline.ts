@@ -38,7 +38,7 @@ import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { ConnectOfferPolicy } from "../lib/connect-offer-policy.ts";
 import type { FileReference } from "./run-launcher/types.ts";
-import { runPreflightGates } from "./run-preflight-gates.ts";
+import { preflightGateApiError, runPreflightGates } from "./run-preflight-gates.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { runWithSpan } from "@appstrate/core/telemetry";
 import {
@@ -221,7 +221,7 @@ export async function resolveRunPreflight(params: {
   //
   // The damaging direction is the false negative: an integration whose pinned
   // version is perfectly satisfiable was refused because its author had since
-  // tightened their working copy. On the run route that surfaces as a 412
+  // tightened their working copy. On the run route that surfaces as a 409
   // naming scopes the version actually being run does not require. On the
   // SCHEDULER it is worse — `triggerScheduledRun` turns any ApiError from this
   // function into `failSchedule(...)`, so a background schedule with no user in
@@ -239,7 +239,7 @@ export async function resolveRunPreflight(params: {
   // disabled, or carrying an invalid draft manifest would stop reporting
   // `integration_not_active` / `integration_invalid_manifest` / `not_connected`
   // and report an unresolved dependency instead — measured at 9 of the 15 cases
-  // in `runs-412-missing-connection.test.ts`. That is a defensible product
+  // in `runs-missing-connection.test.ts`. That is a defensible product
   // position (those runs cannot succeed either way) but it rewrites the
   // `missing_integration_connection` envelope the MissingConnectionsModal
   // consumes, and it would silently convert schedule failures from one cause to
@@ -409,14 +409,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     }),
   );
   const gatesMs = Date.now() - gatesStart;
-  if (!gates.ok) {
-    throw new ApiError({
-      status: gates.error.status ?? 500,
-      code: gates.error.code,
-      title: gates.error.code.replace(/_/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase()),
-      detail: gates.error.message,
-    });
-  }
+  if (!gates.ok) throw preflightGateApiError(gates.error);
   const { agent } = gates;
 
   // --- Step 2a: Integration manifest version snapshot (#686) ---
@@ -453,7 +446,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   // Readiness already ran in resolveRunPreflight WITH the same overrides
   // (so the must_choose retry exits its loop). This second pass produces
   // the persisted resolution snapshot and re-checks under the current DB
-  // state — any error here is hard 412: either the override points at an
+  // state — any error here is hard 409: either the override points at an
   // invalid id (caller's mistake), or a race after readiness mutated DB
   // state (connection deleted / pin shifted). Either way the caller
   // needs structured feedback, not a silent fallback. The cascade reads the

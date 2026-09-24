@@ -31,6 +31,7 @@ import {
 } from "./model-swap.ts";
 import { handlePiMessagesRequest } from "./pi-messages-backend.ts";
 import { applyOauthBearerSwap } from "@appstrate/core/oauth-bearer-swap";
+import { llmProxyErrorBody } from "@appstrate/core/model-swap";
 import {
   DEFAULT_INLINE_OUTPUT_TOKENS,
   DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
@@ -399,7 +400,7 @@ async function logOauthLlmResponse(
   return upstream;
 }
 
-function llmFetchErrorResponse(c: Context, targetUrl: string, err: unknown): Response {
+function llmFetchErrorResponse(targetUrl: string, err: unknown): Response {
   const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
   let domain: string | undefined;
   try {
@@ -411,7 +412,20 @@ function llmFetchErrorResponse(c: Context, targetUrl: string, err: unknown): Res
   // Only non-aliased requests reach an upstream fetch here, so the hostname
   // keeps its debugging value.
   const domainHint = domain ? ` (${domain})` : "";
-  return c.json({ error: `LLM request failed${suffix}${domainHint}` }, 502);
+  return llmProxyError(502, "api_error", `LLM request failed${suffix}${domainHint}`);
+}
+
+/** A `/llm/*` refusal in the provider-shaped envelope, typed in Anthropic's error vocabulary. */
+function llmProxyError(
+  status: number,
+  type: string,
+  message: string,
+  extra?: Record<string, unknown>,
+): Response {
+  return new Response(llmProxyErrorBody(type, message, extra), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
 function stringifyError(err: unknown): string {
@@ -420,21 +434,23 @@ function stringifyError(err: unknown): string {
 }
 
 /**
- * The `/llm` 413 envelope. Mirrors the mcp.ts oversize-error shape so a
- * caller sees a consistent `PAYLOAD_TOO_LARGE` discriminator on both the
- * MCP envelope cap and this request-body cap.
+ * The `/llm` 413, with the same `PAYLOAD_TOO_LARGE` `error.code` as the mcp.ts
+ * envelope cap.
  */
-function llmBodyOversizeError(actual: number | null) {
-  return {
-    error:
-      actual !== null
-        ? `Request body exceeds ${MAX_REQUEST_BODY_SIZE} bytes (declared ${actual}).`
-        : `Request body exceeds ${MAX_REQUEST_BODY_SIZE} bytes.`,
-    reason: "PAYLOAD_TOO_LARGE" as const,
-    limit: MAX_REQUEST_BODY_SIZE,
-    ...(actual !== null ? { actual } : {}),
-    envVar: "SIDECAR_MAX_REQUEST_BODY_BYTES",
-  };
+function llmBodyOversizeError(actual: number | null): Response {
+  return llmProxyError(
+    413,
+    "request_too_large",
+    actual !== null
+      ? `Request body exceeds ${MAX_REQUEST_BODY_SIZE} bytes (declared ${actual}).`
+      : `Request body exceeds ${MAX_REQUEST_BODY_SIZE} bytes.`,
+    {
+      code: "PAYLOAD_TOO_LARGE",
+      limit: MAX_REQUEST_BODY_SIZE,
+      ...(actual !== null ? { actual } : {}),
+      envVar: "SIDECAR_MAX_REQUEST_BODY_BYTES",
+    },
+  );
 }
 
 /**
@@ -456,12 +472,12 @@ async function bufferLlmBodyBytesBounded(
   if (declared !== undefined) {
     const declaredLength = Number(declared);
     if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
-      return c.json(llmBodyOversizeError(declaredLength), 413);
+      return llmBodyOversizeError(declaredLength);
     }
   }
   const bytes = await readRequestBodyBounded(c.req.raw, maxBytes);
   if (bytes === "exceeded") {
-    return c.json(llmBodyOversizeError(null), 413);
+    return llmBodyOversizeError(null);
   }
   return bytes;
 }
@@ -685,11 +701,11 @@ export function createApp(deps: AppDeps): Hono {
   //     refresh + retry once. There is no fingerprint-forging mode.
   app.all("/llm/*", async (c) => {
     if (!config.llm) {
-      return c.json({ error: "LLM proxy not configured" }, 503);
+      return llmProxyError(503, "api_error", "LLM proxy not configured");
     }
 
     if (isBlockedEgressUrl(config.llm.baseUrl)) {
-      return c.json({ error: "LLM base URL targets a blocked network range" }, 403);
+      return llmProxyError(403, "permission_error", "LLM base URL targets a blocked network range");
     }
 
     if (config.llm.authMode === "oauth") {
@@ -805,7 +821,7 @@ export function createApp(deps: AppDeps): Hono {
         ...(body instanceof ReadableStream ? { duplex: "half" } : {}),
       });
     } catch (err) {
-      return llmFetchErrorResponse(c, targetUrl, err);
+      return llmFetchErrorResponse(targetUrl, err);
     } finally {
       // Headers are in (or the call already failed) — the upstream has proven
       // it is alive, so the TTFB timer must stop before it can abort the body.
@@ -828,7 +844,7 @@ export function createApp(deps: AppDeps): Hono {
   ): Promise<Response> {
     const tokenCache = deps.oauthTokenCache;
     if (!tokenCache) {
-      return c.json({ error: "OAuth token cache not configured" }, 503);
+      return llmProxyError(503, "api_error", "OAuth token cache not configured");
     }
 
     let token: CachedToken;
@@ -836,10 +852,9 @@ export function createApp(deps: AppDeps): Hono {
       token = await tokenCache.getToken(llmConfig.credentialId);
     } catch (err) {
       if (err instanceof NeedsReconnectionError) {
-        return c.json(
-          { error: "OAuth connection needs reconnection", needsReconnection: true },
-          401,
-        );
+        return llmProxyError(401, "authentication_error", "OAuth connection needs reconnection", {
+          needsReconnection: true,
+        });
       }
       // Log the detail server-side; return a generic message to the in-container
       // agent so platform-side error internals never cross the sidecar boundary.
@@ -847,12 +862,16 @@ export function createApp(deps: AppDeps): Hono {
         credentialId: llmConfig.credentialId,
         error: stringifyError(err),
       });
-      return c.json({ error: "OAuth token resolution failed" }, 502);
+      return llmProxyError(502, "api_error", "OAuth token resolution failed");
     }
 
     const baseUrl = llmConfig.baseUrl;
     if (isBlockedEgressUrl(baseUrl)) {
-      return c.json({ error: "Resolved OAuth base URL targets a blocked network range" }, 403);
+      return llmProxyError(
+        403,
+        "permission_error",
+        "Resolved OAuth base URL targets a blocked network range",
+      );
     }
 
     const { targetUrl, method } = deriveLlmTarget(c, baseUrl);
@@ -912,7 +931,7 @@ export function createApp(deps: AppDeps): Hono {
         targetUrl,
         error: err instanceof Error ? err.message : String(err),
       });
-      return llmFetchErrorResponse(c, targetUrl, err);
+      return llmFetchErrorResponse(targetUrl, err);
     }
 
     upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, method, upstream);
@@ -926,10 +945,9 @@ export function createApp(deps: AppDeps): Hono {
         upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, method, upstream);
       } catch (err) {
         if (err instanceof NeedsReconnectionError) {
-          return c.json(
-            { error: "OAuth connection needs reconnection", needsReconnection: true },
-            401,
-          );
+          return llmProxyError(401, "authentication_error", "OAuth connection needs reconnection", {
+            needsReconnection: true,
+          });
         }
         // Refresh/replay failed for another reason (network, parse) — log it
         // so a recurring 401 isn't silently masked as a plain upstream 401,

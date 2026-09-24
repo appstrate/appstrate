@@ -206,7 +206,8 @@ const codexProvider: ModelProviderDefinition = {
     authorizationUrl: "https://auth.openai.com/oauth/authorize",
     tokenUrl: "https://auth.openai.com/oauth/token",
     refreshUrl: "https://auth.openai.com/oauth/token",
-    scopes: ["openid", "profile", "email"],
+    // Must match pi-ai's /authorize scopes (pinned by the pi-ai-oauth-parity test).
+    scopes: ["openid", "profile", "email", "offline_access"],
     pkce: "S256",
   },
   // ChatGPT Codex tokens authenticate against the OpenAI catalog —

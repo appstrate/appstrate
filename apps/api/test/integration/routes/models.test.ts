@@ -295,6 +295,21 @@ describe("Models API", () => {
       expect(res.status).toBe(400);
     });
 
+    it("rejects an input modality the runtime cannot boot with — 400, nothing stored", async () => {
+      const credentialId = await createProviderKey();
+      const res = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ modelId: "gpt-4o", credentialId, input: ["text", "audio"] }),
+      });
+      expect(res.status).toBe(400);
+      expect(res.headers.get("content-type")).toContain("application/problem+json");
+      const body = (await res.json()) as { errors?: { field: string }[] };
+      expect(body.errors?.map((e) => e.field)).toContain("input[1]");
+      const rows = await db.select().from(orgModels).where(eq(orgModels.orgId, ctx.orgId));
+      expect(rows).toHaveLength(0);
+    });
+
     it("rejects an alias on a url-model protocol (the swap can't hide it) — 400", async () => {
       // google-generative-ai carries the model id in the URL path, not the
       // request body, so the body-`model` swap would never fire.
@@ -586,7 +601,7 @@ describe("Models API", () => {
     });
   });
 
-  describe("PUT /api/models/:id", () => {
+  describe("PATCH /api/models/:id", () => {
     it("updates a model and returns the full updated resource", async () => {
       const credentialId = await createProviderKey();
 
@@ -603,7 +618,7 @@ describe("Models API", () => {
       const { id } = (await createRes.json()) as any;
 
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ label: "After", enabled: false }),
       });
@@ -632,7 +647,7 @@ describe("Models API", () => {
       const { id } = (await createRes.json()) as { id: string };
 
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ cost: { input: 3, output: 15 } }),
       });
@@ -658,7 +673,7 @@ describe("Models API", () => {
       const { id } = (await createRes.json()) as { id: string };
 
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ cost: null }),
       });
@@ -684,7 +699,7 @@ describe("Models API", () => {
       const { id } = (await createRes.json()) as { id: string };
 
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ label: "Renamed" }),
       });
@@ -718,7 +733,7 @@ describe("Models API", () => {
       });
 
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ credentialId: dead.id }),
       });
@@ -758,7 +773,7 @@ describe("Models API", () => {
       const { id } = (await createRes.json()) as { id: string };
 
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ aliased: true, label: "Masked" }),
       });
@@ -783,7 +798,7 @@ describe("Models API", () => {
 
       // Flip without a label — rejected (the derived label would leak).
       const noLabel = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ aliased: true }),
       });
@@ -793,7 +808,7 @@ describe("Models API", () => {
 
       // Same flip with an explicit label — accepted (api-key, body-model shape).
       const withLabel = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ aliased: true, label: "Appstrate Medium" }),
       });
@@ -825,7 +840,7 @@ describe("Models API", () => {
         createdBy: ctx.user.id,
       });
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ credentialId: oauth.id }),
       });
@@ -853,7 +868,7 @@ describe("Models API", () => {
       const { id } = (await createRes.json()) as { id: string };
 
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ enabled: false }),
       });
@@ -881,7 +896,7 @@ describe("Models API", () => {
       const { id } = (await createRes.json()) as { id: string };
 
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ maxTokens: 100_000 }),
       });
@@ -911,14 +926,14 @@ describe("Models API", () => {
       const { id } = (await createRes.json()) as { id: string };
 
       const reject = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ contextWindow: 50_000 }),
       });
       expect(reject.status).toBe(400);
 
       const accept = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ contextWindow: 60_000 }),
       });
@@ -945,7 +960,7 @@ describe("Models API", () => {
       const { id } = (await createRes.json()) as { id: string };
 
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ modelId: catalogModel.id }),
       });
@@ -976,7 +991,7 @@ describe("Models API", () => {
       const { id } = (await createRes.json()) as { id: string };
 
       const res = await app.request(`/api/models/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ contextWindow: null }),
       });
@@ -1006,7 +1021,7 @@ describe("Models API", () => {
       // binding back because the operator just sent it in the request body,
       // but an `{ enabled }` update discloses fields the caller never had.
       const put = await app.request(`/api/models/${created.id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ enabled: true }),
       });
@@ -1055,7 +1070,7 @@ describe("Models API", () => {
       });
 
       const res = await app.request(`/api/models/${other.id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ modelId: "gpt-4o" }),
       });
@@ -1064,6 +1079,26 @@ describe("Models API", () => {
       const problem = (await res.json()) as any;
       expect(problem.code).toBe("model_already_added");
       expect(problem.existing_model_id).toBe(mine.id);
+    });
+
+    it("rejects an input modality the runtime cannot boot with — 400, row unchanged", async () => {
+      const credentialId = await createProviderKey();
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ label: "Vision", modelId: "gpt-4o", credentialId, input: ["text"] }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const res = await app.request(`/api/models/${id}`, {
+        method: "PATCH",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ input: ["video"] }),
+      });
+      expect(res.status).toBe(400);
+      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, id));
+      expect(row!.input).toEqual(["text"]);
     });
   });
 

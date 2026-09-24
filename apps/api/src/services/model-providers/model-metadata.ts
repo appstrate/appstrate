@@ -10,11 +10,10 @@
  */
 
 import type { CatalogModelEntry } from "@appstrate/shared-types";
-import { INPUT_MODALITIES, type ServedModelHints } from "./model-listing.ts";
+import { MODEL_INPUT_MODALITIES, type ModelInputModality } from "@appstrate/core/module";
+import type { ServedModelHints } from "./model-listing.ts";
 import { listCatalogProviderIds, lookupCatalogModel } from "../pricing-catalog.ts";
 import { getModelProvider } from "./registry.ts";
-
-const MODALITIES: readonly string[] = INPUT_MODALITIES;
 
 /** Everything we can tell about a served id, minus its price. */
 interface ServedModelDescription {
@@ -22,7 +21,7 @@ interface ServedModelDescription {
   contextWindow: number | null;
   maxTokens: number | null;
   /** Accepted input modalities — the `text`/`image` subset of the capabilities. */
-  input: string[] | null;
+  input: ModelInputModality[] | null;
   reasoning: boolean | null;
   /** `endpoint` when the listing published any field, `catalog` on a pure hit, else `null`. */
   source: "endpoint" | "catalog" | null;
@@ -70,7 +69,9 @@ export function describeServedModel(
     label: entry?.label ?? null,
     contextWindow: hints.contextWindow ?? entry?.contextWindow ?? null,
     maxTokens: hints.maxTokens ?? entry?.maxTokens ?? null,
-    input: hints.input ?? entry?.capabilities.filter((c) => MODALITIES.includes(c)) ?? null,
+    input:
+      hints.input ??
+      (entry ? MODEL_INPUT_MODALITIES.filter((m) => entry.capabilities.includes(m)) : null),
     reasoning: hints.reasoning ?? entry?.capabilities.includes("reasoning") ?? null,
     source: hinted ? "endpoint" : entry ? "catalog" : null,
     endpointCapabilities: hints,

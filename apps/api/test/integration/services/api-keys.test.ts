@@ -8,6 +8,7 @@ import {
   generateApiKey,
   hashApiKey,
   extractKeyPrefix,
+  isWellFormedApiKey,
   createApiKeyRecord,
   findApiKeySpace,
   validateApiKey,
@@ -27,17 +28,11 @@ describe("api-keys service", () => {
   // ── generateApiKey ──────────────────────────────────────────
 
   describe("generateApiKey", () => {
-    it("returns a string starting with 'ask_'", () => {
+    it("returns apst_ + 30 base62 random chars + a 6-char base62 CRC32", () => {
       const key = generateApiKey();
 
-      expect(key).toStartWith("ask_");
-    });
-
-    it("returns ask_ prefix + 48 hex characters", () => {
-      const key = generateApiKey();
-
-      expect(key).toHaveLength(4 + 48); // "ask_" (4) + 48 hex chars
-      expect(key.slice(4)).toMatch(/^[0-9a-f]{48}$/);
+      expect(key).toMatch(/^apst_[0-9A-Za-z]{36}$/);
+      expect(isWellFormedApiKey(key)).toBe(true);
     });
 
     it("returns unique values on successive calls", () => {
@@ -51,14 +46,14 @@ describe("api-keys service", () => {
 
   describe("hashApiKey", () => {
     it("returns a 64-character hex string (SHA-256)", async () => {
-      const hash = await hashApiKey("ask_abc123");
+      const hash = await hashApiKey("apst_abc123");
 
       expect(hash).toHaveLength(64);
       expect(hash).toMatch(/^[0-9a-f]{64}$/);
     });
 
     it("returns a consistent hash for the same input", async () => {
-      const input = "ask_consistent_test";
+      const input = "apst_consistent_test";
       const hash1 = await hashApiKey(input);
       const hash2 = await hashApiKey(input);
 
@@ -66,8 +61,8 @@ describe("api-keys service", () => {
     });
 
     it("returns different hashes for different inputs", async () => {
-      const hash1 = await hashApiKey("ask_key_one");
-      const hash2 = await hashApiKey("ask_key_two");
+      const hash1 = await hashApiKey("apst_key_one");
+      const hash2 = await hashApiKey("apst_key_two");
 
       expect(hash1).not.toBe(hash2);
     });
@@ -76,12 +71,30 @@ describe("api-keys service", () => {
   // ── extractKeyPrefix ────────────────────────────────────────
 
   describe("extractKeyPrefix", () => {
-    it("returns the first 8 characters of the raw key", () => {
+    it("returns the apst_ prefix and the first 8 random characters", () => {
       const key = generateApiKey();
-      const prefix = extractKeyPrefix(key);
 
-      expect(prefix).toBe(key.slice(0, 8));
-      expect(prefix).toHaveLength(8);
+      expect(extractKeyPrefix(key)).toBe(key.slice(0, 13));
+    });
+  });
+
+  // ── isWellFormedApiKey ──────────────────────────────────────
+
+  describe("key format", () => {
+    it("rejects a key whose checksum does not match its random part", () => {
+      const key = generateApiKey();
+      const last = key.at(-1)!;
+      const tampered = key.slice(0, -1) + (last === "0" ? "1" : "0");
+
+      expect(isWellFormedApiKey(tampered)).toBe(false);
+    });
+
+    it("rejects a wrong length, a foreign alphabet and the retired prefix", () => {
+      const key = generateApiKey();
+
+      expect(isWellFormedApiKey(key.slice(0, -1))).toBe(false);
+      expect(isWellFormedApiKey(key.replace(/.$/, "-"))).toBe(false);
+      expect(isWellFormedApiKey(`ask_${"0".repeat(48)}`)).toBe(false);
     });
   });
 
@@ -177,7 +190,23 @@ describe("api-keys service", () => {
       expect(result).toBeNull();
     });
 
-    it("returns null for a key without the ask_ prefix", async () => {
+    it("returns null for a bad-checksum key even when its hash is stored (no lookup)", async () => {
+      const valid = generateApiKey();
+      const last = valid.at(-1)!;
+      const rawKey = valid.slice(0, -1) + (last === "0" ? "1" : "0");
+      await createApiKeyRecord({
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        name: "Bad Checksum Key",
+        keyHash: await hashApiKey(rawKey),
+        keyPrefix: extractKeyPrefix(rawKey),
+        createdBy: ctx.user.id,
+        expiresAt: null,
+      });
+
+      expect(await validateApiKey(rawKey)).toBeNull();
+    });
+
+    it("returns null for a key without the apst_ prefix", async () => {
       const result = await validateApiKey("not_a_valid_prefix_key");
 
       expect(result).toBeNull();

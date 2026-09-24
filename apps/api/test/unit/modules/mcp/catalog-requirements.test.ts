@@ -235,7 +235,7 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
   ]),
   ...rowDecided("`gateSpacePackageWrite`: the per-type permission in the path's space", [
     [["POST"], "/api/spaces/{spaceId}/packages"],
-    [["PUT", "DELETE"], "/api/spaces/{spaceId}/packages/{scope}/{name}"],
+    [["PATCH", "DELETE"], "/api/spaces/{spaceId}/packages/{scope}/{name}"],
   ]),
   ...rowDecided("SSE: `validateSSEAuth`, then which runs the caller may read", [
     [["GET"], "/api/realtime/runs"],
@@ -247,7 +247,7 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
     [["POST"], "/api/files/{id}/keep"],
   ]),
   ...rowDecided("`loadWebhookForAction`, judged in the webhook's space", [
-    [["GET", "PUT", "DELETE"], "/api/webhooks/{id}"],
+    [["GET", "PATCH", "DELETE"], "/api/webhooks/{id}"],
     [["POST"], "/api/webhooks/{id}/test"],
     [["POST"], "/api/webhooks/{id}/rotate"],
     [["GET"], "/api/webhooks/{id}/deliveries"],
@@ -271,7 +271,7 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
   ]),
   ...Object.values(PACKAGE_TYPE_ROUTE_SEGMENT).flatMap((segment) =>
     rowDecided("`requirePackageInOrg()`: the type's write/delete permission in its home", [
-      [["PUT", "DELETE"], `/api/packages/${segment}/{scope}/{name}`],
+      [["PATCH", "DELETE"], `/api/packages/${segment}/{scope}/{name}`],
       [["POST"], `/api/packages/${segment}/{scope}/{name}/versions`],
       [["DELETE"], `/api/packages/${segment}/{scope}/{name}/versions/{version}`],
       [["POST"], `/api/packages/${segment}/{scope}/{name}/versions/{version}/restore`],

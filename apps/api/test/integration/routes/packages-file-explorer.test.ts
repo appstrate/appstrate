@@ -12,6 +12,7 @@
  * serving something a browser will execute.
  */
 
+import { ifMatch } from "../../helpers/etag.ts";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { packages, packageDistTags, packageVersions } from "@appstrate/db/schema";
@@ -42,7 +43,6 @@ import {
   SYSTEM_STORAGE_NAMESPACE,
 } from "../../../src/services/package-items/storage.ts";
 import { indexEtag, mutatePackageDraftFiles } from "../../../src/services/package-files.ts";
-import { ApiError } from "../../../src/lib/errors.ts";
 import { uploadPackageZip, buildMinimalZip } from "../../../src/services/package-storage.ts";
 import { insertShadowPackage } from "../../../src/services/inline-run.ts";
 import { isPackageActiveHere } from "../../../src/services/space-packages.ts";
@@ -76,8 +76,8 @@ async function listFiles(
 ): Promise<{ res: Response; entries: FileEntry[] }> {
   const res = await app.request(`/api/packages/${id}/files${query}`, { headers: authHeaders(ctx) });
   if (res.status !== 200) return { res, entries: [] };
-  const body = (await res.clone().json()) as { entries: FileEntry[] };
-  return { res, entries: body.entries };
+  const body = (await res.clone().json()) as { data: FileEntry[] };
+  return { res, entries: body.data };
 }
 
 async function fetchContent(
@@ -125,6 +125,7 @@ describe("package file explorer", () => {
 
       const { res, entries } = await listFiles(ctx, id);
       expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ object: "list", hasMore: false });
       expect(entries.map((e) => e.path)).toEqual(["docs/notes.md", "manifest.json", "prompt.md"]);
 
       // The DB draft columns WIN over the stored ZIP — the editor writes the
@@ -1226,9 +1227,9 @@ describe("draft tree writes", () => {
 
   async function saveContent(content: string, lockVersion: number): Promise<Response> {
     return app.request(`/api/packages/skills/${id}`, {
-      method: "PUT",
-      headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-      body: JSON.stringify({ content, lock_version: lockVersion }),
+      method: "PATCH",
+      headers: authHeaders(ctx, { "Content-Type": "application/json", ...ifMatch(lockVersion) }),
+      body: JSON.stringify({ content }),
     });
   }
 
@@ -1270,13 +1271,12 @@ describe("draft tree writes", () => {
     ]);
   });
 
-  it("a stale lock_version is still a 409, and neither store moves", async () => {
+  it("a stale If-Match is a 412, and neither store moves", async () => {
     const stale = (await lockVersionOf()) + 7;
     const res = await saveContent(NEXT_MD, stale);
-    expect(res.status).toBe(409);
-    const body = (await res.json()) as { code?: string; detail?: string };
-    expect(body.code).toBe("conflict");
-    expect(body.detail).toBe("Skill was modified concurrently. Reload and try again.");
+    expect(res.status).toBe(412);
+    const body = (await res.json()) as { code?: string };
+    expect(body.code).toBe("precondition_failed");
 
     // Negative control: the refusal happens before either write.
     expect(decoder.decode((await storedTree())["SKILL.md"]!)).toBe(SKILL_MD);
@@ -1327,11 +1327,15 @@ describe("draft tree writes", () => {
     const etag = res.headers.get("ETag")!;
     const lockVersion = await lockVersionOf();
     expect(etag).toMatch(/^"i-pd-[0-9a-f]{64}"$/);
+    // What the route hands the service: its If-Match evaluation.
+    const expecting = (current: number) => {
+      if (current !== lockVersion) throw new Error("stale draft");
+    };
 
     const written = await mutatePackageDraftFiles(
       { id, type: "skill", orgId: ctx.orgId },
       {
-        precondition: { lockVersion },
+        precondition: { assertVersion: expecting },
         mutate: (files) => ({ ...files, "docs/note.md": encoder.encode("noted") }),
       },
     );
@@ -1351,15 +1355,13 @@ describe("draft tree writes", () => {
     await mutatePackageDraftFiles(
       { id, type: "skill", orgId: ctx.orgId },
       {
-        precondition: { lockVersion },
+        precondition: { assertVersion: expecting },
         mutate: (files) => ({ ...files, "docs/late.md": encoder.encode("late") }),
       },
     ).catch((err: unknown) => {
       refused = err;
     });
-    expect(refused).toBeInstanceOf(ApiError);
-    expect((refused as ApiError).status).toBe(409);
-    expect((refused as ApiError).code).toBe("conflict");
+    expect((refused as Error).message).toBe("stale draft");
 
     // Negative control: nothing of the refused write reached storage.
     expect(Object.keys(await storedTree())).not.toContain("docs/late.md");

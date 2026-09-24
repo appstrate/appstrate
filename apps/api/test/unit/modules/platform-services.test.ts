@@ -52,6 +52,10 @@ describe("ModuleInitContext.services — platform service wiring", () => {
     expect(typeof services.cleanupSessionFiles).toBe("function");
   });
 
+  it("wires the audit trail (audit.record — module mutations reach audit_events)", () => {
+    expect(typeof services.audit.record).toBe("function");
+  });
+
   it("wires the org query helpers (getOrgOwnerEmails + getOrgMembers + getOrgName)", () => {
     expect(typeof ctx.getOrgOwnerEmails).toBe("function");
     expect(typeof ctx.getOrgMembers).toBe("function");

@@ -59,6 +59,21 @@ live under the governance surface.
 
 - BullMQ `webhook-delivery` worker. Processes delivery jobs, builds the Standard Webhooks envelope, signs it with the subscription's secret, POSTs to the subscriber URL, records the attempt, and schedules retries with exponential backoff (8 attempts total). SSRF protection runs on every delivery URL.
 
+## Payload
+
+```json
+{
+  "id": "evt_…",
+  "object": "event",
+  "type": "run.success",
+  "apiVersion": "2026-…",
+  "timestamp": "2026-09-23T10:31:12.345Z",
+  "data": { "object": { "object": "run", "id": "run_…", "status": "success" } }
+}
+```
+
+`timestamp` is the Standard Webhooks payload field: when the event occurred, as an RFC 3339 string. It is not the signing time — that is the `webhook-timestamp` header, in Unix seconds as the spec requires.
+
 ## Disable behavior
 
 Remove `webhooks` from `MODULES`:

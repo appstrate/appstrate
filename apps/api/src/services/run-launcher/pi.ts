@@ -430,6 +430,9 @@ async function runPlatformContainerImpl(
       // sweep agrees with the server-authoritative gate (avoids silently
       // skipping large deliverables when an operator raises the platform cap).
       maxFileBytes: getEnv().FILE_MAX_BYTES,
+      modelRetry: getEnv().MODEL_RETRY_ENABLED,
+      modelCompaction: getEnv().MODEL_COMPACTION_ENABLED,
+      toolResultByteLimit: getEnv().TOOL_RESULT_BYTE_LIMIT,
       forwardProxyUrl: skipSidecar ? undefined : boundary.sidecarEndpoints.forwardProxyUrl,
       noProxy: skipSidecar ? undefined : boundary.sidecarEndpoints.noProxy,
       sink: {

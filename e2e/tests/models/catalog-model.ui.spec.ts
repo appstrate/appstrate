@@ -138,7 +138,7 @@ test.describe("Catalogued model — UI", () => {
 
     await dialog.locator("#mdl-label").fill(NEW_LABEL);
     const saved = page.waitForRequest(
-      (req) => req.method() === "PUT" && /\/api\/models\/[^/]+$/.test(req.url()),
+      (req) => req.method() === "PATCH" && /\/api\/models\/[^/]+$/.test(req.url()),
     );
     await dialog.getByRole("button", { name: "Enregistrer" }).click();
 
@@ -174,7 +174,7 @@ test.describe("Catalogued model — UI", () => {
     await dialog.locator("#mdl-input-image").click();
 
     const saved = page.waitForRequest(
-      (req) => req.method() === "PUT" && /\/api\/models\/[^/]+$/.test(req.url()),
+      (req) => req.method() === "PATCH" && /\/api\/models\/[^/]+$/.test(req.url()),
     );
     await dialog.getByRole("button", { name: "Enregistrer" }).click();
 

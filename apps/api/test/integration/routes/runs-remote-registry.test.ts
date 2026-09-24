@@ -36,6 +36,7 @@ import { validateManifest } from "@appstrate/core/validation";
 import { and } from "drizzle-orm";
 import { expectProblem } from "../../helpers/assertions.ts";
 import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
+import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 
 const app = getTestApp();
 
@@ -597,7 +598,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
   // resolver must refuse it as `422 version_artifact_unavailable` — the platform
   // run route's answer — instead of handing `""` to readiness, which blamed the
   // author (`400 empty_prompt`) or, with an unconnected integration, the caller
-  // (`412`), hiding the storage fault either way.
+  // (`409`), hiding the storage fault either way.
   describe("unreadable published artifact", () => {
     const INTEG = "@acme/svc";
 
@@ -620,6 +621,26 @@ describe("POST /api/runs/remote — kind: registry", () => {
       // The seeded draft is runnable (non-empty prompt): the 422 and zero run
       // rows prove it was not substituted for the missing version.
       await expectProblem(await launch(), 422, { code: "version_artifact_unavailable" });
+      expect(await db.select().from(runs).where(eq(runs.packageId, "@acme/briefing"))).toHaveLength(
+        0,
+      );
+    });
+
+    it("keeps the signature gate's coded 422 when a required policy parses a corrupt archive", async () => {
+      await seedPublishedAgent(ctx, "1.2.3");
+      await uploadPackageZip("@acme/briefing", "1.2.3", new TextEncoder().encode("not a zip"));
+      // A run is an EXECUTION read, so `required` parses the bytes before the
+      // unzip: the failure is a bundle-layer throw, coded — never an uncoded 500.
+      const saved = process.env.AFPS_SIGNATURE_POLICY;
+      process.env.AFPS_SIGNATURE_POLICY = "required";
+      resetEnvCache();
+      try {
+        await expectProblem(await launch(), 422, { code: "bundle_invalid" });
+      } finally {
+        if (saved === undefined) delete process.env.AFPS_SIGNATURE_POLICY;
+        else process.env.AFPS_SIGNATURE_POLICY = saved;
+        resetEnvCache();
+      }
       expect(await db.select().from(runs).where(eq(runs.packageId, "@acme/briefing"))).toHaveLength(
         0,
       );
@@ -649,9 +670,9 @@ describe("POST /api/runs/remote — kind: registry", () => {
         "1.2.3",
       );
 
-      // Control: with the archive intact, the same launch is the 412 — so the
+      // Control: with the archive intact, the same launch is the 409 — so the
       // 422 below is precedence, not an integration the fixture failed to declare.
-      await expectProblem(await launch(), 412, { code: "missing_integration_connection" });
+      await expectProblem(await launch(), 409, { code: "missing_integration_connection" });
 
       await deleteVersionZip("@acme/briefing", "1.2.3");
       await expectProblem(await launch(), 422, { code: "version_artifact_unavailable" });

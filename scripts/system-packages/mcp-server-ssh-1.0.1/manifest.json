@@ -1,7 +1,7 @@
 {
   "$schema": "https://schemas.afps.dev/v0/mcp-server.schema.json",
   "name": "@appstrate/ssh-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "mcp-server",
   "schema_version": "0.1",
   "manifest_version": "0.3",

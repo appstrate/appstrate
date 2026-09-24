@@ -129,13 +129,14 @@ function authHeaders(h: Harness, extra?: Record<string, string>): Record<string,
 // need to implement for the proxy's one-shot call, so we cast at the
 // assignment boundary.
 type FetchImpl = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
-let originalFetch: typeof fetch;
+// Captured once at load: re-capturing per mock would save the previous mock
+// when a test mocks twice, and leak it into every later file in the process.
+const realFetch = globalThis.fetch;
 function mockUpstream(impl: FetchImpl): void {
-  originalFetch = globalThis.fetch;
   globalThis.fetch = impl as unknown as typeof fetch;
 }
 function restoreFetch(): void {
-  if (originalFetch) globalThis.fetch = originalFetch;
+  globalThis.fetch = realFetch;
 }
 
 describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {

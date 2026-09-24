@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ifMatch } from "../../helpers/etag.ts";
 import { beforeEach, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
 import { packages, spaceMembers, spacePackages } from "@appstrate/db/schema";
@@ -131,10 +132,9 @@ const saveFiles = async (h: Record<string, string>) => {
     .from(packages)
     .where(eq(packages.id, ID));
   return app.request(`/api/packages/skills/${ID}`, {
-    method: "PUT",
-    headers: { ...h, "Content-Type": "application/json" },
+    method: "PATCH",
+    headers: { ...h, "Content-Type": "application/json", ...ifMatch(row!.lockVersion) },
     body: JSON.stringify({
-      lock_version: row!.lockVersion,
       operations: [{ op: "write", path: "notes.md", text: "x" }],
     }),
   });
@@ -152,17 +152,16 @@ function routesUnderAuthority(): [
     ["GET", `/api/packages/skills/${ID}/versions/info`],
     ["GET", `/api/packages/skills/${ID}/versions/0.1.0`],
     ["DELETE", `/api/packages/skills/${ID}`],
-    ["PUT", `/api/packages/skills/${ID}`],
+    ["PATCH", `/api/packages/skills/${ID}`],
     ["POST", `/api/packages/skills/${ID}/versions`],
     ["POST", `/api/packages/skills/${ID}/versions/0.1.0/restore`],
     ["DELETE", `/api/packages/skills/${ID}/versions/0.1.0`],
     [
-      "PUT",
+      "PATCH",
       `/api/packages/skills/${ID}`,
       {
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...ifMatch(0) },
         body: JSON.stringify({
-          lock_version: 0,
           operations: [{ op: "write", path: "notes.md", text: "x" }],
         }),
       },

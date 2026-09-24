@@ -7,7 +7,7 @@ import { and, eq, asc, inArray, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { schedules, endUsers, runs, notifications } from "@appstrate/db/schema";
-import { activeRunStatusValues } from "@appstrate/db/run-status";
+import { activeRunStatusValues } from "@appstrate/core/run-status";
 import { resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
 import { loadSpaceAccess } from "../lib/space-lookup.ts";
 import { batchLoadUserNames } from "../lib/user-helpers.ts";
@@ -1132,7 +1132,7 @@ export async function updateSchedule(
  * Refusing the lock write instead would block a legitimate admin action.
  *
  * The whole lock set is applied, not just the keys added by this write: it is
- * idempotent on a consistent row (`PUT /api/schedules/:id` already refuses a
+ * idempotent on a consistent row (`PATCH /api/schedules/:id` already refuses a
  * locked field, so a compliant schedule names none) and it repairs any drift.
  *
  * Rewrites go through {@link updateSchedule} rather than a raw UPDATE so the

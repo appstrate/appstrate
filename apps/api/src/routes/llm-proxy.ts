@@ -73,7 +73,7 @@ import type { LlmProxyAdapter, LlmProxyPrincipal } from "../services/llm-proxy/t
 import { buildLlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
 import type { AppEnv } from "../types/index.ts";
-import { ACTIVE_RUN_STATUSES } from "@appstrate/db/schema";
+import { ACTIVE_RUN_STATUSES } from "@appstrate/db/run-status";
 
 export function createLlmProxyRouter() {
   const router = new Hono<AppEnv>();

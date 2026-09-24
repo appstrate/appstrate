@@ -43,9 +43,9 @@ import {
   shouldRaiseSweepDone,
   type ChatRunFile,
   type RunLogLine,
-  type RunStatus,
   type SweepRead,
 } from "./run-events.ts";
+import type { RunStatus } from "@appstrate/core/run-status";
 
 interface RunLogStream {
   logs: RunLogLine[];

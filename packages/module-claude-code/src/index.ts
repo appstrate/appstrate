@@ -118,7 +118,15 @@ const claudeCodeProvider: ModelProviderDefinition = {
     authorizationUrl: "https://claude.ai/oauth/authorize",
     tokenUrl: "https://platform.claude.com/v1/oauth/token",
     refreshUrl: "https://platform.claude.com/v1/oauth/token",
-    scopes: ["org:create_api_key", "user:profile", "user:inference"],
+    // Must match pi-ai's /authorize scopes (pinned by the pi-ai-oauth-parity test).
+    scopes: [
+      "org:create_api_key",
+      "user:profile",
+      "user:inference",
+      "user:sessions:claude_code",
+      "user:mcp_servers",
+      "user:file_upload",
+    ],
     pkce: "S256",
   },
   // Claude Code (Claude Pro/Max/Team subscription) authenticates against

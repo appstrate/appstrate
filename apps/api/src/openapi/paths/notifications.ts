@@ -4,7 +4,7 @@ import { STD_RESPONSE_HEADERS } from "../headers.ts";
 
 const notificationObject = {
   type: "object",
-  required: ["id", "type", "run_id", "payload", "read_at", "created_at"],
+  required: ["id", "type", "run_id", "payload", "read_at", "createdAt"],
   properties: {
     id: { type: "string", format: "uuid", description: "Notification id" },
     type: { type: "string", description: "Notification kind, e.g. run_completed" },
@@ -22,7 +22,7 @@ const notificationObject = {
       format: "date-time",
       description: "When the recipient marked it read; null if unread",
     },
-    created_at: { type: "string", format: "date-time" },
+    createdAt: { type: "string", format: "date-time" },
   },
 } as const;
 
@@ -96,7 +96,7 @@ export const notificationsPaths = {
                     run_id: "run_cm4jkl012",
                     payload: { agent_id: "@acme/email-sorter", status: "success" },
                     read_at: null,
-                    created_at: "2026-01-15T10:31:12Z",
+                    createdAt: "2026-01-15T10:31:12Z",
                   },
                 ],
                 has_more: false,

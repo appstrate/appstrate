@@ -5,6 +5,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { ChatPage } from "@appstrate/module-chat/ui";
 import {
   sessionsQueryKey,
+  type SessionsCache,
   type SessionSummary,
 } from "../../../../../packages/module-chat/src/ui/sessions.ts";
 import { render } from "../../test/render.tsx";
@@ -13,15 +14,26 @@ function conversation(id: string, title: string, unread: boolean): SessionSummar
   return { id, title, unread, generating: false, updatedAt: "2026-09-05T10:00:00Z" };
 }
 
+/** One loaded page, as the session-list infinite query caches it. */
+function cache(data: SessionSummary[]): SessionsCache {
+  return { pages: [{ data, hasMore: false }], pageParams: [null] };
+}
+
 describe("chat page session scope", () => {
   it("derives unread markers from the same space cache as its conversation list", () => {
     const qc = new QueryClient();
-    qc.setQueryData(sessionsQueryKey("spc_a"), [
-      conversation("chat_active", "Active conversation", true),
-      conversation("chat_unread", "Unread in A", true),
-      conversation("chat_read", "Read in A", false),
-    ]);
-    qc.setQueryData(sessionsQueryKey("spc_b"), [conversation("chat_other", "Only in B", true)]);
+    qc.setQueryData(
+      sessionsQueryKey("spc_a"),
+      cache([
+        conversation("chat_active", "Active conversation", true),
+        conversation("chat_unread", "Unread in A", true),
+        conversation("chat_read", "Read in A", false),
+      ]),
+    );
+    qc.setQueryData(
+      sessionsQueryKey("spc_b"),
+      cache([conversation("chat_other", "Only in B", true)]),
+    );
 
     // This SPA-only component reads visibility from the browser on render.
     // No DOM or effects are needed to observe its real query/provider wiring.

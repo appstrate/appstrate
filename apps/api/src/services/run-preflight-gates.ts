@@ -24,8 +24,25 @@ import { getPlatformRunLimits, resolveRunTimeout } from "./run-limits.ts";
 import { checkOrgRunRateLimit } from "./org-run-rate-limit.ts";
 import { getRunningRunCountForOrg } from "./state/runs.ts";
 import { callHook, hasHook } from "../lib/modules/module-loader.ts";
+import { ApiError } from "../lib/errors.ts";
 
-type PreflightGateError = { code: string; message: string; status?: number };
+export type PreflightGateError = {
+  code: string;
+  message: string;
+  status?: number;
+  retryAfterSeconds?: number;
+};
+
+/** The HTTP form of a gate refusal, shared by every door that throws one. */
+export function preflightGateApiError(error: PreflightGateError): ApiError {
+  return new ApiError({
+    status: error.status ?? 500,
+    code: error.code,
+    title: error.code.replace(/_/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase()),
+    detail: error.message,
+    retryAfter: error.retryAfterSeconds,
+  });
+}
 
 interface PreflightGatesInput {
   orgId: string;
@@ -138,6 +155,7 @@ export async function runPreflightGates(input: PreflightGatesInput): Promise<Pre
         code: "org_run_rate_limited",
         message: `Organization rate limit reached (${platformLimits.per_org_global_rate_per_min}/min). Retry in ${rateCheck.retryAfterSeconds}s.`,
         status: 429,
+        retryAfterSeconds: rateCheck.retryAfterSeconds,
       },
     };
   }

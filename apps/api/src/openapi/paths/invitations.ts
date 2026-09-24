@@ -46,7 +46,7 @@ export const invitationsPaths = {
                 email: "newuser@example.com",
                 org_name: "Acme Corp",
                 role: "member",
-                space_assignments: [{ space_id: "spc_...", preset_role: "operator" }],
+                space_assignments: [{ spaceId: "spc_...", preset_role: "operator" }],
                 inviter_name: "Alice Martin",
                 expiresAt: "2026-02-15T10:30:00Z",
                 is_new_user: true,

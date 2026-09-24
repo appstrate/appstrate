@@ -190,7 +190,7 @@ interface CallerContext {
     | null;
   agents?:
     | {
-        package_id: string;
+        packageId: string;
         display_name?: string | null;
         description?: string | null;
         takes_input?: boolean | null;
@@ -208,7 +208,7 @@ interface CallerContext {
   agents_truncated?: boolean | null;
   skills?:
     | {
-        package_id: string;
+        packageId: string;
         display_name?: string | null;
         description?: string | null;
         version?: string | null;
@@ -370,9 +370,9 @@ export function formatCallerContext(
     lines.push("", "## Existing agents you can run");
     for (const a of ctx.agents) {
       const desc = a.description?.trim();
-      const label = a.display_name?.trim() || a.package_id;
+      const label = a.display_name?.trim() || a.packageId;
       lines.push(
-        `- \`${a.package_id}\` — ${label}${desc ? `: ${desc}` : ""}` +
+        `- \`${a.packageId}\` — ${label}${desc ? `: ${desc}` : ""}` +
           ` (takes input: ${a.takes_input ? "yes" : "no"}` +
           `${
             a.published === false
@@ -392,9 +392,9 @@ export function formatCallerContext(
     lines.push("", "## Skills you can attach to an agent");
     for (const s of ctx.skills) {
       const desc = s.description?.trim();
-      const label = s.display_name?.trim() || s.package_id;
+      const label = s.display_name?.trim() || s.packageId;
       lines.push(
-        `- \`${s.package_id}\`${s.version ? ` (v${s.version})` : ""} — ${label}` +
+        `- \`${s.packageId}\`${s.version ? ` (v${s.version})` : ""} — ${label}` +
           (desc ? `: ${desc}` : ""),
       );
     }

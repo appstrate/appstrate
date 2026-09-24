@@ -216,18 +216,18 @@ describe("delegated space membership management", () => {
         ),
       );
     expect(events).toHaveLength(1);
-    const revoked = (events[0]!.before as { revoked_space_assignments: unknown[] })
-      .revoked_space_assignments;
+    const revoked = (events[0]!.before as { revokedSpaceAssignments: unknown[] })
+      .revokedSpaceAssignments;
     expect(revoked).toHaveLength(2);
     expect(revoked).toContainEqual({
-      space_id: owner.defaultSpaceId,
-      preset_role: "builder",
-      custom_role_id: null,
+      spaceId: owner.defaultSpaceId,
+      presetRole: "builder",
+      customRoleId: null,
     });
     expect(revoked).toContainEqual({
-      space_id: second.id,
-      preset_role: null,
-      custom_role_id: role.id,
+      spaceId: second.id,
+      presetRole: null,
+      customRoleId: role.id,
     });
 
     const demoted = await request(owner, `/api/orgs/${owner.orgId}/members/${target.id}`, "PUT", {

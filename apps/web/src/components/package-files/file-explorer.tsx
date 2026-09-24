@@ -46,7 +46,7 @@ export function FileExplorer({ packageId, type, version }: FileExplorerProps) {
     { enabled: scope.enabled },
   );
 
-  const entries: PackageFileEntry[] = useMemo(() => data?.entries ?? [], [data]);
+  const entries: PackageFileEntry[] = useMemo(() => data?.data ?? [], [data]);
   const activeEntry = useMemo(
     () => pickActiveEntry(entries, selectedPath, primaryDisplayFile(type).name),
     [entries, selectedPath, type],

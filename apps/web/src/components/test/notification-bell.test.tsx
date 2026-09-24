@@ -31,7 +31,7 @@ function renderList(
     type: string;
     run_id: string | null;
     payload: Record<string, unknown> | null;
-    created_at: string;
+    createdAt: string;
   }[],
 ): string {
   return render(
@@ -58,7 +58,7 @@ describe("NotificationContent", () => {
           package_type: "agent",
           shared_by_name: "Alice Martin",
         },
-        created_at: "2026-09-10T10:00:00.000Z",
+        createdAt: "2026-09-10T10:00:00.000Z",
       },
     ]);
 
@@ -77,7 +77,7 @@ describe("NotificationContent", () => {
         type: "package_shared",
         run_id: null,
         payload: { package_id: "@acme/helper", package_type: "skill", shared_by_name: "Bob" },
-        created_at: "2026-09-10T10:00:00.000Z",
+        createdAt: "2026-09-10T10:00:00.000Z",
       },
     ]);
 
@@ -91,7 +91,7 @@ describe("NotificationContent", () => {
         type: "run_completed",
         run_id: "run_1",
         payload: { agent_id: PACKAGE_ID, status: "success" },
-        created_at: "2026-09-10T10:00:00.000Z",
+        createdAt: "2026-09-10T10:00:00.000Z",
       },
     ]);
 
