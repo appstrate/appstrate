@@ -20,8 +20,8 @@ export interface RunLaunch {
    * Per-integration connection picks for THIS run (#199 mechanism #2).
    * Flat map: `{ "@scope/integration": "<connectionId>" }` — one pick per
    * integration; the chosen connection carries its own `auth_key`. Wire
-   * format validated by `input-parser.ts`. Surfaced from the must_choose
-   * modal picker.
+   * format validated by `input-parser.ts`. Set by the run-with-options modal
+   * and, on a retry, by the connection-recovery modal (`retryLaunch`).
    */
   connectionOverrides?: Record<string, string>;
   /** Per-run model id override (wire `modelId`). From the run-with-options modal. */
