@@ -8,7 +8,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { usePackageDetail } from "../hooks/use-packages";
 import { useRun, useRunLogs } from "../hooks/use-runs";
-import { useRunAgent, useCancelRun } from "../hooks/use-mutations";
+import { useRunLauncher, useCancelRun } from "../hooks/use-mutations";
 import { Spinner } from "../components/spinner";
 import { useRunRealtime, type RunMetricEvent, type RunLogEvent } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
@@ -16,6 +16,7 @@ import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { usePermissions } from "../hooks/use-permissions";
 import { buildLogEntries, buildTurnRows } from "../components/log-utils";
 import { RunModal } from "../components/run-modal";
+import { RunLaunchRecovery } from "../components/run-launch-recovery";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { RunOutcomeTab } from "../components/run-outcome-tab";
@@ -109,7 +110,7 @@ export function RunDetailPage() {
     }
   }, [status, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const runAgent = useRunAgent(packageId);
+  const launcher = useRunLauncher(packageId);
   const cancelRun = useCancelRun();
   const [inputOpen, setInputOpen] = useState(false);
   const { historicalLogs, structuredOutput, turnRows } = useMemo(() => {
@@ -284,15 +285,21 @@ export function RunDetailPage() {
             // Re-run the SAME definition the original run executed, as far as
             // this caller may: `version_ref` is "draft" or a concrete semver,
             // and only an author replays a draft (see `replayVersion`).
-            runAgent.mutate(
+            launcher.launch(
               { input, version: replayVersion(run.version_ref, agent.home_writable) },
-              { onSuccess: () => setInputOpen(false) },
+              () => setInputOpen(false),
             );
           }}
-          isPending={runAgent.isPending}
+          isPending={launcher.isPending}
           initialInput={(run.input as Record<string, unknown>) ?? undefined}
         />
       )}
+
+      <RunLaunchRecovery
+        launcher={launcher}
+        packageId={packageId}
+        integrationEntries={agent?.dependencies.integrations}
+      />
 
       {run.status === "failed" && run.error && (
         <div className="bg-destructive/10 text-destructive mb-4 rounded-md px-4 py-3 text-sm">
@@ -377,7 +384,7 @@ export function RunDetailPage() {
                     // version and there is none.
                     disabled={
                       !permissionsReady ||
-                      runAgent.isPending ||
+                      launcher.isPending ||
                       !agent.active ||
                       (agent.definition === "draft" && !agent.home_writable)
                     }
@@ -394,14 +401,14 @@ export function RunDetailPage() {
                       } else {
                         // The API conceals resolved input from runners. Replay
                         // that snapshot server-side, preserving its parameters.
-                        runAgent.mutate({
+                        launcher.launch({
                           rerun_from: run.id,
                           version: replayVersion(run.version_ref, agent.home_writable),
                         });
                       }
                     }}
                   >
-                    {runAgent.isPending && <Spinner />}
+                    {launcher.isPending && <Spinner />}
                     <Play className="size-3.5" />
                     {t("run.rerun")}
                   </Button>
