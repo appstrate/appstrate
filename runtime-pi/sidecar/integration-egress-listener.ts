@@ -12,8 +12,8 @@
  * that opens its TLS. This listener is that way out:
  *
  *   - terminates the `CONNECT host:port` preamble,
- *   - applies the SSRF floor at CONNECT (the ONLY hard boundary — internal /
- *     cloud-metadata targets are refused before any tunnel opens),
+ *   - applies the SSRF floor and the egress allowlist at CONNECT (internal /
+ *     cloud-metadata / unauthorized targets are refused before any tunnel opens),
  *   - blind-relays raw TCP both directions (NO TLS termination, NO per-SNI
  *     cert mint, NO header injection).
  *
@@ -23,10 +23,10 @@
  * like the MITM listener (which 405s plain HTTP) — env-delivery runners
  * previously routed through MITM, so HTTPS-only egress is unchanged behaviour.
  *
- * Egress is intentionally open to any external host today; turning
- * `authorizedUris` into a hard per-integration allowlist is a separate,
- * deliberate security decision (#543). The param is accepted now so that
- * enforcement, if adopted, lands here at CONNECT.
+ * Egress is a hard allowlist (#1458): only the owning runner may connect
+ * (`isPeerAllowed`), and a CONNECT target is tunnelled only when the
+ * connection's rendered `authorized_uris` grant its `host:port`
+ * (`egressPolicy`). Everything else is a 403.
  */
 
 import { createServer as netCreateServer } from "node:net";
@@ -34,14 +34,36 @@ import type { Socket } from "node:net";
 
 import { isBlockedHost, resolveAndCheckHost, type HostResolver } from "./helpers.ts";
 import { parseConnectTarget, netConnectWithTimeout, relaySockets } from "./connect-tunnel.ts";
+import type { EgressPolicy } from "@appstrate/afps-runtime/resolvers";
 import type { MitmListenerHandle } from "./integration-mitm-listener.ts";
+
+/** Peer gate (#1458): may the socket whose peer IP is `remoteAddress` use this listener? */
+export type PeerCheck = (remoteAddress: string) => Promise<boolean>;
+
+/** TCP-level half of the egress policy — all a blind tunnel can check. */
+export type AuthorityPolicy = Pick<EgressPolicy, "allowsAuthority">;
+
+/** The socket's peer IP (IPv4-mapped `::ffff:a.b.c.d` unwrapped), or undefined once detached. */
+export function peerAddress(socket: Socket): string | undefined {
+  const address = socket.remoteAddress;
+  if (!address) return undefined;
+  return /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(address)?.[1] ?? address;
+}
+
+/** Resolve the peer gate for `socket`; an unknown address or a failing check refuses. */
+export async function peerAdmitted(socket: Socket, isPeerAllowed: PeerCheck): Promise<boolean> {
+  const address = peerAddress(socket);
+  return address !== undefined && (await isPeerAllowed(address).catch(() => false));
+}
 
 export interface EgressListenerEvent {
   kind: "tunnel-opened" | "tunnel-refused" | "tunnel-error";
   /** `host:port` target of the CONNECT (never carries a path / query). */
   target: string;
-  /** Populated for `tunnel-refused` (SSRF / allowlist) and `tunnel-error`. */
+  /** Populated for `tunnel-refused` (SSRF / allowlist / peer) and `tunnel-error`. */
   reason?: string;
+  /** Refused peer IP (`peer-not-allowed` only). */
+  peer?: string;
 }
 
 interface CreateEgressListenerOptions {
@@ -56,14 +78,10 @@ interface CreateEgressListenerOptions {
    * uses the system resolver). Only consulted for non-IP-literal targets.
    */
   resolveHostFn?: HostResolver;
-  /**
-   * Optional hard egress allowlist (#543 follow-up). When provided, a CONNECT
-   * whose host matches NONE of the patterns is refused. `undefined` (default)
-   * leaves egress SSRF-floored-open — today's behaviour. The matcher is
-   * supplied by the caller to avoid coupling this transport file to the
-   * URI-pattern grammar.
-   */
-  authorizedHostMatcher?: (host: string) => boolean;
+  /** The connection's egress allowlist: a CONNECT to a `host:port` it does not grant is refused. */
+  egressPolicy: AuthorityPolicy;
+  /** Only the owning runner may tunnel through this listener. */
+  isPeerAllowed: PeerCheck;
 }
 
 /**
@@ -72,17 +90,24 @@ interface CreateEgressListenerOptions {
  * management alongside MITM listeners.
  */
 export function createIntegrationEgressListener(
-  options: CreateEgressListenerOptions = {},
+  options: CreateEgressListenerOptions,
 ): MitmListenerHandle {
   const host = options.host ?? "127.0.0.1";
   const isBlockedHostFn = options.isBlockedHostFn ?? isBlockedHost;
   const resolveHostFn = options.resolveHostFn;
   const emit = options.onEvent ?? (() => {});
-  const matcher = options.authorizedHostMatcher;
+  const { egressPolicy } = options;
 
   const server = netCreateServer();
 
   server.on("connection", (clientSocket: Socket) => {
+    const refuse = (target: string, reason: string, peer?: string) => {
+      emit({ kind: "tunnel-refused", target, reason, peer });
+      clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+      clientSocket.destroy();
+    };
+    // Peer gate, started at accept: nothing a refused peer sends is acted upon.
+    const admitted = peerAdmitted(clientSocket, options.isPeerAllowed);
     // The kernel hands us a raw TCP socket; we must read the CONNECT preamble
     // ourselves (net.Server has no `connect` event — that's http.Server). The
     // request line can be split across TCP segments, so accumulate until the
@@ -104,63 +129,52 @@ export function createIntegrationEgressListener(
         return; // request line not complete yet — await more segments
       }
       clientSocket.off("data", onData);
-      const firstLine = preamble.slice(0, lineEnd);
-      const match = /^CONNECT\s+(\S+)\s+HTTP\/1\.[01]$/i.exec(firstLine);
-      if (!match) {
-        clientSocket.write("HTTP/1.1 405 Method Not Allowed\r\n\r\n");
-        clientSocket.destroy();
-        return;
-      }
-      const target = match[1] ?? "";
-      const parsed = parseConnectTarget(target);
-      if (!parsed) {
-        clientSocket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
-        clientSocket.destroy();
-        return;
-      }
-      const { host: targetHost, port } = parsed;
-      const lowerHost = targetHost.toLowerCase();
-
-      // SSRF floor, literal layer — refuse IP-literal / known-internal
-      // targets before any DNS round-trip or tunnel.
-      if (isBlockedHostFn(lowerHost)) {
-        emit({ kind: "tunnel-refused", target, reason: "ssrf" });
-        clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
-        clientSocket.destroy();
-        return;
-      }
-
-      // Optional hard egress allowlist (#543 follow-up; no-op by default).
-      if (matcher && !matcher(lowerHost)) {
-        emit({ kind: "tunnel-refused", target, reason: "not-authorized" });
-        clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
-        clientSocket.destroy();
-        return;
-      }
-
-      // SSRF floor, DNS-rebind layer (resolve-and-pin): a DNS name whose
-      // A/AAAA record points inside (10.x, 169.254.169.254, …) passes the
-      // literal check above — resolve every record, refuse if ANY lands in
-      // a blocked range (fail closed on resolution failure), then connect
-      // to the PINNED resolved IP so the upstream connect can't re-resolve
-      // to a different answer. Pinning is safe here: this is a blind CONNECT
-      // tunnel — the sidecar never opens TLS, the client's own handshake
-      // carries SNI/Host for the original name.
       void (async () => {
+        if (!(await admitted)) {
+          return refuse("<unknown>", "peer-not-allowed", peerAddress(clientSocket));
+        }
+        const firstLine = preamble.slice(0, lineEnd);
+        const match = /^CONNECT\s+(\S+)\s+HTTP\/1\.[01]$/i.exec(firstLine);
+        if (!match) {
+          clientSocket.write("HTTP/1.1 405 Method Not Allowed\r\n\r\n");
+          clientSocket.destroy();
+          return;
+        }
+        const target = match[1] ?? "";
+        const parsed = parseConnectTarget(target);
+        if (!parsed) {
+          clientSocket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+          clientSocket.destroy();
+          return;
+        }
+        const { host: targetHost, port } = parsed;
+        const lowerHost = targetHost.toLowerCase();
+
+        // SSRF floor, literal layer — refuse IP-literal / known-internal
+        // targets before any DNS round-trip or tunnel.
+        if (isBlockedHostFn(lowerHost)) return refuse(target, "ssrf");
+
+        // Hard egress allowlist — before any DNS lookup of the name.
+        if (!egressPolicy.allowsAuthority(lowerHost, port)) return refuse(target, "not-authorized");
+
+        // SSRF floor, DNS-rebind layer (resolve-and-pin): a DNS name whose
+        // A/AAAA record points inside (10.x, 169.254.169.254, …) passes the
+        // literal check above — resolve every record, refuse if ANY lands in
+        // a blocked range (fail closed on resolution failure), then connect
+        // to the PINNED resolved IP so the upstream connect can't re-resolve
+        // to a different answer. Pinning is safe here: this is a blind CONNECT
+        // tunnel — the sidecar never opens TLS, the client's own handshake
+        // carries SNI/Host for the original name.
         const check = await resolveAndCheckHost(lowerHost, {
           resolve: resolveHostFn,
           isBlockedHostFn,
         });
         if (clientSocket.destroyed) return; // client gave up during resolution
         if (check.blocked) {
-          emit({
-            kind: "tunnel-refused",
+          return refuse(
             target,
-            reason: check.reason === "resolution-failed" ? "dns-resolution-failed" : "ssrf",
-          });
-          clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
-          clientSocket.destroy();
-          return;
+            check.reason === "resolution-failed" ? "dns-resolution-failed" : "ssrf",
+          );
         }
         const upstream = netConnectWithTimeout(port, check.pinnedAddress, () => {
           clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");

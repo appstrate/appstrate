@@ -18,12 +18,14 @@ import { posix, join, dirname, relative, resolve, sep } from "node:path";
 
 import { SubprocessTransport } from "@appstrate/mcp-transport";
 import { isMcpServerRuntime, type McpServerRuntime } from "@appstrate/core/mcp-server";
+import type { EgressPolicy } from "@appstrate/afps-runtime/resolvers";
 
 import { logger } from "./logger.ts";
 import { scrubSecretMaterial, truncateForScrub } from "./redact.ts";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
 import { createIntegrationDnsResponder } from "./integration-dns-responder.ts";
 import { createTransparentEgressListener } from "./integration-transparent-listener.ts";
+import { createRunnerPeers, policyForRunnerPeer, type RunnerPeers } from "./runner-peers.ts";
 import {
   buildProxyEnvBlock,
   buildCaEnvBlock,
@@ -706,9 +708,10 @@ interface TransparentEgressInfra {
  * Low-port binds require the platform to have granted
  * `net.ipv4.ip_unprivileged_port_start=0` on the sidecar container (it
  * does whenever the run declares integrations). Any failure — inspect,
- * bind, older daemon — is logged and swallowed: transparent egress is an
- * interop layer, not a security boundary, so degrading to the CONNECT
- * proxy contract is always safe.
+ * bind, older daemon — is logged and swallowed: degrading to the CONNECT
+ * proxy contract removes a route and never widens one, so it is always safe.
+ * The splicers serve only the runners `policyForPeer` attributes, under their
+ * own egress policy (#1458).
  *
  * The splicers use the default DNS resolver for their resolve-and-pin
  * floor — deliberately NOT `bundleFetchOpts.resolveHostFn`, which is a
@@ -717,7 +720,10 @@ interface TransparentEgressInfra {
  * adapter interface. If a production resolver override ever lands,
  * revisit so both egress planes resolve identically.
  */
-async function setupTransparentEgress(runNetwork: string): Promise<TransparentEgressInfra | null> {
+async function setupTransparentEgress(
+  runNetwork: string,
+  policyForPeer: (remoteAddress: string) => Promise<EgressPolicy | null>,
+): Promise<TransparentEgressInfra | null> {
   const handles: Array<{ close(): Promise<void> }> = [];
   try {
     // `hostname()` inside a container is the container ID — inspect self.
@@ -736,9 +742,9 @@ async function setupTransparentEgress(runNetwork: string): Promise<TransparentEg
     };
     const dns = createIntegrationDnsResponder({ answerIpv4: ip, host: ip, port: 53 });
     handles.push(dns);
-    const tls = createTransparentEgressListener({ host: ip, port: 443, onEvent });
+    const tls = createTransparentEgressListener({ host: ip, port: 443, onEvent, policyForPeer });
     handles.push(tls);
-    const http = createTransparentEgressListener({ host: ip, port: 80, onEvent });
+    const http = createTransparentEgressListener({ host: ip, port: 80, onEvent, policyForPeer });
     handles.push(http);
     await Promise.all([dns.ready, tls.ready, http.ready]);
     logger.info("transparent egress ready", { dnsIp: ip });
@@ -761,6 +767,9 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
   const hostTempDirsByContainer: Map<string, string[]> = new Map();
   let runNetwork: string | null = null;
   let transparentEgress: TransparentEgressInfra | null = null;
+  let peers: RunnerPeers | null = null;
+  /** Policy per integration id of the runners the transparent plane serves (plain CONNECT). */
+  const transparentPolicies = new Map<string, EgressPolicy>();
 
   return {
     id: "docker",
@@ -775,9 +784,21 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
       // the default bridge with loopback URLs and skip the alias path.
       const envRunId = process.env.RUN_ID;
       runNetwork = envRunId ? `appstrate-exec-${envRunId}` : null;
+      peers = runNetwork
+        ? createRunnerPeers({
+            network: runNetwork,
+            inspect: (network) => dockerExec(["network", "inspect", network]),
+          })
+        : null;
       // #779 — transparent egress plane for proxy-unaware HTTP clients.
       // Only meaningful on a per-run bridge (a routable sidecar IP exists).
-      transparentEgress = runNetwork ? await setupTransparentEgress(runNetwork) : null;
+      transparentEgress =
+        runNetwork && peers
+          ? await setupTransparentEgress(
+              runNetwork,
+              policyForRunnerPeer(peers, transparentPolicies),
+            )
+          : null;
       logger.info("docker integration adapter ready", { runId, runNetwork });
       return {
         // Bind 0.0.0.0 when we have a per-run network — the runner
@@ -867,8 +888,8 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
 
       const networkFlags: string[] = runNetwork ? ["--network", runNetwork] : [];
 
-      // #779 — transparent egress for `delivery.env` runners (plain CONNECT
-      // egress, `caCertHostPath === null`). `--dns` points the embedded DNS
+      // #779 — transparent egress for plain-CONNECT egress runners
+      // (`caCertHostPath === null`). `--dns` points the embedded DNS
       // forwarder (127.0.0.11) at the sidecar's responder, so external names
       // resolve to the sidecar's SNI-passthrough splicer and proxy-unaware
       // HTTP clients (undici/fetch, axios) get egress without cooperating.
@@ -926,6 +947,10 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
         }
       }
       containerIds.push(containerId);
+      peers?.register(containerName, spec.integrationId);
+      if (egress && egress.caCertHostPath === null) {
+        transparentPolicies.set(spec.integrationId, egress.policy);
+      }
 
       // docker cp <src>/. <id>:/<dst>/  — the trailing `/.` semantics
       // copy the directory's *contents* into /bundle (already exists in
@@ -975,6 +1000,12 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
       return { transport, diagnosticId: containerId.slice(0, 12) };
     },
 
+    peerAttribution() {
+      // No per-run network (dev / tests): runners are not on a bridge the
+      // listeners are routable from, and there is no member table to read.
+      return peers ? peers.integrationOf : null;
+    },
+
     async shutdown(): Promise<void> {
       // Container kill is best-effort — `--rm` will clean up after
       // SubprocessTransport closes the docker-attach stdio anyway. This
@@ -1001,6 +1032,7 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
         }
         transparentEgress = null;
       }
+      transparentPolicies.clear();
     },
   };
 }

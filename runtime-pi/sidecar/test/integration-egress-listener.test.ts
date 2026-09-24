@@ -6,7 +6,7 @@
  * Proves the no-injection egress path: a CONNECT tunnel to an allowed host
  * relays raw bytes (NO TLS termination, NO cert mint), the SSRF floor refuses
  * internal / cloud-metadata targets, non-CONNECT verbs are rejected, and the
- * optional hard allowlist (follow-up seam) gates by host when supplied.
+ * hard allowlist (#1458) gates by peer and by `host:port`.
  */
 
 import { describe, it, expect, afterEach } from "bun:test";
@@ -45,7 +45,7 @@ function startTcpEcho(): Promise<{ port: number }> {
 }
 
 function makeListener(
-  overrides: Parameters<typeof createIntegrationEgressListener>[0] = {},
+  overrides: Partial<Parameters<typeof createIntegrationEgressListener>[0]> = {},
 ): Promise<{ handle: MitmListenerHandle; events: EgressListenerEvent[] }> {
   const events: EgressListenerEvent[] = [];
   const handle = createIntegrationEgressListener({
@@ -53,6 +53,9 @@ function makeListener(
     // Allow loopback by default so the echo server is reachable in tests.
     isBlockedHostFn: () => false,
     onEvent: (e) => events.push(e),
+    // Permissive by default; the allowlist tests below override these.
+    egressPolicy: { allowsAuthority: () => true },
+    isPeerAllowed: async () => true,
     ...overrides,
   });
   listeners.push(handle);
@@ -256,18 +259,103 @@ describe("integration-egress-listener (#543)", () => {
     expect(events.some((e) => e.kind === "tunnel-opened")).toBe(true);
   });
 
-  it("enforces the optional hard allowlist when supplied", async () => {
+  it("refuses a host the egress policy does not grant, before resolving it", async () => {
     const echo = await startTcpEcho();
+    let resolved = false;
     const { handle, events } = await makeListener({
-      authorizedHostMatcher: (h) => h === "allowed.example.com",
+      egressPolicy: { allowsAuthority: (h) => h === "allowed.example.com" },
+      resolveHostFn: async () => {
+        resolved = true;
+        return ["127.0.0.1"];
+      },
     });
     const port = handle.address().port;
 
-    // 127.0.0.1 passes the (stubbed) SSRF floor but fails the allowlist.
-    const res = await connectAndProbe(port, `127.0.0.1:${echo.port}`);
+    // Passes the (stubbed) SSRF floor but fails the allowlist.
+    const res = await connectAndProbe(port, `denied.example.com:${echo.port}`);
     expect(res.statusCode).toBe(403);
+    expect(resolved).toBe(false);
     expect(events.some((e) => e.kind === "tunnel-refused" && e.reason === "not-authorized")).toBe(
       true,
     );
+  });
+
+  it("refuses an allowed host on a port the egress policy does not grant", async () => {
+    const echo = await startTcpEcho();
+    const seen: Array<[string, number]> = [];
+    const { handle, events } = await makeListener({
+      egressPolicy: {
+        allowsAuthority: (h, p) => {
+          seen.push([h, p]);
+          return h === "allowed.example.com" && p === 443;
+        },
+      },
+      resolveHostFn: async () => ["127.0.0.1"],
+    });
+    const port = handle.address().port;
+
+    const res = await connectAndProbe(port, `allowed.example.com:${echo.port}`, "ping");
+    expect(res.statusCode).toBe(403);
+    expect(seen).toEqual([["allowed.example.com", echo.port]]);
+    expect(events.some((e) => e.kind === "tunnel-refused" && e.reason === "not-authorized")).toBe(
+      true,
+    );
+  });
+
+  it("tunnels a host:port the egress policy grants", async () => {
+    const echo = await startTcpEcho();
+    const { handle } = await makeListener({
+      egressPolicy: { allowsAuthority: (h, p) => h === "allowed.example.com" && p === echo.port },
+      resolveHostFn: async () => ["127.0.0.1"],
+    });
+    const res = await connectAndProbe(
+      handle.address().port,
+      `allowed.example.com:${echo.port}`,
+      "ping",
+    );
+    expect(res.statusCode).toBe(200);
+    expect(res.echoed).toBe("ping");
+  });
+
+  it("refuses a peer that is not the owning runner, before parsing its CONNECT", async () => {
+    const echo = await startTcpEcho();
+    const peers: string[] = [];
+    let policyConsulted = false;
+    const { handle, events } = await makeListener({
+      isPeerAllowed: async (ip) => {
+        peers.push(ip);
+        return false;
+      },
+      egressPolicy: {
+        allowsAuthority: () => {
+          policyConsulted = true;
+          return true;
+        },
+      },
+    });
+
+    const res = await connectAndProbe(handle.address().port, `127.0.0.1:${echo.port}`, "ping");
+    expect(res.statusCode).toBe(403);
+    expect(peers).toEqual(["127.0.0.1"]);
+    expect(policyConsulted).toBe(false);
+    expect(events).toContainEqual({
+      kind: "tunnel-refused",
+      target: "<unknown>",
+      reason: "peer-not-allowed",
+      peer: "127.0.0.1",
+    });
+    expect(events.some((e) => e.kind === "tunnel-opened")).toBe(false);
+  });
+
+  it("refuses (fails closed) when the peer check throws", async () => {
+    const echo = await startTcpEcho();
+    const { handle, events } = await makeListener({
+      isPeerAllowed: async () => {
+        throw new Error("docker inspect failed");
+      },
+    });
+    const res = await connectAndProbe(handle.address().port, `127.0.0.1:${echo.port}`);
+    expect(res.statusCode).toBe(403);
+    expect(events.some((e) => e.reason === "peer-not-allowed")).toBe(true);
   });
 });

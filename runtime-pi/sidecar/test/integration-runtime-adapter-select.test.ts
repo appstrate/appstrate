@@ -31,6 +31,7 @@ function fakeAdapter(id: string): IntegrationRuntimeAdapter {
     async spawn() {
       throw new Error("not spawned in this test");
     },
+    peerAttribution: () => null,
     async shutdown() {},
   };
 }

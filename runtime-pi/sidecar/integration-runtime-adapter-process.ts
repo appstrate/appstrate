@@ -411,6 +411,13 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
       return { transport, diagnosticId: null };
     },
 
+    peerAttribution() {
+      // Runners share the sidecar's 127.0.0.1 and (in the Firecracker guest)
+      // have direct egress, so a peer IP names no runner: peer checks are
+      // allow-all here and only the listener's host policy applies (#1458).
+      return null;
+    },
+
     async shutdown(): Promise<void> {
       // Nothing to do for the subprocess itself — SubprocessTransport owns it
       // and tears it down on `transport.close()` (called by the MCP client's

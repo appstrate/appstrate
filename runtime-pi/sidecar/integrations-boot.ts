@@ -49,7 +49,7 @@ import {
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
 import { planCaBundle, type CaBundle } from "@appstrate/connect/proxy-ca-planner";
-import { planHttpDeliveryInjection } from "@appstrate/afps-runtime/resolvers";
+import { compileEgressPolicy, planHttpDeliveryInjection } from "@appstrate/afps-runtime/resolvers";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
 import type { CredentialBundle } from "@appstrate/connect/connect";
@@ -788,13 +788,6 @@ async function spawnAndConnectLocalIntegration(params: {
   /** Front this integration with a MITM listener (also needs `ca` + `source`). */
   wantsMitm: boolean;
   /**
-   * Issue #543 — the runner needs a controlled egress route but no header
-   * injection (a `delivery.env` auth declaring an outbound surface). When set
-   * and `wantsMitm` is false, mount a plain CONNECT egress listener. MITM
-   * wins when both are set (it already provides egress).
-   */
-  wantsEgress: boolean;
-  /**
    * Allowlist for `host.register`. `undefined` = no allowlist (AFPS §4.4
    * wildcard). `[]` exposes nothing, which {@link assertIntegrationExposesTools}
    * then turns into a failed boot.
@@ -830,9 +823,16 @@ async function spawnAndConnectLocalIntegration(params: {
   // One listener per integration, picked MITM-first (#543). `egressCtx` is
   // handed to the adapter as the runner's HTTPS_PROXY:
   //   - MITM listener   → caCertHostPath set (TLS terminate + inject).
-  //   - plain CONNECT    → caCertHostPath null (tunnel + SSRF floor only).
-  //   - neither          → null (mtls / delivery.files reach upstream directly).
+  //   - plain CONNECT    → caCertHostPath null (blind tunnel), when `spec.egress` is set.
+  //   - neither          → null: the runner has no egress route.
+  // Both listeners enforce the ONE policy compiled from `spec.egress` (absent =
+  // deny-all) and admit only this integration's own runner (#1458).
   let egressCtx: RuntimeEgressContext | null = null;
+  const policy = compileEgressPolicy(spec.egress ?? { authorizedUris: [], allowAllUris: false });
+  const attribute = adapter.peerAttribution();
+  const isPeerAllowed = attribute
+    ? async (ip: string) => (await attribute(ip)) === spec.integrationId
+    : async () => true;
   // The MITM listener is mounted only when this integration wants MITM, a CA
   // came up, AND the caller hoisted a source. When mounted, the shared
   // `source` is what the connect-login hook drives — surfaced back to the
@@ -849,6 +849,8 @@ async function spawnAndConnectLocalIntegration(params: {
       // (0.0.0.0 for bridged networks, 127.0.0.1 when it shares the parent NS).
       host: adapterCtx.listenerBindHost,
       resolveHostFn: bundleFetchOpts.resolveHostFn,
+      egressPolicy: policy,
+      isPeerAllowed,
       onEvent: (event) => {
         // Surface enough to debug auth-injection bugs without leaking
         // signed query params. URL is reduced to `host + path` (no
@@ -880,27 +882,29 @@ async function spawnAndConnectLocalIntegration(params: {
     params.mitmListeners.push(listener);
     mitmMounted = true;
     const port = listener.address().port;
-    egressCtx = { proxyUrl: adapterCtx.proxyUrlFor(port), caCertHostPath: ca.certHostPath };
+    egressCtx = { proxyUrl: adapterCtx.proxyUrlFor(port), caCertHostPath: ca.certHostPath, policy };
     logger.info(`${logLabel} MITM listener ready`, {
       integrationId: spec.integrationId,
       localUrl: listener.proxyUrl(),
       runnerProxyUrl: egressCtx.proxyUrl,
     });
-  } else if (params.wantsEgress) {
+  } else if (spec.egress) {
     // No injection plan, but the runner declares an outbound surface — give it
-    // a plain CONNECT egress route (tunnel + SSRF floor, NO TLS termination,
+    // a plain CONNECT egress route (policy + SSRF floor, NO TLS termination,
     // NO cert mint). `caCertHostPath: null` tells the adapter to skip the CA
     // env block + cert delivery.
     const listener = createIntegrationEgressListener({
       host: adapterCtx.listenerBindHost,
       resolveHostFn: bundleFetchOpts.resolveHostFn,
+      egressPolicy: policy,
+      isPeerAllowed,
       onEvent: (event) =>
         logger.info(`${logLabel} egress event`, { integrationId: spec.integrationId, ...event }),
     });
     await listener.ready;
     params.mitmListeners.push(listener);
     const port = listener.address().port;
-    egressCtx = { proxyUrl: adapterCtx.proxyUrlFor(port), caCertHostPath: null };
+    egressCtx = { proxyUrl: adapterCtx.proxyUrlFor(port), caCertHostPath: null, policy };
     logger.info(`${logLabel} egress listener ready`, {
       integrationId: spec.integrationId,
       localUrl: listener.proxyUrl(),
@@ -1220,6 +1224,8 @@ export async function bootIntegrations(
    * server is skipped — a spec that declares `apiCall` is logged + dropped.
    */
   apiCallDeps?: ApiCallToolDeps,
+  /** Called once the adapter is prepared, before any runner spawns (forward-proxy peer check). */
+  onAdapterPrepared?: (adapter: IntegrationRuntimeAdapter) => void,
 ): Promise<BootIntegrationsResult> {
   const host = new McpHost({
     onLog: (event) =>
@@ -1279,6 +1285,7 @@ export async function bootIntegrations(
   const adapterPrepareStart = performance.now();
   const adapterCtx = await adapter.prepare(runId);
   const adapterPrepareMs = performance.now() - adapterPrepareStart;
+  onAdapterPrepared?.(adapter);
   // Decode the workspace handle once for the whole run — same handle is
   // shared by every opt-in integration runner. The agent already has
   // the underlying workspace mounted; this surfaces it to mcp-server
@@ -1588,12 +1595,11 @@ export async function bootIntegrations(
       // MITM is created only when the CA came up AND this integration declared
       // `delivery.http`. `mitmSource` is returned so the connect-login hook
       // (run-start acquisition, below) drives `setSessionOutputs` on the same
-      // source the MITM listener reads from. `wantsEgress` (#543) is the
+      // source the MITM listener reads from. `spec.egress` (#543) is the
       // fallback: a no-injection runner that still needs an outbound route gets
       // a plain CONNECT egress listener instead.
       const wantsMitm =
         spec.httpDeliveryAuths !== undefined && Object.keys(spec.httpDeliveryAuths).length > 0;
-      const wantsEgress = spec.needsEgress === true;
       const {
         allocatedNs,
         mitmSource,
@@ -1612,7 +1618,6 @@ export async function bootIntegrations(
         ca: runCa,
         workspaceHandle,
         wantsMitm,
-        wantsEgress,
         allowedTools: spec.toolAllowlist,
         // R8a — propagate `hidden_tools` so the host filters them out at
         // runtime, regardless of whether install-time validation removed them.
@@ -1885,10 +1890,9 @@ export async function runConnectOnce(
       // Always pass null to keep the connect-run path workspace-free
       // regardless of the launching orchestrator's env.
       workspaceHandle: null,
-      wantsMitm: true,
       // connect-run always mounts the MITM listener (it provides egress too),
       // so the plain-egress fallback never applies here.
-      wantsEgress: false,
+      wantsMitm: true,
       allowedTools: [],
       logLabel: "connect-run",
       clients,

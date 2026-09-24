@@ -71,6 +71,12 @@ const runIfOpenssl: typeof it = HAS_OPENSSL ? it : (it.skip as unknown as typeof
  */
 const stubResolveHost = async () => ["203.0.113.10"];
 
+/** Allow-all egress gates for tests about something else; the #1458 describe overrides them. */
+const permissiveEgress = {
+  egressPolicy: { allowsAuthority: () => true, allowsUrl: () => true },
+  isPeerAllowed: async () => true,
+};
+
 async function makeCaBundle() {
   const workDir = path.join(tmpdir(), `afps-mitm-ca-${randomUUID()}`);
   await fs.mkdir(workDir, { recursive: true });
@@ -233,6 +239,7 @@ describe("MITM listener — CONNECT preamble", () => {
       caBundle: bundle,
       minter,
       credentials: creds,
+      ...permissiveEgress,
       resolveHostFn: stubResolveHost,
     });
     await listener.ready;
@@ -312,6 +319,7 @@ describe("MITM listener — strip + inject end-to-end", () => {
       caBundle: bundle,
       minter,
       credentials: creds,
+      ...permissiveEgress,
       resolveHostFn: stubResolveHost,
       fetch: recordedFetch,
     });
@@ -373,6 +381,7 @@ describe("MITM listener — strip + inject end-to-end", () => {
       caBundle: bundle,
       minter,
       credentials: creds,
+      ...permissiveEgress,
       resolveHostFn: stubResolveHost,
       fetch: recordedFetch,
     });
@@ -449,6 +458,7 @@ describe("MITM listener — 401 refresh + retry", () => {
       caBundle: bundle,
       minter,
       credentials: creds,
+      ...permissiveEgress,
       resolveHostFn: stubResolveHost,
       fetch: recorded.fetch,
     });
@@ -513,6 +523,7 @@ describe("MITM listener — 401 refresh + retry", () => {
       caBundle: bundle,
       minter,
       credentials: creds,
+      ...permissiveEgress,
       resolveHostFn: stubResolveHost,
       fetch: recorded.fetch,
     });
@@ -566,6 +577,7 @@ describe("MITM listener — 401 refresh + retry", () => {
         caBundle: bundle,
         minter,
         credentials: creds,
+        ...permissiveEgress,
         resolveHostFn: stubResolveHost,
         fetch: recorded.fetch,
       });
@@ -641,6 +653,7 @@ describe("MITM listener — connect.tool re-login (P3)", () => {
         caBundle: bundle,
         minter,
         credentials: creds,
+        ...permissiveEgress,
         resolveHostFn: stubResolveHost,
         fetch: recorded.fetch,
       });
@@ -700,6 +713,7 @@ describe("MITM listener — connect.tool re-login (P3)", () => {
       caBundle: bundle,
       minter,
       credentials: creds,
+      ...permissiveEgress,
       resolveHostFn: stubResolveHost,
       fetch: recorded.fetch,
     });
@@ -763,6 +777,7 @@ describe("MITM listener — connect.tool re-login (P3)", () => {
         caBundle: bundle,
         minter,
         credentials: creds,
+        ...permissiveEgress,
         resolveHostFn: stubResolveHost,
         fetch: recorded.fetch,
       });
@@ -819,6 +834,7 @@ describe("MITM listener — connect.tool re-login (P3)", () => {
       caBundle: bundle,
       minter,
       credentials: creds,
+      ...permissiveEgress,
       resolveHostFn: stubResolveHost,
       fetch: recorded.fetch,
     });
@@ -864,6 +880,7 @@ describe("MITM listener — telemetry", () => {
       caBundle: bundle,
       minter,
       credentials: creds,
+      ...permissiveEgress,
       resolveHostFn: stubResolveHost,
       fetch: recorded.fetch,
       onEvent: (e) => events.push(e),
@@ -910,6 +927,7 @@ describe("MITM listener — SSRF floor", () => {
         caBundle: bundle,
         minter,
         credentials: creds,
+        ...permissiveEgress,
         resolveHostFn: stubResolveHost,
         fetch: recorded.fetch,
         onEvent: (e) => events.push(e),
@@ -965,6 +983,7 @@ describe("MITM listener — SSRF floor", () => {
         caBundle: bundle,
         minter,
         credentials: creds,
+        ...permissiveEgress,
         resolveHostFn: async () => ["169.254.169.254"],
         fetch: recorded.fetch,
         onEvent: (e) => events.push(e),
@@ -1011,6 +1030,7 @@ describe("MITM listener — SSRF floor", () => {
       caBundle: bundle,
       minter,
       credentials: creds,
+      ...permissiveEgress,
       resolveHostFn: async () => {
         throw new Error("NXDOMAIN");
       },
@@ -1056,6 +1076,7 @@ describe("MITM listener — proxyUrl shape", () => {
       caBundle: bundle,
       minter,
       credentials: creds,
+      ...permissiveEgress,
       resolveHostFn: stubResolveHost,
     });
     await listener.ready;
@@ -1066,4 +1087,152 @@ describe("MITM listener — proxyUrl shape", () => {
       await listener.close();
     }
   });
+});
+
+describe("MITM listener — egress allowlist (#1458)", () => {
+  async function setup(overrides: Partial<Parameters<typeof createIntegrationMitmListener>[0]>) {
+    const bundle = await makeCaBundle();
+    const minter = createCertMinter({
+      caCertPem: bundle.pems.caCertPem,
+      caKeyPem: bundle.pems.caKeyPem,
+    });
+    const events: MitmListenerEvent[] = [];
+    const recorded = makeRecordingFetch(async () => new Response("ok", { status: 200 }));
+    const listener = createIntegrationMitmListener({
+      caBundle: bundle,
+      minter,
+      credentials: {
+        current: () => payload("v", "oauth2", { access_token: "t" }, ["https://api.test.local/**"]),
+        deliveryPlans: () => ({ v: plan("Authorization", "t") }),
+      },
+      resolveHostFn: stubResolveHost,
+      fetch: recorded.fetch,
+      onEvent: (e) => events.push(e),
+      ...permissiveEgress,
+      ...overrides,
+    });
+    await listener.ready;
+    return { listener, caCertPem: bundle.pems.caCertPem, minter, events, calls: recorded.calls };
+  }
+
+  /** Status code of the listener's reply to a raw CONNECT (0 when closed silently). */
+  function connectStatus(port: number, target: string): Promise<number> {
+    return new Promise((resolve) => {
+      const sock = netConnect(port, "127.0.0.1", () => {
+        sock.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`);
+      });
+      let buf = "";
+      sock.on("data", (c: Buffer) => {
+        buf += c.toString("latin1");
+        if (!buf.includes("\r\n\r\n")) return;
+        sock.destroy();
+        resolve(Number.parseInt(buf.split(" ")[1] ?? "0", 10));
+      });
+      sock.on("close", () => resolve(0));
+      sock.on("error", () => resolve(0));
+    });
+  }
+
+  runIfOpenssl("refuses a peer that is not the owning runner before the CONNECT", async () => {
+    const peers: string[] = [];
+    const { listener, minter, events, calls } = await setup({
+      isPeerAllowed: async (ip) => {
+        peers.push(ip);
+        return false;
+      },
+    });
+    try {
+      const status = await connectStatus(listener.address().port, "api.test.local:443");
+      expect(status).toBe(403);
+      expect(peers).toEqual(["127.0.0.1"]);
+      expect(events).toEqual([
+        { kind: "connect-rejected", reason: "peer-not-allowed", peer: "127.0.0.1" },
+      ]);
+      expect(minter.cacheSize).toBe(0);
+      expect(calls.length).toBe(0);
+    } finally {
+      await listener.close();
+    }
+  });
+
+  runIfOpenssl("refuses an off-list SNI before minting a cert or resolving it", async () => {
+    const authorities: Array<[string, number]> = [];
+    const resolved: string[] = [];
+    const { listener, caCertPem, minter, events, calls } = await setup({
+      egressPolicy: {
+        allowsAuthority: (host, port) => {
+          authorities.push([host, port]);
+          return host === "api.test.local";
+        },
+        allowsUrl: () => true,
+      },
+      resolveHostFn: async (host) => {
+        resolved.push(host);
+        return ["203.0.113.10"];
+      },
+    });
+    try {
+      await expect(
+        drivenFetch({
+          listenerPort: listener.address().port,
+          sni: "evil.test.local",
+          caCertPem,
+          method: "GET",
+          path: "/",
+          headers: {},
+        }),
+      ).rejects.toThrow();
+      expect(authorities).toEqual([["evil.test.local", 443]]);
+      expect(events).toContainEqual({
+        kind: "connect-rejected",
+        reason: "not-authorized",
+        host: "evil.test.local",
+      });
+      expect(resolved).toEqual([]);
+      expect(minter.cacheSize).toBe(0);
+      expect(calls.length).toBe(0);
+    } finally {
+      await listener.close();
+    }
+  });
+
+  runIfOpenssl(
+    "answers 403 to an off-list URL without reaching upstream, and still injects on-list",
+    async () => {
+      const { listener, caCertPem, events, calls } = await setup({
+        egressPolicy: {
+          allowsAuthority: () => true,
+          allowsUrl: (url) => url.startsWith("https://api.test.local/allowed/"),
+        },
+      });
+      try {
+        const request = (path: string) =>
+          drivenFetch({
+            listenerPort: listener.address().port,
+            sni: "api.test.local",
+            caCertPem,
+            method: "GET",
+            path,
+            headers: { Authorization: "Bearer caller-token" },
+          });
+
+        const denied = await request("/denied?x=1");
+        expect(denied.status).toBe(403);
+        expect(calls.length).toBe(0);
+        expect(events).toContainEqual({
+          kind: "request-refused",
+          url: "https://api.test.local/denied?x=1",
+          reason: "not-authorized",
+        });
+
+        const allowed = await request("/allowed/items");
+        expect(allowed.status).toBe(200);
+        expect(calls.length).toBe(1);
+        expect(calls[0]!.url).toBe("https://api.test.local/allowed/items");
+        expect((calls[0]!.init.headers as Headers).get("Authorization")).toBe("Bearer t");
+      } finally {
+        await listener.close();
+      }
+    },
+  );
 });
