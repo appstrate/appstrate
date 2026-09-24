@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`appstrate packages sync` installs the pinned space's agents as Claude Code
+  commands** (#1268). Every agent active in the profile's pinned space becomes
+  `/appstrate:run-<agent>` in the plugin: Claude builds the input from the
+  request, asks for what is missing, uploads local files, and launches the
+  agent through the plugin's MCP server with `run_and_wait`, whose permission
+  prompt shows the input before the metered run. Each command carries the
+  space's launch contract — which fields are prompted, prefilled or locked,
+  split by `partitionInputFields`, now in `@appstrate/core/input-resolution`
+  and shared with the dashboard's launch form — never a stored value, and pins
+  the agent's version; a republish, lock or schema change rewrites it at the
+  next sync. Needs `agents:read` and `agents:run` in the pinned space. The
+  `codex` and `claude-user` targets get no agent commands. No server change.
 - **The conformance monitor now probes the provider API of seven
   credential-only integrations without a credential** (`auth-reject`, tier
   `mcp`). A 401 alone proves little — most providers answer 401 with or
