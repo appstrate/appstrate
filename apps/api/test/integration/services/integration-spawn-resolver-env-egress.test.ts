@@ -1,21 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Spawn resolver — env-delivery egress signal (#543).
+ * Spawn resolver — runner egress policy (#543, #1458).
  *
- * A `delivery.env` local-source integration (the server holds its own
- * credentials and authenticates itself — e.g. a form/session login) sits on
- * the per-run network with no direct egress in docker mode. It resolves NO
- * injection plan, so the resolver raises an explicit `needsEgress` flag and
- * the sidecar mounts a plain CONNECT egress listener for it (tunnel + SSRF
- * floor, no TLS termination, no cert mint). It must NOT emit a fake
- * `httpDeliveryAuths` entry (the pre-#543 presence-token workaround). The env
- * credentials are delivered separately via `spawnEnv`.
+ * Every local-source runner whose auth declares an outbound surface gets
+ * `spec.egress`: the connection's RENDERED `authorized_uris` plus
+ * `allow_all_uris`. It is set whatever the delivery channel (env, http, mtls
+ * files) — the sidecar's listener for that runner enforces it. A templated
+ * entry that cannot be rendered is dropped, never passed raw (deny-all).
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
+import type { IntegrationManifest } from "@appstrate/core/integration";
+import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
@@ -25,33 +24,41 @@ import {
   localIntegrationManifest,
   mcpServerManifest,
   envDelivery,
+  filesDelivery,
 } from "../../helpers/integration-manifests.ts";
 
 const INTEG = "@orga/session-integ";
 const SERVER = "@orga/session-server";
 
-function integManifest(opts: { allowAllUris?: boolean } = {}) {
+type Auth = Parameters<typeof localIntegrationManifest>[0]["auths"][string];
+
+function integManifest(auth: Auth): IntegrationManifest {
   return localIntegrationManifest({
     name: INTEG,
     version: "0.1.0",
     serverName: SERVER,
-    auths: {
-      session: {
-        type: "custom",
-        ...(opts.allowAllUris
-          ? { allowAllUris: true }
-          : { authorizedUris: ["https://crm.example.com/**"] }),
-        credentialFields: ["zone", "user", "password"],
-        delivery: envDelivery({
-          CRM_ZONE: "zone",
-          CRM_USER: "user",
-          CRM_PASSWORD: "password",
-        }),
-      },
-    },
+    auths: { main: auth },
     tools_policy: { fetch: {} },
   });
 }
+
+const sessionAuth = (opts: { allowAllUris?: boolean } = {}): Auth => ({
+  type: "custom",
+  ...(opts.allowAllUris
+    ? { allowAllUris: true }
+    : { authorizedUris: ["https://crm.example.com/**"] }),
+  credentialFields: ["zone", "user", "password"],
+  delivery: envDelivery({ CRM_ZONE: "zone", CRM_USER: "user", CRM_PASSWORD: "password" }),
+});
+
+// SSH-like: the reachable host is whatever the USER entered on the connection.
+const sshAuth: Auth = {
+  type: "custom",
+  authorizedUris: ["ssh://{$credential.host}:{$credential.port}"],
+  credentialFields: ["host", "port", "password"],
+  requiredCredentialFields: ["host", "port", "password"],
+  delivery: envDelivery({ SSH_HOST: "host", SSH_PORT: "port", SSH_PASSWORD: "password" }),
+};
 
 function agentManifest(): Record<string, unknown> {
   return {
@@ -66,7 +73,11 @@ function agentManifest(): Record<string, unknown> {
   };
 }
 
-async function seedAll(ctx: TestContext, manifest: Record<string, unknown>) {
+async function resolveWith(
+  ctx: TestContext,
+  manifest: IntegrationManifest,
+  outputs: Record<string, string>,
+): Promise<IntegrationSpawnSpec> {
   await seedPackage({
     id: INTEG,
     orgId: ctx.orgId,
@@ -91,14 +102,12 @@ async function seedAll(ctx: TestContext, manifest: Record<string, unknown>) {
   await seedPackageVersion({ packageId: SERVER, version: "0.1.0", manifest: serverManifest });
   await db.insert(integrationConnections).values({
     integrationId: INTEG,
-    authKey: "session",
+    authKey: "main",
     accountId: "default",
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     endUserId: null,
-    credentialsEncrypted: encryptCredentialEnvelope({
-      outputs: { zone: "phere", user: "lpayet", password: "secret" },
-    }),
+    credentialsEncrypted: encryptCredentialEnvelope({ outputs }),
     identityClaims: {},
     scopesGranted: [],
     needsReconnection: false,
@@ -106,9 +115,18 @@ async function seedAll(ctx: TestContext, manifest: Record<string, unknown>) {
     createdAt: new Date(),
     updatedAt: new Date(),
   });
+
+  const { specs } = await resolveIntegrationSpawns({
+    orgId: ctx.orgId,
+    spaceId: ctx.defaultSpaceId,
+    actor: { type: "user", id: ctx.user.id },
+    agentManifest: agentManifest(),
+  });
+  expect(specs.length).toBe(1);
+  return specs[0]!;
 }
 
-describe("resolveIntegrationSpawns — env-delivery egress signal (#543)", () => {
+describe("resolveIntegrationSpawns — runner egress policy (#543, #1458)", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -116,42 +134,89 @@ describe("resolveIntegrationSpawns — env-delivery egress signal (#543)", () =>
     ctx = await createTestContext({ orgSlug: "orga" });
   });
 
-  it("raises needsEgress (no fake httpDeliveryAuths) and delivers env creds", async () => {
-    await seedAll(ctx, integManifest());
-
-    const { specs } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
-      actor: { type: "user", id: ctx.user.id },
-      agentManifest: agentManifest(),
+  it("env delivery: sets egress (no fake httpDeliveryAuths) and delivers env creds", async () => {
+    const spec = await resolveWith(ctx, integManifest(sessionAuth()), {
+      zone: "phere",
+      user: "lpayet",
+      password: "secret",
     });
-    expect(specs.length).toBe(1);
-    const spec = specs[0]!;
 
-    // Credentials reach the runner via env (the server authenticates itself).
     expect(spec.spawnEnv).toMatchObject({
       CRM_ZONE: "phere",
       CRM_USER: "lpayet",
       CRM_PASSWORD: "secret",
     });
-
-    // The runner gets an explicit egress signal — and NO fake injection plan.
-    // The sidecar mounts a plain CONNECT egress listener off `needsEgress`.
-    expect(spec.needsEgress).toBe(true);
+    expect(spec.egress).toEqual({
+      authorizedUris: ["https://crm.example.com/**"],
+      allowAllUris: false,
+    });
     expect(spec.httpDeliveryAuths).toBeUndefined();
   });
 
-  it("also signals egress for an allow_all_uris env integration", async () => {
-    await seedAll(ctx, integManifest({ allowAllUris: true }));
-
-    const { specs } = await resolveIntegrationSpawns({
-      orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
-      actor: { type: "user", id: ctx.user.id },
-      agentManifest: agentManifest(),
+  it("allow_all_uris: egress carries allowAllUris", async () => {
+    const spec = await resolveWith(ctx, integManifest(sessionAuth({ allowAllUris: true })), {
+      zone: "phere",
+      user: "lpayet",
+      password: "secret",
     });
-    const spec = specs[0]!;
-    expect(spec.needsEgress).toBe(true);
+    expect(spec.egress?.allowAllUris).toBe(true);
     expect(spec.httpDeliveryAuths).toBeUndefined();
+  });
+
+  it("http delivery: egress is set alongside the MITM plan, same rendered list", async () => {
+    const spec = await resolveWith(
+      ctx,
+      integManifest({ type: "api_key", authorizedUris: ["https://api.example.com/**"] }),
+      { api_key: "k-1" },
+    );
+    expect(spec.egress).toEqual({
+      authorizedUris: ["https://api.example.com/**"],
+      allowAllUris: false,
+    });
+    expect(spec.httpDeliveryAuths?.main?.authorizedUris).toEqual(["https://api.example.com/**"]);
+  });
+
+  it("mtls: egress is set (the CONNECT plane relays client-cert TLS blindly)", async () => {
+    const spec = await resolveWith(
+      ctx,
+      integManifest({
+        type: "mtls",
+        authorizedUris: ["https://mtls.example.com/**"],
+        credentialFields: ["client_cert", "client_key"],
+        delivery: filesDelivery({
+          "/run/creds/client.pem": { field: "client_cert" },
+          "/run/creds/client.key": { field: "client_key" },
+        }),
+      }),
+      { client_cert: "CERT", client_key: "KEY" },
+    );
+    expect(spec.fileMounts).toBeDefined();
+    expect(spec.egress).toEqual({
+      authorizedUris: ["https://mtls.example.com/**"],
+      allowAllUris: false,
+    });
+  });
+
+  it("renders a templated entry from the connection's fields", async () => {
+    const spec = await resolveWith(ctx, integManifest(sshAuth), {
+      host: "h",
+      port: "22",
+      password: "pw",
+    });
+    expect(spec.egress).toEqual({ authorizedUris: ["ssh://h:22"], allowAllUris: false });
+  });
+
+  it("a missing field drops the entry (deny-all), never the raw template", async () => {
+    const spec = await resolveWith(ctx, integManifest(sshAuth), { host: "h", password: "pw" });
+    expect(spec.egress).toEqual({ authorizedUris: [], allowAllUris: false });
+  });
+
+  it("a field that is not a literal host drops the entry", async () => {
+    const spec = await resolveWith(ctx, integManifest(sshAuth), {
+      host: "evil.example.com/x",
+      port: "22",
+      password: "pw",
+    });
+    expect(spec.egress).toEqual({ authorizedUris: [], allowAllUris: false });
   });
 });

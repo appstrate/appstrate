@@ -268,6 +268,35 @@ describe("buildConnectLoginSpec", () => {
     });
     // Placeholder MITM auth so the sidecar wires the listener + source.
     expect(spec.httpDeliveryAuths?.session).toBeDefined();
+    // The login runner's MITM enforces the auth's allowlist (#1458).
+    expect(spec.egress).toEqual({
+      authorizedUris: ["https://api.example.test/**"],
+      allowAllUris: false,
+    });
+  });
+
+  it("carries allow_all_uris onto egress", async () => {
+    const ex = execution();
+    const allowAll = JSON.parse(JSON.stringify(MANIFEST)) as IntegrationManifest;
+    const auth = allowAll.auths!.session as Record<string, unknown>;
+    delete auth.authorized_uris;
+    auth.allow_all_uris = true;
+    ex.manifest = allowAll;
+    const spec = await buildConnectLoginSpec(ex, fakeMcpResolver);
+    expect(spec.egress).toEqual({ authorizedUris: [], allowAllUris: true });
+  });
+
+  it("never forwards a raw credential template (refused on connect auths at import)", async () => {
+    const ex = execution();
+    const templated = JSON.parse(JSON.stringify(MANIFEST)) as IntegrationManifest;
+    (templated.auths!.session as Record<string, unknown>).authorized_uris = [
+      "https://api.example.test/**",
+      "https://{$credential.host}/**",
+    ];
+    ex.manifest = templated;
+    const spec = await buildConnectLoginSpec(ex, fakeMcpResolver);
+    expect(spec.egress?.authorizedUris).toEqual(["https://api.example.test/**"]);
+    expect(spec.connectLogin!.authorizedUris).toEqual(["https://api.example.test/**"]);
   });
 
   it("throws when the auth has no delivery.http", async () => {

@@ -86,6 +86,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `invalid_manifest`. Write `$['x-auth-token']`, `$.data[0]`, `$.sub`. A login
   selector's `[-1]` now selects the last element; the previous engine
   selected nothing.
+- **`integrationManifestSchema`** (`@appstrate/core/integration`) validates
+  templated `auths.{key}.authorized_uris` entries (`{$credential.<field>}`,
+  rendered per connection by `renderAuthorizedUris`): every referenced field
+  must be a `credentials.schema` property listed in its `required`, and a
+  template is refused on an `oauth2` auth, on an auth declaring `connect` and
+  on an auth exposing `api_call`.
+  The private delivery-reference extractor now uses the shared
+  `credentialTemplateRefs`. The `@appstrate/afps-shared` range moves to
+  `^0.9.1`, which must be on npm before this release is published.
+- **BREAKING: `IntegrationSpawnSpec.needsEgress` is removed, replaced by
+  `IntegrationSpawnSpec.egress`** (`@appstrate/core/sidecar-types`,
+  `{ authorizedUris: string[]; allowAllUris: boolean }`) — the local runner's
+  egress allowlist: the connection's rendered `authorized_uris` plus
+  `allow_all_uris`, set for every local runner whose auth declares an outbound
+  surface (mtls, `delivery.http` and `connect.tool` runners included) and
+  enforced by the sidecar listener that runner goes through (issue #1458).
+  `HttpDeliveryAuthSpec.authorizedUris` now carries the rendered list too.
 - **`SubscriptionChatModel.input`** (`@appstrate/core/chat-contract`) is typed
   `ModelInputModality[] | null` instead of `string[] | null`.
 - **`formatErrorChain`** (`@appstrate/core/errors`) starts a cause as a new

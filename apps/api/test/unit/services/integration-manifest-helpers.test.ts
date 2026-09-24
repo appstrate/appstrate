@@ -11,6 +11,8 @@ import { describe, it, expect } from "bun:test";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   renderCredentialTemplate,
+  renderAuthAuthorizedUris,
+  runnerEgressFor,
   getIntegrationSourceKind,
   getLocalServerRef,
   getRemoteSource,
@@ -175,5 +177,52 @@ describe("getAppstrateConnectMeta", () => {
   it("returns undefined when the connect block or meta is absent", () => {
     expect(getAppstrateConnectMeta(undefined)).toBeUndefined();
     expect(getAppstrateConnectMeta({ tool: {} })).toBeUndefined();
+  });
+});
+
+describe("renderAuthAuthorizedUris", () => {
+  const ssh = { authorized_uris: ["ssh://{$credential.host}:{$credential.port}"] };
+
+  it("renders a templated entry from the connection's fields", () => {
+    expect(renderAuthAuthorizedUris(ssh, { host: "h", port: "22" })).toEqual(["ssh://h:22"]);
+  });
+
+  it("drops a templated entry whose field is missing (deny-all), never the raw template", () => {
+    expect(renderAuthAuthorizedUris(ssh, { host: "h" })).toEqual([]);
+  });
+
+  it("drops a templated entry whose value is not a literal host label or port", () => {
+    expect(renderAuthAuthorizedUris(ssh, { host: "a.com:443", port: "22" })).toEqual([]);
+    expect(renderAuthAuthorizedUris(ssh, { host: "*", port: "22" })).toEqual([]);
+  });
+
+  it("passes static entries unchanged and treats an absent list as empty", () => {
+    expect(renderAuthAuthorizedUris({ authorized_uris: ["https://a.example/**"] }, {})).toEqual([
+      "https://a.example/**",
+    ]);
+    expect(renderAuthAuthorizedUris({}, {})).toEqual([]);
+  });
+});
+
+describe("runnerEgressFor", () => {
+  it("is undefined when the auth declares no outbound surface", () => {
+    expect(runnerEgressFor({}, [])).toBeUndefined();
+    expect(runnerEgressFor({ authorized_uris: [] }, [])).toBeUndefined();
+  });
+
+  it("carries the rendered list, even when rendering emptied it (deny-all)", () => {
+    const auth = { authorized_uris: ["ssh://{$credential.host}:22"] };
+    expect(runnerEgressFor(auth, [])).toEqual({ authorizedUris: [], allowAllUris: false });
+    expect(runnerEgressFor(auth, ["ssh://h:22"])).toEqual({
+      authorizedUris: ["ssh://h:22"],
+      allowAllUris: false,
+    });
+  });
+
+  it("carries allow_all_uris", () => {
+    expect(runnerEgressFor({ allow_all_uris: true }, [])).toEqual({
+      authorizedUris: [],
+      allowAllUris: true,
+    });
   });
 });

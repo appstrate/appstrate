@@ -53,6 +53,8 @@ import {
   getIntegrationSourceKind,
   getLocalServerRef,
   getAppstrateConnectMeta,
+  renderAuthAuthorizedUris,
+  runnerEgressFor,
   type AfpsManifestAuth,
 } from "../integration-manifest-helpers.ts";
 import {
@@ -254,7 +256,10 @@ export async function buildConnectLoginSpec(
 
   const connectMeta = getAppstrateConnectMeta(auth.connect);
   const reauthOn = connectMeta?.reauth_on;
-  const authorizedUris = auth.authorized_uris ?? [];
+  // Templates are refused on connect auths at import; rendering against no
+  // fields keeps the static entries and fails closed on anything else.
+  const authorizedUris = renderAuthAuthorizedUris(auth, {});
+  const egress = runnerEgressFor(auth, authorizedUris);
 
   return {
     integrationId: execution.integrationId,
@@ -315,6 +320,8 @@ export async function buildConnectLoginSpec(
       inputs: stringifyInputs(execution.inputs),
       ...(reauthOn ? { reauthOn: [...reauthOn] } : {}),
     },
+    // The login runner's MITM enforces the same allowlist as an agent run's.
+    ...(egress ? { egress } : {}),
   };
 }
 
