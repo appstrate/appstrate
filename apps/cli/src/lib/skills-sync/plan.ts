@@ -337,11 +337,10 @@ interface Claimant {
 
 /**
  * Newcomers collide in input order (sorted by package id); every skill before
- * any agent (D23). `incumbents` (slug → package id) keeps a wanted package on
- * its installed PREFERRED name: an unattended sync must never make
- * `/appstrate:<slug>` launch ANOTHER package. A fallback is derived from the
- * package id, so it simply re-derives. An unresolved incumbent (absent here)
- * keeps its name unconditionally.
+ * any agent (D23). `incumbents` (slug → wanted package id) are never handed to
+ * another package this run: an unattended sync must never make
+ * `/appstrate:<slug>` launch a different one. A package takes its preferred
+ * slug when free, else the one it holds, else a fallback.
  */
 export function assignSlugs(
   skills: ResolvedSkill[],
@@ -366,24 +365,17 @@ export function assignSlugs(
     }
   });
 
-  const preferredOf = new Map(
-    [...skillClaims, ...agentClaims].map(({ packageId, preferred }): [string, string] => [
-      packageId,
-      preferred,
-    ]),
-  );
-  const reserved = new Map(
-    [...incumbents].filter(([slug, packageId]) => {
-      const preferred = preferredOf.get(packageId);
-      return preferred === undefined || slug === preferred;
-    }),
-  );
   const taken = new Set<string>();
-  const pick = (claimant: Claimant): SlugClaim => {
+  const pick = ({ packageId, preferred, prefix }: Claimant): SlugClaim => {
     const blocked = new Set(taken);
-    for (const [slug, holder] of reserved) if (holder !== claimant.packageId) blocked.add(slug);
-    const { packageId, preferred, prefix } = claimant;
-    const slug = blocked.has(preferred) ? collisionSlug(packageId, blocked, prefix) : preferred;
+    let own: string | undefined;
+    for (const [slug, holder] of incumbents) {
+      if (holder !== packageId) blocked.add(slug);
+      else own ??= slug;
+    }
+    const slug = !blocked.has(preferred)
+      ? preferred
+      : (own ?? collisionSlug(packageId, blocked, prefix));
     return slug === preferred ? { slug } : { slug, renamedFrom: preferred };
   };
 
@@ -396,7 +388,6 @@ export function assignSlugs(
     const { view } = claimant;
     try {
       const naming = pick(claimant);
-      // Rendered before it is taken: a command that fails leaves its name free.
       const files = materializeAgent(naming.slug, view);
       taken.add(naming.slug);
       planned.push({
@@ -408,7 +399,6 @@ export function assignSlugs(
         ...naming,
       });
     } catch (error) {
-      if (reserved.get(claimant.preferred) === view.packageId) reserved.delete(claimant.preferred);
       failed.push({ packageId: view.packageId, error });
     }
   }

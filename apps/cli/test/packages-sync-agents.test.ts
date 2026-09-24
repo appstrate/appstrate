@@ -516,6 +516,25 @@ describe("packages sync — an installed name stays with its package", () => {
     expect(await readdir(pluginSkills())).toEqual(["report"]);
     expect(await readText(commandFile("report"))).toContain("Alpha.");
   });
+
+  it("settles two disagreeing ledgers by target order, the plugin first", async () => {
+    const zeta: SkillFixture = { id: "@zeta/report", skillMd: skillMd("report", "Zeta.") };
+    const alpha: SkillFixture = { id: "@alpha/report", skillMd: skillMd("report", "Alpha.") };
+    // codex records `report` for zeta, the plugin records it for alpha.
+    serve([], { skills: [zeta] });
+    await packagesSyncCommand({ target: ["codex"] }, createMemoryIO().io);
+    serve([], { skills: [alpha] });
+    await packagesSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
+
+    serve([], { skills: [alpha, zeta] });
+    await packagesSyncCommand({ target: ["codex", "claude-plugin"] }, createMemoryIO().io);
+
+    const codex = join(home, ".agents", "skills");
+    expect(await readText(commandFile("report"))).toContain("Alpha.");
+    expect(await readText(commandFile("zeta-report"))).toContain("Zeta.");
+    expect(await readText(join(codex, "report", "SKILL.md"))).toContain("Alpha.");
+    expect(await readText(join(codex, "zeta-report", "SKILL.md"))).toContain("Zeta.");
+  });
 });
 
 describe("packages sync — stored values stay on the server (D20)", () => {

@@ -348,7 +348,7 @@ describe("assignSlugs — an installed name stays with its package", () => {
     expect(slugsOf(planned)).toEqual({ "@alpha/report": "alpha-report", "@zeta/report": "report" });
   });
 
-  it("gives a fallback holder the same fallback, and the name once its holder left", () => {
+  it("keeps a fallback holder on its fallback, and gives it the name once its holder left", () => {
     const agents = [view("@alpha/report"), view("@zeta/report")];
     const both = new Map([
       ["run-report", "@zeta/report"],
@@ -365,9 +365,52 @@ describe("assignSlugs — an installed name stays with its package", () => {
     });
   });
 
-  it("releases a name that is no longer one its holder would get", () => {
-    // `@zed/tools` was installed as `pdf`, then renamed its frontmatter; it sorts
-    // after the newcomer, so only an upfront check can free `pdf` in time.
+  // A newcomer whose PREFERRED slug is somebody's installed fallback.
+  const held = new Map([
+    ["run-report", "@zeta/report"],
+    ["run-alpha-report", "@alpha/report"],
+  ]);
+
+  it("never hands a held fallback to a newcomer that prefers it", () => {
+    const agents = [view("@a/alpha-report"), view("@alpha/report"), view("@zeta/report")];
+
+    expect(slugsOf(assignSlugs([], agents, held).planned)).toEqual({
+      "@a/alpha-report": "run-a-alpha-report",
+      "@alpha/report": "run-alpha-report",
+      "@zeta/report": "run-report",
+    });
+  });
+
+  it("never hands a held agent fallback to a skill that prefers it", () => {
+    const skills = [resolved({ packageId: "@a/tool", frontmatterName: "run-alpha-report" })];
+    const agents = [view("@alpha/report"), view("@zeta/report")];
+
+    expect(slugsOf(assignSlugs(skills, agents, held).planned)).toEqual({
+      "@a/tool": "a-tool",
+      "@alpha/report": "run-alpha-report",
+      "@zeta/report": "run-report",
+    });
+  });
+
+  it("leaves a cycle where it is", () => {
+    // Each holds the other's preferred name.
+    const { planned } = assignSlugs(
+      [
+        resolved({ packageId: "@acme/one", frontmatterName: "one" }),
+        resolved({ packageId: "@acme/two", frontmatterName: "two" }),
+      ],
+      [],
+      new Map([
+        ["two", "@acme/one"],
+        ["one", "@acme/two"],
+      ]),
+    );
+
+    expect(slugsOf(planned)).toEqual({ "@acme/one": "two", "@acme/two": "one" });
+  });
+
+  it("moves a renamed holder to its new name and keeps its old one from others this run", () => {
+    // `@zed/tools` was installed as `pdf`, then renamed its frontmatter to `tools`.
     const { planned } = assignSlugs(
       [
         resolved({ packageId: "@acme/pdf", frontmatterName: "pdf" }),
@@ -377,7 +420,21 @@ describe("assignSlugs — an installed name stays with its package", () => {
       new Map([["pdf", "@zed/tools"]]),
     );
 
-    expect(slugsOf(planned)).toEqual({ "@acme/pdf": "pdf", "@zed/tools": "tools" });
+    expect(slugsOf(planned)).toEqual({ "@acme/pdf": "acme-pdf", "@zed/tools": "tools" });
+
+    // Next run the ledger no longer holds `pdf`: it is the newcomer's to take.
+    const next = assignSlugs(
+      [
+        resolved({ packageId: "@acme/pdf", frontmatterName: "pdf" }),
+        resolved({ packageId: "@zed/tools", frontmatterName: "tools" }),
+      ],
+      [],
+      new Map([
+        ["acme-pdf", "@acme/pdf"],
+        ["tools", "@zed/tools"],
+      ]),
+    );
+    expect(slugsOf(next.planned)).toEqual({ "@acme/pdf": "pdf", "@zed/tools": "tools" });
   });
 });
 
