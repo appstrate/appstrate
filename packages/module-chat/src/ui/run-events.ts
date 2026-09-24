@@ -128,12 +128,7 @@ const runUpdateLiteSchema = z.object({
 });
 type RunUpdateLite = z.infer<typeof runUpdateLiteSchema>;
 
-/**
- * The same subset read from the `GET /api/runs/:id` resource, which spells the
- * two timestamps snake_case (`RunWireDto.started_at`/`completed_at`) where the
- * `run_update` frame says `startedAt`/`completedAt` — mapped onto the frame's
- * names so both sources feed the panel one shape.
- */
+/** The same subset from `GET /api/runs/:id`, its snake_case timestamps mapped onto the frame's. */
 const runResourceLiteSchema = runUpdateLiteSchema
   .omit({ startedAt: true, completedAt: true })
   .extend({
@@ -210,8 +205,6 @@ export function parseRunUpdateFrame(raw: string): RunUpdateLite | undefined {
  * "Lancement" for an already-running run until the first live frame arrives.
  */
 export function parseRunResource(body: unknown): RunUpdateLite | undefined {
-  // Zod strips every key outside the subset — extra resource fields are
-  // ignored, never asserted away.
   const parsed = runResourceLiteSchema.safeParse(body);
   return parsed.success ? parsed.data : undefined;
 }

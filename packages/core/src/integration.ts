@@ -137,15 +137,10 @@ export interface IdentityClaimKeyViolation {
 }
 
 /**
- * List the keys of `auths.<k>.identity_claims` and the names in
- * `auths.<k>.connect.login.identity_outputs` that are not snake_case.
- * The platform's `extractIdentity` reads `account_id` only, so a camelCase
- * `accountId` would silently fall back to email/sub.
- *
- * A WRITE-path policy, deliberately not part of {@link integrationManifestSchema}:
- * that schema also parses stored manifests, and a published version declaring
- * `accountId` is immutable — it must stay readable (its connections key on the
- * email/sub fallback), while no new content may declare it.
+ * List the `auths.<k>.identity_claims` keys and `connect.login.identity_outputs`
+ * names that are not snake_case (`extractIdentity` reads `account_id` only).
+ * A WRITE-path policy, not part of {@link integrationManifestSchema}: that schema
+ * also parses immutable published manifests, which must stay readable.
  */
 export function findNonSnakeCaseIdentityClaimKeys(manifest: unknown): IdentityClaimKeyViolation[] {
   if (typeof manifest !== "object" || manifest === null) return [];
@@ -472,8 +467,8 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
     }
   }
 
-  // (6) `default_tools` (Appstrate extension, not in the AFPS spec) — the tool selection an agent inherits when
-  // it depends on this integration but omits `integrations_configuration.<id>`.
+  // (6) `default_tools` (Appstrate extension, not in the AFPS spec) — the tool selection an agent
+  // inherits when it depends on this integration but omits `integrations_configuration.<id>`.
   //   - `"*"` requires `allow_undeclared_tools: true` (same gate as an agent's
   //     wildcard selection — a default cannot grant the passthrough surface the
   //     integration author did not opt into).

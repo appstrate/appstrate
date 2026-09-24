@@ -28,10 +28,7 @@ export interface PackageTypeConfig {
   labelSingular: string;
   /** Producer-side check for this type's authored content, run by every path that WRITES it. */
   validateContent?: (content: string) => CompanionFileViolation | null;
-  /**
-   * Producer-side policy on this type's manifest, run by the same write paths
-   * and never on read: a stored manifest that predates it stays readable.
-   */
+  /** Producer-side manifest policy, same write paths, never on read. */
   checkManifest?: (manifest: unknown) => { path: (string | number)[]; message: string }[];
   /**
    * Whether `manifest.json` is a STORED file of this type's archive.

@@ -1402,9 +1402,8 @@ export interface LlmUsageLedgerRow {
 }
 
 /**
- * An audit `before` / `after` payload: camelCase keys (CASING_CONVENTIONS 4m), so a
- * snake_case request body — or a `Record<string, unknown>` that could hide one — does
- * not compile. Checks top-level keys only; values (a wire JSONB field) are opaque.
+ * Audit `before` / `after` payload with camelCase top-level keys (CASING_CONVENTIONS 4m):
+ * a raw snake_case body, or a `Record<string, unknown>` that could hide one, does not compile.
  */
 export type AuditPayload = { [key: string]: unknown; [key: `${string}_${string}`]: never };
 

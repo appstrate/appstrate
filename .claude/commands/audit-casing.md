@@ -41,7 +41,7 @@ The audit references `docs/CASING_CONVENTIONS.md` as authoritative. It verifies:
    - `ExecutionContext` (4r)
    - Firecracker runner-daemon protocol (4s)
    - Sidecar / agent-container boot contracts (4t)
-5. **Zone 5 — Documented asymmetries**: env-vars JSON split (5a), SSE vs REST (5b), standalone model/proxy/credential ids (5c), Better Auth plugin management surfaces (5d)
+5. **Zone 5 — Documented asymmetries**: env-vars JSON split (5a), SSE vs REST (5b), model/proxy/credential ids, name-based (5c), Better Auth plugin management surfaces (5d)
 
 ## Automated gates (run these first)
 
@@ -217,7 +217,7 @@ Verify files:
 - afps-spec/packages/schema/src/schemas.ts (Zod source — read origin/main of the afps-spec repo)
 - afps-spec/packages/schema/v0/*.schema.json (generated JSON Schema)
 - appstrate/packages/core/src/validation.ts
-- appstrate/packages/core/src/integration.ts (incl. the snake_case check on identity_claims keys and identity_outputs)
+- appstrate/packages/core/src/integration.ts (incl. `findNonSnakeCaseIdentityClaimKeys` on identity_claims keys and identity_outputs — a WRITE-path policy wired through `CONFIG_BY_TYPE.integration.checkManifest` in apps/api/src/services/package-items/config.ts, deliberately NOT in `integrationManifestSchema`)
 - appstrate/packages/core/src/mcp-server.ts
 - appstrate/packages/core/src/form.ts (reads snake_case wrappers only; RJSF vendor keys are the documented exception)
 - appstrate/packages/core/schema/*.schema.json
@@ -248,7 +248,7 @@ Scope:
 
 Method:
 1. Extract the full set of property names emitted in real `c.json(...)` projections and accepted by request Zod schemas.
-2. For EACH camelCase name: is its literal name on a carve-out list of the doc (4b universal list incl. `runId`; 4c; 4e names; 4n; 5c on the surfaces it names; 5d)? Yes → OK. No → BUG. Match by NAME, never by suffix similarity. Pay special attention to `*By`, `*Name`, `*Email`, `*Url`, `*Id` not on the 4b list, and boolean flags.
+2. For EACH camelCase name: is its literal name on a carve-out list of the doc (4b universal list incl. `runId`; 4c; 4e names; 4n; 5c everywhere it holds that id; 5d only on its own surface)? Yes → OK. No → BUG. Match by NAME, never by suffix similarity. Pay special attention to `*By`, `*Name`, `*Email`, `*Url`, `*Id` not on the 4b list, and boolean flags.
 3. For each snake_case twin of a 4b name (`run_id`, `space_id`, `created_at`, …): BUG unless it is one of the doc's enumerated counter-exceptions.
 4. Model-provider objects: one object = one casing family; only 4e names, 4b names and the 5c ids stay camelCase.
 
@@ -338,7 +338,7 @@ Not in this list, and do not add them back: `module-claude-code` and `cloud` (mo
 
 For each:
 - Grep for any 1.x manifest residue (displayName, schemaVersion, fileConstraints, etc.)
-- Grep for reads/writes of wire names the platform renamed (a client sending `modelId` on a run-launch body, reading `requestId` from a problem document, posting `accessToken` to the redeem route)
+- Grep for reads/writes of wire names the platform renamed (a client sending `model_id` on a run-launch body or `credential_id` to `/discover`, reading `requestId` from a problem document, posting `accessToken` to the redeem route)
 - Classify: legit (internal TS, banner, historical changelog) vs bug
 
 Test fixtures inside appstrate:

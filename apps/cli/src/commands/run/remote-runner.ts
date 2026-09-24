@@ -83,10 +83,7 @@ const MAX_CONSECUTIVE_RECORD_POLL_FAILURES = 20;
 // `run.ts` and the test suite, take them from `@appstrate/shared-types`
 // directly), so the re-export was a second name for the same type and is gone.
 
-/**
- * Subset of the run returned by `GET /api/runs/:id`, derived from the server's
- * wire DTO so a client/server spelling drift fails to compile.
- */
+/** Subset of `GET /api/runs/:id`, derived from the wire DTO so spelling drift fails to compile. */
 export type RemoteRunRecord = Pick<
   RunWireDto,
   | "id"

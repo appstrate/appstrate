@@ -4,12 +4,15 @@
  * Casing gate over the whole OpenAPI spec (core + every module), per
  * `docs/CASING_CONVENTIONS.md`. It DISCOVERS leaks instead of checking known
  * names: every property name, query parameter name and example key that
- * holds an uppercase letter must be on `CAMEL_CASE_CARVE_OUTS` — the doc's
- * rule is name-based, a field qualifies only by its literal name. It also
- * fails on the snake_case twin of a 4b name (`created_at`, `run_id`, …),
- * which a camelCase-only check cannot see, outside `SNAKE_TWIN_EXCEPTIONS`.
+ * holds an uppercase letter must be on `CAMEL_CASE_CARVE_OUTS`. Most entries
+ * are name-based (the name qualifies wherever it appears); the 5d entries
+ * mirror one Better Auth plugin table and qualify only `within` the JSON
+ * pointers of that surface. It also fails on the snake_case twin of a 4b name
+ * (`created_at`, `run_id`, …), which a camelCase-only check cannot see,
+ * outside `SNAKE_TWIN_EXCEPTIONS`.
  *
- * Both lists only shrink: an entry that no longer matches anything fails too.
+ * Every list only shrinks: an entry that matches nothing (within its scope)
+ * fails too.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -19,7 +22,23 @@ import { collectModuleOpenApi } from "../../../../scripts/lib/module-openapi.ts"
 const UNIVERSAL = "4b universal DB-convention field";
 const PAGINATION = "pagination envelope / cursor params";
 
-export const CAMEL_CASE_CARVE_OUTS: Record<string, string> = {
+/** A reason alone applies everywhere; `within` limits the entry to JSON-pointer prefixes. */
+type CarveOut = string | { reason: string; within: readonly string[] };
+
+const OAUTH_CLIENTS = {
+  reason: "5d Better Auth plugin mirror (OAuth clients)",
+  within: [
+    "#/components/schemas/OAuthClientObject/",
+    "#/components/schemas/OAuthClientWithSecret/",
+    "#/paths/~1api~1oauth~1clients",
+  ],
+};
+const CLI_SESSIONS = {
+  reason: "5d Better Auth plugin mirror (CLI sessions)",
+  within: ["#/paths/~1api~1auth~1cli~1", "#/paths/~1api~1orgs~1{orgId}~1cli-sessions"],
+};
+
+export const CAMEL_CASE_CARVE_OUTS: Record<string, CarveOut> = {
   createdAt: UNIVERSAL,
   updatedAt: UNIVERSAL,
   expiresAt: UNIVERSAL,
@@ -73,28 +92,28 @@ export const CAMEL_CASE_CARVE_OUTS: Record<string, string> = {
 
   durationMs: "4i canonical run events (runner finalize body)",
 
-  modelId: "5c standalone model/proxy/credential ids",
-  proxyId: "5c standalone model/proxy/credential ids",
-  credentialId: "5c standalone model/proxy/credential ids",
+  modelId: "5c org model/proxy/credential ids",
+  proxyId: "5c org model/proxy/credential ids",
+  credentialId: "5c org model/proxy/credential ids",
 
-  clientId: "5d Better Auth plugin mirror (OAuth clients)",
-  clientSecret: "5d Better Auth plugin mirror (OAuth clients)",
-  redirectUris: "5d Better Auth plugin mirror (OAuth clients)",
-  postLogoutRedirectUris: "5d Better Auth plugin mirror (OAuth clients)",
-  isFirstParty: "5d Better Auth plugin mirror (OAuth clients)",
-  allowSignup: "5d Better Auth plugin mirror (OAuth clients)",
-  signupRole: "5d Better Auth plugin mirror (OAuth clients)",
-  signupSpaceAssignments: "5d Better Auth plugin mirror (OAuth clients)",
-  referencedOrgId: "5d Better Auth plugin mirror (OAuth clients)",
-  referencedSpaceId: "5d Better Auth plugin mirror (OAuth clients)",
-  familyId: "5d Better Auth plugin mirror (CLI sessions)",
-  deviceName: "5d Better Auth plugin mirror (CLI sessions)",
-  userAgent: "5d Better Auth plugin mirror (CLI sessions)",
-  createdIp: "5d Better Auth plugin mirror (CLI sessions)",
-  lastUsedIp: "5d Better Auth plugin mirror (CLI sessions)",
-  userName: "5d Better Auth plugin mirror (CLI sessions)",
-  userEmail: "5d Better Auth plugin mirror (CLI sessions)",
-  revokedCount: "5d Better Auth plugin mirror (CLI sessions)",
+  clientId: OAUTH_CLIENTS,
+  clientSecret: OAUTH_CLIENTS,
+  redirectUris: OAUTH_CLIENTS,
+  postLogoutRedirectUris: OAUTH_CLIENTS,
+  isFirstParty: OAUTH_CLIENTS,
+  allowSignup: OAUTH_CLIENTS,
+  signupRole: OAUTH_CLIENTS,
+  signupSpaceAssignments: OAUTH_CLIENTS,
+  referencedOrgId: OAUTH_CLIENTS,
+  referencedSpaceId: OAUTH_CLIENTS,
+  familyId: CLI_SESSIONS,
+  deviceName: CLI_SESSIONS,
+  userAgent: CLI_SESSIONS,
+  createdIp: CLI_SESSIONS,
+  lastUsedIp: CLI_SESSIONS,
+  userName: CLI_SESSIONS,
+  userEmail: CLI_SESSIONS,
+  revokedCount: CLI_SESSIONS,
 };
 
 /**
@@ -102,12 +121,16 @@ export const CAMEL_CASE_CARVE_OUTS: Record<string, string> = {
  * walked. Declared schemas are always walked: a property the spec names is a
  * field, whatever object it sits in.
  */
-const OPAQUE_EXAMPLE_KEYS: Record<string, string> = {
+const OPAQUE_EXAMPLE_KEYS: Record<string, CarveOut> = {
   input: "runs.input — keyed by the agent's own input schema (4g)",
   checkpoint: "runs.checkpoint — agent-written (4g)",
-  payload: "webhook delivery payload (4j)",
+  payload: { reason: "webhook delivery payload (4j)", within: ["#/paths/~1api~1webhooks"] },
   headers: "HTTP field names (RFC 9110)",
 };
+
+const applies = (entry: CarveOut | undefined, at: string) =>
+  entry !== undefined &&
+  (typeof entry === "string" || entry.within.some((prefix) => at.startsWith(prefix)));
 
 const toSnake = (name: string) => name.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 
@@ -139,7 +162,7 @@ const pointer = (base: string, key: string | number) =>
 function walkExample(value: unknown, at: string, camel: Finding[]): void {
   if (!value || typeof value !== "object") return;
   for (const [key, child] of Object.entries(value)) {
-    if (key in OPAQUE_EXAMPLE_KEYS) continue;
+    if (applies(OPAQUE_EXAMPLE_KEYS[key], at)) continue;
     if (!Array.isArray(value) && /[A-Z]/.test(key)) camel.push({ name: key, at: pointer(at, key) });
     walkExample(child, pointer(at, key), camel);
   }
@@ -192,13 +215,14 @@ async function scan(): Promise<{ camel: Finding[]; twins: Finding[] }> {
 const { camel, twins } = await scan();
 
 describe("OpenAPI casing", () => {
-  it("spells every camelCase name from the carve-out list", () => {
-    const leaks = camel.filter((f) => !(f.name in CAMEL_CASE_CARVE_OUTS));
-    expect(leaks.map((f) => `${f.name} at ${f.at}`)).toEqual([]);
+  const allowed = (f: Finding) => applies(CAMEL_CASE_CARVE_OUTS[f.name], f.at);
+
+  it("spells every camelCase name from the carve-out list, within its scope", () => {
+    expect(camel.filter((f) => !allowed(f)).map((f) => `${f.name} at ${f.at}`)).toEqual([]);
   });
 
-  it("carries no carve-out entry that nothing uses", () => {
-    const used = new Set(camel.map((f) => f.name));
+  it("carries no carve-out entry that nothing uses within its scope", () => {
+    const used = new Set(camel.filter(allowed).map((f) => f.name));
     expect(Object.keys(CAMEL_CASE_CARVE_OUTS).filter((name) => !used.has(name))).toEqual([]);
   });
 

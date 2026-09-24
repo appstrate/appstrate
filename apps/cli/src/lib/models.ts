@@ -15,11 +15,8 @@ import type { OrgModelInfo } from "@appstrate/shared-types";
 import { apiList } from "./api.ts";
 
 /**
- * One row of `GET /api/models`, narrowed to the fields the CLI reads. Derived
- * from the server's wire type so a renamed or retyped field fails to compile
- * here instead of reading `undefined`. The listing is the non-loopback view:
- * an aliased preset arrives with its backing (`apiShape`, `providerId`, …)
- * nulled — see `projectAliasedModel`.
+ * One row of `GET /api/models`, derived from the server's wire type so a renamed
+ * field fails to compile. An aliased preset arrives with its backing nulled.
  */
 export type ModelPreset = Pick<
   OrgModelInfo,

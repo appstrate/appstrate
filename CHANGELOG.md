@@ -246,31 +246,29 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   provider registry's models) carry `reasoning.temperature_compatible` and
   `reasoning.native_levels`. The old names are refused with a `400`. Stored
   settings are rewritten by `scripts/migration/0024` (operators entry above).
-- **BREAKING (API, CLI): run-launch and chat bodies take `model_id` /
-  `proxy_id`** (#1545) — `POST /api/agents/{scope}/{name}/run`,
-  `POST /api/runs/inline` (and `/inline/validate`), the MCP `run_and_wait`
-  tool, and `POST /api/chat` (`model_id`). Their other fields were already
-  snake_case. The chat body is now strict, so an old `modelId` is a `400`
-  instead of a turn silently run on the default model. `modelId` / `proxyId`
-  stay camelCase on the standalone surfaces: `/api/agents/{scope}/{name}/model`
-  and `/proxy`, `/api/models*`, `PUT /api/proxies/default`, the space package
-  and `GET …/run-config`. A CLI published before this release gets a `400`
-  from `appstrate run <package>` whenever it sends a model or a proxy, and its
-  local runs ignore the space's reasoning level: release `cli@` with the API.
+  The chat's saved generation preference (`localStorage`
+  `appstrate.chat.generation`, `{ reasoningLevel }`) no longer parses and
+  resets once to the defaults. A CLI published before this release runs
+  `appstrate run <package>` locally without the space's reasoning level:
+  release `cli@` with the API.
+- **BREAKING (chat): `POST /api/chat` refuses unknown body fields** (#1545)
+  with a `400` instead of dropping them, so a misspelled field no longer runs
+  the turn on the default model in silence.
 - **BREAKING (API): the model-provider surfaces use one casing per object**
   (#1545). Only the provider-registry names (`providerId`, `apiShape`,
   `authMode`, `displayName`, `iconUrl`, …), the universal ids and timestamps,
-  and the `modelId` / `credentialId` of `/api/models*` stay camelCase; every
-  other field is snake_case. Credentials: `api_key` and `base_url_override` on
+  and the org model / proxy / credential ids `modelId`, `proxyId`,
+  `credentialId` (camelCase wherever they appear) stay camelCase; every other
+  field is snake_case. Credentials: `api_key` and `base_url_override` on
   create and update (were `apiKey`, `baseUrlOverride`), `base_url`, `api_key`,
   `existing_key_id` on the inline test, `base_url` on the credential;
-  `POST …/discover` takes `providerId` (was `provider_id`), like the other
-  bodies. Org models: `provider_name`, `base_url`; seed `model_ids` and
-  `promoted_default`; test `api_key`, `existing_model_id`. OAuth pairing:
-  `credential_id` and `consumed_at` on the pairing, and the redeem route
-  (`POST /api/model-providers-oauth/pair/redeem`) takes `access_token`,
-  `refresh_token`, `account_id` (RFC 6749 names) and returns `credential_id`
-  and `available_model_ids`. The old names are refused with a `400`.
+  `POST …/discover` takes `credentialId` and `providerId` (were
+  `credential_id`, `provider_id`), like the other bodies. Org models:
+  `provider_name`, `base_url`; seed `model_ids` and `promoted_default`; test
+  `api_key`, `existing_model_id`. OAuth pairing: `consumed_at` on the pairing,
+  and the redeem route (`POST /api/model-providers-oauth/pair/redeem`) takes
+  `access_token`, `refresh_token`, `account_id` (RFC 6749 names) and returns
+  `available_model_ids`. The old names are refused with a `400`.
 - **BREAKING (sidecar): `GET /internal/oauth-token/{credentialId}` (and
   `/refresh`) returns `access_token` and `account_id`** (#1545). The sidecar
   reads only those names, so the `SIDECAR_IMAGE` must be the one of this
@@ -295,9 +293,12 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   files follow** (#1545). `GET /api/notifications` returns `runId` on each
   notification, `packageId` in a `package_shared` payload (was `package_id`),
   and the list envelope (`object: "list"`, `hasMore`) instead of `has_more`.
-  The File DTO carries `runId`, and `GET /api/files` filters on `?runId=`
-  (was `?run_id=`); the MCP `list_files` output mirrors it. Stored
-  notification payloads are rewritten by `scripts/migration/0026`.
+  A `run_completed` payload carries `packageId` (was `agent_id`). The File
+  DTO carries `runId`, and `GET /api/files` filters on `?runId=` (was
+  `?run_id=`); the MCP `list_files` tool mirrors it — its `runId` argument
+  (was `run_id`) and output — and refuses an unknown argument instead of
+  ignoring it. Stored notification payloads are rewritten by
+  `scripts/migration/0026`.
 - **BREAKING (API): platform-written keys in returned JSONB are snake_case**
   (#1545). `spaces.settings.branding` is `logo_url`, `primary_color`,
   `accent_color`, `support_email`, `from_name` (rewritten by
@@ -308,12 +309,14 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   The runner's `file.published` event carries `fileId`; the runtime image must
   be the one of this release for published files to be logged.
 - **BREAKING (integrations): identity claim keys are snake_case** (#1545).
-  Core validation refuses an `identity_claims` key or a
-  `connect.login.identity_outputs` entry that is not snake_case, and the
-  account key is read from `account_id` only: a manifest declaring
-  `accountId` no longer validates. The 37 system integrations that declared
-  camelCase keys (`accountId`, `avatarUrl`, `teamName`, …) get a patch
-  release (e.g. `@appstrate/gmail` 1.1.6, `@appstrate/github` 1.0.5).
+  Every integration write (create, save, publish, import) refuses an
+  `identity_claims` key or a `connect.login.identity_outputs` entry that is
+  not snake_case (`findNonSnakeCaseIdentityClaimKeys` in core), and the
+  account key is read from `account_id` only. A stored manifest declaring
+  `accountId` still reads; its new connections key on the `email` / `sub`
+  fallback. The 37 system integrations that declared camelCase keys
+  (`accountId`, `avatarUrl`, `teamName`, …) get a patch release (e.g.
+  `@appstrate/gmail` 1.1.6, `@appstrate/github` 1.0.5).
   `scripts/migration/0025` rewrites the stored `identity_claims` keys of
   existing connections; their account keys do not change.
 - **BREAKING (audit): four more audit payloads use camelCase keys** (#1545):

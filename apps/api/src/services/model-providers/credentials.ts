@@ -41,11 +41,7 @@ interface ApiKeyBlob {
   apiKey: string;
 }
 
-/**
- * Resolved OAuth access token — the TS-internal view of
- * {@link OAuthTokenResponse} (the snake_case wire shape consumed by the
- * sidecar, produced by {@link serializeOAuthTokenResponse}).
- */
+/** Resolved OAuth access token; {@link serializeOAuthTokenResponse} maps it to the wire. */
 export interface OAuthToken {
   accessToken: string;
   /** Epoch ms. `null` = unknown expiry. */

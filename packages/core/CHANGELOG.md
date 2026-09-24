@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`@appstrate/core/integration`, #1545) — list the `auths.{key}.identity_claims`
   keys and `connect.login.identity_outputs` names that are not snake_case, with
   their manifest path. A write-path policy: the platform refuses such content on
-  save, publish and import, while `integrationManifestSchema` keeps reading a
+  create, save, publish and import, while `integrationManifestSchema` keeps reading a
   stored manifest that predates it (a published version is immutable).
 
 - **`AFPS_SCHEMA_VERSION`** (`@appstrate/core/validation`) — the AFPS

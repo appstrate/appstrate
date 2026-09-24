@@ -1275,8 +1275,8 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
 
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const start = performance.now();
-    // The SDK does not enforce `inputSchema`: an unknown filter (the retired
-    // `run_id`) would otherwise be dropped and widen the listing in silence.
+    // The SDK does not enforce `inputSchema`: an unknown filter would be
+    // dropped and widen the listing in silence.
     const unknown = Object.keys(args).filter((k) => !(k in descriptor.inputSchema.properties!));
     if (unknown.length > 0) {
       throw new McpError(ErrorCode.InvalidParams, `Unknown argument(s): ${unknown.join(", ")}.`);
