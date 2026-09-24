@@ -15,6 +15,7 @@ import {
   seedRun,
   seedOrgModelProviderOAuth,
 } from "../../helpers/seed.ts";
+import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import { assertDbHas, assertDbMissing, expectProblem, getDbRow } from "../../helpers/assertions.ts";
 import { spaces, spacePackages, auditEvents, packages, runs } from "@appstrate/db/schema";
 import { insertShadowPackage } from "../../../src/services/inline-run.ts";
@@ -139,6 +140,30 @@ describe("Spaces API", () => {
       const body = (await res.json()) as any;
       expect(body.object).toBe("space");
       expect(body.name).toBe("Updated Name");
+    });
+
+    it("audits the patch with camelCase keys, not the snake_case body (carve-out 4m)", async () => {
+      const space = await seedSpace({ orgId: ctx.orgId, name: "Audited" });
+      const res = await app.request(`/api/spaces/${space.id}`, {
+        method: "PATCH",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Audited Renamed",
+          default_role: "viewer",
+          settings: { allowedRedirectDomains: ["example.com"] },
+        }),
+      });
+      expect(res.status).toBe(200);
+
+      const [row] = await db
+        .select()
+        .from(auditEvents)
+        .where(and(eq(auditEvents.resourceId, space.id), eq(auditEvents.action, "space.updated")));
+      expect(row!.after).toEqual({
+        name: "Audited Renamed",
+        defaultRole: "viewer",
+        settings: { allowedRedirectDomains: ["example.com"] },
+      });
     });
   });
 
@@ -545,13 +570,13 @@ describe("Spaces API", () => {
 
       const res = await putPackage(packageId, {
         modelId: model.id,
-        generationConfig: { temperature: 0.4 },
+        generation_config: { temperature: 0.4 },
       });
 
       expect(res.status).toBe(400);
       expect(await res.json()).toMatchObject({
         code: "invalid_request",
-        param: "generationConfig",
+        param: "generation_config",
       });
       const [row] = await db
         .select({ modelId: spacePackages.modelId })
@@ -563,20 +588,20 @@ describe("Spaces API", () => {
     // Same refusal, same message, its own wire field — the invariant the
     // hoisted `validateGenerationOverride` establishes across all three routes
     // that run this pipeline (see the sibling case in `agents.test.ts`).
-    it("names the generationConfig field when no model resolves at all", async () => {
+    it("names the generation_config field when no model resolves at all", async () => {
       const packageId = "@testorg/no-model-generation-agent";
       await seedPackage({ id: packageId, orgId: ctx.orgId, homeSpaceId: ctx.defaultSpaceId });
       await seedSpacePackage(ctx.defaultSpaceId, packageId);
 
       const res = await putPackage(packageId, {
         modelId: null,
-        generationConfig: { temperature: 0.4 },
+        generation_config: { temperature: 0.4 },
       });
 
       expect(res.status).toBe(400);
       expect(await res.json()).toMatchObject({
         code: "invalid_request",
-        param: "generationConfig",
+        param: "generation_config",
         detail: "A model must be configured before generation settings can be saved",
       });
     });
@@ -628,6 +653,43 @@ describe("Spaces API", () => {
         .from(spacePackages)
         .where(placementRowWhere(packageId));
       expect(row?.generation).toEqual({});
+    });
+
+    it("stores and answers generation_config with a snake_case reasoning_level", async () => {
+      const packageId = "@testorg/reasoning-agent";
+      await seedPackage({ id: packageId, orgId: ctx.orgId, homeSpaceId: ctx.defaultSpaceId });
+      await seedSpacePackage(ctx.defaultSpaceId, packageId);
+      const credential = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        providerId: TEST_OAUTH_PROVIDER_ID,
+      });
+      const model = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId: credential.id,
+        modelId: "test-reasoning-model",
+      });
+
+      for (const body of [
+        { modelId: model.id, generationConfig: { reasoning_level: "xhigh" } },
+        { modelId: model.id, generation_config: { reasoningLevel: "xhigh" } },
+      ]) {
+        expect((await putPackage(packageId, body)).status).toBe(400);
+      }
+
+      const res = await putPackage(packageId, {
+        modelId: model.id,
+        generation_config: { reasoning_level: "xhigh" },
+      });
+
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect(((await res.json()) as Record<string, unknown>).generation_config).toEqual({
+        reasoning_level: "xhigh",
+      });
+      const [row] = await db
+        .select({ generation: spacePackages.generationConfig })
+        .from(spacePackages)
+        .where(placementRowWhere(packageId));
+      expect(row?.generation).toEqual({ reasoning_level: "xhigh" });
     });
 
     it("404s for a package owned by ANOTHER org, and creates no association row", async () => {

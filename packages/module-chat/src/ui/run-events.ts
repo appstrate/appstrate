@@ -14,8 +14,8 @@
  * The schemas here are deliberately a MINIMAL local subset of the canonical
  * `@appstrate/shared-types` realtime schemas: we only need a handful of
  * fields, so we redeclare them and stay decoupled from the API wire module.
- * Field names match the wire shape (post-camelize) exactly so a server
- * payload validates unchanged.
+ * Field names match each wire shape exactly so a server payload validates
+ * unchanged.
  */
 
 import { z } from "zod";
@@ -128,6 +128,19 @@ const runUpdateLiteSchema = z.object({
 });
 type RunUpdateLite = z.infer<typeof runUpdateLiteSchema>;
 
+/** The same subset from `GET /api/runs/:id`, its snake_case timestamps mapped onto the frame's. */
+const runResourceLiteSchema = runUpdateLiteSchema
+  .omit({ startedAt: true, completedAt: true })
+  .extend({
+    started_at: z.string().nullable().optional(),
+    completed_at: z.string().nullable().optional(),
+  })
+  .transform(({ started_at, completed_at, ...rest }): RunUpdateLite => ({
+    ...rest,
+    startedAt: started_at,
+    completedAt: completed_at,
+  }));
+
 /**
  * Pull the launched run id out of a tool-call result. The invoke-operation
  * envelope is `{ status, body }` (the run resource lives in `body`); the
@@ -192,10 +205,7 @@ export function parseRunUpdateFrame(raw: string): RunUpdateLite | undefined {
  * "Lancement" for an already-running run until the first live frame arrives.
  */
 export function parseRunResource(body: unknown): RunUpdateLite | undefined {
-  // Same lifecycle subset as a `run_update` frame. Zod strips every other key,
-  // so a server still sending retired fields (`primary_document_id`) parses
-  // unchanged — they are ignored, never asserted away.
-  const parsed = runUpdateLiteSchema.safeParse(body);
+  const parsed = runResourceLiteSchema.safeParse(body);
   return parsed.success ? parsed.data : undefined;
 }
 
@@ -437,7 +447,7 @@ export function publishedFilesFromLogs(logs: readonly RunLogLine[]): ChatRunFile
 }
 
 /**
- * One page of `GET /api/files?run_id=…&purpose=agent_output`, narrowed to what
+ * One page of `GET /api/files?runId=…&purpose=agent_output`, narrowed to what
  * this run PRODUCED.
  */
 interface ProducedFileList {
@@ -458,7 +468,7 @@ interface ProducedFileList {
 }
 
 /**
- * The run's produced files, read from `GET /api/files?run_id=…` — the same
+ * The run's produced files, read from `GET /api/files?runId=…` — the same
  * endpoint (and the same predicate) the run page's Outcome pane uses. This is
  * the AUTHORITATIVE set: the log stream is a truncatable window
  * (`?limit=1000`, ascending, cursor never followed), and the end-of-run
@@ -625,12 +635,7 @@ export function extractRunPackageId(result: unknown): string | undefined {
   const unwrapped = asRecord(unwrapResult(result));
   if (!unwrapped) return undefined;
   const body = asRecord(unwrapped.body);
-  return (
-    nonEmptyString(body?.packageId) ??
-    nonEmptyString(body?.package_id) ??
-    nonEmptyString(unwrapped.packageId) ??
-    nonEmptyString(unwrapped.package_id)
-  );
+  return nonEmptyString(body?.packageId) ?? nonEmptyString(unwrapped.packageId);
 }
 
 /**

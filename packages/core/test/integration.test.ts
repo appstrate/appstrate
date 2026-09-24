@@ -31,6 +31,7 @@ import {
   readDefaultTools,
   resolveEffectiveToolSelection,
   resolveIntegrationToolCatalog,
+  findNonSnakeCaseIdentityClaimKeys,
 } from "../src/integration.ts";
 import { validateManifest, metaSchema } from "../src/validation.ts";
 import { TOOL_NAME_MAX_LEN } from "../src/naming.ts";
@@ -710,21 +711,21 @@ describe("integrationManifestSchema — delivery.http.prefix install gate", () =
   });
 });
 
-describe("integrationManifestSchema — identity_claims JSONPath install gate", () => {
-  const withClaims = (identity_claims: Record<string, string>) =>
-    baseManifest({
-      source: { kind: "none" },
-      auths: {
-        key: {
-          type: "api_key",
-          credentials: { schema: { type: "object", properties: {} } },
-          authorized_uris: ["https://api.example.com/**"],
-          delivery: { http: { in: "header", name: "X-Api-Key", value: "{$credential.api_key}" } },
-          identity_claims,
-        },
+const withClaims = (identity_claims: Record<string, string>) =>
+  baseManifest({
+    source: { kind: "none" },
+    auths: {
+      key: {
+        type: "api_key",
+        credentials: { schema: { type: "object", properties: {} } },
+        authorized_uris: ["https://api.example.com/**"],
+        delivery: { http: { in: "header", name: "X-Api-Key", value: "{$credential.api_key}" } },
+        identity_claims,
       },
-    });
+    },
+  });
 
+describe("integrationManifestSchema — identity_claims JSONPath install gate", () => {
   // The grammar itself is tested in packages/afps-shared/test/jsonpath.test.ts.
   it("accepts a path in the subset and refuses one outside it on the claim's own path", () => {
     expect(integrationManifestSchema.safeParse(withClaims({ a: "$.data[0].id" })).success).toBe(
@@ -733,6 +734,40 @@ describe("integrationManifestSchema — identity_claims JSONPath install gate", 
     expect(errorPaths(withClaims({ accountId: "$..email" }))).toContain(
       "auths.key.identity_claims.accountId",
     );
+  });
+});
+
+describe("findNonSnakeCaseIdentityClaimKeys — write-path identity key casing", () => {
+  const withLogin = (identity_outputs: string[]) =>
+    customWithConnect({
+      login: {
+        request: { method: "POST", url: "https://x" },
+        outputs: { token: "$response.body#/token", userId: "$response.body#/u", user_id: "$" },
+        identity_outputs,
+      },
+    });
+
+  it("is not a read-path rule: a stored camelCase manifest still validates", () => {
+    expect(validateManifest(withClaims({ accountId: "$.id" })).valid).toBe(true);
+    expect(errorPaths(withLogin(["userId"]))).toEqual([]);
+  });
+
+  it("names every non-snake_case claim key and login identity output on its own path", () => {
+    const found = [
+      ...findNonSnakeCaseIdentityClaimKeys(withClaims({ accountId: "$.id", avatar_url: "$.a" })),
+      ...findNonSnakeCaseIdentityClaimKeys(withLogin(["user_id", "userId"])),
+    ];
+    expect(found.map((v) => [v.key, v.path.join(".")])).toEqual([
+      ["accountId", "auths.key.identity_claims.accountId"],
+      ["userId", "auths.session.connect.login.identity_outputs.1"],
+    ]);
+    expect(found[0]!.message).toContain("snake_case");
+  });
+
+  it("finds nothing on a snake_case manifest or a non-manifest", () => {
+    expect(findNonSnakeCaseIdentityClaimKeys(withClaims({ account_id: "$.id" }))).toEqual([]);
+    expect(findNonSnakeCaseIdentityClaimKeys(withLogin(["user_id"]))).toEqual([]);
+    expect(findNonSnakeCaseIdentityClaimKeys(null)).toEqual([]);
   });
 });
 

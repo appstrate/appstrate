@@ -8,6 +8,9 @@
  * (emails, login + consent pages) renders with the satellite app's name,
  * logo and accent color instead of the platform default.
  *
+ * `spaces.settings` is returned verbatim by the spaces routes, so the stored
+ * keys are wire keys — snake_case (CASING_CONVENTIONS 4g boundary).
+ *
  * The module stays the sole owner of the shape. Core does not know anything
  * about branding, and a future non-OIDC consumer that wants the same field
  * should import `SpaceBrandingSchema` from here rather than widening core.
@@ -47,17 +50,17 @@ function isValidLogoUrl(raw: string): boolean {
 const SpaceBrandingSchema = z
   .object({
     name: z.string().min(1).max(200).optional(),
-    logoUrl: z.url().refine(isValidLogoUrl, "logoUrl must be a public HTTPS URL").optional(),
-    primaryColor: z
+    logo_url: z.url().refine(isValidLogoUrl, "logo_url must be a public HTTPS URL").optional(),
+    primary_color: z
       .string()
-      .regex(/^#[0-9a-fA-F]{6}$/, "primaryColor must be a 6-digit hex color")
+      .regex(/^#[0-9a-fA-F]{6}$/, "primary_color must be a 6-digit hex color")
       .optional(),
-    accentColor: z
+    accent_color: z
       .string()
-      .regex(/^#[0-9a-fA-F]{6}$/, "accentColor must be a 6-digit hex color")
+      .regex(/^#[0-9a-fA-F]{6}$/, "accent_color must be a 6-digit hex color")
       .optional(),
-    supportEmail: z.email().optional(),
-    fromName: z.string().min(1).max(200).optional(),
+    support_email: z.email().optional(),
+    from_name: z.string().min(1).max(200).optional(),
   })
   .strict();
 
@@ -119,11 +122,11 @@ export async function resolveSpaceBranding(spaceId: string): Promise<ResolvedSpa
 
   return {
     name: parsed.name ?? appName,
-    logoUrl: parsed.logoUrl ?? null,
-    primaryColor: parsed.primaryColor ?? DEFAULT_PRIMARY,
-    accentColor: parsed.accentColor ?? parsed.primaryColor ?? DEFAULT_ACCENT,
-    supportEmail: parsed.supportEmail ?? null,
-    fromName: parsed.fromName ?? parsed.name ?? appName,
+    logoUrl: parsed.logo_url ?? null,
+    primaryColor: parsed.primary_color ?? DEFAULT_PRIMARY,
+    accentColor: parsed.accent_color ?? parsed.primary_color ?? DEFAULT_ACCENT,
+    supportEmail: parsed.support_email ?? null,
+    fromName: parsed.from_name ?? parsed.name ?? appName,
   };
 }
 

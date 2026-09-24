@@ -34,7 +34,7 @@ interface FetchCall {
 
 function buildOAuthTokenResponse(overrides: Partial<OAuthTokenResponse> = {}): OAuthTokenResponse {
   return {
-    accessToken: "oat-fresh-token",
+    access_token: "oat-fresh-token",
     expiresAt: Date.now() + 60 * 60_000,
     ...overrides,
   };
@@ -326,7 +326,7 @@ describe("/llm/* oauth — no forging", () => {
         const isRefresh = url.endsWith("/refresh");
         return new Response(
           JSON.stringify(
-            buildOAuthTokenResponse({ accessToken: isRefresh ? "oat-refreshed" : "oat-stale" }),
+            buildOAuthTokenResponse({ access_token: isRefresh ? "oat-refreshed" : "oat-stale" }),
           ),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );

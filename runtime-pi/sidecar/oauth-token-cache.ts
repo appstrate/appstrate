@@ -24,7 +24,13 @@
 
 import type { OAuthTokenResponse } from "@appstrate/core/sidecar-types";
 
-export type CachedToken = OAuthTokenResponse & { fetchedAt: number };
+export interface CachedToken {
+  accessToken: string;
+  /** Epoch ms; `null` = unknown expiry. */
+  expiresAt: number | null;
+  accountId?: string;
+  fetchedAt: number;
+}
 
 /** Signaled when the platform returns 410 (`needsReconnection=true`). */
 export class NeedsReconnectionError extends Error {
@@ -140,7 +146,9 @@ export class OAuthTokenCache {
 
   private toCached(payload: OAuthTokenResponse): CachedToken {
     return {
-      ...payload,
+      accessToken: payload.access_token,
+      expiresAt: payload.expiresAt,
+      ...(payload.account_id !== undefined ? { accountId: payload.account_id } : {}),
       fetchedAt: Date.now(),
     };
   }
@@ -180,6 +188,10 @@ export class OAuthTokenCache {
       }
       throw new Error(detail || `OAuth token endpoint returned ${res.status} for ${credentialId}`);
     }
-    return (await res.json()) as OAuthTokenResponse;
+    const payload = (await res.json()) as Partial<OAuthTokenResponse>;
+    if (typeof payload.access_token !== "string") {
+      throw new Error(`OAuth token endpoint returned no access_token for ${credentialId}`);
+    }
+    return payload as OAuthTokenResponse;
   }
 }

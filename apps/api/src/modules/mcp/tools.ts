@@ -361,6 +361,7 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
     },
     inputSchema: {
       type: "object",
+      additionalProperties: false,
       properties: {
         query: {
           type: "string",
@@ -461,6 +462,7 @@ function buildDescribeTool(ctx: McpToolContext, invokes: boolean): AppstrateTool
     },
     inputSchema: {
       type: "object",
+      additionalProperties: false,
       properties: {
         operation_id: {
           type: "string",
@@ -673,6 +675,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     },
     inputSchema: {
       type: "object",
+      additionalProperties: false,
       properties: {
         operation_id: { type: "string", description: "The operationId to invoke." },
         path_params: {
@@ -874,10 +877,9 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 
 /**
  * `run_and_wait` arguments that exist only for `kind:"inline"`. Declared only
- * to a caller whose surface `composes`. The launch allowlist
- * (`RUN_AND_WAIT_ARGUMENT_NAMES`) still knows them either way: an agent-only
- * caller that sends `kind:"inline"` anyway reaches the route and takes its 403,
- * the one refusal that owns the rule.
+ * to a caller whose surface `composes`; another caller sending one gets the
+ * undeclared-argument refusal (`refuseUndeclaredArguments`), and the route's
+ * 403 still owns the rule behind it.
  */
 const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
   manifest: {
@@ -1061,6 +1063,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
         },
       },
       required: ["kind"],
+      additionalProperties: false,
     },
   };
 
@@ -1217,9 +1220,9 @@ function projectFileRow(raw: unknown): Record<string, unknown> | null {
     name,
     mime: asString(r?.mime) ?? "application/octet-stream",
     size: typeof r?.size === "number" ? r.size : 0,
-    // Casing mirrors FileDto (CASING_CONVENTIONS.md 4b): `packageId`/`createdAt`
-    // camelCase carve-outs; `run_id` a snake_case domain field.
-    run_id: asString(r?.run_id) ?? null,
+    // Casing mirrors FileDto (CASING_CONVENTIONS.md 4b): `runId`/`packageId`/
+    // `createdAt` are camelCase carve-outs.
+    runId: asString(r?.runId) ?? null,
     packageId: asString(r?.packageId) ?? null,
     createdAt: asString(r?.createdAt) ?? null,
     // Surface the same access capabilities the REST DTO carries (computed by the
@@ -1237,9 +1240,9 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
     description:
       "List the files visible to you — files you attached to this conversation " +
       "(`user_upload`) and deliverables agents published from runs (`agent_output`). Filter by " +
-      "`run_id`, `chat_session_id`, or `purpose`. Each row carries an `appfile://` URI you can " +
+      "`runId`, `chat_session_id`, or `purpose`. Each row carries an `appfile://` URI you can " +
       "pass verbatim into a run_and_wait input file field (to feed a file to another agent) " +
-      "or read with read_file. Returns `{ files: [...], has_more }`.",
+      "or read with read_file. Returns `{ files: [...], hasMore }`.",
     annotations: {
       title: "List files",
       readOnlyHint: true,
@@ -1248,8 +1251,9 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
     },
     inputSchema: {
       type: "object",
+      additionalProperties: false,
       properties: {
-        run_id: {
+        runId: {
           type: "string",
           description: "Only files produced by / attached to this run.",
         },
@@ -1275,8 +1279,8 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const start = performance.now();
     const query: Record<string, unknown> = {};
-    const runId = asString(args.run_id);
-    if (runId) query.run_id = runId;
+    const runId = asString(args.runId);
+    if (runId) query.runId = runId;
     const chatSessionId = asString(args.chat_session_id);
     if (chatSessionId) query.chat_session_id = chatSessionId;
     const purpose = asString(args.purpose);
@@ -1303,7 +1307,7 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
       durationMs: performance.now() - start,
       shownCount: files.length,
     });
-    return textResult({ files, has_more: body?.hasMore === true });
+    return textResult({ files, hasMore: body?.hasMore === true });
   };
 
   return { descriptor, handler };
@@ -1480,7 +1484,7 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
       idempotentHint: true,
       openWorldHint: false,
     },
-    inputSchema: { type: "object", properties: {} },
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
   };
 
   const handler = async (): Promise<CallToolResult> => {
@@ -1551,6 +1555,34 @@ export function deriveMcpSurface(
 }
 
 /**
+ * The SDK does not validate `tools/call` arguments against `inputSchema`, so an
+ * argument a tool does not read is dropped in silence — a misspelled filter
+ * widens a listing, a misspelled field is simply not applied. A tool declaring
+ * `additionalProperties: false` therefore gets its undeclared top-level keys
+ * refused here, as -32602 naming the accepted ones, before its handler runs.
+ */
+function refuseUndeclaredArguments(tool: AppstrateToolDefinition): AppstrateToolDefinition {
+  const schema = tool.descriptor.inputSchema;
+  if (schema.additionalProperties !== false) return tool;
+  const declared = new Set(Object.keys(schema.properties ?? {}));
+  return {
+    descriptor: tool.descriptor,
+    handler: async (args, extra) => {
+      const unknown = Object.keys(args).filter((k) => !declared.has(k));
+      if (unknown.length > 0) {
+        const accepted =
+          declared.size > 0 ? `Accepted: ${[...declared].join(", ")}.` : "No arguments.";
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          `Unknown argument(s): ${unknown.join(", ")}. ${accepted}`,
+        );
+      }
+      return tool.handler(args, extra);
+    },
+  };
+}
+
+/**
  * Build the per-request tool set. Handlers close over the caller's auth
  * context.
  *
@@ -1568,5 +1600,5 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
     ...buildPackageFileTools(ctx, surface.importsPackages),
     // Redundant for a context-injecting caller; search_operations stays for `best_match`.
     ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx)]),
-  ];
+  ].map(refuseUndeclaredArguments);
 }

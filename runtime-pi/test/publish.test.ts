@@ -852,7 +852,7 @@ describe("buildPublishFileDef (publish_file tool)", () => {
     const events = (result._meta?.["dev.appstrate/events"] ?? []) as Array<Record<string, unknown>>;
     expect(events).toHaveLength(1);
     expect(events[0]!.type).toBe("file.published");
-    expect(events[0]!.file_id).toMatch(/^file_/);
+    expect(events[0]!.fileId).toMatch(/^file_/);
     expect(events[0]!).not.toHaveProperty("presentation");
   });
 

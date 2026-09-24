@@ -243,7 +243,7 @@ describe("handleChatStream", () => {
 
   async function postChat(
     sessionId: string,
-    generation?: { temperature?: number; reasoningLevel?: string },
+    generation?: { temperature?: number; reasoning_level?: string },
     engine?: ChatEngine,
     overrides?: {
       /** apiShape of the single scripted `/api/models` row. */
@@ -493,8 +493,9 @@ describe("handleChatStream", () => {
 
       expect(res.status).toBe(429);
       expect(res.headers.get("Retry-After")).toBe("5");
-      const body = (await res.json()) as { code?: string; retryAfter?: number; instance?: string };
-      expect(body).toMatchObject({ code: "chat_capacity", retryAfter: 5 });
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body).toMatchObject({ code: "chat_capacity", retry_after: 5 });
+      expect(body).not.toHaveProperty("retryAfter");
       expect(body.instance).toStartWith("urn:appstrate:request:");
       expect(engineCalls).toBe(0);
 

@@ -22,7 +22,7 @@ import { isFileProducedByRun, PUBLISHED_FILE_LOG_EVENT } from "@appstrate/core/f
 /** Minimal shape the helpers read — a structural subset of the `FileDto`. */
 export interface FileLike {
   purpose: "user_upload" | "agent_output";
-  run_id: string | null;
+  runId: string | null;
   packageId: string | null;
   mime: string;
 }
@@ -41,7 +41,7 @@ export type RunFileDirection = "output" | "input";
  * (`@appstrate/core/file-uri`), which documents why both halves of the pair
  * are load-bearing; this function only names the two sides for the UI.
  */
-export function runFileDirection<T extends Pick<FileLike, "purpose" | "run_id">>(
+export function runFileDirection<T extends Pick<FileLike, "purpose" | "runId">>(
   file: T,
   runId: string,
 ): RunFileDirection {
@@ -58,7 +58,7 @@ export function runFileDirection<T extends Pick<FileLike, "purpose" | "run_id">>
  * exactly one place: this list and the per-tile badge answer the same question
  * and must answer it identically.
  */
-export function producedRunFiles<T extends Pick<FileLike, "purpose" | "run_id">>(
+export function producedRunFiles<T extends Pick<FileLike, "purpose" | "runId">>(
   files: readonly T[],
   runId: string,
 ): T[] {
@@ -75,7 +75,7 @@ export function producedRunFiles<T extends Pick<FileLike, "purpose" | "run_id">>
  * that an earlier run produced and this one only read — and no agent-declared
  * field takes part: presentation was never the model's call.
  */
-export function featuredRunFile<T extends Pick<FileLike, "purpose" | "run_id">>(
+export function featuredRunFile<T extends Pick<FileLike, "purpose" | "runId">>(
   files: readonly T[],
   runId: string,
 ): T | undefined {
@@ -146,8 +146,8 @@ export function mimeIconFor(mime: string): LucideIcon {
  * Hono route; only the run id is percent-encoded.
  */
 export function fileRunHref(file: FileLike): string | undefined {
-  if (!file.run_id || !file.packageId) return undefined;
-  return `/agents/${file.packageId}/runs/${encodeURIComponent(file.run_id)}`;
+  if (!file.runId || !file.packageId) return undefined;
+  return `/agents/${file.packageId}/runs/${encodeURIComponent(file.runId)}`;
 }
 
 /** Files inside this window (or already past) get the amber "expiring" state. */

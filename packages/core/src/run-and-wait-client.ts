@@ -204,9 +204,10 @@ function materializeInlineManifest(manifest: Record<string, unknown>): {
  * model reads a normal success and reports work it did on an input the run
  * never had. That failure mode has no other place to be caught.
  *
- * Kept in step with the descriptor's `inputSchema.properties` by
- * `run-and-wait-argument-parity.test.ts`, which reads both and compares them —
- * a name added to one side and not the other is a silent drop again.
+ * Must match the MCP descriptor's `inputSchema.properties` (apps/api
+ * `modules/mcp/tools.ts`). The MCP module refuses any argument its schema does
+ * not declare, so a name on only one side is refused on one path, never
+ * dropped.
  */
 const RUN_AND_WAIT_ARGUMENT_NAMES: ReadonlySet<string> = new Set([
   "kind",
@@ -815,10 +816,10 @@ const RUN_PRODUCED_FILES_PAGE_LIMIT = 100;
  *
  * `purpose=agent_output` narrows but does not decide: the route answers the
  * run's whole CONTAINER, so a file chained in from an earlier run arrives
- * carrying that purpose. Both callers filter on `run_id` themselves.
+ * carrying that purpose. Both callers filter on `runId` themselves.
  */
 export function runProducedFilesPath(runId: string): string {
-  return `/api/files?run_id=${encodeURIComponent(runId)}&purpose=agent_output&limit=${RUN_PRODUCED_FILES_PAGE_LIMIT}`;
+  return `/api/files?runId=${encodeURIComponent(runId)}&purpose=agent_output&limit=${RUN_PRODUCED_FILES_PAGE_LIMIT}`;
 }
 
 /**
@@ -827,7 +828,7 @@ export function runProducedFilesPath(runId: string): string {
  * (network, non-2xx, malformed body) yields an empty list — a missing file
  * list must never turn a successful run into a tool error.
  *
- * `GET /api/files?run_id=…` answers the run's whole file CONTAINER — the files
+ * `GET /api/files?runId=…` answers the run's whole file CONTAINER — the files
  * it produced PLUS the ones mounted as its input. Which rows are this run's
  * OUTPUT is {@link isFileProducedByRun}, the same predicate the run page and
  * the chat's run card read.

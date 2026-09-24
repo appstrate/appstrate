@@ -428,16 +428,16 @@ platform does not hand the backing over**. Not: the org cannot find out.
 Real, and worth keeping — each of these is a place the vendor's name would
 otherwise appear in an Appstrate surface for free:
 
-| masked                     | where                                                                           |
-| -------------------------- | ------------------------------------------------------------------------------- |
-| backing model id           | `projectAliasedModel` nulls `modelId`; `swapResponseModelJson` rewrites `model` |
-| provider id / display name | `projectAliasedModel` nulls `providerId` / `providerName`                       |
-| endpoint hostname          | `projectAliasedModel` nulls `baseUrl`; the gateway originates the upstream call |
-| rate card / context window | `projectAliasedModel` nulls `cost`, `contextWindow`, `maxTokens`                |
-| protocol family on the DTO | `projectAliasedModel` nulls `apiShape` (but see the oracle below)               |
-| provider error prose       | replaced wholesale by `syntheticAliasErrorBody` — never forwarded               |
-| vendor response headers    | reduced to `LLM_PASSTHROUGH_RESPONSE_HEADERS`                                   |
-| the agent container's env  | pinned as an exact set by `packages/runner-pi/test/alias-env-allowlist.test.ts` |
+| masked                     | where                                                                            |
+| -------------------------- | -------------------------------------------------------------------------------- |
+| backing model id           | `projectAliasedModel` nulls `modelId`; `swapResponseModelJson` rewrites `model`  |
+| provider id / display name | `projectAliasedModel` nulls `providerId` / `provider_name`                       |
+| endpoint hostname          | `projectAliasedModel` nulls `base_url`; the gateway originates the upstream call |
+| rate card / context window | `projectAliasedModel` nulls `cost`, `contextWindow`, `maxTokens`                 |
+| protocol family on the DTO | `projectAliasedModel` nulls `apiShape` (but see the oracle below)                |
+| provider error prose       | replaced wholesale by `syntheticAliasErrorBody` — never forwarded                |
+| vendor response headers    | reduced to `LLM_PASSTHROUGH_RESPONSE_HEADERS`                                    |
+| the agent container's env  | pinned as an exact set by `packages/runner-pi/test/alias-env-allowlist.test.ts`  |
 
 The env surface is the one item on this list with a **CI gate**, and that is why
 it is the one item that stays closed as the code moves: any new variable fails
@@ -449,7 +449,7 @@ admin/owner grant, or an API key minted with the scope):
 
 - **`PUT /api/models/{id}` now projects its response.** It returned
   `getOrgModel()` raw, so a no-op `PUT {"enabled":true}` answered with
-  `providerId`, `providerName`, `baseUrl`, `apiShape`, `contextWindow` and
+  `providerId`, `provider_name`, `base_url`, `apiShape`, `contextWindow` and
   `cost`. Its only guard was `isSystemModel`, which rejects env-declared models
   and says nothing about a DB-row alias. The asymmetry with `POST` is kept
   deliberately: a create response echoes a binding the operator just sent, an

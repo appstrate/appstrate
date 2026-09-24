@@ -738,7 +738,7 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
   it("file.published events persist as run_logs(type='result', event='file')", async () => {
     const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
     const payload = {
-      file_id: "file_abc12345",
+      fileId: "file_abc12345",
       uri: "appfile://file_abc12345",
       name: "report.html",
       mime: "text/html",

@@ -222,20 +222,20 @@ Plugin configuration highlights:
 
 ### Per-space branding
 
-Both pages accept a `branding: ResolvedSpaceBranding` prop, loaded at request time via `services/branding.ts → resolveSpaceBranding(spaceId)`. The helper reads `spaces.settings.branding` (shape defined by the module-owned `SpaceBrandingSchema` Zod schema) and falls back to the space's raw `name` field when the setting is missing or malformed. Fields supported:
+Both pages accept a `branding: ResolvedSpaceBranding` prop, loaded at request time via `services/branding.ts → resolveSpaceBranding(spaceId)`. The helper reads `spaces.settings.branding` and validates it against the module-owned `SpaceBrandingSchema` (a `.strict()` Zod object). `spaces.settings` is returned verbatim by the spaces routes, so the stored keys are wire keys — snake_case (CASING_CONVENTIONS 4g). Stored shape:
 
 ```ts
 {
   name?: string;           // Display name (defaults to spaces.name)
-  logoUrl?: string;        // Header logo URL (escaped)
-  primaryColor?: string;   // Hex #RRGGBB — validated by SpaceBrandingSchema, defaults to #4f46e5
-  accentColor?: string;    // Hex #RRGGBB — validated by SpaceBrandingSchema
-  supportEmail?: string;
-  fromName?: string;       // Email sender display name
+  logo_url?: string;       // Header logo — must be a public https:// URL (SSRF-blocked hosts rejected)
+  primary_color?: string;  // Hex #RRGGBB, defaults to #4f46e5
+  accent_color?: string;   // Hex #RRGGBB, defaults to primary_color, then #4338ca
+  support_email?: string;
+  from_name?: string;      // Email sender display name (defaults to name, then spaces.name)
 }
 ```
 
-Colors are validated by `SpaceBrandingSchema` at resolve time, so a misconfigured branding JSONB is silently replaced with the platform default before reaching the render. The shell header, button colors, and `<title>` tags all reflect the resolved branding.
+Validation happens at resolve time and never throws: a missing, malformed, or unknown-key branding object (e.g. a camelCase `logoUrl`) is rejected as a whole, logged at `warn`, and replaced with the defaults above. The resolved `ResolvedSpaceBranding` passed to the pages is an internal TS type (camelCase, every field populated). The shell header, button colors, and `<title>` tags all reflect it.
 
 ## Enabling OAuth for a space
 
@@ -387,7 +387,7 @@ Making that a real ceiling — minting instance tokens with the consented scope 
 
 For `level=space` OIDC clients, Google/GitHub sign-in routes through the **tenant's** OAuth App — not the platform's. The tenant controls branding on the consent screen, requested scopes, and audit/revocation; the platform's env `GOOGLE_CLIENT_*` / `GITHUB_CLIENT_*` never touch a space-level flow. When a tenant hasn't configured credentials for a provider, that provider's button is hidden on the tenant's login/register pages (no fallback).
 
-**Storage**: `space_social_providers` keyed on `(space_id, provider)` with `clientId` + AES-256-GCM-encrypted `clientSecret` + optional `scopes[]`. ON DELETE CASCADE with `spaces`.
+**Storage**: `space_social_providers` keyed on `(space_id, provider)` with `client_id` + AES-256-GCM-encrypted `client_secret_encrypted` + optional `scopes[]`. ON DELETE CASCADE with `spaces`.
 
 **Runtime wiring**:
 
@@ -400,7 +400,7 @@ For `level=space` OIDC clients, Google/GitHub sign-in routes through the **tenan
 
 1. Register a Google OAuth App at <https://console.cloud.google.com/apis/credentials> (or a GitHub OAuth App at <https://github.com/settings/developers>).
 2. Set the authorized redirect URI to `{APP_URL}/api/auth/callback/google` (or `.../github`). This URL is shared across all tenants — each tenant's OAuth App must register it.
-3. `PUT /api/spaces/{spaceId}/social-providers/{google|github}` with `{ "clientId": "…", "clientSecret": "…", "scopes": ["openid","email","profile"] }` (scopes optional).
+3. `PUT /api/spaces/{spaceId}/social-providers/{google|github}` with `{ "client_id": "…", "client_secret": "…", "scopes": ["openid","email","profile"] }` (scopes optional).
 4. The provider's button appears on the next login-page render (resolver cache: ≤60s).
 
 **Testing**: `services/social.ts` exposes `_setSocialSpy` (`:79`) so E2E tests can assert which per-space row a given request resolved against — mirrors `_setSmtpSpy` in `services/smtp.ts` (`:72`). Both throw unless `NODE_ENV === "test"`.

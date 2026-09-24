@@ -89,7 +89,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     // actually be rendered and acted on.
     expect(listed!.providerId).toBe("test-oauth");
     expect(listed!.apiShape).toBe("openai-responses");
-    expect(listed!.baseUrl).toBe("https://example.test/v1");
+    expect(listed!.base_url).toBe("https://example.test/v1");
     expect(listed!.credentialId).toBe(model.credentialId);
   });
 
@@ -100,7 +100,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     expect(listed).toBeDefined();
     expect(listed!.needs_reconnection).toBe(false);
     expect(listed!.providerId).toBe("test-oauth");
-    expect(listed!.baseUrl).toBe("https://example.test/v1");
+    expect(listed!.base_url).toBe("https://example.test/v1");
   });
 
   it("flags a model on an api-key credential as false, with the decrypt path untouched", async () => {
@@ -113,7 +113,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     // byte-identical to what the run path's credential lookup produces.
     expect(listed!.providerId).toBe("openai");
     expect(listed!.apiShape).toBe("openai-responses");
-    expect(listed!.baseUrl).toBe("https://api.openai.com/v1");
+    expect(listed!.base_url).toBe("https://api.openai.com/v1");
     expect(listed!.credentialId).toBe(cred.id);
 
     const resolved = await loadModel(ctx.orgId, model.id);

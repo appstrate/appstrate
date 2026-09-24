@@ -195,7 +195,7 @@ export const authPaths = {
                     type: "object",
                     properties: {
                       orgId: { type: "string" },
-                      orgSlug: { type: "string" },
+                      org_slug: { type: "string" },
                       warnings: {
                         type: "array",
                         items: { type: "string" },

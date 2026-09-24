@@ -28,7 +28,7 @@ No DB tables, no routes, no workers — the unified `model_provider_credentials`
 
 ## Client-side helper
 
-The OAuth dance must run on the user's machine — Anthropic's authorize endpoint only allowlists loopback redirect URIs. Appstrate ships [`@appstrate/connect-helper`](https://www.npmjs.com/package/@appstrate/connect-helper) for this purpose; the dashboard mints a pairing token and surfaces `npx @appstrate/connect-helper@latest <token>`. The helper binds `127.0.0.1:53692`, completes the PKCE flow, and POSTs the resulting credentials back to the platform.
+The OAuth dance must run on the user's machine — Anthropic's authorize endpoint only allowlists loopback redirect URIs. Appstrate ships [`@appstrate/connect-helper`](https://www.npmjs.com/package/@appstrate/connect-helper) for this purpose; the dashboard mints a pairing token and surfaces `npx @appstrate/connect-helper@<range> <token>`, pinned to the helper range the platform speaks (`CONNECT_HELPER_PACKAGE`, `apps/api/src/lib/connect-helper.ts`). The helper binds `127.0.0.1:53692`, completes the PKCE flow, and POSTs the resulting credentials back to the platform.
 
 The helper's source lives in a separate private repo (`appstrate/connect-helper`) — the published npm package is public so `npx` works without auth. The helper's `PROVIDERS` table already registers `"claude-code"`; no setup is required from the operator beyond enabling this module on the platform side.
 

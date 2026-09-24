@@ -304,7 +304,7 @@ router.patch("/:orgId", requirePermission("org", "update"), async (c) => {
     action: "org.updated",
     resourceType: "org",
     resourceId: orgId,
-    after: data as unknown as Record<string, unknown>,
+    after: data,
     orgIdOverride: orgId,
   });
 
@@ -659,7 +659,11 @@ router.patch("/:orgId/settings", requirePermission("org", "settings"), async (c)
     action: "org.settings_updated",
     resourceType: "org",
     resourceId: orgId,
-    after: data as unknown as Record<string, unknown>,
+    after: {
+      apiVersion: data.api_version,
+      dashboardSsoEnabled: data.dashboard_sso_enabled,
+      restrictPackageCopy: data.restrict_package_copy,
+    },
     orgIdOverride: orgId,
   });
   return c.json(settings);

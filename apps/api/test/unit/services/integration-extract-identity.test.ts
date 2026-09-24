@@ -29,7 +29,7 @@ function manifestWith(identityClaims?: Record<string, string>): IntegrationManif
 describe("extractIdentity", () => {
   it("reads indices and quoted members, which the old dot-split reader missed", () => {
     const m = manifestWith({
-      accountId: "$.emails[0].value",
+      account_id: "$.emails[0].value",
       name: "$['display name']",
     });
     const { accountId, identityClaims } = extractIdentity(m, "primary", {
@@ -37,14 +37,24 @@ describe("extractIdentity", () => {
       "display name": "Ada",
     });
     expect(accountId).toBe("ada@example.com");
-    expect(identityClaims).toEqual({ accountId: "ada@example.com", name: "Ada" });
+    expect(identityClaims).toEqual({ account_id: "ada@example.com", name: "Ada" });
   });
 
   it("leaves a claim the provider did not return out of the bag", () => {
-    const m = manifestWith({ accountId: "$.login", email: "$.email" });
+    const m = manifestWith({ account_id: "$.login", email: "$.email" });
     const { identityClaims } = extractIdentity(m, "primary", { login: "ada" });
-    expect(identityClaims).toEqual({ accountId: "ada" });
+    expect(identityClaims).toEqual({ account_id: "ada" });
     expect("email" in identityClaims).toBe(false);
+  });
+
+  it("keys the account on the snake_case `account_id` claim only", () => {
+    const source = { login: "ada", email: "ada@example.com" };
+    const snake = extractIdentity(manifestWith({ account_id: "$.login" }), "primary", source);
+    expect(snake.accountId).toBe("ada");
+    // A camelCase `accountId` is an ordinary claim, not the account key.
+    const camel = extractIdentity(manifestWith({ accountId: "$.login" }), "primary", source);
+    expect(camel.accountId).toBe("ada@example.com");
+    expect(camel.identityClaims).toEqual({ accountId: "ada" });
   });
 
   it("falls back to the 'default' account id when the provider exposed no identity", () => {
@@ -53,7 +63,7 @@ describe("extractIdentity", () => {
   });
 
   it("fails the connect with invalid_config on a path outside the subset", () => {
-    const m = manifestWith({ accountId: "$..login" });
+    const m = manifestWith({ account_id: "$..login" });
     let caught: unknown;
     try {
       extractIdentity(m, "primary", { login: "ada" });
@@ -62,6 +72,6 @@ describe("extractIdentity", () => {
     }
     expect(caught).toBeInstanceOf(ApiError);
     expect((caught as ApiError).code).toBe("invalid_config");
-    expect((caught as ApiError).message).toContain("auths.primary.identity_claims.accountId");
+    expect((caught as ApiError).message).toContain("auths.primary.identity_claims.account_id");
   });
 });

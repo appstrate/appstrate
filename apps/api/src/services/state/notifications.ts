@@ -6,6 +6,8 @@ import { runs, notifications, organizationMembers, packages } from "@appstrate/d
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { actorMatch, type Actor } from "../../lib/actor.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
+import { listResponse } from "../../lib/list-response.ts";
+import type { ListEnvelope } from "@appstrate/shared-types";
 
 // --- Notifications ---
 //
@@ -29,16 +31,10 @@ function recipientFilter(actor: Actor): SQL {
 interface NotificationDto {
   id: string;
   type: string;
-  run_id: string | null;
+  runId: string | null;
   payload: Record<string, unknown> | null;
   read_at: string | null;
   createdAt: string;
-}
-
-interface NotificationListResult {
-  data: NotificationDto[];
-  /** True when another page follows (keyset pagination — see listNotifications). */
-  has_more: boolean;
 }
 
 /**
@@ -90,7 +86,7 @@ export async function createRunNotifications(scope: SpaceScope, runId: string): 
   // bell entry is suppressed.
   if (run.packageEphemeral === true) return 0;
 
-  const payload = { agent_id: run.packageId, status: run.status };
+  const payload = { packageId: run.packageId, status: run.status };
   const base = {
     orgId: scope.orgId,
     spaceId: scope.spaceId,
@@ -147,7 +143,7 @@ export async function createRunNotifications(scope: SpaceScope, runId: string): 
  * and the bell reads notifications of the space the recipient is in.
  *
  * No `runId` — the entity is the package, carried in the payload the way
- * `agent_id` is for a run, so the bell renders without a join. The SHARER's
+ * it is for a run, so the bell renders without a join. The SHARER's
  * name is in there for the same reason: "X shared Y with you" is the whole
  * content of this notification, and the bell has no query that would resolve a
  * user id. Best-effort like the run fan-out: the caller wraps it, because a
@@ -169,7 +165,7 @@ export async function createPackageShareNotification(params: {
     recipientId: params.recipientUserId,
     type: "package_shared",
     payload: {
-      package_id: params.packageId,
+      packageId: params.packageId,
       package_type: params.packageType,
       shared_by_name: params.sharedByName,
     },
@@ -268,7 +264,7 @@ export async function getUnreadCountsByAgent(
   scope: SpaceScope,
   actor: Actor,
 ): Promise<Record<string, number>> {
-  const agentId = sql<string | null>`${notifications.payload}->>'agent_id'`;
+  const agentId = sql<string | null>`${notifications.payload}->>'packageId'`;
   const rows = await db
     .select({ agentId, count: count() })
     .from(notifications)
@@ -276,7 +272,13 @@ export async function getUnreadCountsByAgent(
       scopedWhere(notifications, {
         orgId: scope.orgId,
         spaceId: scope.spaceId,
-        extra: [recipientFilter(actor), isNull(notifications.readAt), sql`${agentId} IS NOT NULL`],
+        extra: [
+          recipientFilter(actor),
+          isNull(notifications.readAt),
+          // `package_shared` carries `packageId` too, but is not a run notification.
+          eq(notifications.type, "run_completed"),
+          sql`${agentId} IS NOT NULL`,
+        ],
       }),
     )
     .groupBy(agentId);
@@ -304,10 +306,10 @@ export async function listNotifications(
   scope: SpaceScope,
   actor: Actor,
   options: { unread?: boolean; limit?: number; startingAfter?: string } = {},
-): Promise<NotificationListResult> {
+): Promise<ListEnvelope<NotificationDto>> {
   const { unread = false, startingAfter } = options;
   const limit = Math.min(Math.max(options.limit ?? 20, 1), 100);
-  const fetchLimit = limit + 1; // one extra row to detect has_more
+  const fetchLimit = limit + 1; // one extra row to detect hasMore
 
   const extra: SQL[] = [recipientFilter(actor)];
   if (unread) extra.push(isNull(notifications.readAt));
@@ -347,15 +349,15 @@ export async function listNotifications(
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
 
-  return {
-    data: page.map((r) => ({
+  return listResponse(
+    page.map((r) => ({
       id: r.id,
       type: r.type,
-      run_id: r.runId,
+      runId: r.runId,
       payload: r.payload ?? null,
       read_at: r.readAt?.toISOString() ?? null,
       createdAt: r.createdAt.toISOString(),
     })),
-    has_more: hasMore,
-  };
+    { hasMore },
+  );
 }

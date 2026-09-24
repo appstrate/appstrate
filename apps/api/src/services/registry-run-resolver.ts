@@ -117,7 +117,7 @@ export async function resolveRegistryAgent(
     // `getPackage` already returned the draft state (`draftManifest`/
     // `draftContent`). Run the full AFPS structural validation —
     // type-dispatched so an agent with a corrupt `dependencies` shape,
-    // missing `schemaVersion`, etc. fails cleanly here instead of
+    // missing `schema_version`, etc. fails cleanly here instead of
     // crashing deeper in the run pipeline with a less actionable error.
     // READ direction: the draft is already persisted, so a `runtime_tools` id
     // retired after it was written must not make it unrunnable. Save paths

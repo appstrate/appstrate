@@ -128,8 +128,8 @@ function projectAliasedGenerationCapabilities(
       supported: reasoningSupported ? "supported" : "unsupported",
       ...(temperatureSupported && reasoningSupported
         ? {
-            temperatureCompatible:
-              capabilities?.reasoning.temperatureCompatible === "supported"
+            temperature_compatible:
+              capabilities?.reasoning.temperature_compatible === "supported"
                 ? "supported"
                 : "unsupported",
           }
@@ -174,8 +174,8 @@ export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
     // Backing — always null for an alias.
     apiShape: null,
     providerId: null,
-    providerName: null,
-    baseUrl: null,
+    provider_name: null,
+    base_url: null,
     modelId: null,
     credentialId: null,
     // Capability/cost — identifying catalog metadata stays private. Generation
@@ -270,8 +270,8 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
         UNKNOWN_MODEL_GENERATION_CAPABILITIES,
       apiShape: def.apiShape,
       providerId: def.providerId,
-      providerName: getModelProvider(def.providerId)?.displayName ?? null,
-      baseUrl: def.baseUrl,
+      provider_name: getModelProvider(def.providerId)?.displayName ?? null,
+      base_url: def.baseUrl,
       modelId: def.modelId,
       enabled: def.enabled !== false,
       is_default: pointer !== null ? id === pointer : def.isDefault === true,
@@ -300,8 +300,8 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
           UNKNOWN_MODEL_GENERATION_CAPABILITIES,
         apiShape: creds.apiShape,
         providerId: creds.providerId,
-        providerName: getModelProvider(creds.providerId)?.displayName ?? null,
-        baseUrl: creds.baseUrl,
+        provider_name: getModelProvider(creds.providerId)?.displayName ?? null,
+        base_url: creds.baseUrl,
         modelId: row.modelId,
         enabled: row.enabled,
         is_default: pointer !== null && row.id === pointer,
@@ -1017,7 +1017,7 @@ export async function assertExplicitModelExists(
  * handlers each ran their own copy of this — same two refusals, same literal
  * message spelled out four times, and only the `param` legitimately differed
  * (it names the wire field the override arrived on, which is `generation`,
- * `generationConfig` and `generation_config_override` respectively).
+ * `generation_config` and `generation_config_override` respectively).
  *
  * `selectedModel` is the resolved model this layer will run on, or `null` when
  * NOTHING resolves — no override, no agent pin, no org default. Generation

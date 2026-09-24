@@ -35,6 +35,7 @@ async function seedConnectionFor(opts: {
   userId: string;
   label?: string;
   sharedWithOrg?: boolean;
+  identityClaims?: Record<string, unknown>;
 }): Promise<string> {
   await seedPackage({
     id: opts.integrationId,
@@ -54,6 +55,7 @@ async function seedConnectionFor(opts: {
       scopesGranted: ["openid", "email"],
       label: opts.label ?? null,
       sharedWithOrg: opts.sharedWithOrg ?? false,
+      ...(opts.identityClaims ? { identityClaims: opts.identityClaims } : {}),
     })
     .returning({ id: integrationConnections.id });
   return row!.id;
@@ -340,6 +342,36 @@ describe("Me API (/api/me)", () => {
       expect(group?.kind).toBe("integration");
       expect(group?.total_connections).toBe(1);
       expect(group?.connections[0]?.kind).toBe("integration");
+    });
+
+    // Claim keys are snake_case (AFPS identity keys): `account_email` wins
+    // over `email`, and a camelCase `accountEmail` is not an identity key.
+    it("derives identity from the snake_case account_email claim only", async () => {
+      const ctx = await createTestContext({ orgSlug: "ident-org" });
+      await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        integrationId: "@conn/snake",
+        userId: ctx.user.id,
+        identityClaims: { account_email: "ada@example.com", email: "other@example.com" },
+      });
+      await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        integrationId: "@conn/camel",
+        userId: ctx.user.id,
+        identityClaims: { accountEmail: "ada@example.com", email: "other@example.com" },
+      });
+
+      const res = await app.request("/api/me/connections", { headers: { Cookie: ctx.cookie } });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{ source_id: string; connections: Array<{ identity: string }> }>;
+      };
+      const identityOf = (id: string) =>
+        body.data.find((g) => g.source_id === id)?.connections[0]?.identity;
+      expect(identityOf("@conn/snake")).toBe("ada@example.com");
+      expect(identityOf("@conn/camel")).toBe("other@example.com");
     });
 
     it("aggregates connections across multiple orgs the caller belongs to", async () => {

@@ -76,7 +76,7 @@ export type ModelNativeReasoningLevel = z.infer<typeof modelNativeReasoningLevel
 export const modelGenerationSettingsSchema = z
   .object({
     temperature: z.number().finite().min(0).max(1).nullable().optional(),
-    reasoningLevel: modelReasoningLevelSchema.nullable().optional(),
+    reasoning_level: modelReasoningLevelSchema.nullable().optional(),
   })
   .strict();
 
@@ -91,12 +91,12 @@ export const modelGenerationCapabilitiesSchema = z
     reasoning: z
       .object({
         supported: modelCapabilitySupportSchema.default("unknown"),
-        temperatureCompatible: modelCapabilitySupportSchema.optional(),
+        temperature_compatible: modelCapabilitySupportSchema.optional(),
         adaptive: z.boolean().nullable().default(null),
         levels: z
           .partialRecord(modelReasoningLevelSchema, modelCapabilitySupportSchema)
           .default({}),
-        nativeLevels: z
+        native_levels: z
           .partialRecord(modelReasoningLevelSchema, modelNativeReasoningLevelSchema)
           .optional(),
       })
@@ -111,18 +111,18 @@ export interface ModelGenerationCapabilitiesOverride {
   temperature?: ModelCapabilitySupport;
   reasoning?: {
     supported?: ModelCapabilitySupport;
-    temperatureCompatible?: ModelCapabilitySupport;
+    temperature_compatible?: ModelCapabilitySupport;
     adaptive?: boolean | null;
     levels?: Partial<Record<ModelReasoningLevel, ModelCapabilitySupport>>;
-    nativeLevels?: Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>>;
+    native_levels?: Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>>;
   };
 }
 
 /** Shared Anthropic wire constraints for API-key and Claude Code transports. */
 export const ANTHROPIC_GENERATION_CAPABILITIES_OVERRIDE = {
   reasoning: {
-    temperatureCompatible: "unsupported",
-    nativeLevels: { minimal: "low" },
+    temperature_compatible: "unsupported",
+    native_levels: { minimal: "low" },
   },
 } satisfies ModelGenerationCapabilitiesOverride;
 
@@ -138,16 +138,18 @@ export function applyModelGenerationCapabilitiesOverride(
 ): ModelGenerationCapabilities {
   if (!override) return capabilities;
   const nativeLevels = {
-    ...capabilities.reasoning.nativeLevels,
-    ...override.reasoning?.nativeLevels,
+    ...capabilities.reasoning.native_levels,
+    ...override.reasoning?.native_levels,
   };
   const temperatureCompatible =
-    override.reasoning?.temperatureCompatible ?? capabilities.reasoning.temperatureCompatible;
+    override.reasoning?.temperature_compatible ?? capabilities.reasoning.temperature_compatible;
   return {
     temperature: override.temperature ?? capabilities.temperature,
     reasoning: {
       supported: override.reasoning?.supported ?? capabilities.reasoning.supported,
-      ...(temperatureCompatible !== undefined ? { temperatureCompatible } : {}),
+      ...(temperatureCompatible !== undefined
+        ? { temperature_compatible: temperatureCompatible }
+        : {}),
       adaptive:
         override.reasoning?.adaptive !== undefined
           ? override.reasoning.adaptive
@@ -156,7 +158,7 @@ export function applyModelGenerationCapabilitiesOverride(
         ...capabilities.reasoning.levels,
         ...override.reasoning?.levels,
       },
-      ...(Object.keys(nativeLevels).length > 0 ? { nativeLevels } : {}),
+      ...(Object.keys(nativeLevels).length > 0 ? { native_levels: nativeLevels } : {}),
     },
   };
 }
@@ -174,22 +176,22 @@ export function reconcileModelGenerationSettings(
     next = rest;
   }
 
-  const reasoningLevel = next.reasoningLevel;
+  const reasoningLevel = next.reasoning_level;
   if (
     reasoningLevel != null &&
     (capabilities?.reasoning.supported === "unsupported" ||
       capabilities?.reasoning.levels[reasoningLevel] !== "supported")
   ) {
-    const { reasoningLevel: _reasoningLevel, ...rest } = next;
+    const { reasoning_level: _reasoningLevel, ...rest } = next;
     void _reasoningLevel;
     next = rest;
   }
 
   if (
     next.temperature != null &&
-    next.reasoningLevel != null &&
-    next.reasoningLevel !== "off" &&
-    capabilities?.reasoning.temperatureCompatible === "unsupported"
+    next.reasoning_level != null &&
+    next.reasoning_level !== "off" &&
+    capabilities?.reasoning.temperature_compatible === "unsupported"
   ) {
     const { temperature: _temperature, ...rest } = next;
     void _temperature;
@@ -239,7 +241,7 @@ export function resolveModelGenerationSettings({
 
   const temperature = parsedOverride.temperature ?? parsedDefaults.temperature ?? undefined;
   const reasoningLevel =
-    parsedOverride.reasoningLevel ?? parsedDefaults.reasoningLevel ?? undefined;
+    parsedOverride.reasoning_level ?? parsedDefaults.reasoning_level ?? undefined;
 
   if (temperature !== undefined && parsedCapabilities.temperature === "unsupported") {
     throw new ModelGenerationError(
@@ -273,7 +275,7 @@ export function resolveModelGenerationSettings({
     temperature !== undefined &&
     reasoningLevel !== undefined &&
     reasoningLevel !== "off" &&
-    parsedCapabilities.reasoning.temperatureCompatible === "unsupported"
+    parsedCapabilities.reasoning.temperature_compatible === "unsupported"
   ) {
     throw new ModelGenerationError(
       "temperature_with_reasoning_unsupported",
@@ -283,7 +285,7 @@ export function resolveModelGenerationSettings({
 
   return {
     ...(temperature !== undefined ? { temperature } : {}),
-    ...(reasoningLevel !== undefined ? { reasoningLevel } : {}),
+    ...(reasoningLevel !== undefined ? { reasoning_level: reasoningLevel } : {}),
   };
 }
 
@@ -292,6 +294,6 @@ export function toNativeModelReasoningLevel(
   level: ModelReasoningLevel,
   capabilities?: ModelGenerationCapabilities | null,
 ): ModelNativeReasoningLevel {
-  if (level === "off") return capabilities?.reasoning.nativeLevels?.off ?? "none";
-  return capabilities?.reasoning.nativeLevels?.[level] ?? level;
+  if (level === "off") return capabilities?.reasoning.native_levels?.off ?? "none";
+  return capabilities?.reasoning.native_levels?.[level] ?? level;
 }

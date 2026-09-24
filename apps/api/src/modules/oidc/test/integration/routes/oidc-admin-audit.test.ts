@@ -90,7 +90,7 @@ describe("OIDC admin audit trail", () => {
       port: 587,
       username: "smtp-user-name",
       pass: "super-secret-pass",
-      fromAddress: "noreply@tenant.example",
+      from_address: "noreply@tenant.example",
     });
     expect(put.status).toBe(200);
     expect((await send("DELETE", path)).status).toBe(204);
@@ -100,6 +100,11 @@ describe("OIDC admin audit trail", () => {
       ["space.smtp_config.set", ctx.defaultSpaceId, ctx.defaultSpaceId],
       ["space.smtp_config.deleted", ctx.defaultSpaceId, ctx.defaultSpaceId],
     ]);
+    expect(rows[0]!.after).toEqual({
+      host: "smtp.sendgrid.net",
+      port: 587,
+      fromAddress: "noreply@tenant.example",
+    });
     const trail = JSON.stringify(rows);
     expect(trail).not.toContain("super-secret-pass");
     expect(trail).not.toContain("smtp-user-name");
@@ -108,8 +113,8 @@ describe("OIDC admin audit trail", () => {
   it("records social-provider set/delete without the client secret", async () => {
     const path = `/api/spaces/${ctx.defaultSpaceId}/social-providers/google`;
     const put = await send("PUT", path, {
-      clientId: "tenant.apps.googleusercontent.com",
-      clientSecret: "super-secret",
+      client_id: "tenant.apps.googleusercontent.com",
+      client_secret: "super-secret",
     });
     expect(put.status).toBe(200);
     expect((await send("DELETE", path)).status).toBe(204);
@@ -119,6 +124,7 @@ describe("OIDC admin audit trail", () => {
       ["space.social_provider.set", "social_provider", "google"],
       ["space.social_provider.deleted", "social_provider", "google"],
     ]);
+    expect(rows[0]!.after).toEqual({ clientId: "tenant.apps.googleusercontent.com", scopes: null });
     expect(JSON.stringify(rows)).not.toContain("super-secret");
   });
 });

@@ -144,8 +144,8 @@ precondition_failed` (it was `409 conflict`), and a body still sending
   `WWW-Authenticate: Bearer error="invalid_token"` challenge that generic 401
   handlers read as "log out".
 - **BREAKING (API): chat's capacity refusal (`429 chat_capacity`) is a standard
-  problem document**: `retryAfter` replaces the non-standard `retry_after`, and
-  `instance`/`requestId` are present.
+  problem document**: it carries `retry_after` as every problem does, and
+  `instance`/`request_id` are present.
 - **BREAKING (API): timestamps named `expiresAt` / `createdAt` are RFC 3339
   strings, and the universal ids and timestamps are spelled camelCase on the
   surfaces that still used snake_case.** The hosted-connect session
@@ -193,7 +193,7 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   `RateLimit`, `RateLimit-Policy`, `Retry-After`, `ETag`, `Location`,
   `Appstrate-Version`, `Idempotent-Replayed`, `WWW-Authenticate` and the other
   non-safelisted headers the API sets.
-- **`Retry-After` is sent with every error that carries `retryAfter`**: the
+- **`Retry-After` is sent with every error that carries `retry_after`**: the
   per-organization run rate limit (`429 org_run_rate_limited`, which only put
   the delay in `detail`), the shutdown refusal (`503 shutting_down`, 5 s) and
   chat's `429 chat_capacity`.
@@ -269,11 +269,17 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   one.
   `@appstrate/module-ee` applies its own `0008` (the `llm_usage` id columns of
   its ledger, cursor and floor, to `bigint`) at init. Scripts, in
-  `scripts/migration/`, in order: **1. `0023` BEFORE the deploy**, read-only —
-  it must exit 0 (every integration draft and published version whose
-  JSONPath the release refuses on read is fixed or superseded, see the
-  integrations entry above); `0021` inside the deploy window (old application
-  stopped, new one not started), `0022` right after the deploy.
+  `scripts/migration/`, in order: **1. `0023`, `0024` and `0029` BEFORE the
+  deploy**, read-only — each must exit 0 (`0023`: every integration draft and
+  published version whose JSONPath the release refuses on read is fixed or
+  superseded, see the integrations entry above; `0024`: see the egress entry above; `0029`: every org integration
+  whose draft or `latest` version declares a camelCase identity claim key is
+  fixed, see the identity-claims entry below); inside the deploy window (old
+  application stopped, new one not started), `0021`, `0025`, `0027` and
+  `0028`; right after the deploy, `0022` and `0026`. `0025`–`0028` are
+  one-way against the image: snapshot the database before the window, and roll
+  forward (the previous build reads the new spellings as unknown — agent
+  launches answer 500).
 - **BREAKING (operators): more env values fail boot instead of falling back.**
   A `CHAT_PI_MAX_CONCURRENCY` that is not a positive integer
   (`@appstrate/module-chat`), `MODEL_RETRY_ENABLED` / `MODEL_COMPACTION_ENABLED`
@@ -282,6 +288,114 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   `PLATFORM_API_URL` or `PORT`. The CLI's local `appstrate run` now refuses the
   same malformed `MODEL_RETRY_ENABLED` / `MODEL_COMPACTION_ENABLED` /
   `TOOL_RESULT_BYTE_LIMIT` values from the shell; it used to ignore them.
+- **BREAKING (API): model generation settings are snake_case** (#1545).
+  `reasoningLevel` is `reasoning_level` wherever generation settings travel:
+  the run's `generation` / `generation_override`, a schedule's
+  `generation_config_override`, `PATCH /api/agents/{scope}/{name}/model`, the
+  run-launch and chat bodies, and the space package, whose `generationConfig`
+  is now `generation_config`. Model capabilities (`OrgModel.generation`, the
+  provider registry's models) carry `reasoning.temperature_compatible` and
+  `reasoning.native_levels`. The old names are refused with a `400`. Stored
+  settings are rewritten by `scripts/migration/0025` (operators entry above).
+  The chat's saved generation preference (`localStorage`
+  `appstrate.chat.generation`, `{ reasoningLevel }`) no longer parses and
+  resets once to the defaults. A CLI published before this release runs
+  `appstrate run <package>` locally without the space's reasoning level:
+  release `cli@` with the API.
+- **BREAKING (chat): `POST /api/chat` refuses unknown body fields** (#1545)
+  with a `400` instead of dropping them, so a misspelled field no longer runs
+  the turn on the default model in silence.
+- **BREAKING (API): the model-provider surfaces use one casing per object**
+  (#1545). Only the provider-registry names (`providerId`, `apiShape`,
+  `authMode`, `displayName`, `iconUrl`, …), the universal ids and timestamps,
+  and the org model / proxy / credential ids `modelId`, `proxyId`,
+  `credentialId` (camelCase wherever they appear) stay camelCase; every other
+  field is snake_case. Credentials: `api_key` and `base_url_override` on
+  create and update (were `apiKey`, `baseUrlOverride`), `base_url`, `api_key`
+  on the inline test, which takes the stored credential it falls back to as
+  `credentialId` (was `existingKeyId`), `base_url` on the credential;
+  `POST …/discover` takes `credentialId` and `providerId` (were
+  `credential_id`, `provider_id`), like the other bodies. Org models:
+  `provider_name`, `base_url`; seed `model_ids` and `promoted_default`; test
+  `api_key`, `existing_model_id`. OAuth pairing: `consumed_at` on the pairing,
+  and the redeem route (`POST /api/model-providers-oauth/pair/redeem`) takes
+  `access_token`, `refresh_token`, `account_id` (RFC 6749 names) and returns
+  `available_model_ids`. The old names are refused with a `400`.
+- **BREAKING (sidecar): `GET /internal/oauth-token/{credentialId}` (and
+  `/refresh`) returns `access_token` and `account_id`** (#1545). The sidecar
+  reads only those names, so the `SIDECAR_IMAGE` must be the one of this
+  release — an older sidecar fails every OAuth-model run on the new platform.
+  Stored credentials are unchanged.
+- **BREAKING (connect-helper): the dashboard pins the helper,
+  `npx @appstrate/connect-helper@0.3.x <token>`, instead of `@latest`**
+  (#1545). Helper 0.3.0 posts the snake_case redeem body: this API refuses the
+  0.2.x body (`accessToken` / `refreshToken`) with a `400`, and an older API
+  refuses 0.3.0's. **Publish connect-helper 0.3.0 (npm dist-tag `next`)
+  BEFORE deploying this release** — until then the pinned command finds no
+  version to run. A range resolves against every published version whatever
+  its dist-tag, while `latest` stays on 0.2.2: platforms released before this
+  one still emit `@latest`, keep getting 0.2.2 and keep working. Move `latest`
+  to 0.3.x only once no supported platform emits `@latest`. A pairing redeemed
+  by a mismatched helper is consumed before its body is rejected: mint a new
+  one. The range lives in one constant,
+  `CONNECT_HELPER_PACKAGE` (`apps/api/src/lib/connect-helper.ts`), bumped with
+  each helper minor that changes the wire.
+- **BREAKING (API): OIDC management bodies and views are snake_case**
+  (#1545). Per-space SMTP config: `from_address`, `from_name`, `secure_mode`
+  (were `fromAddress`, `fromName`, `secureMode`), and the test send returns
+  `message_id`. Per-space social providers: `client_id`, `client_secret`. The
+  bootstrap redeem returns `bootstrap.org_slug`. The request schemas are
+  strict, so the old names are a `400`. No data moves: the values live in
+  columns.
+- **BREAKING (API): problem documents carry `request_id` and `retry_after`**
+  (#1545), like their other extension members, instead of `requestId` /
+  `retryAfter`. The `Request-Id` and `Retry-After` headers are unchanged.
+- **BREAKING (API): `runId` joins the universal ids, and notifications and
+  files follow** (#1545). `GET /api/notifications` returns `runId` on each
+  notification, `packageId` in a `package_shared` payload (was `package_id`),
+  and the list envelope (`object: "list"`, `hasMore`) instead of `has_more`.
+  A `run_completed` payload carries `packageId` (was `agent_id`). The File
+  DTO carries `runId`, and `GET /api/files` filters on `?runId=` (was
+  `?run_id=`). Its query is strict: an undeclared parameter (`run_id`,
+  `offset`) or an invalid `purpose` is a 400 instead of a silently wider
+  list. The MCP `list_files` tool mirrors it — its `runId` argument
+  (was `run_id`) and output. Stored notification payloads are rewritten by
+  `scripts/migration/0027`.
+- **BREAKING (MCP): every tool refuses an argument it does not declare**
+  (#1545) with `-32602 Unknown argument(s): …` instead of ignoring it —
+  `search_operations`, `describe_operation`, `invoke_operation` (top-level
+  keys; `path_params`, `query` and `body` stay open), `get_me`, `list_files`,
+  `read_file` and the package-file tools. `run_and_wait` already refused one,
+  as a tool error.
+- **BREAKING (API): platform-written keys in returned JSONB are snake_case**
+  (#1545). `spaces.settings.branding` is `logo_url`, `primary_color`,
+  `accent_color`, `support_email`, `from_name` (rewritten by
+  `scripts/migration/0028`; the OIDC branding reader is strict, so a space
+  still holding the camelCase keys renders the default branding). The
+  runner's `file.published` event carries `fileId`; the runtime image must
+  be the one of this release for published files to be logged.
+- **BREAKING (integrations): identity claim keys are snake_case** (#1545).
+  Every integration write (create, save, publish, restore, import, fork)
+  refuses an
+  `identity_claims` key or a `connect.login.identity_outputs` entry that is
+  not snake_case (`findNonSnakeCaseIdentityClaimKeys` in core), and the
+  account key is read from `account_id` only. A stored manifest declaring
+  `accountId` still reads; its new connections key on the `email` / `sub`
+  fallback. The 37 system integrations that declared camelCase keys
+  (`accountId`, `avatarUrl`, `teamName`, …) get a patch release (e.g.
+  `@appstrate/gmail` 1.1.6, `@appstrate/github` 1.0.5).
+  `scripts/migration/0026` rewrites the stored `identity_claims` keys of
+  existing connections; their account keys do not change. **Operators: run
+  `scripts/migration/0029` BEFORE the deploy** and fix every org integration
+  it lists (edit the draft, publish a fixed version): an unfixed one keys new
+  connects on the fallback, so reconnecting or upgrading the scopes of a
+  connection made before the deploy fails 409 `identity_mismatch`.
+- **BREAKING (audit): four more audit payloads use camelCase keys** (#1545):
+  `org.settings_updated`, `space.updated`, `oauth_client.updated` (signup
+  space assignments) and the bundle import (`fileId`). Rows written before
+  the upgrade are not rewritten. Module authors: `PlatformServices.audit.record`
+  types `before` / `after` as `AuditPayload`, so a snake_case top-level key
+  does not compile.
 
 ### Removed
 
@@ -372,6 +486,15 @@ version_artifact_unavailable`, not `400 empty_prompt` or
   error. On runs, schedules, input-settings, package/version reads and restore,
   a storage outage is now 5xx, not that 422; on the doors that run the version,
   a signature-policy refusal keeps its own coded 422.
+- **`appstrate run <package>` without `--model` uses the organization's
+  default model again, and `appstrate models list` marks it** (#1545). The CLI
+  read the model's `is_default` under a camelCase name, so every run without
+  `--model` failed with "No default preset". `models list` no longer crashes on
+  a model alias.
+- **`appstrate run --remote` reports the run's token usage and timings**
+  (#1545) instead of 0/0 tokens: the CLI read `token_usage`, `started_at` and
+  `completed_at` under camelCase names. The chat's run cards show the start
+  and end times for the same reason.
 
 ## [1.0.0-beta.61] - 2026-09-23
 

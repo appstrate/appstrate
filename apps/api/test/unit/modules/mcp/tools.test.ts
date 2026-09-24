@@ -253,15 +253,12 @@ describe("operationIdGranted", () => {
   });
 });
 
-describe("pre-#1177 argument vocabulary", () => {
-  it("does not rename a retired document_uri argument", async () => {
+describe("validate_package_file arguments", () => {
+  it("refuses an argument other than `file_uri`", async () => {
     const { byName } = makeTools(["mcp:read", "mcp:invoke", "agents:write"]);
-    // `validate_package_file` reads `file_uri`. A caller pinned to the old
-    // vocabulary now gets the plain "required" error rather than a silent
-    // rename — the argument it sent is simply not one the tool knows.
     await expect(
       byName.get("validate_package_file")!.handler({ document_uri: "appfile://file_x" }, noExtra),
-    ).rejects.toThrow(/file_uri is required/);
+    ).rejects.toThrow("Unknown argument(s): document_uri");
   });
 });
 
@@ -1108,5 +1105,58 @@ describe("buildMcpTools contextInjected", () => {
       );
       expect(validateManifest(template)).toMatchObject({ valid: true, errors: [] });
     }
+  });
+});
+
+/**
+ * The SDK does not validate `tools/call` arguments, so `buildMcpTools` refuses
+ * an undeclared top-level key for every tool whose schema is closed — before
+ * the handler, so nothing is dispatched.
+ */
+describe("undeclared tool arguments", () => {
+  const ADMIN_LIKE = [
+    "mcp:read",
+    "mcp:invoke",
+    "agents:read",
+    "agents:write",
+    "agents:run",
+    "runs:read-all",
+    "files:read",
+  ];
+
+  it("refuses an undeclared argument, naming it, on every closed tool", async () => {
+    const { byName, calls } = makeTools(ADMIN_LIKE);
+    const closed = [...byName.values()].filter(
+      (t) => t.descriptor.inputSchema.additionalProperties === false,
+    );
+    expect(closed.map((t) => t.descriptor.name).sort()).toEqual([...byName.keys()].sort());
+    expect(byName.has("run_and_wait")).toBe(true);
+    for (const tool of closed) {
+      const call = tool.handler({ stray_key: 1 }, noExtra);
+      await expect(call).rejects.toBeInstanceOf(McpError);
+      await expect(call).rejects.toMatchObject({
+        code: ErrorCode.InvalidParams,
+        message: expect.stringContaining("Unknown argument(s): stray_key"),
+      });
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("lets every declared argument through", async () => {
+    const { byName, calls } = makeTools(ADMIN_LIKE);
+    await byName
+      .get("search_operations")!
+      .handler({ query: "agent", tag: "Agents", limit: 1 }, noExtra);
+    await byName.get("get_me")!.handler({}, noExtra);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("refuses list_files' `run_id` — its filter is `runId`", async () => {
+    const { byName, calls } = makeTools(ADMIN_LIKE);
+    await expect(byName.get("list_files")!.handler({ run_id: "run_1" }, noExtra)).rejects.toThrow(
+      "Unknown argument(s): run_id",
+    );
+    await byName.get("list_files")!.handler({ runId: "run_1" }, noExtra);
+    expect(new URL(calls[0]!.url).searchParams.get("runId")).toBe("run_1");
   });
 });

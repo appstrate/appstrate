@@ -125,9 +125,9 @@ describe("buildModelFormPayload — custom endpoint", () => {
 
   it("creates the credential against the registry provider, at the typed base URL", () => {
     expect(data.newCredential).toEqual({
-      apiKey: "sk-test",
+      api_key: "sk-test",
       providerId: "openai-compatible",
-      baseUrlOverride: "http://localhost:11434/v1",
+      base_url_override: "http://localhost:11434/v1",
     });
     // Filled in from the create response before the model is posted.
     expect(data.credentialId).toBe("");
@@ -159,7 +159,7 @@ describe("buildModelFormPayload — custom endpoint", () => {
         }),
       }),
     );
-    expect(pinned.newCredential).toEqual({ apiKey: "sk-ant-test", providerId: "anthropic" });
+    expect(pinned.newCredential).toEqual({ api_key: "sk-ant-test", providerId: "anthropic" });
   });
 });
 
@@ -383,9 +383,9 @@ describe("buildModelFormPayload — missing credential", () => {
     );
     expect(data.credentialId).toBe("");
     expect(data.newCredential).toEqual({
-      apiKey: "sk-local",
+      api_key: "sk-local",
       providerId: "openai-compatible",
-      baseUrlOverride: "http://localhost:11434/v1",
+      base_url_override: "http://localhost:11434/v1",
     });
   });
 
@@ -435,7 +435,7 @@ describe("toCreateModelBody", () => {
         label: "Local Qwen",
         modelId: "qwen3:8b",
         credentialId: "",
-        newCredential: { apiKey: "sk-test", providerId: "openai-compatible" },
+        newCredential: { api_key: "sk-test", providerId: "openai-compatible" },
         input: ["text"],
         contextWindow: 32768,
         maxTokens: 8192,
@@ -585,9 +585,9 @@ describe("buildModelsBatchPayload — the credential they all share", () => {
     );
     expect(data.credentialId).toBe("");
     expect(data.newCredential).toEqual({
-      apiKey: "sk-test",
+      api_key: "sk-test",
       providerId: "openai-compatible",
-      baseUrlOverride: "http://localhost:11434/v1",
+      base_url_override: "http://localhost:11434/v1",
     });
   });
 
@@ -601,7 +601,7 @@ describe("buildModelsBatchPayload — the credential they all share", () => {
         rows: ROWS,
       }),
     );
-    expect(data.newCredential).toEqual({ apiKey: "sk-ant-test", providerId: "anthropic" });
+    expect(data.newCredential).toEqual({ api_key: "sk-ant-test", providerId: "anthropic" });
   });
 
   it("refuses a batch with nothing checked", () => {

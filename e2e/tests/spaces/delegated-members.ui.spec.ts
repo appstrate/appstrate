@@ -343,7 +343,7 @@ test("an operator's runs page and run detail hold only its own runs", async ({
   // and a failed run is still a run these two must not read across.
   const credential = await apiClient.post("/model-provider-credentials", {
     providerId: "anthropic",
-    apiKey: "sk-ant-e2e",
+    api_key: "sk-ant-e2e",
   });
   expect(credential.status()).toBe(201);
   const model = await apiClient.post("/models", {

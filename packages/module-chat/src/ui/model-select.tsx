@@ -24,15 +24,15 @@ import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 /** Group/button label for a managed model — provider-neutral, binding not exposed. */
 const MANAGED_LABEL = "Géré";
 
-function providerLabel(model: { providerName?: string | null; aliased?: boolean }): string {
+function providerLabel(model: { provider_name?: string | null; aliased?: boolean }): string {
   // Managed models don't expose their binding — group/badge them neutrally (their
-  // `providerName` is nulled server-side anyway).
+  // `provider_name` is nulled server-side anyway).
   if (model.aliased) return MANAGED_LABEL;
-  // `providerName` is the server's registry-resolved display name (`providerId`
+  // `provider_name` is the server's registry-resolved display name (`providerId`
   // → `displayName`) — the single source for provider labels. We deliberately do
   // NOT fall back to `apiShape`: it's ambiguous (OpenCode Go and OpenAI both use
   // `openai-completions`), which is the bug this replaced.
-  return model.providerName || MANAGED_LABEL;
+  return model.provider_name || MANAGED_LABEL;
 }
 
 interface Props {
@@ -72,7 +72,7 @@ export function ModelSelect({
   const { t } = useChatHost();
   const active = models.find((m) => m.id === selectedId);
   const groups = groupByProvider(models);
-  const hasOverrides = generation.temperature != null || generation.reasoningLevel != null;
+  const hasOverrides = generation.temperature != null || generation.reasoning_level != null;
   const hasNoGenerationControls =
     active?.generation?.temperature === "unsupported" &&
     active.generation.reasoning.supported === "unsupported";

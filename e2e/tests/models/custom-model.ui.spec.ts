@@ -190,7 +190,7 @@ test.describe("Custom endpoint model — UI", () => {
       modelId: SERVED_MODEL,
       contextWindow: SERVED_CONTEXT,
       apiShape: "openai-completions",
-      baseUrl,
+      base_url: baseUrl,
     });
   });
 
@@ -285,8 +285,8 @@ test.describe("Custom endpoint model — UI", () => {
     // test covers is the picker, not the key's creation.
     const seeded = await apiClient.post("/model-provider-credentials", {
       providerId: OPENAI_PROVIDER_ID,
-      apiKey: GOOD_KEY,
-      baseUrlOverride: baseUrl,
+      api_key: GOOD_KEY,
+      base_url_override: baseUrl,
     });
     expect(seeded.status()).toBe(201);
     const credential = (await seeded.json()) as { id: string; label: string };
@@ -312,7 +312,7 @@ test.describe("Custom endpoint model — UI", () => {
     await expect(dialog).toBeHidden();
     const created = (await listModels(apiClient)).find((m) => m.modelId === SERVED_MODEL);
     // Bound to the key that was picked — no second credential was minted.
-    expect(created).toMatchObject({ credentialId: credential.id, baseUrl });
+    expect(created).toMatchObject({ credentialId: credential.id, base_url: baseUrl });
   });
 
   test("reports a key the endpoint rejects", async ({ authedPage: page }) => {

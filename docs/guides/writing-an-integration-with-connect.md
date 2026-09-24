@@ -231,14 +231,16 @@ platform reads it to derive an **account key**, which is both the connection's
 display label and the value that distinguishes two accounts of the same
 provider. Resolution, in order:
 
-1. the `accountId` (or `account_id`) key of your `identity_claims` map;
+1. the `account_id` key of your `identity_claims` map (keys are snake_case:
+   creating, saving, publishing or importing a manifest that declares any
+   other key — `accountId`, `avatarUrl` — is refused);
 2. a top-level `email`, `account_email` or `sub` in the payload;
 3. the literal `"default"`.
 
 Landing on `"default"` is not an error and nothing is logged: the connection is
 simply labelled `Connexion 1`, `Connexion 2`, … and every connection on that
 provider shares one account key, so a member holding two accounts cannot tell
-them apart. **Declare `accountId` explicitly.** Choose the most human-readable
+them apart. **Declare `account_id` explicitly.** Choose the most human-readable
 value that is _unique per account_ — email, else a unique handle, else an opaque
 id. A display name that two accounts can share is the wrong choice even though
 it reads better.

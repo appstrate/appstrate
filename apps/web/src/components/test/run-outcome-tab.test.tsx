@@ -35,20 +35,20 @@ const RUN_ID = "run_1";
 const VIEWER_HEIGHT_CLASS = "h-[max(24rem,calc(100vh-28rem))]";
 
 function file(overrides: Partial<FileDto> & { name: string }): FileDto {
-  return fileFixture({ run_id: RUN_ID, ...overrides });
+  return fileFixture({ runId: RUN_ID, ...overrides });
 }
 
 /** One file the run consumed — never part of the outcome. */
-const UPLOAD = file({ name: "brief.pdf", purpose: "user_upload", run_id: null });
+const UPLOAD = file({ name: "brief.pdf", purpose: "user_upload", runId: null });
 
 /**
  * A file an EARLIER run produced and this one merely consumed, chained in with
- * `appfile://`. `GET /api/files?run_id=…` returns it because the run's file
+ * `appfile://`. `GET /api/files?runId=…` returns it because the run's file
  * query answers the whole container (`run_id = X` OR an id referenced by
  * `runs.input`), and it keeps `purpose: "agent_output"` — the producing run's
- * purpose. Only its `run_id` tells it apart.
+ * purpose. Only its `runId` tells it apart.
  */
-const CHAINED_IN = file({ name: "source.csv", run_id: "run_0" });
+const CHAINED_IN = file({ name: "source.csv", runId: "run_0" });
 
 function outcome(
   files: FileDto[],
@@ -71,7 +71,7 @@ function outcome(
       memoryCount={extra.memoryCount ?? 0}
       producedFileCount={
         extra.producedFileCount ??
-        files.filter((f) => f.purpose === "agent_output" && f.run_id === RUN_ID).length
+        files.filter((f) => f.purpose === "agent_output" && f.runId === RUN_ID).length
       }
       files={files}
       hasMore={extra.hasMore ?? false}
@@ -153,7 +153,7 @@ describe("Outcome shows what the run PRODUCED, and only that", () => {
     // the card claimed truncation under a complete list.
     const produced = [file({ name: "rapport.md" }), file({ name: "annexe.md" })];
     const inputs = Array.from({ length: 5 }, (_, i) =>
-      file({ name: `entree-${i}.csv`, purpose: "user_upload", run_id: null }),
+      file({ name: `entree-${i}.csv`, purpose: "user_upload", runId: null }),
     );
     const html = outcome([...produced, ...inputs], { hasMore: true, producedFileCount: 2 });
     expect(html).toContain("rapport.md");

@@ -18,8 +18,8 @@ const base: OrgModelInfo = {
   label: "Appstrate Medium",
   apiShape: "openai-completions",
   providerId: "openai-compatible",
-  providerName: "OpenAI-compatible (custom)",
-  baseUrl: "https://api.deepseek.com/v1",
+  provider_name: "OpenAI-compatible (custom)",
+  base_url: "https://api.deepseek.com/v1",
   modelId: "deepseek-chat",
   generation: {
     temperature: "unsupported",
@@ -35,7 +35,7 @@ const base: OrgModelInfo = {
         xhigh: "supported",
         max: "supported",
       },
-      nativeLevels: { off: "none", max: "max" },
+      native_levels: { off: "none", max: "max" },
     },
   },
   input: ["text"],
@@ -75,8 +75,8 @@ describe("projectAliasedModel", () => {
     // the dedicated case below; it must survive the projection.)
     expect(out.apiShape).toBeNull();
     expect(out.providerId).toBeNull();
-    expect(out.providerName).toBeNull();
-    expect(out.baseUrl).toBeNull();
+    expect(out.provider_name).toBeNull();
+    expect(out.base_url).toBeNull();
     expect(out.modelId).toBeNull();
     expect(out.credentialId).toBeNull();
     expect(out.input).toBeNull();
@@ -105,7 +105,7 @@ describe("projectAliasedModel", () => {
     expect(json).not.toContain("deepseek");
     expect(json).not.toContain("deepseek-chat");
     expect(json).not.toContain("api.deepseek.com");
-    expect(json).not.toContain("nativeLevels");
+    expect(json).not.toContain("native_levels");
   });
 
   it("keeps alias controls fail-closed without catalog-confirmed support", () => {
@@ -138,7 +138,7 @@ describe("projectAliasedModel", () => {
       },
     });
 
-    expect(out.generation?.reasoning.temperatureCompatible).toBe("unsupported");
+    expect(out.generation?.reasoning.temperature_compatible).toBe("unsupported");
   });
 
   it("preserves explicitly compatible alias pairs", () => {
@@ -149,14 +149,14 @@ describe("projectAliasedModel", () => {
         temperature: "supported",
         reasoning: {
           supported: "supported",
-          temperatureCompatible: "supported",
+          temperature_compatible: "supported",
           adaptive: null,
           levels: { low: "supported" },
         },
       },
     });
 
-    expect(out.generation?.reasoning.temperatureCompatible).toBe("supported");
+    expect(out.generation?.reasoning.temperature_compatible).toBe("supported");
   });
 
   it("preserves needs_reconnection on an aliased model", () => {
@@ -166,7 +166,7 @@ describe("projectAliasedModel", () => {
     const out = projectAliasedModel({ ...base, aliased: true, needs_reconnection: true });
     expect(out.needs_reconnection).toBe(true);
     expect(out.providerId).toBeNull(); // backing still hidden
-    expect(out.baseUrl).toBeNull();
+    expect(out.base_url).toBeNull();
   });
 
   it("preserves a declared iconUrl on an aliased model", () => {

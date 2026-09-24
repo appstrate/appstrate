@@ -593,7 +593,7 @@ describe("authority — `<type>:share` in the home space", () => {
     // The bell renders "<sharer> vous a partagé <package>" from this payload
     // alone — it has no query that would resolve a user id.
     expect(rows[0]!.payload).toEqual({
-      package_id: AGENT,
+      packageId: AGENT,
       package_type: "agent",
       shared_by_name: author.name,
     });

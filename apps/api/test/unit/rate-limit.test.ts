@@ -102,6 +102,8 @@ describe("rateLimit (authenticated)", () => {
     const body = (await res.json()) as any;
     expect(body.code).toBe("rate_limited");
     expect(body.detail).toContain("Too many requests");
+    expect(body.retry_after).toBe(Number(res.headers.get("Retry-After")));
+    expect(body).not.toHaveProperty("retryAfter");
   });
 
   it("returns IETF headers and Retry-After on 429", async () => {

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`findNonSnakeCaseIdentityClaimKeys`** and **`IdentityClaimKeyViolation`**
+  (`@appstrate/core/integration`, #1545) — list the `auths.{key}.identity_claims`
+  keys and `connect.login.identity_outputs` names that are not snake_case, with
+  their manifest path. A write-path policy: the platform refuses such content on
+  create, save, publish and import, while `integrationManifestSchema` keeps reading a
+  stored manifest that predates it (a published version is immutable).
+
 - **`AFPS_SCHEMA_VERSION`** (`@appstrate/core/validation`) — the AFPS
   `schema_version` every manifest the platform writes declares (`"0.3"`, the
   revision spec Appendix A tells producers to emit). The skill-only import, the
@@ -73,7 +80,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a module route writes a row to the platform's `audit_events` trail. The org,
   space, actor, IP, user agent and request id come from the request context,
   as for a core route; the entry names `action`, `resourceType` and optionally
-  `resourceId`, `before` and `after`. Best-effort: never rejects.
+  `resourceId`, `before` and `after`, typed **`AuditPayload`**: a snake_case
+  top-level key (a raw request body) is a compile error. Best-effort: never rejects.
 
 ### Fixed
 
@@ -86,6 +94,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: model generation settings are snake_case** (`@appstrate/core/model-generation`,
+  #1545): `modelGenerationSettingsSchema` reads `reasoning_level` (was
+  `reasoningLevel`), and `ModelGenerationCapabilities` /
+  `ModelGenerationCapabilitiesOverride` spell `reasoning.temperature_compatible`
+  and `reasoning.native_levels` (were `temperatureCompatible` / `nativeLevels`).
+  The settings schema is `.strict()`, so the old key is refused, not dropped.
+- **BREAKING: `ProblemDetail` extension members are snake_case**
+  (`@appstrate/core/api-errors`, #1545): `ApiError.toProblemDetail()` writes
+  `request_id` (was `requestId`) and `retry_after` (was `retryAfter`), and both
+  new names are reserved against `extensions`. The RFC 9457 members and the
+  `Request-Id` / `Retry-After` headers are unchanged; the `ApiError`
+  constructor option and property stay `retryAfter`.
+- **BREAKING: a file's producing run is `runId`** (#1545, `runId` joins the
+  universal carve-out): `isFileProducedByRun` (`@appstrate/core/file-uri`) reads
+  the File DTO's `runId`, and `runProducedFilesPath`
+  (`@appstrate/core/run-and-wait-client`) filters `GET /api/files` with
+  `?runId=`. The `file.published` run event (`FilePublishedEvent`,
+  `@appstrate/core/runtime-tool-defs`) carries `fileId` (CloudEvents payloads
+  are camelCase, carve-out 4i).
+- **BREAKING: `OAuthTokenResponse` is snake_case at the JSON boundary**
+  (`@appstrate/core/sidecar-types`, #1545): `access_token` and `account_id`
+  (omitted when the provider surfaced none) replace `accessToken` /
+  `accountId`; `expiresAt` keeps its universal carve-out name. The sidecar
+  image must match the API.
 - **`run_and_wait` inline manifest defaults** (`@appstrate/core/run-and-wait-client`):
   a manifest that omits `schema_version` now gets `"0.3"` (was `"0.2"`), and the
   default `$schema` is read from `AFPS_SCHEMA_URLS.agent` (same URL as before).

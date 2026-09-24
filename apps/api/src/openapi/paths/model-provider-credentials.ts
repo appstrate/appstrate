@@ -176,7 +176,7 @@ export const modelProviderCredentialsPaths = {
                     id: "cm7stu901",
                     label: "OpenAI Production",
                     apiShape: "openai-completions",
-                    baseUrl: "https://api.openai.com",
+                    base_url: "https://api.openai.com",
                     source: "custom",
                     authMode: "api_key",
                     created_by: "usr_cm3abc123",
@@ -205,13 +205,13 @@ export const modelProviderCredentialsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["providerId", "apiKey"],
+              required: ["providerId", "api_key"],
               properties: {
                 label: {
                   type: "string",
                   minLength: 1,
                   description:
-                    "Display name for the model provider credential. Optional — when omitted the server derives one from the provider's `displayName`, prefixed with the endpoint host (`localhost:11434 · OpenAI-compatible (custom)`) when `baseUrlOverride` is supplied to a `baseUrlOverridable` provider. Either way it is deduped against existing org credentials.",
+                    "Display name for the model provider credential. Optional — when omitted the server derives one from the provider's `displayName`, prefixed with the endpoint host (`localhost:11434 · OpenAI-compatible (custom)`) when `base_url_override` is supplied to a `baseUrlOverridable` provider. Either way it is deduped against existing org credentials.",
                 },
                 providerId: {
                   type: "string",
@@ -219,8 +219,12 @@ export const modelProviderCredentialsPaths = {
                   description:
                     "Canonical registry providerId (`openai`, `anthropic`, `openai-compatible`, …). Discovered via `GET /api/model-provider-credentials/registry`. Only providers with `authMode: api_key` are accepted here; OAuth providers go through the pairing flow.",
                 },
-                apiKey: { type: "string", minLength: 1, description: "API key for authentication" },
-                baseUrlOverride: {
+                api_key: {
+                  type: "string",
+                  minLength: 1,
+                  description: "API key for authentication",
+                },
+                base_url_override: {
                   type: ["string", "null"],
                   format: "uri",
                   description:
@@ -271,7 +275,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Test model provider credential configuration inline",
       description:
-        "Test a model provider credential configuration without saving it first. If editing an existing credential, pass existingKeyId to fall back to its stored API key when apiKey is omitted. Rate limited to 5 requests per minute.",
+        "Test a model provider credential configuration without saving it first. If editing an existing credential, pass its `credentialId` to fall back to its stored API key when `api_key` is omitted. Rate limited to 5 requests per minute.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -279,23 +283,23 @@ export const modelProviderCredentialsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["apiShape", "baseUrl"],
+              required: ["apiShape", "base_url"],
               properties: {
                 apiShape: {
                   type: "string",
                   minLength: 1,
-                  description: "Wire format / API shape",
+                  description: "Wire format / API shape (a registry `apiShape` value)",
                 },
-                baseUrl: {
+                base_url: {
                   type: "string",
                   format: "uri",
                   description: "Model provider API base URL",
                 },
-                apiKey: {
+                api_key: {
                   type: "string",
                   description: "API key (required for new credentials)",
                 },
-                existingKeyId: {
+                credentialId: {
                   type: "string",
                   description: "Existing credential ID to fall back to for stored API key",
                 },
@@ -329,7 +333,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Enumerate the models an endpoint serves",
       description:
-        "Asks an endpoint for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the vendored pricing catalog otherwise; `source` says which described a given model. `label` always comes from the catalog. Unlike `POST /{id}/refresh-models` this works BEFORE a credential exists — the operator supplies `provider_id` + `api_key` inline — and it **persists no model state**: no credential is created, no `available_model_ids` is written (the probe itself is recorded in the audit trail, without the key). Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. A provider declaring a static model list (every subscription/OAuth provider) is refused — its token is never read or spent to enumerate models. A listing that declares a next page (Anthropic `has_more` / `last_id`, Google `nextPageToken`) is followed to its end, so a paginated endpoint is enumerated whole; `truncated` says when a page or model cap stopped the read instead; a page whose body streams past the size budget is refused as `bad_response`. Rate limited to 6 requests per minute.",
+        "Asks an endpoint for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the vendored pricing catalog otherwise; `source` says which described a given model. `label` always comes from the catalog. Unlike `POST /{id}/refresh-models` this works BEFORE a credential exists — the operator supplies `providerId` + `api_key` inline — and it **persists no model state**: no credential is created, no `available_model_ids` is written (the probe itself is recorded in the audit trail, without the key). Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. A provider declaring a static model list (every subscription/OAuth provider) is refused — its token is never read or spent to enumerate models. A listing that declares a next page (Anthropic `has_more` / `last_id`, Google `nextPageToken`) is followed to its end, so a paginated endpoint is enumerated whole; `truncated` says when a page or model cap stopped the read instead; a page whose body streams past the size budget is refused as `bad_response`. Rate limited to 6 requests per minute.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -338,15 +342,15 @@ export const modelProviderCredentialsPaths = {
             schema: {
               type: "object",
               description:
-                "Exactly one of the two forms: `credential_id` alone, or `provider_id` + `api_key` (+ optional `base_url_override`). Both forms together, or neither, is a 400.",
+                "Exactly one of the two forms: `credentialId` alone, or `providerId` + `api_key` (+ optional `base_url_override`). Both forms together, or neither, is a 400.",
               properties: {
-                credential_id: {
+                credentialId: {
                   type: "string",
                   format: "uuid",
                   description:
                     "An existing organization credential to enumerate. Built-in/system credentials are refused (`operation_not_allowed`).",
                 },
-                provider_id: {
+                providerId: {
                   type: "string",
                   minLength: 1,
                   description:
@@ -462,7 +466,7 @@ export const modelProviderCredentialsPaths = {
         },
         "400": {
           description:
-            "Bad request — `validation_failed` when the body fails Zod validation, or `invalid_request` when both/neither form is supplied, `provider_id` is unknown or OAuth-only, or `base_url_override` is sent to a provider that does not accept one.",
+            "Bad request — `validation_failed` when the body fails Zod validation, or `invalid_request` when both/neither form is supplied, `providerId` is unknown or OAuth-only, or `base_url_override` is sent to a provider that does not accept one.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -472,7 +476,7 @@ export const modelProviderCredentialsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           description:
-            "Forbidden — caller lacks `model-provider-credentials:write` (generic RBAC), or `operation_not_allowed` when `credential_id` refers to a built-in/system credential.",
+            "Forbidden — caller lacks `model-provider-credentials:write` (generic RBAC), or `operation_not_allowed` when `credentialId` refers to a built-in/system credential.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -491,7 +495,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Update a model provider credential",
       description:
-        "Update a model provider credential's mutable fields. The `apiShape` and `baseUrl` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
+        "Update a model provider credential's mutable fields. The `apiShape` and `base_url` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -504,7 +508,7 @@ export const modelProviderCredentialsPaths = {
               type: "object",
               properties: {
                 label: { type: "string", minLength: 1 },
-                apiKey: { type: "string", minLength: 1 },
+                api_key: { type: "string", minLength: 1 },
               },
               additionalProperties: false,
             },

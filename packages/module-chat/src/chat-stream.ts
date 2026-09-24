@@ -106,44 +106,47 @@ export const CHAT_MESSAGE_MAX_BYTES = 256 * 1024;
 //   - any `file` part MUST reference an `upload://` or `appfile://` URI. That
 //     rejects inline `data:` bytes and arbitrary URLs in the chat channel
 //     (attachments flow only through the file store, never inline).
-export const chatStreamSchema = z.object({
-  id: z.string().optional(),
-  messages: z
-    .array(z.unknown())
-    .min(1, "messages must not be empty")
-    .superRefine((messages, ctx) => {
-      messages.forEach((message, i) => {
-        const role = (message as { role?: unknown }).role;
-        if (typeof role !== "string" || !CHAT_MESSAGE_ROLES.has(role)) {
-          ctx.addIssue({
-            code: "custom",
-            message: "Message role must be 'user' or 'assistant'.",
-            path: [i, "role"],
-          });
-        }
-        const parts = (message as { parts?: unknown }).parts;
-        if (!Array.isArray(parts)) return;
-        parts.forEach((part, j) => {
-          if (!part || typeof part !== "object" || (part as { type?: unknown }).type !== "file") {
-            return;
-          }
-          const url = (part as { url?: unknown }).url;
-          if (!isAttachmentUri(url)) {
+//   - `.strict()`: an unknown field is a 400, never silently dropped.
+export const chatStreamSchema = z
+  .object({
+    id: z.string().optional(),
+    messages: z
+      .array(z.unknown())
+      .min(1, "messages must not be empty")
+      .superRefine((messages, ctx) => {
+        messages.forEach((message, i) => {
+          const role = (message as { role?: unknown }).role;
+          if (typeof role !== "string" || !CHAT_MESSAGE_ROLES.has(role)) {
             ctx.addIssue({
               code: "custom",
-              message: "File attachment URI must be an 'upload://' or 'appfile://' URI.",
-              path: [i, "parts", j, "url"],
+              message: "Message role must be 'user' or 'assistant'.",
+              path: [i, "role"],
             });
           }
+          const parts = (message as { parts?: unknown }).parts;
+          if (!Array.isArray(parts)) return;
+          parts.forEach((part, j) => {
+            if (!part || typeof part !== "object" || (part as { type?: unknown }).type !== "file") {
+              return;
+            }
+            const url = (part as { url?: unknown }).url;
+            if (!isAttachmentUri(url)) {
+              ctx.addIssue({
+                code: "custom",
+                message: "File attachment URI must be an 'upload://' or 'appfile://' URI.",
+                path: [i, "parts", j, "url"],
+              });
+            }
+          });
         });
-      });
-      withByteCap(CHAT_MESSAGE_MAX_BYTES)(messages.at(-1), ctx);
-    }),
-  modelId: z.string().optional(),
-  generation: modelGenerationSettingsSchema.optional(),
-  /** The composer's agent-authoring switch; absent = on. See {@link turnPermissions}. */
-  agent_authoring: z.boolean().optional(),
-});
+        withByteCap(CHAT_MESSAGE_MAX_BYTES)(messages.at(-1), ctx);
+      }),
+    modelId: z.string().optional(),
+    generation: modelGenerationSettingsSchema.optional(),
+    /** The composer's agent-authoring switch; absent = on. See {@link turnPermissions}. */
+    agent_authoring: z.boolean().optional(),
+  })
+  .strict();
 
 function clientErrorMessage(error: unknown): string {
   return clientTurnErrorMarker(classifyClientTurnError(error));

@@ -152,7 +152,7 @@ export const uploadsPaths = {
                 status: 403,
                 detail: "Organization staging limit (5368709120 bytes) would be exceeded",
                 code: "storage_limit_exceeded",
-                requestId: "req_abc123",
+                request_id: "req_abc123",
               },
             },
           },
@@ -179,7 +179,7 @@ export const uploadsPaths = {
                   "Too many active staged uploads (max 20); consume or let existing uploads " +
                   "expire before staging more",
                 code: "upload_staging_limit_exceeded",
-                requestId: "req_abc123",
+                request_id: "req_abc123",
               },
             },
           },

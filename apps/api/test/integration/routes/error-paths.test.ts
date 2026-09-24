@@ -300,14 +300,14 @@ describe("RFC 9457 — problem detail format on errors", () => {
     expect(body).toHaveProperty("detail");
     expect(body).toHaveProperty("instance");
     expect(body).toHaveProperty("code");
-    expect(body).toHaveProperty("requestId");
+    expect(body).toHaveProperty("request_id");
   });
 
   it("includes Request-Id header matching body", async () => {
     const res = await app.request("/api/agents");
     const body = (await res.json()) as any;
     const headerReqId = res.headers.get("Request-Id");
-    expect(headerReqId).toBe(body.requestId);
+    expect(headerReqId).toBe(body.request_id);
   });
 
   it("type URI follows kebab-case convention", async () => {

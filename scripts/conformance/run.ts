@@ -7,8 +7,9 @@
  *
  * Tiers:
  *   - gate  (default) — deterministic, no network/credentials. Local MCP-server
- *                       tool parity, refresh-strategy, identity-source and
- *                       scope-echo declarations. Wired into `bun run check`.
+ *                       tool parity, refresh-strategy, identity-source,
+ *                       identity-claim-keys and scope-echo declarations.
+ *                       Wired into `bun run check`.
  *   - mcp             — gate + remote MCP parity + OAuth AS-metadata conformance
  *                       + identity-endpoint liveness + auth-reject probes
  *                       (network, no credentials).
@@ -31,7 +32,7 @@ import {
   checkBacklogCeiling,
 } from "./refresh-strategy.ts";
 import { checkIdentityEndpoints, declaredIdentityEndpoints } from "./identity-endpoint.ts";
-import { checkIdentitySource } from "./identity-source.ts";
+import { checkIdentityClaimKeys, checkIdentitySource } from "./identity-source.ts";
 import { checkScopeEcho } from "./scope-echo.ts";
 import { checkAuthRejection } from "./auth-reject.ts";
 import { AUTH_PROBES } from "./probes.ts";
@@ -110,6 +111,7 @@ async function main(): Promise<void> {
     if (klass !== "mcp-server-local" && klass !== "other") {
       findings.push(...checkRefreshStrategy(entry));
       findings.push(...checkIdentitySource(entry));
+      findings.push(...checkIdentityClaimKeys(entry));
       findings.push(...checkScopeEcho(entry));
     }
 

@@ -235,7 +235,7 @@ describe("run_and_wait client", () => {
               mime: "text/html",
               size: 2048,
               purpose: "agent_output",
-              run_id: "run_1",
+              runId: "run_1",
             },
           ],
           hasMore: false,
@@ -301,7 +301,7 @@ describe("run_and_wait client", () => {
   it("fetchRunFiles keeps only files this run produced", async () => {
     // The files container of a run also holds the files mounted as its
     // INPUT — a chained `appfile://` from an earlier run carries
-    // `purpose: 'agent_output'` too, so only its `run_id` distinguishes it.
+    // `purpose: 'agent_output'` too, so only its `runId` distinguishes it.
     const fetchImpl = fakeFetch(async () =>
       jsonResponse({
         object: "list",
@@ -313,7 +313,7 @@ describe("run_and_wait client", () => {
             mime: "application/pdf",
             size: 10,
             purpose: "agent_output",
-            run_id: "run_0",
+            runId: "run_0",
           },
           {
             id: "file_out",
@@ -322,7 +322,7 @@ describe("run_and_wait client", () => {
             mime: "text/html",
             size: 20,
             purpose: "agent_output",
-            run_id: "run_1",
+            runId: "run_1",
           },
           {
             id: "file_detached",
@@ -331,7 +331,7 @@ describe("run_and_wait client", () => {
             mime: "text/plain",
             size: 30,
             purpose: "agent_output",
-            run_id: null,
+            runId: null,
           },
         ],
         hasMore: false,

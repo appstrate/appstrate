@@ -87,7 +87,7 @@ function mapRow(row: SocialRow): SocialProviderView {
   return {
     spaceId: row.spaceId,
     provider: row.provider,
-    clientId: row.clientId,
+    client_id: row.clientId,
     scopes: row.scopes,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

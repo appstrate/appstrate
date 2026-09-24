@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { modelProviderCredentials } from "@appstrate/db/schema";
+import { auditEvents, modelProviderCredentials } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
@@ -252,7 +252,7 @@ describe("Model Provider Keys API", () => {
         body: JSON.stringify({
           label: "Test Key",
           providerId: "openai",
-          apiKey: "sk-test-key-123",
+          api_key: "sk-test-key-123",
         }),
       });
 
@@ -282,14 +282,86 @@ describe("Model Provider Keys API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           providerId: "openai-compatible",
-          apiKey: "sk-local",
-          baseUrlOverride: "http://10.255.255.9:9/v1",
+          api_key: "sk-local",
+          base_url_override: "http://10.255.255.9:9/v1",
         }),
       });
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
       expect(body.label).toStartWith("10.255.255.9:9 · ");
+    });
+  });
+
+  describe("wire casing (snake_case family)", () => {
+    const post = (path: string, body: unknown) =>
+      app.request(path, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify(body),
+      });
+
+    it("rejects snake_case spellings of the carve-out names `providerId` / `apiShape`", async () => {
+      const create = await post("/api/model-provider-credentials", {
+        provider_id: "openai",
+        api_key: "sk-snake",
+      });
+      expect(create.status).toBe(400);
+      const inlineTest = await post("/api/model-provider-credentials/test", {
+        api_shape: "openai-responses",
+        base_url: "http://10.255.255.9:9",
+        api_key: "sk-x",
+      });
+      expect(inlineTest.status).toBe(400);
+      const discover = await post("/api/model-provider-credentials/discover", {
+        provider_id: "openai-compatible",
+        api_key: "sk-x",
+      });
+      expect(discover.status).toBe(400);
+    });
+
+    it("rejects camelCase `apiKey` / `baseUrlOverride` beside `providerId` on create", async () => {
+      const res = await post("/api/model-provider-credentials", {
+        providerId: "openai-compatible",
+        apiKey: "sk-camel",
+        baseUrlOverride: "http://10.255.255.9:9/v1",
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects camelCase `baseUrl` / `apiKey` beside `apiShape` on inline test", async () => {
+      const res = await post("/api/model-provider-credentials/test", {
+        apiShape: "openai-responses",
+        baseUrl: "http://10.255.255.9:9",
+        apiKey: "sk-x",
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects a camelCase `apiKey` on update", async () => {
+      const created = await post("/api/model-provider-credentials", {
+        providerId: "openai",
+        api_key: "sk-original",
+      });
+      const { id } = (await created.json()) as { id: string };
+      const res = await app.request(`/api/model-provider-credentials/${id}`, {
+        method: "PATCH",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ apiKey: "sk-rotated" }),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("emits `base_url`, never `baseUrl`, with the honoured override", async () => {
+      const res = await post("/api/model-provider-credentials", {
+        providerId: "openai-compatible",
+        api_key: "sk-local",
+        base_url_override: "http://10.255.255.9:9/v1",
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body.base_url).toBe("http://10.255.255.9:9/v1");
+      expect(body).not.toHaveProperty("baseUrl");
     });
   });
 
@@ -302,7 +374,7 @@ describe("Model Provider Keys API", () => {
         body: JSON.stringify({
           label: "Original Label",
           providerId: "openai",
-          apiKey: "sk-test-key-123",
+          api_key: "sk-test-key-123",
         }),
       });
       expect(createRes.status).toBe(201);
@@ -312,7 +384,7 @@ describe("Model Provider Keys API", () => {
       const res = await app.request(`/api/model-provider-credentials/${id}`, {
         method: "PATCH",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ label: "Updated Label", apiKey: "sk-rotated-secret-456" }),
+        body: JSON.stringify({ label: "Updated Label", api_key: "sk-rotated-secret-456" }),
       });
 
       expect(res.status).toBe(200);
@@ -327,6 +399,18 @@ describe("Model Provider Keys API", () => {
       expect(serialized).not.toContain("sk-rotated-secret-456");
       expect(body).not.toHaveProperty("apiKey");
       expect(body).not.toHaveProperty("credentialsEncrypted");
+
+      // The audit trail keeps camelCase keys and never the rotated secret.
+      const [audit] = await db
+        .select({ after: auditEvents.after })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.action, "model_provider_credential.updated"),
+            eq(auditEvents.resourceId, id),
+          ),
+        );
+      expect(audit?.after).toEqual({ label: "Updated Label" });
     });
   });
 
@@ -339,7 +423,7 @@ describe("Model Provider Keys API", () => {
         body: JSON.stringify({
           label: "To Delete",
           providerId: "openai",
-          apiKey: "sk-test-key-123",
+          api_key: "sk-test-key-123",
         }),
       });
       expect(createRes.status).toBe(201);
@@ -370,7 +454,7 @@ describe("Model Provider Keys API", () => {
         body: JSON.stringify({
           label: "Pinned",
           providerId: "anthropic",
-          apiKey: "sk-anth-test",
+          api_key: "sk-anth-test",
         }),
       });
       const { id: credId } = (await createRes.json()) as { id: string };
@@ -448,8 +532,8 @@ describe("Model Provider Keys API", () => {
         body: JSON.stringify({
           label: "Org A key",
           providerId: "openai-compatible",
-          baseUrlOverride: "https://api.openai.com/v1",
-          apiKey: "sk-org-a",
+          base_url_override: "https://api.openai.com/v1",
+          api_key: "sk-org-a",
         }),
       });
       const { id } = (await createRes.json()) as { id: string };
@@ -476,8 +560,8 @@ describe("Model Provider Keys API", () => {
         body: JSON.stringify({
           label: "Local",
           providerId: "openai-compatible",
-          baseUrlOverride: "http://10.255.255.9:9",
-          apiKey: "sk-local",
+          base_url_override: "http://10.255.255.9:9",
+          api_key: "sk-local",
         }),
       });
       const { id } = (await createRes.json()) as { id: string };
@@ -500,45 +584,45 @@ describe("Model Provider Keys API", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           apiShape: "openai-responses",
-          baseUrl: "http://10.255.255.9:9",
-          apiKey: "sk-x",
+          base_url: "http://10.255.255.9:9",
+          api_key: "sk-x",
         }),
       });
       expect(res.status).toBe(401);
     });
 
-    it("returns 400 when neither apiKey nor existingKeyId is provided", async () => {
+    it("returns 400 when neither api_key nor credentialId is provided", async () => {
       const res = await app.request("/api/model-provider-credentials/test", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           apiShape: "openai-responses",
-          baseUrl: "http://10.255.255.9:9",
+          base_url: "http://10.255.255.9:9",
         }),
       });
       expect(res.status).toBe(400);
     });
 
-    it("returns 400 on missing baseUrl (Zod rejects)", async () => {
+    it("returns 400 on missing base_url (Zod rejects)", async () => {
       const res = await app.request("/api/model-provider-credentials/test", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           apiShape: "openai-responses",
-          apiKey: "sk-x",
+          api_key: "sk-x",
         }),
       });
       expect(res.status).toBe(400);
     });
 
-    it("returns 200 + BLOCKED_URL when apiKey is supplied inline with a private baseUrl", async () => {
+    it("returns 200 + BLOCKED_URL when api_key is supplied inline with a private base_url", async () => {
       const res = await app.request("/api/model-provider-credentials/test", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           apiShape: "openai-responses",
-          baseUrl: "http://10.255.255.9:9",
-          apiKey: "sk-inline",
+          base_url: "http://10.255.255.9:9",
+          api_key: "sk-inline",
         }),
       });
       expect(res.status).toBe(200);
@@ -546,7 +630,7 @@ describe("Model Provider Keys API", () => {
       expect(body.error).toBe("BLOCKED_URL");
     });
 
-    it("resolves the saved key's plaintext when only existingKeyId is provided", async () => {
+    it("resolves the saved key's plaintext when only credentialId is provided", async () => {
       // Regression for the same wiring that broke as bug 2: the inline
       // /test route also goes through `loadInferenceCredentials`.
       // The test verifies the resolution succeeds end-to-end (we hit
@@ -558,8 +642,8 @@ describe("Model Provider Keys API", () => {
         body: JSON.stringify({
           label: "Inline-existing",
           providerId: "openai-compatible",
-          baseUrlOverride: "http://10.255.255.9:9",
-          apiKey: "sk-stored",
+          base_url_override: "http://10.255.255.9:9",
+          api_key: "sk-stored",
         }),
       });
       const { id } = (await createRes.json()) as { id: string };
@@ -569,16 +653,27 @@ describe("Model Provider Keys API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           apiShape: "openai-responses",
-          baseUrl: "http://10.255.255.9:9",
-          existingKeyId: id,
+          base_url: "http://10.255.255.9:9",
+          credentialId: id,
         }),
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as { ok: boolean; error?: string };
       expect(body.error).toBe("BLOCKED_URL");
+
+      const snakeFallback = await app.request("/api/model-provider-credentials/test", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          apiShape: "openai-responses",
+          base_url: "http://10.255.255.9:9",
+          existing_key_id: id,
+        }),
+      });
+      expect(snakeFallback.status).toBe(400);
     });
 
-    it("falls through to 'API key is required' (400) when existingKeyId points to a non-existent key", async () => {
+    it("falls through to 'API key is required' (400) when credentialId points to a non-existent key", async () => {
       // loadInferenceCredentials returns null → apiKey stays
       // undefined → route throws invalidRequest. Guards against a future
       // refactor that would silently treat an unresolved key as ok.
@@ -587,8 +682,8 @@ describe("Model Provider Keys API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           apiShape: "openai-responses",
-          baseUrl: "http://10.255.255.9:9",
-          existingKeyId: "00000000-0000-0000-0000-000000000000",
+          base_url: "http://10.255.255.9:9",
+          credentialId: "00000000-0000-0000-0000-000000000000",
         }),
       });
       expect(res.status).toBe(400);

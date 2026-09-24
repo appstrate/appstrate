@@ -76,7 +76,7 @@ const RUN: RuntimePiEnvOptions = {
     cost: { input: 0.28, output: 0.42, cacheRead: 0.028 },
     aliased: true,
   },
-  generation: { temperature: 0.2, reasoningLevel: "high" },
+  generation: { temperature: 0.2, reasoning_level: "high" },
   agentPrompt: "You are a helpful agent.",
   runId: "run_1",
   agentInput: { topic: "quarterly report" },

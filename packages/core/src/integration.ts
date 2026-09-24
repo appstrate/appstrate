@@ -129,6 +129,56 @@ function walkForNonFragmentRefs(
   }
 }
 
+/** Spelling of a key that lands in a connection's `identity_claims` bag. */
+const IDENTITY_CLAIM_KEY = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
+
+/** One identity claim key that is not snake_case, located in the manifest. */
+export interface IdentityClaimKeyViolation {
+  key: string;
+  /** Manifest path of the key, e.g. `["auths", "oauth", "identity_claims", "accountId"]`. */
+  path: (string | number)[];
+  message: string;
+}
+
+/**
+ * List the `auths.<k>.identity_claims` keys and `connect.login.identity_outputs`
+ * names that are not snake_case (`extractIdentity` reads `account_id` only).
+ * A WRITE-path policy, not part of {@link integrationManifestSchema}: that schema
+ * also parses immutable published manifests, which must stay readable.
+ */
+export function findNonSnakeCaseIdentityClaimKeys(manifest: unknown): IdentityClaimKeyViolation[] {
+  if (typeof manifest !== "object" || manifest === null) return [];
+  const auths = (manifest as { auths?: unknown }).auths;
+  if (typeof auths !== "object" || auths === null) return [];
+  const found: IdentityClaimKeyViolation[] = [];
+  const check = (key: unknown, path: (string | number)[]) => {
+    if (typeof key !== "string" || IDENTITY_CLAIM_KEY.test(key)) return;
+    found.push({
+      key,
+      path,
+      message: `identity claim key '${key}' must be snake_case (e.g. account_id)`,
+    });
+  };
+  for (const [authKey, auth] of Object.entries(auths)) {
+    const { identity_claims, connect } = (auth ?? {}) as {
+      identity_claims?: unknown;
+      connect?: { login?: { identity_outputs?: unknown } };
+    };
+    if (typeof identity_claims === "object" && identity_claims !== null) {
+      for (const claim of Object.keys(identity_claims)) {
+        check(claim, ["auths", authKey, "identity_claims", claim]);
+      }
+    }
+    const outputs = connect?.login?.identity_outputs;
+    if (Array.isArray(outputs)) {
+      outputs.forEach((name, index) => {
+        check(name, ["auths", authKey, "connect", "login", "identity_outputs", index]);
+      });
+    }
+  }
+  return found;
+}
+
 export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefine((m, ctx) => {
   const manifest = m as unknown as IntegrationManifest;
   const auths = manifest.auths ?? {};
@@ -491,8 +541,8 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
     }
   }
 
-  // (6) `default_tools` (AFPS §4.4) — the tool selection an agent inherits when
-  // it depends on this integration but omits `integrations_configuration.<id>`.
+  // (6) `default_tools` (Appstrate extension, not in the AFPS spec) — the tool selection an agent
+  // inherits when it depends on this integration but omits `integrations_configuration.<id>`.
   //   - `"*"` requires `allow_undeclared_tools: true` (same gate as an agent's
   //     wildcard selection — a default cannot grant the passthrough surface the
   //     integration author did not opt into).
@@ -891,7 +941,7 @@ export function getApiCallConfigs(manifest: IntegrationManifest): ApiCallConfig[
 }
 
 /**
- * Read the integration's declared `default_tools` (AFPS §4.4 — the tools an
+ * Read the integration's declared `default_tools` (Appstrate extension — the tools an
  * agent inherits when it depends on the integration but omits
  * `integrations_configuration.<id>` or omits its `tools`). This is a loose
  * field on the integration manifest (validated by {@link integrationManifestSchema}

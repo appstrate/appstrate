@@ -309,6 +309,7 @@ export const chatPaths = {
                 },
                 id: { type: "string", description: "Session id (the assistant-ui thread id)" },
               },
+              additionalProperties: false,
             },
           },
         },

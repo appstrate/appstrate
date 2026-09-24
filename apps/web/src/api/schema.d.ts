@@ -1290,7 +1290,7 @@ export interface paths {
         };
         /**
          * List files
-         * @description List the files visible to the caller in the current space. Requires the `files:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so a member sees the files of the runs it may read (the whole space with `runs:read-all`, otherwise the runs it launched) plus its own chat and container-less files, and end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; paginate with `startingAfter` + `limit`.
+         * @description List the files visible to the caller in the current space. Requires the `files:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so a member sees the files of the runs it may read (the whole space with `runs:read-all`, otherwise the runs it launched) plus its own chat and container-less files, and end-users see only their own. Filter by `purpose`, `runId`, `packageId`, `chat_session_id`, or a chat session's complete context; paginate with `startingAfter` + `limit`. An unknown query parameter or an invalid `purpose` is rejected with 400.
          */
         get: operations["listFiles"];
         put?: never;
@@ -2042,7 +2042,7 @@ export interface paths {
         put?: never;
         /**
          * Enumerate the models an endpoint serves
-         * @description Asks an endpoint for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the vendored pricing catalog otherwise; `source` says which described a given model. `label` always comes from the catalog. Unlike `POST /{id}/refresh-models` this works BEFORE a credential exists — the operator supplies `provider_id` + `api_key` inline — and it **persists no model state**: no credential is created, no `available_model_ids` is written (the probe itself is recorded in the audit trail, without the key). Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. A provider declaring a static model list (every subscription/OAuth provider) is refused — its token is never read or spent to enumerate models. A listing that declares a next page (Anthropic `has_more` / `last_id`, Google `nextPageToken`) is followed to its end, so a paginated endpoint is enumerated whole; `truncated` says when a page or model cap stopped the read instead; a page whose body streams past the size budget is refused as `bad_response`. Rate limited to 6 requests per minute.
+         * @description Asks an endpoint for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the vendored pricing catalog otherwise; `source` says which described a given model. `label` always comes from the catalog. Unlike `POST /{id}/refresh-models` this works BEFORE a credential exists — the operator supplies `providerId` + `api_key` inline — and it **persists no model state**: no credential is created, no `available_model_ids` is written (the probe itself is recorded in the audit trail, without the key). Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. A provider declaring a static model list (every subscription/OAuth provider) is refused — its token is never read or spent to enumerate models. A listing that declares a next page (Anthropic `has_more` / `last_id`, Google `nextPageToken`) is followed to its end, so a paginated endpoint is enumerated whole; `truncated` says when a page or model cap stopped the read instead; a page whose body streams past the size budget is refused as `bad_response`. Rate limited to 6 requests per minute.
          */
         post: operations["discoverModelProviderCredentialModels"];
         delete?: never;
@@ -2082,7 +2082,7 @@ export interface paths {
         put?: never;
         /**
          * Test model provider credential configuration inline
-         * @description Test a model provider credential configuration without saving it first. If editing an existing credential, pass existingKeyId to fall back to its stored API key when apiKey is omitted. Rate limited to 5 requests per minute.
+         * @description Test a model provider credential configuration without saving it first. If editing an existing credential, pass its `credentialId` to fall back to its stored API key when `api_key` is omitted. Rate limited to 5 requests per minute.
          */
         post: operations["testModelProviderCredentialInline"];
         delete?: never;
@@ -2110,7 +2110,7 @@ export interface paths {
         head?: never;
         /**
          * Update a model provider credential
-         * @description Update a model provider credential's mutable fields. The `apiShape` and `baseUrl` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.
+         * @description Update a model provider credential's mutable fields. The `apiShape` and `base_url` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.
          */
         patch: operations["updateModelProviderCredential"];
         trace?: never;
@@ -2166,7 +2166,7 @@ export interface paths {
         put?: never;
         /**
          * Redeem a pairing token: post the OAuth credential bundle back to the platform
-         * @description Canonical pairing-redeem route used by `@appstrate/connect-helper`. Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / `providerId` and optional reconnect target are pinned at mint time, so a tampered helper cannot redirect the redeem to a different org, provider, or credential. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before creating or updating `model_provider_credentials`.
+         * @description Canonical pairing-redeem route used by `@appstrate/connect-helper`. Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / provider and optional reconnect target are pinned at mint time, so a tampered helper cannot redirect the redeem to a different org, provider, or credential. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before creating or updating `model_provider_credentials`.
          */
         post: operations["redeemOAuthModelProviderPairing"];
         delete?: never;
@@ -2186,7 +2186,7 @@ export interface paths {
         put?: never;
         /**
          * Mint a one-shot pairing token for the connect helper
-         * @description Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. Pass `credentialId` to reconnect that exact org credential in place; omit it to create a new connection. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Space-Id` — the resulting credential lives in `model_provider_credentials`, which has no space affinity).
+         * @description Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper@0.3.x <token>` command, pinned to the helper range this platform speaks. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. Pass `credentialId` to reconnect that exact org credential in place; omit it to create a new connection. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Space-Id` — the resulting credential lives in `model_provider_credentials`, which has no space affinity).
          */
         post: operations["createOAuthModelProviderPairing"];
         delete?: never;
@@ -2314,7 +2314,7 @@ export interface paths {
         put?: never;
         /**
          * Test model configuration inline
-         * @description Test a model configuration without saving it first. If editing an existing model, pass existingModelId to fall back to its stored API key when apiKey is omitted. Rate limited to 5 requests per minute.
+         * @description Test a model configuration without saving it first. If editing an existing model, pass `existing_model_id` to fall back to its stored API key when `api_key` is omitted. Rate limited to 5 requests per minute.
          */
         post: operations["testModelInline"];
         delete?: never;
@@ -4451,7 +4451,7 @@ export interface paths {
         get: operations["getSpaceSocialProvider"];
         /**
          * Upsert per-space social auth provider configuration
-         * @description Creates or replaces the OAuth App credentials for a given provider on this space. The `clientSecret` field is encrypted at rest and never returned in any response. Requires `space-settings:write` in THIS space (preset `admin`) — a caller who is not in the space gets 403 `not_a_space_member`, or 404 when the space is `private`.
+         * @description Creates or replaces the OAuth App credentials for a given provider on this space. The `client_secret` field is encrypted at rest and never returned in any response. Requires `space-settings:write` in THIS space (preset `admin`) — a caller who is not in the space gets 403 `not_a_space_member`, or 404 when the space is `private`.
          */
         put: operations["upsertSpaceSocialProvider"];
         post?: never;
@@ -4858,7 +4858,7 @@ export interface paths {
         };
         /**
          * Fetch a fresh access token for an OAuth model provider connection
-         * @description Sidecar-only. Auth via Bearer run token. Returns the resolved access token plus the runtime config (apiShape, baseUrl, accountId, …). Refreshes the token proactively if it expires within 5 minutes.
+         * @description Sidecar-only. Auth via Bearer run token. Returns the resolved `access_token`, its `expiresAt` and, when the provider surfaced one, the `account_id`. Refreshes the token proactively if it expires within 5 minutes.
          */
         get: operations["getOAuthModelProviderToken"];
         put?: never;
@@ -5533,13 +5533,13 @@ export interface components {
                  * @description Optional compatibility fact for combining a custom temperature with active reasoning. Omission means unknown.
                  * @enum {string}
                  */
-                temperatureCompatible?: "supported" | "unsupported" | "unknown";
+                temperature_compatible?: "supported" | "unsupported" | "unknown";
                 adaptive: boolean | null;
                 levels: {
                     [key: string]: "supported" | "unsupported" | "unknown";
                 };
                 /** @description Optional provider-native values for portable levels (for example off to none). */
-                nativeLevels?: {
+                native_levels?: {
                     [key: string]: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
                 };
             };
@@ -5552,7 +5552,7 @@ export interface components {
              * @description Portable reasoning effort normalized across providers.
              * @enum {string|null}
              */
-            reasoningLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | null;
+            reasoning_level?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | null;
         };
         ModelProviderCredential: {
             id: string;
@@ -5560,7 +5560,7 @@ export interface components {
             /** @description Protocol family. `null` for a built-in credential whose every model is managed (#727) — the binding is not exposed, so the endpoint doesn't reveal the provider. */
             apiShape: string | null;
             /** @description Endpoint base URL. `null` for a managed-only built-in credential (see apiShape). */
-            baseUrl: string | null;
+            base_url: string | null;
             /** @enum {string} */
             source: "built-in" | "custom";
             /** @enum {string} */
@@ -5620,11 +5620,11 @@ export interface components {
         };
         /** @description Resolved access token returned by `GET /internal/oauth-token/{id}` and `POST .../refresh`. Carries only the fields that change per refresh — provider invariants (baseUrl, …) live in the sidecar's boot-time `LlmProxyOauthConfig`. Wire-equivalent to the `OAuthTokenResponse` TS interface in `@appstrate/core/sidecar-types`. */
         OAuthTokenResponse: {
-            accessToken: string;
+            access_token: string;
             /** @description Epoch milliseconds. null when expiry is unknown. */
             expiresAt: number | null;
-            /** @description Abstract account/tenant identifier surfaced by the provider's `extractTokenIdentity` hook. The sidecar's identity layer (keyed by providerId from the boot config) decides which routing header to echo it as. */
-            accountId?: string;
+            /** @description Abstract account/tenant identifier surfaced by the provider's `extractTokenIdentity` hook. Omitted when the provider surfaced none. The sidecar's identity layer (keyed by providerId from the boot config) decides which routing header to echo it as. */
+            account_id?: string;
         };
         OrgDetail: {
             id?: string;
@@ -5681,9 +5681,9 @@ export interface components {
             /** @description The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. `null` for managed models — binding not exposed. */
             providerId: string | null;
             /** @description The provider's human display name resolved from the model-provider registry by `providerId` (e.g. `OpenCode Go`, `OpenAI`). The authoritative label for grouping/badging a model by provider — `apiShape` is ambiguous (OpenCode Go and OpenAI both use `openai-completions`), so do NOT derive a provider label from it. `null` for managed models (binding not exposed) and for rows whose `providerId` has no registry entry. */
-            providerName: string | null;
+            provider_name: string | null;
             /** @description Provider endpoint. `null` for managed models — binding not exposed. */
-            baseUrl: string | null;
+            base_url: string | null;
             /** @description Upstream model id. `null` for managed models — not exposed. */
             modelId: string | null;
             /** @description Generation controls supported by the backing model. Null for managed aliases whose binding is hidden. */
@@ -5696,9 +5696,9 @@ export interface components {
             is_default: boolean;
             /** @description True when the model's stored credential can no longer be used for inference — an OAuth credential flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment. */
             needs_reconnection: boolean;
-            /** @description Managed-model flag. When true, the binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is not exposed in this projection — these fields are `null`; render a managed badge. */
+            /** @description Managed-model flag. When true, the binding (`modelId`, `apiShape`, `base_url`, `credentialId`, capabilities/cost) is not exposed in this projection — these fields are `null`; render a managed badge. */
             aliased: boolean;
-            /** @description Display-icon key for the UI (a client provider-icon key, e.g. `anthropic`, `openai`). A deliberate public choice on the model — decoupled from the provider, so a managed model can show an icon without exposing its binding. `null` means resolve the icon from the (visible) `apiShape`/`baseUrl`, or fall back to a generic icon. */
+            /** @description Display-icon key for the UI (a client provider-icon key, e.g. `anthropic`, `openai`). A deliberate public choice on the model — decoupled from the provider, so a managed model can show an icon without exposing its binding. `null` means resolve the icon from the (visible) `apiShape`/`base_url`, or fall back to a generic icon. */
             iconUrl: string | null;
             /** @enum {string} */
             source: "built-in" | "custom";
@@ -5984,11 +5984,11 @@ export interface components {
             /** @description Machine-readable error code (snake_case) */
             code: string;
             /** @description Unique request identifier (req_ prefix) */
-            requestId: string;
+            request_id: string;
             /** @description Parameter that caused the error */
             param?: string;
             /** @description Seconds before retry; mirrored in the `Retry-After` header */
-            retryAfter?: number;
+            retry_after?: number;
             /** @description Field-level validation errors */
             errors?: components["schemas"]["ResolutionFieldError"][];
         };
@@ -6310,10 +6310,10 @@ export interface components {
             port: number;
             username: string;
             /** Format: email */
-            fromAddress: string;
-            fromName: string | null;
+            from_address: string;
+            from_name: string | null;
             /** @enum {string} */
-            secureMode: "auto" | "tls" | "starttls" | "none";
+            secure_mode: "auto" | "tls" | "starttls" | "none";
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -6323,7 +6323,7 @@ export interface components {
             spaceId: string;
             /** @enum {string} */
             provider: "google" | "github";
-            clientId: string;
+            client_id: string;
             scopes: string[] | null;
             /** Format: date-time */
             createdAt: string;
@@ -6439,7 +6439,7 @@ export interface components {
             object?: "space_package";
             /** @description Package ID from org catalog */
             packageId: string;
-            generationConfig: components["schemas"]["ModelGenerationSettings"] | null;
+            generation_config: components["schemas"]["ModelGenerationSettings"] | null;
             /** @description Model override for this space */
             modelId: string | null;
             /** @description Proxy override for this space */
@@ -6552,7 +6552,7 @@ export interface components {
                  *       "status": 401,
                  *       "detail": "Invalid or missing session",
                  *       "code": "unauthorized",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6571,7 +6571,7 @@ export interface components {
                  *       "status": 403,
                  *       "detail": "Insufficient permissions",
                  *       "code": "forbidden",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6590,7 +6590,7 @@ export interface components {
                  *       "status": 404,
                  *       "detail": "Resource not found",
                  *       "code": "not_found",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6611,7 +6611,7 @@ export interface components {
                  *       "status": 412,
                  *       "detail": "The resource changed since you read it: If-Match does not match its current ETag. Re-read it, reapply your change, and send the new ETag.",
                  *       "code": "precondition_failed",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6631,7 +6631,7 @@ export interface components {
                  *       "status": 428,
                  *       "detail": "This write requires an If-Match header carrying the ETag of the representation you read. GET the resource, then send its ETag.",
                  *       "code": "precondition_required",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6659,7 +6659,7 @@ export interface components {
                  *       "status": 415,
                  *       "detail": "MCP-server packages must be uploaded as a multipart .afps or .zip archive.",
                  *       "code": "archive_required",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6682,8 +6682,8 @@ export interface components {
                  *       "status": 429,
                  *       "detail": "Too many requests. Please try again shortly.",
                  *       "code": "rate_limited",
-                 *       "requestId": "req_abc123",
-                 *       "retryAfter": 30
+                 *       "request_id": "req_abc123",
+                 *       "retry_after": 30
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6703,7 +6703,7 @@ export interface components {
                  *       "status": 409,
                  *       "detail": "A request with the same Idempotency-Key is already being processed. Please wait and retry.",
                  *       "code": "idempotency_in_progress",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6742,7 +6742,7 @@ export interface components {
                  *       "status": 409,
                  *       "detail": "An organization must keep at least one owner. Promote another member to owner first, or delete the organization.",
                  *       "code": "last_owner",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6761,7 +6761,7 @@ export interface components {
                  *       "status": 500,
                  *       "detail": "An unexpected error occurred. Please try again or contact support.",
                  *       "code": "internal_error",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6781,7 +6781,7 @@ export interface components {
                  *       "status": 422,
                  *       "detail": "The package archive expands past the 50 MB decompression limit and was refused (decompressed-budget-exceeded). Republish the package from bytes that fit the limit.",
                  *       "code": "package_archive_unreadable",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6800,7 +6800,7 @@ export interface components {
                  *       "status": 404,
                  *       "detail": "Agent '@acme/reporter' has no published version",
                  *       "code": "no_published_version",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6829,7 +6829,7 @@ export interface components {
                  *       "status": 422,
                  *       "detail": "This Idempotency-Key was already used with a different method, URL or body. Use a new key for different requests.",
                  *       "code": "idempotency_conflict",
-                 *       "requestId": "req_abc123"
+                 *       "request_id": "req_abc123"
                  *     }
                  */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -6904,7 +6904,7 @@ export interface components {
         RateLimit: string;
         /** @description IETF RateLimit-Policy header describing the rate limit window (e.g. 20;w=60). */
         RateLimitPolicy: string;
-        /** @description Seconds to wait before retrying. Present on every 429, and on any error whose problem body carries `retryAfter` (the two always agree), such as the 503 `shutting_down`. */
+        /** @description Seconds to wait before retrying. Present on every 429, and on any error whose problem body carries `retry_after` (the two always agree), such as the 503 `shutting_down`. */
         RetryAfter: number;
         /** @description RFC 6750 Bearer challenge, present on every 401. `Bearer error="invalid_token"` when a credential was presented but rejected, bare `Bearer` when no credential was presented. Resources registered for RFC 9728 discovery (e.g. MCP) answer with a richer challenge carrying `resource_metadata="…"`. */
         WWWAuthenticate: string;
@@ -7936,11 +7936,11 @@ export interface operations {
                      *       "metadata": null,
                      *       "generation": {
                      *         "temperature": 0.2,
-                     *         "reasoningLevel": "high"
+                     *         "reasoning_level": "high"
                      *       },
                      *       "generation_override": {
                      *         "temperature": 0.2,
-                     *         "reasoningLevel": "high"
+                     *         "reasoning_level": "high"
                      *       },
                      *       "started_at": "2026-01-15T10:30:00Z",
                      *       "completed_at": null,
@@ -8148,7 +8148,7 @@ export interface operations {
                      *       "status": 409,
                      *       "detail": "Cannot delete runs while agent has active runs",
                      *       "code": "conflict",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -8548,7 +8548,7 @@ export interface operations {
                         token?: string | null;
                         bootstrap?: {
                             orgId?: string;
-                            orgSlug?: string;
+                            org_slug?: string;
                             /** @description Optional advisory codes — e.g. `default_space_provisioning_failed` when the post-bootstrap default-space/agent hook failed. The owner+org are still committed; the operator can self-heal via /api/spaces. */
                             warnings?: string[];
                         };
@@ -10878,7 +10878,7 @@ export interface operations {
                      *       "status": 409,
                      *       "detail": "An end-user with this externalId already exists in the space.",
                      *       "code": "external_id_taken",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -10893,7 +10893,7 @@ export interface operations {
                 /** @description Filter by file purpose. */
                 purpose?: "user_upload" | "agent_output";
                 /** @description Filter to files anchored to this run. */
-                run_id?: string;
+                runId?: string;
                 /** @description Filter to files produced by this agent package. */
                 packageId?: string;
                 /** @description Filter to files anchored to this chat session. */
@@ -10938,7 +10938,7 @@ export interface operations {
                             purpose: "user_upload" | "agent_output";
                             spaceId: string;
                             /** @description Run container, or null. */
-                            run_id: string | null;
+                            runId: string | null;
                             /** @description Chat-session container, or null. */
                             chat_session_id: string | null;
                             /** @description Producing agent package id, or null. */
@@ -11030,7 +11030,7 @@ export interface operations {
                         purpose: "user_upload" | "agent_output";
                         spaceId: string;
                         /** @description Run container, or null. */
-                        run_id: string | null;
+                        runId: string | null;
                         /** @description Chat-session container, or null. */
                         chat_session_id: string | null;
                         /** @description Producing agent package id, or null. */
@@ -11130,7 +11130,7 @@ export interface operations {
                      *       "status": 409,
                      *       "detail": "This file is referenced by one or more runs and cannot be deleted",
                      *       "code": "file_in_use",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -11223,7 +11223,7 @@ export interface operations {
                         purpose: "user_upload" | "agent_output";
                         spaceId: string;
                         /** @description Run container, or null. */
-                        run_id: string | null;
+                        runId: string | null;
                         /** @description Chat-session container, or null. */
                         chat_session_id: string | null;
                         /** @description Producing agent package id, or null. */
@@ -11523,7 +11523,7 @@ export interface operations {
                      *       "status": 503,
                      *       "detail": "This connection method is unavailable on this deployment. Contact your administrator.",
                      *       "code": "connect_unavailable",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -11542,7 +11542,7 @@ export interface operations {
                      *       "status": 504,
                      *       "detail": "The connection attempt timed out after 60000ms — the login did not complete in time. Please try again.",
                      *       "code": "timeout",
-                     *       "requestId": "req_def456"
+                     *       "request_id": "req_def456"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -11795,7 +11795,7 @@ export interface operations {
                      *       "status": 503,
                      *       "detail": "This connection method is unavailable on this deployment. Contact your administrator.",
                      *       "code": "connect_unavailable",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -11814,7 +11814,7 @@ export interface operations {
                      *       "status": 504,
                      *       "detail": "The connection attempt timed out after 60000ms — the login did not complete in time. Please try again.",
                      *       "code": "timeout",
-                     *       "requestId": "req_def456"
+                     *       "request_id": "req_def456"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -13627,7 +13627,7 @@ export interface operations {
                      *           "id": "cm7stu901",
                      *           "label": "OpenAI Production",
                      *           "apiShape": "openai-completions",
-                     *           "baseUrl": "https://api.openai.com",
+                     *           "base_url": "https://api.openai.com",
                      *           "source": "custom",
                      *           "authMode": "api_key",
                      *           "created_by": "usr_cm3abc123",
@@ -13662,17 +13662,17 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Display name for the model provider credential. Optional — when omitted the server derives one from the provider's `displayName`, prefixed with the endpoint host (`localhost:11434 · OpenAI-compatible (custom)`) when `baseUrlOverride` is supplied to a `baseUrlOverridable` provider. Either way it is deduped against existing org credentials. */
+                    /** @description Display name for the model provider credential. Optional — when omitted the server derives one from the provider's `displayName`, prefixed with the endpoint host (`localhost:11434 · OpenAI-compatible (custom)`) when `base_url_override` is supplied to a `baseUrlOverridable` provider. Either way it is deduped against existing org credentials. */
                     label?: string;
                     /** @description Canonical registry providerId (`openai`, `anthropic`, `openai-compatible`, …). Discovered via `GET /api/model-provider-credentials/registry`. Only providers with `authMode: api_key` are accepted here; OAuth providers go through the pairing flow. */
                     providerId: string;
                     /** @description API key for authentication */
-                    apiKey: string;
+                    api_key: string;
                     /**
                      * Format: uri
                      * @description Optional override for self-hosted endpoints. Honored only by providers with `baseUrlOverridable: true` (e.g. `openai-compatible`); ignored otherwise.
                      */
-                    baseUrlOverride?: string | null;
+                    base_url_override?: string | null;
                 };
             };
         };
@@ -13727,9 +13727,9 @@ export interface operations {
                      * Format: uuid
                      * @description An existing organization credential to enumerate. Built-in/system credentials are refused (`operation_not_allowed`).
                      */
-                    credential_id?: string;
+                    credentialId?: string;
                     /** @description Canonical registry providerId (`openai-compatible`, `openai`, …). Discovered via `GET /api/model-provider-credentials/registry`. */
-                    provider_id?: string;
+                    providerId?: string;
                     /** @description API key for the endpoint. Used for this one request and never stored or echoed back. */
                     api_key?: string;
                     /**
@@ -13784,7 +13784,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Bad request — `validation_failed` when the body fails Zod validation, or `invalid_request` when both/neither form is supplied, `provider_id` is unknown or OAuth-only, or `base_url_override` is sent to a provider that does not accept one. */
+            /** @description Bad request — `validation_failed` when the body fails Zod validation, or `invalid_request` when both/neither form is supplied, `providerId` is unknown or OAuth-only, or `base_url_override` is sent to a provider that does not accept one. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13794,7 +13794,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Forbidden — caller lacks `model-provider-credentials:write` (generic RBAC), or `operation_not_allowed` when `credential_id` refers to a built-in/system credential. */
+            /** @description Forbidden — caller lacks `model-provider-credentials:write` (generic RBAC), or `operation_not_allowed` when `credentialId` refers to a built-in/system credential. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -13892,17 +13892,17 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Wire format / API shape */
+                    /** @description Wire format / API shape (a registry `apiShape` value) */
                     apiShape: string;
                     /**
                      * Format: uri
                      * @description Model provider API base URL
                      */
-                    baseUrl: string;
+                    base_url: string;
                     /** @description API key (required for new credentials) */
-                    apiKey?: string;
+                    api_key?: string;
                     /** @description Existing credential ID to fall back to for stored API key */
-                    existingKeyId?: string;
+                    credentialId?: string;
                 };
             };
         };
@@ -13984,7 +13984,7 @@ export interface operations {
             content: {
                 "application/json": {
                     label?: string;
-                    apiKey?: string;
+                    api_key?: string;
                 };
             };
         };
@@ -14098,12 +14098,12 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Must match the pairing's pinned providerId. Mismatched → 400; provider deregistered after mint → 404. */
+                    /** @description Must match the pairing's pinned provider id. Mismatched → 400; provider deregistered after mint → 404. */
                     providerId: string;
                     /** @description Display name for the credential. Optional — the platform derives one from the provider's `displayName` when omitted (`@appstrate/connect-helper` no longer invents one client-side). */
                     label?: string;
-                    accessToken: string;
-                    refreshToken: string;
+                    access_token: string;
+                    refresh_token: string;
                     /** @description Unix milliseconds since epoch — when the access token expires. */
                     expiresAt?: number | null;
                     /**
@@ -14112,12 +14112,12 @@ export interface operations {
                      */
                     email?: string;
                     /** @description Abstract account/tenant identifier — the well-known `accountId` slot from the provider's identity surface. When the CLI forwards it, the platform persists this value verbatim; otherwise the provider's `extractTokenIdentity` hook fills it in server-side. */
-                    accountId?: string;
+                    account_id?: string;
                 };
             };
         };
         responses: {
-            /** @description Credential created or reconnected in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, so the models the helper prints in its terminal summary have to travel back in this response. `availableModelIds` is therefore a projection of the credential's own servable set — byte-for-byte what `available_model_ids` reports for this `credentialId` on `GET /api/model-provider-credentials`, resolved through the same accessor, so the terminal and the dashboard can never disagree. For subscription providers (`codex`, `claude-code`) that set is derived from the provider definition ∩ the pricing catalog with no upstream call; for probe-validated providers a reconnect preserves the credential's empirically discovered list. The dashboard obtains the resulting credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list. */
+            /** @description Credential created or reconnected in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, so the models the helper prints in its terminal summary have to travel back in this response. `available_model_ids` is therefore a projection of the credential's own servable set — byte-for-byte what `available_model_ids` reports for this `credentialId` on `GET /api/model-provider-credentials`, resolved through the same accessor, so the terminal and the dashboard can never disagree. For subscription providers (`codex`, `claude-code`) that set is derived from the provider definition ∩ the pricing catalog with no upstream call; for probe-validated providers a reconnect preserves the credential's empirically discovered list. The dashboard obtains the resulting credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -14129,7 +14129,7 @@ export interface operations {
                         providerId: string;
                         /** Format: email */
                         email?: string;
-                        availableModelIds: string[];
+                        available_model_ids: string[];
                     };
                 };
             };
@@ -14182,7 +14182,7 @@ export interface operations {
                         id: string;
                         /** @description Plaintext pairing token (`appp_<header>.<secret>`). Returned ONCE — never exposed by GET /pairing/:id. Carry as `Authorization: Bearer <token>` on POST /pair/redeem. */
                         token: string;
-                        /** @description Ready-to-paste shell command (`npx @appstrate/connect-helper@latest <token>`). */
+                        /** @description Ready-to-paste shell command (`npx @appstrate/connect-helper@0.3.x <token>`). */
                         command: string;
                         /** Format: date-time */
                         expiresAt: string;
@@ -14228,7 +14228,7 @@ export interface operations {
                         /** @enum {string} */
                         status: "pending" | "consumed" | "expired";
                         /** Format: date-time */
-                        consumedAt: string | null;
+                        consumed_at: string | null;
                         /** Format: date-time */
                         expiresAt: string;
                         /**
@@ -14300,9 +14300,9 @@ export interface operations {
                      *           "id": "gpt-4o",
                      *           "label": "GPT-4o",
                      *           "providerId": "openai",
-                     *           "providerName": "OpenAI",
+                     *           "provider_name": "OpenAI",
                      *           "apiShape": "openai-responses",
-                     *           "baseUrl": "https://api.openai.com/v1",
+                     *           "base_url": "https://api.openai.com/v1",
                      *           "modelId": "gpt-4o",
                      *           "generation": {
                      *             "temperature": "supported",
@@ -14375,7 +14375,7 @@ export interface operations {
                         cacheRead?: number;
                         cacheWrite?: number;
                     };
-                    /** @description Managed-model flag. When true, this model's binding (modelId, provider, baseUrl, capabilities/cost) is not exposed on user-facing surfaces and these fields are null; inference is routed by the platform. */
+                    /** @description Managed-model flag. When true, this model's binding (modelId, provider, base_url, capabilities/cost) is not exposed on user-facing surfaces and these fields are null; inference is routed by the platform. */
                     aliased?: boolean;
                 };
             };
@@ -14543,7 +14543,7 @@ export interface operations {
                      *       "status": 502,
                      *       "detail": "OpenRouter API returned an unexpected error",
                      *       "code": "provider_error",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -14562,7 +14562,7 @@ export interface operations {
                      *       "status": 504,
                      *       "detail": "OpenRouter did not respond within the allowed time",
                      *       "code": "timeout",
-                     *       "requestId": "req_def456"
+                     *       "request_id": "req_def456"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -14584,7 +14584,7 @@ export interface operations {
             content: {
                 "application/json": {
                     credentialId: string;
-                    modelIds: string[];
+                    model_ids: string[];
                 };
             };
         };
@@ -14600,7 +14600,7 @@ export interface operations {
                     "application/json": {
                         created: number;
                         ids: string[];
-                        promotedDefault: boolean;
+                        promoted_default: boolean;
                     };
                 };
             };
@@ -14627,10 +14627,10 @@ export interface operations {
                     credentialId: string;
                     /** @description Model identifier */
                     modelId: string;
-                    /** @description Override API key for the probe. Falls back to existingModelId's key, then the credential's stored key. */
-                    apiKey?: string;
+                    /** @description Override API key for the probe. Falls back to `existing_model_id`'s key, then the credential's stored key. */
+                    api_key?: string;
                     /** @description Existing model ID to fall back to for stored API key */
-                    existingModelId?: string;
+                    existing_model_id?: string;
                 };
             };
         };
@@ -14797,23 +14797,26 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "object": "list",
                      *       "data": [
                      *         {
                      *           "id": "550e8400-e29b-41d4-a716-446655440000",
                      *           "type": "run_completed",
-                     *           "run_id": "run_cm4jkl012",
+                     *           "runId": "run_cm4jkl012",
                      *           "payload": {
-                     *             "agent_id": "@acme/email-sorter",
+                     *             "packageId": "@acme/email-sorter",
                      *             "status": "success"
                      *           },
                      *           "read_at": null,
                      *           "createdAt": "2026-01-15T10:31:12Z"
                      *         }
                      *       ],
-                     *       "has_more": false
+                     *       "hasMore": false
                      *     }
                      */
                     "application/json": {
+                        /** @enum {string} */
+                        object: "list";
                         data: {
                             /**
                              * Format: uuid
@@ -14823,8 +14826,8 @@ export interface operations {
                             /** @description Notification kind, e.g. run_completed */
                             type: string;
                             /** @description Originating run id, when the notification references one */
-                            run_id: string | null;
-                            /** @description Render-without-join data (agent_id, status) */
+                            runId: string | null;
+                            /** @description Render-without-join data. `run_completed`: `packageId`, `status`. `package_shared`: `packageId`, `package_type`, `shared_by_name`. */
                             payload: {
                                 [key: string]: unknown;
                             } | null;
@@ -14837,7 +14840,7 @@ export interface operations {
                             createdAt: string;
                         }[];
                         /** @description True when another page follows — page via the Link header cursor */
-                        has_more: boolean;
+                        hasMore: boolean;
                     };
                 };
             };
@@ -18471,7 +18474,7 @@ export interface operations {
                     "application/json": components["schemas"]["AgentDetail"] | components["schemas"]["OrgPackageItemDetail"];
                 };
             };
-            /** @description Already owned, name collision, unsupported type, or no published version. RFC 9457 problem+json with `code` one of `invalid_request` (already owned / no published version / unsupported type) or `name_collision`. */
+            /** @description Already owned, name collision, unsupported type, no published version, or a source manifest the type's write policy refuses (an integration's non-snake_case identity claim key). RFC 9457 problem+json with `code` one of `invalid_request` (already owned / no published version / unsupported type), `name_collision` or `validation_failed` (`errors[].field` names the manifest key). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -18602,7 +18605,7 @@ export interface operations {
                      *       "status": 422,
                      *       "detail": "MCP-server package '@myorg/tools' has no activatable published version.",
                      *       "code": "bundle_invalid",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -18938,7 +18941,7 @@ export interface operations {
                      *       "status": 409,
                      *       "detail": "A password is already set for this account. Use the change password form instead.",
                      *       "code": "password_already_set",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -20105,7 +20108,7 @@ export interface operations {
                      *       "error": null,
                      *       "metadata": null,
                      *       "generation": {
-                     *         "reasoningLevel": "medium"
+                     *         "reasoning_level": "medium"
                      *       },
                      *       "generation_override": null,
                      *       "started_at": "2026-01-15T10:30:00Z",
@@ -20163,7 +20166,7 @@ export interface operations {
                      *       "status": 400,
                      *       "detail": "Invalid 'wait' value: expected true, false, or a non-negative integer number of seconds (max 55)",
                      *       "code": "invalid_request",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -20273,7 +20276,7 @@ export interface operations {
                      *       "status": 409,
                      *       "detail": "Run has already completed and cannot be cancelled",
                      *       "code": "conflict",
-                     *       "requestId": "req_def456"
+                     *       "request_id": "req_def456"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -21772,11 +21775,11 @@ export interface operations {
                     username: string;
                     pass: string;
                     /** Format: email */
-                    fromAddress: string;
+                    from_address: string;
                     /** @description Rejects quotes and CRLF to prevent email-header injection at send time. */
-                    fromName?: string;
+                    from_name?: string;
                     /** @enum {string} */
-                    secureMode?: "auto" | "tls" | "starttls" | "none";
+                    secure_mode?: "auto" | "tls" | "starttls" | "none";
                 };
             };
         };
@@ -21870,7 +21873,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         ok: boolean;
-                        messageId: string;
+                        message_id: string;
                     };
                 };
             };
@@ -21938,8 +21941,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    clientId: string;
-                    clientSecret: string;
+                    client_id: string;
+                    client_secret: string;
                     scopes?: string[];
                 };
             };
@@ -22271,7 +22274,7 @@ export interface operations {
                      *       "status": 422,
                      *       "detail": "MCP-server package '@myorg/tools' has no activatable published version.",
                      *       "code": "bundle_invalid",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -22361,7 +22364,7 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
-                    generationConfig?: components["schemas"]["ModelGenerationSettings"] | null;
+                    generation_config?: components["schemas"]["ModelGenerationSettings"] | null;
                     modelId?: string | null;
                     proxyId?: string | null;
                 };
@@ -22414,7 +22417,7 @@ export interface operations {
                      * @example {
                      *       "generation": {
                      *         "temperature": 0.2,
-                     *         "reasoningLevel": "high"
+                     *         "reasoning_level": "high"
                      *       },
                      *       "modelId": "claude-sonnet-4-6",
                      *       "proxyId": null,
@@ -22535,7 +22538,7 @@ export interface operations {
                      *       "status": 403,
                      *       "detail": "Organization staging limit (5368709120 bytes) would be exceeded",
                      *       "code": "storage_limit_exceeded",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -22557,7 +22560,7 @@ export interface operations {
                      *       "status": 429,
                      *       "detail": "Too many active staged uploads (max 20); consume or let existing uploads expire before staging more",
                      *       "code": "upload_staging_limit_exceeded",
-                     *       "requestId": "req_abc123"
+                     *       "request_id": "req_abc123"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -23599,7 +23602,7 @@ export interface operations {
                      *       "status": 403,
                      *       "detail": "This invitation is for newuser@example.com",
                      *       "code": "email_mismatch",
-                     *       "requestId": "req_stu901"
+                     *       "request_id": "req_stu901"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -23618,7 +23621,7 @@ export interface operations {
                      *       "status": 404,
                      *       "detail": "Invitation not found",
                      *       "code": "invitation_not_found",
-                     *       "requestId": "req_mno345"
+                     *       "request_id": "req_mno345"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -23637,7 +23640,7 @@ export interface operations {
                      *       "status": 410,
                      *       "detail": "Invitation has already been accepted",
                      *       "code": "invitation_accepted",
-                     *       "requestId": "req_pqr678"
+                     *       "request_id": "req_pqr678"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -23707,7 +23710,7 @@ export interface operations {
                      *       "status": 404,
                      *       "detail": "Invitation not found",
                      *       "code": "invitation_not_found",
-                     *       "requestId": "req_mno345"
+                     *       "request_id": "req_mno345"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
@@ -23726,7 +23729,7 @@ export interface operations {
                      *       "status": 410,
                      *       "detail": "Invitation has already been accepted",
                      *       "code": "invitation_accepted",
-                     *       "requestId": "req_pqr678"
+                     *       "request_id": "req_pqr678"
                      *     }
                      */
                     "application/problem+json": components["schemas"]["ProblemDetail"];

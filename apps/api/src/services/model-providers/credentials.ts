@@ -41,15 +41,22 @@ interface ApiKeyBlob {
   apiKey: string;
 }
 
+/** Resolved OAuth access token; {@link serializeOAuthTokenResponse} maps it to the wire. */
+export interface OAuthToken {
+  accessToken: string;
+  /** Epoch ms. `null` = unknown expiry. */
+  expiresAt: number | null;
+  accountId?: string;
+}
+
 /**
  * OAuth credential as stored at rest. Structurally a superset of
- * {@link OAuthTokenResponse} (the wire shape consumed by the sidecar) plus
- * the fields the platform keeps private: the rotating `refreshToken`, the
- * `needsReconnection` death flag, and the surface-only `email`. Keeping the
- * relationship explicit (intersection, not parallel declaration) means a
- * field added to the wire contract is automatically required here.
+ * {@link OAuthToken} plus the fields the platform keeps private: the rotating
+ * `refreshToken`, the `needsReconnection` death flag, and the surface-only
+ * `email`. Keeping the relationship explicit (intersection, not parallel
+ * declaration) means a field added to the token is automatically required here.
  */
-export type OAuthBlob = OAuthTokenResponse & {
+export type OAuthBlob = OAuthToken & {
   kind: "oauth";
   refreshToken: string;
   needsReconnection: boolean;
@@ -92,20 +99,22 @@ interface DecryptedModelProviderCredentials {
 // ─── Internal helpers ──────────────────────────────────────────────────────
 
 /**
- * Project an OAuth credential source into the wire shape consumed by the
- * sidecar. The conditional `accountId` spread is the actual contract — when
- * the provider didn't surface one, the field is omitted entirely (rather
- * than serialized as `null`).
+ * Project an OAuth credential source onto {@link OAuthToken}. The conditional
+ * `accountId` spread is the actual contract — when the provider didn't surface
+ * one, the field is omitted entirely (rather than serialized as `null`).
  */
-export function pickOAuthTokenResponse(source: {
-  accessToken: string;
-  expiresAt: number | null;
-  accountId?: string;
-}): OAuthTokenResponse {
+export function pickOAuthToken(source: OAuthToken): OAuthToken {
   const { accessToken, expiresAt, accountId } = source;
   return accountId !== undefined
     ? { accessToken, expiresAt, accountId }
     : { accessToken, expiresAt };
+}
+
+/** JSON boundary of `/internal/oauth-token/:id(/refresh)`. */
+export function serializeOAuthTokenResponse(token: OAuthToken): OAuthTokenResponse {
+  return token.accountId !== undefined
+    ? { access_token: token.accessToken, expiresAt: token.expiresAt, account_id: token.accountId }
+    : { access_token: token.accessToken, expiresAt: token.expiresAt };
 }
 
 /**
@@ -767,7 +776,7 @@ export async function listOrgModelProviderCredentials(
         label:
           def.label ?? (aliasOnly ? "System models" : (provider?.displayName ?? def.providerId)),
         apiShape: aliasOnly ? null : def.apiShape,
-        baseUrl: aliasOnly ? null : def.baseUrl,
+        base_url: aliasOnly ? null : def.baseUrl,
         source: "built-in",
         authMode: "api_key",
         created_by: null,
@@ -783,7 +792,7 @@ export async function listOrgModelProviderCredentials(
         id: r.id,
         label: r.label,
         apiShape: cfg?.apiShape ?? "openai-completions",
-        baseUrl: cfg ? effectiveBaseUrl(cfg, r.baseUrlOverride) : "",
+        base_url: cfg ? effectiveBaseUrl(cfg, r.baseUrlOverride) : "",
         source: "custom",
         authMode: cfg?.authMode ?? "api_key",
         providerId: r.providerId,

@@ -370,7 +370,7 @@ export function runPiChat(input: PiChatInput): Response {
         } = sdk;
 
         const piModel = model;
-        const requestedThinkingLevel = input.generation.reasoningLevel ?? "medium";
+        const requestedThinkingLevel = input.generation.reasoning_level ?? "medium";
         const {
           model: sessionModel,
           thinkingLevel,

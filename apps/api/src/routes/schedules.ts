@@ -26,6 +26,7 @@ import { requireActiveAgent, requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { ApiError, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
+import type { AuditPayload } from "@appstrate/core/module";
 import { parseListPagination } from "../lib/list-query.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { getActor, actorFromIds, type Actor } from "../lib/actor.ts";
@@ -702,7 +703,7 @@ export function createSchedulesRouter() {
     // convention — see api-keys.ts, modules/webhooks/routes.ts). Only
     // include keys the caller actually sent so the audit reflects the
     // patch, not a snapshot of the whole row.
-    const auditAfter: Record<string, unknown> = {};
+    const auditAfter: AuditPayload = {};
     if (data.name !== undefined) auditAfter.name = data.name;
     if (data.cron_expression !== undefined) auditAfter.cronExpression = data.cron_expression;
     if (data.timezone !== undefined) auditAfter.timezone = data.timezone;

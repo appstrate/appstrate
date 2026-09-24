@@ -254,7 +254,7 @@ async function runPlatformContainerImpl(
     // Model-alias swap descriptor (LLM-gateway alias pattern). The container is
     // handed the public alias as MODEL_ID (below); the sidecar swaps it for the
     // real upstream id on every call. The real id never enters the container.
-    const requestedReasoningLevel = plan.generationConfig?.reasoningLevel ?? "medium";
+    const requestedReasoningLevel = plan.generationConfig?.reasoning_level ?? "medium";
     const nativeReasoningLevel = toNativeModelReasoningLevel(
       requestedReasoningLevel,
       llmConfig.generation,
@@ -273,8 +273,8 @@ async function runPlatformContainerImpl(
           backing: {
             providerId: derivePiProvider(llmConfig.providerId, llmConfig.apiShape),
             reasoning: llmConfig.reasoning ?? false,
-            ...(llmConfig.generation?.reasoning.nativeLevels
-              ? { reasoningLevelMap: llmConfig.generation.reasoning.nativeLevels }
+            ...(llmConfig.generation?.reasoning.native_levels
+              ? { reasoningLevelMap: llmConfig.generation.reasoning.native_levels }
               : {}),
             input: llmConfig.input ?? ["text"],
           },
@@ -391,7 +391,7 @@ async function runPlatformContainerImpl(
         contextWindow: llmConfig.contextWindow,
         maxTokens: llmConfig.maxTokens,
         reasoning: llmConfig.reasoning,
-        reasoningLevelMap: llmConfig.generation?.reasoning.nativeLevels,
+        reasoningLevelMap: llmConfig.generation?.reasoning.native_levels,
         cost: llmConfig.cost,
         // WHAT this run is, not which vars to mask: `buildRuntimePiEnv` owns
         // the alias policy for the container env contract.

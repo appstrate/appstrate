@@ -122,7 +122,7 @@ export function RunOutcomeView({
   // files it consumed would be lying about the one thing it exists to say —
   // and the query answers the run's whole container, so a file chained in from
   // an earlier run arrives here carrying `agent_output` and is told apart only
-  // by its own `run_id`.
+  // by its own `runId`.
   const produced = useMemo(() => producedRunFiles(files, runId), [files, runId]);
   // Derived from the produced files alone (#1177) — exactly one is featured and
   // opened, several are only listed and the user picks.

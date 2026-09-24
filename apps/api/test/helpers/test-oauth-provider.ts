@@ -161,7 +161,7 @@ export function registerTestOAuthProvider(): void {
           supported: "supported",
           adaptive: true,
           levels: { xhigh: "supported" },
-          nativeLevels: { xhigh: "max" },
+          native_levels: { xhigh: "max" },
         },
       },
       cost: { input: 0, output: 0 },

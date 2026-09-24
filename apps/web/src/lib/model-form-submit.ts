@@ -17,6 +17,7 @@ import type {
   ModelFormModelEntry,
   ModelFormSubmission,
   ModelFormSubmitOutcome,
+  NewCredentialBody,
 } from "./model-form-payload.ts";
 import { toCreateModelBody } from "./model-form-payload.ts";
 import { ApiError } from "../api/errors.ts";
@@ -35,11 +36,7 @@ type ModelFormUpdateBody = Omit<ModelFormData, "newCredential">;
 
 /** The three writes a submission can make. */
 export interface ModelFormWrites {
-  createCredential: (body: {
-    providerId: string;
-    apiKey: string;
-    baseUrlOverride?: string;
-  }) => Promise<{ id: string }>;
+  createCredential: (body: NewCredentialBody) => Promise<{ id: string }>;
   createModel: (body: ModelFormCreateBody) => Promise<unknown>;
   updateModel: (id: string, body: ModelFormUpdateBody) => Promise<unknown>;
 }

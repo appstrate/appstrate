@@ -45,7 +45,7 @@ import { runs } from "./runs.ts";
  * `type` + `runId` play the standard `entity_type` / `entity_id` roles so
  * the table extends to non-run notifications (invitations, billing) later
  * without a schema change. `payload` carries the few fields the bell needs
- * to render without a join back to `runs` (`agent_id`, `status`).
+ * to render without a join back to `runs` (`packageId`, `status`).
  */
 export const notifications = pgTable(
   "notifications",
@@ -79,7 +79,7 @@ export const notifications = pgTable(
     // that have no run. `runs.id` is a text (`run_`-prefixed) id, so this
     // is text too. ON DELETE CASCADE: deleting a run drops its notifications.
     runId: text("run_id").references(() => runs.id, { onDelete: "cascade" }),
-    // Render-without-join payload: { agent_id, status }.
+    // Render-without-join payload: { packageId, status }.
     payload: jsonb("payload").$type<Record<string, unknown>>(),
     readAt: timestamp("read_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

@@ -22,7 +22,7 @@ import type { OAuthTokenResponse } from "@appstrate/core/sidecar-types";
 
 function makeTokenResponse(overrides: Partial<OAuthTokenResponse> = {}): OAuthTokenResponse {
   return {
-    accessToken: "tok-fresh",
+    access_token: "tok-fresh",
     expiresAt: Date.now() + 60 * 60_000, // 1h
     ...overrides,
   };
@@ -74,7 +74,7 @@ describe("OAuthTokenCache.getToken — basic", () => {
     let invocations = 0;
     const { cache } = makeHarness(() => {
       invocations++;
-      return makeJsonResponse(makeTokenResponse({ expiresAt, accessToken: `t${invocations}` }));
+      return makeJsonResponse(makeTokenResponse({ expiresAt, access_token: `t${invocations}` }));
     });
     const t1 = await cache.getToken("c1");
     const t2 = await cache.getToken("c1");
@@ -107,7 +107,7 @@ describe("OAuthTokenCache.getToken — basic", () => {
     let invocations = 0;
     const { cache } = makeHarness(() => {
       invocations++;
-      return makeJsonResponse(makeTokenResponse({ accessToken: `tok-${invocations}` }));
+      return makeJsonResponse(makeTokenResponse({ access_token: `tok-${invocations}` }));
     });
     const [a, b] = await Promise.all([cache.getToken("c1"), cache.getToken("c2")]);
     expect(a.accessToken).not.toBe(b.accessToken);
@@ -122,7 +122,7 @@ describe("OAuthTokenCache.getToken — platform owns proactive refresh", () => {
     const { cache, calls } = makeHarness(() =>
       makeJsonResponse(
         makeTokenResponse({
-          accessToken: "tok-from-platform",
+          access_token: "tok-from-platform",
           expiresAt: Date.now() + 60 * 60_000,
         }),
       ),
@@ -160,7 +160,7 @@ describe("OAuthTokenCache — invalidation", () => {
     let invocations = 0;
     const { cache } = makeHarness(() => {
       invocations++;
-      return makeJsonResponse(makeTokenResponse({ accessToken: `tok-${invocations}` }));
+      return makeJsonResponse(makeTokenResponse({ access_token: `tok-${invocations}` }));
     });
     const t1 = await cache.getToken("c1");
     cache.invalidate("c1");
@@ -176,7 +176,7 @@ describe("OAuthTokenCache — invalidation", () => {
       invocations++;
       const isRefresh = url.endsWith("/refresh");
       return makeJsonResponse(
-        makeTokenResponse({ accessToken: isRefresh ? "tok-after" : "tok-before" }),
+        makeTokenResponse({ access_token: isRefresh ? "tok-after" : "tok-before" }),
       );
     });
     const t1 = await cache.getToken("c1");
@@ -216,7 +216,7 @@ describe("OAuthTokenCache — cache TTL semantics", () => {
         invocations++;
         return makeJsonResponse(
           makeTokenResponse({
-            accessToken: `tok-${invocations}`,
+            access_token: `tok-${invocations}`,
             expiresAt: originalNow() + 60 * 60_000,
           }),
         );
@@ -270,7 +270,7 @@ describe("OAuthTokenCache — hardening (Phase 8)", () => {
     const { cache } = makeHarness(async () => {
       invocations++;
       await new Promise((r) => setTimeout(r, 5));
-      return makeJsonResponse(makeTokenResponse({ accessToken: "tok-shared" }));
+      return makeJsonResponse(makeTokenResponse({ access_token: "tok-shared" }));
     });
 
     // Spawn refresh + read concurrently — second arrival must join the inflight
@@ -295,7 +295,7 @@ describe("OAuthTokenCache — hardening (Phase 8)", () => {
           headers: { "Content-Type": "application/json" },
         });
       }
-      return makeJsonResponse(makeTokenResponse({ accessToken: "tok-eventual" }));
+      return makeJsonResponse(makeTokenResponse({ access_token: "tok-eventual" }));
     });
 
     await expect(cache.forceRefresh("c1")).rejects.toThrow(/503/);
@@ -309,7 +309,7 @@ describe("OAuthTokenCache — hardening (Phase 8)", () => {
     const fetchFn = mock(async () => {
       invocations++;
       if (invocations === 1) throw new Error("network unstable");
-      return makeJsonResponse(makeTokenResponse({ accessToken: "tok-second" }));
+      return makeJsonResponse(makeTokenResponse({ access_token: "tok-second" }));
     });
     const cache = new OAuthTokenCache({
       getPlatformApiUrl: () => "http://platform",
@@ -365,5 +365,30 @@ describe("OAuthTokenCache — hardening (Phase 8)", () => {
     }
     expect(caught).toBeInstanceOf(NeedsReconnectionError);
     expect((caught as NeedsReconnectionError).credentialId).toBe("c1");
+  });
+});
+
+describe("OAuthTokenCache — wire shape of /internal/oauth-token", () => {
+  it("reads snake_case `access_token` / `account_id` into the camelCase cache entry", async () => {
+    const { cache } = makeHarness(() =>
+      makeJsonResponse(makeTokenResponse({ access_token: "tok-wire", account_id: "acct-1" })),
+    );
+    const t = await cache.getToken("c1");
+    expect(t.accessToken).toBe("tok-wire");
+    expect(t.accountId).toBe("acct-1");
+    expect(t).not.toHaveProperty("access_token");
+  });
+
+  it("omits accountId when the platform surfaced none", async () => {
+    const { cache } = makeHarness();
+    const t = await cache.getToken("c1");
+    expect(t).not.toHaveProperty("accountId");
+  });
+
+  it("fails loudly on a camelCase `accessToken` instead of caching `undefined`", async () => {
+    const { cache } = makeHarness(() =>
+      makeJsonResponse({ accessToken: "tok-camel", expiresAt: Date.now() + 60 * 60_000 }),
+    );
+    await expect(cache.getToken("c1")).rejects.toThrow("no access_token");
   });
 });

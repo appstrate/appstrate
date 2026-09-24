@@ -50,6 +50,7 @@ import {
   forceRefreshOAuthModelProviderToken,
   resolveOAuthTokenForSidecar,
 } from "../services/model-providers/token-resolver.ts";
+import { serializeOAuthTokenResponse } from "../services/model-providers/credentials.ts";
 import {
   resolveLiveIntegrationCredentials,
   serializeIntegrationCredentialsWire,
@@ -446,7 +447,9 @@ export function createInternalRouter() {
     assertPlatformOriginOAuthAccess(run.runOrigin);
     const credentialId = c.req.param("credentialId");
     await assertOAuthModelCredential(credentialId, run.orgId, run.modelCredentialId);
-    return c.json(await resolveOAuthTokenForSidecar(credentialId, run.orgId));
+    return c.json(
+      serializeOAuthTokenResponse(await resolveOAuthTokenForSidecar(credentialId, run.orgId)),
+    );
   });
 
   router.post("/oauth-token/:credentialId/refresh", async (c) => {
@@ -454,7 +457,11 @@ export function createInternalRouter() {
     assertPlatformOriginOAuthAccess(run.runOrigin);
     const credentialId = c.req.param("credentialId");
     await assertOAuthModelCredential(credentialId, run.orgId, run.modelCredentialId);
-    return c.json(await forceRefreshOAuthModelProviderToken(credentialId, run.orgId));
+    return c.json(
+      serializeOAuthTokenResponse(
+        await forceRefreshOAuthModelProviderToken(credentialId, run.orgId),
+      ),
+    );
   });
 
   /**

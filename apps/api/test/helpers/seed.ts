@@ -570,6 +570,7 @@ interface OAuthCredentialSeed {
   /** Epoch ms. `null` means "no upstream expiry" — passes through to the resolver as-is. */
   expiresAt?: number | null;
   needsReconnection?: boolean;
+  accountId?: string;
   createdBy?: string | null;
 }
 
@@ -596,6 +597,7 @@ export async function seedOrgModelProviderOAuth(
         refreshToken: overrides.refreshToken ?? "test-refresh-token",
         expiresAt: overrides.expiresAt === undefined ? Date.now() + 3600_000 : overrides.expiresAt,
         needsReconnection: overrides.needsReconnection ?? false,
+        ...(overrides.accountId !== undefined ? { accountId: overrides.accountId } : {}),
       }),
       createdBy: overrides.createdBy ?? null,
     })

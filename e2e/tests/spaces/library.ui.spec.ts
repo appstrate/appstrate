@@ -119,7 +119,7 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
   // placement away would have taken the choice with it.
   const credential = await apiClient.post("/model-provider-credentials", {
     providerId: "anthropic",
-    apiKey: "sk-ant-e2e",
+    api_key: "sk-ant-e2e",
   });
   expect(credential.status(), await credential.text()).toBe(201);
   const model = await apiClient.post("/models", {
@@ -225,7 +225,7 @@ test("a switched-off agent leaves the index, stays in the library, and is switch
   // being off is the only thing left that could hide it.
   const credential = await apiClient.post("/model-provider-credentials", {
     providerId: "anthropic",
-    apiKey: "sk-ant-e2e",
+    api_key: "sk-ant-e2e",
   });
   expect(credential.status(), await credential.text()).toBe(201);
   const model = await apiClient.post("/models", {

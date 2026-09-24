@@ -38,6 +38,7 @@
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import { and, asc, eq } from "drizzle-orm";
+import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import { auditEvents, packageShares, spacePackages } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
@@ -230,7 +231,7 @@ describe("`POST /api/runs/remote` — the fourth execution door", () => {
         type: "agent",
         display_name: "Live",
         description: "d",
-        schemaVersion: "1.0",
+        schema_version: AFPS_SCHEMA_VERSION,
         dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
       },
       draftContent: "prompt",
@@ -256,11 +257,11 @@ describe("`POST /api/spaces/{id}/packages` — the activation door", () => {
 
   /**
    * The refusal, minus the two members that are per-request by construction
-   * (`instance` and `requestId` echo the request id). Everything else has to
+   * (`instance` and `request_id` echo the request id). Everything else has to
    * match byte for byte between the two calls, so it is all compared.
    */
   const problem = async (res: Response): Promise<Record<string, unknown>> => {
-    const { instance: _i, requestId: _r, ...body } = (await res.json()) as Record<string, unknown>;
+    const { instance: _i, request_id: _r, ...body } = (await res.json()) as Record<string, unknown>;
     return { status: res.status, ...body };
   };
 

@@ -103,12 +103,12 @@ describe("acquirePiChatSlot", () => {
 });
 
 describe("chatCapacityError", () => {
-  it("is an RFC 9457 429 carrying retryAfter", () => {
+  it("is an RFC 9457 429 carrying retry_after", () => {
     const err = chatCapacityError();
     expect(err.status).toBe(429);
     expect(err.code).toBe("chat_capacity");
     expect(err.retryAfter).toBe(5);
-    expect(err.toProblemDetail("req_x")).toMatchObject({ retryAfter: 5, requestId: "req_x" });
+    expect(err.toProblemDetail("req_x")).toMatchObject({ retry_after: 5, request_id: "req_x" });
   });
 });
 

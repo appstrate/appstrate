@@ -21,6 +21,7 @@
  * token response) or declare where to fetch it.
  */
 
+import { findNonSnakeCaseIdentityClaimKeys } from "@appstrate/core/integration";
 import type { SystemPackageEntry } from "@appstrate/core/system-packages";
 import type { Finding } from "./types.ts";
 
@@ -58,4 +59,14 @@ export function checkIdentitySource(entry: SystemPackageEntry): Finding[] {
       },
     ];
   });
+}
+
+/** Write-path identity-claim key casing, for system manifests (no write route sees them). FAIL. */
+export function checkIdentityClaimKeys(entry: SystemPackageEntry): Finding[] {
+  return findNonSnakeCaseIdentityClaimKeys(entry.manifest).map((v) => ({
+    packageId: entry.packageId,
+    check: "identity-claim-keys",
+    severity: "fail" as const,
+    message: `${v.path.join(".")}: ${v.message}`,
+  }));
 }

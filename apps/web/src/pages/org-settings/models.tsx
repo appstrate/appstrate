@@ -557,13 +557,14 @@ export function OrgSettingsModelsPage() {
         isPending={createPkMutation.isPending || updatePkMutation.isPending}
         onSubmit={(data) => {
           if (editPk) {
-            // The PATCH body only accepts mutable fields — `api`/`baseUrl` are
-            // pinned by `providerId` at create time. Strip them here even
-            // though the form disables those inputs on edit.
-            const patch: { label?: string; apiKey?: string } = { label: data.label };
-            if (data.apiKey) patch.apiKey = data.apiKey;
+            // The PATCH body only accepts mutable fields — the protocol and
+            // endpoint are pinned by `providerId` at create time. Strip them
+            // here even though the form disables those inputs on edit.
             updatePkMutation.mutate(
-              { params: { path: { id: editPk.id } }, body: patch },
+              {
+                params: { path: { id: editPk.id } },
+                body: { label: data.label, ...(data.apiKey ? { api_key: data.apiKey } : {}) },
+              },
               { onSuccess: () => setPkModalOpen(false) },
             );
           } else {
@@ -573,8 +574,8 @@ export function OrgSettingsModelsPage() {
                 body: {
                   label: uniqueLabel,
                   providerId: data.providerId,
-                  apiKey: data.apiKey ?? "",
-                  ...(data.baseUrlOverride ? { baseUrlOverride: data.baseUrlOverride } : {}),
+                  api_key: data.apiKey ?? "",
+                  ...(data.baseUrlOverride ? { base_url_override: data.baseUrlOverride } : {}),
                 },
               },
               { onSuccess: () => setPkModalOpen(false) },

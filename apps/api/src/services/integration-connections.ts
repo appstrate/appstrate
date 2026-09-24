@@ -1871,8 +1871,8 @@ export async function deleteIntegrationOAuthClient(
  * credentials bag). A path selecting nothing is omitted; an unsupported path
  * fails the connect with `invalid_config`.
  *
- * `accountId` is the declared `accountId` / `account_id` claim, else the
- * source's `email` / `account_email` / `sub`, else `"default"` (single-account).
+ * `accountId` is the declared `account_id` claim, else the source's `email` /
+ * `account_email` / `sub`, else `"default"` (single-account).
  */
 export function extractIdentity(
   manifest: IntegrationManifest,
@@ -1887,7 +1887,6 @@ export function extractIdentity(
     if (value !== undefined) claims[outKey] = value;
   }
   const accountId =
-    (typeof claims.accountId === "string" && claims.accountId) ||
     (typeof claims.account_id === "string" && claims.account_id) ||
     (typeof source.email === "string" && source.email) ||
     (typeof source.account_email === "string" && source.account_email) ||

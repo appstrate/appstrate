@@ -223,12 +223,30 @@ describe("ApiError extension members (RFC 9457 §3.2)", () => {
     // `errors` is OPTIONAL and absent on this problem, so a `key in body` guard
     // would have let it through — and a client branching on `errors` cannot
     // tell a validation list from an extension that took the name.
-    const body = build({ errors: ["nope"], status: 200, param: "x" }) as unknown as Record<
-      string,
-      unknown
-    >;
+    const body = build({
+      errors: ["nope"],
+      status: 200,
+      param: "x",
+      request_id: "req_spoofed",
+      retry_after: 9,
+    }) as unknown as Record<string, unknown>;
     expect(body.errors).toBeUndefined();
     expect(body.param).toBeUndefined();
     expect(body.status).toBe(409);
+    expect(body.request_id).toBe("req_test");
+    expect(body.retry_after).toBeUndefined();
+  });
+
+  it("names the request id and retry delay in snake_case", () => {
+    const body = new ApiError({
+      status: 429,
+      code: "rate_limited",
+      title: "Rate Limited",
+      detail: "Slow down",
+      retryAfter: 7,
+    }).toProblemDetail("req_test") as unknown as Record<string, unknown>;
+    expect(body).toMatchObject({ request_id: "req_test", retry_after: 7 });
+    expect(body).not.toHaveProperty("requestId");
+    expect(body).not.toHaveProperty("retryAfter");
   });
 });

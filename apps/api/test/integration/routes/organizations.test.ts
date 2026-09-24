@@ -186,7 +186,7 @@ describe("Organizations API", () => {
       expect(body.code).toBe("slug_taken");
     });
 
-    it("pins apiVersion in settings at creation", async () => {
+    it("pins api_version in settings at creation", async () => {
       const testUser = await createTestUser();
 
       const res = await app.request("/api/orgs", {
@@ -522,6 +522,33 @@ describe("Organizations API", () => {
       expect(res.status).toBe(200);
       const settings = await getOrgSettings(ctx.orgId);
       expect(settings.api_version).toBe(CURRENT_API_VERSION);
+    });
+
+    it("audits the settings patch with camelCase keys, not the snake_case body (carve-out 4m)", async () => {
+      const ctx = await createTestContext();
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
+        method: "PATCH",
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          api_version: CURRENT_API_VERSION,
+          dashboard_sso_enabled: true,
+          restrict_package_copy: true,
+        }),
+      });
+      expect(res.status).toBe(200);
+
+      const [row] = await db
+        .select()
+        .from(auditEvents)
+        .where(
+          and(eq(auditEvents.orgId, ctx.orgId), eq(auditEvents.action, "org.settings_updated")),
+        );
+      expect(row!.after).toEqual({
+        apiVersion: CURRENT_API_VERSION,
+        dashboardSsoEnabled: true,
+        restrictPackageCopy: true,
+      });
     });
 
     it("leaves the org fully usable after a rejected write (self-brick regression)", async () => {
@@ -1370,12 +1397,12 @@ describe("Organizations API", () => {
       expect(res.status).toBe(403);
     });
 
-    it("PUT /api/orgs/:otherOrgId/settings returns 403", async () => {
+    it("PATCH /api/orgs/:otherOrgId/settings returns 403", async () => {
       const { orgB, bearer } = await setupTwoOrgKey();
       const res = await app.request(`/api/orgs/${orgB.id}/settings`, {
         method: "PATCH",
         headers: { ...bearer, "Content-Type": "application/json" },
-        body: JSON.stringify({ apiVersion: "2026-03-21" }),
+        body: JSON.stringify({ api_version: "2026-03-21" }),
       });
       expect(res.status).toBe(403);
     });

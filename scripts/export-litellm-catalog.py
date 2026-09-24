@@ -179,7 +179,7 @@ def generation_capabilities(
         "levels": levels,
     }
     if temperature_compatible is not None:
-        reasoning_capabilities["temperatureCompatible"] = temperature_compatible
+        reasoning_capabilities["temperature_compatible"] = temperature_compatible
 
     return {
         "temperature": temperature,

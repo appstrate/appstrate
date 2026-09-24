@@ -61,27 +61,27 @@ export function getProviderById(
 
 /**
  * The registry entry behind a saved row. `providerId` answers for any endpoint,
- * a custom URL included; the `(apiShape, baseUrl)` match is the fallback for
+ * a custom URL included; the `(apiShape, base_url)` match is the fallback for
  * rows whose binding is hidden (built-in credentials, aliased models).
  */
 export function resolveProviderEntry(
-  row: { providerId?: string | null; apiShape: string | null; baseUrl: string | null },
+  row: { providerId?: string | null; apiShape: string | null; base_url: string | null },
   registry: readonly ProviderRegistryEntry[],
 ): ProviderRegistryEntry | undefined {
   return (
     (row.providerId ? getProviderById(row.providerId, registry) : undefined) ??
-    findProviderByApiShapeAndBaseUrl(row.apiShape, row.baseUrl, registry)
+    findProviderByApiShapeAndBaseUrl(row.apiShape, row.base_url, registry)
   );
 }
 
 /**
- * The `providerId` owning a `(apiShape, baseUrl, modelId?)` row: the catalog
+ * The `providerId` owning a `(apiShape, base_url, modelId?)` row: the catalog
  * owner of `modelId` first, then the base-URL match. `""` when none claims it.
  */
 export function resolveProviderId(
   spec: {
     apiShape: string | null;
-    baseUrl: string | null | undefined;
+    base_url: string | null | undefined;
     modelId?: string | null | undefined;
   },
   registry: readonly ProviderRegistryEntry[],
@@ -92,5 +92,5 @@ export function resolveProviderId(
     );
     if (owner) return owner.providerId;
   }
-  return findProviderByApiShapeAndBaseUrl(spec.apiShape, spec.baseUrl, registry)?.providerId ?? "";
+  return findProviderByApiShapeAndBaseUrl(spec.apiShape, spec.base_url, registry)?.providerId ?? "";
 }

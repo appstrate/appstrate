@@ -37,7 +37,7 @@ export function createNotificationsRouter() {
     const startingAfter = c.req.query("startingAfter");
     const result = await listNotifications(scope, actor, { unread, limit, startingAfter });
     const lastId = result.data.at(-1)?.id;
-    setCursorLinkHeader({ c, hasMore: result.has_more, lastId });
+    setCursorLinkHeader({ c, hasMore: result.hasMore, lastId });
     return c.json(result);
   });
 

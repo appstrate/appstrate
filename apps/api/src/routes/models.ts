@@ -129,15 +129,15 @@ export const setDefaultSchema = z
 export const seedModelsSchema = z
   .object({
     credentialId: z.uuid({ message: "credentialId must be a valid UUID" }),
-    modelIds: z
+    model_ids: z
       .array(z.string().min(1))
-      .min(1, "at least one modelId is required")
+      .min(1, "at least one model id is required")
       .max(50)
       // The same id twice is one binding asked for twice, and
       // `uq_org_models_unaliased_binding` refuses it. The seed insert is a
       // single atomic statement, so a self-duplicating body would fail the
       // whole batch on a constraint the caller cannot see — name it here.
-      .refine((ids) => new Set(ids).size === ids.length, "modelIds must be unique"),
+      .refine((ids) => new Set(ids).size === ids.length, "model_ids must be unique"),
   })
   .strict();
 
@@ -148,8 +148,8 @@ export const testInlineSchema = z
   .object({
     credentialId: z.string().min(1, "credentialId is required"),
     modelId: z.string().min(1),
-    apiKey: z.string().optional(),
-    existingModelId: z.string().optional(),
+    api_key: z.string().optional(),
+    existing_model_id: z.string().optional(),
   })
   .strict();
 
@@ -331,7 +331,7 @@ export function createModelsRouter() {
   });
 
   // POST /api/models/seed — bulk-seed models from the registry for one credential.
-  // The credential's providerId pins the registry entry; modelIds are validated
+  // The credential's providerId pins the registry entry; model_ids are validated
   // against it. Atomic — either all rows insert or none. Idempotent: returns
   // `created: 0` when the org already has any model bound to this credential.
   router.post("/seed", requirePermission("models", "write"), async (c) => {
@@ -379,7 +379,7 @@ export function createModelsRouter() {
       ...(credentialInfo?.available_model_ids ?? []),
     ]);
     const models: Array<CatalogModelEntry & { id: string }> = [];
-    for (const modelId of data.modelIds) {
+    for (const modelId of data.model_ids) {
       const cat = catalogById.get(modelId);
       if (!cat) {
         throw invalidRequest(`Model ${modelId} is not in the ${catalogKey} catalog`);
@@ -408,7 +408,10 @@ export function createModelsRouter() {
           promotedDefault: result.promotedDefault,
         },
       });
-      return c.json(result, 201);
+      return c.json(
+        { created: result.created, ids: result.ids, promoted_default: result.promotedDefault },
+        201,
+      );
     } catch (err) {
       if (err instanceof ApiError) throw err;
       logger.error("Model seed failed", { error: getErrorMessage(err) });
@@ -553,16 +556,16 @@ export function createModelsRouter() {
     const data = await readJsonBody(c, testInlineSchema);
 
     // Resolve the provider via the credential's providerId — the registry
-    // owns apiShape and the default baseUrl. The user-supplied apiKey (if
+    // owns apiShape and the default baseUrl. The user-supplied `api_key` (if
     // any) overrides the stored credential for "verify before save" flows.
     const creds = await loadInferenceCredentials(orgId, data.credentialId);
     if (!creds) {
       throw notFound("Credential not found");
     }
 
-    let apiKey = data.apiKey;
-    if (!apiKey && data.existingModelId) {
-      const existing = await loadModel(orgId, data.existingModelId);
+    let apiKey = data.api_key;
+    if (!apiKey && data.existing_model_id) {
+      const existing = await loadModel(orgId, data.existing_model_id);
       if (existing) apiKey = existing.apiKey;
     }
     if (!apiKey) {
@@ -738,7 +741,7 @@ export function createModelsRouter() {
         action: "model.updated",
         resourceType: "model",
         resourceId: modelId,
-        after: data as unknown as Record<string, unknown>,
+        after: data,
       });
       // Return the bare updated resource (#657), projected for a model alias
       // (Threat A) — the same projection the list and effective-default paths

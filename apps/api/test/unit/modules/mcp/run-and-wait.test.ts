@@ -53,7 +53,7 @@ function makeRunAndWait(opts: {
   permissions?: string[];
   launch?: () => Response;
   getRun?: Response[];
-  /** Rows the stubbed `GET /api/files?run_id=…` returns (published docs). */
+  /** Rows the stubbed `GET /api/files?runId=…` returns (published docs). */
   files?: Array<Record<string, unknown>>;
 }): {
   tool: ReturnType<typeof toolsFor>[number];
@@ -174,13 +174,15 @@ describe("run_and_wait", () => {
   it("refuses an undeclared argument instead of silently dropping it", async () => {
     const { tool, calls } = makeRunAndWait({});
 
-    const res = await tool.handler(
+    const call = tool.handler(
       { kind: "agent", scope: "@acme", name: "writer", contextFiles: ["appfile://file_1"] },
       noExtra,
     );
 
-    expect(res.isError).toBe(true);
-    expect(parseResult(res).error).toContain("contextFiles");
+    await expect(call).rejects.toMatchObject({
+      code: ErrorCode.InvalidParams,
+      message: expect.stringContaining("Unknown argument(s): contextFiles"),
+    } satisfies Partial<McpError>);
     // The whole point: no launch happened. A silent drop would have 201'd.
     expect(calls.find((c) => c.method === "POST")).toBeUndefined();
   });
@@ -188,13 +190,21 @@ describe("run_and_wait", () => {
   it("names the replacement for a retired argument", async () => {
     const { tool } = makeRunAndWait({});
 
-    const res = await tool.handler(
-      { kind: "inline", manifest: { display_name: "x" }, prompt: "p", context_documents: [] },
-      noExtra,
-    );
+    await expect(
+      tool.handler(
+        { kind: "inline", manifest: { display_name: "x" }, prompt: "p", context_documents: [] },
+        noExtra,
+      ),
+    ).rejects.toThrow(/Unknown argument\(s\): context_documents\. Accepted: .*context_files/);
+  });
 
-    expect(res.isError).toBe(true);
-    expect(parseResult(res).error).toContain("`context_files`");
+  it("refuses an inline-only argument the caller's descriptor does not declare", async () => {
+    const { tool, calls } = makeRunAndWait({ permissions: [...LAUNCHES, "agents:run"] });
+
+    await expect(
+      tool.handler({ kind: "agent", scope: "@acme", name: "writer", prompt: "p" }, noExtra),
+    ).rejects.toThrow("Unknown argument(s): prompt");
+    expect(calls).toHaveLength(0);
   });
 
   it("accepts every argument the descriptor declares", async () => {
@@ -493,7 +503,7 @@ describe("run_and_wait", () => {
           name: "report.html",
           mime: "text/html",
           size: 120,
-          run_id: "run_7",
+          runId: "run_7",
           // `fetchRunFiles` filters every returned row through
           // `isFileProducedByRun`, which needs BOTH halves — the run's file
           // container also holds the files mounted as its INPUT. The real
