@@ -617,12 +617,8 @@ describe("POST /api/runs/remote — kind: registry", () => {
     it("refuses a version whose ZIP is gone with 422, never running the draft", async () => {
       await seedPublishedAgent(ctx, "1.2.3");
       await deleteVersionZip("@acme/briefing", "1.2.3");
-      // A runnable draft sits right there: a 422 proves it was not substituted.
-      await db
-        .update(packages)
-        .set({ draftContent: "Unpublished replacement" })
-        .where(eq(packages.id, "@acme/briefing"));
-
+      // The seeded draft is runnable (non-empty prompt): the 422 and zero run
+      // rows prove it was not substituted for the missing version.
       await expectProblem(await launch(), 422, { code: "version_artifact_unavailable" });
       expect(await db.select().from(runs).where(eq(runs.packageId, "@acme/briefing"))).toHaveLength(
         0,

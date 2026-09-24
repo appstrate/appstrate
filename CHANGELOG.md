@@ -128,13 +128,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (SQLSTATE class 22 or `23514`) is recorded as a `system`/`event_dropped` log
   row instead, so the stream moves on.
 - **A remote run of a broken published version names the storage fault**
-  (#1533). `POST /api/runs/remote` with a `registry` source at
-  `stage: "published"` now answers `422 version_artifact_unavailable` when the
-  selected version's prompt archive is missing, corrupt or has no `prompt.md`,
-  as the platform run route does — instead of `400 empty_prompt`, which blamed
-  the author, or `412 missing_integration_connection`, which hid the fault. The
-  422 is now documented on `runAgent`, `createRemoteRun`, `createSchedule`,
-  `updateSchedule` and `saveAgentInputSettings`.
+  (#1533). `POST /api/runs/remote` (`registry`, `stage: "published"`) answers
+  `422 version_artifact_unavailable` when the version's prompt archive is
+  missing, corrupt or has no `prompt.md`, as the run route does — instead of a
+  later error that misplaced the fault (`400 empty_prompt`, blaming the author,
+  or `412 missing_integration_connection`, hiding it). Now documented on
+  `runAgent`, `createRemoteRun`, both schedule writes and input-settings.
 
 ## [1.0.0-beta.61] - 2026-09-23
 

@@ -20060,7 +20060,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), a dependency pin or `dependency_overrides` entry resolves to no published version (`dependency_unresolved`), or — `registry` source with `stage: "published"` only — the selected version has no readable prompt archive (`version_artifact_unavailable`); the working copy is never substituted */
+            /** @description Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), a dependency pin or `dependency_overrides` entry resolves to no published version (`dependency_unresolved`), or — `registry` source with `stage: "published"` (the default) only — the selected version has no readable prompt archive (`version_artifact_unavailable`); the working copy is never substituted */
             422: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
