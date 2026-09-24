@@ -148,8 +148,8 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
       const target = input.spec ? `${input.packageId}@${input.spec}` : input.packageId;
       throw new BundleFetchError(
         "version_artifact_unavailable",
-        `The published version of ${target} cannot be run: its stored archive is unreadable`,
-        `The package author must republish it or delete the broken version. If you own it, run the working copy meanwhile:\n  appstrate run ${input.packageId}@draft --local`,
+        `The published version of ${target} cannot be run: its stored archive is unavailable`,
+        `The package author must publish a new version (or delete the broken one). If you own it, run the working copy meanwhile:\n  appstrate run ${input.packageId}@draft --local`,
       );
     }
     throw new BundleFetchError(

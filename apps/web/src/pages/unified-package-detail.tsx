@@ -292,15 +292,25 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     return <Navigate to="/" replace />;
   }
 
-  // A published version whose stored archive is unreadable EXISTS — redirecting
+  // A published version whose stored archive is unavailable EXISTS — redirecting
   // to the live page (what any other version failure does) would hide that it
-  // is broken. Say so instead.
+  // is broken. Say so, and leave the way back to the live page one click away.
   if (
     isVersionView &&
     versionError instanceof ApiError &&
     versionError.code === "version_artifact_unavailable"
   ) {
-    return <ErrorState message={t("files.errorMissingArtifact")} />;
+    return (
+      <div className="flex flex-col items-center">
+        <ErrorState message={t("files.errorMissingArtifact")} />
+        <Link
+          to={packageDetailPath(type, packageId)}
+          className="text-sm text-blue-400 hover:underline"
+        >
+          {t("btn.back", { ns: "common" })}
+        </Link>
+      </div>
+    );
   }
 
   // ── Version redirect ──

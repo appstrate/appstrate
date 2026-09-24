@@ -300,7 +300,7 @@ describe("fetchBundleForRun — errors", () => {
   });
 
   it("maps 422 `version_artifact_unavailable` to a storage-fault error naming the version", async () => {
-    // The version is published but its stored archive is unreadable: the
+    // The version is published but its stored archive is unavailable: the
     // user did nothing wrong, so the CLI must not say "check the spelling".
     const fetchImpl = stubFetch({
       status: 422,
@@ -310,7 +310,7 @@ describe("fetchBundleForRun — errors", () => {
         title: "Version Artifact Unavailable",
         status: 422,
         code: "version_artifact_unavailable",
-        detail: "The stored archive of version 1.2.3 is unreadable.",
+        detail: "The stored archive of version 1.2.3 is unavailable.",
       }),
     });
     let caught: unknown;
@@ -330,8 +330,8 @@ describe("fetchBundleForRun — errors", () => {
     const err = caught as BundleFetchError;
     expect(err.code).toBe("version_artifact_unavailable");
     expect(err.message).toContain("@scope/agent@1.2.3");
-    expect(err.message).toContain("unreadable");
-    expect(err.hint).toContain("republish");
+    expect(err.message).toContain("unavailable");
+    expect(err.hint).toContain("publish a new version");
     expect(err.hint).toContain("appstrate run @scope/agent@draft --local");
   });
 
