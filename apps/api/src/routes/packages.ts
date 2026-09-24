@@ -52,6 +52,8 @@ import { ifNoneMatchSatisfied } from "../lib/if-none-match.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 import {
   getVersionDetail,
+  getVersionRow,
+  readVersionArchive,
   requirePublishedArchive,
   versionArtifactUnavailable,
   type VersionDetail,
@@ -1252,9 +1254,9 @@ function makeListVersionsHandler(rcfg: PackageRouteConfig) {
  * Build the canonical version detail DTO — the exact object the `GET` version
  * detail endpoint serializes. Reused by the version create endpoint so it
  * echoes the resulting version resource instead of an id/message stub (issue
- * #646). Tolerant: `content` is null when the bytes cannot be read, so a read
- * failure right after a committed publish never turns that write into a 4xx —
- * the GET handler refuses an unreadable archive itself.
+ * #646). Refuses nothing: `content` is null when `detail.content` is (the GET
+ * handler refuses an unreadable archive before calling this; the create echo
+ * does not).
  */
 async function buildVersionDetailDto(
   rcfg: PackageRouteConfig,
@@ -1385,21 +1387,24 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
 
     // Return the created version resource bare — same DTO/serializer as the
     // GET version detail — so callers see the snapshot (manifest, integrity,
-    // dist_tags, …) without a follow-up GET (issue #657). `id` (version row
-    // id) and `version` are part of the resource.
-    // The version is committed: a failed read-back is a 500, never a 4xx on a successful write.
-    const detail = await getVersionDetail(itemId, result.version).catch((err: unknown) => {
-      logger.error("Created version read-back failed", {
+    // dist_tags, …) without a follow-up GET (issue #657). The version is
+    // committed: a row that cannot be re-read is a 500, but bytes that cannot be
+    // read back (storage, signature policy) only null `content` — never an error
+    // answer to a successful write.
+    const row = await getVersionRow(itemId, result.version);
+    if (!row) {
+      logger.error("Created version could not be re-read", { packageId: itemId, orgId });
+      throw internalError();
+    }
+    const content = await readVersionArchive(itemId, row.version).catch((err: unknown) => {
+      logger.warn("Created version archive could not be read back", {
         packageId: itemId,
+        version: row.version,
         error: getErrorMessage(err),
       });
       return null;
     });
-    if (!detail) {
-      logger.error("Created version could not be re-read", { packageId: itemId, orgId });
-      throw internalError();
-    }
-    return c.json(await buildVersionDetailDto(rcfg, itemId, detail), 201);
+    return c.json(await buildVersionDetailDto(rcfg, itemId, { ...row, content }), 201);
   };
 }
 

@@ -8,7 +8,7 @@ import { REQUEST_ID_ONLY_HEADERS } from "./headers.ts";
 export const responses = {
   VersionArtifactUnavailable: {
     description:
-      "The selected published version's archive is missing, corrupt, or lacks the content entry its type requires (`prompt.md` for an agent, `SKILL.md` for a skill) — `version_artifact_unavailable`. Nothing is substituted for it, not even the working copy, and nothing is written.",
+      "The selected published version's archive is missing, corrupt, or lacks the content entry its type requires (`prompt.md` for an agent, `SKILL.md` for a skill) — `version_artifact_unavailable`. Nothing is substituted for it, not even the working copy, and nothing is written. When `AFPS_SIGNATURE_POLICY` is not `off`, the signature gate answers first: a corrupt archive is `bundle_invalid` and an unsigned or untrusted one `bundle_signature_invalid`, both 422.",
     headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },

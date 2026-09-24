@@ -3271,6 +3271,50 @@ describe("Packages API", () => {
       }
     });
 
+    it("POST versions answers 201 for a committed publish whose bytes cannot be read back", async () => {
+      const id = "@pkgorg/publish-unsigned-echo";
+      const headers = authHeaders(ctx, { "Content-Type": "application/json" });
+      const create = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ manifest: agentManifest(id), content: "v1 prompt" }),
+      });
+      expect(create.status).toBe(201);
+      const created = (await create.json()) as { lock_version: number };
+      const edited = await app.request(`/api/packages/agents/${id}`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ content: "v2 prompt", lock_version: created.lock_version }),
+      });
+      expect(edited.status).toBe(200);
+
+      // `required` rejects the platform's own unsigned archives on read, so the
+      // publish commits but the echo cannot re-read it. The version exists: a
+      // 5xx here would tell the caller to retry a publish that already happened.
+      const saved = process.env.AFPS_SIGNATURE_POLICY;
+      process.env.AFPS_SIGNATURE_POLICY = "required";
+      resetEnvCache();
+      try {
+        const res = await app.request(`/api/packages/agents/${id}/versions`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ version: "0.2.0" }),
+        });
+        expect(res.status, await res.clone().text()).toBe(201);
+        const body = (await res.json()) as { version: string; content: unknown };
+        expect(body.version).toBe("0.2.0");
+        expect(body.content).toBeNull();
+      } finally {
+        if (saved === undefined) delete process.env.AFPS_SIGNATURE_POLICY;
+        else process.env.AFPS_SIGNATURE_POLICY = saved;
+        resetEnvCache();
+      }
+      await assertDbHas(
+        packageVersions,
+        and(eq(packageVersions.packageId, id), eq(packageVersions.version, "0.2.0"))!,
+      );
+    });
+
     it("bundle export, file explorer and download refuse a version whose archive is gone", async () => {
       const id = "@pkgorg/doors-unreadable";
       const create = await app.request("/api/packages/agents", {

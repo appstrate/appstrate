@@ -321,14 +321,22 @@ export interface VersionDetail {
 
 /**
  * Resolve a version query and return full version data including the files of its ZIP.
- * Returns null if the version cannot be resolved. `content` is null when the object is
- * absent or will not unzip — a reader that needs the bytes goes through
- * {@link requirePublishedArchive}. Storage errors propagate; bundle-layer ones are coded.
+ * Returns null if the version cannot be resolved. See {@link readVersionArchive} for `content`.
  */
 export async function getVersionDetail(
   packageId: string,
   versionSpec: string,
 ): Promise<VersionDetail | null> {
+  const row = await getVersionRow(packageId, versionSpec);
+  if (!row) return null;
+  return { ...row, content: await readVersionArchive(packageId, row.version) };
+}
+
+/** A version's catalog row — {@link getVersionDetail} without reading its archive. */
+export async function getVersionRow(
+  packageId: string,
+  versionSpec: string,
+): Promise<Omit<VersionDetail, "content"> | null> {
   const versionId = await resolveVersion(packageId, versionSpec);
   if (!versionId) return null;
 
@@ -348,39 +356,44 @@ export async function getVersionDetail(
     .limit(1);
 
   if (!row) return null;
-
-  // Only the bytes' own failure is a broken artifact: a storage outage propagates, and
-  // a refusal from the signature gate inside the download keeps its coded answer (#878).
-  let zipBuffer: Buffer | null;
-  try {
-    zipBuffer = await downloadVersionZip(packageId, row.version);
-  } catch (err) {
-    throw toBundleApiError(err) ?? err;
-  }
-  let content: Record<string, Uint8Array> | null = null;
-  if (zipBuffer) {
-    try {
-      content = unzipPackageArchive(zipBuffer);
-    } catch (err) {
-      logger.warn("Failed to extract ZIP for version detail", {
-        packageId,
-        version: row.version,
-        error: getErrorMessage(err),
-      });
-    }
-  }
-
   return {
     id: row.id,
     version: row.version,
     manifest: asRecord(row.manifest),
-    content,
     yanked: row.yanked,
     yankedReason: row.yankedReason,
     integrity: row.integrity,
     artifactSize: row.artifactSize,
     createdAt: toISO(row.createdAt),
   };
+}
+
+/**
+ * A published version's files: null when the object is absent or will not unzip — a
+ * reader that needs the bytes goes through {@link requirePublishedArchive}. Storage errors
+ * propagate; bundle-layer refusals (the signature gate inside the download) are coded (#878).
+ */
+export async function readVersionArchive(
+  packageId: string,
+  version: string,
+): Promise<Record<string, Uint8Array> | null> {
+  let zipBuffer: Buffer | null;
+  try {
+    zipBuffer = await downloadVersionZip(packageId, version);
+  } catch (err) {
+    throw toBundleApiError(err) ?? err;
+  }
+  if (!zipBuffer) return null;
+  try {
+    return unzipPackageArchive(zipBuffer);
+  } catch (err) {
+    logger.warn("Failed to extract ZIP for version detail", {
+      packageId,
+      version,
+      error: getErrorMessage(err),
+    });
+    return null;
+  }
 }
 
 /**
