@@ -122,7 +122,7 @@ describe("POST /api/model-providers-oauth/pair/redeem — pairing-bearer track",
     expect(body).not.toHaveProperty("credential_id");
   });
 
-  it("rejects the retired camelCase token fields with 400", async () => {
+  it("rejects camelCase token fields with 400", async () => {
     const pairing = await mintPairing(ctx, "test-oauth");
     const res = await app.request("/api/model-providers-oauth/pair/redeem", {
       method: "POST",

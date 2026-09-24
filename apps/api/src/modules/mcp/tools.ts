@@ -361,6 +361,7 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
     },
     inputSchema: {
       type: "object",
+      additionalProperties: false,
       properties: {
         query: {
           type: "string",
@@ -461,6 +462,7 @@ function buildDescribeTool(ctx: McpToolContext, invokes: boolean): AppstrateTool
     },
     inputSchema: {
       type: "object",
+      additionalProperties: false,
       properties: {
         operation_id: {
           type: "string",
@@ -673,6 +675,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     },
     inputSchema: {
       type: "object",
+      additionalProperties: false,
       properties: {
         operation_id: { type: "string", description: "The operationId to invoke." },
         path_params: {
@@ -1008,6 +1011,9 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       idempotentHint: false,
       openWorldHint: true,
     },
+    // Not `additionalProperties: false`: `launchRunAndWait`, shared with the
+    // chat, refuses an undeclared argument itself, as a tool error listing the
+    // accepted names.
     inputSchema: {
       type: "object",
       properties: {
@@ -1275,12 +1281,6 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
 
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const start = performance.now();
-    // The SDK does not enforce `inputSchema`: an unknown filter would be
-    // dropped and widen the listing in silence.
-    const unknown = Object.keys(args).filter((k) => !(k in descriptor.inputSchema.properties!));
-    if (unknown.length > 0) {
-      throw new McpError(ErrorCode.InvalidParams, `Unknown argument(s): ${unknown.join(", ")}.`);
-    }
     const query: Record<string, unknown> = {};
     const runId = asString(args.runId);
     if (runId) query.runId = runId;
@@ -1487,7 +1487,7 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
       idempotentHint: true,
       openWorldHint: false,
     },
-    inputSchema: { type: "object", properties: {} },
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
   };
 
   const handler = async (): Promise<CallToolResult> => {
@@ -1564,6 +1564,29 @@ export function deriveMcpSurface(
  * No aliases for retired tool names: a stale client gets `-32602 Unknown tool`
  * and re-lists, where an alias would be a permanent second dispatch path.
  */
+/**
+ * The SDK does not validate `tools/call` arguments against `inputSchema`, so an
+ * argument a tool does not read is dropped in silence — a misspelled filter
+ * widens a listing, a misspelled field is simply not applied. A tool declaring
+ * `additionalProperties: false` therefore gets its undeclared top-level keys
+ * refused here, as -32602, before its handler runs.
+ */
+function refuseUndeclaredArguments(tool: AppstrateToolDefinition): AppstrateToolDefinition {
+  const schema = tool.descriptor.inputSchema;
+  if (schema.additionalProperties !== false) return tool;
+  const declared = new Set(Object.keys(schema.properties ?? {}));
+  return {
+    descriptor: tool.descriptor,
+    handler: async (args, extra) => {
+      const unknown = Object.keys(args).filter((k) => !declared.has(k));
+      if (unknown.length > 0) {
+        throw new McpError(ErrorCode.InvalidParams, `Unknown argument(s): ${unknown.join(", ")}.`);
+      }
+      return tool.handler(args, extra);
+    },
+  };
+}
+
 export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition[] {
   return [
     buildSearchTool(ctx, surface.invokes),
@@ -1575,5 +1598,5 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
     ...buildPackageFileTools(ctx, surface.importsPackages),
     // Redundant for a context-injecting caller; search_operations stays for `best_match`.
     ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx)]),
-  ];
+  ].map(refuseUndeclaredArguments);
 }

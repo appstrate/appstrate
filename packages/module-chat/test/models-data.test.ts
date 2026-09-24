@@ -35,7 +35,7 @@ describe("fetchModels", () => {
     expect(model?.provider_name).toBe("OpenCode Go");
   });
 
-  it("does not read a camelCase `providerName` the server no longer sends", async () => {
+  it("does not read a camelCase `providerName`", async () => {
     serve([{ ...ROW, providerName: "OpenCode Go" }]);
     const [model] = await fetchModels();
     expect(model?.provider_name).toBeUndefined();

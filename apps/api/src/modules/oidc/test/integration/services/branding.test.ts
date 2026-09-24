@@ -131,7 +131,7 @@ describe("resolveSpaceBranding", () => {
     expect(resolved.accentColor).toBe("#22c55e");
   });
 
-  it("rejects the retired camelCase keys and falls back to defaults", async () => {
+  it("ignores a branding blob with camelCase keys and falls back to defaults", async () => {
     const spaceId = await seedSpaceWithSettings({
       branding: {
         name: "Mon Workspace",

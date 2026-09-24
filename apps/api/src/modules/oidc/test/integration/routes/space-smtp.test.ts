@@ -49,8 +49,8 @@ describe("/api/spaces/:id/smtp-config", () => {
     expect(created.from_address).toBe("noreply@tenant.example");
     expect(created.from_name).toBe("Tenant");
     expect(created.secure_mode).toBe("starttls");
-    for (const retired of ["fromAddress", "fromName", "secureMode"]) {
-      expect(created).not.toHaveProperty(retired);
+    for (const camel of ["fromAddress", "fromName", "secureMode"]) {
+      expect(created).not.toHaveProperty(camel);
     }
     expect(created).not.toHaveProperty("pass");
     expect(created).not.toHaveProperty("passEncrypted");
@@ -76,7 +76,7 @@ describe("/api/spaces/:id/smtp-config", () => {
     expect(notFound.status).toBe(404);
   });
 
-  it("rejects the retired camelCase body keys", async () => {
+  it("rejects camelCase body keys", async () => {
     const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}/smtp-config`, {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },

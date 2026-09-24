@@ -193,14 +193,14 @@ describe("mcp list_files", () => {
     });
     expect((toolData(uploads.envelope).data.files as unknown[]).length).toBe(0);
 
-    // The retired `run_id` spelling fails loudly instead of listing unfiltered.
-    const retired = await rpc(headers, {
+    // An undeclared `run_id` argument fails loudly instead of listing unfiltered.
+    const undeclared = await rpc(headers, {
       jsonrpc: "2.0",
       id: 3,
       method: "tools/call",
       params: { name: "list_files", arguments: { run_id: runA } },
     });
-    expect(retired.envelope.error?.message).toContain("Unknown argument(s): run_id");
+    expect(undeclared.envelope.error?.message).toContain("Unknown argument(s): run_id");
   });
 
   it("scopes to the caller's org — a foreign org's files are not listed", async () => {

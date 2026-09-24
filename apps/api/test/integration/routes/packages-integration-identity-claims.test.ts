@@ -66,7 +66,7 @@ beforeEach(async () => {
 });
 
 /** A draft stored before the rule — planted directly, since the routes now refuse it. */
-async function seedLegacyDraft() {
+async function seedCamelCaseDraft() {
   await seedPackage({
     id: ID,
     orgId: ctx.orgId,
@@ -81,7 +81,7 @@ async function seedLegacyDraft() {
 }
 
 /** A version published before the rule: its archive and its row. */
-async function seedLegacyVersion(version: string) {
+async function seedCamelCaseVersion(version: string) {
   const m = { ...CAMEL, version };
   const afps = zipSync({ "manifest.json": enc(JSON.stringify(m, null, 2)) });
   await storage.uploadFile(AGENT_PACKAGES_BUCKET, versionZipKey(ID, version), afps);
@@ -104,7 +104,7 @@ function create(m: Record<string, unknown>) {
 
 describe("reading a stored camelCase manifest", () => {
   it("still serves it", async () => {
-    await seedLegacyDraft();
+    await seedCamelCaseDraft();
     const res = await app.request(`/api/integrations/${ID}`, { headers: authHeaders(ctx) });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -141,8 +141,8 @@ describe("writing a camelCase identity claim key", () => {
     });
   });
 
-  it("publish refuses to freeze a stored legacy draft", async () => {
-    await seedLegacyDraft();
+  it("publish refuses to freeze a stored camelCase draft", async () => {
+    await seedCamelCaseDraft();
     const res = await app.request(`/api/packages/integrations/${ID}/versions`, {
       method: "POST",
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
@@ -152,9 +152,9 @@ describe("writing a camelCase identity claim key", () => {
     expect(await db.select().from(packageVersions)).toEqual([]);
   });
 
-  it("restoring a published legacy version refuses it and leaves the draft untouched", async () => {
+  it("restoring a published camelCase version refuses it and leaves the draft untouched", async () => {
     expect((await create(SNAKE)).status).toBe(201);
-    await seedLegacyVersion("2.0.0");
+    await seedCamelCaseVersion("2.0.0");
     const res = await app.request(`/api/packages/integrations/${ID}/versions/2.0.0/restore`, {
       method: "POST",
       headers: authHeaders(ctx),

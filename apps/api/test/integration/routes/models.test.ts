@@ -1493,7 +1493,7 @@ describe("Models API", () => {
       expect(body.promoted_default).toBe(false);
     });
 
-    it("rejects the retired camelCase `modelIds` and answers in snake_case", async () => {
+    it("rejects a camelCase `modelIds` and answers in snake_case", async () => {
       const credentialId = await seedTestOAuthCredential();
       const post = (body: unknown) =>
         app.request("/api/models/seed", {
@@ -1618,17 +1618,17 @@ describe("Models API", () => {
       expect(res.status).toBe(403);
     });
 
-    it("POST /api/models/test → 400 for the retired camelCase key fields", async () => {
+    it("POST /api/models/test → 400 for camelCase key fields", async () => {
       const key = await seedOrgModelProviderKey({
         orgId: ctx.orgId,
         apiShape: "openai",
         baseUrl: "https://api.openai.com",
       });
-      for (const retired of [{ apiKey: "sk-test" }, { existingModelId: "mdl_x" }]) {
+      for (const camel of [{ apiKey: "sk-test" }, { existingModelId: "mdl_x" }]) {
         const res = await app.request("/api/models/test", {
           method: "POST",
           headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-          body: JSON.stringify({ credentialId: key.id, modelId: "gpt-4o", ...retired }),
+          body: JSON.stringify({ credentialId: key.id, modelId: "gpt-4o", ...camel }),
         });
         expect(res.status).toBe(400);
       }

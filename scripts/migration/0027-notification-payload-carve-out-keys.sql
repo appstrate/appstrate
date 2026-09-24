@@ -1,14 +1,15 @@
--- 0027 — rename the `package_id` / `agent_id` / `run_id` keys to `packageId` /
--- `packageId` / `runId` in `notifications.payload` (#1545 D8 + R4,
--- CASING_CONVENTIONS 4b). The payload is returned verbatim by
--- `GET /api/notifications`; its other keys (`status`, `package_type`,
--- `shared_by_name`) are unchanged. The previous build writes `package_id`
--- (`package_shared`) and `agent_id` (`run_completed`, the run's package);
--- `run_id` is renamed for any older row. A key already spelled `packageId` /
--- `runId` wins over its snake twin. Run INSIDE the deploy window (old app
--- stopped, new one not started): each build reads only its own spelling, so a
--- notice in the other one names no package and counts toward no agent. Cost: one sequential scan of `notifications` (no index on the
--- payload), UPDATEs only the rows still holding a snake key; idempotent.
+-- 0027 — rename the `package_id` and `agent_id` keys of `notifications.payload`
+-- to `packageId`, and `run_id` to `runId` (#1545 D8 + R4, CASING_CONVENTIONS
+-- 4b). The payload is returned verbatim by `GET /api/notifications`; its other
+-- keys (`status`, `package_type`, `shared_by_name`) are unchanged. The previous
+-- build writes `package_id` (`package_shared`) and `agent_id` (`run_completed`,
+-- the run's package); `run_id` is renamed for any older row. A key already
+-- spelled `packageId` / `runId` wins over its snake twin. Run INSIDE the deploy
+-- window (old app stopped, new one not started): each build reads only its own
+-- spelling, so a notice in the other one names no package and counts toward no
+-- agent.
+-- Cost: one sequential scan of `notifications` (no index on the payload),
+-- UPDATEs only the rows still holding a snake key; idempotent.
 -- Rows: UNMEASURED — rehearse on a restored dump first (README requirement 4).
 
 BEGIN;

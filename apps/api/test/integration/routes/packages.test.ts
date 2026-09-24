@@ -3820,6 +3820,44 @@ describe("Packages API", () => {
       };
       expect(zipped.type).toBe("integration");
     });
+
+    // The fork mints a draft every connect reads, so the integration write
+    // policy applies to it like any other write.
+    it("refuses to fork an integration version declaring a camelCase identity claim key", async () => {
+      const srcCtx = await createTestContext({ orgSlug: "forkclaims" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
+      const sourceId = "@forkclaims/camel-claims";
+      const manifest = remoteIntegrationManifest({
+        name: sourceId,
+        version: "0.1.0",
+        auths: {
+          oauth: {
+            type: "oauth2",
+            authorizationEndpoint: "https://auth.example.com/authorize",
+            tokenEndpoint: "https://auth.example.com/token",
+            identityClaims: { accountId: "$.id" },
+          },
+        },
+      }) as unknown as Record<string, unknown>;
+      await seedPublishedSource(sourceId, srcCtx.orgId, manifest, "", "integration");
+
+      const res = await app.request(`/api/packages/${sourceId}/fork`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { code: string; errors: { field: string }[] };
+      expect(body.code).toBe("validation_failed");
+      expect(body.errors.map((e) => e.field)).toEqual([
+        "manifest.auths.oauth.identity_claims.accountId",
+      ]);
+      const [row] = await db
+        .select({ id: packages.id })
+        .from(packages)
+        .where(eq(packages.id, "@pkgorg/camel-claims"));
+      expect(row).toBeUndefined();
+    });
   });
 
   // ═══════════════════════════════════════════════

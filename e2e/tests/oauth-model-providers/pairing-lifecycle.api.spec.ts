@@ -100,7 +100,7 @@ for (const provider of PROVIDER_CASES) {
       const mint = (await mintRes.json()) as PairingMintResponse;
       expect(mint.id).toMatch(/^pair_[A-Za-z0-9_-]+$/);
       expect(mint.token).toMatch(/^appp_/);
-      expect(mint.command).toContain("npx @appstrate/connect-helper@latest ");
+      expect(mint.command).toContain("npx @appstrate/connect-helper@0.3.x ");
       expect(mint.command).toContain(mint.token);
       expect(new Date(mint.expiresAt).getTime()).toBeGreaterThan(Date.now());
 

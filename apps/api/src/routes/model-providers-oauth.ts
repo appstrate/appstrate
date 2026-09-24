@@ -19,6 +19,7 @@ import {
 import { invalidRequest, notFound, parseBody, unauthorized } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { recordAuditFromContext } from "../services/audit.ts";
+import { connectHelperCommand } from "../lib/connect-helper.ts";
 import { getOrgModelProviderCredential } from "../services/model-providers/credentials.ts";
 
 /**
@@ -244,7 +245,7 @@ export function createModelProvidersOAuthRouter() {
         ttlSeconds: PAIRING_TTL_SECONDS,
       });
 
-      const command = `npx @appstrate/connect-helper@latest ${token}`;
+      const command = connectHelperCommand(token);
 
       await recordAuditFromContext(c, {
         action: "oauth_model_provider.pairing_created",

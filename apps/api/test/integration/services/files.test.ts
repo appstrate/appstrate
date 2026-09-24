@@ -425,13 +425,13 @@ describe("files service + routes", () => {
     expect(flist.data[0]!.runId).toBe(runA);
     expect(flist.data[0]).not.toHaveProperty("run_id");
 
-    // A misspelled / retired filter name is a 400 naming it — never a silently
+    // An undeclared filter name is a 400 naming it — never a silently
     // unfiltered listing of every run's files.
-    const retired = await app.request(`/api/files?run_id=${runA}`, {
+    const undeclared = await app.request(`/api/files?run_id=${runA}`, {
       headers: authHeaders(ctx),
     });
-    expect(retired.status).toBe(400);
-    const problem = (await retired.json()) as { errors: { field: string }[] };
+    expect(undeclared.status).toBe(400);
+    const problem = (await undeclared.json()) as { errors: { field: string }[] };
     expect(problem.errors.map((e) => e.field)).toEqual(["run_id"]);
   });
 

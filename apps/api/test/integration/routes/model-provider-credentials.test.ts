@@ -661,7 +661,7 @@ describe("Model Provider Keys API", () => {
       const body = (await res.json()) as { ok: boolean; error?: string };
       expect(body.error).toBe("BLOCKED_URL");
 
-      const retired = await app.request("/api/model-provider-credentials/test", {
+      const snakeFallback = await app.request("/api/model-provider-credentials/test", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
@@ -670,7 +670,7 @@ describe("Model Provider Keys API", () => {
           existing_key_id: id,
         }),
       });
-      expect(retired.status).toBe(400);
+      expect(snakeFallback.status).toBe(400);
     });
 
     it("falls through to 'API key is required' (400) when credentialId points to a non-existent key", async () => {

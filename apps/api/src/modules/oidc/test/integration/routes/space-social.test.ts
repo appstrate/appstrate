@@ -62,7 +62,7 @@ describe("/api/spaces/:id/social-providers/:provider", () => {
     expect(notFoundRes.status).toBe(404);
   });
 
-  it("rejects the retired camelCase body keys", async () => {
+  it("rejects camelCase body keys", async () => {
     const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}/social-providers/google`, {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },

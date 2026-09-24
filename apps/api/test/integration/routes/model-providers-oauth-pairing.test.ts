@@ -39,7 +39,7 @@ describe("POST /api/model-providers-oauth/pairing", () => {
     };
     expect(body.id).toMatch(/^pair_[A-Za-z0-9_-]+$/);
     expect(body.token).toMatch(/^appp_/);
-    expect(body.command).toBe(`npx @appstrate/connect-helper@latest ${body.token}`);
+    expect(body.command).toBe(`npx @appstrate/connect-helper@0.3.x ${body.token}`);
     // Date string must parse to a future timestamp.
     expect(new Date(body.expiresAt).getTime()).toBeGreaterThan(Date.now());
   });

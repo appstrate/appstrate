@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { CONNECT_HELPER_PACKAGE } from "../../lib/connect-helper.ts";
+
 export const modelProvidersOAuthPaths = {
   "/api/model-providers-oauth/pairing": {
     post: {
       operationId: "createOAuthModelProviderPairing",
       tags: ["Model Provider Credentials"],
       summary: "Mint a one-shot pairing token for the connect helper",
-      description:
-        "Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. Pass `credentialId` to reconnect that exact org credential in place; omit it to create a new connection. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Space-Id` — the resulting credential lives in `model_provider_credentials`, which has no space affinity).",
+      description: `Creates a single-use pairing token surfaced in the dashboard as a \`npx ${CONNECT_HELPER_PACKAGE} <token>\` command, pinned to the helper range this platform speaks. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to \`/api/model-providers-oauth/pair/redeem\` using this token as Bearer credentials. Pass \`credentialId\` to reconnect that exact org credential in place; omit it to create a new connection. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only \`X-Org-Id\` is required (no \`X-Space-Id\` — the resulting credential lives in \`model_provider_credentials\`, which has no space affinity).`,
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -56,8 +57,7 @@ export const modelProvidersOAuthPaths = {
                   },
                   command: {
                     type: "string",
-                    description:
-                      "Ready-to-paste shell command (`npx @appstrate/connect-helper@latest <token>`).",
+                    description: `Ready-to-paste shell command (\`npx ${CONNECT_HELPER_PACKAGE} <token>\`).`,
                   },
                   expiresAt: {
                     type: "string",

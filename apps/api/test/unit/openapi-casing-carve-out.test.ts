@@ -5,9 +5,10 @@
  * `docs/CASING_CONVENTIONS.md`. It DISCOVERS leaks instead of checking known
  * names: every property name, query parameter name and example key that
  * holds an uppercase letter must be on `CAMEL_CASE_CARVE_OUTS`. Most entries
- * are name-based (the name qualifies wherever it appears); the 5d entries
- * mirror one Better Auth plugin table and qualify only `within` the JSON
- * pointers of that surface. It also fails on the snake_case twin of a 4b name
+ * are name-based (the name qualifies wherever it appears); the 4n entries
+ * belong to one headless-platform surface and the 5d entries mirror one Better
+ * Auth plugin table, so both qualify only `within` the JSON pointers of that
+ * surface. It also fails on the snake_case twin of a 4b name
  * (`created_at`, `run_id`, …), which a camelCase-only check cannot see,
  * outside `SNAKE_TWIN_EXCEPTIONS`.
  *
@@ -32,6 +33,32 @@ const OAUTH_CLIENTS = {
     "#/components/schemas/OAuthClientWithSecret/",
     "#/paths/~1api~1oauth~1clients",
   ],
+};
+// 4n: each name is camelCase on the surface `docs/CASING_CONVENTIONS.md` names for it.
+const API_KEYS = {
+  reason: "4n headless-platform DTO (API keys)",
+  within: ["#/components/schemas/ApiKeyInfo/", "#/paths/~1api~1api-keys"],
+};
+const PROXIES = {
+  reason: "4n headless-platform DTO (proxies)",
+  within: ["#/components/schemas/OrgProxy/", "#/paths/~1api~1proxies"],
+};
+const LIBRARY_SPACES = "get/responses/200/content/application~1json";
+const SPACES_END_USERS = {
+  reason: "4n headless-platform DTO (spaces, end-users)",
+  within: [
+    "#/components/schemas/SpaceObject/",
+    "#/components/schemas/EndUserObject/",
+    "#/paths/~1api~1spaces",
+    "#/paths/~1api~1end-users",
+    // The library lists the spaces a package can be placed in, as space rows.
+    `#/paths/~1api~1library/${LIBRARY_SPACES}/schema/properties/spaces/`,
+    `#/paths/~1api~1library/${LIBRARY_SPACES}/example/spaces/`,
+  ],
+};
+const WEBHOOKS = {
+  reason: "4n headless-platform DTO (webhook CRUD)",
+  within: ["#/components/schemas/WebhookObject/", "#/paths/~1api~1webhooks"],
 };
 const CLI_SESSIONS = {
   reason: "5d Better Auth plugin mirror (CLI sessions)",
@@ -61,18 +88,18 @@ export const CAMEL_CASE_CARVE_OUTS: Record<string, CarveOut> = {
   startingAfter: PAGINATION,
   endingBefore: PAGINATION,
 
-  keyPrefix: "4n headless-platform DTO",
-  urlPrefix: "4n headless-platform DTO",
-  externalId: "4n headless-platform DTO",
-  isDefault: "4n headless-platform DTO",
-  allowedRedirectDomains: "4n headless-platform DTO",
-  payloadMode: "4n headless-platform DTO (webhook CRUD)",
-  eventId: "4n headless-platform DTO (webhook CRUD)",
-  eventType: "4n headless-platform DTO (webhook CRUD)",
-  statusCode: "4n headless-platform DTO (webhook CRUD)",
-  windowSeconds: "4n headless-platform DTO (webhook CRUD)",
-  secretPrevious: "4n headless-platform DTO (webhook CRUD)",
-  rotationWindowEndsAt: "4n headless-platform DTO (webhook CRUD)",
+  keyPrefix: API_KEYS,
+  urlPrefix: PROXIES,
+  externalId: SPACES_END_USERS,
+  isDefault: SPACES_END_USERS,
+  allowedRedirectDomains: SPACES_END_USERS,
+  payloadMode: WEBHOOKS,
+  eventId: WEBHOOKS,
+  eventType: WEBHOOKS,
+  statusCode: WEBHOOKS,
+  windowSeconds: WEBHOOKS,
+  secretPrevious: WEBHOOKS,
+  rotationWindowEndsAt: WEBHOOKS,
 
   displayName: "4c Better Auth profile/member DTO; 4e provider registry",
   joinedAt: "4c Better Auth member DTO",

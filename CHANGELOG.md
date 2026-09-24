@@ -298,12 +298,19 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   reads only those names, so the `SIDECAR_IMAGE` must be the one of this
   release — an older sidecar fails every OAuth-model run on the new platform.
   Stored credentials are unchanged.
-- **BREAKING (connect-helper): publish `@appstrate/connect-helper` right after
-  the API deploy** (#1545). Its companion release posts the snake_case redeem
-  body; the published helper sends `accessToken` / `refreshToken` and is
-  refused with a `400` by this API, and the new helper is refused by an older
-  one. A pairing redeemed by an old helper in between is consumed before its
-  body is rejected: mint a new pairing once the helper is upgraded.
+- **BREAKING (connect-helper): the dashboard pins the helper,
+  `npx @appstrate/connect-helper@0.3.x <token>`, instead of `@latest`**
+  (#1545). Helper 0.3.0 posts the snake_case redeem body: this API refuses the
+  0.2.x body (`accessToken` / `refreshToken`) with a `400`, and an older API
+  refuses 0.3.0's. Publish helper 0.3.0 right after this deploy — until then
+  the pinned command finds no version to run. Every self-hosted platform
+  released before this one emits `@latest`, so once 0.3.0 is the npm `latest`
+  its pairings fail with a `400` until it is upgraded to this release: upgrade
+  those platforms before or with the helper release; no order keeps both
+  working. A pairing redeemed by a mismatched helper is consumed before its
+  body is rejected: mint a new one. The range lives in one constant,
+  `CONNECT_HELPER_PACKAGE` (`apps/api/src/lib/connect-helper.ts`), bumped with
+  each helper minor that changes the wire.
 - **BREAKING (API): OIDC management bodies and views are snake_case**
   (#1545). Per-space SMTP config: `from_address`, `from_name`, `secure_mode`
   (were `fromAddress`, `fromName`, `secureMode`), and the test send returns
@@ -323,9 +330,14 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   `?run_id=`). Its query is strict: an undeclared parameter (`run_id`,
   `offset`) or an invalid `purpose` is a 400 instead of a silently wider
   list. The MCP `list_files` tool mirrors it — its `runId` argument
-  (was `run_id`) and output — and refuses an unknown argument instead of
-  ignoring it. Stored notification payloads are rewritten by
+  (was `run_id`) and output. Stored notification payloads are rewritten by
   `scripts/migration/0027`.
+- **BREAKING (MCP): every tool refuses an argument it does not declare**
+  (#1545) with `-32602 Unknown argument(s): …` instead of ignoring it —
+  `search_operations`, `describe_operation`, `invoke_operation` (top-level
+  keys; `path_params`, `query` and `body` stay open), `get_me`, `list_files`,
+  `read_file` and the package-file tools. `run_and_wait` already refused one,
+  as a tool error.
 - **BREAKING (API): platform-written keys in returned JSONB are snake_case**
   (#1545). `spaces.settings.branding` is `logo_url`, `primary_color`,
   `accent_color`, `support_email`, `from_name` (rewritten by
@@ -334,7 +346,8 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   runner's `file.published` event carries `fileId`; the runtime image must
   be the one of this release for published files to be logged.
 - **BREAKING (integrations): identity claim keys are snake_case** (#1545).
-  Every integration write (create, save, publish, import) refuses an
+  Every integration write (create, save, publish, restore, import, fork)
+  refuses an
   `identity_claims` key or a `connect.login.identity_outputs` entry that is
   not snake_case (`findNonSnakeCaseIdentityClaimKeys` in core), and the
   account key is read from `account_id` only. A stored manifest declaring

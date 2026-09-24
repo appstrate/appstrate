@@ -385,7 +385,7 @@ describe("OAuthTokenCache — wire shape of /internal/oauth-token", () => {
     expect(t).not.toHaveProperty("accountId");
   });
 
-  it("fails loudly on the retired camelCase `accessToken` instead of caching `undefined`", async () => {
+  it("fails loudly on a camelCase `accessToken` instead of caching `undefined`", async () => {
     const { cache } = makeHarness(() =>
       makeJsonResponse({ accessToken: "tok-camel", expiresAt: Date.now() + 60 * 60_000 }),
     );

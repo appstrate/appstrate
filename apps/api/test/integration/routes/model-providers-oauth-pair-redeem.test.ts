@@ -79,8 +79,8 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
     expect(body.providerId).toBe("test-oauth");
     expect(body.credentialId).toBeTruthy();
     expect(Array.isArray(body.available_model_ids)).toBe(true);
-    for (const retired of ["provider_id", "credential_id", "availableModelIds"]) {
-      expect(body).not.toHaveProperty(retired);
+    for (const other of ["provider_id", "credential_id", "availableModelIds"]) {
+      expect(body).not.toHaveProperty(other);
     }
   });
 
