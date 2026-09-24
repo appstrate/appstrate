@@ -19,7 +19,8 @@ import type { SchemaWrapper } from "@appstrate/core/form";
 import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
 import { usePackageActivationState, useSetPackageActive } from "../hooks/use-library";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { LoadingState } from "../components/page-states";
+import { LoadingState, ErrorState } from "../components/page-states";
+import { ApiError } from "../api/client";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { packageDetailPath } from "../lib/package-paths";
 import { isModelSelectable } from "../lib/model-selectability";
@@ -190,11 +191,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // read-only system package is freely editable/deletable (registry checks happen at publish).
   const isOwned = source !== "system";
 
-  const { data: versionDetail, isLoading: versionLoading } = useVersionDetail(
-    type,
-    packageId,
-    versionParam,
-  );
+  const {
+    data: versionDetail,
+    isLoading: versionLoading,
+    error: versionError,
+  } = useVersionDetail(type, packageId, versionParam);
 
   // The server's own flag gates publishing (the header badge and the publish
   // dialog), as it does for `appstrate packages publish`: the server judges the
@@ -289,6 +290,17 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   if (isLoading || (isVersionView && versionLoading)) return <LoadingState />;
   if (error || !detail) {
     return <Navigate to="/" replace />;
+  }
+
+  // A published version whose stored archive is unreadable EXISTS — redirecting
+  // to the live page (what any other version failure does) would hide that it
+  // is broken. Say so instead.
+  if (
+    isVersionView &&
+    versionError instanceof ApiError &&
+    versionError.code === "version_artifact_unavailable"
+  ) {
+    return <ErrorState message={t("files.errorMissingArtifact")} />;
   }
 
   // ── Version redirect ──
