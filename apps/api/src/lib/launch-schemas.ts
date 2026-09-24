@@ -49,7 +49,7 @@ import { isValidDependencyOverride } from "../services/input-parser.ts";
  * most on schedules. An empty-string id is FALSY at the resolver's `resolveOne`
  * (`integration-connection-resolver.ts`, layer 4), so the pin is skipped
  * without a trace and the launch falls through to the actor-fallback or dies
- * with a 412 `must_choose_connection`. A schedule replays its frozen map on
+ * with a 409 `must_choose_connection`. A schedule replays its frozen map on
  * every tick, so without this the write answers 200 once and every subsequent
  * fire is silently wrong.
  *

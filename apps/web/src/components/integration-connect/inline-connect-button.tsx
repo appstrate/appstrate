@@ -30,7 +30,7 @@ import { useIntegrationDetail } from "../../hooks/use-integrations";
  *
  * Used by:
  *   - AgentIntegrationsBlock (Connexions tab status cards)
- *   - MissingConnectionsModal (412 recovery surface)
+ *   - MissingConnectionsModal (409 recovery surface)
  *
  * On success the integration's React Query keys are invalidated by the
  * underlying mutation hooks; the consuming card/row re-renders with
@@ -120,7 +120,7 @@ export function InlineConnectButton({
   // authKey, render the single-button path bound to that method.
   const showDropdown = authKeys.length > 1 && !lockToAuthKey;
 
-  // Guard: a fresh agent run might 412 before the integration manifest
+  // Guard: a fresh agent run might 409 before the integration manifest
   // is in cache. Disable the trigger until the detail loads rather than
   // opening a portal with no auth metadata.
   const disabled = authKeys.length === 0 || isPending;

@@ -97,7 +97,7 @@ export function assertLockedFieldsSatisfiable(
  * Three call sites need exactly this pair, and they answer differently: the
  * create route throws `validationFailed`, the update route does too, and the
  * fire path calls `failSchedule` and logs. Writing the pair out per site is
- * what let them drift — `PUT /api/schedules/:id` had adopted only the
+ * what let them drift — `PATCH /api/schedules/:id` had adopted only the
  * lock half (core's `assertFieldsUnlocked`) and skipped the validation
  * entirely, so a PUT that replaced `input` with a wrong-typed or incomplete
  * value answered 200 and then failed at EVERY subsequent tick. The create

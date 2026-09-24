@@ -7,7 +7,7 @@
  * always a registry `providerId`.
  */
 
-import type { ModelCost } from "@appstrate/core/module";
+import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { ProviderRegistryEntry } from "../hooks/use-model-provider-credentials";
 import type { ModelPickRow } from "./model-source";
 import { catalogValues, sameSet, type CatalogModelValues } from "./row-overrides-catalog";
@@ -34,7 +34,7 @@ export interface ModelFormFields {
  * so the server keeps resolving the rest from the vendored catalog.
  */
 interface ModelCapabilityOverrides {
-  input?: string[];
+  input?: ModelInputModality[];
   contextWindow?: number;
   maxTokens?: number;
   reasoning?: boolean;
@@ -55,13 +55,13 @@ interface ModelFormCredentialBinding {
 }
 
 /**
- * One model, ready to submit. The four overrides widen to `null`: `PUT` reads
+ * One model, ready to submit. The four overrides widen to `null`: `PATCH` reads
  * `null` as "drop the stored override", `POST` refuses it and goes through
  * {@link toCreateModelBody}.
  */
 export type ModelFormData = ModelFormCredentialBinding &
   Omit<ModelFormModelEntry, keyof ModelCapabilityOverrides> & {
-    input?: string[] | null;
+    input?: ModelInputModality[] | null;
     contextWindow?: number | null;
     maxTokens?: number | null;
     reasoning?: boolean | null;
@@ -187,9 +187,10 @@ function capabilityOverrides(
     return { input: null, contextWindow: null, maxTokens: null, reasoning: null };
   }
   const catalog = input.catalogEntry ? catalogValues(input.catalogEntry) : null;
-  const modalities = [fields.inputText && "text", fields.inputImage && "image"].filter(
-    Boolean,
-  ) as string[];
+  const modalities: ModelInputModality[] = [
+    ...(fields.inputText ? (["text"] as const) : []),
+    ...(fields.inputImage ? (["image"] as const) : []),
+  ];
   const contextWindow = parseInt(fields.contextWindow.trim(), 10);
   const maxTokens = parseInt(fields.maxTokens.trim(), 10);
   // A blank limit, no box ticked (the server refuses an empty array), or a

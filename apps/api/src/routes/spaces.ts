@@ -75,6 +75,7 @@ import {
   requirePermission,
 } from "../middleware/require-permission.ts";
 import {
+  auditSpaceRole,
   exactlyOneRole,
   spaceRoleAssignmentShape,
   toAssignment,
@@ -308,7 +309,7 @@ async function coarseSpacePackageGate(
  *      so the route is not an enumeration oracle.
  *   2. **Catalog lookup**, through `assertCatalogPackageAccess` — the same
  *      reachability rule the READ routes obey, for all three ops, so `POST`,
- *      `DELETE` and `PUT` cannot be told apart by their refusals. Two different
+ *      `DELETE` and `PATCH` cannot be told apart by their refusals. Two different
  *      `detail` strings here (org-visible but unreachable vs nonexistent) would
  *      be an existence oracle over the whole catalogue.
  *   3. **Exact gate** for the resolved type.
@@ -353,14 +354,14 @@ async function gateSpacePackageWrite(
   return type;
 }
 
-/** snake_case on the wire, camelCase in the service that counted them. */
+/** Counts go snake_case on the wire; `spaceId` is the universal-id carve-out. */
 function toSweepWire(
   spaceId: string,
   counts: { rehomedPackages: number; deletedPackages: number },
 ): SpaceSweepResult {
   return {
     object: "space_sweep",
-    space_id: spaceId,
+    spaceId,
     rehomed_packages: counts.rehomedPackages,
     deleted_packages: counts.deletedPackages,
   };
@@ -687,7 +688,7 @@ export function createSpacesRouter() {
       action: "space.member_added",
       resourceType: "space_member",
       resourceId: `${spaceId}:${userId}`,
-      after: assignment,
+      after: auditSpaceRole(assignment),
     });
     return c.json({ object: "space_member", userId, ...assignment }, 201);
   });
@@ -716,7 +717,7 @@ export function createSpacesRouter() {
         action: "space.member_role_changed",
         resourceType: "space_member",
         resourceId: `${spaceId}:${userId}`,
-        after: assignment,
+        after: auditSpaceRole(assignment),
       });
       return c.json({ object: "space_member", userId, ...assignment });
     },
@@ -883,8 +884,8 @@ export function createSpacesRouter() {
     },
   );
 
-  // PUT /api/spaces/:spaceId/packages/:packageId — update config
-  router.put(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
+  // PATCH /api/spaces/:spaceId/packages/:packageId — merge-update config
+  router.patch(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
     const spaceId = c.req.param("spaceId")!;
     const orgId = c.get("orgId");
     const scope = { orgId, spaceId: spaceId };

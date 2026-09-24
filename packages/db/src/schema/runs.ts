@@ -8,6 +8,7 @@ import {
   integer,
   jsonb,
   serial,
+  bigserial,
   uuid,
   index,
   uniqueIndex,
@@ -412,7 +413,7 @@ export const runs = pgTable(
 export const runLogs = pgTable(
   "run_logs",
   {
-    id: serial("id").primaryKey(),
+    id: bigserial("id", { mode: "number" }).primaryKey(),
     runId: text("run_id")
       .notNull()
       .references(() => runs.id, { onDelete: "cascade" }),
@@ -558,7 +559,7 @@ export const packagePersistence = pgTable(
 export const llmUsage = pgTable(
   "llm_usage",
   {
-    id: serial("id").primaryKey(),
+    id: bigserial("id", { mode: "number" }).primaryKey(),
     source: llmUsageSourceEnum("source").notNull(),
     orgId: uuid("org_id")
       .notNull()

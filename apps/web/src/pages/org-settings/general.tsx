@@ -71,7 +71,7 @@ export function OrgSettingsGeneralPage() {
         : t("orgSettings.leaveLastOwner")
       : t("orgSettings.leaveOrgDesc");
 
-  const updateNameMutation = $api.useMutation("put", "/api/orgs/{orgId}", {
+  const updateNameMutation = $api.useMutation("patch", "/api/orgs/{orgId}", {
     onSuccess: () => {
       // The org list lives under the legacy ["orgs"] key (see use-org.ts).
       void queryClient.invalidateQueries({ queryKey: orgKeys.all });

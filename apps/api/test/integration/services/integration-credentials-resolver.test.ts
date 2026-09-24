@@ -36,6 +36,8 @@ import { integrationConnections, integrationOauthClients, packages } from "@apps
 import { eq } from "drizzle-orm";
 import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
 import { resolveLiveIntegrationCredentials } from "../../../src/services/integration-credentials-resolver.ts";
+import { saveIntegrationConnection } from "../../../src/services/integration-connections.ts";
+import { getEnv } from "@appstrate/env";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
@@ -298,7 +300,8 @@ describe("resolveLiveIntegrationCredentials", () => {
   // A FORCED refresh only happens after the sidecar saw an upstream 401. For
   // EVERY auth shape a real fleet uses, the outcome must be exactly one of:
   //   • refreshed → fresh token rotated in, connection NOT flagged; or
-  //   • terminal  → 410 + connection flagged needsReconnection.
+  //   • terminal  → 502 below the failure threshold (one rejection can be
+  //     transient), then 410 + connection flagged needsReconnection.
   // It must NEVER be the old silent "stale-200, no flag" no-op (the original
   // bug). The `expect: "refreshed"` branch asserts the token was genuinely
   // ROTATED (not the seeded "old-access"), so a silent no-op fails both
@@ -423,20 +426,28 @@ describe("resolveLiveIntegrationCredentials", () => {
       // OAuth refresh exchange (when reached) returns a rotated token.
       token.setResponse({ access_token: "rotated", expires_in: 3600 });
 
-      let status: number | undefined;
-      let result: Awaited<ReturnType<typeof resolveLiveIntegrationCredentials>> | undefined;
-      try {
-        result = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
-          forceRefresh: true,
-        });
-      } catch (err) {
-        status = (err as { status?: number }).status;
-      }
+      const forced = async () => {
+        try {
+          return {
+            result: await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
+              forceRefresh: true,
+            }),
+            status: undefined,
+          };
+        } catch (err) {
+          return { result: undefined, status: (err as { status?: number }).status };
+        }
+      };
 
       if (c.expect === "flagged") {
-        expect(status).toBe(410);
+        for (let i = 1; i < getEnv().INTEGRATION_REFRESH_MAX_FAILURES; i++) {
+          expect((await forced()).status).toBe(502);
+          expect(await needsReconnection(connId)).toBe(false);
+        }
+        expect((await forced()).status).toBe(410);
         expect(await needsReconnection(connId)).toBe(true);
       } else {
+        const { result, status } = await forced();
         expect(status).toBeUndefined();
         expect(await needsReconnection(connId)).toBe(false);
         const primary = result!.auths.find((a) => a.authKey === "primary");
@@ -445,6 +456,43 @@ describe("resolveLiveIntegrationCredentials", () => {
       }
     });
   }
+
+  it("a reconnect resets the rejection streak of an unrefreshable auth", async () => {
+    await db
+      .update(packages)
+      .set({
+        draftManifest: localIntegrationManifest({
+          name: INTEGRATION_ID,
+          serverName: "@official/gmail-server",
+          auths: { primary: { type: "api_key", credentialFields: ["api_key"] } },
+        }) as unknown as Record<string, unknown>,
+      })
+      .where(eq(packages.id, INTEGRATION_ID));
+    const connId = await seedConnection({ userId: ctx.user.id });
+    const forcedStatus = () =>
+      resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
+        forceRefresh: true,
+      }).then(
+        () => undefined,
+        (err: { status?: number }) => err.status,
+      );
+    const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+    for (let i = 1; i < max; i++) expect(await forcedStatus()).toBe(502);
+
+    await saveIntegrationConnection(
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+      {
+        packageId: INTEGRATION_ID,
+        authKey: "primary",
+        accountId: "acct-1",
+        credentials: { api_key: "fresh" },
+        actor: { type: "user", id: ctx.user.id },
+        connectionId: connId,
+      },
+    );
+    expect(await forcedStatus()).toBe(502);
+    expect(await needsReconnection(connId)).toBe(false);
+  });
 
   it("forced refresh reaches the IdP even when the stored token is far from expiry", async () => {
     // The matrix above seeds connections with a NULL `expires_at`, so it never

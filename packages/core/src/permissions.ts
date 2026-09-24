@@ -392,11 +392,11 @@ export type SpaceVisibility = (typeof SPACE_VISIBILITIES)[number];
 
 /**
  * One space membership applied when an invitation is accepted (RBAC spec §5); the shape
- * `org_invitations.space_assignments` stores, hence snake_case. Exactly one of
+ * `org_invitations.space_assignments` stores, in wire casing. Exactly one of
  * `preset_role` / `custom_role_id` is set (validated at invite time, not by the type).
  */
 export interface SpaceAssignment {
-  space_id: string;
+  spaceId: string;
   preset_role?: SpaceRolePreset;
   custom_role_id?: string;
 }

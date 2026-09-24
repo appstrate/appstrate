@@ -19,7 +19,7 @@ import { CHAT_USABLE_FAMILIES } from "./chat-families.ts";
 import { isModelLive } from "./model-liveness.ts";
 import { logger } from "./logger.ts";
 import type { ModelGenerationCapabilities } from "@appstrate/core/model-generation";
-import type { ModelCost } from "@appstrate/core/module";
+import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 
 export interface OrgModel {
   id: string;
@@ -39,7 +39,7 @@ export interface OrgModel {
    */
   needs_reconnection?: boolean;
   generation?: ModelGenerationCapabilities | null;
-  input?: string[] | null;
+  input?: ModelInputModality[] | null;
   contextWindow?: number | null;
   maxTokens?: number | null;
   reasoning?: boolean | null;

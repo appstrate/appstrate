@@ -550,3 +550,59 @@ describe("POST /api/credential-proxy/proxy — response capping (X-Truncated hea
     expect(res.headers.get("X-Truncated")).toBeNull();
   });
 });
+
+describe("POST /api/credential-proxy/proxy — boolean control headers take 1/0", () => {
+  let ctx: TestContext;
+  let apiKey: string;
+
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    ctx = await createTestContext({ orgSlug: "cporg" });
+    await seedIntegrationWithConnection(ctx);
+    apiKey = await mintProxyKey(ctx);
+  });
+  afterEach(() => restoreFetch());
+
+  function proxyPost(extra: Record<string, string>, body?: string) {
+    return app.request("/api/credential-proxy/proxy", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-Org-Id": ctx.orgId,
+        "X-Space-Id": ctx.defaultSpaceId,
+        "X-Integration-Id": INTEGRATION_ID,
+        "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        "X-Session-Id": uuidV4(),
+        "Content-Type": "application/json",
+        ...extra,
+      },
+      body,
+    });
+  }
+
+  it("X-Substitute-Body: 1 substitutes placeholders in the body", async () => {
+    let upstreamBody = "";
+    mockUpstream(async (_input, init) => {
+      upstreamBody = await new Response(init?.body).text();
+      return new Response("{}", { status: 200 });
+    });
+    const res = await proxyPost({ "X-Substitute-Body": "1" }, '{"token":"{{api_key}}"}');
+    expect(res.status).toBe(200);
+    expect(upstreamBody).toBe('{"token":"ya29.live-token"}');
+  });
+
+  for (const [name, value] of [
+    ["X-Substitute-Body", "true"],
+    ["X-Stream-Request", "yes"],
+    ["X-Stream-Response", "false"],
+  ] as const) {
+    it(`returns 400 on ${name}: ${value}`, async () => {
+      mockUpstream(async () => new Response("should not be called", { status: 599 }));
+      const res = await proxyPost({ [name]: value }, "{}");
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { detail?: string };
+      expect(body.detail ?? "").toContain(`${name} must be "1" or "0"`);
+    });
+  }
+});

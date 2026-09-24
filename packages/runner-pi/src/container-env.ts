@@ -8,6 +8,7 @@
 
 import { createLogger } from "@appstrate/core/logger";
 import { ALIAS_CLIENT_API_SHAPE } from "@appstrate/core/model-swap";
+import type { ModelInputModality } from "@appstrate/core/module";
 import type {
   ModelNativeReasoningLevel,
   ModelReasoningLevel,
@@ -42,7 +43,7 @@ export interface RuntimePiModelConfig {
   apiKey?: string;
   /** Stands in for the real apiKey inside the container. Required when LLM traffic is proxied. */
   apiKeyPlaceholder?: string;
-  input?: ReadonlyArray<string> | null;
+  input?: ReadonlyArray<ModelInputModality> | null;
   contextWindow?: number | null;
   maxTokens?: number | null;
   reasoning?: boolean | null;
@@ -107,6 +108,10 @@ export interface RuntimePiEnvOptions {
   timeoutSeconds?: number;
   /** Per-file cap for the outputs sweep; must match the server's `publish_file` ceiling. */
   maxFileBytes?: number;
+  /** Operator knobs for the container's Pi loops; only non-defaults are emitted. */
+  modelRetry?: boolean;
+  modelCompaction?: boolean;
+  toolResultByteLimit?: number;
 }
 
 /**
@@ -287,24 +292,8 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     env.no_proxy = noProxy;
   }
 
-  // The two Pi SDK loops `pi-runner.ts` reads out of the container's env. Both
-  // are forwarded from the API host's own `process.env` — the same mechanism
-  // `TOOL_RESULT_BYTE_LIMIT` uses below — because the host env is the only
-  // surface an operator can actually set. Routing them through a
-  // `RuntimePiEnvOptions` flag instead looks like plumbing and is not: the sole
-  // production caller (`apps/api/src/services/run-launcher/pi.ts`) passes no
-  // such flag, so the knob would be reachable from the test fixture and nowhere
-  // else. A writer with no caller is the same defect as a reader with no writer.
-  //
-  // Worth reaching for when an outer layer already retries: the sidecar's
-  // aliased `/llm` path does, `ALIAS_UPSTREAM_MAX_RETRIES` attempts per call,
-  // which multiplies with the SDK's own loop rather than replacing it.
-  for (const key of ["MODEL_RETRY_ENABLED", "MODEL_COMPACTION_ENABLED"] as const) {
-    const value = process.env[key];
-    if (value !== undefined && value !== "") {
-      env[key] = value;
-    }
-  }
+  if (opts.modelRetry === false) env.MODEL_RETRY_ENABLED = "false";
+  if (opts.modelCompaction === false) env.MODEL_COMPACTION_ENABLED = "false";
 
   if (opts.sink) {
     env.APPSTRATE_SINK_URL = opts.sink.url;
@@ -327,11 +316,8 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   // Tool results are truncated at WRITE time, before the event sink, so this is the
   // only knob controlling how much survives into `run_logs`. Keep it below the
   // platform's 32 KB `run_logs.data` cap.
-  {
-    const toolResultLimit = process.env.TOOL_RESULT_BYTE_LIMIT;
-    if (toolResultLimit !== undefined && toolResultLimit !== "") {
-      env.TOOL_RESULT_BYTE_LIMIT = toolResultLimit;
-    }
+  if (opts.toolResultByteLimit !== undefined) {
+    env.TOOL_RESULT_BYTE_LIMIT = String(opts.toolResultByteLimit);
   }
 
   return env;

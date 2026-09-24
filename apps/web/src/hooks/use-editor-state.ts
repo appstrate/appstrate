@@ -15,7 +15,8 @@ import type { PackageFileWriteOperation } from "../lib/package-file-tree";
 
 export interface EditorState {
   manifest: Record<string, unknown>;
-  lock_version?: number;
+  /** The draft version this editor is based on: its detail's `ETag`. */
+  etag?: string | null;
   operations?: PackageFileWriteOperation[];
 }
 
@@ -89,8 +90,11 @@ export function useEditorState({
     saving.current = true;
     setError(null);
     try {
-      const updated = await updatePkg.mutateAsync(packageUpdateBody(state));
-      const saved = { ...state, operations: undefined, lock_version: updated.lock_version };
+      const updated = await updatePkg.mutateAsync({
+        etag: state.etag ?? "",
+        body: packageUpdateBody(state),
+      });
+      const saved = { ...state, operations: undefined, etag: updated.etag };
       setState(saved);
       setInitialSnapshot(saved);
     } catch (cause) {

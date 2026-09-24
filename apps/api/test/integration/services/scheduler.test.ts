@@ -686,7 +686,7 @@ describeRequiresRedis("scheduler service", () => {
   // (`fetchIntegrationManifest` → not_found → null), so the run would otherwise
   // finish `success` without the integration's tools. The readiness
   // manifest-health gate must turn this into a VISIBLE failed run on the
-  // scheduled path too (parity with the 412 on the request path).
+  // scheduled path too (parity with the 409 on the request path).
 
   describe("triggerScheduledRun integration manifest health (#737)", () => {
     it("fails fast with a visible failed run when a declared integration package is missing", async () => {

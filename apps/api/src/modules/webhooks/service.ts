@@ -5,7 +5,7 @@
  */
 
 import { z } from "zod";
-import { eq, or, desc, isNull, type InferSelectModel } from "drizzle-orm";
+import { and, eq, or, desc, isNull, sql, type InferSelectModel } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { webhooks, webhookDeliveries } from "@appstrate/db/schema";
 import { logger } from "../../lib/logger.ts";
@@ -473,21 +473,50 @@ export async function rotateSecret(
   };
 }
 
+/**
+ * One page of a webhook's deliveries, newest first, keyset-paginated on
+ * `(createdAt, id)`. The cursor row is compared in SQL: a JS `Date` would
+ * truncate `created_at`'s microseconds and skip rows.
+ */
 export async function listDeliveries(
   scope: OrgScope | SpaceScope,
   webhookId: string,
-  limit = 20,
-): Promise<WebhookDeliveryInfo[]> {
+  params: { limit?: number; startingAfter?: string } = {},
+): Promise<{ data: WebhookDeliveryInfo[]; hasMore: boolean }> {
   await getWebhook(scope, webhookId);
+  const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
+
+  const ownDelivery = eq(webhookDeliveries.webhookId, webhookId);
+  const conditions = [ownDelivery];
+  if (params.startingAfter !== undefined) {
+    const cursorId = params.startingAfter;
+    const [cursor] = z.uuid().safeParse(cursorId).success
+      ? await db
+          .select({ id: webhookDeliveries.id })
+          .from(webhookDeliveries)
+          .where(and(ownDelivery, eq(webhookDeliveries.id, cursorId)))
+          .limit(1)
+      : [];
+    if (!cursor) {
+      throw invalidRequest(
+        "startingAfter must be the id of a delivery of this webhook",
+        "startingAfter",
+      );
+    }
+    conditions.push(
+      sql`(${webhookDeliveries.createdAt}, ${webhookDeliveries.id}) < (select cur.created_at, cur.id from ${webhookDeliveries} cur where cur.id = ${cursorId})`,
+    );
+  }
 
   const rows = await db
     .select()
     .from(webhookDeliveries)
-    .where(eq(webhookDeliveries.webhookId, webhookId))
-    .orderBy(desc(webhookDeliveries.createdAt))
-    .limit(Math.min(limit, 100));
+    .where(and(...conditions))
+    .orderBy(desc(webhookDeliveries.createdAt), desc(webhookDeliveries.id))
+    .limit(limit + 1);
 
-  return rows.map(toWebhookDeliveryResponse);
+  const hasMore = rows.length > limit;
+  return { data: rows.slice(0, limit).map(toWebhookDeliveryResponse), hasMore };
 }
 
 // ---------------------------------------------------------------------------
@@ -500,7 +529,6 @@ export function buildEventEnvelope(params: {
   payloadMode: "full" | "summary";
 }): { eventId: string; payload: Record<string, unknown> } {
   const eventId = prefixedId("evt");
-  const now = Math.floor(Date.now() / 1000);
 
   // Default the inner `object` discriminator to "run" so run-lifecycle
   // callers don't have to set it; callers for non-run events (e.g.
@@ -533,7 +561,8 @@ export function buildEventEnvelope(params: {
       object: "event",
       type: params.eventType,
       apiVersion: CURRENT_API_VERSION,
-      created: now,
+      // Standard Webhooks' payload field: when the event occurred, ISO 8601.
+      timestamp: new Date().toISOString(),
       data: { object: execObj },
     },
   };

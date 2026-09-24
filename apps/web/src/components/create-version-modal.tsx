@@ -19,8 +19,8 @@ interface CreateVersionModalProps {
   type: PackageType;
   packageId: string;
   hasUnarchivedChanges?: boolean;
-  /** The draft's `lock_version` as displayed: publishing refuses a draft moved since. */
-  lockVersion?: number;
+  /** The draft's `ETag` as displayed: publishing refuses a draft moved since. */
+  etag?: string | null;
 }
 
 type FormData = { selectedBump: VersionBump };
@@ -31,7 +31,7 @@ export function CreateVersionModal({
   type,
   packageId,
   hasUnarchivedChanges = true,
-  lockVersion,
+  etag,
 }: CreateVersionModalProps) {
   const { t } = useTranslation("agents");
   const { data: versionInfo } = useVersionInfo(type, packageId);
@@ -63,7 +63,7 @@ export function CreateVersionModal({
   const handleFormSubmit = () => {
     setError("root", { message: "" });
     createVersion.mutate(
-      { version: plan.override, lockVersion },
+      { version: plan.override, etag },
       {
         onSuccess: () => {
           onClose();
@@ -74,7 +74,7 @@ export function CreateVersionModal({
           const refused =
             err instanceof ApiError && err.code === "no_changes"
               ? t("version.noChanges")
-              : err instanceof ApiError && err.code === "conflict"
+              : err instanceof ApiError && err.code === "precondition_failed"
                 ? t("version.draftChanged")
                 : null;
           setError("root", {

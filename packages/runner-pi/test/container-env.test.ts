@@ -6,6 +6,7 @@ import {
   buildRuntimePiEnv,
   pickOperatorSidecarEnv,
   SIDECAR_OPERATOR_ENV_KEYS,
+  type RuntimePiModelConfig,
 } from "../src/container-env.ts";
 
 const model = {
@@ -221,7 +222,7 @@ describe("buildRuntimePiEnv", () => {
   describe("model-alias masking (issue #1198, Threat B)", () => {
     // The env an aliased run is built from, over a real 200 000/8192 catalog
     // pair.
-    const aliasedModel = {
+    const aliasedModel: RuntimePiModelConfig = {
       ...model,
       aliased: true,
       input: ["text", "image"],
@@ -385,26 +386,45 @@ describe("buildRuntimePiEnv", () => {
     }
   });
 
-  it("forwards TOOL_RESULT_BYTE_LIMIT to the agent container when set on the host", () => {
-    const original = process.env.TOOL_RESULT_BYTE_LIMIT;
+  it("emits the Pi loop knobs only when they depart from the runner defaults", () => {
+    const defaults = buildRuntimePiEnv({
+      model,
+      agentPrompt: "p",
+      ...sidecar,
+      modelRetry: true,
+      modelCompaction: true,
+    });
+    expect(defaults.MODEL_RETRY_ENABLED).toBeUndefined();
+    expect(defaults.MODEL_COMPACTION_ENABLED).toBeUndefined();
+    expect(defaults.TOOL_RESULT_BYTE_LIMIT).toBeUndefined();
+
+    const tuned = buildRuntimePiEnv({
+      model,
+      agentPrompt: "p",
+      ...sidecar,
+      modelRetry: false,
+      modelCompaction: false,
+      toolResultByteLimit: 16384,
+    });
+    expect(tuned.MODEL_RETRY_ENABLED).toBe("false");
+    expect(tuned.MODEL_COMPACTION_ENABLED).toBe("false");
+    expect(tuned.TOOL_RESULT_BYTE_LIMIT).toBe("16384");
+  });
+
+  it("reads none of the Pi loop knobs from the host process env", () => {
+    const keys = ["MODEL_RETRY_ENABLED", "MODEL_COMPACTION_ENABLED", "TOOL_RESULT_BYTE_LIMIT"];
+    const saved = keys.map((k) => process.env[k]);
+    process.env.MODEL_RETRY_ENABLED = "false";
+    process.env.MODEL_COMPACTION_ENABLED = "false";
     process.env.TOOL_RESULT_BYTE_LIMIT = "16384";
     try {
       const env = buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar });
-      expect(env.TOOL_RESULT_BYTE_LIMIT).toBe("16384");
+      for (const k of keys) expect(env[k]).toBeUndefined();
     } finally {
-      if (original === undefined) delete process.env.TOOL_RESULT_BYTE_LIMIT;
-      else process.env.TOOL_RESULT_BYTE_LIMIT = original;
-    }
-  });
-
-  it("does not emit TOOL_RESULT_BYTE_LIMIT when unset on the host", () => {
-    const original = process.env.TOOL_RESULT_BYTE_LIMIT;
-    delete process.env.TOOL_RESULT_BYTE_LIMIT;
-    try {
-      const env = buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar });
-      expect(env.TOOL_RESULT_BYTE_LIMIT).toBeUndefined();
-    } finally {
-      if (original !== undefined) process.env.TOOL_RESULT_BYTE_LIMIT = original;
+      keys.forEach((k, n) => {
+        if (saved[n] === undefined) delete process.env[k];
+        else process.env[k] = saved[n];
+      });
     }
   });
 

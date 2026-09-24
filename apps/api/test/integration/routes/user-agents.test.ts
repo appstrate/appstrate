@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { etagVersion } from "../../helpers/etag.ts";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
@@ -127,8 +128,8 @@ describe("User Agents API", () => {
         .select({ draftManifest: packages.draftManifest, lockVersion: packages.lockVersion })
         .from(packages)
         .where(eq(packages.id, "@myorg/skills-agent"));
-      expect(row!.lockVersion).toBe(body.lock_version);
-      expect(body.lock_version).toBeGreaterThan(1);
+      expect(row!.lockVersion).toBe(etagVersion(res));
+      expect(etagVersion(res)).toBeGreaterThan(1);
       const m = asRecord(row!.draftManifest);
       const deps = asRecord(m.dependencies);
       expect(deps.skills).toEqual({ "@myorg/skill-a": "^1.0.0" });

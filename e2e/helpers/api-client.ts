@@ -17,7 +17,7 @@ export interface ApiClient {
   get(path: string): Promise<APIResponse>;
   post(path: string, data?: unknown): Promise<APIResponse>;
   put(path: string, data?: unknown): Promise<APIResponse>;
-  patch(path: string, data?: unknown): Promise<APIResponse>;
+  patch(path: string, data?: unknown, extra?: Record<string, string>): Promise<APIResponse>;
   delete(path: string): Promise<APIResponse>;
   /** Create a new client with a different spaceId (same auth + org) */
   withSpace(spaceId: string): ApiClient;
@@ -49,9 +49,9 @@ export function createApiClient(request: APIRequestContext, options: ApiClientOp
         data,
       });
     },
-    patch(path: string, data?: unknown) {
+    patch(path: string, data?: unknown, extra?: Record<string, string>) {
       return request.patch(`/api${path}`, {
-        headers: headers({ "Content-Type": "application/json" }),
+        headers: headers({ "Content-Type": "application/json", ...extra }),
         data,
       });
     },
@@ -78,7 +78,7 @@ export function createOrgOnlyClient(
   get(path: string): Promise<APIResponse>;
   post(path: string, data?: unknown): Promise<APIResponse>;
   put(path: string, data?: unknown): Promise<APIResponse>;
-  patch(path: string, data?: unknown): Promise<APIResponse>;
+  patch(path: string, data?: unknown, extra?: Record<string, string>): Promise<APIResponse>;
   delete(path: string): Promise<APIResponse>;
 } {
   const headers = (extra?: Record<string, string>) => ({
@@ -103,9 +103,9 @@ export function createOrgOnlyClient(
         data,
       });
     },
-    patch(path: string, data?: unknown) {
+    patch(path: string, data?: unknown, extra?: Record<string, string>) {
       return request.patch(`/api${path}`, {
-        headers: headers({ "Content-Type": "application/json" }),
+        headers: headers({ "Content-Type": "application/json", ...extra }),
         data,
       });
     },

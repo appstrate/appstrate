@@ -36,7 +36,7 @@ export function useCreateProxy() {
 
 export function useUpdateProxy() {
   const invalidate = useInvalidateProxies();
-  return $api.useMutation("put", "/api/proxies/{id}", { onSuccess: invalidate });
+  return $api.useMutation("patch", "/api/proxies/{id}", { onSuccess: invalidate });
 }
 
 export function useDeleteProxy() {

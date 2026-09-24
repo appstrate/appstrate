@@ -123,7 +123,7 @@ describe("resolveSkill — the draft is NAMED, never left to the route's default
 
     const skill = (await resolveSkill("default", "@acme/pdf", "draft"))!;
     expect(skill.version).toBe("draft");
-    expect(skill.integrity).toBe('draft:1:"idx-9"');
+    expect(skill.integrity).toBe('draft:"1":"idx-9"');
     // The two fixtures carry DIFFERENT frontmatter names, so this pins the
     // selector on the detail request the same way the bytes below pin it on
     // the file routes: unnamed, the stub answers with the published metadata.

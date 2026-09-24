@@ -115,7 +115,7 @@ describe("resolveOrCreateOrgMembership", () => {
       {
         allowSignup: true,
         signupRole: "guest",
-        signupSpaceAssignments: [{ space_id: defaultSpaceId, preset_role: "viewer" }],
+        signupSpaceAssignments: [{ spaceId: defaultSpaceId, preset_role: "viewer" }],
       },
     );
     expect(resolved.role).toBe("guest");

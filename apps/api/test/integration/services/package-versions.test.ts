@@ -750,18 +750,24 @@ describe("package-versions service", () => {
         .select({ lockVersion: packages.lockVersion })
         .from(packages)
         .where(eq(packages.id, pkg.id));
-      const stale = await createVersionFromDraft({
-        packageId: pkg.id,
-        orgId,
-        userId,
-        lockVersion: row!.lockVersion - 1,
-      });
-      expect(stale).toEqual({ error: "conflict" });
+      // The route's If-Match evaluation, handed the version read under the lock.
+      const expecting = (expected: number) => (current: number) => {
+        if (current !== expected) throw new Error("precondition_failed");
+      };
+      await expect(
+        createVersionFromDraft({
+          packageId: pkg.id,
+          orgId,
+          userId,
+          assertVersion: expecting(row!.lockVersion - 1),
+        }),
+      ).rejects.toThrow("precondition_failed");
+      expect(await getVersionCount(pkg.id)).toBe(0);
       const current = await createVersionFromDraft({
         packageId: pkg.id,
         orgId,
         userId,
-        lockVersion: row!.lockVersion,
+        assertVersion: expecting(row!.lockVersion),
       });
       expect(current).toMatchObject({ version: "1.0.0" });
     });

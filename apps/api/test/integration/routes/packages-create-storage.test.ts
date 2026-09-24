@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ifMatch } from "../../helpers/etag.ts";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db, isEmbeddedDb, reservePgConnection } from "@appstrate/db/client";
@@ -200,10 +201,9 @@ describe("package creation storage consistency", () => {
         await reached.promise;
         expect(await row("skill")).toBeUndefined();
         const premature = await app.request("/api/packages/skills/@create-storage/skill", {
-          method: "PUT",
-          headers: authHeaders(ctx),
+          method: "PATCH",
+          headers: { ...authHeaders(ctx), ...ifMatch(1) },
           body: JSON.stringify({
-            lock_version: 1,
             operations: [{ op: "write", path: "saved.txt", text: "new" }],
           }),
         });
@@ -211,10 +211,9 @@ describe("package creation storage consistency", () => {
         release.resolve();
         expect((await creation).status).toBe(201);
         const update = await app.request("/api/packages/skills/@create-storage/skill", {
-          method: "PUT",
-          headers: authHeaders(ctx),
+          method: "PATCH",
+          headers: { ...authHeaders(ctx), ...ifMatch((await row("skill"))!.lockVersion) },
           body: JSON.stringify({
-            lock_version: (await row("skill"))!.lockVersion,
             operations: [{ op: "write", path: "saved.txt", text: "new" }],
           }),
         });
@@ -297,10 +296,9 @@ describe("package creation storage consistency", () => {
         await reached.promise;
         const draft = (await row("skill"))!;
         const update = await app.request("/api/packages/skills/@create-storage/skill", {
-          method: "PUT",
-          headers: authHeaders(ctx),
+          method: "PATCH",
+          headers: { ...authHeaders(ctx), ...ifMatch(draft.lockVersion) },
           body: JSON.stringify({
-            lock_version: draft.lockVersion,
             operations: [{ op: "write", path: "notes.txt", text: "edited" }],
           }),
         });

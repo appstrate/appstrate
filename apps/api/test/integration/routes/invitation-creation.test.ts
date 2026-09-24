@@ -20,7 +20,7 @@ function invite(ctx: TestContext, email: string, spaceId = ctx.defaultSpaceId) {
     body: JSON.stringify({
       email,
       role: "guest",
-      space_assignments: [{ space_id: spaceId, preset_role: "viewer" }],
+      space_assignments: [{ spaceId, preset_role: "viewer" }],
     }),
   });
 }
@@ -48,7 +48,7 @@ describe("Invitation creation preserves pending access", () => {
       token: invitation.token,
       status: "pending",
       role: "guest",
-      spaceAssignments: [{ space_id: ctx.defaultSpaceId, preset_role: "viewer" }],
+      spaceAssignments: [{ spaceId: ctx.defaultSpaceId, preset_role: "viewer" }],
     });
     expect((await app.request(`/invite/${invitation.token}/info`)).status).toBe(200);
   });

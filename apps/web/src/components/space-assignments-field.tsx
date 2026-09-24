@@ -50,7 +50,7 @@ export function SpaceAssignmentsField({
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const unavailable = disabled || loading || !!error;
-  const taken = new Set(value.map((a) => a.space_id));
+  const taken = new Set(value.map((a) => a.spaceId));
   const available = spaces.filter((s) => !taken.has(s.id));
 
   return (
@@ -73,11 +73,11 @@ export function SpaceAssignmentsField({
             emptyMessage={spaces.length === 0 ? t("orgSettings.assignmentsNoSpaces") : null}
           />
           {value.map((assignment, index) => {
-            const space = spaces.find((s) => s.id === assignment.space_id);
+            const space = spaces.find((s) => s.id === assignment.spaceId);
             const spaceName = space?.name ?? t("orgSettings.assignmentUnavailableSpace");
             return (
               <div
-                key={assignment.space_id}
+                key={assignment.spaceId}
                 className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md border p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
               >
                 <span className="col-span-2 text-sm font-medium break-words sm:col-span-1">
@@ -112,7 +112,7 @@ export function SpaceAssignmentsField({
               value=""
               disabled={unavailable}
               onValueChange={(spaceId) =>
-                onChange([...value, { space_id: spaceId, role: DEFAULT_SPACE_ROLE_VALUE }])
+                onChange([...value, { spaceId, role: DEFAULT_SPACE_ROLE_VALUE }])
               }
             >
               <SelectTrigger className="w-full" aria-label={t("orgSettings.inviteSpaceAdd")}>

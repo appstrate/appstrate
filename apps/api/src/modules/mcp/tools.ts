@@ -63,6 +63,7 @@ import {
 import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
 import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
+import { filePurposeValues } from "@appstrate/db/schema";
 import { asString, textResult } from "./tool-results.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 
@@ -208,6 +209,17 @@ const PROTECTED_HEADERS = new Set<string>([
 // Cap the buffered response body so a large list endpoint can't dump
 // unbounded text into the model context. Truncation is flagged in the result.
 const MAX_RESPONSE_CHARS = 100_000;
+
+/** `Headers.set`, answering `false` where it would throw on an invalid name/value. */
+function trySetHeader(headers: Headers, name: string, value: string): boolean {
+  try {
+    headers.set(name, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -613,8 +625,16 @@ export async function readResponse(
     }
   }
 
+  // The version to send back as `if_match` on the next write to this resource.
+  const etag = response.headers.get("etag");
   return textResult(
-    { status: response.status, ...(truncated ? { truncated: true } : {}), body, ...extra },
+    {
+      status: response.status,
+      ...(etag ? { etag } : {}),
+      ...(truncated ? { truncated: true } : {}),
+      body,
+      ...extra,
+    },
     isError,
   );
 }
@@ -636,7 +656,11 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     description:
       "Execute an Appstrate API operation. Call describe_operation first to learn its " +
       "path_params, query, and body shapes. Runs with your own credentials and permissions; " +
-      "the request is validated and authorized exactly as the equivalent REST call.",
+      "the request is validated and authorized exactly as the equivalent REST call. " +
+      "Optimistic concurrency: a result carries `etag` when the resource is versioned — " +
+      "pass it back as `if_match` on the next write to that resource. A write refused with " +
+      "412 means it changed since you read it: re-read, reapply your change, retry; 428 means " +
+      "the write requires `if_match` (package draft updates do — read the package first).",
     annotations: {
       title: "Invoke API operation",
       // Dispatches any of ~222 operations, including POST/PUT/DELETE — declare
@@ -665,6 +689,12 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
           type: "object",
           description: "JSON request body (for POST/PUT/PATCH).",
           additionalProperties: true,
+        },
+        if_match: {
+          type: "string",
+          description:
+            "The `etag` of the representation this write is based on, sent as the If-Match " +
+            "header (copy it verbatim from the result that returned it, quotes included).",
         },
         headers: {
           type: "object",
@@ -729,27 +759,26 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
 
     const query = asRecord(args.query) ?? {};
 
+    // An invalid model-supplied header is a tool error, not a 500.
+    const rejectHeader = (name: string): CallToolResult => {
+      emit(ctx, {
+        tool: "invoke_operation",
+        durationMs: performance.now() - start,
+        operationId,
+        method: op.method,
+        outcome: "rejected",
+      });
+      return textResult({ error: `Invalid header name or value: ${name}` }, true);
+    };
     const headers = new Headers(ctx.authHeaders);
+    const ifMatch = asString(args.if_match);
+    if (ifMatch && !trySetHeader(headers, "If-Match", ifMatch)) return rejectHeader("If-Match");
     const extraHeaders = asRecord(args.headers);
     if (extraHeaders) {
       for (const [name, value] of Object.entries(extraHeaders)) {
         if (PROTECTED_HEADERS.has(name.toLowerCase())) continue;
         if (typeof value !== "string") continue;
-        // A model-supplied header name/value may be syntactically invalid
-        // (`Headers.set` throws a TypeError). Surface a graceful tool error
-        // instead of a 500 so the model can self-correct.
-        try {
-          headers.set(name, value);
-        } catch {
-          emit(ctx, {
-            tool: "invoke_operation",
-            durationMs: performance.now() - start,
-            operationId,
-            method: op.method,
-            outcome: "rejected",
-          });
-          return textResult({ error: `Invalid header name or value: ${name}` }, true);
-        }
+        if (!trySetHeader(headers, name, value)) return rejectHeader(name);
       }
     }
     // Auto-map OpenAPI `in: header` parameters: a model often supplies a
@@ -764,7 +793,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
       if (queryKey === undefined) continue;
       const value = query[queryKey];
       if (typeof value === "string" || typeof value === "number") {
-        headers.set(headerName, String(value));
+        if (!trySetHeader(headers, headerName, String(value))) return rejectHeader(headerName);
         delete query[queryKey];
       }
     }
@@ -1019,7 +1048,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
             (inline ? " (either kind)" : "") +
             ': `{ "@scope/integration": ' +
             '"<connection_id>" }`, exactly one connection id per integration. This is the retry ' +
-            "path for a `412 must_choose_connection` launch error — that error lists the " +
+            "path for a `409 must_choose_connection` launch error — that error lists the " +
             "ambiguous integration and its `candidate_connections`, each with a `label`, an " +
             "`account_id` and `owned_by_actor`; pick one candidate's `id` and retry the SAME " +
             "call with it here. Those fields are what tells the candidates apart, so read them " +
@@ -1230,7 +1259,7 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
         },
         purpose: {
           type: "string",
-          enum: ["user_upload", "agent_output"],
+          enum: [...filePurposeValues],
           description: "`user_upload` = files you attached; `agent_output` = agent deliverables.",
         },
         limit: {

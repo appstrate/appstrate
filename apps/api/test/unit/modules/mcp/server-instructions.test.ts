@@ -6,7 +6,7 @@
  * (#1207) — and the agent-authoring guidance gated on `agents:write`.
  *
  * Prose is not the contract. Only the tokens a model branches on are pinned:
- * the STATUS it must recognize (412, never 400), the field it must read before
+ * the STATUS it must recognize (409, never 400), the field it must read before
  * reaching for a tool (`connect_url`), the operation and the argument the
  * fallback kickoff must carry (`initiateIntegrationConnect` with `scopes` = the
  * item's `required_scopes`), the one thing that differs between the two client
@@ -47,13 +47,13 @@ function connectBullet(contextInjected: boolean): string {
 }
 
 describe("MCP server instructions — connect bullet", () => {
-  it("names the readiness refusal as a 412 and never as a 400", () => {
-    // The readiness envelope is `412 missing_integration_connection`
+  it("names the readiness refusal as a 409 and never as a 400", () => {
+    // The readiness envelope is `409 missing_integration_connection`
     // (services/agent-readiness.ts); a model told to expect a 400 treats the
-    // 412 as an unknown failure and gives up instead of connecting.
+    // 409 as an unknown failure and gives up instead of connecting.
     for (const contextInjected of [false, true]) {
       const bullet = connectBullet(contextInjected);
-      expect(bullet).toMatch(/\b412\b/);
+      expect(bullet).toMatch(/\b409 `missing_integration_connection`/);
       expect(bullet).not.toMatch(/\b400\b/);
     }
   });
@@ -89,7 +89,7 @@ describe("MCP server instructions — connect bullet", () => {
     expect(external).not.toContain("do NOT paste the link");
     expect(external).toMatch(/Give the caller that `connect_url`/);
     expect(chat).not.toMatch(/Give the caller that `connect_url`/);
-    // Behaviour-shaping, not wording: dropping it turns a 412 into a poll loop.
+    // Behaviour-shaping, not wording: dropping it turns a 409 into a poll loop.
     for (const bullet of [chat, external]) {
       expect(bullet).toMatch(/do NOT poll, loop, wait/);
       expect(bullet).toMatch(/authKey: "<the error's auth_key/);

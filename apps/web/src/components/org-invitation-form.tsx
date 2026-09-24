@@ -65,7 +65,7 @@ export function OrgInvitationForm({
       // Invitations cannot grant ownership; the API enforces AssignableOrgRole.
       role: (invitation?.role ?? "member") as AssignableOrgRole,
       assignments: (invitation?.space_assignments ?? []).map((assignment) => ({
-        space_id: assignment.space_id,
+        spaceId: assignment.spaceId,
         role: spaceRoleValue(assignment),
       })),
     },
@@ -85,7 +85,7 @@ export function OrgInvitationForm({
     onError,
   });
 
-  const update = $api.useMutation("put", "/api/orgs/{orgId}/invitations/{invitationId}", {
+  const update = $api.useMutation("patch", "/api/orgs/{orgId}/invitations/{invitationId}", {
     onSuccess: () => {
       toast.success(t("orgSettings.inviteUpdated"));
       complete();

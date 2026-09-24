@@ -21,7 +21,7 @@ import { tokenUsageSchema } from "@appstrate/core/token-usage";
 // Import-free literal tuple, NOT the Drizzle `pgEnum` — this schema module is
 // bundled into the SPA and a value import from `@appstrate/db/schema` drags
 // drizzle-orm + the whole table schema into the browser.
-import { runStatusValues } from "@appstrate/db/run-status";
+import { runStatusValues } from "@appstrate/core/run-status";
 import { pricingStatusValues } from "@appstrate/db/pricing-status";
 import type { RunWireDto } from "./index.ts";
 

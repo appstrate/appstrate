@@ -28,7 +28,8 @@ export const headers = {
     schema: { type: "string", example: "20;w=60" },
   },
   RetryAfter: {
-    description: "Seconds to wait before retrying. Present on 429 responses.",
+    description:
+      "Seconds to wait before retrying. Present on every 429, and on any error whose problem body carries `retryAfter` (the two always agree), such as the 503 `shutting_down`.",
     schema: { type: "integer" },
   },
   WWWAuthenticate: {
@@ -38,6 +39,11 @@ export const headers = {
       "presented. Resources registered for RFC 9728 discovery (e.g. MCP) answer with a " +
       'richer challenge carrying `resource_metadata="…"`.',
     schema: { type: "string", example: 'Bearer error="invalid_token"' },
+  },
+  ETag: {
+    description:
+      "Strong entity-tag of the resource version this response carries (RFC 9110 §8.8.3). Send it back verbatim in `If-Match` on the next write to that resource: a write based on a stale read is refused with `412 precondition_failed`.",
+    schema: { type: "string", example: '"42"' },
   },
   Link: {
     description:
@@ -72,4 +78,13 @@ export const STD_RESPONSE_HEADERS = {
  */
 export const REQUEST_ID_ONLY_HEADERS = {
   "Request-Id": { $ref: "#/components/headers/RequestId" },
+} as const;
+
+/**
+ * The standard set plus `ETag`: the responses of a resource written under
+ * `If-Match` (the version to send back on the next write).
+ */
+export const ETAG_RESPONSE_HEADERS = {
+  ...STD_RESPONSE_HEADERS,
+  ETag: { $ref: "#/components/headers/ETag" },
 } as const;

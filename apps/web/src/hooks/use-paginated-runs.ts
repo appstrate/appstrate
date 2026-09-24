@@ -6,7 +6,8 @@ import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { paginatedRunsKeys } from "../lib/query-keys";
-import type { EnrichedRun, ListEnvelope, RunStatus } from "@appstrate/shared-types";
+import type { EnrichedRun, ListEnvelope } from "@appstrate/shared-types";
+import type { RunStatus } from "@appstrate/core/run-status";
 
 export type RunKindFilter = "all" | "package" | "inline";
 

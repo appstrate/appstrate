@@ -67,7 +67,7 @@ import { runs } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { applyRecoveredOutput, finalizeRun, getRunSinkContext } from "./run-event-ingestion.ts";
 import { stopWorkloadAndWait } from "./stop-workload.ts";
-import { emptyRunResult } from "@appstrate/afps-runtime/runner";
+import { emptyRunResult, type TerminalRunResult } from "@appstrate/afps-runtime/runner";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
@@ -273,13 +273,15 @@ async function finalizeStalledRun(
   // makes this call a no-op. We don't gate here to keep the convergence
   // point identical to every other finalize path.
 
-  const result = emptyRunResult();
-  result.status = "failed";
-  result.error = {
-    message:
-      candidate.reason === "boot-deadline"
-        ? `Run never started executing — the runner posted no event within its ${candidate.bootBudgetSeconds}s provisioning budget. The runtime image pull, container boot, or sandbox provisioning did not finish in time.`
-        : `Runner stopped reporting — no heartbeat for ${stallThresholdSeconds}s. The runner process may have crashed or lost network connectivity.`,
+  const result: TerminalRunResult = {
+    ...emptyRunResult(),
+    status: "failed",
+    error: {
+      message:
+        candidate.reason === "boot-deadline"
+          ? `Run never started executing — the runner posted no event within its ${candidate.bootBudgetSeconds}s provisioning budget. The runtime image pull, container boot, or sandbox provisioning did not finish in time.`
+          : `Runner stopped reporting — no heartbeat for ${stallThresholdSeconds}s. The runner process may have crashed or lost network connectivity.`,
+    },
   };
 
   // Stop the workload and WAIT (bounded) for the stop to ack before

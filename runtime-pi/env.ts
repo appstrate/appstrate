@@ -16,7 +16,9 @@
  */
 
 import { getErrorMessage } from "@appstrate/core/errors";
+import { normalizeHttpUrl } from "@appstrate/core/url";
 import { derivePiProvider } from "@appstrate/runner-pi/provider-map";
+import { parsePiLoopEnv } from "@appstrate/runner-pi/loop-env";
 import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import type { Api, Model } from "./pi-sdk.ts";
 import { MODEL_API_SHAPES, SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
@@ -26,6 +28,11 @@ import {
   type ModelNativeReasoningLevel,
   type ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
+import {
+  MODEL_INPUT_MODALITIES,
+  modelInputModalitySchema,
+  type ModelInputModality,
+} from "@appstrate/core/module";
 
 interface RuntimeEnv {
   /** Run identifier injected by the platform on container create. */
@@ -54,7 +61,7 @@ interface RuntimeEnv {
    */
   modelProvider?: string;
   /** Pi SDK input modalities. */
-  modelInput: ReadonlyArray<"text" | "image">;
+  modelInput: ReadonlyArray<ModelInputModality>;
   /**
    * Per-token cost (input/output/cacheRead/cacheWrite USD), or ABSENT when the
    * platform resolved no rates — unpriced, or aliased (the published rate card
@@ -110,6 +117,10 @@ interface RuntimeEnv {
    * `undefined` → SDK default.
    */
   mcpToolTimeoutMs?: number;
+  /** Pi loop knobs (`MODEL_RETRY_ENABLED`, `MODEL_COMPACTION_ENABLED`, `TOOL_RESULT_BYTE_LIMIT`). */
+  modelRetry: boolean;
+  modelCompaction: boolean;
+  toolResultByteLimit?: number;
   /**
    * NON-FATAL boot diagnostics — the counterpart of {@link RuntimeEnvError}'s
    * fatal `issues`. A value that is present but malformed is a contract
@@ -160,15 +171,6 @@ export class RuntimeEnvError extends Error {
   }
 }
 
-function isHttpUrl(value: string): boolean {
-  try {
-    const u = new URL(value);
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
 function parseJsonRecord(name: string, raw: string, issues: string[]): Record<string, unknown> {
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -185,10 +187,12 @@ function parseJsonRecord(name: string, raw: string, issues: string[]): Record<st
   }
 }
 
+const ALLOWED_MODALITIES = MODEL_INPUT_MODALITIES.map((m) => `"${m}"`).join(", ");
+
 function parseModelInput(
   raw: string | undefined,
   issues: string[],
-): ReadonlyArray<"text" | "image"> {
+): ReadonlyArray<ModelInputModality> {
   if (!raw) return ["text"];
   let parsed: unknown;
   try {
@@ -198,13 +202,15 @@ function parseModelInput(
     return ["text"];
   }
   if (!Array.isArray(parsed)) {
-    issues.push(`MODEL_INPUT: must be a JSON array of "text" | "image"`);
+    issues.push(`MODEL_INPUT: must be a JSON array of ${ALLOWED_MODALITIES}`);
     return ["text"];
   }
-  const out: Array<"text" | "image"> = [];
+  const out: ModelInputModality[] = [];
   for (const v of parsed) {
-    if (v === "text" || v === "image") out.push(v);
-    else issues.push(`MODEL_INPUT: invalid modality "${String(v)}" (allowed: "text", "image")`);
+    const modality = modelInputModalitySchema.safeParse(v);
+    if (modality.success) out.push(modality.data);
+    else
+      issues.push(`MODEL_INPUT: invalid modality "${String(v)}" (allowed: ${ALLOWED_MODALITIES})`);
   }
   return out.length > 0 ? out : ["text"];
 }
@@ -306,6 +312,7 @@ function parsePositiveNumber(
   return n;
 }
 
+/** `"true"` / `"false"`, absent meaning `true`; anything else is a launcher bug. */
 /**
  * Parse + validate the runtime-pi env vars from a source object.
  *
@@ -324,12 +331,12 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
 
   const sinkUrl = source.APPSTRATE_SINK_URL;
   if (!sinkUrl) issues.push("APPSTRATE_SINK_URL: required");
-  else if (!isHttpUrl(sinkUrl))
+  else if (normalizeHttpUrl(sinkUrl) === null)
     issues.push(`APPSTRATE_SINK_URL: must be an http(s) URL (got "${sinkUrl}")`);
 
   const sinkFinalizeUrl = source.APPSTRATE_SINK_FINALIZE_URL;
   if (!sinkFinalizeUrl) issues.push("APPSTRATE_SINK_FINALIZE_URL: required");
-  else if (!isHttpUrl(sinkFinalizeUrl))
+  else if (normalizeHttpUrl(sinkFinalizeUrl) === null)
     issues.push(`APPSTRATE_SINK_FINALIZE_URL: must be an http(s) URL (got "${sinkFinalizeUrl}")`);
 
   const sinkSecret = source.APPSTRATE_SINK_SECRET;
@@ -351,7 +358,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
   if (!agentPrompt) issues.push("AGENT_PROMPT: required");
 
   const sidecarUrl = source.SIDECAR_URL;
-  if (sidecarUrl !== undefined && sidecarUrl !== "" && !isHttpUrl(sidecarUrl)) {
+  if (sidecarUrl !== undefined && sidecarUrl !== "" && normalizeHttpUrl(sidecarUrl) === null) {
     issues.push(`SIDECAR_URL: must be an http(s) URL when set (got "${sidecarUrl}")`);
   }
 
@@ -364,7 +371,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
   }
 
   const modelBaseUrl = source.MODEL_BASE_URL;
-  if (modelBaseUrl && !isHttpUrl(modelBaseUrl))
+  if (modelBaseUrl && normalizeHttpUrl(modelBaseUrl) === null)
     issues.push(`MODEL_BASE_URL: must be an http(s) URL when set (got "${modelBaseUrl}")`);
 
   const agentInput = source.AGENT_INPUT
@@ -423,6 +430,9 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     issues,
   );
 
+  const piLoop = parsePiLoopEnv(source);
+  issues.push(...piLoop.issues);
+
   if (issues.length > 0) throw new RuntimeEnvError(issues);
 
   return {
@@ -451,6 +461,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     timeoutSeconds: agentTimeoutSeconds > 0 ? agentTimeoutSeconds : undefined,
     ...(mcpToolTimeoutMs > 0 ? { mcpToolTimeoutMs } : {}),
     traceparent: source.TRACEPARENT || undefined,
+    ...piLoop.options,
     warnings,
   };
 }

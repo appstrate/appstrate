@@ -42,6 +42,7 @@ import { validateSpaceInOrg } from "../../lib/space-lookup.ts";
 import { callerOrgRole, callerPersonalOwnerId } from "../../lib/view-as.ts";
 import { requireOrgPathMembership } from "../../middleware/org-path-context.ts";
 import { getOrgSettings } from "../../services/organizations.ts";
+import { recordAuditFromContext } from "../../services/audit.ts";
 import { listSessionsForOrg, revokeFamilyForOrgAdmin } from "./services/cli-tokens.ts";
 import {
   createClient,
@@ -535,6 +536,12 @@ export function createOidcRouter() {
 
       try {
         const created = await createClient(data);
+        await recordAuditFromContext(c, {
+          action: "oauth_client.created",
+          resourceType: "oauth_client",
+          resourceId: created.clientId,
+          after: { name: created.name, level: created.level, isFirstParty: created.isFirstParty },
+        });
         return c.json(created, 201);
       } catch (err) {
         if (err instanceof OAuthAdminValidationError) {
@@ -573,7 +580,7 @@ export function createOidcRouter() {
     "/api/oauth/scopes",
     rateLimit(300),
     requireModulePermission("oauth-clients", "read"),
-    async (c) => c.json({ data: [...getAppstrateScopes()] }),
+    async (c) => c.json(listResponse([...getAppstrateScopes()])),
   );
 
   router.get(
@@ -617,6 +624,12 @@ export function createOidcRouter() {
       try {
         const updated = await updateClient(clientId, data);
         if (!updated) throw notFound("OAuth client not found");
+        await recordAuditFromContext(c, {
+          action: "oauth_client.updated",
+          resourceType: "oauth_client",
+          resourceId: clientId,
+          after: data,
+        });
         return c.json(updated);
       } catch (err) {
         if (err instanceof OAuthAdminValidationError) {
@@ -638,6 +651,11 @@ export function createOidcRouter() {
       if (!owning || owning !== orgId) throw notFound("OAuth client not found");
       const deleted = await deleteClient(clientId);
       if (!deleted) throw notFound("OAuth client not found");
+      await recordAuditFromContext(c, {
+        action: "oauth_client.deleted",
+        resourceType: "oauth_client",
+        resourceId: clientId,
+      });
       return c.body(null, 204);
     },
   );
@@ -662,6 +680,11 @@ export function createOidcRouter() {
 
       const rotated = await rotateClientSecret(clientId);
       if (!rotated) throw notFound("OAuth client not found");
+      await recordAuditFromContext(c, {
+        action: "oauth_client.secret_rotated",
+        resourceType: "oauth_client",
+        resourceId: clientId,
+      });
       return c.json(rotated);
     },
   );
@@ -741,6 +764,13 @@ export function createOidcRouter() {
         throw invalidRequest("host resolves to a private/internal network", "host");
       }
       const saved = await upsertSmtpConfig(spaceId, data);
+      // `pass` and `username` stay out of the trail.
+      await recordAuditFromContext(c, {
+        action: "space.smtp_config.set",
+        resourceType: "smtp_config",
+        resourceId: spaceId,
+        after: { host: data.host, port: data.port, fromAddress: data.fromAddress },
+      });
       return c.json(saved);
     },
   );
@@ -753,6 +783,11 @@ export function createOidcRouter() {
       const spaceId = c.req.param("id")!;
       const deleted = await deleteSmtpConfig(spaceId);
       if (!deleted) throw notFound("SMTP configuration not found");
+      await recordAuditFromContext(c, {
+        action: "space.smtp_config.deleted",
+        resourceType: "smtp_config",
+        resourceId: spaceId,
+      });
       return c.body(null, 204);
     },
   );
@@ -817,6 +852,12 @@ export function createOidcRouter() {
       const provider = parseProvider(c.req.param("provider")!);
       const data = await readJsonBody(c, socialProviderUpsertSchema);
       const saved = await upsertSocialProvider(spaceId, provider, data);
+      await recordAuditFromContext(c, {
+        action: "space.social_provider.set",
+        resourceType: "social_provider",
+        resourceId: provider,
+        after: { clientId: data.clientId, scopes: data.scopes ?? null },
+      });
       return c.json(saved);
     },
   );
@@ -830,6 +871,11 @@ export function createOidcRouter() {
       const provider = parseProvider(c.req.param("provider")!);
       const deleted = await deleteSocialProvider(spaceId, provider);
       if (!deleted) throw notFound("Social provider configuration not found");
+      await recordAuditFromContext(c, {
+        action: "space.social_provider.deleted",
+        resourceType: "social_provider",
+        resourceId: provider,
+      });
       return c.body(null, 204);
     },
   );

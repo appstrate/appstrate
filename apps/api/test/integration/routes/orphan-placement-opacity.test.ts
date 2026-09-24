@@ -101,11 +101,11 @@ describe("the caller context handed to the model", () => {
     expect(res.status).toBe(200);
     const text = await res.clone().text();
     const body = (await res.json()) as {
-      agents: { package_id: string }[];
-      skills: { package_id: string }[];
+      agents: { packageId: string }[];
+      skills: { packageId: string }[];
     };
-    expect(body.agents.map((a) => a.package_id)).not.toContain(AGENT);
-    expect(body.skills.map((s) => s.package_id)).not.toContain(SKILL);
+    expect(body.agents.map((a) => a.packageId)).not.toContain(AGENT);
+    expect(body.skills.map((s) => s.packageId)).not.toContain(SKILL);
     // The hints carry `display_name` and `description` straight off the draft
     // manifest, so the id check alone would miss the actual disclosure.
     expect(text).not.toContain(SECRET);

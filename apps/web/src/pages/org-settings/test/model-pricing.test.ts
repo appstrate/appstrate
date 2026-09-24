@@ -44,7 +44,7 @@ describe("isModelUnpriced", () => {
 
   it("built-in with a null cost → NOT flagged, its remedy would 403", () => {
     // Built-in rates come from `SYSTEM_PROVIDER_KEYS`, and the badge's hint
-    // points at `PUT /api/models/{id}`, which answers `systemEntityForbidden`
+    // points at `PATCH /api/models/{id}`, which answers `systemEntityForbidden`
     // on a system id. A badge whose only remedy is refused is worse than none.
     expect(isModelUnpriced(model({ source: "built-in" }))).toBe(false);
   });

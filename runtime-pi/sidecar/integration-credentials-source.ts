@@ -397,13 +397,9 @@ export function createIntegrationCredentialsSource(
   }
 
   async function doRefresh(authKey: string): Promise<boolean> {
-    const url = `${options.platformApiUrl}/internal/integration-credentials/${options.integrationId}/refresh`;
     let res: Response;
     try {
-      res = await fetchFn(url, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${options.runToken}` },
-      });
+      res = await postIntegrationCredentialsRefresh(options.integrationId, { ...options, fetchFn });
     } catch (err) {
       logger.warn("integration credential refresh fetch failed", {
         integrationId: options.integrationId,
@@ -534,6 +530,44 @@ export function createIntegrationCredentialsSource(
     },
     hasReloginHandler: (authKey) => reloginHandlers.has(authKey),
   };
+}
+
+/**
+ * The single report path for "the upstream rejected this credential": the
+ * platform refreshes what it can, else counts it toward a reconnect flag (410).
+ */
+export function postIntegrationCredentialsRefresh(
+  integrationId: string,
+  opts: { platformApiUrl: string; runToken: string; fetchFn?: typeof fetch },
+): Promise<Response> {
+  const fetchFn = opts.fetchFn ?? fetch;
+  return fetchFn(
+    `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}/refresh`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${opts.runToken}` },
+    },
+  );
+}
+
+/**
+ * `_meta` key a local integration server sets on an `isError` tool result to
+ * say its credential was REJECTED by the target (not a transient failure):
+ * `{ "dev.appstrate/credential": { "status": "rejected", "reason": "…" } }`.
+ */
+export const CREDENTIAL_META_KEY = "dev.appstrate/credential";
+
+export function isCredentialRejectedResult(result: {
+  isError?: unknown;
+  _meta?: Record<string, unknown>;
+}): boolean {
+  if (result.isError !== true) return false;
+  const signal = result._meta?.[CREDENTIAL_META_KEY];
+  return (
+    typeof signal === "object" &&
+    signal !== null &&
+    (signal as { status?: unknown }).status === "rejected"
+  );
 }
 
 /**

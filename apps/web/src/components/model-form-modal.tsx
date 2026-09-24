@@ -403,7 +403,7 @@ function ModelForm({
     }
   });
 
-  // Creating, an empty name lets the server derive one. Editing, PUT reads an
+  // Creating, an empty name lets the server derive one. Editing, PATCH reads an
   // absent name as "keep it", so clearing it is refused.
   const labelValidate = (v: string) =>
     !model || v.trim() ? undefined : t("validation.required", { ns: "common" });

@@ -165,7 +165,7 @@ export async function updateOrganization(
 import { orgSettingsSchema as orgSettingsBaseSchema } from "@appstrate/core/permissions";
 
 /**
- * Body of `PUT /api/orgs/{orgId}/settings` — a PATCH over the org settings
+ * Body of `PATCH /api/orgs/{orgId}/settings` — an RFC 7396 merge over the org settings
  * document, so every member is optional.
  *
  * `.strict()`: an unknown key is a 400, never a silently dropped setting. It

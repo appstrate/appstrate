@@ -473,11 +473,12 @@ export function personaMemberships(
   return overlay;
 }
 
-export function viewAsWire(persona: ViewAsPersona): Record<string, unknown> {
+/** The persona as an audit payload records it — camelCase explicit keys (CASING_CONVENTIONS 4m). */
+export function viewAsAudit(persona: ViewAsPersona): Record<string, unknown> {
   return {
-    org_role: persona.orgRole,
+    orgRole: persona.orgRole,
     space: persona.space
-      ? { space_id: persona.space.spaceId, role: toSpaceRoleWire(persona.space.role) }
+      ? { spaceId: persona.space.spaceId, role: toSpaceRoleWire(persona.space.role) }
       : null,
   };
 }

@@ -198,9 +198,9 @@ If unsure: "universal" means "appears on >5 different types". Otherwise snake_ca
 
 **⚠️ Boundary — this carve-out covers JSONB that NEVER crosses the wire verbatim.** A JSONB column that is serialized back to a client as-is (no per-key projection) is a **wire payload**, not an internal contract, and its interior keys follow Zone 1 (**snake_case**, with the universal DB carve-out). The interior is the API contract.
 
-| Wire-exposed JSONB column    | Interior casing                                         | Why                                                                                                                                                                                                                                                         |
-| ---------------------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `organizations.org_settings` | **snake_case** (`api_version`, `dashboard_sso_enabled`) | Returned verbatim by `GET /api/orgs/:orgId/settings` and written verbatim by `PUT`; the blob IS the wire shape. Renaming a key here is a breaking wire change AND needs a JSONB data migration for existing rows (see `0002_rename_org_settings_keys.sql`). |
+| Wire-exposed JSONB column    | Interior casing                                         | Why                                                                                                                                                                                                                                                    |
+| ---------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `organizations.org_settings` | **snake_case** (`api_version`, `dashboard_sso_enabled`) | Returned verbatim by `GET /api/orgs/:orgId/settings` and merged in by `PATCH`; the blob IS the wire shape. Renaming a key here is a breaking wire change AND needs a JSONB data migration for existing rows (see `0002_rename_org_settings_keys.sql`). |
 
 When adding a JSONB column, decide up front: **internal contract** (never returned raw → camelCase/producer-defined, this carve-out) or **wire-exposed** (returned/accepted raw → snake_case, Zone 1). If a route ever starts returning an internal blob verbatim, its keys must be migrated to snake_case.
 
@@ -231,7 +231,7 @@ When adding a JSONB column, decide up front: **internal contract** (never return
 
 **File**: `apps/api/src/modules/webhooks/service.ts`
 
-**Rule**: Envelope (`id`, `object`, `type`, `apiVersion`, `created`, `data`) + inner payload all camelCase. Includes `packageId`, `resultTruncated`, `actor: { type, id }`, `errors: [{ field, code, message, title }]`.
+**Rule**: Envelope (`id`, `object`, `type`, `apiVersion`, `timestamp`, `data`) + inner payload all camelCase. `timestamp` is the Standard Webhooks payload field, an RFC 3339 string. Includes `packageId`, `resultTruncated`, `actor: { type, id }`, `errors: [{ field, code, message, title }]`.
 
 #### Carve-out 4k — BullMQ job data
 
@@ -418,7 +418,7 @@ This is the single canonical contract for frontend, SDK, github-action, and MCP 
 **Mirror manifest** (snake_case on wire, projection from snake_case manifest):
 `display_name`, `schema_version`
 
-**Domain fields** (snake_case): `running_runs`, `used_by_agents`, `reused_by_agents`, `has_unarchived_changes`, `version_count`, `created_by_name`, `last_run`, `user_name`, `end_user_name`, `api_key_name`, `schedule_name`, `actor_name`, `actor_type`, `actor_id`, `manifest_name`, `latest_published_version`, `active_version`, `restored_version`, `total_connections`, `lock_version`, `auto_installed`, `agent_scope`, `agent_name`, `package_ephemeral`, `inline_manifest`, `inline_prompt`, `runner_name`, `runner_kind`, `model_label`, `proxy_label`, `version_label`, `model_source`, `version_dirty`, `token_usage`, `cron_expression`, `connection_overrides`, `last_run_at`, `next_run_at`, `model_id_override`, `proxy_id_override`, `version_override`, `artifact_size`, `yanked_reason`, `dist_tags`, `draft_manifest`, `callback_url`, `started_at`, `completed_at`, `forked_from`
+**Domain fields** (snake_case): `running_runs`, `used_by_agents`, `reused_by_agents`, `has_unarchived_changes`, `version_count`, `created_by_name`, `last_run`, `user_name`, `end_user_name`, `api_key_name`, `schedule_name`, `actor_name`, `actor_type`, `actor_id`, `manifest_name`, `latest_published_version`, `active_version`, `restored_version`, `total_connections`, `auto_installed`, `agent_scope`, `agent_name`, `package_ephemeral`, `inline_manifest`, `inline_prompt`, `runner_name`, `runner_kind`, `model_label`, `proxy_label`, `version_label`, `model_source`, `version_dirty`, `token_usage`, `cron_expression`, `connection_overrides`, `last_run_at`, `next_run_at`, `model_id_override`, `proxy_id_override`, `version_override`, `artifact_size`, `yanked_reason`, `dist_tags`, `draft_manifest`, `callback_url`, `started_at`, `completed_at`, `forked_from`
 
 **Space-package DTO domain fields** (snake_case — `space_package` object on `/api/spaces/{id}/packages*`): `installed_at`, `package_type`, `package_source`, `draft_manifest`. Note `modelId`/`proxyId` on the same object stay camelCase per asymmetry 5c. `installed_at` keeps the spelling of the column it aliases: the act is spelled activate / deactivate everywhere else, and renaming a column is a migration of rows rather than of code.
 
@@ -439,7 +439,7 @@ This is the single canonical contract for frontend, SDK, github-action, and MCP 
 - `createdBy` → **`created_by`** (it is `*By`, an actor reference, not a timestamp/id; resembles `createdAt` but is NOT carved out).
 - `createdByName` → **`created_by_name`** (already snake_case in the domain list above).
 
-The carve-out has ONE documented counter-exception, and it is enumerated rather than inferable: the package **placement / share** family spells its ids snake_case — `home_space_id` on every package read, `space_id` on `PackagePlacement`, `user_id` inside `shared_by` on both `PackagePlacement` and `PackageShare`. The list is those four names on those objects, and nothing generalises from it: elsewhere `spaceId` and `userId` stay camelCase.
+The carve-out has ONE documented counter-exception, and it is enumerated rather than inferable: the package **placement / share** family spells its ids snake_case — `home_space_id` on every package read, `space_id` on `PackagePlacement`, `user_id` inside `shared_by` on both `PackagePlacement` and `PackageShare`. The list is those four names on those objects, and nothing generalises from it: elsewhere `spaceId` and `userId` stay camelCase. That includes the rest of the same family: a share's `target` (`ShareTarget` / `ShareTargetView`: `userId`, `spaceId`), `PackageShare.createdAt`, `SpaceAssignment.spaceId` (invitations, OAuth signup policies) and `SpaceSweepResult.spaceId`.
 
 Rule of thumb: a field qualifies for the camelCase carve-out only if its literal name appears in the list above (universal DB convention) — never by suffix similarity.
 
@@ -548,6 +548,8 @@ rg "(\.|:\s+)(displayName|schemaVersion|forkedFrom|runningRuns|usedByAgents|reus
 # Universal DB convention should stay camelCase
 rg "(\.|:\s+)(created_at|updated_at|user_id|org_id|space_id|package_id|end_user_id|api_key_id|schedule_id|expires_at|revoked_at|last_used_at|run_number|run_origin|context_snapshot|model_credential_id)\b" -t ts -t tsx
 ```
+
+For the wire this is enforced, not grepped: `apps/api/test/unit/openapi-casing-carve-out.test.ts` walks the full OpenAPI spec (core + modules) and fails on any property or query parameter spelled as one of these snake_case twins. Its `ALLOWED` list holds the exceptions this document records and the deviations not yet reconciled; an entry that stops matching fails the test too, so the list only shrinks. The `rg` above stays useful for TS code, where it cannot tell a wire key from a SQL column.
 
 ### Find Drizzle pgTable with snake_case TS fields (bug)
 

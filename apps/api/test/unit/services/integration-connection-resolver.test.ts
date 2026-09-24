@@ -442,7 +442,7 @@ describe("resolveConnections — fallback (cascade layer 5)", () => {
         { id: shared.id, label: "database", accountId: "root@db-01", ownedByActor: false },
       ]),
     );
-    // …and the snake_case projection the 412 envelope carries — the wire names
+    // …and the snake_case projection the 409 envelope carries — the wire names
     // are what an API or MCP caller parses to pick without a second call.
     expect(translateResolutionError(result.errors[0]!)).toMatchObject({
       field: `integrations.${INTEG}`,
@@ -1124,7 +1124,7 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     expect(err.authKey).toBe("oauth");
     expect(err.requiredScopes).toEqual(["repo", "admin:repo", "user"]);
     expect(err.missingScopes).toEqual(["user"]);
-    // …and the snake_case projection the 412 envelope carries. `owned_by_actor`
+    // …and the snake_case projection the 409 envelope carries. `owned_by_actor`
     // is what the connect-offer mint gates on: a scope upgrade re-consents THIS
     // row, so minting for a foreign owner would re-consent someone else's
     // account.
@@ -1151,7 +1151,7 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     expect(err.authKey).toBe("oauth");
     expect(err.requiredScopes).toEqual(["repo", "admin:repo", "user"]);
     // …and the snake_case projection, on real resolver output rather than a
-    // hand-built error: the wire names are what the 412 consumers parse.
+    // hand-built error: the wire names are what the 409 consumers parse.
     expect(translateResolutionError(err)).toMatchObject({
       field: `integrations.${INTEG}`,
       code: "not_connected",

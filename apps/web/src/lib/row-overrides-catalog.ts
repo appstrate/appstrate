@@ -7,11 +7,11 @@
  * registry entry. `label` is deliberately out of it.
  */
 
-const MODALITIES = ["text", "image"];
+import { MODEL_INPUT_MODALITIES, type ModelInputModality } from "@appstrate/core/module";
 
 /** The stored row's four catalog-derivable fields — an `OrgModel` fits. */
 export interface StoredModelValues {
-  input?: string[] | null;
+  input?: ModelInputModality[] | null;
   contextWindow?: number | null;
   maxTokens?: number | null;
   reasoning?: boolean | null;
@@ -30,13 +30,13 @@ export function sameSet(a: readonly string[], b: readonly string[]): boolean {
 
 /** The catalog entry's four answers, in the stored row's shape. */
 export function catalogValues(entry: CatalogModelValues): {
-  input: string[];
+  input: ModelInputModality[];
   contextWindow: number;
   maxTokens: number | null;
   reasoning: boolean;
 } {
   return {
-    input: entry.capabilities.filter((c) => MODALITIES.includes(c)),
+    input: MODEL_INPUT_MODALITIES.filter((m) => entry.capabilities.includes(m)),
     contextWindow: entry.contextWindow,
     maxTokens: entry.maxTokens ?? null,
     reasoning: entry.capabilities.includes("reasoning"),

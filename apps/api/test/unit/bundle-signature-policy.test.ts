@@ -6,8 +6,8 @@
  * policies against signed, unsigned, and tampered bundles.
  */
 
-import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
-import { zipArtifact } from "@appstrate/core/zip";
+import { describe, it, expect, beforeEach, afterEach, afterAll, spyOn } from "bun:test";
+import { unzipArtifact, zipArtifact } from "@appstrate/core/zip";
 import {
   buildBundleFromAfps,
   canonicalBundleDigest,
@@ -17,10 +17,16 @@ import {
 } from "@appstrate/afps-runtime/bundle";
 import {
   BundleSignatureError,
+  initBundleSignaturePolicy,
   loadAndVerifyBundle,
   _resetTrustRootCacheForTesting,
 } from "../../src/services/run-launcher/bundle-signature-policy.ts";
+import {
+  _setSystemPackagesForTesting,
+  type SystemPackageEntry,
+} from "../../src/services/system-packages.ts";
 import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
+import { logger } from "../../src/lib/logger.ts";
 
 const MINIMAL_MANIFEST = JSON.stringify({
   name: "@testorg/sig-test",
@@ -34,14 +40,17 @@ const MINIMAL_MANIFEST = JSON.stringify({
 async function buildBundleBytes(opts?: {
   prompt?: string;
   sign?: { keyId: string; privateKey: string };
+  manifest?: string;
 }) {
   const files: Record<string, Uint8Array> = {
-    "manifest.json": new TextEncoder().encode(MINIMAL_MANIFEST),
+    "manifest.json": new TextEncoder().encode(opts?.manifest ?? MINIMAL_MANIFEST),
     "prompt.md": new TextEncoder().encode(opts?.prompt ?? "Hello {{runId}}"),
   };
   if (opts?.sign) {
     const unsignedZip = zipArtifact(files, 6);
-    const unsignedBundle = await buildBundleFromAfps(unsignedZip, emptyPackageCatalog);
+    const unsignedBundle = await buildBundleFromAfps(unsignedZip, emptyPackageCatalog, {
+      depTypes: [],
+    });
     const digest = canonicalBundleDigest(unsignedBundle);
     const signature = signBundle(digest, {
       keyId: opts.sign.keyId,
@@ -112,6 +121,11 @@ describe("BundleSignaturePolicy", () => {
   describe("policy=required", () => {
     beforeEach(() => setEnv({ AFPS_SIGNATURE_POLICY: "required" }));
 
+    it("refuses a malformed archive", async () => {
+      const bytes = new TextEncoder().encode("not a zip");
+      await expect(loadAndVerifyBundle(bytes, "@testorg/sig-test")).rejects.toThrow();
+    });
+
     it("rejects an unsigned bundle with code=unsigned_required", async () => {
       const bytes = await buildBundleBytes();
       await expect(loadAndVerifyBundle(bytes, "@testorg/sig-test")).rejects.toThrow(
@@ -135,6 +149,16 @@ describe("BundleSignaturePolicy", () => {
       );
     });
 
+    it("verifies a signed package that declares dependencies (stored separately)", async () => {
+      const manifest = JSON.stringify({
+        ...JSON.parse(MINIMAL_MANIFEST),
+        dependencies: { skills: { "@testorg/some-skill": "^1.0.0" } },
+      });
+      const bytes = await buildBundleBytes({ sign: keypair, manifest });
+      const bundle = await loadAndVerifyBundle(bytes, "@testorg/sig-test");
+      expect(bundle).not.toBeNull();
+    });
+
     it("rejects a bundle signed by an untrusted key with code=chain_missing", async () => {
       const foreignKey = generateKeyPair();
       const bytes = await buildBundleBytes({ sign: foreignKey });
@@ -148,16 +172,58 @@ describe("BundleSignaturePolicy", () => {
     });
   });
 
+  describe("default policy", () => {
+    it("is warn: a signed bundle is verified", async () => {
+      setEnv({ AFPS_SIGNATURE_POLICY: undefined });
+      const bytes = await buildBundleBytes({ sign: keypair });
+      expect(await loadAndVerifyBundle(bytes, "@testorg/sig-test")).not.toBeNull();
+    });
+  });
+
+  describe("system packages", () => {
+    it("are exempt even under policy=required (the image is their trust root)", async () => {
+      setEnv({ AFPS_SIGNATURE_POLICY: "required" });
+      const restore = _setSystemPackagesForTesting(
+        new Map([["@testorg/sig-test", { packageId: "@testorg/sig-test" } as SystemPackageEntry]]),
+      );
+      try {
+        const bundle = await loadAndVerifyBundle(await buildBundleBytes(), "@testorg/sig-test");
+        expect(bundle).toBeNull();
+      } finally {
+        restore();
+      }
+    });
+  });
+
   describe("policy=warn", () => {
     beforeEach(() => setEnv({ AFPS_SIGNATURE_POLICY: "warn" }));
 
-    it("accepts an unsigned bundle (warn only)", async () => {
-      const bytes = await buildBundleBytes();
-      const bundle = await loadAndVerifyBundle(bytes, "@testorg/sig-test");
-      expect(bundle).not.toBeNull();
-      expect((bundle!.packages.get(bundle!.root)!.manifest as Record<string, unknown>).name).toBe(
-        "@testorg/sig-test",
+    it("never throws: a malformed archive is logged and passes", async () => {
+      const warn = spyOn(logger, "warn");
+      try {
+        const bytes = new TextEncoder().encode("not a zip");
+        expect(await loadAndVerifyBundle(bytes, "@testorg/sig-test")).toBeNull();
+        expect(warn).toHaveBeenCalledTimes(1);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it("finds a signature under a wrapper folder", async () => {
+      const foreign = await buildBundleBytes({ sign: generateKeyPair() });
+      const wrapped = zipArtifact(
+        Object.fromEntries(
+          Object.entries(unzipArtifact(foreign)).map(([name, bytes]) => [`pkg/${name}`, bytes]),
+        ),
+        6,
       );
+      const warn = spyOn(logger, "warn");
+      try {
+        expect(await loadAndVerifyBundle(wrapped, "@testorg/sig-test")).not.toBeNull();
+        expect(warn).toHaveBeenCalledWith("AFPS bundle signature invalid", expect.anything());
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     it("accepts a signed bundle with an invalid signature (warn only)", async () => {
@@ -190,6 +256,14 @@ describe("BundleSignaturePolicy", () => {
       await expect(loadAndVerifyBundle(bytes, "@testorg/sig-test")).rejects.toThrow(
         /AFPS_TRUST_ROOT/,
       );
+    });
+
+    it("initBundleSignaturePolicy fails boot on a malformed AFPS_TRUST_ROOT, whatever the policy", () => {
+      setEnv({
+        AFPS_TRUST_ROOT: JSON.stringify([{ keyId: "k1" /* publicKey missing */ }]),
+        AFPS_SIGNATURE_POLICY: "off",
+      });
+      expect(() => initBundleSignaturePolicy()).toThrow(/AFPS_TRUST_ROOT\[0\]/);
     });
 
     it("fails fast when a publicKey does not decode to 32 bytes", async () => {

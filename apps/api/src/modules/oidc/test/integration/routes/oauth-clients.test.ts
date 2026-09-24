@@ -183,7 +183,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
       body: JSON.stringify({
         allowSignup: true,
         signupRole: "guest",
-        signupSpaceAssignments: [{ space_id: ctx.defaultSpaceId, preset_role: "viewer" }],
+        signupSpaceAssignments: [{ spaceId: ctx.defaultSpaceId, preset_role: "viewer" }],
       }),
     });
     expect(patchRes.status).toBe(200);
@@ -195,7 +195,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     expect(updated.allowSignup).toBe(true);
     expect(updated.signupRole).toBe("guest");
     expect(updated.signupSpaceAssignments).toEqual([
-      { space_id: ctx.defaultSpaceId, preset_role: "viewer" },
+      { spaceId: ctx.defaultSpaceId, preset_role: "viewer" },
     ]);
   });
 
@@ -471,6 +471,15 @@ describe("OAuth clients admin routes (polymorphic)", () => {
   it("GET /api/oauth/clients/:id returns 404 for unknown id", async () => {
     const res = await app.request("/api/oauth/clients/oauth_nope", { headers: authHeaders(ctx) });
     expect(res.status).toBe(404);
+  });
+
+  it("GET /api/oauth/scopes answers the list envelope", async () => {
+    const res = await app.request("/api/oauth/scopes", { headers: authHeaders(ctx) });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { object: string; data: string[]; hasMore: boolean };
+    expect(body.object).toBe("list");
+    expect(body.hasMore).toBe(false);
+    expect(body.data).toContain("openid");
   });
 
   it("PATCH updates scopes", async () => {

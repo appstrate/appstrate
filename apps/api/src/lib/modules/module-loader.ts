@@ -797,7 +797,7 @@ export function getModuleOpenApiTags(): Array<{ name: string; description?: stri
 /**
  * Collect auth strategies contributed by all loaded modules.
  *
- * Strategies run in module load order, BEFORE core auth (Bearer ask_ API key
+ * Strategies run in module load order, BEFORE core auth (Bearer apst_ API key
  * → session cookie). First-match-wins: the first strategy returning a
  * non-null resolution claims the request.
  *

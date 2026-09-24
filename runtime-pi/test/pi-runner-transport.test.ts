@@ -64,6 +64,8 @@ describe("runtime-pi sidecar transport wiring", () => {
           input instanceof Request
             ? new URL(input.url)
             : new URL(typeof input === "string" ? input : input.href);
+        // The sidecar's key-outcome report to the platform shares this fetch.
+        if (url.pathname.startsWith("/internal/")) return new Response(null, { status: 204 });
         upstreamRequests.push({
           method: init?.method ?? (input instanceof Request ? input.method : "GET"),
           path: url.pathname,

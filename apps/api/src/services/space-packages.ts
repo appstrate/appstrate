@@ -672,7 +672,7 @@ export async function listActivePackages(scope: SpaceScope, type: PackageType) {
  */
 interface PackageHint {
   /** Package identifier, e.g. "@appstrate/triage" / "@appstrate/web-research". */
-  package_id: string;
+  packageId: string;
   display_name: string;
   description: string;
   source: string;
@@ -770,7 +770,7 @@ async function listActivePackageHints<T extends PackageHint>(
   const items = rows.map((row) => {
     const manifest = asRecord(row.draftManifest) as Record<string, unknown>;
     const base: PackageHint = {
-      package_id: typeof manifest.name === "string" ? manifest.name : row.id,
+      packageId: typeof manifest.name === "string" ? manifest.name : row.id,
       display_name: typeof manifest.display_name === "string" ? manifest.display_name : "",
       description: typeof manifest.description === "string" ? manifest.description : "",
       source: row.source ?? "local",

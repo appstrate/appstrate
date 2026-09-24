@@ -604,22 +604,49 @@ function scratchPath(prefix: string): string {
   );
 }
 
+/** The target refused the credential itself (only a reconnect fixes it), unlike a network failure. */
+class CredentialRejected extends Error {
+  constructor(
+    message: string,
+    readonly reason: "host_key_mismatch" | "publickey_rejected",
+  ) {
+    super(message);
+  }
+}
+
+/** The rejection reason anywhere in `err`'s cause chain (tools wrap failures). */
+function credentialRejection(err: unknown): CredentialRejected["reason"] | null {
+  for (let e = err; e instanceof Error; e = e.cause) {
+    if (e instanceof CredentialRejected) return e.reason;
+  }
+  return null;
+}
+
 function sshFailure(what: string, res: RunResult): Error {
   const tail = res.stderr.trim() || res.stdout.trim();
-  let hint = "";
+  const status = res.code === null ? "timed out" : `exit ${res.code}`;
   if (/host key verification failed|remote host identification has changed/i.test(tail)) {
-    hint =
-      "\nhint: the pinned host key does not match — the target's key changed or SSH_HOST_KEY is wrong. Never accept a new key silently; reconnect the integration.";
-  } else if (/permission denied \(publickey/i.test(tail)) {
+    return new CredentialRejected(
+      `${what} failed (${status}): ${tail}` +
+        "\nhint: the pinned host key does not match — the target's key changed or SSH_HOST_KEY is wrong. Never accept a new key silently; reconnect the integration.",
+      "host_key_mismatch",
+    );
+  }
+  if (/permission denied \(publickey/i.test(tail)) {
     // sshd sends the same refusal for all three causes, so they are named together.
-    hint =
-      "\nhint: the target rejected the key — check authorized_keys on the dedicated account. " +
-      "The `restrict` option the install block writes needs OpenSSH 7.2 or newer; an older sshd " +
-      "refuses the whole line as an unknown option, so the key is installed and never authenticates. " +
-      "On an sshd built WITHOUT PAM (Alpine), a locked account password (`user:!:` in /etc/shadow, " +
-      "what `adduser -D` and `useradd` leave behind) also refuses public-key login — unlock it with " +
-      "`echo '<user>:*' | chpasswd -e`, never `passwd -u`, which leaves an empty password on busybox.";
-  } else if (/CONNECT refused by proxy/i.test(tail)) {
+    return new CredentialRejected(
+      `${what} failed (${status}): ${tail}` +
+        "\nhint: the target rejected the key — check authorized_keys on the dedicated account. " +
+        "The `restrict` option the install block writes needs OpenSSH 7.2 or newer; an older sshd " +
+        "refuses the whole line as an unknown option, so the key is installed and never authenticates. " +
+        "On an sshd built WITHOUT PAM (Alpine), a locked account password (`user:!:` in /etc/shadow, " +
+        "what `adduser -D` and `useradd` leave behind) also refuses public-key login — unlock it with " +
+        "`echo '<user>:*' | chpasswd -e`, never `passwd -u`, which leaves an empty password on busybox.",
+      "publickey_rejected",
+    );
+  }
+  let hint = "";
+  if (/CONNECT refused by proxy/i.test(tail)) {
     hint = "\nhint: the egress proxy refused the target (private address or blocked host).";
   } else if (what === "sftp" && /^connection closed/i.test(tail)) {
     // Only when the closed channel is the FIRST thing said: a forced command
@@ -630,7 +657,6 @@ function sshFailure(what: string, res: RunResult): Error {
       "forced command (ForceCommand in sshd_config, or command= in authorized_keys), it needs an " +
       "arm that execs sftp-server for this case. Appstrate installs no forced command of its own.";
   }
-  const status = res.code === null ? "timed out" : `exit ${res.code}`;
   return new Error(`${what} failed (${status}): ${tail}${hint}`);
 }
 
@@ -1097,7 +1123,7 @@ export async function handleRequest(
       result: {
         protocolVersion: "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "appstrate-ssh-mcp", version: "1.0.0" },
+        serverInfo: { name: "appstrate-ssh-mcp", version: "1.0.1" },
       },
     };
   }
@@ -1127,10 +1153,18 @@ export async function handleRequest(
       const refused = err instanceof ProtocolError;
       logLine({ op: refused ? "tool-refused" : "tool-error", tool: name, ms, message });
       const body = refused ? { refused: true, reason: message } : { error: message };
+      const rejection = credentialRejection(err);
       return {
         jsonrpc: "2.0",
         id: req.id ?? null,
-        result: { isError: true, content: [{ type: "text", text: JSON.stringify(body, null, 2) }] },
+        result: {
+          isError: true,
+          content: [{ type: "text", text: JSON.stringify(body, null, 2) }],
+          // The sidecar's cue to report the connection for reconnect.
+          ...(rejection
+            ? { _meta: { "dev.appstrate/credential": { status: "rejected", reason: rejection } } }
+            : {}),
+        },
       };
     }
   }

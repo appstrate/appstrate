@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`formatLogLine`**, **`PINO_LEVELS`** and **`LogLevel`**
+  (`@appstrate/core/log-line`, new import-free subpath) — one pino-compatible
+  JSON log line (numeric `level`, epoch-ms `time`, `msg`, fields) for the
+  processes that must not carry pino: the Pi runner, the agent entrypoint and
+  the sidecar.
+
+- **`runStatusValues`**, **`terminalRunStatusValues`**, **`activeRunStatusValues`**,
+  **`RunStatus`** and **`TerminalRunStatus`** (`@appstrate/core/run-status`, new
+  import-free subpath) — the canonical run-status tuples, moved here from
+  `@appstrate/db/run-status` (which now derives from them) so core can use them.
+  `RUN_AND_WAIT_TERMINAL_STATUSES` is now built from `terminalRunStatusValues`
+  (same members), and the module event's `status` is typed
+  `"started" | TerminalRunStatus` (same union).
+- **`setCursorLinkHeader`** and **`setSinceLinkHeader`** (`@appstrate/core/pagination-link`,
+  new subpath) — set the RFC 5988 `Link` header of a cursor-paginated list
+  (`?startingAfter=`/`?endingBefore=` keyset or `?since=` sequence), rooted on
+  a caller-supplied public origin, so a module router pages with the same
+  header as the platform's own lists.
+- **`MODEL_INPUT_MODALITIES`**, **`modelInputModalitySchema`** and
+  **`ModelInputModality`** (`@appstrate/core/module`) — the closed set of model
+  input modalities (`text`, `image`) the Pi runtime accepts, shared by the model
+  API's request schemas, the `org_models.input` column type and the runtime's
+  `MODEL_INPUT` reader.
+- **`withByteCap(maxBytes)`** (`@appstrate/core/safe-json`) — Zod refinement
+  capping the UTF-8 size of a value's JSON serialization, so a module can cap a
+  JSONB payload it persists with the same idiom and wording as the platform.
 - **`scopesNotCovered`** (`@appstrate/core/integration`) — the required OAuth
   scopes a grant does not cover once expanded through `scope_catalog[].implies`,
   so an alias a provider echoes (Google `userinfo.email` for `email`) counts as
@@ -35,9 +61,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   something to that `(orgId, userId)` pair drops it here, so it does not come
   back if the same user is invited again. Optional to implement; must be
   idempotent.
+- **`PlatformServices.audit.record(c, entry)` (`@appstrate/core/module`)** —
+  a module route writes a row to the platform's `audit_events` trail. The org,
+  space, actor, IP, user agent and request id come from the request context,
+  as for a core route; the entry names `action`, `resourceType` and optionally
+  `resourceId`, `before` and `after`. Best-effort: never rejects.
 
 ### Changed
 
+- **`@appstrate/afps-shared` dependency range moved to `^0.9.0`** (from
+  `^0.8.0`): core imports its new `./jsonpath` subpath and
+  `allocateMcpToolName`. **Requires `@appstrate/afps-shared@0.9.0` on npm before
+  this release is published.**
+- **`integrationManifestSchema`** (`@appstrate/core/integration`) refuses every
+  manifest JSONPath outside the subset of `@appstrate/afps-shared/jsonpath`
+  (`$`, `.name`, `['name']`, `[0]`, `[-1]`): an `auths.{key}.identity_claims`
+  value, a `connect.login.outputs.{name}` selector of `type: "jsonpath"` and a
+  `connect.login.success_criteria[i]` condition of `type: "jsonpath"`. Before,
+  the last two were evaluated by the login engine's own lenient tokenizer and
+  `identity_claims` by a dot-split walk, so forms outside the subset worked:
+  `$.x-auth-token`, `$.data.0`, `$.data[00]`, and a bare claim name (`"sub"`,
+  read as `"$.sub"`). They are now refused, and the schema also runs when the
+  platform reads a stored manifest, so a stored one fails there with
+  `invalid_manifest`. Write `$['x-auth-token']`, `$.data[0]`, `$.sub`. A login
+  selector's `[-1]` now selects the last element; the previous engine
+  selected nothing.
+- **`SubscriptionChatModel.input`** (`@appstrate/core/chat-contract`) is typed
+  `ModelInputModality[] | null` instead of `string[] | null`.
 - **`formatErrorChain`** (`@appstrate/core/errors`) starts a cause as a new
   sentence after a message that already ends one (`"Refused. Conflict"`, never
   `"Refused.: Conflict"`), and no longer appends a cause whose message the text
@@ -58,6 +108,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each such operation from a route handler,
   `router.all("/x/*", (c) => handler(c.req.raw))`, or remove it from
   `openApiPaths()`.
+- **BREAKING: `SpaceAssignment.space_id` is renamed `spaceId`**
+  (`@appstrate/core/permissions`), the universal-id carve-out of the casing
+  conventions. The role keys (`preset_role`, `custom_role_id`) are unchanged.
+  Stored rows move with it: `scripts/migration/0021-space-assignments-spaceid-key.sql`.
+- **BREAKING: the MCP tool-name grammar keeps the upstream body**
+  (`@appstrate/core/naming`). `isValidToolName` now accepts
+  `{namespace}__{body}` with `body` in `[A-Za-z0-9_-]+` (case, `-`, a leading
+  digit and inner `__` allowed; the namespace stays lowercase snake-case), and
+  is re-exported from `@appstrate/afps-shared/mcp-naming`, the one copy of the
+  grammar. `normaliseMcpToolBody` no longer lowercases, collapses or strips an
+  upstream `ns__` prefix: it only maps characters providers reject to `_`.
+  New **`allocateMcpToolName(namespace, upstreamName, taken)`** replaces the
+  sidecar's `{ns}__tool_N` / `_2` fallbacks with a truncated body plus an
+  8-hex hash of the original name. Exposed names of upstream tools that used
+  upper case, `-`, `__` or overlong names change; stored manifests reference
+  ORIGINAL upstream names (`tools`, `hidden_tools`, `tools_policy`) and are
+  unaffected.
+- **BREAKING: the connect offer on `ResolutionFieldError`**
+  (`@appstrate/core/api-errors`) renames `expires_at` (epoch ms) to
+  **`expiresAt`** (RFC 3339 string) and `package_id` to **`packageId`**, the
+  universal DB-convention spellings. `connect_url` is unchanged.
+- **Sidecar `/llm/*` refusals are provider-shaped**: a new
+  **`llmProxyErrorBody(type, message)`** (`@appstrate/core/model-swap`) builds
+  `{ type: "error", error: { type, message } }`, the envelope
+  `syntheticAliasErrorBody` already used and both the Anthropic and the OpenAI
+  SDK parse. `syntheticAliasErrorBody` now builds on it (same output).
 
 ## [11.1.0] — 2026-09-22
 

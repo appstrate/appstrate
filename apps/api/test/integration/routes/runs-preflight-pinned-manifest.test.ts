@@ -5,20 +5,20 @@
  * integration manifests at the PIN, not at the integration author's draft.
  *
  * The route builds one request-scoped `manifestCache` and hands it to
- * `resolveRunPreflight` (advisory 412) and then to `prepareAndExecuteRun`
+ * `resolveRunPreflight` (advisory 409) and then to `prepareAndExecuteRun`
  * (authoritative Step 2a freeze + Step 2b cascade). Only the pipeline seeded
  * it, so the preflight fell through to `packages.draft_manifest` while the
  * gates it precedes read the pinned published version.
  *
  * The damaging direction is the FALSE NEGATIVE, and it is the one this suite
  * pins down: pinned manifest SATISFIABLE, draft NOT. Pre-fix the launch was
- * refused with a 412 naming scopes the version actually being run does not
+ * refused with a 409 naming scopes the version actually being run does not
  * require, and it never reached Step 2b to be judged correctly — a user whose
  * pinned integration is perfectly fine simply could not launch.
  *
  * The mirror direction (draft ready, pinned not) needs no test here: Step 2b
- * re-runs the cascade over the seeded, pinned manifests and raises the 412
- * itself, which `runs-412-missing-connection.test.ts` already covers.
+ * re-runs the cascade over the seeded, pinned manifests and raises the 409
+ * itself, which `runs-missing-connection.test.ts` already covers.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -39,7 +39,7 @@ const INTEG = "@pinrun/svc";
 
 /**
  * `search` requires `requiredScopes` on the oauth2 `primary` auth — the fact
- * the 412 verdict turns on, via `missingScopesForConnection`.
+ * the 409 verdict turns on, via `missingScopesForConnection`.
  */
 function integManifest(version: string, requiredScopes: string[]) {
   return localIntegrationManifest({
@@ -130,7 +130,7 @@ describe("POST /api/agents/:scope/:name/run — preflight reads the PINNED integ
     });
   });
 
-  it("does not 412 when the pinned version is satisfiable and only the draft drifted", async () => {
+  it("does not 409 when the pinned version is satisfiable and only the draft drifted", async () => {
     const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -143,7 +143,7 @@ describe("POST /api/agents/:scope/:name/run — preflight reads the PINNED integ
     // negative assertion cannot tell "preflight passed" apart from "the request
     // never got there": if `seedAgent` / `activatePackage` / `authHeaders` ever
     // drift such that the route answers 401 or 404 BEFORE `resolveRunPreflight`
-    // runs, the body carries no `code` and no `errors`, the status is not 412,
+    // runs, the body carries no `code` and no `errors`, the status is not 409,
     // and all three pass over a suite that exercised nothing.
     //
     // `model_not_configured` is raised by `prepareAndExecuteRun`
@@ -156,11 +156,11 @@ describe("POST /api/agents/:scope/:name/run — preflight reads the PINNED integ
     expect(res.status).toBe(400);
     expect(body.code).toBe("model_not_configured");
 
-    // 412 is reserved exclusively for the missing_integration_connection
-    // envelope (same reasoning as the must_choose retry assertion in
-    // runs-412-missing-connection.test.ts), so `not 412` directly proves the
+    // This door's other 409s cannot arise here (same reasoning as the
+    // must_choose retry assertion in runs-missing-connection.test.ts), so
+    // `not 409` directly proves the
     // preflight judged the pinned manifest.
-    expect(res.status).not.toBe(412);
+    expect(res.status).not.toBe(409);
     expect(body.code).not.toBe("missing_integration_connection");
     // And nothing anywhere in the response blames this integration — the
     // reverted code answers `insufficient_scopes` / `missing_scopes: ["write"]`

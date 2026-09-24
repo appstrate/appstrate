@@ -6,7 +6,7 @@
  * may become overrides when adding a discovered model.
  */
 
-import type { ModelCost } from "@appstrate/core/module";
+import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type {
   DiscoveredModel,
   ProviderRegistryEntry,
@@ -40,7 +40,7 @@ export interface ModelPickRow {
   label: string | null;
   contextWindow: number | null;
   maxTokens: number | null;
-  input: string[] | null;
+  input: ModelInputModality[] | null;
   reasoning: boolean | null;
   /** Who described the row — rendered as a badge. */
   source: "endpoint" | "catalog" | null;

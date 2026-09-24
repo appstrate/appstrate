@@ -348,8 +348,8 @@ describe("run_and_wait", () => {
   });
 
   it("opts the launch into connect offers, and only the launch", async () => {
-    // The MCP client is a human's own client, so a 412 may carry the link that
-    // human opens. The poll has no 412 to enrich, so it must stay opt-out.
+    // The MCP client is a human's own client, so a 409 may carry the link that
+    // human opens. The poll has no 409 to enrich, so it must stay opt-out.
     const { tool, calls } = makeRunAndWait({
       getRun: [jsonResponse({ id: "run_1", status: "success" })],
     });
@@ -404,7 +404,7 @@ describe("run_and_wait", () => {
     });
   });
 
-  // `connection_overrides` is the ONLY remedy for a `412 must_choose_connection`
+  // `connection_overrides` is the ONLY remedy for a `409 must_choose_connection`
   // launch, and the model can only use an argument the tool DECLARES. The
   // forwarding itself is unit-tested on `launchRunAndWait` (core); what is
   // proven here is the composition — descriptor + handler — because either half
@@ -420,7 +420,7 @@ describe("run_and_wait", () => {
       // One connection id per integration — a non-string value map would let the
       // model send a shape the route rejects with a 400.
       expect(property!.additionalProperties).toEqual({ type: "string" });
-      // Not required: the argument only exists for the retry after the 412, so
+      // Not required: the argument only exists for the retry after the 409, so
       // demanding it would break every ordinary launch. Pinned as an exact set
       // rather than a `not.toContain` — `kind` is the ONE required argument,
       // and a negative assertion on a single name can never fail.

@@ -13,6 +13,7 @@
  * returned `truncated` rather than as a complete listing.
  */
 
+import { MODEL_INPUT_MODALITIES, type ModelInputModality } from "@appstrate/core/module";
 import { fetchModelListing } from "../org-models.ts";
 import { logger } from "../../lib/logger.ts";
 
@@ -29,9 +30,6 @@ const MAX_LISTING_PAGES = 10;
  */
 const MAX_LISTING_BODY_BYTES = 4 * 1024 * 1024;
 
-/** Input modalities a listing entry or a catalog entry can advertise, in canonical order. */
-export const INPUT_MODALITIES = ["text", "image"] as const;
-
 /** Context-window fields, in the order the first positive integer wins. */
 const CONTEXT_WINDOW_FIELDS = ["max_model_len", "context_length", "max_context_length"] as const;
 
@@ -39,7 +37,7 @@ const CONTEXT_WINDOW_FIELDS = ["max_model_len", "context_length", "max_context_l
 export interface ServedModelHints {
   contextWindow?: number;
   maxTokens?: number;
-  input?: ("text" | "image")[];
+  input?: ModelInputModality[];
   reasoning?: boolean;
 }
 
@@ -162,7 +160,7 @@ function sniffHints(entry: Record<string, unknown>): ServedModelHints {
   const capabilities = readRecord(entry.capabilities);
   const modalities = readStringArray(readRecord(entry.architecture)?.input_modalities);
   if (modalities !== null) {
-    const input = INPUT_MODALITIES.filter((m) => modalities.includes(m));
+    const input = MODEL_INPUT_MODALITIES.filter((m) => modalities.includes(m));
     if (input.length > 0) hints.input = input;
   } else {
     const vision = readBoolean(capabilities?.vision);

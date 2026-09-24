@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 
 export const modelsPaths = {
@@ -101,7 +102,7 @@ export const modelsPaths = {
                 },
                 input: {
                   type: "array",
-                  items: { type: "string" },
+                  items: { type: "string", enum: [...MODEL_INPUT_MODALITIES] },
                   description: "Supported input types",
                 },
                 contextWindow: { type: "integer", description: "Context window size in tokens" },
@@ -310,7 +311,7 @@ export const modelsPaths = {
                         maxTokens: { type: ["integer", "null"], description: "Max output tokens" },
                         input: {
                           type: "array",
-                          items: { type: "string" },
+                          items: { type: "string", enum: [...MODEL_INPUT_MODALITIES] },
                           description: "Supported input types",
                         },
                         reasoning: {
@@ -447,11 +448,12 @@ export const modelsPaths = {
     },
   },
   "/api/models/{id}": {
-    put: {
+    patch: {
       operationId: "updateModel",
       tags: ["Models"],
       summary: "Update a custom model",
-      description: "Update a custom model configuration. Built-in models cannot be modified.",
+      description:
+        "Update a custom model configuration. Built-in models cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -470,7 +472,10 @@ export const modelsPaths = {
                   description: "Provider key ID to change which key is used",
                 },
                 enabled: { type: "boolean" },
-                input: { type: ["array", "null"], items: { type: "string" } },
+                input: {
+                  type: ["array", "null"],
+                  items: { type: "string", enum: [...MODEL_INPUT_MODALITIES] },
+                },
                 contextWindow: { type: ["integer", "null"] },
                 maxTokens: { type: ["integer", "null"] },
                 reasoning: { type: ["boolean", "null"] },

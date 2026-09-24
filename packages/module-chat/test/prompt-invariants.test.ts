@@ -119,7 +119,7 @@ describe("full persona invariants", () => {
   });
 
   it("routes integration_not_active to activation, never to a retry", () => {
-    // Retrying the run or re-running the connect flow can never clear a 412:
+    // Retrying the run or re-running the connect flow can never clear a 409:
     // connecting is personal, activating is per space. The persona names the
     // real catalog operation with its path and body, because the model is told
     // never to guess an operationId. `activatePackage` is decided in the space
@@ -192,9 +192,9 @@ describe("caller-context prompt hygiene", () => {
         user: { name: "Ada" },
         org: { role: "member" },
         connections: [{ integration_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
-        agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+        agents: [{ packageId: "@appstrate/triage", takes_input: false }],
         agents_truncated: true,
-        skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
+        skills: [{ packageId: "@appstrate/web-research", version: "1.2.0" }],
         skills_truncated: true,
       },
       {
@@ -402,7 +402,7 @@ describe("the persona without agent runs", () => {
     const raw = {
       user: { name: "Ada" },
       org: { role: "member" },
-      agents: [{ package_id: "@acme/triage", takes_input: false }],
+      agents: [{ packageId: "@acme/triage", takes_input: false }],
     };
     expect(
       formatCallerContext(raw, {

@@ -21,7 +21,7 @@
  *
  * Direction under test is the FALSE NEGATIVE: pinned manifest SATISFIABLE,
  * draft NOT. The mirror direction is caught downstream by run-pipeline Step 2b
- * and covered by `runs-412-missing-connection.test.ts`.
+ * and covered by `runs-missing-connection.test.ts`.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -145,7 +145,7 @@ describe("resolveRunPreflight — integration manifests are read at the PIN", ()
 
   it("scheduler call shape (no manifestCache) resolves against the pin, not the draft", async () => {
     // `scheduler.ts:triggerScheduledRun` passes no memo. Unseeded, the draft's
-    // `write` requirement wins and this throws 412 — which the scheduler
+    // `write` requirement wins and this throws 409 — which the scheduler
     // converts into `failSchedule(...)`, permanently stopping a schedule whose
     // pinned version is perfectly runnable. The preflight returns nothing —
     // passing IS resolving.
@@ -171,7 +171,7 @@ describe("resolveRunPreflight — integration manifests are read at the PIN", ()
     // readiness judge the draft — which demands `write` the connection lacks.
     const err = await preflight({ dependencyOverrides: { [INTEG]: "draft" } }).catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
-    expect((err as ApiError).status).toBe(412);
+    expect((err as ApiError).status).toBe(409);
     expect((err as ApiError).code).toBe("missing_integration_connection");
   });
 });

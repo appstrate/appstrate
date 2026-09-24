@@ -37,6 +37,7 @@ import {
 } from "@appstrate/afps-shared/api-tool-naming";
 import { isBareAuthSchemePrefix } from "@appstrate/afps-shared/delivery-http";
 import { normaliseMcpToolBody } from "@appstrate/afps-shared/mcp-naming";
+import { JsonPathSyntaxError, parseJsonPath } from "@appstrate/afps-shared/jsonpath";
 import { isToolsWildcard, TOOLS_WILDCARD, type ManifestIntegrationEntry } from "./dependencies.ts";
 
 // ─────────────────────────────────────────────
@@ -210,12 +211,49 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       }
     }
 
+    // (1f) §7.4 + §7.7 install gate — every manifest JSONPath the shared
+    // evaluator reads later is parsed here, so an unsupported form fails the
+    // import instead of the first connect.
+    const checkJsonPath = (path: string, at: (string | number)[]) => {
+      try {
+        parseJsonPath(path);
+      } catch (err) {
+        if (!(err instanceof JsonPathSyntaxError)) throw err;
+        ctx.addIssue({
+          code: "custom",
+          message: `${err.message} — supported: $, .name, ['name'], [0], [-1]`,
+          path: ["auths", authKey, ...at],
+        });
+      }
+    };
+    const identityClaims = (auth as { identity_claims?: Record<string, string> }).identity_claims;
+    for (const [claim, path] of Object.entries(identityClaims ?? {})) {
+      checkJsonPath(path, ["identity_claims", claim]);
+    }
+    const login = auth.connect?.login;
+    for (const [name, output] of Object.entries(login?.outputs ?? {})) {
+      const selector = output as { type?: unknown; selector?: unknown };
+      if (selector.type === "jsonpath" && typeof selector.selector === "string") {
+        checkJsonPath(selector.selector, ["connect", "login", "outputs", name, "selector"]);
+      }
+    }
+    (login?.success_criteria ?? []).forEach((criterion, index) => {
+      if (criterion.type === "jsonpath") {
+        checkJsonPath(criterion.condition, [
+          "connect",
+          "login",
+          "success_criteria",
+          index,
+          "condition",
+        ]);
+      }
+    });
+
     // connect.login output gating (§7.7): a delivery.* value template may
     // only reference declared connect outputs. We only enforce the gating
     // when a declarative `login` is present (the AFPS `tool` mode declares
     // its outputs out-of-band via `produces`, which the loose schema doesn't
     // surface here).
-    const login = auth.connect?.login;
     if (login) {
       const declaredOutputs = new Set(Object.keys(login.outputs ?? {}));
       if (declaredOutputs.size === 0) {
@@ -887,7 +925,7 @@ export function connectableAuthKeysForAgent(
  * {@link validateAgentIntegrationScopes} accepts anything in the UNION of every
  * auth's catalog ({@link getAvailableScopes}); the connect kickoff, in contrast,
  * is per-auth and refuses a scope the TARGET auth does not declare. Unioning a
- * sibling auth's scope in here relayed it as `required_scopes` on the 412, and
+ * sibling auth's scope in here relayed it as `required_scopes` on the 409, and
  * the kickoff then rejected the platform's own value — a loop nothing in the
  * agent could break. Tool-contributed scopes need no such filter: they are read
  * out of `tools_policy[tool].required_scopes[authKey]`, per-auth by
@@ -1197,7 +1235,7 @@ export type ConnectionResolutionErrorCode =
  * One connection the caller may pick from on `must_choose_connection`.
  *
  * Carries what it takes to TELL the candidates apart, not just to name them.
- * An id alone is opaque: a model reading the 412 has to fetch the connection
+ * An id alone is opaque: a model reading the 409 has to fetch the connection
  * list to learn which uuid is the account the user named before it can retry,
  * and a human reading a log learns nothing at all. The resolver already holds
  * the rows, so denormalizing the three distinguishing fields costs no query.

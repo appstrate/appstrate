@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Dispatch, SetStateAction } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { WebhookDelivery } from "@appstrate/shared-types";
 import { $api, client, type components, type paths } from "@/api/client";
 import { useCurrentOrgId } from "@/hooks/use-org";
@@ -120,7 +120,7 @@ export function useCreateWebhook() {
 
 export function useUpdateWebhook() {
   const invalidate = useInvalidateWebhooks();
-  return $api.useMutation("put", "/api/webhooks/{id}", { onSuccess: invalidate });
+  return $api.useMutation("patch", "/api/webhooks/{id}", { onSuccess: invalidate });
 }
 
 export function useDeleteWebhook() {
@@ -137,15 +137,26 @@ export function useRotateWebhookSecret() {
   return $api.useMutation("post", "/api/webhooks/{id}/rotate", { onSuccess: invalidate });
 }
 
+/**
+ * A webhook's delivery history, keyset-paged (`startingAfter` = last id seen).
+ * The key keeps the `[method, path, init]` prefix so `useInvalidateWebhooks`
+ * reaches it; a refetch re-reads every loaded page, keeping them on screen.
+ */
 export function useWebhookDeliveries(webhookId: string) {
   const scope = useWebhookScope();
-  return $api.useQuery(
-    "get",
-    "/api/webhooks/{id}/deliveries",
-    { params: { path: { id: webhookId }, header: scope.header } },
-    {
-      enabled: scope.enabled && !!webhookId,
-      select: (e) => e.data ?? [],
+  const params = { path: { id: webhookId }, header: scope.header };
+  return useInfiniteQuery({
+    queryKey: ["get", "/api/webhooks/{id}/deliveries", { params }] as const,
+    queryFn: async ({ pageParam, signal }) => {
+      const { data } = await client.GET("/api/webhooks/{id}/deliveries", {
+        params: { ...params, query: { startingAfter: pageParam } },
+        signal,
+      });
+      if (!data) throw new Error("empty response");
+      return data;
     },
-  );
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => (last.hasMore ? last.data[last.data.length - 1]?.id : undefined),
+    enabled: scope.enabled && !!webhookId,
+  });
 }

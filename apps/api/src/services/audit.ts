@@ -21,7 +21,7 @@ import { logger } from "../lib/logger.ts";
 import type { AppEnv } from "../types/index.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { getClientIpFromRequest } from "../lib/client-ip.ts";
-import { viewAsWire } from "../lib/view-as.ts";
+import { viewAsAudit } from "../lib/view-as.ts";
 
 type AuditActorType = "user" | "end_user" | "api_key" | "system" | (string & {});
 
@@ -40,6 +40,11 @@ interface RecordAuditInput {
   userAgent?: string | null;
   requestId?: string | null;
 }
+
+type ContextAuditInput = Omit<
+  RecordAuditInput,
+  "orgId" | "spaceId" | "actorType" | "actorId" | "ip" | "userAgent" | "requestId"
+>;
 
 export async function recordAudit(input: RecordAuditInput): Promise<void> {
   try {
@@ -142,17 +147,16 @@ export async function drainAudits(
  * there).
  *
  * A route acting on a resource in another space re-enters that space before it
- * writes, so the spaceId read here is already the resource's. No per-call override.
+ * writes, so the space read here is already the resource's. A module route
+ * enters through `enterSpaceContext`, which sets `space` but leaves `spaceId`
+ * (the credential's) alone — hence `space` first. No per-call override.
  *
- * Under a role preview the persona goes into `after.view_as`; the actor stays
+ * Under a role preview the persona goes into `after.viewAs`; the actor stays
  * the administrator, which is who they were.
  */
 export async function recordAuditFromContext(
   c: Context<AppEnv>,
-  input: Omit<
-    RecordAuditInput,
-    "orgId" | "spaceId" | "actorType" | "actorId" | "ip" | "userAgent" | "requestId"
-  > & { orgIdOverride?: string },
+  input: ContextAuditInput & { orgIdOverride?: string },
 ): Promise<void> {
   const { orgIdOverride, ...auditInput } = input;
   const orgId = orgIdOverride ?? c.get("orgId");
@@ -178,13 +182,28 @@ export async function recordAuditFromContext(
   const persona = c.get("viewAs");
   await recordAudit({
     ...auditInput,
-    ...(persona ? { after: { ...(auditInput.after ?? {}), view_as: viewAsWire(persona) } } : {}),
+    ...(persona ? { after: { ...(auditInput.after ?? {}), viewAs: viewAsAudit(persona) } } : {}),
     orgId,
-    spaceId: c.get("spaceId") ?? null,
+    spaceId: c.get("space")?.id ?? c.get("spaceId") ?? null,
     actorType,
     actorId,
+    ...requestAuditMeta(c),
+  });
+}
+
+/** For session-less doors (OAuth callback, hosted connect): the caller names the principal. */
+export async function recordAuditAs(
+  c: Context<AppEnv>,
+  principal: { orgId: string; spaceId: string | null; actorType: AuditActorType; actorId: string },
+  input: ContextAuditInput,
+): Promise<void> {
+  await recordAudit({ ...input, ...principal, ...requestAuditMeta(c) });
+}
+
+function requestAuditMeta(c: Context<AppEnv>) {
+  return {
     ip: getClientIpFromRequest(c.req.raw),
     userAgent: c.req.header("user-agent") ?? null,
     requestId: c.get("requestId") ?? null,
-  });
+  };
 }

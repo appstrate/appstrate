@@ -23,7 +23,7 @@
 
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { chatMessages, chatSessions } from "@appstrate/db/schema";
+import { chatMessages, chatSessions, type ChatMessageContent } from "@appstrate/db/schema";
 import { toPgSafe } from "@appstrate/db/pg-safe";
 import { notFound } from "@appstrate/core/api-errors";
 import { uiMessageText } from "./message-text.ts";
@@ -39,9 +39,9 @@ import type { UIMessage } from "ai";
 type ChatDbClient = Pick<typeof db, "select" | "insert" | "update">;
 
 /** Storage content = UIMessage minus its id (the id rides in `message_id`). */
-function toContent(message: UIMessage): Record<string, unknown> {
+function toContent(message: UIMessage): ChatMessageContent {
   const { id: _id, ...rest } = message;
-  return rest as Record<string, unknown>;
+  return rest;
 }
 
 /**
@@ -159,7 +159,7 @@ async function upsertMessage(
   // *random* fallback id would instead break idempotency — a retried finalize
   // would mint a new id each attempt and insert a duplicate row — so derive a
   // stable, content-addressed id when one is missing.
-  const content = toContent(message) as typeof chatMessages.$inferInsert.content;
+  const content = toContent(message);
   const messageId =
     message.id || (await deterministicMessageId(sessionId, precedingMessageId, content));
   // `seq` feeds the read-state watermark. On a retried finalize the conflict

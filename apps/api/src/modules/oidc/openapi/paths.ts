@@ -319,9 +319,11 @@ export const oidcPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["data"],
+                required: ["object", "data", "hasMore"],
                 properties: {
+                  object: { type: "string", enum: ["list"] },
                   data: { type: "array", items: { type: "string" } },
+                  hasMore: { type: "boolean" },
                 },
               },
             },

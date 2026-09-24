@@ -389,7 +389,7 @@ describe("Spaces API", () => {
   describe("PUT /api/spaces/:id/packages/:packageId requires a prior placement (CRIT-05)", () => {
     function putPackage(packageId: string, body: Record<string, unknown> = { modelId: null }) {
       return app.request(`/api/spaces/${ctx.defaultSpaceId}/packages/${packageId}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });

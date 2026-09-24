@@ -55,6 +55,7 @@ import { getExecutionMode } from "../infra/mode.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { ensureBucket } from "@appstrate/db/storage";
 import { logInfraMode } from "../infra/index.ts";
+import { initBundleSignaturePolicy } from "../services/run-launcher/bundle-signature-policy.ts";
 import { installPermissionAuditLogger } from "./permission-audit.ts";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 
@@ -191,6 +192,9 @@ export async function bootCritical(): Promise<void> {
 
   // Verify storage backend is accessible (fail-fast if misconfigured)
   await ensureBucket();
+
+  // Parse AFPS_TRUST_ROOT (fail-fast) and log the effective signature policy.
+  initBundleSignaturePolicy();
 
   // Parse + validate run limits (PLATFORM_RUN_LIMITS, INLINE_RUN_LIMITS).
   // Throws at boot on invalid shape — no run can start without them.
@@ -776,7 +780,7 @@ async function warnOnUnserveableApiVersionPins(): Promise<void> {
   logger.error(
     `${offenders.length} organization(s) are pinned to an API version this build cannot serve. ` +
       `Every org-scoped route will answer 400 unsupported_api_version for them until the pin is ` +
-      `repaired (PUT /api/orgs/:orgId/settings with a supported api_version).`,
+      `repaired (PATCH /api/orgs/:orgId/settings with a supported api_version).`,
     {
       supportedVersions: supported,
       currentVersion: CURRENT_API_VERSION,

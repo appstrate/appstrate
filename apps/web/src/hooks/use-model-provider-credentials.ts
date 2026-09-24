@@ -82,7 +82,7 @@ export function useCreateModelProviderCredential() {
 // be mutated — delete and re-create to switch providers.
 export function useUpdateModelProviderCredential() {
   const invalidate = useInvalidateModelProviderCredentials();
-  return $api.useMutation("put", "/api/model-provider-credentials/{id}", {
+  return $api.useMutation("patch", "/api/model-provider-credentials/{id}", {
     onSuccess: invalidate,
   });
 }

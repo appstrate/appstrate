@@ -54,10 +54,10 @@ describe("listRecentForActor (service layer)", () => {
     const out = await listRecentForActor(scope(), actor());
     expect(out).toHaveLength(2);
     // Newest first: the failed agentB run leads.
-    expect(out[0]!.package_id).toBe(agentB);
+    expect(out[0]!.packageId).toBe(agentB);
     expect(out[0]!.status).toBe("failed");
     expect(out[0]!.error).toBe("boom");
-    expect(out[1]!.package_id).toBe(agentA);
+    expect(out[1]!.packageId).toBe(agentA);
     // Success runs never expose an error message.
     expect(out[1]!.error).toBeNull();
   });
@@ -86,7 +86,7 @@ describe("listRecentForActor (service layer)", () => {
 
     const mine = await listRecentForActor(scope(), actor());
     expect(mine).toHaveLength(1);
-    expect(mine[0]!.package_id).toBe(agentA);
+    expect(mine[0]!.packageId).toBe(agentA);
 
     // The other org's actor sees nothing in our space.
     void other;

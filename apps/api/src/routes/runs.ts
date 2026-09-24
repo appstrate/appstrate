@@ -61,7 +61,8 @@ import { connectOfferPolicyFromRequest } from "../lib/connect-offer-policy.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { currentTraceparent, telemetryTrustsIncomingTrace } from "@appstrate/core/telemetry";
-import { TERMINAL_RUN_STATUSES, runStatusValues } from "@appstrate/db/schema";
+import { TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
+import { runStatusValues } from "@appstrate/core/run-status";
 import { parseWaitQuery, waitForRunTerminal } from "../services/run-wait.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
@@ -354,7 +355,7 @@ export function createRunsRouter() {
           spaceId: c.get("spaceId"),
           orgId,
           actor,
-          // Opt-in only: absent header ⇒ null ⇒ a 412 with no connect link.
+          // Opt-in only: absent header ⇒ null ⇒ a 409 with no connect link.
           connectOffers: connectOfferPolicyFromRequest(c),
           connectionOverrides: connectionOverrides ?? null,
           // Same overrides handed to `prepareAndExecuteRun` below, so the
@@ -607,7 +608,8 @@ export function createRunsRouter() {
     let sinceId: number | undefined;
     if (sinceParam !== undefined && sinceParam !== "") {
       const parsed = Number(sinceParam);
-      if (Number.isInteger(parsed) && parsed >= 0) sinceId = parsed;
+      // Safe-integer bound keeps the value inside int8, so a huge cursor falls back instead of a 500.
+      if (Number.isSafeInteger(parsed) && parsed >= 0) sinceId = parsed;
     }
 
     const minLevel = z.enum(RUN_LOG_LEVELS).optional().catch(undefined).parse(c.req.query("level"));

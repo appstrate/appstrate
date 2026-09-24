@@ -20,7 +20,7 @@ import * as path from "node:path";
 import { createConsoleSink } from "../src/commands/run/sink.ts";
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
-import type { RunResult } from "@appstrate/afps-runtime/runner";
+import type { RunResult, TerminalRunResult } from "@appstrate/afps-runtime/runner";
 
 /**
  * `SinkOptions` is intentionally not exported from `sink.ts` (nothing outside
@@ -72,11 +72,12 @@ function progressEvent(message: string, data?: unknown): RunEvent {
   return { type: "appstrate.progress", timestamp: 0, runId: RUN_ID, message, data } as RunEvent;
 }
 
-function emptyResult(): RunResult {
+function emptyResult(): TerminalRunResult {
   return {
     memories: [],
     output: null,
     logs: [],
+    status: "success",
   };
 }
 
@@ -438,7 +439,7 @@ describe("createConsoleSink — human mode", () => {
 
   it("prints failure line when result has error", async () => {
     const sink = streams.sink({});
-    await sink.finalize({ ...emptyResult(), error: { message: "bad" } });
+    await sink.finalize({ ...emptyResult(), status: "failed", error: { message: "bad" } });
     expect(streams.stdout).toContain("bad");
     expect(streams.stdout).toContain("failed");
   });

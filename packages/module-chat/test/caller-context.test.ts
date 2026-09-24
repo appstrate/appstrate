@@ -37,6 +37,7 @@ function fakeDeps(respond: (req: Request) => Response): {
         return respond(req);
       },
       rateLimit: () => async (_c, next) => next(),
+      publicOrigin: "http://localhost:3000",
       resolveChatModel: async () => ({ subscription: false }),
       recordChatUsage: async () => {},
       checkUsageAllowed: async () => null,
@@ -127,14 +128,14 @@ describe("formatCallerContext", () => {
         org: { role: "member" },
         agents: [
           {
-            package_id: "@acme/mine",
+            packageId: "@acme/mine",
             display_name: "Mine",
             takes_input: false,
             published: false,
             home_writable: true,
           },
           {
-            package_id: "@acme/theirs",
+            packageId: "@acme/theirs",
             display_name: "Theirs",
             takes_input: false,
             published: false,
@@ -197,7 +198,7 @@ describe("formatCallerContext", () => {
       org: { role: "member" },
       agents: [
         {
-          package_id: "@acme/mine",
+          packageId: "@acme/mine",
           display_name: "Mine",
           takes_input: false,
           published: false,
@@ -229,7 +230,7 @@ describe("formatCallerContext", () => {
       org: { role: "member" },
       agents: [
         {
-          package_id: "@acme/mine",
+          packageId: "@acme/mine",
           display_name: "Mine",
           takes_input: false,
           published: false,
@@ -255,7 +256,7 @@ describe("formatCallerContext", () => {
   it("advertises no draft as runnable when the turn may not author agents", () => {
     // The turn's token then lacks `agents:write`, and a draft launch 403s.
     const draft = {
-      package_id: "@acme/mine",
+      packageId: "@acme/mine",
       display_name: "Mine",
       takes_input: false,
       published: false,
@@ -276,7 +277,7 @@ describe("formatCallerContext", () => {
     const raw = {
       user: { name: "Ada" },
       org: { role: "member" },
-      skills: [{ package_id: "@acme/research", display_name: "Research" }],
+      skills: [{ packageId: "@acme/research", display_name: "Research" }],
     };
     expect(formatCallerContext(raw, BASE_OPTS)).toContain("## Skills you can attach");
     expect(
@@ -293,7 +294,7 @@ describe("formatCallerContext", () => {
         org: { role: "member" },
         agents: [
           {
-            package_id: "@acme/shipped",
+            packageId: "@acme/shipped",
             display_name: "Shipped",
             takes_input: true,
             published: true,
@@ -342,13 +343,13 @@ describe("formatCallerContext", () => {
         connections: [],
         agents: [
           {
-            package_id: "@appstrate/triage",
+            packageId: "@appstrate/triage",
             display_name: "Inbox Triage",
             description: "Sorts incoming email.",
             takes_input: false,
           },
           {
-            package_id: "@acme/report",
+            packageId: "@acme/report",
             display_name: "Report",
             description: "Builds a report.",
             takes_input: true,
@@ -374,7 +375,7 @@ describe("formatCallerContext", () => {
         user: { name: "Ada" },
         org: { role: "member" },
         connections: [],
-        agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+        agents: [{ packageId: "@appstrate/triage", takes_input: false }],
         agents_truncated: true,
       },
       BASE_OPTS,
@@ -387,7 +388,7 @@ describe("formatCallerContext", () => {
   it("renders a context block from agents alone (no identity/connections)", () => {
     const out = formatCallerContext(
       {
-        agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+        agents: [{ packageId: "@appstrate/triage", takes_input: false }],
       },
       BASE_OPTS,
     );
@@ -416,13 +417,13 @@ describe("formatCallerContext", () => {
         connections: [],
         skills: [
           {
-            package_id: "@appstrate/web-research",
+            packageId: "@appstrate/web-research",
             display_name: "Web Research",
             description: "Multi-source web search.",
             version: "1.2.0",
           },
           {
-            package_id: "@acme/pdf",
+            packageId: "@acme/pdf",
             display_name: "PDF",
             description: "Reads PDFs.",
             version: null,
@@ -449,7 +450,7 @@ describe("formatCallerContext", () => {
         user: { name: "Ada" },
         org: { role: "member" },
         connections: [],
-        skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
+        skills: [{ packageId: "@appstrate/web-research", version: "1.2.0" }],
         skills_truncated: true,
       },
       BASE_OPTS,
@@ -465,7 +466,7 @@ describe("formatCallerContext", () => {
   it("renders a context block from skills alone (no identity/connections/agents)", () => {
     const out = formatCallerContext(
       {
-        skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
+        skills: [{ packageId: "@appstrate/web-research", version: "1.2.0" }],
       },
       BASE_OPTS,
     );
@@ -517,13 +518,13 @@ describe("formatCallerContext", () => {
         org: { role: "member" },
         recent_runs: [
           {
-            package_id: "@appstrate/triage",
+            packageId: "@appstrate/triage",
             status: "failed",
-            run_number: 7,
+            runNumber: 7,
             started_at: "2026-06-25T09:00:00.000Z",
             error: "Gmail token expired",
           },
-          { package_id: "@acme/report", status: "success", run_number: 6 },
+          { packageId: "@acme/report", status: "success", runNumber: 6 },
         ],
       },
       BASE_OPTS,
@@ -543,7 +544,7 @@ describe("formatCallerContext", () => {
     expect(
       formatCallerContext(
         {
-          recent_runs: [{ package_id: "@acme/report", status: "success", run_number: 1 }],
+          recent_runs: [{ packageId: "@acme/report", status: "success", runNumber: 1 }],
         },
         BASE_OPTS,
       ),
@@ -555,8 +556,8 @@ describe("formatCallerContext", () => {
       user: { name: "Ada", email: "ada@acme.com" },
       org: { role: "member", name: "Acme", slug: "acme" },
       connections: [{ integration_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
-      agents: [{ package_id: "@appstrate/triage", takes_input: false }],
-      skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
+      agents: [{ packageId: "@appstrate/triage", takes_input: false }],
+      skills: [{ packageId: "@appstrate/web-research", version: "1.2.0" }],
     };
     const at = new Date("2026-06-25T09:05:00.000Z");
     const later = new Date("2026-06-25T09:50:00.000Z");
@@ -589,7 +590,7 @@ describe("buildCallerContextBlock", () => {
       user: { name: "Ada", email: "ada@acme.com" },
       org: { role: "member", name: "Acme", slug: "acme" },
       connections: [{ integration_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
-      agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+      agents: [{ packageId: "@appstrate/triage", takes_input: false }],
     };
     const { deps, lastRequest } = fakeDeps(() => Response.json(payload));
     const out = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
@@ -617,7 +618,7 @@ describe("buildCallerContextBlock", () => {
     const payload = {
       user: { name: "Ada", email: "ada@acme.com" },
       org: { role: "member" },
-      agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+      agents: [{ packageId: "@appstrate/triage", takes_input: false }],
     };
     const { deps } = fakeDeps(() => Response.json(payload));
     const out = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
@@ -640,7 +641,7 @@ describe("buildCallerContextBlock", () => {
       org: { role: "member" },
       agents: [
         {
-          package_id: "@acme/mine",
+          packageId: "@acme/mine",
           display_name: "Mine",
           takes_input: false,
           published: false,

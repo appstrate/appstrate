@@ -1023,13 +1023,16 @@ describe("Runs API", () => {
       });
 
       // Stale or garbled cursors must not 400 — the polling tail must
-      // keep working through transient client-side malformation.
-      const res = await app.request(`/api/runs/${run.id}/logs?since=not-a-number`, {
-        headers: authHeaders(ctx),
-      });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: unknown[] };
-      expect(body.data).toHaveLength(1);
+      // keep working through transient client-side malformation. `1e30` is an
+      // integer past int8: it must fall back, not reach Postgres as a 500.
+      for (const since of ["not-a-number", "1e30"]) {
+        const res = await app.request(`/api/runs/${run.id}/logs?since=${since}`, {
+          headers: authHeaders(ctx),
+        });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { data: unknown[] };
+        expect(body.data).toHaveLength(1);
+      }
     });
 
     it("?since=<highest_id> returns an empty array", async () => {
@@ -1052,12 +1055,15 @@ describe("Runs API", () => {
         level: "info",
       });
 
-      const res = await app.request(`/api/runs/${run.id}/logs?since=${log.id}`, {
-        headers: authHeaders(ctx),
-      });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: unknown[] };
-      expect(body.data).toHaveLength(0);
+      // The second cursor is past int4: `run_logs.id` is bigint (migration 0069).
+      for (const since of [String(log.id), "3000000000"]) {
+        const res = await app.request(`/api/runs/${run.id}/logs?since=${since}`, {
+          headers: authHeaders(ctx),
+        });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { data: unknown[] };
+        expect(body.data).toHaveLength(0);
+      }
     });
 
     it("filters by ?level= minimum severity", async () => {

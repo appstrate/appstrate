@@ -65,6 +65,43 @@ export const responses = {
       },
     },
   },
+  PreconditionFailed: {
+    description:
+      "`If-Match` does not match the resource's current `ETag`: it changed since it was read. Nothing was written. The response carries the current `ETag`; re-read, reapply, retry.",
+    headers: { ...REQUEST_ID_ONLY_HEADERS, ETag: { $ref: "#/components/headers/ETag" } },
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        example: {
+          type: "https://docs.appstrate.dev/errors/precondition-failed",
+          title: "Precondition Failed",
+          status: 412,
+          detail:
+            "The resource changed since you read it: If-Match does not match its current ETag. Re-read it, reapply your change, and send the new ETag.",
+          code: "precondition_failed",
+          requestId: "req_abc123",
+        },
+      },
+    },
+  },
+  PreconditionRequired: {
+    description: "The write requires an `If-Match` header and none was sent (RFC 6585 §3).",
+    headers: REQUEST_ID_ONLY_HEADERS,
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        example: {
+          type: "https://docs.appstrate.dev/errors/precondition-required",
+          title: "Precondition Required",
+          status: 428,
+          detail:
+            "This write requires an If-Match header carrying the ETag of the representation you read. GET the resource, then send its ETag.",
+          code: "precondition_required",
+          requestId: "req_abc123",
+        },
+      },
+    },
+  },
   ValidationError: {
     description:
       'Validation error. Body-level failures emit `code: "validation_failed"` ' +
@@ -173,7 +210,10 @@ export const responses = {
     description:
       "`idempotency_in_progress` — a request with the same `Idempotency-Key` is already being " +
       "processed; wait and retry. Or `org_deleting` — the organization's deletion is reserved, " +
-      "so no new work is admitted and a retry will not succeed.",
+      "so no new work is admitted and a retry will not succeed. Or `missing_integration_connection` — " +
+      "a declared integration has no usable connection for the caller: `errors[]` carries one item " +
+      "per integration (`field: integrations.<id>`), and a `must_choose_connection` item lists " +
+      "`candidate_connections` to pick from via `connection_overrides`.",
     headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": {
@@ -200,6 +240,24 @@ export const responses = {
               detail: "This organization is being deleted; no new work can be admitted.",
               code: "org_deleting",
               requestId: "req_abc123",
+            },
+          },
+          missingIntegrationConnection: {
+            summary: "A declared integration has no usable connection",
+            value: {
+              type: "https://docs.appstrate.dev/errors/missing-integration-connection",
+              title: "Missing Integration Connection",
+              status: 409,
+              detail: "Integration '@acme/gmail' is not connected",
+              code: "missing_integration_connection",
+              requestId: "req_abc123",
+              errors: [
+                {
+                  field: "integrations.@acme/gmail",
+                  code: "not_connected",
+                  message: "Integration '@acme/gmail' is not connected",
+                },
+              ],
             },
           },
         },
@@ -292,25 +350,25 @@ export const responses = {
    *
    * It is NOT one cause on both: `POST` resolves the manifest the schedule will
    * FIRE and 404s a never-published agent (`assertScheduleTargetValid`), while
-   * `PUT` loads the schedule row FIRST (`loadScheduleOr404`) — so an unknown
+   * `PATCH` loads the schedule row FIRST (`loadScheduleOr404`) — so an unknown
    * schedule id is the DOMINANT 404 there, and the publish cause only reaches
-   * `PUT` when the patch carries `input` or `version_override`. The description
+   * `PATCH` when the patch carries `input` or `version_override`. The description
    * therefore names every cause and says which operation each belongs to; the
    * component is shared so the two operations cannot drift, not because they
    * refuse for identical reasons.
    *
-   * It was written out inline on `POST` only, so `PUT` declared the generic
+   * It was written out inline on `POST` only, so `PATCH` declared the generic
    * `NotFound` while returning this — and the test that was supposed to catch
    * that read the create operation alone and reported green. Then the first fix
-   * `$ref`'d POST's wording onto PUT verbatim, which left PUT's own primary 404
+   * `$ref`'d POST's wording onto PATCH verbatim, which left PATCH's own primary 404
    * (unknown schedule id) undocumented.
    */
   NoPublishedVersion: {
     description:
-      "Resource not found. On `PUT /api/schedules/{id}`, most commonly the schedule id itself " +
+      "Resource not found. On `PATCH /api/schedules/{id}`, most commonly the schedule id itself " +
       "does not exist (or belongs to another space) — that check runs first. Both writes " +
       "also answer 404 when the target agent does not exist, or has no published version " +
-      "(`no_published_version`): on `POST` always, on `PUT` when the patch carries `input` or " +
+      "(`no_published_version`): on `POST` always, on `PATCH` when the patch carries `input` or " +
       "`version_override`. A schedule with no `version_override` fires the PUBLISHED manifest, " +
       "so a never-published agent is refused at the write rather than 404ing on every tick; pin " +
       'the working copy with `version_override: "draft"` to schedule it anyway.',

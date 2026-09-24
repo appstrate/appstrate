@@ -289,7 +289,7 @@ export function IntegrationConnectionPicker({
   // The trigger paints amber on exactly the states that gate a run. In pin mode
   // it reads the server's authoritative `run_blocking` flag (the same bulk
   // connection-readiness query the launch badge uses — and the same resolver the
-  // run-kickoff 412 runs, including the required-auth carve-out for inert
+  // run-kickoff 409 runs, including the required-auth carve-out for inert
   // integrations), so the picker can never disagree with the badge.
   //
   // Override mode (schedule editor) keeps its own rule: "no pick" = inherit is

@@ -372,7 +372,8 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
     version: typeof m.version === "string" ? m.version : null,
     manifest_name: typeof m.name === "string" ? m.name : null,
     manifest: asRecord(data.draftManifest),
-    lock_version: data.lockVersion,
+    // camelCase and NOT on the wire: it is the draft's `ETag` (`sendPackageDetail`).
+    lockVersion: data.lockVersion,
     forked_from: data.forkedFrom ?? null,
     agents: dependents,
   };

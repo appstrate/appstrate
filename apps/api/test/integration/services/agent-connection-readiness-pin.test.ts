@@ -2,7 +2,7 @@
 
 /**
  * `resolveAgentConnectionReadiness` must judge integration manifests at the
- * PINNED version, exactly like the run-kickoff 412 gate.
+ * PINNED version, exactly like the run-kickoff 409 gate.
  *
  * The readiness endpoint's whole contract is "the UI's pre-run signal can never
  * disagree with the actual gate". The run freezes every declared integration to

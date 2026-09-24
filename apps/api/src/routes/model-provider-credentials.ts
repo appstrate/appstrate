@@ -504,8 +504,8 @@ export function createModelProviderCredentialsRouter() {
     },
   );
 
-  // PUT /api/model-provider-credentials/:id
-  router.put("/:id", requirePermission("model-provider-credentials", "write"), async (c) => {
+  // PATCH /api/model-provider-credentials/:id
+  router.patch("/:id", requirePermission("model-provider-credentials", "write"), async (c) => {
     const orgId = c.get("orgId");
     const id = c.req.param("id")!;
     if (isSystemModelProviderCredential(id)) {

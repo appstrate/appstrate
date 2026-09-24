@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { usePackageDetail } from "../hooks/use-packages";
+import { usePackageDetail, type Versioned } from "../hooks/use-packages";
 import type { OrgPackageItemDetail } from "@appstrate/shared-types";
 import type { PackageType } from "@appstrate/core/validation";
 import { useAuth } from "../hooks/use-auth";
@@ -644,7 +644,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
       isEdit && agentDetail
         ? {
             manifest: withNormalizedManifest(agentDetail.manifest ?? {}),
-            lock_version: agentDetail.lock_version,
+            etag: agentDetail.etag,
           }
         : defaultEditorState(currentOrg?.slug, user?.email);
 
@@ -662,12 +662,12 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
 
   // Integration editor with structured configuration and the shared file tree.
   if (type === "integration") {
-    const intDetail = pkgQuery.data as OrgPackageItemDetail | undefined;
+    const intDetail = pkgQuery.data as Versioned<OrgPackageItemDetail> | undefined;
     const initialState: EditorState =
       isEdit && intDetail
         ? {
             manifest: intDetail.manifest ?? {},
-            lock_version: intDetail.lock_version,
+            etag: intDetail.etag,
           }
         : { manifest: defaultIntegrationManifest(currentOrg?.slug, user?.email) };
 
@@ -682,13 +682,13 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
   }
 
   // Skill editor (agent/integration returned early above — pkgQuery is always OrgPackageItemDetail here)
-  const pkgDetail = pkgQuery.data as OrgPackageItemDetail | undefined;
+  const pkgDetail = pkgQuery.data as Versioned<OrgPackageItemDetail> | undefined;
 
   const initialState: EditorState =
     isEdit && pkgDetail
       ? {
           manifest: pkgDetail.manifest ?? {},
-          lock_version: pkgDetail.lock_version,
+          etag: pkgDetail.etag,
         }
       : {
           manifest: defaultSkillManifest(currentOrg?.slug, user?.email),

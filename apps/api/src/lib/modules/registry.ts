@@ -12,7 +12,7 @@
 import { db } from "@appstrate/db/client";
 import { organizationMembers, organizations, user } from "@appstrate/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
-import type { MiddlewareHandler } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import type { ModuleInitContext, ModuleOrgMember, PlatformServices } from "@appstrate/core/module";
 import { getEnv } from "@appstrate/env";
 
@@ -32,6 +32,8 @@ import {
   detachOrDeleteContainedFiles,
   setOrgFileStorageLimit,
 } from "../../services/files.ts";
+import { recordAuditFromContext } from "../../services/audit.ts";
+import type { AppEnv } from "../../types/index.ts";
 
 // ---------------------------------------------------------------------------
 // Registry — env-driven module specifiers
@@ -147,6 +149,11 @@ function buildPlatformServices(): PlatformServices {
     // the org's technical byte ceiling here; the platform enforces it on every
     // write. Billing-neutral: the core stores a byte limit, never a plan/price.
     setFileStorageLimit: setOrgFileStorageLimit,
+    // Module routes run behind the platform middleware chain, so the context
+    // carries the same org / actor / request variables a core route audits from.
+    audit: {
+      record: (c, entry) => recordAuditFromContext(c as Context<AppEnv>, entry),
+    },
   };
 }
 

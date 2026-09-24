@@ -199,7 +199,7 @@ function agentConnectionReadinessQueryOptions(
 /**
  * Bulk connection readiness for an agent — ONE call that drives the launch
  * badge, the Connexions tab pickers, and the pre-run check. `blocks_run` /
- * `errors` mirror the run-kickoff 412 (run semantics); `integrations[]` carries
+ * `errors` mirror the run-kickoff 409 (run semantics); `integrations[]` carries
  * every declared integration's management verdict (includeInert) + a
  * `run_blocking` flag. Replaces the former N per-integration round-trips.
  */

@@ -609,7 +609,7 @@ describe("validateNewPath", () => {
     expect(validateNewPath(tree, "docs/__proto__/x.md")).toBe("invalid");
   });
 
-  it("refuses the manifest, which is authored through the package PUT", () => {
+  it("refuses the manifest, which is authored through the package PATCH", () => {
     expect(validateNewPath(tree, "manifest.json")).toBe("reserved");
   });
 

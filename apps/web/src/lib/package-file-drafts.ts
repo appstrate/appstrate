@@ -81,12 +81,10 @@ export function fileTextOperation(path: string, text: string): PackageFileWriteO
 
 export function packageUpdateBody(state: {
   manifest: Record<string, unknown>;
-  lock_version?: number;
   operations?: PackageFileWriteOperation[];
 }) {
   return {
     manifest: state.manifest,
-    lock_version: state.lock_version!,
     ...(state.operations?.length ? { operations: state.operations } : {}),
   };
 }

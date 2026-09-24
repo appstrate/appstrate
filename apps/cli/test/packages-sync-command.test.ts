@@ -572,7 +572,7 @@ describe("packages sync — --source draft", () => {
     expect(server.indexReads()).toBe(1);
   });
 
-  it("does not re-fetch when neither the ETag nor lock_version moved", async () => {
+  it("does not re-fetch when neither the index nor the draft ETag moved", async () => {
     const server = createSkillServer(DRAFT);
     server.install();
     const { io } = createMemoryIO();

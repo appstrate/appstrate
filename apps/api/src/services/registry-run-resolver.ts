@@ -161,7 +161,7 @@ export async function resolveRegistryAgent(
   // an explicit spec, else the "latest" dist-tag. It throws `notFound` if
   // nothing resolves — let it bubble.
   const version = await resolveExportVersion(packageId, spec ?? null);
-  const detail = await getVersionDetail(packageId, version);
+  const detail = await getVersionDetail(packageId, version, { forExecution: true });
   if (!detail) {
     throw new ApiError({
       status: 404,

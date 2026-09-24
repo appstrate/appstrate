@@ -104,8 +104,8 @@ describe("readSchemaDefaults", () => {
     // against a value nothing produces.
     //
     // Entries absent from the schema entirely are not an error and are excluded:
-    // `OTEL_*` and the two `SIDECAR_MAX_*` vars are read straight from
-    // `process.env` by the sidecar and by `@appstrate/module-observability`.
+    // `OTEL_*` belong to `@appstrate/module-observability`'s own schema, and the
+    // two `SIDECAR_MAX_*` vars are read straight from `process.env` by the sidecar.
     const { keys, defaulted } = readSchemaDefaults();
     const claimedButNotDefaulted = Object.keys(CODE_DEFAULTS)
       .filter((name) => keys.has(name) && !defaulted.has(name))

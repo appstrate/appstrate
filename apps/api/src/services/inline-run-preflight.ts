@@ -60,7 +60,7 @@ export interface InlineRunPreflightResult {
   /**
    * Caller's per-integration connection picks (resolver mechanism #2), read off
    * the body ONCE below and carried here. Nothing else on the inline path feeds
-   * them to the readiness gate, so without this a `must_choose_connection` 412
+   * them to the readiness gate, so without this a `must_choose_connection` 409
    * is inescapable here; and every consumer — both readiness branches and
    * `prepareAndExecuteRun` — must gate on this one value, since a second
    * independent read is how two passes come to disagree about which connection

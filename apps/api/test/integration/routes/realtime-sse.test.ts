@@ -720,14 +720,14 @@ describe("realtime SSE routes (integration)", () => {
     });
 
     it("returns 401 with invalid API key", async () => {
-      const res = await app.request(`/api/realtime/runs?token=ask_invalid_key`);
+      const res = await app.request(`/api/realtime/runs?token=apst_invalid_key`);
       expect(res.status).toBe(401);
     });
   });
 
   // ── CRIT-04 — SSE auth: `runs:read` required, isAdmin derived (not hardcoded) ──
   //
-  // `validateSSEAuth` (routes/realtime.ts) used to accept ANY valid `ask_`
+  // `validateSSEAuth` (routes/realtime.ts) used to accept ANY valid API key
   // token without checking its scopes AND passed `isAdmin: true` to the
   // subscriber filter unconditionally. The fix (a) resolves the key's
   // effective permissions (scopes ∩ creator role) and requires `runs:read`,
@@ -744,7 +744,7 @@ describe("realtime SSE routes (integration)", () => {
       return key.rawKey;
     }
 
-    it("rejects an ask_ token WITHOUT `runs:read` with 403 on all three stream routes", async () => {
+    it("rejects an API key WITHOUT `runs:read` with 403 on all three stream routes", async () => {
       // Valid key, valid scope — just not `runs:read`. Pre-fix, any valid
       // key opened every stream, so all three requests below returned 200.
       const token = await seedSseKey({ createdBy: ctx.user.id, scopes: ["agents:read"] });
@@ -760,7 +760,7 @@ describe("realtime SSE routes (integration)", () => {
       }
     });
 
-    it("accepts an ask_ token WITH `runs:read` on all three stream routes (feature intact)", async () => {
+    it("accepts an API key WITH `runs:read` on all three stream routes (feature intact)", async () => {
       const token = await seedSseKey({ createdBy: ctx.user.id, scopes: ["runs:read"] });
 
       const paths = [
