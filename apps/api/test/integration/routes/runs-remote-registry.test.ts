@@ -59,7 +59,7 @@ function publishedManifest(version = "1.2.3") {
  * Publish `manifest` as `@acme/briefing@version` and install it in the default
  * space: draft row, version row, `latest` dist-tag (a thin `seedPackageVersion`
  * INSERT does not write one, but the unspecified-spec resolution path needs it)
- * and the artefact bytes `getVersionDetail` extracts the prompt from.
+ * and the artefact bytes the resolver reads the prompt from.
  */
 async function seedRegistryAgent(
   ctx: TestContext,

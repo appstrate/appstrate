@@ -48,7 +48,11 @@
  */
 
 import { ApiError, notFound } from "../lib/errors.ts";
-import { getLatestVersionInfo, getVersionDetail } from "./package-versions.ts";
+import {
+  getLatestVersionInfo,
+  getVersionDetail,
+  requirePublishedArchive,
+} from "./package-versions.ts";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 
 // Both keywords are reserved names (`isProtectedTag` in
@@ -74,30 +78,6 @@ interface ResolvedRunAgent {
 }
 
 /**
- * The prompt of a published agent version, or `422 version_artifact_unavailable`.
- *
- * `getVersionDetail` swallows a storage or unzip failure and answers
- * `prompt: null`, as it does for an archive without `prompt.md` — so null is
- * a broken artifact, never an empty prompt. Every run door refuses it here
- * rather than letting a `""` reach the readiness gate, where it would read as
- * the author's `empty_prompt` (#1533).
- */
-export function requireVersionPrompt(
-  packageId: string,
-  detail: { version: string; prompt: string | null },
-): string {
-  if (detail.prompt === null) {
-    throw new ApiError({
-      status: 422,
-      code: "version_artifact_unavailable",
-      title: "Version Artifact Unavailable",
-      detail: `Published agent '${packageId}@${detail.version}' has no readable prompt archive`,
-    });
-  }
-  return detail.prompt;
-}
-
-/**
  * Build the effective LoadedPackage for a resolved published version.
  *
  * A `LoadedPackage` carries only what the definition SAYS (manifest + prompt),
@@ -106,14 +86,19 @@ export function requireVersionPrompt(
  */
 function substituteVersion(
   agent: LoadedPackage,
-  detail: { version: string; manifest: Record<string, unknown>; prompt: string | null },
+  detail: {
+    version: string;
+    manifest: Record<string, unknown>;
+    content: Record<string, Uint8Array> | null;
+  },
 ): ResolvedRunAgent {
   return {
     agent: {
       ...agent,
       // Version manifest replaces the draft manifest entirely.
       manifest: detail.manifest as unknown as AgentManifest,
-      prompt: requireVersionPrompt(agent.id, detail),
+      // `prompt.md` is required for an agent, so `entry` is present past the helper.
+      prompt: new TextDecoder().decode(requirePublishedArchive("agent", agent.id, detail).entry),
     },
     overrideVersionLabel: detail.version,
   };

@@ -34,6 +34,7 @@ import {
   buildMinimalZip,
   uploadPackageZip,
   downloadVersionZip,
+  deleteVersionZip,
 } from "../../../src/services/package-storage.ts";
 import { unzipPackageArchive } from "../../../src/services/package-archive.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
@@ -3158,6 +3159,54 @@ describe("Packages API", () => {
       // No operation envelope.
       expect(body.message).toBeUndefined();
       expect(body.restored_version).toBeUndefined();
+    });
+
+    it("POST restore refuses a version whose archive is gone, before any write", async () => {
+      const id = "@pkgorg/restore-unreadable";
+      const create = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ manifest: agentManifest(id), content: "v1 prompt" }),
+      });
+      expect(create.status).toBe(201);
+      const created = (await create.json()) as { lock_version: number };
+      await deleteVersionZip(id, "0.1.0");
+
+      // Move the draft away from 0.1.0 so an applied restore would show.
+      const edited = await app.request(`/api/packages/agents/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: { ...agentManifest(id), description: "Edited since 0.1.0" },
+          content: "draft since 0.1.0",
+          lock_version: created.lock_version,
+        }),
+      });
+      expect(edited.status).toBe(200);
+
+      const draftOf = async () => {
+        const [row] = await db
+          .select({
+            draftContent: packages.draftContent,
+            draftManifest: packages.draftManifest,
+            lockVersion: packages.lockVersion,
+            updatedAt: packages.updatedAt,
+          })
+          .from(packages)
+          .where(eq(packages.id, id));
+        return row!;
+      };
+      const before = await draftOf();
+      expect(before.draftContent).toBe("draft since 0.1.0");
+
+      const res = await app.request(`/api/packages/agents/${id}/versions/0.1.0/restore`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+      });
+      await expectProblem(res, 422, { code: "version_artifact_unavailable" });
+
+      // The old handler answered 200 here and wrote an EMPTY draft over this one.
+      expect(await draftOf()).toEqual(before);
     });
 
     it("POST versions refuses a stale lock_version and cuts the draft it names", async () => {

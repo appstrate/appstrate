@@ -5,6 +5,7 @@ import { eq, and, desc, count, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
+import { ApiError } from "../lib/errors.ts";
 import {
   uploadPackageZip,
   downloadVersionZip,
@@ -26,6 +27,7 @@ import {
 import { planCreateVersionOutcome, planTagReassignment } from "@appstrate/core/version-policy";
 
 import { parseScopedName } from "@appstrate/core/naming";
+import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import { dropRetiredRuntimeTools, type PackageType } from "@appstrate/core/validation";
 import { parsePackageZip, zipArtifact } from "@appstrate/core/zip";
 import { asRecord, asRecordOrNull } from "@appstrate/core/safe-json";
@@ -308,7 +310,6 @@ interface VersionDetail {
   id: number;
   version: string;
   manifest: Record<string, unknown>;
-  prompt: string | null;
   content: Record<string, Uint8Array> | null;
   yanked: boolean;
   yankedReason: string | null;
@@ -318,8 +319,9 @@ interface VersionDetail {
 }
 
 /**
- * Resolve a version query and return full version data including text content extracted from ZIP.
- * Returns null if the version cannot be resolved.
+ * Resolve a version query and return full version data including the files of its ZIP.
+ * Returns null if the version cannot be resolved. `content` is null when the archive
+ * cannot be read — a reader that needs the bytes goes through {@link requirePublishedArchive}.
  */
 export async function getVersionDetail(
   packageId: string,
@@ -345,21 +347,10 @@ export async function getVersionDetail(
 
   if (!row) return null;
 
-  // Try to download and extract ZIP content
-  let prompt: string | null = null;
   let content: Record<string, Uint8Array> | null = null;
-
   try {
     const zipBuffer = await downloadVersionZip(packageId, row.version);
-    if (zipBuffer) {
-      const files = unzipPackageArchive(zipBuffer);
-      content = files;
-      // Extract prompt.md from ZIP
-      const promptData = files["prompt.md"];
-      if (promptData) {
-        prompt = new TextDecoder().decode(promptData);
-      }
-    }
+    if (zipBuffer) content = unzipPackageArchive(zipBuffer);
   } catch (err) {
     logger.warn("Failed to extract ZIP for version detail", {
       packageId,
@@ -372,7 +363,6 @@ export async function getVersionDetail(
     id: row.id,
     version: row.version,
     manifest: asRecord(row.manifest),
-    prompt,
     content,
     yanked: row.yanked,
     yankedReason: row.yankedReason,
@@ -380,6 +370,31 @@ export async function getVersionDetail(
     artifactSize: row.artifactSize,
     createdAt: toISO(row.createdAt),
   };
+}
+
+/**
+ * The archive of a published version, or `422 version_artifact_unavailable` — for an
+ * archive that could not be read, and for one missing its type's REQUIRED content entry
+ * (`PACKAGE_CONTENT_ENTRY`). `entry` is that entry's bytes, `undefined` when the type has
+ * none or its optional one is absent. The only place this refusal is built.
+ */
+export function requirePublishedArchive(
+  type: PackageType,
+  packageId: string,
+  detail: { version: string; content: Record<string, Uint8Array> | null },
+): { files: Record<string, Uint8Array>; entry: Uint8Array | undefined } {
+  const unavailable = (what: string) =>
+    new ApiError({
+      status: 422,
+      code: "version_artifact_unavailable",
+      title: "Version Artifact Unavailable",
+      detail: `Published '${packageId}@${detail.version}' has no readable ${what}`,
+    });
+  if (detail.content === null) throw unavailable("archive");
+  const spec = PACKAGE_CONTENT_ENTRY[type];
+  const entry = spec ? detail.content[spec.path] : undefined;
+  if (spec?.required && !entry) throw unavailable(`'${spec.path}' in its archive`);
+  return { files: detail.content, entry };
 }
 
 /** Count the number of published versions for a package. */
