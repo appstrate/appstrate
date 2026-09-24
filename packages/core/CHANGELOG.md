@@ -87,6 +87,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING: `InlineRunBody.model_id` / `InlineRunBody.proxy_id`**
   (`@appstrate/core/platform-types`, #1545) — were `modelId` / `proxyId`,
   matching the snake_case inline-run wire body.
+- **BREAKING: `ProblemDetail` extension members are snake_case**
+  (`@appstrate/core/api-errors`, #1545): `ApiError.toProblemDetail()` writes
+  `request_id` (was `requestId`) and `retry_after` (was `retryAfter`), and both
+  new names are reserved against `extensions`. The RFC 9457 members and the
+  `Request-Id` / `Retry-After` headers are unchanged; the `ApiError`
+  constructor option and property stay `retryAfter`.
+- **BREAKING: `integrationManifestSchema` rejects a non-snake_case identity
+  claim name** (`@appstrate/core/integration`, #1545): every key of
+  `auths.{key}.identity_claims` and every entry of
+  `auths.{key}.connect.login.identity_outputs` must match
+  `^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`. A camelCase `accountId` used to validate
+  and then never be read, so the connection fell back to `email`/`sub`.
 - **`run_and_wait` inline manifest defaults** (`@appstrate/core/run-and-wait-client`):
   a manifest that omits `schema_version` now gets `"0.3"` (was `"0.2"`), and the
   default `$schema` is read from `AFPS_SCHEMA_URLS.agent` (same URL as before).

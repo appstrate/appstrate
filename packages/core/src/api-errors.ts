@@ -5,7 +5,7 @@
  *
  * All API errors use `application/problem+json` with standard fields
  * (type, title, status, detail, instance) plus Stripe-like extensions
- * (code, param, requestId, retryAfter, errors[]).
+ * (code, param, request_id, retry_after, errors[]).
  *
  * @see https://www.rfc-editor.org/rfc/rfc9457
  */
@@ -21,9 +21,9 @@ export interface ProblemDetail {
   detail: string;
   instance: string;
   code: string;
-  requestId: string;
+  request_id: string;
   param?: string;
-  retryAfter?: number;
+  retry_after?: number;
   errors?: ValidationFieldError[];
 }
 
@@ -123,9 +123,9 @@ const RESERVED_PROBLEM_KEYS: ReadonlySet<string> = new Set<string>([
   "detail",
   "instance",
   "code",
-  "requestId",
+  "request_id",
   "param",
-  "retryAfter",
+  "retry_after",
   "errors",
 ]);
 
@@ -198,10 +198,10 @@ export class ApiError extends Error {
       detail: this.message,
       instance: `urn:appstrate:request:${requestId}`,
       code: this.code,
-      requestId,
+      request_id: requestId,
     };
     if (this.param !== undefined) body.param = this.param;
-    if (this.retryAfter !== undefined) body.retryAfter = this.retryAfter;
+    if (this.retryAfter !== undefined) body.retry_after = this.retryAfter;
     if (this.fieldErrors?.length) body.errors = this.fieldErrors;
     // RFC 9457 §3.2 extension members, written last and only into keys the
     // standard fields do not own. The guard is the RESERVED SET, not

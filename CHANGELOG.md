@@ -97,8 +97,8 @@ precondition_failed` (it was `409 conflict`), and a body still sending
   `WWW-Authenticate: Bearer error="invalid_token"` challenge that generic 401
   handlers read as "log out".
 - **BREAKING (API): chat's capacity refusal (`429 chat_capacity`) is a standard
-  problem document**: `retryAfter` replaces the non-standard `retry_after`, and
-  `instance`/`requestId` are present.
+  problem document**: it carries `retry_after` as every problem does, and
+  `instance`/`request_id` are present.
 - **BREAKING (API): timestamps named `expiresAt` / `createdAt` are RFC 3339
   strings, and the universal ids and timestamps are spelled camelCase on the
   surfaces that still used snake_case.** The hosted-connect session
@@ -146,7 +146,7 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   `RateLimit`, `RateLimit-Policy`, `Retry-After`, `ETag`, `Location`,
   `Appstrate-Version`, `Idempotent-Replayed`, `WWW-Authenticate` and the other
   non-safelisted headers the API sets.
-- **`Retry-After` is sent with every error that carries `retryAfter`**: the
+- **`Retry-After` is sent with every error that carries `retry_after`**: the
   per-organization run rate limit (`429 org_run_rate_limited`, which only put
   the delay in `detail`), the shutdown refusal (`503 shutting_down`, 5 s) and
   chat's `429 chat_capacity`.

@@ -399,7 +399,7 @@ const connectRunResponses = {
           detail:
             "This connection method is unavailable on this deployment. Contact your administrator.",
           code: "connect_unavailable",
-          requestId: "req_abc123",
+          request_id: "req_abc123",
         },
       },
     },
@@ -416,7 +416,7 @@ const connectRunResponses = {
           detail:
             "The connection attempt timed out after 60000ms — the login did not complete in time. Please try again.",
           code: "timeout",
-          requestId: "req_def456",
+          request_id: "req_def456",
         },
       },
     },

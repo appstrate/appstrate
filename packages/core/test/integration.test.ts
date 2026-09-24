@@ -584,7 +584,7 @@ describe("integrationManifestSchema — delivery.http.prefix install gate", () =
   });
 });
 
-describe("integrationManifestSchema — identity_claims JSONPath install gate", () => {
+describe("integrationManifestSchema — identity claim install gates", () => {
   const withClaims = (identity_claims: Record<string, string>) =>
     baseManifest({
       source: { kind: "none" },
@@ -607,6 +607,32 @@ describe("integrationManifestSchema — identity_claims JSONPath install gate", 
     expect(errorPaths(withClaims({ account_id: "$..email" }))).toContain(
       "auths.key.identity_claims.account_id",
     );
+  });
+
+  it("refuses a non-snake_case claim key through validateManifest, on the key's own path", () => {
+    const refused = validateManifest(withClaims({ accountId: "$.id", avatar_url: "$.a" }));
+    expect(refused.valid).toBe(false);
+    expect(errorPaths(withClaims({ accountId: "$.id", avatar_url: "$.a" }))).toEqual([
+      "auths.key.identity_claims.accountId",
+    ]);
+    expect(validateManifest(withClaims({ account_id: "$.id", avatar_url: "$.a" })).valid).toBe(
+      true,
+    );
+  });
+
+  it("refuses a non-snake_case login identity_outputs name", () => {
+    const login = (identity_outputs: string[]) =>
+      customWithConnect({
+        login: {
+          request: { method: "POST", url: "https://x" },
+          outputs: { token: "$response.body#/token", userId: "$response.body#/u", user_id: "$" },
+          identity_outputs,
+        },
+      });
+    expect(errorPaths(login(["userId"]))).toEqual([
+      "auths.session.connect.login.identity_outputs.0",
+    ]);
+    expect(errorPaths(login(["user_id"]))).toEqual([]);
   });
 });
 

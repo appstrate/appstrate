@@ -125,6 +125,14 @@ function walkForNonFragmentRefs(
   }
 }
 
+/**
+ * Spelling of every key that lands in a connection's `identity_claims` bag —
+ * the keys of `identity_claims` and the promoted `identity_outputs`.
+ * `extractIdentity` reads `account_id` only, so a camelCase `accountId` would
+ * validate and silently fall back to email/sub.
+ */
+const IDENTITY_CLAIM_KEY = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
+
 export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefine((m, ctx) => {
   const manifest = m as unknown as IntegrationManifest;
   const auths = manifest.auths ?? {};
@@ -226,11 +234,23 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
         });
       }
     };
+    const checkIdentityKey = (key: string, at: (string | number)[]) => {
+      if (IDENTITY_CLAIM_KEY.test(key)) return;
+      ctx.addIssue({
+        code: "custom",
+        message: `identity claim key '${key}' must be snake_case (e.g. account_id)`,
+        path: ["auths", authKey, ...at],
+      });
+    };
     const identityClaims = (auth as { identity_claims?: Record<string, string> }).identity_claims;
     for (const [claim, path] of Object.entries(identityClaims ?? {})) {
+      checkIdentityKey(claim, ["identity_claims", claim]);
       checkJsonPath(path, ["identity_claims", claim]);
     }
     const login = auth.connect?.login;
+    (login?.identity_outputs ?? []).forEach((name, index) => {
+      checkIdentityKey(name, ["connect", "login", "identity_outputs", index]);
+    });
     for (const [name, output] of Object.entries(login?.outputs ?? {})) {
       const selector = output as { type?: unknown; selector?: unknown };
       if (selector.type === "jsonpath" && typeof selector.selector === "string") {

@@ -29,7 +29,7 @@ export const headers = {
   },
   RetryAfter: {
     description:
-      "Seconds to wait before retrying. Present on every 429, and on any error whose problem body carries `retryAfter` (the two always agree), such as the 503 `shutting_down`.",
+      "Seconds to wait before retrying. Present on every 429, and on any error whose problem body carries `retry_after` (the two always agree), such as the 503 `shutting_down`.",
     schema: { type: "integer" },
   },
   WWWAuthenticate: {

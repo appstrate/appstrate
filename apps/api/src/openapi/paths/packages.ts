@@ -1846,7 +1846,7 @@ export const packagesPaths = {
                 status: 422,
                 detail: "MCP-server package '@myorg/tools' has no activatable published version.",
                 code: "bundle_invalid",
-                requestId: "req_abc123",
+                request_id: "req_abc123",
               },
             },
           },

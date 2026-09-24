@@ -256,11 +256,11 @@ describe("`POST /api/spaces/{id}/packages` — the activation door", () => {
 
   /**
    * The refusal, minus the two members that are per-request by construction
-   * (`instance` and `requestId` echo the request id). Everything else has to
+   * (`instance` and `request_id` echo the request id). Everything else has to
    * match byte for byte between the two calls, so it is all compared.
    */
   const problem = async (res: Response): Promise<Record<string, unknown>> => {
-    const { instance: _i, requestId: _r, ...body } = (await res.json()) as Record<string, unknown>;
+    const { instance: _i, request_id: _r, ...body } = (await res.json()) as Record<string, unknown>;
     return { status: res.status, ...body };
   };
 
