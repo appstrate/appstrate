@@ -34,11 +34,24 @@ whoever retires, archives or absorbs a product, not whoever cuts a release.
 `@appstrate/afps-shared` by caret range (`^0.5.0` today — read
 `packages/core/package.json`, not this line). A bumped range must
 reach npm **before** the core release that references it, or installing
-`@appstrate/core` cannot resolve it. The workflow's
-`scripts/verify-package-resolves.ts` step packs the tarball and typechecks every
-exported subpath in a clean npm project outside the monorepo, so a leaf that is
-not on npm yet fails there — right before publish — rather than for the first
-consumer to install.
+`@appstrate/core` cannot resolve it. `scripts/verify-package-resolves.ts` packs
+the tarball and typechecks every exported subpath in a clean npm project outside
+the monorepo, so a leaf that is not on npm yet fails there rather than for the
+first consumer to install. It runs twice: in `publish-core.yml` right before
+publish, and in `check.yml` (`Package resolves for consumers`) on every PR and
+every push to `main`.
+
+That second run is why the leaf's tag is **part of merging**, not of the next
+core release. A PR that bumps `packages/afps-shared` `version` and moves core's
+range to it in the same change (core importing a new leaf export makes this the
+normal shape) is red on `Package resolves for consumers (packages/core)` from its
+first push, and it stays red on `main` until the leaf is on npm. Publishing is by
+tag and the tag must point at the squash commit, so the order is: merge, then
+immediately `git tag afps-shared@X.Y.Z <squash-sha> && git push origin
+afps-shared@X.Y.Z`, then re-run the failed `Check` job on `main`. That job is the
+one red check such a PR may be merged with; every other check must be green.
+Measured: #1536 was merged without the tag and `main` stayed red until
+`afps-shared@0.9.0` was pushed separately.
 
 **For a non-major release, bring the consumers within one minor first.** Being
 on `^X` is not enough: the gate fails on a consumer two or more minors behind
