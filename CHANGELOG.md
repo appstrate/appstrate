@@ -18,11 +18,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   prefilled or locked, split by `partitionInputFields`, now in
   `@appstrate/core/input-resolution` and shared with the dashboard's launch
   form — never a stored value, and pins the agent's version; a republish,
-  lock or schema change rewrites it at the next sync. Needs `agents:run` plus
-  `runs:read` or `runs:read-all` in the pinned space (core's `canRunAgents`,
-  the grant the MCP server offers `run_and_wait` on — the `runner` role has
-  it). The `codex` and `claude-user` targets get no agent commands. No server
-  change.
+  lock or schema change rewrites it at the next sync. Needs `agents:run`,
+  `runs:read` (or `runs:read-all`) and `mcp:invoke` in the pinned space —
+  core's `agentCapabilities` reaching `run`, the grant the MCP server exposes
+  `run_and_wait` and `invoke_operation` on; the `runner` role has it. The
+  `codex` and `claude-user` targets get no agent commands. No server change.
 - **The conformance monitor now probes the provider API of seven
   credential-only integrations without a credential** (`auth-reject`, tier
   `mcp`). A 401 alone proves little — most providers answer 401 with or
