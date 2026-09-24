@@ -3226,6 +3226,30 @@ describe("Packages API", () => {
       await expectProblem(res, 422, { code: "version_artifact_unavailable" });
     });
 
+    it("every published-bytes read door refuses a version whose archive is gone", async () => {
+      const id = "@pkgorg/doors-unreadable";
+      const create = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ manifest: agentManifest(id), content: "v1 prompt" }),
+      });
+      expect(create.status).toBe(201);
+      await deleteVersionZip(id, "0.1.0");
+
+      // Previously a 404 ("Artifact missing…" / "Artifact not found in storage"),
+      // which read as "no such version" rather than a broken published artifact.
+      for (const path of [
+        `/api/agents/${id}/bundle`,
+        `/api/agents/${id}/bundle?version=0.1.0`,
+        `/api/packages/${id}/files?version=0.1.0`,
+        `/api/packages/${id}/0.1.0/download`,
+      ]) {
+        const res = await app.request(path, { headers: authHeaders(ctx) });
+        const body = await expectProblem(res, 422);
+        expect(`${path}: ${body.code}`).toBe(`${path}: version_artifact_unavailable`);
+      }
+    });
+
     it("POST versions refuses a stale lock_version and cuts the draft it names", async () => {
       const headers = authHeaders(ctx, { "Content-Type": "application/json" });
       const create = await app.request("/api/packages/agents", {
@@ -3888,6 +3912,54 @@ describe("Packages API", () => {
       // The refusal lands while READING the source — before the collision check
       // and before any insert — so there is no half-made fork to clean up.
       await assertDbMissing(packages, eq(packages.id, "@pkgorg/high-ratio-agent"));
+    });
+  });
+
+  describe("POST fork — source archive unavailable", () => {
+    it("422s on a published source whose ZIP is gone, and mints nothing", async () => {
+      const srcCtx = await createTestContext({ orgSlug: "forkgone" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
+      const sourceId = "@forkgone/lost-agent";
+      const manifest = {
+        name: sourceId,
+        version: "0.1.0",
+        type: "agent",
+        schema_version: "0.1",
+        display_name: "Lost Archive",
+        description: "Published source whose artifact left storage",
+      };
+      await seedPackage({
+        id: sourceId,
+        orgId: srcCtx.orgId,
+        type: "agent",
+        draftManifest: manifest,
+        draftContent: "source prompt",
+      });
+      const zip = buildMinimalZip(manifest, "source prompt");
+      await uploadPackageZip(sourceId, "0.1.0", zip);
+      const row = await seedPackageVersion({
+        packageId: sourceId,
+        version: "0.1.0",
+        manifest,
+        integrity: computeIntegrity(new Uint8Array(zip)),
+        artifactSize: zip.byteLength,
+      });
+      await db
+        .insert(packageDistTags)
+        .values({ packageId: sourceId, tag: "latest", versionId: row.id });
+      await deleteVersionZip(sourceId, "0.1.0");
+
+      const res = await app.request(`/api/packages/${sourceId}/fork`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({}),
+      });
+
+      // A version EXISTS: the old `400 invalid_request` ("no published version")
+      // sent the caller looking for a publish that had already happened.
+      await expectProblem(res, 422, { code: "version_artifact_unavailable" });
+      await assertDbMissing(packages, eq(packages.id, "@pkgorg/lost-agent"));
+      await assertDbMissing(packageVersions, eq(packageVersions.packageId, "@pkgorg/lost-agent"));
     });
   });
 });

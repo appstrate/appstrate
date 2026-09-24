@@ -53,6 +53,8 @@ import { isValidVersion } from "@appstrate/core/semver";
 import {
   getVersionDetail,
   requirePublishedArchive,
+  versionArtifactUnavailable,
+  type VersionDetail,
   getVersionCount,
   getMatchingDistTags,
   listPackageVersions,
@@ -1248,21 +1250,19 @@ function makeListVersionsHandler(rcfg: PackageRouteConfig) {
 
 /**
  * Build the canonical version detail DTO — the exact object the `GET` version
- * detail endpoint serializes. Reused by the version create / restore endpoints
- * so they echo the resulting version resource instead of an id/message stub
- * (issue #646). Returns `null` when the version query resolves nothing.
+ * detail endpoint serializes. Reused by the version create endpoint so it
+ * echoes the resulting version resource instead of an id/message stub (issue
+ * #646). Tolerant: `content` is null when the bytes cannot be read, so a read
+ * failure right after a committed publish never turns that write into a 4xx —
+ * the GET handler refuses an unreadable archive itself.
  */
 async function buildVersionDetailDto(
   rcfg: PackageRouteConfig,
   itemId: string,
-  versionSpec: string,
-): Promise<Record<string, unknown> | null> {
-  const detail = await getVersionDetail(itemId, versionSpec);
-  if (!detail) return null;
-
-  const { files } = requirePublishedArchive(rcfg.cfg.type, itemId, detail);
+  detail: VersionDetail,
+): Promise<Record<string, unknown>> {
   const matchingTags = await getMatchingDistTags(itemId, detail.version);
-  const fileData = files[rcfg.storageFileName];
+  const fileData = detail.content?.[rcfg.storageFileName];
   const content = fileData ? new TextDecoder().decode(fileData) : null;
 
   return {
@@ -1288,12 +1288,13 @@ function makeVersionDetailHandler(rcfg: PackageRouteConfig) {
     await loadOrgItemOr404(rcfg, orgId, itemId);
     await assertCatalogPackageAccess(c, itemId);
 
-    const dto = await buildVersionDetailDto(rcfg, itemId, versionSpec);
-    if (!dto) {
+    const detail = await getVersionDetail(itemId, versionSpec);
+    if (!detail) {
       throw notFound(`Version '${versionSpec}' not found`);
     }
+    requirePublishedArchive(rcfg.cfg.type, itemId, detail);
 
-    return c.json(dto);
+    return c.json(await buildVersionDetailDto(rcfg, itemId, detail));
   };
 }
 
@@ -1386,12 +1387,12 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     // GET version detail — so callers see the snapshot (manifest, integrity,
     // dist_tags, …) without a follow-up GET (issue #657). `id` (version row
     // id) and `version` are part of the resource.
-    const detail = await buildVersionDetailDto(rcfg, itemId, result.version);
+    const detail = await getVersionDetail(itemId, result.version);
     if (!detail) {
       logger.error("Created version could not be re-read", { packageId: itemId, orgId });
       throw internalError();
     }
-    return c.json(detail, 201);
+    return c.json(await buildVersionDetailDto(rcfg, itemId, detail), 201);
   };
 }
 
@@ -3039,9 +3040,7 @@ export function createPackagesRouter() {
     } catch {
       throw internalError();
     }
-    if (!data) {
-      throw notFound("Artifact not found in storage");
-    }
+    if (!data) throw versionArtifactUnavailable(packageId, ver.version);
 
     const downloadHeaders = buildDownloadHeaders({
       integrity: ver.integrity,

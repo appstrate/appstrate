@@ -306,7 +306,7 @@ export async function getVersionForDownload(
 // Version detail
 // ─────────────────────────────────────────────
 
-interface VersionDetail {
+export interface VersionDetail {
   id: number;
   version: string;
   manifest: Record<string, unknown>;
@@ -373,27 +373,39 @@ export async function getVersionDetail(
 }
 
 /**
- * The archive of a published version, or `422 version_artifact_unavailable` — for an
+ * `422 version_artifact_unavailable`: a version that EXISTS but whose bytes cannot be
+ * read — a broken artifact, never a missing version. The only place this refusal is built.
+ */
+export function versionArtifactUnavailable(
+  packageId: string,
+  version: string,
+  what = "archive",
+): ApiError {
+  return new ApiError({
+    status: 422,
+    code: "version_artifact_unavailable",
+    title: "Version Artifact Unavailable",
+    detail: `Published '${packageId}@${version}' has no readable ${what}`,
+  });
+}
+
+/**
+ * The archive of a published version, or {@link versionArtifactUnavailable} — for an
  * archive that could not be read, and for one missing its type's REQUIRED content entry
  * (`PACKAGE_CONTENT_ENTRY`). `entry` is that entry's bytes, `undefined` when the type has
- * none or its optional one is absent. The only place this refusal is built.
+ * none or its optional one is absent.
  */
 export function requirePublishedArchive(
   type: PackageType,
   packageId: string,
   detail: { version: string; content: Record<string, Uint8Array> | null },
 ): { files: Record<string, Uint8Array>; entry: Uint8Array | undefined } {
-  const unavailable = (what: string) =>
-    new ApiError({
-      status: 422,
-      code: "version_artifact_unavailable",
-      title: "Version Artifact Unavailable",
-      detail: `Published '${packageId}@${detail.version}' has no readable ${what}`,
-    });
-  if (detail.content === null) throw unavailable("archive");
+  if (detail.content === null) throw versionArtifactUnavailable(packageId, detail.version);
   const spec = PACKAGE_CONTENT_ENTRY[type];
   const entry = spec ? detail.content[spec.path] : undefined;
-  if (spec?.required && !entry) throw unavailable(`'${spec.path}' in its archive`);
+  if (spec?.required && !entry) {
+    throw versionArtifactUnavailable(packageId, detail.version, `'${spec.path}' in its archive`);
+  }
   return { files: detail.content, entry };
 }
 

@@ -65,8 +65,9 @@ const SKILL_BODY =
 
 /**
  * Publish a real artifact so the version routes can reach their `200`. Without
- * bytes in storage every call answers `404 Artifact not found in storage`,
- * which would make the negative assertions below pass for the wrong reason.
+ * bytes in storage every call past the guards answers `422
+ * version_artifact_unavailable`, so a positive assertion would fail on storage
+ * rather than on the permission under test.
  */
 async function publishSkill(ctx: TestContext, version = "0.1.0"): Promise<void> {
   // Deliberately OUT OF REACH of the calling space: the suite's visibility

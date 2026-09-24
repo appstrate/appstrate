@@ -257,8 +257,9 @@ export const responses = {
     },
   },
   /**
-   * A STORED package artifact could not be expanded within the platform's
-   * decompression ceiling. Shared by the package file-explorer operations,
+   * A STORED package artifact cannot be served: it could not be expanded within
+   * the platform's decompression ceiling, or the selected published version's
+   * archive is gone (#1533). Shared by the file-explorer and download operations,
    * which all read the caller's own package and share one remedy (republish).
    *
    * `POST .../fork` deliberately does NOT `$ref` this: its 422 carries two
@@ -267,10 +268,12 @@ export const responses = {
    */
   PackageArchiveUnreadable: {
     description:
-      "The stored artifact expands past the package decompression ceiling and was refused " +
-      "(`package_archive_unreadable`). This is the SAME ceiling the import gate applies, so " +
-      "reaching it means the archive is a bomb or was stored before the gate covered this path " +
-      "— republish the package. RFC 9457 problem+json.",
+      "The stored archive cannot be served. `package_archive_unreadable`: it expands past the " +
+      "package decompression ceiling and was refused — the SAME ceiling the import gate applies, " +
+      "so reaching it means the archive is a bomb or was stored before the gate covered this " +
+      "path; republish the package. `version_artifact_unavailable`: the selected PUBLISHED " +
+      "version exists but its archive is gone from storage; nothing is substituted for it, the " +
+      "draft included. RFC 9457 problem+json.",
     headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": {

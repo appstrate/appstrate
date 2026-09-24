@@ -15,7 +15,7 @@ import { conflict, notFound } from "../lib/errors.ts";
 import { downloadPackageFiles, uploadPackageFiles } from "./package-items/storage.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import { unzipPackageArchive } from "./package-archive.ts";
-import { getVersionForDownload } from "./package-versions.ts";
+import { getVersionForDownload, versionArtifactUnavailable } from "./package-versions.ts";
 import { withPackageDraftLock } from "./package-draft-lock.ts";
 import {
   CONFIG_BY_TYPE,
@@ -408,7 +408,7 @@ export async function readPackageSnapshot(
     // route applies. Reading a version through a path that skips it would make
     // the explorer the one place tampering goes unnoticed.
     const zip = await downloadVersionZip(pkg.id, validator.version, validator.integrity);
-    if (!zip) throw notFound("Artifact not found in storage");
+    if (!zip) throw versionArtifactUnavailable(pkg.id, validator.version);
     files = unzipPackageArchive(zip);
     snapshotId = validator.snapshotId;
   }

@@ -2071,14 +2071,14 @@ export const packagesPaths = {
             "Insufficient permissions — the source package type's read in its organization and its write in the destination space, or `package_copy_restricted` when the SOURCE organization sets `restrict_package_copy`, which narrows forking to callers holding the source package type's `share` in its HOME space. That is what the setting means — a fork is a COPY leaving the space that owns it, exactly as on `download` and on the agent `bundle` route. The setting read is the SOURCE organization's, since it is the source's content being protected. Skills and system packages are exempt.",
         },
         "404": { $ref: "#/components/responses/NotFound" },
-        // Same CONDITION as `#/components/responses/PackageArchiveUnreadable`,
+        // Same CONDITIONS as `#/components/responses/PackageArchiveUnreadable`,
         // deliberately NOT `$ref`-ed: the shared component tells the caller to
         // republish the package, which is impossible here (a fork's source is
         // always a package the calling org does not own), and it cannot state
         // that nothing was written. Both facts are specific to this boundary.
         "422": {
           description:
-            "The SOURCE package's published artifact expands past the platform's decompression ceiling and was refused (`package_archive_unreadable`). Nothing was written: the fork is rejected while reading the source, before the name-collision check and before any package or version row is created, so there is no partial copy to clean up. A fork always targets a package the calling organization does NOT own, so the caller cannot repair the source — report it to whoever publishes it (or to the platform operator if it is a system package). RFC 9457 problem+json.",
+            "The SOURCE package's published artifact cannot be read: it expands past the platform's decompression ceiling and was refused (`package_archive_unreadable`), or the source's latest published version exists but its archive is gone from storage (`version_artifact_unavailable`). Nothing was written: the fork is rejected while reading the source, before the name-collision check and before any package or version row is created, so there is no partial copy to clean up. A fork always targets a package the calling organization does NOT own, so the caller cannot repair the source — report it to whoever publishes it (or to the platform operator if it is a system package). RFC 9457 problem+json.",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {

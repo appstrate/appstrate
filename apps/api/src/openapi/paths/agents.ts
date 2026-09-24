@@ -722,7 +722,7 @@ export const agentsPaths = {
         },
         "422": {
           description:
-            "The bundle cannot be assembled from stored artifacts. `dependency_unresolved`: a declared dependency resolves to no published version, or it resolved but its artifact is absent from storage or out of this organization's scope — the detail names the dependency. `bundle_invalid`: a stored archive or manifest is malformed or exceeds an archive limit (for example an archive with no `manifest.json` at its root); the package must be republished. `bundle_signature_invalid`: rejected by `AFPS_SIGNATURE_POLICY`",
+            "The bundle cannot be assembled from stored artifacts. `version_artifact_unavailable`: the selected published version of the agent itself exists but its archive is gone from storage — nothing is substituted for it. `dependency_unresolved`: a declared dependency resolves to no published version, or it resolved but its artifact is absent from storage or out of this organization's scope — the detail names the dependency. `bundle_invalid`: a stored archive or manifest is malformed or exceeds an archive limit (for example an archive with no `manifest.json` at its root); the package must be republished. `bundle_signature_invalid`: rejected by `AFPS_SIGNATURE_POLICY`",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
