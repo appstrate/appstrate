@@ -52,6 +52,7 @@ import {
   type CatalogOperation,
 } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
+import { ceilingHolds } from "../../lib/route-requirements.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import {
   getFileForActor,
@@ -120,6 +121,8 @@ export interface McpToolContext {
   authHeaders: Headers;
   /** Effective permissions of the caller (from the session/token). */
   permissions: ReadonlySet<string>;
+  /** A delegated credential's scopes (`scopeCeiling`); `undefined` for a session. Caps ceiling guards. */
+  ceiling: ReadonlySet<string> | undefined;
   /**
    * The resolved caller identity (from the same forwarded auth the dispatched
    * requests carry). Lets the file resource provider call the files
@@ -301,7 +304,7 @@ function scoreOperation(op: CatalogOperation, tokens: string[]): number {
 function describePayload(
   op: CatalogOperation,
   componentSchemas: Record<string, unknown>,
-  permissions: ReadonlySet<string>,
+  ctx: Pick<McpToolContext, "permissions" | "ceiling">,
 ): Record<string, unknown> {
   return {
     operation_id: op.operationId,
@@ -314,12 +317,24 @@ function describePayload(
     // would pre-refuse an allowed cross-space call.
     required_permissions: op.requirement.requirements,
     target_space_permissions: op.requirement.targetSpaceRequirements,
-    granted: operationGranted(op, permissions),
+    // Asked of a delegated credential's scopes only, never of the role.
+    ceiling_permissions: op.requirement.ceilingRequirements,
+    granted: operationGranted(op, ctx.permissions, ctx.ceiling),
     parameters: op.operation.parameters ?? [],
     request_body: op.operation.requestBody ?? null,
     responses: op.operation.responses ?? {},
     referenced_schemas: collectReferencedSchemas(op.operation, componentSchemas),
   };
+}
+
+/** A denial's ceiling half: named only when a delegated credential's scopes miss one. */
+function deniedCeiling(
+  op: CatalogOperation,
+  ctx: Pick<McpToolContext, "ceiling">,
+): { ceiling_permissions?: readonly string[] } {
+  return ctx.ceiling !== undefined && !ceilingHolds(op.requirement.ceilingRequirements, ctx.ceiling)
+    ? { ceiling_permissions: op.requirement.ceilingRequirements }
+    : {};
 }
 
 function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDefinition {
@@ -383,7 +398,7 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
     const granted: CatalogOperation[] = [];
     const denied: CatalogOperation[] = [];
     for (const { op } of scored) {
-      (operationGranted(op, ctx.permissions) ? granted : denied).push(op);
+      (operationGranted(op, ctx.permissions, ctx.ceiling) ? granted : denied).push(op);
     }
     const shown = granted.slice(0, limit);
 
@@ -397,9 +412,7 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
     // Only the top granted hit carries its schema: one describe saved, response bounded.
     const top = shown[0];
     const bestMatch =
-      tokens.length > 0 && top
-        ? describePayload(top, componentSchemas, ctx.permissions)
-        : undefined;
+      tokens.length > 0 && top ? describePayload(top, componentSchemas, ctx) : undefined;
 
     return textResult({
       total: granted.length,
@@ -414,6 +427,7 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
       denied: denied.slice(0, limit).map((op) => ({
         operation_id: op.operationId,
         required_permissions: op.requirement.requirements,
+        ...deniedCeiling(op, ctx),
       })),
       best_match: bestMatch,
     });
@@ -434,7 +448,10 @@ function buildDescribeTool(ctx: McpToolContext, invokes: boolean): AppstrateTool
       "It also reports whether your role clears the route's guards (`granted`) and which " +
       "permissions the route requires in YOUR space (`required_permissions`). " +
       "`target_space_permissions` is separate on purpose: those are decided in the space the " +
-      "path names, not here, so they never make an operation unavailable to you. A granted " +
+      "path names, not here, so they never make an operation unavailable to you. " +
+      "`ceiling_permissions` apply only when you act through a delegated credential (API key, " +
+      "OAuth token): its scopes must include each, so they make an operation unavailable when " +
+      "your credential's scopes omit one, whatever your role holds. A granted " +
       "operation can still be refused on the record it acts on; that refusal names its reason.",
     annotations: {
       title: "Describe API operation",
@@ -480,7 +497,7 @@ function buildDescribeTool(ctx: McpToolContext, invokes: boolean): AppstrateTool
       operationId,
     });
 
-    return textResult(describePayload(op, componentSchemas, ctx.permissions));
+    return textResult(describePayload(op, componentSchemas, ctx));
   };
 
   return { descriptor, handler };
@@ -830,12 +847,16 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     // Only a 403 the permission set explains gets the permission answer; one the
     // ROW decided (a file ACL, `draft_not_writable`) already names its reason.
     const denial =
-      response.status === 403 && !operationGranted(op, ctx.permissions)
+      response.status === 403 && !operationGranted(op, ctx.permissions, ctx.ceiling)
         ? {
             required_permissions: op.requirement.requirements,
+            ...deniedCeiling(op, ctx),
             hint:
-              "Your role does not hold this permission. Report it to the user; do not retry " +
-              "and do not look for another operation that does the same thing.",
+              (ctx.ceiling === undefined
+                ? "Your role does not hold this permission."
+                : "Your role, or your credential's scopes, do not hold this permission.") +
+              " Report it to the user; do not retry and do not look for another operation " +
+              "that does the same thing.",
           }
         : undefined;
     return readResponse(response, denial);
@@ -1507,8 +1528,13 @@ export interface McpSurface {
   importsPackages: boolean;
 }
 
-export function deriveMcpSurface(permissions: ReadonlySet<string>, actor: Actor): McpSurface {
-  const granted = (operationId: string): boolean => operationIdGranted(operationId, permissions);
+export function deriveMcpSurface(
+  permissions: ReadonlySet<string>,
+  ceiling: ReadonlySet<string> | undefined,
+  actor: Actor,
+): McpSurface {
+  const granted = (operationId: string): boolean =>
+    operationIdGranted(operationId, permissions, ceiling);
   const invokes = permissions.has("mcp:invoke");
   const runs = invokes && granted("runAgent") && granted("getRun");
   return {

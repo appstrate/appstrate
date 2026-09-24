@@ -450,7 +450,7 @@ export function createModelsRouter() {
   });
 
   // GET /api/models/openrouter — search OpenRouter models (proxy)
-  router.get("/openrouter", rateLimit(10), async (c) => {
+  router.get("/openrouter", rateLimit(10), requirePermission("models", "read"), async (c) => {
     const q = c.req.query("q") || "";
 
     try {

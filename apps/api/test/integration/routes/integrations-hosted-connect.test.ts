@@ -964,7 +964,8 @@ const orgBoundDelegate: AppstrateModule = {
             orgRole: "admin",
             authMethod: "test-org-bound-delegate",
             principalKind: "delegate",
-            permissions: [],
+            // The handoff's ceiling, so only the binding can refuse.
+            permissions: ["integrations:disconnect"],
           } satisfies AuthResolution;
         },
       },
@@ -1101,15 +1102,19 @@ describe("me/connections/:id/handoff — the teardown half, derived", () => {
       const { connection } = await connectSsh();
       const foreignOrgId = await secondOrgFor(ctx.user.id);
       const foreignSpace = await seedSpace({ orgId: foreignOrgId, name: "Foreign" });
+      // Both hold the handoff's ceiling, so only the binding can refuse.
+      const scopes = ["integrations:disconnect"];
       const foreign = await seedApiKey({
         orgId: foreignOrgId,
         spaceId: foreignSpace.id,
         createdBy: ctx.user.id,
+        scopes,
       });
       const here = await seedApiKey({
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
+        scopes,
       });
 
       expect(await handoffAs(connection.id, { Authorization: `Bearer ${foreign.rawKey}` })).toEqual(

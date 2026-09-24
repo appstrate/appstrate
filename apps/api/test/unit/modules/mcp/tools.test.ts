@@ -56,6 +56,8 @@ function makeTools(
       status: 200,
       headers: { "content-type": "application/json" },
     }),
+  /** A delegated credential's scopes; `undefined` for a session. */
+  ceiling?: ReadonlySet<string>,
 ) {
   const calls: Request[] = [];
   const dispatch: Dispatch = async (req) => {
@@ -66,6 +68,7 @@ function makeTools(
     origin: "https://test.local",
     authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
     permissions: new Set(permissions),
+    ceiling,
     dispatch,
     actor,
     scope: { orgId: "org_1", spaceId: "spc_1" },
@@ -239,10 +242,14 @@ describe("import_package_file declaration", () => {
 
 describe("operationIdGranted", () => {
   it("answers from the route table and refuses an id the catalog does not know", () => {
-    expect(operationIdGranted("runInline", new Set(["agents:run"]))).toBe(false);
-    expect(operationIdGranted("runInline", new Set(["agents:run", "agents:write"]))).toBe(true);
+    expect(operationIdGranted("runInline", new Set(["agents:run"]), undefined)).toBe(false);
+    expect(
+      operationIdGranted("runInline", new Set(["agents:run", "agents:write"]), undefined),
+    ).toBe(true);
     // A rename, not a denial: `false` here would silently hide a tool.
-    expect(() => operationIdGranted("noSuchOperation", new Set())).toThrow(/noSuchOperation/);
+    expect(() => operationIdGranted("noSuchOperation", new Set(), undefined)).toThrow(
+      /noSuchOperation/,
+    );
   });
 });
 
@@ -458,6 +465,53 @@ describe("describe_operation", () => {
       expect(body.target_space_permissions).toContain("space-members:read");
       expect(body.required_permissions).toEqual([]);
       expect(body.granted).toBe(true);
+    });
+
+    it("names a credential-ceiling requirement in its own field, never filtering a session on it", async () => {
+      // `DELETE /api/me/connections/{id}` is authorized by ownership: only a
+      // delegated credential's scopes are asked, so a caller holding nothing is granted.
+      const body = await describeOp(["mcp:read"], "deleteMyConnection");
+      expect(body.ceiling_permissions).toEqual(["integrations:disconnect"]);
+      expect(body.required_permissions).toEqual([]);
+      expect(body.granted).toBe(true);
+    });
+
+    it("refuses a ceiling requirement a delegated credential's scopes omit", async () => {
+      const toolsWith = (ceiling: ReadonlySet<string> | undefined) =>
+        new Map(
+          toolsFor({
+            origin: "https://test.local",
+            authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
+            permissions: new Set(["mcp:read"]),
+            ceiling,
+            dispatch: async () => new Response("{}"),
+            actor: { type: "user", id: "user_1" },
+            scope: { orgId: "org_1", spaceId: "spc_1" },
+            authorizeBundle: async () => {},
+            mayShareRoot: async () => false,
+          }).map((t) => [t.descriptor.name, t]),
+        );
+      const granted = async (ceiling: ReadonlySet<string> | undefined) =>
+        parseResult(
+          await toolsWith(ceiling)
+            .get("describe_operation")!
+            .handler({ operation_id: "deleteMyConnection" }, noExtra),
+        ).granted;
+
+      expect(await granted(new Set(["integrations:read"]))).toBe(false);
+      expect(await granted(new Set(["integrations:disconnect"]))).toBe(true);
+      expect(await granted(undefined)).toBe(true);
+
+      // The denial names the scope that refused it.
+      const search = parseResult(
+        await toolsWith(new Set(["integrations:read"]))
+          .get("search_operations")!
+          .handler({ query: "deleteMyConnection" }, noExtra),
+      );
+      const denied = search.denied as { operation_id: string; ceiling_permissions?: string[] }[];
+      expect(
+        denied.find((d) => d.operation_id === "deleteMyConnection")?.ceiling_permissions,
+      ).toEqual(["integrations:disconnect"]);
     });
   });
 
@@ -709,6 +763,9 @@ describe("invoke_operation", () => {
     expect(body.status).toBe(403);
     expect(body.required_permissions).toEqual(["agents:read|agents:run"]);
     expect(body.hint).toContain("do not retry");
+    // A session has no credential scopes to blame.
+    expect(body.hint).toStartWith("Your role does not hold this permission.");
+    expect(body).not.toHaveProperty("ceiling_permissions");
   });
 
   it("adds no permission hint to a non-403 failure", async () => {
@@ -756,6 +813,49 @@ describe("invoke_operation", () => {
     expect(body.status).toBe(403);
     expect("hint" in body).toBe(false);
     expect("required_permissions" in body).toBe(false);
+  });
+
+  describe("a delegated credential's ceiling", () => {
+    const forbidden = () =>
+      new Response(JSON.stringify({ title: "Forbidden" }), {
+        status: 403,
+        headers: { "content-type": "application/json" },
+      });
+    const invokeDelete = async (ceiling: ReadonlySet<string>) => {
+      const { byName } = makeTools(
+        ["mcp:read", "mcp:invoke"],
+        false,
+        { type: "user", id: "user_1" },
+        forbidden,
+        ceiling,
+      );
+      return parseResult(
+        await byName.get("invoke_operation")!.handler(
+          {
+            operation_id: "deleteMyConnection",
+            path_params: { connectionId: "conn_1" },
+          },
+          noExtra,
+        ),
+      );
+    };
+
+    it("names the ceiling scope when the credential's scopes refused the 403", async () => {
+      const body = await invokeDelete(new Set(["integrations:read"]));
+      expect(body.status).toBe(403);
+      expect(body.ceiling_permissions).toEqual(["integrations:disconnect"]);
+      expect(body.hint).toStartWith(
+        "Your role, or your credential's scopes, do not hold this permission.",
+      );
+    });
+
+    it("adds no permission answer to a 403 the row decided under a satisfied ceiling", async () => {
+      const body = await invokeDelete(new Set(["integrations:disconnect"]));
+      expect(body.status).toBe(403);
+      expect(body).not.toHaveProperty("hint");
+      expect(body).not.toHaveProperty("ceiling_permissions");
+      expect(body).not.toHaveProperty("required_permissions");
+    });
   });
 
   it("errors when required path params are missing", async () => {
@@ -844,18 +944,18 @@ describe("buildOperationIndex", () => {
 
   it("lists every operation this caller's guards grant, grouped under tag headers", () => {
     const permissions = new Set(["mcp:read", "agents:read"]);
-    const index = buildOperationIndex(permissions);
+    const index = buildOperationIndex(permissions, undefined);
     const { operations } = getCatalog();
     // A tag section header is present.
     expect(index).toMatch(/^## /m);
     const listed = indexIds(index);
     for (const op of operations.values()) {
-      expect(listed.includes(op.operationId)).toBe(operationGranted(op, permissions));
+      expect(listed.includes(op.operationId)).toBe(operationGranted(op, permissions, undefined));
     }
   });
 
   it("indexes the agent reads `agents:read` opens and none of the acts it does not", () => {
-    const listed = indexIds(buildOperationIndex(new Set(["mcp:read", "agents:read"])));
+    const listed = indexIds(buildOperationIndex(new Set(["mcp:read", "agents:read"]), undefined));
     // Granted: `GET /api/agents` (`agents:read|agents:run`) and
     // `GET /api/packages/agents` (`agents:read`).
     expect(listed).toContain("listAgents");
@@ -867,7 +967,7 @@ describe("buildOperationIndex", () => {
   });
 
   it("keeps only what no guard gates when the caller holds nothing", () => {
-    const listed = indexIds(buildOperationIndex(new Set<string>()));
+    const listed = indexIds(buildOperationIndex(new Set<string>(), undefined));
     // `/api/me/*` mounts no permission guard — self-scoped, filtered by
     // ownership — so the index is narrowed, never emptied.
     expect(listed).toContain("getMyContext");
@@ -877,8 +977,17 @@ describe("buildOperationIndex", () => {
     expect(listed).not.toContain("runAgent");
   });
 
+  it("drops a ceiling-guarded operation for a delegated credential lacking its scope, never for a session", () => {
+    expect(indexIds(buildOperationIndex(new Set<string>(), new Set()))).not.toContain(
+      "deleteMyConnection",
+    );
+    expect(indexIds(buildOperationIndex(new Set<string>(), undefined))).toContain(
+      "deleteMyConnection",
+    );
+  });
+
   it("carries no structured method+path columns (those come from describe / best_match)", () => {
-    const index = buildOperationIndex(new Set(["mcp:read", "agents:read"]));
+    const index = buildOperationIndex(new Set(["mcp:read", "agents:read"]), undefined);
     const { operations } = getCatalog();
     const knownIds = new Set([...operations.values()].map((op) => op.operationId));
     // Each tag section is `## Tag` followed by ONE comma-separated line of
@@ -911,6 +1020,7 @@ describe("buildMcpTools contextInjected", () => {
       // The full surface, so this asserts on get_me's absence and nothing
       // else — every other tool here has a grant of its own.
       permissions: new Set(FULL_SURFACE),
+      ceiling: undefined,
       dispatch,
       contextInjected: true,
       actor: { type: "user", id: "user_1" },

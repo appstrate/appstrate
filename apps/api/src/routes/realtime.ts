@@ -12,7 +12,7 @@ import type { RealtimeEvent, RealtimeChannel } from "../services/realtime.ts";
 import { ApiError, forbidden, notFound, unauthorized } from "../lib/errors.ts";
 import { API_KEY_PREFIX, validateApiKey } from "../services/api-keys.ts";
 import { getOrgMember } from "../services/organizations.ts";
-import { effectivePermissions } from "../lib/permissions.ts";
+import { ceilingAllows, effectivePermissions, type Permission } from "../lib/permissions.ts";
 import { resolveSpaceRole, type SpaceMemberRow } from "../lib/space-role.ts";
 import { loadSpaceAccess, type SpaceContextRow } from "../lib/space-lookup.ts";
 import {
@@ -87,6 +87,31 @@ function parseChannels(raw: string | undefined): ReadonlySet<RealtimeChannel> | 
     if (known) requested.add(known);
   }
   return requested.size > 0 ? requested : undefined;
+}
+
+/** Channel → the scope a delegated credential must hold to receive it (RBAC spec §7.1). */
+const CHANNEL_CEILINGS: Partial<Record<RealtimeChannel, Permission>> = {
+  connection_update: "integrations:read",
+  // Declared by `@appstrate/module-chat`, whose resource merge this package does not see.
+  chat_session_update: "chat:read" as Permission,
+};
+
+/**
+ * The requested channels minus those carrying the caller's own rows that the
+ * credential's ceiling puts out of reach; a session has no ceiling and keeps all.
+ */
+function subscribedChannels(
+  c: Context<AppEnv>,
+  requested: ReadonlySet<RealtimeChannel> | undefined,
+): ReadonlySet<RealtimeChannel> | undefined {
+  const denied = REALTIME_CHANNELS.filter((channel) => {
+    const permission = CHANNEL_CEILINGS[channel];
+    return permission !== undefined && !ceilingAllows(c, permission);
+  });
+  if (denied.length === 0) return requested;
+  return new Set(
+    [...(requested ?? REALTIME_CHANNELS)].filter((channel) => !denied.includes(channel)),
+  );
 }
 
 interface SSEAuthResult {
@@ -207,10 +232,10 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
     if (!grants) {
       throw forbidden("The key's creator is not a member of the key's space");
     }
-    const permissions = effectivePermissions({
-      orgPermissions: grants,
-      scopeCeiling: new Set(keyInfo.scopes),
-    });
+    // On the context too, so ceiling-capped reads below answer as on HTTP.
+    const scopeCeiling = new Set<string>(keyInfo.scopes);
+    c.set("scopeCeiling", scopeCeiling);
+    const permissions = effectivePermissions({ orgPermissions: grants, scopeCeiling });
     if (!canReadRuns((p) => permissions.has(p))) {
       throw forbidden("API key does not have the 'runs:read' scope");
     }
@@ -636,7 +661,7 @@ export function createRealtimeRouter() {
         isAdmin: validated.canReadDebugLogs,
         readAll: validated.canReadEveryRun,
         userId: validated.userId,
-        channels: parseChannels(c.req.query("channels")),
+        channels: subscribedChannels(c, parseChannels(c.req.query("channels"))),
       },
       verbose,
       (send) =>
@@ -663,7 +688,7 @@ export function createRealtimeRouter() {
         isAdmin: validated.canReadDebugLogs,
         readAll: validated.canReadEveryRun,
         userId: validated.userId,
-        channels: parseChannels(c.req.query("channels")),
+        channels: subscribedChannels(c, parseChannels(c.req.query("channels"))),
       },
       verbose,
     );
@@ -686,7 +711,7 @@ export function createRealtimeRouter() {
         isAdmin: validated.canReadDebugLogs,
         readAll: validated.canReadEveryRun,
         userId: validated.userId,
-        channels: parseChannels(c.req.query("channels")),
+        channels: subscribedChannels(c, parseChannels(c.req.query("channels"))),
       },
       verbose,
     );
