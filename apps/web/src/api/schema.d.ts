@@ -7292,7 +7292,7 @@ export interface operations {
                      *           "id": "@acme/email-sorter",
                      *           "display_name": "Email Sorter",
                      *           "description": "Automatically sorts and labels incoming emails",
-                     *           "schema_version": "0.3",
+                     *           "schema_version": "0.1",
                      *           "author": "Acme Corp",
                      *           "keywords": [
                      *             "email",
@@ -7313,7 +7313,7 @@ export interface operations {
                      *           "id": "@appstrate/code-reviewer",
                      *           "display_name": "Code Reviewer",
                      *           "description": "Reviews pull requests and suggests improvements",
-                     *           "schema_version": "0.3",
+                     *           "schema_version": "0.1",
                      *           "author": "Appstrate",
                      *           "keywords": [
                      *             "code",

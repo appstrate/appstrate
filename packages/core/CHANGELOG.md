@@ -77,6 +77,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`run_and_wait` inline manifest defaults** (`@appstrate/core/run-and-wait-client`):
+  a manifest that omits `schema_version` now gets `"0.3"` (was `"0.2"`), and the
+  default `$schema` is read from `AFPS_SCHEMA_URLS.agent` (same URL as before).
+
 - **`@appstrate/afps-shared` dependency range moved to `^0.9.0`** (from
   `^0.8.0`): core imports its new `./jsonpath` subpath and
   `allocateMcpToolName`. **Requires `@appstrate/afps-shared@0.9.0` on npm before

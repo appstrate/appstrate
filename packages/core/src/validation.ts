@@ -55,9 +55,10 @@ export const SUPPORTED_SCHEMA_VERSION_MAJOR = 0 as const;
 
 /**
  * The AFPS `schema_version` every manifest this platform writes declares — the
- * spec revision it conforms to (spec Appendix A: "producers MUST emit `0.3`"). Reading
- * is governed by `SUPPORTED_SCHEMA_VERSION_MAJOR`, not by this value: a lower
- * MINOR of the same MAJOR stays valid per §2.4.
+ * spec revision it conforms to (spec Appendix A: "producers MUST emit `0.3`").
+ * Reading does not compare against it: any MINOR of
+ * `SUPPORTED_SCHEMA_VERSION_MAJOR` is accepted, because published versions are
+ * immutable and many were written at an earlier MINOR.
  */
 export const AFPS_SCHEMA_VERSION = "0.3" as const;
 
@@ -169,7 +170,7 @@ export const manifestSchema = z.looseObject({
   schema_version: z
     .string()
     .regex(SCHEMA_VERSION_REGEX, {
-      error: 'schema_version must follow MAJOR.MINOR format with no leading zeros (e.g. "0.1")',
+      error: `schema_version must follow MAJOR.MINOR format with no leading zeros (e.g. "${AFPS_SCHEMA_VERSION}")`,
     })
     .refine(
       (v) => {

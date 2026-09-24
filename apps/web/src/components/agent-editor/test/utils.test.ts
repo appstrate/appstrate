@@ -4,6 +4,8 @@ import { describe, it, expect } from "bun:test";
 import {
   caretRange,
   defaultEditorState,
+  defaultIntegrationManifest,
+  defaultSkillManifest,
   getManifestName,
   getResourceEntries,
   setResourceEntries,
@@ -206,6 +208,11 @@ describe("defaultEditorState", () => {
     expect(state.manifest.schema_version).toBe(AFPS_SCHEMA_VERSION);
     expect(state.manifest.schemaVersion).toBeUndefined();
     expect(state.operations).toEqual([{ op: "write", path: "prompt.md", text: "" }]);
+  });
+
+  it("skill and integration defaults declare the same schema_version", () => {
+    expect(defaultSkillManifest("my-org").schema_version).toBe(AFPS_SCHEMA_VERSION);
+    expect(defaultIntegrationManifest("my-org").schema_version).toBe(AFPS_SCHEMA_VERSION);
   });
 
   it("handles missing org slug", () => {
