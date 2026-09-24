@@ -19,7 +19,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { normalizeHttpUrl } from "@appstrate/core/url";
 import { parsePiLoopEnv } from "@appstrate/runner-pi/loop-env";
 import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
-import { buildPiModel } from "@appstrate/runner-pi/pi-model";
+import { buildPiModel, isPiProvider } from "@appstrate/runner-pi/pi-model";
 import type { Api, Model } from "./pi-sdk.ts";
 import { MODEL_API_SHAPES, SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
 import {
@@ -387,6 +387,11 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     issues.push(
       `MODEL_REASONING_LEVEL: invalid value "${source.MODEL_REASONING_LEVEL}" (allowed: ${modelReasoningLevelSchema.options.join(", ")})`,
     );
+  }
+  // Pi drops the credential of a provider it does not know: the run would
+  // boot, then die on its first turn with `Unknown provider`.
+  if (source.MODEL_PROVIDER && !isPiProvider(source.MODEL_PROVIDER)) {
+    issues.push(`MODEL_PROVIDER: "${source.MODEL_PROVIDER}" is not a Pi provider key`);
   }
   // Optional: a 0 fallback means "absent" (parsePositiveNumber only returns it
   // for a missing var, or after pushing an issue for a malformed one). We map

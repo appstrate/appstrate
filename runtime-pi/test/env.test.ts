@@ -180,6 +180,21 @@ describe("parseRuntimeEnv — fail-fast errors", () => {
     );
   });
 
+  it("refuses a MODEL_PROVIDER that is no Pi provider key", () => {
+    // `codex` is the Appstrate provider id, not Pi's `openai-codex`: Pi drops
+    // its credential and the first turn dies on `Unknown provider: codex`.
+    expect(() =>
+      parseRuntimeEnv({ ...VALID, MODEL_API: "openai-codex-responses", MODEL_PROVIDER: "codex" }),
+    ).toThrow(/MODEL_PROVIDER: "codex" is not a Pi provider key/);
+    expect(
+      parseRuntimeEnv({
+        ...VALID,
+        MODEL_API: "openai-codex-responses",
+        MODEL_PROVIDER: "openai-codex",
+      }).modelProvider,
+    ).toBe("openai-codex");
+  });
+
   it("collects every missing required field in one shot", () => {
     let caught: unknown;
     try {
