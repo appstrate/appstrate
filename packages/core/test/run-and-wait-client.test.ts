@@ -8,7 +8,7 @@ import {
   runAndWaitSteps,
   runAndWaitStepsWithFiles,
 } from "../src/run-and-wait-client.ts";
-import { agentManifestSchema } from "../src/validation.ts";
+import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION, agentManifestSchema } from "../src/validation.ts";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -387,8 +387,8 @@ describe("run_and_wait client", () => {
 
 describe("launchRunAndWait launch body", () => {
   const defaultInlineManifest = (overrides: Record<string, unknown>) => ({
-    $schema: "https://schemas.afps.dev/v0/agent.schema.json",
-    schema_version: "0.2",
+    $schema: AFPS_SCHEMA_URLS.agent,
+    schema_version: AFPS_SCHEMA_VERSION,
     type: "agent",
     version: "1.0.0",
     dependencies: {},

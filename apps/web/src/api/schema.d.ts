@@ -19758,7 +19758,7 @@ export interface operations {
                  *         "display_name": "Summarize attached file",
                  *         "version": "0.0.0",
                  *         "type": "agent",
-                 *         "schema_version": "0.1",
+                 *         "schema_version": "0.3",
                  *         "dependencies": {}
                  *       },
                  *       "prompt": "Summarize the attached file in three bullet points.",
@@ -19858,7 +19858,7 @@ export interface operations {
                      *         "display_name": "Summarize attached file",
                      *         "version": "0.0.0",
                      *         "type": "agent",
-                     *         "schema_version": "0.1",
+                     *         "schema_version": "0.3",
                      *         "dependencies": {}
                      *       },
                      *       "inline_prompt": "Summarize the attached file in three bullet points."
