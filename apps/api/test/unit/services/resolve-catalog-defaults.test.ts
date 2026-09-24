@@ -105,15 +105,15 @@ describe("resolveCatalogDefaults", () => {
       expect(
         resolveModelGenerationSettings({
           capabilities: codex.generation,
-          override: { reasoningLevel: "low" },
+          override: { reasoning_level: "low" },
         }),
-      ).toEqual({ reasoningLevel: "low" });
+      ).toEqual({ reasoning_level: "low" });
       expect(
         resolveModelGenerationSettings({
           capabilities: codex.generation,
-          override: { reasoningLevel: "max" },
+          override: { reasoning_level: "max" },
         }),
-      ).toEqual({ reasoningLevel: "max" });
+      ).toEqual({ reasoning_level: "max" });
     });
 
     it("keeps provider transport restrictions on a catalog miss", () => {
@@ -126,12 +126,12 @@ describe("resolveCatalogDefaults", () => {
       for (const providerId of ["anthropic", "claude-code"]) {
         const defaults = resolveCatalogDefaults(providerId, "claude-3-7-sonnet-20250219");
 
-        expect(defaults.generation?.reasoning.temperatureCompatible).toBe("unsupported");
-        expect(defaults.generation?.reasoning.nativeLevels?.minimal).toBe("low");
+        expect(defaults.generation?.reasoning.temperature_compatible).toBe("unsupported");
+        expect(defaults.generation?.reasoning.native_levels?.minimal).toBe("low");
         expect(() =>
           resolveModelGenerationSettings({
             capabilities: defaults.generation,
-            override: { temperature: 0.4, reasoningLevel: "low" },
+            override: { temperature: 0.4, reasoning_level: "low" },
           }),
         ).toThrow(ModelGenerationError);
       }

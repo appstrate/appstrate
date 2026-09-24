@@ -552,7 +552,7 @@ export const spacesPaths = {
             schema: {
               type: "object",
               properties: {
-                generationConfig: {
+                generation_config: {
                   oneOf: [
                     { $ref: "#/components/schemas/ModelGenerationSettings" },
                     { type: "null" },
@@ -647,7 +647,7 @@ export const spacesPaths = {
                 },
               },
               example: {
-                generation: { temperature: 0.2, reasoningLevel: "high" },
+                generation: { temperature: 0.2, reasoning_level: "high" },
                 modelId: "claude-sonnet-4-6",
                 proxyId: null,
                 input: { values: { dry_run: true }, locked_fields: ["dry_run"] },

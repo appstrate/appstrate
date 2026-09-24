@@ -72,7 +72,7 @@ export function ModelSelect({
   const { t } = useChatHost();
   const active = models.find((m) => m.id === selectedId);
   const groups = groupByProvider(models);
-  const hasOverrides = generation.temperature != null || generation.reasoningLevel != null;
+  const hasOverrides = generation.temperature != null || generation.reasoning_level != null;
   const hasNoGenerationControls =
     active?.generation?.temperature === "unsupported" &&
     active.generation.reasoning.supported === "unsupported";

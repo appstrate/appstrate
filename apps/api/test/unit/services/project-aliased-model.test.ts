@@ -35,7 +35,7 @@ const base: OrgModelInfo = {
         xhigh: "supported",
         max: "supported",
       },
-      nativeLevels: { off: "none", max: "max" },
+      native_levels: { off: "none", max: "max" },
     },
   },
   input: ["text"],
@@ -105,7 +105,7 @@ describe("projectAliasedModel", () => {
     expect(json).not.toContain("deepseek");
     expect(json).not.toContain("deepseek-chat");
     expect(json).not.toContain("api.deepseek.com");
-    expect(json).not.toContain("nativeLevels");
+    expect(json).not.toContain("native_levels");
   });
 
   it("keeps alias controls fail-closed without catalog-confirmed support", () => {
@@ -138,7 +138,7 @@ describe("projectAliasedModel", () => {
       },
     });
 
-    expect(out.generation?.reasoning.temperatureCompatible).toBe("unsupported");
+    expect(out.generation?.reasoning.temperature_compatible).toBe("unsupported");
   });
 
   it("preserves explicitly compatible alias pairs", () => {
@@ -149,14 +149,14 @@ describe("projectAliasedModel", () => {
         temperature: "supported",
         reasoning: {
           supported: "supported",
-          temperatureCompatible: "supported",
+          temperature_compatible: "supported",
           adaptive: null,
           levels: { low: "supported" },
         },
       },
     });
 
-    expect(out.generation?.reasoning.temperatureCompatible).toBe("supported");
+    expect(out.generation?.reasoning.temperature_compatible).toBe("supported");
   });
 
   it("preserves needs_reconnection on an aliased model", () => {

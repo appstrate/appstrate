@@ -129,9 +129,9 @@ function useRunAgent(packageId: string) {
           ...(connectionOverrides !== undefined
             ? { connection_overrides: connectionOverrides }
             : {}),
-          ...(modelId !== undefined ? { modelId } : {}),
+          ...(modelId !== undefined ? { model_id: modelId } : {}),
           ...(generation !== undefined ? { generation } : {}),
-          ...(proxyId !== undefined ? { proxyId } : {}),
+          ...(proxyId !== undefined ? { proxy_id: proxyId } : {}),
           ...(dependencyOverrides !== undefined
             ? { dependency_overrides: dependencyOverrides }
             : {}),

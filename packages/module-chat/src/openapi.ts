@@ -300,7 +300,7 @@ export const chatPaths = {
                   items: { type: "object", description: "AI SDK UIMessage" },
                   minItems: 1,
                 },
-                modelId: { type: "string" },
+                model_id: { type: "string" },
                 generation: { $ref: "#/components/schemas/ModelGenerationSettings" },
                 agent_authoring: {
                   type: "boolean",
@@ -309,6 +309,7 @@ export const chatPaths = {
                 },
                 id: { type: "string", description: "Session id (the assistant-ui thread id)" },
               },
+              additionalProperties: false,
             },
           },
         },

@@ -197,8 +197,8 @@ export async function runInlinePreflight(params: {
     }
   }
 
-  const modelIdOverride = body.modelId ?? null;
-  const proxyIdOverride = body.proxyId ?? null;
+  const modelIdOverride = body.model_id ?? null;
+  const proxyIdOverride = body.proxy_id ?? null;
   const runOverrides = body.connection_overrides ?? null;
 
   // ----- 2. input against manifest schema (AJV) -----

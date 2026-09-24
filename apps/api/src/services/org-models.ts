@@ -128,8 +128,8 @@ function projectAliasedGenerationCapabilities(
       supported: reasoningSupported ? "supported" : "unsupported",
       ...(temperatureSupported && reasoningSupported
         ? {
-            temperatureCompatible:
-              capabilities?.reasoning.temperatureCompatible === "supported"
+            temperature_compatible:
+              capabilities?.reasoning.temperature_compatible === "supported"
                 ? "supported"
                 : "unsupported",
           }
@@ -984,7 +984,7 @@ export async function modelNeedsReconnection(orgId: string, modelDbId: string): 
 }
 
 /**
- * Validate an explicit, caller-supplied `modelId` (run body / schedule row).
+ * Validate an explicit, caller-supplied model id (run body `model_id` / schedule row).
  *
  * `loadModel` resolves both system-model keys and org-model UUIDs, returning
  * null for anything else (including non-UUID strings, which it now swallows
@@ -1017,7 +1017,7 @@ export async function assertExplicitModelExists(
  * handlers each ran their own copy of this — same two refusals, same literal
  * message spelled out four times, and only the `param` legitimately differed
  * (it names the wire field the override arrived on, which is `generation`,
- * `generationConfig` and `generation_config_override` respectively).
+ * `generation_config` and `generation_config_override` respectively).
  *
  * `selectedModel` is the resolved model this layer will run on, or `null` when
  * NOTHING resolves — no override, no agent pin, no org default. Generation

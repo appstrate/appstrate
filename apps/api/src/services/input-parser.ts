@@ -76,11 +76,11 @@ import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 export interface ParsedInput {
   input?: Record<string, unknown>;
   uploadedFiles?: FileReference[];
-  /** Per-run model override (wire field `modelId` on the request body). */
+  /** Per-run model override (wire field `model_id` on the request body). */
   modelIdOverride?: string;
   /** Per-run sampling/reasoning override. */
   generationConfigOverride?: ModelGenerationSettings;
-  /** Per-run proxy override (wire field `proxyId` on the request body). */
+  /** Per-run proxy override (wire field `proxy_id` on the request body). */
   proxyIdOverride?: string;
   /**
    * Per-integration connection picks for THIS run (#199).
@@ -138,15 +138,15 @@ interface RunRequestBody {
    * `rerun_from`, mutually exclusive with `input`). Consumed staged uploads
    * are persisted as durable `appfile://` URIs, so a cancelled (or completed)
    * run can be re-triggered with the same files and different overrides
-   * (`modelId`, `?version`) in one call, no re-upload and no
+   * (`model_id`, `?version`) in one call, no re-upload and no
    * dependency on upload retention.
    */
   rerun_from?: string | undefined;
   /** Nullable on the inline surface only (`null` == "no override"). */
-  modelId?: string | null | undefined;
+  model_id?: string | null | undefined;
   generation?: ModelGenerationSettings | undefined;
   /** Nullable on the inline surface only (`null` == "no override"). */
-  proxyId?: string | null | undefined;
+  proxy_id?: string | null | undefined;
   connection_overrides?: Record<string, string> | undefined;
   dependency_overrides?: Record<string, string> | undefined;
 }
@@ -1011,9 +1011,9 @@ export async function parseRequestInput(
     consumedFileIds: consumedFileIds.length > 0 ? consumedFileIds : undefined,
     // `?? undefined` normalises the inline surface's nullable form (`null` ==
     // "no override") onto the one representation every consumer reads.
-    modelIdOverride: body.modelId ?? undefined,
+    modelIdOverride: body.model_id ?? undefined,
     generationConfigOverride,
-    proxyIdOverride: body.proxyId ?? undefined,
+    proxyIdOverride: body.proxy_id ?? undefined,
     connectionOverrides: body.connection_overrides,
     dependencyOverrides,
   };

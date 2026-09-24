@@ -371,7 +371,7 @@ describe("runRemote — happy path", () => {
     expect(logCalls[1]!.url).toContain("since=2");
   });
 
-  it("forwards modelId, proxyId, and version override to the trigger", async () => {
+  it("forwards model_id, proxy_id, and version override to the trigger", async () => {
     const calls: FetchCall[] = [];
     const fetchImpl = makeFetchImpl(
       {
@@ -404,8 +404,9 @@ describe("runRemote — happy path", () => {
     const trigger = calls.find((c) => c.method === "POST" && c.url.includes("/run"))!;
     expect(trigger.url).toContain("version=1.2.3");
     const body = JSON.parse(trigger.body!);
-    expect(body.modelId).toBe("claude-opus-4-7");
-    expect(body.proxyId).toBe("px_test");
+    expect(body).toMatchObject({ model_id: "claude-opus-4-7", proxy_id: "px_test" });
+    expect(body).not.toHaveProperty("modelId");
+    expect(body).not.toHaveProperty("proxyId");
   });
 
   it("forwards Idempotency-Key when provided", async () => {

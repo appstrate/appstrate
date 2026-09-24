@@ -46,7 +46,7 @@ function withoutTemperature(value: ModelGenerationSettings): ModelGenerationSett
 }
 
 function withoutReasoning(value: ModelGenerationSettings): ModelGenerationSettings {
-  const { reasoningLevel: _reasoningLevel, ...rest } = value;
+  const { reasoning_level: _reasoningLevel, ...rest } = value;
   void _reasoningLevel;
   return rest;
 }
@@ -81,8 +81,8 @@ export function ModelGenerationControls({
   const reasoningDisabled = disabled || reasoningControlsUnavailable;
   const selectedTemperature =
     value.temperature == null ? labels.inherit : String(value.temperature);
-  const selectedReasoning = value.reasoningLevel
-    ? labels.levels[value.reasoningLevel]
+  const selectedReasoning = value.reasoning_level
+    ? labels.levels[value.reasoning_level]
     : labels.inherit;
 
   return (
@@ -167,7 +167,7 @@ export function ModelGenerationControls({
           </div>
           <ToggleGroup
             type="single"
-            value={value.reasoningLevel ?? INHERIT}
+            value={value.reasoning_level ?? INHERIT}
             disabled={reasoningDisabled}
             variant="outline"
             aria-labelledby={`${id}-reasoning-label`}
@@ -178,7 +178,7 @@ export function ModelGenerationControls({
               onChange(
                 next === INHERIT
                   ? withoutReasoning(value)
-                  : { ...value, reasoningLevel: next as ModelReasoningLevel },
+                  : { ...value, reasoning_level: next as ModelReasoningLevel },
               );
             }}
           >

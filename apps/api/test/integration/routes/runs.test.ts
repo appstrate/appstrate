@@ -155,14 +155,14 @@ describe("Runs API", () => {
     });
   });
 
-  // ─── POST /api/agents/:scope/:name/run — modelId override ──
+  // ─── POST /api/agents/:scope/:name/run — model_id override ──
   //
-  // Regression for #544: an explicit, caller-supplied `modelId` that is not a
+  // Regression for #544: an explicit, caller-supplied `model_id` that is not a
   // real model reference must produce a clean 404, not an unhandled 500. A
   // non-UUID value (e.g. a human-readable model name) used to reach the
   // `org_models.id` uuid column and make Postgres raise
   // `invalid input syntax for type uuid`, which bubbled up as a 500.
-  describe("POST /api/agents/:scope/:name/run — modelId override", () => {
+  describe("POST /api/agents/:scope/:name/run — model_id override", () => {
     async function seedNoInputAgent() {
       await seedAgent({
         id: "@runorg/model-agent",
@@ -183,13 +183,13 @@ describe("Runs API", () => {
       );
     }
 
-    it("returns 404 (not 500) for a non-UUID modelId", async () => {
+    it("returns 404 (not 500) for a non-UUID model_id", async () => {
       await seedNoInputAgent();
 
       const res = await app.request("/api/agents/@runorg/model-agent/run?version=draft", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ input: {}, modelId: "gpt-5.5" }),
+        body: JSON.stringify({ input: {}, model_id: "gpt-5.5" }),
       });
 
       expect(res.status).toBe(404);
@@ -197,7 +197,7 @@ describe("Runs API", () => {
       expect(body.detail).toContain("gpt-5.5");
     });
 
-    it("returns 404 for a well-formed but unknown modelId UUID", async () => {
+    it("returns 404 for a well-formed but unknown model_id UUID", async () => {
       await seedNoInputAgent();
 
       const res = await app.request("/api/agents/@runorg/model-agent/run?version=draft", {
@@ -205,7 +205,7 @@ describe("Runs API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           input: {},
-          modelId: "5af6e114-c264-479d-8c13-ed981b96e972",
+          model_id: "5af6e114-c264-479d-8c13-ed981b96e972",
         }),
       });
 
@@ -286,7 +286,7 @@ describe("Runs API", () => {
   // callers can detect org-default drift immediately — the org default is
   // resolved at run creation, not ahead of time, so a default changed
   // between triggers silently applies to the next run unless the caller
-  // pins a model via the `modelId` body field.
+  // pins a model via the `model_id` body field.
   //
   // These are the only tests in this file that take the trigger to a 200 —
   // the fire-and-forget background execution runs against a fake
@@ -392,7 +392,7 @@ describe("Runs API", () => {
       await waitForRunPipelineSettled();
     });
 
-    it("echoes the pinned model when the body carries an explicit modelId", async () => {
+    it("echoes the pinned model when the body carries an explicit model_id", async () => {
       await seedRunnableAgent();
       const defaultId = await seedOrgModel("Echo Default GPT");
       await setDefaultModel(ctx.orgId, defaultId);
@@ -401,7 +401,7 @@ describe("Runs API", () => {
       const res = await app.request("/api/agents/@runorg/echo-agent/run?version=draft", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ input: {}, modelId: pinnedId }),
+        body: JSON.stringify({ input: {}, model_id: pinnedId }),
       });
 
       expect(res.status).toBe(201);

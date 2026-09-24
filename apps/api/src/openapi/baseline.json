@@ -495,7 +495,7 @@
                         "orgId": {
                           "type": "string"
                         },
-                        "orgSlug": {
+                        "org_slug": {
                           "type": "string"
                         },
                         "warnings": {
@@ -1625,7 +1625,7 @@
         "operationId": "runAgent",
         "tags": ["Runs"],
         "summary": "Execute an agent",
-        "description": "Start an agent run (fire-and-forget — the response does not wait for execution). Returns `201` + the created run resource — same shape as `GET /runs/{id}` — including the resolved `model_label` / `model_source`. Rate-limited to 20/min. The body is JSON. File-typed input fields (`format: uri` + `contentMediaType` in the agent's input schema) accept either of two forms: (1) an `upload://upl_xxx` reference from `createUpload` — stage the bytes first by PUTting them to the signed URL (see `createUpload` for the step-by-step recipe); or (2) an inline RFC 2397 data URI `data:<mime>;name=<filename>;base64,<payload>` with up to 4 MiB of decoded content (`name` is optional) — the single-call path for JSON-only clients such as MCP. Inline bytes are written to the run workspace as a file and the payload is stripped from the persisted run input (the stored value keeps only a `data:<mime>;name=<doc>;base64,` marker). Declared binary MIMEs are verified by magic-byte sniffing in both forms. Send `rerun_from` instead of `input` to replay a previous run's input — same files, new overrides — without re-uploading. The effective model is resolved at run creation with precedence: request `modelId` > agent model setting > org default model > system default. Without an explicit `modelId`, a change to the org default model between triggers applies to the next run — send `modelId` to pin a specific model per run. A run against a published version assembles its bundle from stored artifacts before the container starts, so a bad artifact fails the trigger rather than the run: `422 dependency_unresolved` (a pin with no published version), `422 bundle_invalid` (the stored archive cannot be assembled), `422 bundle_signature_invalid` (rejected by `AFPS_SIGNATURE_POLICY`), or `500 bundle_integrity_mismatch` (the stored bytes no longer match the integrity hash recorded at publish time — republish the package). No run row is created in any of those cases. The body is closed: an unknown field, or a field whose type does not match, is a `400` rather than a silently ignored value, and a malformed JSON body is a `400` rather than an input-less run. Send no body at all for a run whose input resolves entirely from stored values.",
+        "description": "Start an agent run (fire-and-forget — the response does not wait for execution). Returns `201` + the created run resource — same shape as `GET /runs/{id}` — including the resolved `model_label` / `model_source`. Rate-limited to 20/min. The body is JSON. File-typed input fields (`format: uri` + `contentMediaType` in the agent's input schema) accept either of two forms: (1) an `upload://upl_xxx` reference from `createUpload` — stage the bytes first by PUTting them to the signed URL (see `createUpload` for the step-by-step recipe); or (2) an inline RFC 2397 data URI `data:<mime>;name=<filename>;base64,<payload>` with up to 4 MiB of decoded content (`name` is optional) — the single-call path for JSON-only clients such as MCP. Inline bytes are written to the run workspace as a file and the payload is stripped from the persisted run input (the stored value keeps only a `data:<mime>;name=<doc>;base64,` marker). Declared binary MIMEs are verified by magic-byte sniffing in both forms. Send `rerun_from` instead of `input` to replay a previous run's input — same files, new overrides — without re-uploading. The effective model is resolved at run creation with precedence: request `model_id` > agent model setting > org default model > system default. Without an explicit `model_id`, a change to the org default model between triggers applies to the next run — send `model_id` to pin a specific model per run. A run against a published version assembles its bundle from stored artifacts before the container starts, so a bad artifact fails the trigger rather than the run: `422 dependency_unresolved` (a pin with no published version), `422 bundle_invalid` (the stored archive cannot be assembled), `422 bundle_signature_invalid` (rejected by `AFPS_SIGNATURE_POLICY`), or `500 bundle_integrity_mismatch` (the stored bytes no longer match the integrity hash recorded at publish time — republish the package). No run row is created in any of those cases. The body is closed: an unknown field, or a field whose type does not match, is a `400` rather than a silently ignored value, and a malformed JSON body is a `400` rather than an input-less run. Send no body at all for a run whose input resolves entirely from stored values.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1675,15 +1675,15 @@
                     "type": "string",
                     "description": "Run id whose persisted `input` to replay on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + space scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). Staged `upload://` inputs are materialized on the original run and rewritten in its persisted input as durable `appfile://` references, so later reruns reuse the same files without depending on upload retention. Existing `appfile://` inputs remain unchanged. **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Stage the file with `createUpload` when the input must be replayable."
                   },
-                  "modelId": {
+                  "model_id": {
                     "type": "string",
-                    "description": "Model ID override for this run — a system model key or an org-model UUID. Pins THIS run to that model, taking priority over the full resolution cascade (request `modelId` > agent model setting > org default model > system default). Without it, the org default is resolved at run creation — not ahead of time — so changing the org default between triggers silently changes the model used by subsequent runs. Returns 404 when the referenced model does not exist. The response echoes the resolved `model_label` + `model_source` so callers can verify which model the run actually uses."
+                    "description": "Model ID override for this run — a system model key or an org-model UUID. Pins THIS run to that model, taking priority over the full resolution cascade (request `model_id` > agent model setting > org default model > system default). Without it, the org default is resolved at run creation — not ahead of time — so changing the org default between triggers silently changes the model used by subsequent runs. Returns 404 when the referenced model does not exist. The response echoes the resolved `model_label` + `model_source` so callers can verify which model the run actually uses."
                   },
                   "generation": {
                     "$ref": "#/components/schemas/ModelGenerationSettings",
                     "description": "Per-run temperature/reasoning override. A custom temperature is rejected only when explicitly unsupported; a reasoning level is accepted only when explicitly supported. Omitted properties inherit the agent defaults."
                   },
-                  "proxyId": {
+                  "proxy_id": {
                     "type": "string",
                     "description": "Proxy ID override for this run, or \"none\" to disable proxying. Takes priority over agent and org defaults."
                   },
@@ -1761,11 +1761,11 @@
                   "metadata": null,
                   "generation": {
                     "temperature": 0.2,
-                    "reasoningLevel": "high"
+                    "reasoning_level": "high"
                   },
                   "generation_override": {
                     "temperature": 0.2,
-                    "reasoningLevel": "high"
+                    "reasoning_level": "high"
                   },
                   "started_at": "2026-01-15T10:30:00Z",
                   "completed_at": null,
@@ -2126,10 +2126,10 @@
                       "minLength": 1
                     }
                   },
-                  "modelId": {
+                  "model_id": {
                     "type": ["string", "null"]
                   },
-                  "proxyId": {
+                  "proxy_id": {
                     "type": ["string", "null"]
                   },
                   "generation": {
@@ -2146,7 +2146,7 @@
                   "display_name": "Summarize attached file",
                   "version": "0.0.0",
                   "type": "agent",
-                  "schema_version": "0.1",
+                  "schema_version": "0.3",
                   "dependencies": {}
                 },
                 "prompt": "Summarize the attached file in three bullet points.",
@@ -2241,7 +2241,7 @@
                     "display_name": "Summarize attached file",
                     "version": "0.0.0",
                     "type": "agent",
-                    "schema_version": "0.1",
+                    "schema_version": "0.3",
                     "dependencies": {}
                   },
                   "inline_prompt": "Summarize the attached file in three bullet points."
@@ -2380,10 +2380,10 @@
                     },
                     "description": "Same field as `POST /api/runs/inline` — applied to the integration readiness check so a pick that clears `must_choose_connection` here clears it on the real launch too. Never persisted; no run is created. Values must be non-empty, same rule and same reason as on the launch surfaces."
                   },
-                  "modelId": {
+                  "model_id": {
                     "type": ["string", "null"]
                   },
-                  "proxyId": {
+                  "proxy_id": {
                     "type": ["string", "null"]
                   },
                   "generation": {
@@ -2689,7 +2689,7 @@
                   "error": null,
                   "metadata": null,
                   "generation": {
-                    "reasoningLevel": "medium"
+                    "reasoning_level": "medium"
                   },
                   "generation_override": null,
                   "started_at": "2026-01-15T10:30:00Z",
@@ -19061,7 +19061,7 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "generationConfig": {
+                  "generation_config": {
                     "oneOf": [
                       {
                         "$ref": "#/components/schemas/ModelGenerationSettings"
@@ -19223,7 +19223,7 @@
                 "example": {
                   "generation": {
                     "temperature": 0.2,
-                    "reasoningLevel": "high"
+                    "reasoning_level": "high"
                   },
                   "modelId": "claude-sonnet-4-6",
                   "proxyId": null,
@@ -23852,7 +23852,7 @@
             "maximum": 1,
             "description": "Provider sampling temperature; null or omission inherits the runtime default."
           },
-          "reasoningLevel": {
+          "reasoning_level": {
             "type": ["string", "null"],
             "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max", null],
             "description": "Portable reasoning effort normalized across providers."
@@ -23878,7 +23878,7 @@
                 "type": "string",
                 "enum": ["supported", "unsupported", "unknown"]
               },
-              "temperatureCompatible": {
+              "temperature_compatible": {
                 "type": "string",
                 "enum": ["supported", "unsupported", "unknown"],
                 "description": "Optional compatibility fact for combining a custom temperature with active reasoning. Omission means unknown."
@@ -23896,7 +23896,7 @@
                   "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
                 }
               },
-              "nativeLevels": {
+              "native_levels": {
                 "type": "object",
                 "description": "Optional provider-native values for portable levels (for example off to none).",
                 "additionalProperties": {
@@ -23932,7 +23932,7 @@
         "description": "A package PLACED in a space, with `enabled` and its model/proxy overrides. The row survives deactivation — every setting on it is kept — and goes away only when the placement behind it is withdrawn: the share is revoked (`DELETE /api/packages/{scope}/{name}/shares/{target}`), or the package's home moves out of the space with `keep_in_previous_home: false`. It carries no version: outside its home space a package runs its latest published version, and its draft runs for whoever can write it.",
         "required": [
           "packageId",
-          "generationConfig",
+          "generation_config",
           "modelId",
           "proxyId",
           "enabled",
@@ -23951,7 +23951,7 @@
             "type": "string",
             "description": "Package ID from org catalog"
           },
-          "generationConfig": {
+          "generation_config": {
             "oneOf": [
               {
                 "$ref": "#/components/schemas/ModelGenerationSettings"
@@ -24998,7 +24998,7 @@
           },
           "model_source": {
             "type": ["string", "null"],
-            "description": "Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override."
+            "description": "Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `model_id` override."
           },
           "cost": {
             "type": ["number", "null"],

@@ -252,7 +252,7 @@ function spacePackageWire(
 ) {
   return {
     packageId: row.packageId,
-    generationConfig: row.generationConfig,
+    generation_config: row.generationConfig,
     modelId: row.modelId,
     proxyId: row.proxyId,
     enabled: row.enabled,
@@ -526,7 +526,7 @@ export async function deactivatePackage(
 // (`AgentDetail.input`).
 const spacePackageSelect = {
   packageId: spacePackages.packageId,
-  generationConfig: spacePackages.generationConfig,
+  generation_config: spacePackages.generationConfig,
   modelId: spacePackages.modelId,
   proxyId: spacePackages.proxyId,
   enabled: spacePackages.enabled,

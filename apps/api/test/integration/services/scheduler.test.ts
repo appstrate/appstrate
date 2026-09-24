@@ -157,7 +157,7 @@ describeRequiresRedis("scheduler service", () => {
         actor,
         {
           cronExpression: "0 9 * * *",
-          generationConfigOverride: { temperature: 0, reasoningLevel: "high" },
+          generationConfigOverride: { temperature: 0, reasoning_level: "high" },
           modelIdOverride: "model_abc",
           proxyIdOverride: "prx_xyz",
           versionOverride: "1.2.3",
@@ -166,7 +166,7 @@ describeRequiresRedis("scheduler service", () => {
 
       expect(schedule.generation_config_override).toEqual({
         temperature: 0,
-        reasoningLevel: "high",
+        reasoning_level: "high",
       });
       expect(schedule.model_id_override).toBe("model_abc");
       expect(schedule.proxy_id_override).toBe("prx_xyz");
@@ -433,7 +433,7 @@ describeRequiresRedis("scheduler service", () => {
         actor,
         {
           cronExpression: "0 9 * * *",
-          generationConfigOverride: { reasoningLevel: "low" },
+          generationConfigOverride: { reasoning_level: "low" },
           modelIdOverride: "model_init",
           proxyIdOverride: "prx_init",
           versionOverride: "1.0.0",
@@ -448,7 +448,7 @@ describeRequiresRedis("scheduler service", () => {
         null,
         undefined,
       );
-      expect(partialUpdate!.generation_config_override).toEqual({ reasoningLevel: "low" });
+      expect(partialUpdate!.generation_config_override).toEqual({ reasoning_level: "low" });
       expect(partialUpdate!.model_id_override).toBe("model_init");
       expect(partialUpdate!.proxy_id_override).toBe("prx_init");
       expect(partialUpdate!.version_override).toBe("1.0.0");

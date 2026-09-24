@@ -228,7 +228,7 @@ export const activatePackageSchema = z
 // than a silent no-op.
 export const updatePackageSchema = z
   .object({
-    generationConfig: modelGenerationSettingsSchema.nullable().optional(),
+    generation_config: modelGenerationSettingsSchema.nullable().optional(),
     modelId: z.string().nullable().optional(),
     proxyId: z.string().nullable().optional(),
   })
@@ -911,7 +911,7 @@ export function createSpacesRouter() {
     const data = await readJsonBody(c, updatePackageSchema);
 
     const placement = await getSpacePackage(scope, packageId);
-    let generationConfig = data.generationConfig;
+    let generationConfig = data.generation_config;
     if (placement && (data.modelId !== undefined || generationConfig !== undefined)) {
       const effectiveModelId = data.modelId !== undefined ? data.modelId : placement.modelId;
       const explicitModel =
@@ -923,12 +923,12 @@ export function createSpacesRouter() {
         generationConfig = validateGenerationOverride(
           generationConfig,
           selectedModel,
-          "generationConfig",
+          "generation_config",
         );
       } else if (
         generationConfig === undefined &&
         data.modelId !== undefined &&
-        placement.generationConfig
+        placement.generation_config
       ) {
         // Reconcile only when `modelId` is part of THIS patch: re-clamping
         // stored settings is a response to the selected model possibly
@@ -937,13 +937,13 @@ export function createSpacesRouter() {
         // silently rewrite `generation_config` on a request that never named
         // it.
         generationConfig = reconcileModelGenerationSettings(
-          placement.generationConfig,
+          placement.generation_config,
           selectedModel?.generation,
         );
       }
     }
 
-    const { generationConfig: _generationConfig, ...rest } = data;
+    const { generation_config: _generationConfig, ...rest } = data;
     void _generationConfig;
     // `requirePlacement` — this route updates an EXISTING placement; a
     // packageId that is not placed here (or not visible to the org) is a 404,

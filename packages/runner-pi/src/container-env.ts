@@ -10,6 +10,7 @@ import { createLogger } from "@appstrate/core/logger";
 import { ALIAS_CLIENT_API_SHAPE } from "@appstrate/core/model-swap";
 import type { ModelInputModality } from "@appstrate/core/module";
 import type {
+  ModelGenerationSettings,
   ModelNativeReasoningLevel,
   ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
@@ -60,10 +61,7 @@ export interface RuntimePiModelConfig {
 export interface RuntimePiEnvOptions {
   model: RuntimePiModelConfig;
   /** Effective model-generation controls resolved by the platform. */
-  generation?: {
-    temperature?: number | null;
-    reasoningLevel?: ModelReasoningLevel | null;
-  };
+  generation?: ModelGenerationSettings;
   agentPrompt: string;
   runId?: string;
   agentInput?: unknown;
@@ -252,8 +250,8 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   if (opts.generation?.temperature != null) {
     env.MODEL_TEMPERATURE = String(opts.generation.temperature);
   }
-  if (opts.generation?.reasoningLevel != null) {
-    env.MODEL_REASONING_LEVEL = opts.generation.reasoningLevel;
+  if (opts.generation?.reasoning_level != null) {
+    env.MODEL_REASONING_LEVEL = opts.generation.reasoning_level;
   }
   // The published rate card identifies the vendor on its own, so an aliased run is
   // told nothing about price. Safe because `writeRunnerLedgerRow` computes

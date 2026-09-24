@@ -322,9 +322,9 @@ export interface InlineRunBody {
   manifest?: unknown;
   prompt?: unknown;
   input?: Record<string, unknown>;
-  modelId?: string | null;
+  model_id?: string | null;
   generation?: ModelGenerationSettings;
-  proxyId?: string | null;
+  proxy_id?: string | null;
   /**
    * Per-integration connection picks for THIS run (flat map:
    * `{ "@scope/integration": "<connection_id>" }`, resolver mechanism #2).

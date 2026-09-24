@@ -358,7 +358,7 @@ describe("generation capabilities", () => {
     temperature: "supported",
     reasoning: {
       supported: "supported",
-      temperatureCompatible: "unsupported",
+      temperature_compatible: "unsupported",
       adaptive: null,
       levels: {
         none: "supported",
@@ -385,7 +385,7 @@ describe("generation capabilities", () => {
   });
 
   it("accepts an omitted pair fact when LiteLLM is inconclusive", () => {
-    const { temperatureCompatible: _temperatureCompatible, ...reasoning } =
+    const { temperature_compatible: _temperatureCompatible, ...reasoning } =
       normalizedGeneration.reasoning;
     void _temperatureCompatible;
 
@@ -441,7 +441,7 @@ describe("generation capabilities", () => {
             ...normalizedGeneration,
             reasoning: {
               ...normalizedGeneration.reasoning,
-              temperatureCompatible: "maybe",
+              temperature_compatible: "maybe",
             },
           },
         } as never,
@@ -456,7 +456,7 @@ describe("generation capabilities", () => {
           temperature: "supported",
           reasoning: {
             supported: "supported",
-            temperatureCompatible: "unsupported",
+            temperature_compatible: "unsupported",
             adaptive: null,
             levels: {
               none: "supported",
@@ -474,7 +474,7 @@ describe("generation capabilities", () => {
       temperature: "supported",
       reasoning: {
         supported: "supported",
-        temperatureCompatible: "unsupported",
+        temperature_compatible: "unsupported",
         adaptive: null,
         levels: {
           off: "supported",

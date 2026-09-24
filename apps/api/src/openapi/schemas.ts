@@ -265,7 +265,7 @@ export const schemas = {
         description:
           "Provider sampling temperature; null or omission inherits the runtime default.",
       },
-      reasoningLevel: {
+      reasoning_level: {
         type: ["string", "null"],
         enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max", null],
         description: "Portable reasoning effort normalized across providers.",
@@ -286,7 +286,7 @@ export const schemas = {
         required: ["supported", "adaptive", "levels"],
         properties: {
           supported: { type: "string", enum: ["supported", "unsupported", "unknown"] },
-          temperatureCompatible: {
+          temperature_compatible: {
             type: "string",
             enum: ["supported", "unsupported", "unknown"],
             description:
@@ -303,7 +303,7 @@ export const schemas = {
               enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
             },
           },
-          nativeLevels: {
+          native_levels: {
             type: "object",
             description:
               "Optional provider-native values for portable levels (for example off to none).",
@@ -356,7 +356,7 @@ export const schemas = {
     //     not reach — the column is data, renamed by a migration or not at all.
     required: [
       "packageId",
-      "generationConfig",
+      "generation_config",
       "modelId",
       "proxyId",
       "enabled",
@@ -369,7 +369,7 @@ export const schemas = {
     properties: {
       object: { type: "string", enum: ["space_package"] },
       packageId: { type: "string", description: "Package ID from org catalog" },
-      generationConfig: {
+      generation_config: {
         oneOf: [{ $ref: "#/components/schemas/ModelGenerationSettings" }, { type: "null" }],
       },
       modelId: { type: ["string", "null"], description: "Model override for this space" },
@@ -1135,7 +1135,7 @@ export const schemas = {
       model_source: {
         type: ["string", "null"],
         description:
-          "Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override.",
+          "Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `model_id` override.",
       },
       cost: { type: ["number", "null"], description: "Run cost in dollars" },
       cost_pricing_status: {

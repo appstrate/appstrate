@@ -111,7 +111,7 @@ export async function resolveChatModel(
       contextWindow: resolved.contextWindow ?? null,
       maxTokens: resolved.maxTokens ?? null,
       reasoning: resolved.reasoning ?? false,
-      reasoningLevelMap: resolved.generation?.reasoning.nativeLevels,
+      reasoningLevelMap: resolved.generation?.reasoning.native_levels,
       input: resolved.input ?? null,
       accessToken: token.accessToken,
     },

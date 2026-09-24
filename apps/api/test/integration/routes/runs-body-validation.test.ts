@@ -95,6 +95,15 @@ describe("POST /api/agents/:scope/:name/run — body validation", () => {
     expect(((await res.json()) as { code: string }).code).toBe("invalid_request");
   });
 
+  it("rejects the camelCase modelId, proxyId and reasoningLevel with 400", async () => {
+    await expectRejectedField(await post({ input: {}, modelId: "claude-sonnet-4" }), "modelId");
+    await expectRejectedField(await post({ input: {}, proxyId: "none" }), "proxyId");
+    await expectRejectedField(
+      await post({ input: {}, generation: { reasoningLevel: "high" } }),
+      "generation.reasoningLevel",
+    );
+  });
+
   it("rejects a wrong-typed input with 400", async () => {
     const res = await post({ input: "not-an-object" });
     await expectRejectedField(res, "input");
@@ -135,9 +144,9 @@ describe("POST /api/agents/:scope/:name/run — body validation", () => {
     // version resolution (404) rather than being refused by the schema.
     const res = await post({
       input: { topic: "ops" },
-      modelId: "claude-sonnet-4",
+      model_id: "claude-sonnet-4",
       generation: { temperature: 0.2 },
-      proxyId: "none",
+      proxy_id: "none",
       connection_overrides: { "@acme/gmail": "conn_1" },
       dependency_overrides: { "@acme/skill": "draft" },
     });
@@ -194,6 +203,13 @@ describe("POST /api/runs/inline/validate — body validation", () => {
       dependency_overrides: { "@acme/skill": "draft" },
     });
     await expectRejectedField(res, "dependency_overrides");
+  });
+
+  it("rejects the camelCase modelId and proxyId, accepts model_id and proxy_id", async () => {
+    const base = { manifest: validManifest(), prompt: "do" };
+    await expectRejectedField(await post({ ...base, modelId: null }), "modelId");
+    await expectRejectedField(await post({ ...base, proxyId: null }), "proxyId");
+    expect((await post({ ...base, model_id: null, proxy_id: null })).status).toBe(200);
   });
 
   it("accepts `generation` — honoured on this surface, now documented too", async () => {

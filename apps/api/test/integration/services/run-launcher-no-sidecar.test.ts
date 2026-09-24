@@ -349,7 +349,7 @@ describe("run-launcher — sidecar skip decision", () => {
       runId: "run_adaptive_alias",
       context: buildContext("run_adaptive_alias"),
       plan: buildRunPlan({
-        generationConfig: { reasoningLevel: "max" },
+        generationConfig: { reasoning_level: "max" },
         llmConfig: {
           providerId: "anthropic",
           apiShape: "anthropic-messages",
@@ -365,10 +365,10 @@ describe("run-launcher — sidecar skip decision", () => {
             temperature: "supported",
             reasoning: {
               supported: "supported",
-              temperatureCompatible: "unsupported",
+              temperature_compatible: "unsupported",
               adaptive: true,
               levels: { max: "supported" },
-              nativeLevels: { max: "max" },
+              native_levels: { max: "max" },
             },
           },
         },

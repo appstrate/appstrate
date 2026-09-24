@@ -137,7 +137,7 @@ export function createPiProxyModelBinding(args: {
     apiShape: args.model.apiShape,
     baseUrl,
     reasoning: args.model.reasoning ?? args.model.generation?.reasoning.supported === "supported",
-    reasoningLevelMap: args.model.generation?.reasoning.nativeLevels,
+    reasoningLevelMap: args.model.generation?.reasoning.native_levels,
     input: args.model.input,
     cost: args.model.cost,
     contextWindow: args.model.contextWindow,

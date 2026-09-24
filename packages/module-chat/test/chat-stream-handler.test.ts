@@ -243,7 +243,7 @@ describe("handleChatStream", () => {
 
   async function postChat(
     sessionId: string,
-    generation?: { temperature?: number; reasoningLevel?: string },
+    generation?: { temperature?: number; reasoning_level?: string },
     engine?: ChatEngine,
     overrides?: {
       /** apiShape of the single scripted `/api/models` row. */

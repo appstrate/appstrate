@@ -192,7 +192,7 @@ describe("vendored catalog invariant — sparse temperature compatibility", () =
             temperature?: string;
             reasoning?: {
               supported?: string;
-              temperatureCompatible?: string;
+              temperature_compatible?: string;
             };
           };
         }
@@ -200,7 +200,7 @@ describe("vendored catalog invariant — sparse temperature compatibility", () =
 
       return Object.entries(entries).flatMap(([modelId, entry]) => {
         const generation = entry.generation;
-        const compatibility = generation?.reasoning?.temperatureCompatible;
+        const compatibility = generation?.reasoning?.temperature_compatible;
         return compatibility === undefined ? [] : [{ file, modelId, generation, compatibility }];
       });
     });
@@ -220,7 +220,7 @@ describe("vendored catalog invariant — sparse temperature compatibility", () =
 
   it("keeps the known OpenAI incompatibility guard", () => {
     expect(
-      lookupCatalogModel("openai", "gpt-5.1")?.generation?.reasoning.temperatureCompatible,
+      lookupCatalogModel("openai", "gpt-5.1")?.generation?.reasoning.temperature_compatible,
     ).toBe("unsupported");
   });
 });

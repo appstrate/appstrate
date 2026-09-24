@@ -521,8 +521,8 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       ...(typeof inheritedConfig.generation?.temperature === "number"
         ? { temperature: inheritedConfig.generation.temperature }
         : {}),
-      ...(inheritedConfig.generation?.reasoningLevel != null
-        ? { thinkingLevel: inheritedConfig.generation.reasoningLevel }
+      ...(inheritedConfig.generation?.reasoning_level != null
+        ? { thinkingLevel: inheritedConfig.generation.reasoning_level }
         : {}),
       systemPrompt,
       cwd: workspaceDir,

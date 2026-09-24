@@ -45,7 +45,7 @@ describe("GET /api/spaces/:spaceId/packages/:scope/:name/run-config", () => {
       spaceId: ctx.defaultSpaceId,
       packageId: "@testorg/agent",
       modelId: "claude-sonnet",
-      generationConfig: { temperature: 0.2, reasoningLevel: "high" },
+      generationConfig: { temperature: 0.2, reasoning_level: "high" },
       proxyId: null,
     });
 
@@ -57,7 +57,7 @@ describe("GET /api/spaces/:spaceId/packages/:scope/:name/run-config", () => {
     const body = (await res.json()) as Record<string, unknown>;
     // `toEqual` on the WHOLE body, so a re-added version member fails here.
     expect(body).toEqual({
-      generation: { temperature: 0.2, reasoningLevel: "high" },
+      generation: { temperature: 0.2, reasoning_level: "high" },
       input: { values: {}, locked_fields: [] },
       modelId: "claude-sonnet",
       proxyId: null,

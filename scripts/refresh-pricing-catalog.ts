@@ -171,7 +171,7 @@ interface LiteLLMEntry {
     temperature: ModelCapabilitySupport;
     reasoning: {
       supported: ModelCapabilitySupport;
-      temperatureCompatible?: ModelCapabilitySupport;
+      temperature_compatible?: ModelCapabilitySupport;
       adaptive: boolean | null;
       levels: Partial<Record<ModelNativeReasoningLevel, ModelCapabilitySupport>>;
     };
@@ -214,8 +214,8 @@ function assertNormalizedGenerationCatalog(data: Record<string, LiteLLMEntry>): 
       generation != null &&
       isSupport(generation.temperature) &&
       isSupport(generation.reasoning?.supported) &&
-      (generation.reasoning?.temperatureCompatible === undefined ||
-        isSupport(generation.reasoning.temperatureCompatible)) &&
+      (generation.reasoning?.temperature_compatible === undefined ||
+        isSupport(generation.reasoning.temperature_compatible)) &&
       (generation.reasoning?.adaptive === null ||
         typeof generation.reasoning?.adaptive === "boolean") &&
       validLevels;
@@ -571,8 +571,8 @@ function projectGenerationCapabilities(entry: LiteLLMEntry): ModelGenerationCapa
     temperature: exported.temperature,
     reasoning: {
       supported: exported.reasoning.supported,
-      ...(exported.reasoning.temperatureCompatible !== undefined
-        ? { temperatureCompatible: exported.reasoning.temperatureCompatible }
+      ...(exported.reasoning.temperature_compatible !== undefined
+        ? { temperature_compatible: exported.reasoning.temperature_compatible }
         : {}),
       adaptive: exported.reasoning.adaptive,
       levels,

@@ -8,7 +8,7 @@
  * launch fires `executeAgentInBackground()`, whose async tail keeps writing to
  * `runs` / `run_logs` past the end of the test and races the next
  * `truncateAll()`. The positive paths are therefore probed with a deliberately
- * unknown `modelId`, which is rejected by `assertExplicitModelExists` INSIDE
+ * unknown `model_id`, which is rejected by `assertExplicitModelExists` INSIDE
  * `triggerInlineRun` — i.e. strictly AFTER the context files have been
  * declared, ACL-checked and streamed. Reaching that model 404 instead of the
  * `file_uri_in_prompt` 400 is what proves the injection ran.
@@ -205,7 +205,7 @@ describe("POST /api/runs/inline — context_files", () => {
       manifest: validManifest(),
       prompt: "Compile the findings.",
       context_files: [fileUri(docId)],
-      modelId: UNKNOWN_MODEL,
+      model_id: UNKNOWN_MODEL,
     });
     // Past the mount: the only remaining rejection is the unknown model, raised
     // inside `triggerInlineRun` after the file was ACL-checked and streamed.

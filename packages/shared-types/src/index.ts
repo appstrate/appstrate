@@ -1176,7 +1176,7 @@ export interface SpaceMember {
  */
 export interface SpacePackage {
   packageId: string;
-  generationConfig: ModelGenerationSettings | null;
+  generation_config: ModelGenerationSettings | null;
   modelId: string | null;
   proxyId: string | null;
   /** Whether the space RUNS it. The row and its settings survive a `false`. */

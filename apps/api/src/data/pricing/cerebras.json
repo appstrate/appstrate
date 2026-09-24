@@ -12,7 +12,7 @@
       "temperature": "supported",
       "reasoning": {
         "supported": "supported",
-        "temperatureCompatible": "supported",
+        "temperature_compatible": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
@@ -42,7 +42,7 @@
       "temperature": "supported",
       "reasoning": {
         "supported": "supported",
-        "temperatureCompatible": "supported",
+        "temperature_compatible": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
@@ -132,7 +132,7 @@
       "temperature": "supported",
       "reasoning": {
         "supported": "supported",
-        "temperatureCompatible": "supported",
+        "temperature_compatible": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
@@ -191,7 +191,7 @@
       "temperature": "supported",
       "reasoning": {
         "supported": "supported",
-        "temperatureCompatible": "supported",
+        "temperature_compatible": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
@@ -221,7 +221,7 @@
       "temperature": "supported",
       "reasoning": {
         "supported": "supported",
-        "temperatureCompatible": "supported",
+        "temperature_compatible": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",

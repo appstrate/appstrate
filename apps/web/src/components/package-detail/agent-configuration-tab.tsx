@@ -204,7 +204,7 @@ function ModelSection({ packageId }: { packageId: string }) {
   const editorKey = [
     agentModel.modelId ?? "inherit",
     generation.temperature ?? "inherit",
-    generation.reasoningLevel ?? "inherit",
+    generation.reasoning_level ?? "inherit",
   ].join(":");
 
   return (

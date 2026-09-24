@@ -25,9 +25,9 @@ export interface RunLaunch {
    * and, on a retry, by the connection-recovery modal (`retryLaunch`).
    */
   connectionOverrides?: Record<string, string>;
-  /** Per-run model id override (wire `modelId`). From the run-with-options modal. */
+  /** Per-run model id override (wire `model_id`). From the run-with-options modal. */
   modelId?: string;
-  /** Per-run proxy id override (wire `proxyId`). From the run-with-options modal. */
+  /** Per-run proxy id override (wire `proxy_id`). From the run-with-options modal. */
   proxyId?: string;
   /** Per-run temperature/reasoning override (wire `generation`). */
   generation?: ModelGenerationSettings;

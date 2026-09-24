@@ -26,7 +26,7 @@ describe("buildRuntimePiEnv", () => {
       model,
       agentPrompt: "p",
       ...sidecar,
-      generation: { temperature: 0, reasoningLevel: "xhigh" },
+      generation: { temperature: 0, reasoning_level: "xhigh" },
     });
     expect(env.MODEL_TEMPERATURE).toBe("0");
     expect(env.MODEL_REASONING_LEVEL).toBe("xhigh");
