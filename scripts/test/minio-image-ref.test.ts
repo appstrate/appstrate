@@ -20,7 +20,8 @@ import { COMPOSE_GLOBS, trackedFiles, trackedIndexFiles } from "../lib/tracked-f
 const REPO_ROOT = join(import.meta.dir, "..", "..");
 const PINNED_REF = /^cgr\.dev\/chainguard\/minio@sha256:[0-9a-f]{64}$/;
 const IMAGE_LINE = /^\s*image:\s*["']?([^\s"'#]+)/;
-const DOC_REF = /cgr\.dev\/chainguard\/minio@sha256:[0-9a-f]+/g;
+// Any reference, tag or digest: a README drifting to `:latest` must fail, not go unseen.
+const DOC_REF = /cgr\.dev\/chainguard\/minio[@:][^\s`"')]+/g;
 
 interface Ref {
   file: string;
@@ -57,7 +58,7 @@ function composeMinioRefs(): Ref[] {
   return refs;
 }
 
-/** Every digest-pinned Chainguard MinIO ref printed in a tracked Markdown file, release notes excepted. */
+/** Every Chainguard MinIO ref (tag or digest) printed in a tracked Markdown file, release notes excepted. */
 function docMinioRefs(): Ref[] {
   const refs: Ref[] = [];
   for (const file of trackedIndexFiles(["*.md"], "Markdown file")) {
@@ -95,7 +96,11 @@ describe("MinIO image ref", () => {
 
   it("is the same ref in every README that prints it", () => {
     const refs = docMinioRefs();
-    expect(refs.length).toBeGreaterThan(0);
+    // Anchors: the two READMEs that print the volume-ownership repair.
+    const files = new Set(refs.map((r) => r.file));
+    for (const anchor of ["deploy/README.md", "examples/self-hosting/README.md"]) {
+      expect(files.has(anchor)).toBe(true);
+    }
     expect(format(refs.filter((r) => r.ref !== canonical))).toEqual([]);
   });
 });
