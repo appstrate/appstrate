@@ -8,7 +8,7 @@ import { REQUEST_ID_ONLY_HEADERS } from "./headers.ts";
 export const responses = {
   VersionArtifactUnavailable: {
     description:
-      "The selected published agent has no readable prompt archive (`version_artifact_unavailable`). The working copy is never substituted.",
+      "The selected published version's archive is missing, corrupt, or lacks the content entry its type requires (`prompt.md` for an agent, `SKILL.md` for a skill) — `version_artifact_unavailable`. Nothing is substituted for it, not even the working copy, and nothing is written. When the version is about to run (a run or schedule) and `AFPS_SIGNATURE_POLICY` is `required`, the signature gate answers first: a corrupt archive is `bundle_invalid` and an unsigned or untrusted one `bundle_signature_invalid`, both 422. An archive past the decompression ceiling answers `422 package_archive_unreadable`.",
     headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
@@ -315,8 +315,9 @@ export const responses = {
     },
   },
   /**
-   * A STORED package artifact could not be expanded within the platform's
-   * decompression ceiling. Shared by the package file-explorer operations,
+   * A STORED package artifact cannot be served: it could not be expanded within
+   * the platform's decompression ceiling, or the selected published version's
+   * archive is gone (#1533). Shared by the file-explorer and download operations,
    * which all read the caller's own package and share one remedy (republish).
    *
    * `POST .../fork` deliberately does NOT `$ref` this: its 422 carries two
@@ -325,10 +326,12 @@ export const responses = {
    */
   PackageArchiveUnreadable: {
     description:
-      "The stored artifact expands past the package decompression ceiling and was refused " +
-      "(`package_archive_unreadable`). This is the SAME ceiling the import gate applies, so " +
-      "reaching it means the archive is a bomb or was stored before the gate covered this path " +
-      "— republish the package. RFC 9457 problem+json.",
+      "The stored archive cannot be served. `package_archive_unreadable`: it expands past the " +
+      "package decompression ceiling and was refused — the SAME ceiling the import gate applies, " +
+      "so reaching it means the archive is a bomb or was stored before the gate covered this " +
+      "path; republish the package. `version_artifact_unavailable`: the selected PUBLISHED " +
+      "version exists but its archive is gone from storage; nothing is substituted for it, the " +
+      "draft included. RFC 9457 problem+json.",
     headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": {

@@ -5,6 +5,7 @@ import { eq, and, desc, count, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
+import { ApiError } from "../lib/errors.ts";
 import {
   uploadPackageZip,
   downloadVersionZip,
@@ -12,7 +13,6 @@ import {
   deleteVersionZip,
   buildMinimalZip,
 } from "./package-storage.ts";
-import { BundleSignatureError } from "./run-launcher/bundle-signature-policy.ts";
 import { unzipPackageArchive } from "./package-archive.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { computeIntegrity } from "@appstrate/core/integrity";
@@ -28,6 +28,7 @@ import {
 import { planCreateVersionOutcome, planTagReassignment } from "@appstrate/core/version-policy";
 
 import { parseScopedName } from "@appstrate/core/naming";
+import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import { dropRetiredRuntimeTools, type PackageType } from "@appstrate/core/validation";
 import { parsePackageZip, zipArtifact } from "@appstrate/core/zip";
 import { asRecord, asRecordOrNull } from "@appstrate/core/safe-json";
@@ -37,6 +38,7 @@ import { toISO } from "../lib/date-helpers.ts";
 import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
 import { withPackageDraftLock } from "./package-draft-lock.ts";
+import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 
 // ─────────────────────────────────────────────
 // Version creation
@@ -306,11 +308,10 @@ export async function getVersionForDownload(
 // Version detail
 // ─────────────────────────────────────────────
 
-interface VersionDetail {
+export interface VersionDetail {
   id: number;
   version: string;
   manifest: Record<string, unknown>;
-  prompt: string | null;
   content: Record<string, Uint8Array> | null;
   yanked: boolean;
   yankedReason: string | null;
@@ -320,8 +321,8 @@ interface VersionDetail {
 }
 
 /**
- * Resolve a version query and return full version data including text content extracted from ZIP.
- * Returns null if the version cannot be resolved.
+ * Resolve a version query and return full version data including the files of its ZIP.
+ * Returns null if the version cannot be resolved. See {@link readVersionArchive} for `content`.
  */
 export async function getVersionDetail(
   packageId: string,
@@ -329,6 +330,16 @@ export async function getVersionDetail(
   /** The version will run: apply the AFPS signature policy to its bytes. */
   opts: { forExecution?: boolean } = {},
 ): Promise<VersionDetail | null> {
+  const row = await getVersionRow(packageId, versionSpec);
+  if (!row) return null;
+  return { ...row, content: await readVersionArchive(packageId, row.version, opts) };
+}
+
+/** A version's catalog row — {@link getVersionDetail} without reading its archive. */
+export async function getVersionRow(
+  packageId: string,
+  versionSpec: string,
+): Promise<Omit<VersionDetail, "content"> | null> {
   const versionId = await resolveVersion(packageId, versionSpec);
   if (!versionId) return null;
 
@@ -348,45 +359,97 @@ export async function getVersionDetail(
     .limit(1);
 
   if (!row) return null;
-
-  // Try to download and extract ZIP content
-  let prompt: string | null = null;
-  let content: Record<string, Uint8Array> | null = null;
-
-  const download = opts.forExecution ? downloadVersionZipForExecution : downloadVersionZip;
-  try {
-    const zipBuffer = await download(packageId, row.version);
-    if (zipBuffer) {
-      const files = unzipPackageArchive(zipBuffer);
-      content = files;
-      // Extract prompt.md from ZIP
-      const promptData = files["prompt.md"];
-      if (promptData) {
-        prompt = new TextDecoder().decode(promptData);
-      }
-    }
-  } catch (err) {
-    // A policy refusal must stop the run, not degrade it to a prompt-less one.
-    if (err instanceof BundleSignatureError) throw err;
-    logger.warn("Failed to extract ZIP for version detail", {
-      packageId,
-      version: row.version,
-      error: getErrorMessage(err),
-    });
-  }
-
   return {
     id: row.id,
     version: row.version,
     manifest: asRecord(row.manifest),
-    prompt,
-    content,
     yanked: row.yanked,
     yankedReason: row.yankedReason,
     integrity: row.integrity,
     artifactSize: row.artifactSize,
     createdAt: toISO(row.createdAt),
   };
+}
+
+/**
+ * A published version's files: null when the object is absent or will not unzip — a
+ * reader that needs the bytes goes through {@link requirePublishedArchive}. Storage errors
+ * propagate; bundle-layer refusals (the signature gate of an execution read) are coded (#878).
+ */
+export async function readVersionArchive(
+  packageId: string,
+  version: string,
+  /** The version will run: apply the AFPS signature policy to its bytes. */
+  opts: { forExecution?: boolean } = {},
+): Promise<Record<string, Uint8Array> | null> {
+  const download = opts.forExecution ? downloadVersionZipForExecution : downloadVersionZip;
+  let zipBuffer: Buffer | null;
+  try {
+    zipBuffer = await download(packageId, version);
+  } catch (err) {
+    throw toBundleApiError(err) ?? err;
+  }
+  if (!zipBuffer) return null;
+  try {
+    return unzipPackageArchive(zipBuffer);
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    logger.warn("Failed to extract ZIP for version detail", {
+      packageId,
+      version,
+      error: getErrorMessage(err),
+    });
+    return null;
+  }
+}
+
+/**
+ * `422 version_artifact_unavailable`: a version that EXISTS but whose bytes cannot be
+ * read — a broken artifact, never a missing version. The only place this refusal is
+ * built, so the one place it is logged for ops.
+ */
+export function versionArtifactUnavailable(
+  packageId: string,
+  version: string,
+  what = "archive",
+): ApiError {
+  logger.warn("Published version artifact unavailable", { packageId, version, what });
+  return new ApiError({
+    status: 422,
+    code: "version_artifact_unavailable",
+    title: "Version Artifact Unavailable",
+    detail: `Published '${packageId}@${version}' has no readable ${what}`,
+  });
+}
+
+/**
+ * The archive of a published version, or {@link versionArtifactUnavailable} when it is
+ * unreadable or lacks its type's REQUIRED content entry (`PACKAGE_CONTENT_ENTRY`).
+ * `entry` is that entry's bytes; `undefined` when the type has none or the optional one is absent.
+ */
+export function requirePublishedArchive(
+  type: PackageType,
+  packageId: string,
+  detail: Pick<VersionDetail, "version" | "content">,
+): { files: Record<string, Uint8Array>; entry: Uint8Array | undefined } {
+  if (detail.content === null) throw versionArtifactUnavailable(packageId, detail.version);
+  const spec = PACKAGE_CONTENT_ENTRY[type];
+  const entry = spec ? detail.content[spec.path] : undefined;
+  if (spec?.required && !entry) {
+    throw versionArtifactUnavailable(packageId, detail.version, `'${spec.path}' in its archive`);
+  }
+  return { files: detail.content, entry };
+}
+
+/**
+ * The decoded `prompt.md` of a published agent version, via {@link requirePublishedArchive},
+ * which refuses a version without one (`prompt.md` is required for an agent).
+ */
+export function requirePublishedPrompt(
+  packageId: string,
+  detail: Pick<VersionDetail, "version" | "content">,
+): string {
+  return new TextDecoder().decode(requirePublishedArchive("agent", packageId, detail).entry);
 }
 
 /** Count the number of published versions for a package. */

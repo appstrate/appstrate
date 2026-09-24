@@ -21,6 +21,7 @@ import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import { zipArtifact, PACKAGE_ZIP_MAX_COMPRESSED_BYTES } from "@appstrate/core/zip";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
+import { expectProblem } from "../../helpers/assertions.ts";
 import {
   addOrgMember,
   authHeaders,
@@ -515,6 +516,23 @@ describe("package file explorer", () => {
         );
         // Two 54 MB decompressions on one request pair: the work IS the subject,
         // so it sits above bun's 5 s default rather than failing on machine load.
+      },
+      CEILING_TEST_TIMEOUT_MS,
+    );
+
+    it(
+      "refuses the same artifact on the version-detail route, naming the ceiling",
+      async () => {
+        await seedVersionExpandingTo(6, 9);
+
+        // Version detail reads through `getVersionDetail`, not the explorer's
+        // snapshot. The ceiling refusal must survive that path as itself, not be
+        // flattened into "no readable archive".
+        const res = await app.request(`/api/packages/agents/${id}/versions/1.0.0`, {
+          headers: authHeaders(ctx),
+        });
+        const problem = await expectProblem(res, 422, { code: "package_archive_unreadable" });
+        expect(problem.detail).toContain("50 MB");
       },
       CEILING_TEST_TIMEOUT_MS,
     );
@@ -1061,7 +1079,8 @@ describe("package file explorer", () => {
       await seedPackageShare(ctx.defaultSpaceId, id);
       await seedSpacePackage(ctx.defaultSpaceId, id);
       // A version row WITHOUT its artifact in storage. Any code path that
-      // downloads the ZIP to answer the request must fail loudly.
+      // downloads the ZIP to answer the request fails loudly, with
+      // `422 version_artifact_unavailable`.
       await seedPackageVersion({
         packageId: id,
         version: "1.0.0",
@@ -1071,9 +1090,9 @@ describe("package file explorer", () => {
       });
     });
 
-    it("404s an unconditional read — proving the artifact really is absent", async () => {
+    it("422s an unconditional read — proving the artifact really is absent", async () => {
       const { res } = await listFiles(ctx, id, "?version=1.0.0");
-      expect(res.status).toBe(404);
+      await expectProblem(res, 422, { code: "version_artifact_unavailable" });
     });
 
     it("304s a conditional index read WITHOUT downloading the artifact", async () => {
@@ -1099,23 +1118,23 @@ describe("package file explorer", () => {
     });
 
     it("does not short-circuit the content route on another file's tag", async () => {
-      // No per-file match ⇒ it must go read the artifact, which is absent ⇒ 404.
-      // The important part is that it is NOT a 304.
+      // No per-file match ⇒ it must go read the artifact, which is absent ⇒
+      // 422. That refusal is only reachable from storage, so it is NOT a 304.
       const res = await app.request(
         `/api/packages/${id}/files/content?path=prompt.md&version=1.0.0`,
         { headers: authHeaders(ctx, { "If-None-Match": fileTag(integrity, "other.md") }) },
       );
-      expect(res.status).toBe(404);
+      await expectProblem(res, 422, { code: "version_artifact_unavailable" });
     });
 
     it("does not short-circuit the content route on a bare wildcard", async () => {
       // `*` says nothing about WHICH path, so it cannot stand in for "this file
-      // exists". It must fall through to the read (which 404s here).
+      // exists". It must fall through to the read (which 422s here).
       const res = await app.request(
         `/api/packages/${id}/files/content?path=prompt.md&version=1.0.0`,
         { headers: authHeaders(ctx, { "If-None-Match": "*" }) },
       );
-      expect(res.status).toBe(404);
+      await expectProblem(res, 422, { code: "version_artifact_unavailable" });
     });
 
     it("does not short-circuit the content route on the INDEX tag", async () => {
@@ -1123,7 +1142,7 @@ describe("package file explorer", () => {
         `/api/packages/${id}/files/content?path=prompt.md&version=1.0.0`,
         { headers: authHeaders(ctx, { "If-None-Match": `"i-pv-${integrity}"` }) },
       );
-      expect(res.status).toBe(404);
+      await expectProblem(res, 422, { code: "version_artifact_unavailable" });
     });
 
     it("still 404s an unknown version before any storage access", async () => {

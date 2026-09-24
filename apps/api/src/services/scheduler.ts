@@ -558,8 +558,9 @@ export async function triggerScheduledRun(
     // Same resolver as a manual run: the schedule's own `version_override`, or
     // the latest published version when it has none. No authority check — the
     // principal who created the schedule proved it then (`routes/schedules.ts`),
-    // and this path has no Hono context to re-ask with. A missing version
-    // produces a visible failed run.
+    // and this path has no Hono context to re-ask with. Every resolution failure
+    // (missing version, unreadable archive, storage outage) produces a visible
+    // failed run.
     let agent: LoadedPackage;
     let overrideVersionLabel: string | undefined;
     try {
@@ -577,7 +578,14 @@ export async function triggerScheduledRun(
         await failSchedule(err.message);
         return;
       }
-      throw err;
+      // Storage/SDK/programming error text stays in the log: the run row is user-visible.
+      logger.error("Schedule version resolution threw, recording a failed run", {
+        scheduleId,
+        packageId,
+        error: getErrorMessage(err),
+      });
+      await failSchedule("The scheduled version could not be loaded (internal error)");
+      return;
     }
 
     // Per-space settings: editor defaults + locked fields for the input

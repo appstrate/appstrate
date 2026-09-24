@@ -52,6 +52,11 @@ import { assertIfMatch, ifNoneMatchSatisfied, setEtag } from "../lib/conditional
 import { isValidVersion } from "@appstrate/core/semver";
 import {
   getVersionDetail,
+  getVersionRow,
+  readVersionArchive,
+  requirePublishedArchive,
+  versionArtifactUnavailable,
+  type VersionDetail,
   getVersionCount,
   getMatchingDistTags,
   listPackageVersions,
@@ -876,11 +881,9 @@ async function loadOrgItemOr404(rcfg: PackageRouteConfig, orgId: string, itemId:
  * reproduces that rather than handing back a `null` the editor would render as
  * an empty file.
  *
- * That fallback stands for an entry MISSING FROM AN ARCHIVE THAT OPENED, and
- * for nothing else. An archive the storage cannot produce at all is a broken
- * artifact for every type, and gets the same `422 version_artifact_unavailable`
- * the run path answers for a published agent with no readable prompt — as does
- * an archive that opened without a REQUIRED entry (`prompt.md`, `SKILL.md`).
+ * That fallback stands only for an entry missing from an archive that opened:
+ * an unreadable archive, or one without a REQUIRED entry, is refused by
+ * {@link requirePublishedArchive} — the same 422 the run and restore paths answer.
  */
 async function loadPublishedDefinition(
   type: PackageType,
@@ -890,38 +893,7 @@ async function loadPublishedDefinition(
   const detail = await getVersionDetail(packageId, spec);
   if (!detail) throw notFound(`Version '${spec}' not found`);
   const m = asRecord(detail.manifest);
-  const entry = PACKAGE_CONTENT_ENTRY[type];
-  // TWO different failures, and only the first is a failure at all.
-  //
-  // `getVersionDetail` CATCHES a storage or unzip failure and answers
-  // `content: null` rather than throwing, so that null is the ONLY evidence
-  // that the published bytes could not be read — and it is type-independent.
-  // Asking the per-type entry FIRST made this 422 unreachable for the two types
-  // that have no REQUIRED entry — `integration` (`INTEGRATION.md` is optional)
-  // and `mcp-server` (no entry at all): an archive nothing could open answered
-  // 200 with the manifest text as `content` and `definition: "published"`, i.e.
-  // other bytes than the published ones, presented as the published ones.
-  if (detail.content === null) {
-    throw new ApiError({
-      status: 422,
-      code: "version_artifact_unavailable",
-      title: "Version Artifact Unavailable",
-      detail: `Published '${packageId}@${detail.version}' has no readable archive`,
-    });
-  }
-  const bytes = entry ? detail.content[entry.path] : undefined;
-  // The archive OPENED and the entry is not in it. For a REQUIRED entry that is
-  // a broken artifact and gets the same 422; for an optional one — or a type
-  // with no content entry — it is the normal published shape, and the manifest
-  // text below is the definition, exactly as `applyDraftOverlay` stores it.
-  if (entry?.required && !bytes) {
-    throw new ApiError({
-      status: 422,
-      code: "version_artifact_unavailable",
-      title: "Version Artifact Unavailable",
-      detail: `Published '${packageId}@${detail.version}' has no readable '${entry.path}' in its archive`,
-    });
-  }
+  const { entry } = requirePublishedArchive(type, packageId, detail);
   return {
     // Same projection `getOrgItem` runs over the draft manifest, field for
     // field: a reader must not be able to tell which definition answered by
@@ -931,7 +903,7 @@ async function loadPublishedDefinition(
     version: typeof m.version === "string" ? m.version : null,
     manifest_name: typeof m.name === "string" ? m.name : null,
     manifest: m,
-    content: bytes ? decodeSkillMarkdown(bytes) : JSON.stringify(m, null, 2),
+    content: entry ? decodeSkillMarkdown(entry) : JSON.stringify(m, null, 2),
   };
 }
 
@@ -1286,28 +1258,20 @@ function makeListVersionsHandler(rcfg: PackageRouteConfig) {
 
 /**
  * Build the canonical version detail DTO — the exact object the `GET` version
- * detail endpoint serializes. Reused by the version create / restore endpoints
- * so they echo the resulting version resource instead of an id/message stub
- * (issue #646). Returns `null` when the version query resolves nothing.
+ * detail endpoint serializes. Reused by the version create endpoint so it
+ * echoes the resulting version resource instead of an id/message stub (issue
+ * #646). Refuses nothing: `content` is null when `detail.content` is (the GET
+ * handler refuses an unreadable archive before calling this; the create echo
+ * does not).
  */
 async function buildVersionDetailDto(
   rcfg: PackageRouteConfig,
   itemId: string,
-  versionSpec: string,
-): Promise<Record<string, unknown> | null> {
-  const detail = await getVersionDetail(itemId, versionSpec);
-  if (!detail) return null;
-
+  detail: VersionDetail,
+): Promise<Record<string, unknown>> {
   const matchingTags = await getMatchingDistTags(itemId, detail.version);
-
-  // Extract primary content file from the ZIP
-  let content: string | null = null;
-  if (detail.content) {
-    const fileData = detail.content[rcfg.storageFileName];
-    if (fileData) {
-      content = new TextDecoder().decode(fileData);
-    }
-  }
+  const fileData = detail.content?.[rcfg.storageFileName];
+  const content = fileData ? new TextDecoder().decode(fileData) : null;
 
   return {
     id: detail.id,
@@ -1332,12 +1296,13 @@ function makeVersionDetailHandler(rcfg: PackageRouteConfig) {
     await loadOrgItemOr404(rcfg, orgId, itemId);
     await assertCatalogPackageAccess(c, itemId);
 
-    const dto = await buildVersionDetailDto(rcfg, itemId, versionSpec);
-    if (!dto) {
+    const detail = await getVersionDetail(itemId, versionSpec);
+    if (!detail) {
       throw notFound(`Version '${versionSpec}' not found`);
     }
+    requirePublishedArchive(rcfg.cfg.type, itemId, detail);
 
-    return c.json(dto);
+    return c.json(await buildVersionDetailDto(rcfg, itemId, detail));
   };
 }
 
@@ -1420,14 +1385,24 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
 
     // Return the created version resource bare — same DTO/serializer as the
     // GET version detail — so callers see the snapshot (manifest, integrity,
-    // dist_tags, …) without a follow-up GET (issue #657). `id` (version row
-    // id) and `version` are part of the resource.
-    const detail = await buildVersionDetailDto(rcfg, itemId, result.version);
-    if (!detail) {
+    // dist_tags, …) without a follow-up GET (issue #657). The version is
+    // committed: a row that cannot be re-read is a 500, but bytes that cannot be
+    // read back (storage, signature policy) only null `content` — never an error
+    // answer to a successful write.
+    const row = await getVersionRow(itemId, result.version);
+    if (!row) {
       logger.error("Created version could not be re-read", { packageId: itemId, orgId });
       throw internalError();
     }
-    return c.json(detail, 201);
+    const content = await readVersionArchive(itemId, row.version).catch((err: unknown) => {
+      logger.warn("Created version archive could not be read back", {
+        packageId: itemId,
+        version: row.version,
+        error: getErrorMessage(err),
+      });
+      return null;
+    });
+    return c.json(await buildVersionDetailDto(rcfg, itemId, { ...row, content }), 201);
   };
 }
 
@@ -1453,29 +1428,17 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       throw notFound(`${rcfg.cfg.labelSingular} '${itemId}' not found`);
     }
 
-    // Extract `packages.draft_content` from the version ZIP.
-    //
-    // The column mirrors the archive's CONTENT ENTRY (`PACKAGE_CONTENT_ENTRY`),
-    // NOT the file this type's editor `content` is stored under
-    // (`rcfg.storageFileName`). The two names agree for `agent`/`skill` and
-    // DIVERGE for `integration`, whose column holds the optional
-    // `INTEGRATION.md` while its editor content is `manifest.json` — reading
-    // the storage name restored a manifest copy over the docs, the exact
-    // overload `parsePackageZip` avoids. Falling back to the storage name
-    // reproduces that parser's own manifest-text fallback for a bundle that
-    // ships no companion, and is a no-op for the three types whose two names
-    // already coincide.
-    const contentEntryPath = PACKAGE_CONTENT_ENTRY[rcfg.cfg.type]?.path;
-    let content = detail.prompt ?? "";
-    if (detail.content) {
-      const fileData =
-        (contentEntryPath ? detail.content[contentEntryPath] : undefined) ??
-        detail.content[rcfg.storageFileName];
-      if (fileData) {
-        // BOM-preserving: gated below AND written back as the draft.
-        content = decodeSkillMarkdown(fileData);
-      }
-    }
+    // Before any write: a published version is an integrity-checked archive by
+    // construction, so one that cannot be read is refused, never restored as an
+    // empty draft.
+    const { files, entry } = requirePublishedArchive(rcfg.cfg.type, itemId, detail);
+    // `packages.draft_content` mirrors the archive's CONTENT ENTRY, not the file
+    // the editor's `content` is stored under (`rcfg.storageFileName`): the two
+    // diverge for `integration`, whose column holds the optional `INTEGRATION.md`.
+    // Without that entry the column holds the manifest text, as `parsePackageZip`
+    // stores it. BOM-preserving: gated below AND written back as the draft.
+    const fileData = entry ?? files[rcfg.storageFileName];
+    const content = fileData ? decodeSkillMarkdown(fileData) : "";
 
     // A restore WRITES authored content. Before the write below, so a
     // violation leaves both stores untouched.
@@ -1486,17 +1449,14 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       asRecord(detail.manifest),
       asRecord(existing.manifest),
     );
-    // Restores share the writer lock and replace the complete tree when the
-    // version has one. Legacy metadata-only versions leave existing files alone.
+    // Restores share the writer lock and replace the complete tree.
     await mutatePackageDraftFiles(
       { id: itemId, type: rcfg.cfg.type, orgId },
       {
         precondition: { assertVersion: (current) => assertIfMatch(c, current) },
         manifest: asRecord(detail.manifest),
         draftContent: content,
-        ...(detail.content
-          ? { replace: detail.content }
-          : { mutate: (files: Record<string, Uint8Array>) => files }),
+        replace: files,
       },
     );
 
@@ -3093,9 +3053,7 @@ export function createPackagesRouter() {
     } catch {
       throw internalError();
     }
-    if (!data) {
-      throw notFound("Artifact not found in storage");
-    }
+    if (!data) throw versionArtifactUnavailable(packageId, ver.version);
 
     const downloadHeaders = buildDownloadHeaders({
       integrity: ver.integrity,

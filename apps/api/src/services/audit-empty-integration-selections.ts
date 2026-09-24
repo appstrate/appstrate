@@ -32,7 +32,7 @@ import { spacePackages, packageVersions, packages, schedules } from "@appstrate/
 import { eq, and } from "drizzle-orm";
 
 import { validateAgentIntegrationSelections } from "./integration-scope-validation.ts";
-import { getLatestVersionInfo, getVersionDetail } from "./package-versions.ts";
+import { getLatestVersionInfo, getVersionRow } from "./package-versions.ts";
 import { isPackageActiveHere } from "./space-packages.ts";
 
 interface Finding {
@@ -103,7 +103,7 @@ async function emptySelections(
  * (`resolveAgentRunVersion` in `./agent-version-resolver.ts`): absent or
  * `"published"` means the LATEST PUBLISHED version — never the draft — `"draft"`
  * means the working copy, and anything else is an exact version, a dist-tag, or
- * a semver range resolved through `getVersionDetail`.
+ * a semver range resolved through `getVersionRow`.
  *
  * Getting this backwards is what made the first version of this audit
  * untrustworthy: it read an absent override as "draft", so a schedule that in
@@ -125,8 +125,8 @@ async function scheduleArtifactLabel(
     return latest?.version ?? null;
   }
   // Exact version, dist-tag, or semver range — one resolver, same as the run.
-  const detail = await getVersionDetail(packageId, sel);
-  return detail?.version ?? null;
+  const row = await getVersionRow(packageId, sel);
+  return row?.version ?? null;
 }
 
 /**

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { etagVersion, ifMatch } from "../../helpers/etag.ts";
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { zipSync } from "fflate";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -35,13 +35,20 @@ import {
   buildMinimalZip,
   uploadPackageZip,
   downloadVersionZip,
+  deleteVersionZip,
 } from "../../../src/services/package-storage.ts";
 import { unzipPackageArchive } from "../../../src/services/package-archive.ts";
+import {
+  AGENT_PACKAGES_BUCKET,
+  versionZipKey,
+} from "../../../src/services/package-storage-keys.ts";
+import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { zipArtifact, PACKAGE_ZIP_MAX_COMPRESSED_BYTES } from "@appstrate/core/zip";
 import { auditEvents, packages, packageDistTags, packageVersions } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import { db } from "../../helpers/db.ts";
+import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 
 const app = getTestApp();
 
@@ -3226,6 +3233,191 @@ describe("Packages API", () => {
       expect(body.restored_version).toBeUndefined();
     });
 
+    it("POST restore refuses a version whose archive is gone, before any write", async () => {
+      const id = "@pkgorg/restore-unreadable";
+      const create = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ manifest: agentManifest(id), content: "v1 prompt" }),
+      });
+      expect(create.status).toBe(201);
+      await deleteVersionZip(id, "0.1.0");
+
+      // Move the draft away from 0.1.0 so an applied restore would show.
+      const edited = await app.request(`/api/packages/agents/${id}`, {
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(etagVersion(create)),
+        }),
+        body: JSON.stringify({
+          manifest: { ...agentManifest(id), description: "Edited since 0.1.0" },
+          content: "draft since 0.1.0",
+        }),
+      });
+      expect(edited.status).toBe(200);
+
+      const draftOf = async () => {
+        const [row] = await db
+          .select({
+            draftContent: packages.draftContent,
+            draftManifest: packages.draftManifest,
+            lockVersion: packages.lockVersion,
+            updatedAt: packages.updatedAt,
+          })
+          .from(packages)
+          .where(eq(packages.id, id));
+        return row!;
+      };
+      const before = await draftOf();
+      expect(before.draftContent).toBe("draft since 0.1.0");
+
+      const res = await app.request(`/api/packages/agents/${id}/versions/0.1.0/restore`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+      });
+      await expectProblem(res, 422, { code: "version_artifact_unavailable" });
+
+      // The old handler answered 200 here and wrote an EMPTY draft over this one.
+      expect(await draftOf()).toEqual(before);
+    });
+
+    it("GET version detail refuses a version whose archive is gone", async () => {
+      const id = "@pkgorg/detail-unreadable";
+      const create = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ manifest: agentManifest(id), content: "v1 prompt" }),
+      });
+      expect(create.status).toBe(201);
+      await deleteVersionZip(id, "0.1.0");
+
+      // Previously 200 with `content: null`, indistinguishable from an empty version.
+      const res = await app.request(`/api/packages/agents/${id}/versions/0.1.0`, {
+        headers: authHeaders(ctx),
+      });
+      await expectProblem(res, 422, { code: "version_artifact_unavailable" });
+    });
+
+    it("GET version detail refuses a version whose archive does not unzip", async () => {
+      const id = "@pkgorg/detail-corrupt";
+      const create = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ manifest: agentManifest(id), content: "v1 prompt" }),
+      });
+      expect(create.status).toBe(201);
+      // The object exists, so this is the unzip half of the unreadable case.
+      await uploadPackageZip(id, "0.1.0", new TextEncoder().encode("not a zip archive"));
+
+      const res = await app.request(`/api/packages/agents/${id}/versions/0.1.0`, {
+        headers: authHeaders(ctx),
+      });
+      await expectProblem(res, 422, { code: "version_artifact_unavailable" });
+    });
+
+    it("GET version detail refuses a corrupt archive the same way under a required signature policy", async () => {
+      const id = "@pkgorg/detail-corrupt-signed";
+      const create = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ manifest: agentManifest(id), content: "v1 prompt" }),
+      });
+      expect(create.status).toBe(201);
+      await uploadPackageZip(id, "0.1.0", new TextEncoder().encode("not a zip archive"));
+
+      // The signature policy gates EXECUTION reads only; a display read of a
+      // broken archive is the artifact refusal whatever the policy says. The gate's
+      // own coded refusal on a run door is covered in runs-remote-registry.test.ts.
+      const saved = process.env.AFPS_SIGNATURE_POLICY;
+      process.env.AFPS_SIGNATURE_POLICY = "required";
+      resetEnvCache();
+      try {
+        const res = await app.request(`/api/packages/agents/${id}/versions/0.1.0`, {
+          headers: authHeaders(ctx),
+        });
+        await expectProblem(res, 422, { code: "version_artifact_unavailable" });
+      } finally {
+        if (saved === undefined) delete process.env.AFPS_SIGNATURE_POLICY;
+        else process.env.AFPS_SIGNATURE_POLICY = saved;
+        resetEnvCache();
+      }
+    });
+
+    it("POST versions answers 201 for a committed publish whose bytes cannot be read back", async () => {
+      const id = "@pkgorg/publish-unreadable-echo";
+      const headers = authHeaders(ctx, { "Content-Type": "application/json" });
+      const create = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ manifest: agentManifest(id), content: "v1 prompt" }),
+      });
+      expect(create.status).toBe(201);
+      const edited = await app.request(`/api/packages/agents/${id}`, {
+        method: "PATCH",
+        headers: { ...headers, ...ifMatch(etagVersion(create)) },
+        body: JSON.stringify({ content: "v2 prompt" }),
+      });
+      expect(edited.status).toBe(200);
+
+      // Storage fails reading the NEW version back, after the publish committed.
+      // The version exists: a 5xx here would tell the caller to retry a publish
+      // that already happened.
+      const newKey = versionZipKey(id, "0.2.0");
+      const original = storage.downloadFile;
+      const downloadSpy = spyOn(storage, "downloadFile").mockImplementation(
+        async (bucket, path) => {
+          if (bucket === AGENT_PACKAGES_BUCKET && path === newKey) {
+            throw new Error("storage unreachable");
+          }
+          return original(bucket, path);
+        },
+      );
+      try {
+        const res = await app.request(`/api/packages/agents/${id}/versions`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ version: "0.2.0" }),
+        });
+        expect(res.status, await res.clone().text()).toBe(201);
+        const body = (await res.json()) as { version: string; content: unknown };
+        expect(body.version).toBe("0.2.0");
+        expect(body.content).toBeNull();
+        // The fault was injected on the read-back, not somewhere unrelated.
+        expect(downloadSpy.mock.calls.some(([, path]) => path === newKey)).toBe(true);
+      } finally {
+        downloadSpy.mockRestore();
+      }
+      await assertDbHas(
+        packageVersions,
+        and(eq(packageVersions.packageId, id), eq(packageVersions.version, "0.2.0"))!,
+      );
+    });
+
+    it("bundle export, file explorer and download refuse a version whose archive is gone", async () => {
+      const id = "@pkgorg/doors-unreadable";
+      const create = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ manifest: agentManifest(id), content: "v1 prompt" }),
+      });
+      expect(create.status).toBe(201);
+      await deleteVersionZip(id, "0.1.0");
+
+      // Previously a 404 ("Artifact missing…" / "Artifact not found in storage"),
+      // which read as "no such version" rather than a broken published artifact.
+      for (const path of [
+        `/api/agents/${id}/bundle`,
+        `/api/agents/${id}/bundle?version=0.1.0`,
+        `/api/packages/${id}/files?version=0.1.0`,
+        `/api/packages/${id}/0.1.0/download`,
+      ]) {
+        const res = await app.request(path, { headers: authHeaders(ctx) });
+        const body = await expectProblem(res, 422);
+        expect(`${path}: ${body.code}`).toBe(`${path}: version_artifact_unavailable`);
+      }
+    });
+
     it("POST versions refuses a stale If-Match and cuts the draft it names", async () => {
       const headers = authHeaders(ctx, { "Content-Type": "application/json" });
       const create = await app.request("/api/packages/agents", {
@@ -3891,6 +4083,54 @@ describe("Packages API", () => {
       // The refusal lands while READING the source — before the collision check
       // and before any insert — so there is no half-made fork to clean up.
       await assertDbMissing(packages, eq(packages.id, "@pkgorg/high-ratio-agent"));
+    });
+  });
+
+  describe("POST fork — source archive unavailable", () => {
+    it("422s on a published source whose ZIP is gone, and mints nothing", async () => {
+      const srcCtx = await createTestContext({ orgSlug: "forkgone" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
+      const sourceId = "@forkgone/lost-agent";
+      const manifest = {
+        name: sourceId,
+        version: "0.1.0",
+        type: "agent",
+        schema_version: "0.1",
+        display_name: "Lost Archive",
+        description: "Published source whose artifact left storage",
+      };
+      await seedPackage({
+        id: sourceId,
+        orgId: srcCtx.orgId,
+        type: "agent",
+        draftManifest: manifest,
+        draftContent: "source prompt",
+      });
+      const zip = buildMinimalZip(manifest, "source prompt");
+      await uploadPackageZip(sourceId, "0.1.0", zip);
+      const row = await seedPackageVersion({
+        packageId: sourceId,
+        version: "0.1.0",
+        manifest,
+        integrity: computeIntegrity(new Uint8Array(zip)),
+        artifactSize: zip.byteLength,
+      });
+      await db
+        .insert(packageDistTags)
+        .values({ packageId: sourceId, tag: "latest", versionId: row.id });
+      await deleteVersionZip(sourceId, "0.1.0");
+
+      const res = await app.request(`/api/packages/${sourceId}/fork`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({}),
+      });
+
+      // A version EXISTS: the old `400 invalid_request` ("no published version")
+      // sent the caller looking for a publish that had already happened.
+      await expectProblem(res, 422, { code: "version_artifact_unavailable" });
+      await assertDbMissing(packages, eq(packages.id, "@pkgorg/lost-agent"));
+      await assertDbMissing(packageVersions, eq(packageVersions.packageId, "@pkgorg/lost-agent"));
     });
   });
 });

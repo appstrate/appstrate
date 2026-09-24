@@ -222,6 +222,7 @@ export const schedulesPaths = {
           description:
             "`no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{spaceId}/packages`).",
         },
+        "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -386,6 +387,7 @@ export const schedulesPaths = {
         // revalidating onto a never-published agent gets `no_published_version`
         // here too. The shared component's description names both.
         "404": { $ref: "#/components/responses/NoPublishedVersion" },
+        "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
       },
     },
     delete: {

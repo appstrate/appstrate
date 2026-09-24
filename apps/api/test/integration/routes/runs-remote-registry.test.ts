@@ -26,10 +26,17 @@ import {
 } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion, seedSpaceMember } from "../../helpers/seed.ts";
 import { activatePackage, updateSpacePackage } from "../../../src/services/space-packages.ts";
-import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
+import {
+  buildMinimalZip,
+  deleteVersionZip,
+  uploadPackageZip,
+} from "../../../src/services/package-storage.ts";
 import { runs, packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
 import { validateManifest } from "@appstrate/core/validation";
 import { and } from "drizzle-orm";
+import { expectProblem } from "../../helpers/assertions.ts";
+import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
+import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 
 const app = getTestApp();
 
@@ -53,7 +60,7 @@ function publishedManifest(version = "1.2.3") {
  * Publish `manifest` as `@acme/briefing@version` and install it in the default
  * space: draft row, version row, `latest` dist-tag (a thin `seedPackageVersion`
  * INSERT does not write one, but the unspecified-spec resolution path needs it)
- * and the artefact bytes `getVersionDetail` extracts the prompt from.
+ * and the artefact bytes the resolver reads the prompt from.
  */
 async function seedRegistryAgent(
   ctx: TestContext,
@@ -585,6 +592,94 @@ describe("POST /api/runs/remote — kind: registry", () => {
     expect(res.status).toBe(410);
     const body = (await res.json()) as { code?: string };
     expect(body.code).toBe("version_yanked");
+  });
+
+  // #1533: a published version whose archive cannot be read has no prompt. The
+  // resolver must refuse it as `422 version_artifact_unavailable` — the platform
+  // run route's answer — instead of handing `""` to readiness, which blamed the
+  // author (`400 empty_prompt`) or, with an unconnected integration, the caller
+  // (`409`), hiding the storage fault either way.
+  describe("unreadable published artifact", () => {
+    const INTEG = "@acme/svc";
+
+    function launch() {
+      return post({
+        source: {
+          kind: "registry",
+          packageId: "@acme/briefing",
+          stage: "published",
+          spec: "1.2.3",
+        },
+        spaceId: ctx.defaultSpaceId,
+        input: {},
+      });
+    }
+
+    it("refuses a version whose ZIP is gone with 422, never running the draft", async () => {
+      await seedPublishedAgent(ctx, "1.2.3");
+      await deleteVersionZip("@acme/briefing", "1.2.3");
+      // The seeded draft is runnable (non-empty prompt): the 422 and zero run
+      // rows prove it was not substituted for the missing version.
+      await expectProblem(await launch(), 422, { code: "version_artifact_unavailable" });
+      expect(await db.select().from(runs).where(eq(runs.packageId, "@acme/briefing"))).toHaveLength(
+        0,
+      );
+    });
+
+    it("keeps the signature gate's coded 422 when a required policy parses a corrupt archive", async () => {
+      await seedPublishedAgent(ctx, "1.2.3");
+      await uploadPackageZip("@acme/briefing", "1.2.3", new TextEncoder().encode("not a zip"));
+      // A run is an EXECUTION read, so `required` parses the bytes before the
+      // unzip: the failure is a bundle-layer throw, coded — never an uncoded 500.
+      const saved = process.env.AFPS_SIGNATURE_POLICY;
+      process.env.AFPS_SIGNATURE_POLICY = "required";
+      resetEnvCache();
+      try {
+        await expectProblem(await launch(), 422, { code: "bundle_invalid" });
+      } finally {
+        if (saved === undefined) delete process.env.AFPS_SIGNATURE_POLICY;
+        else process.env.AFPS_SIGNATURE_POLICY = saved;
+        resetEnvCache();
+      }
+      expect(await db.select().from(runs).where(eq(runs.packageId, "@acme/briefing"))).toHaveLength(
+        0,
+      );
+    });
+
+    it("reports the unreadable artifact ahead of a missing integration connection", async () => {
+      await seedPackage({
+        id: INTEG,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: localIntegrationManifest({
+          name: INTEG,
+          auths: { primary: { type: "api_key" } },
+          tools_policy: { search: {} },
+        }),
+      });
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEG);
+      await seedRegistryAgent(
+        ctx,
+        {
+          ...publishedManifest("1.2.3"),
+          dependencies: { skills: {}, mcp_servers: {}, integrations: { [INTEG]: "^1.0.0" } },
+          integrations_configuration: { [INTEG]: { tools: ["search"] } },
+        } as unknown as Record<string, unknown>,
+        "1.2.3",
+      );
+
+      // Control: with the archive intact, the same launch is the 409 — so the
+      // 422 below is precedence, not an integration the fixture failed to declare.
+      await expectProblem(await launch(), 409, { code: "missing_integration_connection" });
+
+      await deleteVersionZip("@acme/briefing", "1.2.3");
+      await expectProblem(await launch(), 422, { code: "version_artifact_unavailable" });
+      expect(await db.select().from(runs).where(eq(runs.packageId, "@acme/briefing"))).toHaveLength(
+        0,
+      );
+    });
   });
 
   it("rejects `stage: draft` combined with a spec (400)", async () => {

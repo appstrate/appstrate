@@ -15,7 +15,7 @@ import { conflict, notFound } from "../lib/errors.ts";
 import { downloadPackageFiles, uploadPackageFiles } from "./package-items/storage.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import { unzipPackageArchive } from "./package-archive.ts";
-import { getVersionForDownload } from "./package-versions.ts";
+import { getVersionForDownload, versionArtifactUnavailable } from "./package-versions.ts";
 import { withPackageDraftLock } from "./package-draft-lock.ts";
 import {
   CONFIG_BY_TYPE,
@@ -375,9 +375,9 @@ export async function resolvePackageFileValidator(
  * package bytes for the explorer, and the only emitter of the
  * `"Package file snapshot read"` log line.
  *
- * @throws 404 when a version's artifact is missing from storage. A missing
- *   DRAFT artifact is not an error — a freshly created package has no ZIP yet
- *   and must still list its DB-backed files.
+ * @throws 422 `version_artifact_unavailable` when a version's artifact is
+ *   missing from storage. A missing DRAFT artifact is not an error — a freshly
+ *   created package has no ZIP yet and must still list its DB-backed files.
  */
 export async function readPackageSnapshot(
   pkg: PackageFileSource,
@@ -408,7 +408,7 @@ export async function readPackageSnapshot(
     // route applies. Reading a version through a path that skips it would make
     // the explorer the one place tampering goes unnoticed.
     const zip = await downloadVersionZip(pkg.id, validator.version, validator.integrity);
-    if (!zip) throw notFound("Artifact not found in storage");
+    if (!zip) throw versionArtifactUnavailable(pkg.id, validator.version);
     files = unzipPackageArchive(zip);
     snapshotId = validator.snapshotId;
   }

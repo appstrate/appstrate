@@ -48,7 +48,12 @@
  */
 
 import { ApiError, notFound } from "../lib/errors.ts";
-import { getLatestVersionInfo, getVersionDetail } from "./package-versions.ts";
+import {
+  getLatestVersionInfo,
+  getVersionDetail,
+  requirePublishedPrompt,
+  type VersionDetail,
+} from "./package-versions.ts";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 
 // Both keywords are reserved names (`isProtectedTag` in
@@ -82,22 +87,14 @@ interface ResolvedRunAgent {
  */
 function substituteVersion(
   agent: LoadedPackage,
-  detail: { version: string; manifest: Record<string, unknown>; prompt: string | null },
+  detail: Pick<VersionDetail, "version" | "manifest" | "content">,
 ): ResolvedRunAgent {
-  if (detail.prompt === null) {
-    throw new ApiError({
-      status: 422,
-      code: "version_artifact_unavailable",
-      title: "Version Artifact Unavailable",
-      detail: `Published agent '${agent.id}@${detail.version}' has no readable prompt archive`,
-    });
-  }
   return {
     agent: {
       ...agent,
       // Version manifest replaces the draft manifest entirely.
       manifest: detail.manifest as unknown as AgentManifest,
-      prompt: detail.prompt,
+      prompt: requirePublishedPrompt(agent.id, detail),
     },
     overrideVersionLabel: detail.version,
   };
@@ -106,7 +103,8 @@ function substituteVersion(
 /**
  * Resolve the `version` selector for a run trigger into the effective agent
  * definition. Throws `ApiError` (404) when an explicit selector cannot be
- * satisfied — never silently falls back to the draft.
+ * satisfied — never silently falls back to the draft — and 422
+ * `version_artifact_unavailable` when the selected version's archive is unreadable.
  */
 export async function resolveAgentRunVersion(
   agent: LoadedPackage,
