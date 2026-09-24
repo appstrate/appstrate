@@ -57,7 +57,10 @@ export async function searchOpenRouterModels(query: string): Promise<SearchedMod
       const promptPerToken = parseFloat(pricing?.prompt);
       const completionPerToken = parseFloat(pricing?.completion);
       const cacheReadPerToken = parseFloat(pricing?.input_cache_read);
-      const hasValidPricing = !isNaN(promptPerToken) && !isNaN(completionPerToken);
+      // A missing (NaN) or negative rate is unpublished: OpenRouter's `-1` marks
+      // a variable price (`openrouter/auto`), the Pi catalog's rule too.
+      const published = (rate: number): boolean => rate >= 0;
+      const hasValidPricing = published(promptPerToken) && published(completionPerToken);
 
       return {
         id: String(m.id ?? ""),
@@ -75,7 +78,7 @@ export async function searchOpenRouterModels(query: string): Promise<SearchedMod
           ? {
               input: promptPerToken * 1_000_000,
               output: completionPerToken * 1_000_000,
-              ...(isNaN(cacheReadPerToken) ? {} : { cacheRead: cacheReadPerToken * 1_000_000 }),
+              ...(published(cacheReadPerToken) ? { cacheRead: cacheReadPerToken * 1_000_000 } : {}),
             }
           : null,
       };

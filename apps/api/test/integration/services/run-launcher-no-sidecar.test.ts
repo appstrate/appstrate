@@ -257,6 +257,97 @@ describe("run-launcher — sidecar skip decision", () => {
     expect(counts.capturedAgentEnv?.MODEL_PROVIDER).toBe("moonshotai");
   });
 
+  // A user-described gateway has no Pi record: nothing may invent a key for it,
+  // or the container / sidecar would resolve some other vendor's dialect.
+  it("hands a gateway (no Pi provider key) neither a MODEL_PROVIDER nor a backing key", async () => {
+    const gateway = {
+      providerId: "openai-compatible",
+      piProvider: null,
+      apiShape: "openai-completions",
+      baseUrl: "https://gateway.example.test/v1",
+      modelId: "vendor/some-model",
+      apiKey: "sk-real-secret",
+      label: "Gateway",
+      isSystemModel: false,
+    } as const;
+
+    const direct = createCountingFake();
+    await runPlatformContainer({
+      runId: "run_gateway_direct",
+      context: buildContext("run_gateway_direct"),
+      plan: buildRunPlan({
+        llmConfig: { ...gateway, aliased: false, aliasId: "vendor/some-model" },
+      }),
+      sinkCredentials: mintSinkCredentials({
+        runId: "run_gateway_direct",
+        appUrl: "http://platform:3000",
+        ttlSeconds: 60,
+      }),
+      orchestrator: direct.orchestrator,
+    });
+    expect(direct.counts.capturedAgentEnv?.MODEL_ID).toBe("vendor/some-model");
+    expect(direct.counts.capturedAgentEnv).not.toHaveProperty("MODEL_PROVIDER");
+
+    const aliased = createCountingFake();
+    await runPlatformContainer({
+      runId: "run_gateway_alias",
+      context: buildContext("run_gateway_alias"),
+      plan: buildRunPlan({
+        llmConfig: { ...gateway, aliased: true, aliasId: "appstrate-gateway" },
+      }),
+      sinkCredentials: mintSinkCredentials({
+        runId: "run_gateway_alias",
+        appUrl: "http://platform:3000",
+        ttlSeconds: 60,
+      }),
+      orchestrator: aliased.orchestrator,
+    });
+    const llm = aliased.counts.capturedSidecarSpec?.llm;
+    if (llm?.authMode !== "api_key") throw new Error(`expected api_key llm, got ${llm?.authMode}`);
+    expect(llm.modelSwap?.backing).toEqual({ providerId: null, input: ["text"] });
+    expect(aliased.counts.capturedAgentEnv).not.toHaveProperty("MODEL_PROVIDER");
+  });
+
+  // `reasoning: false` is a stated fact (the operator turned it off), not an
+  // unknown: it must reach the sidecar rather than be dropped so Pi's record
+  // silently turns reasoning back on.
+  it("passes an explicit reasoning:false through to the alias backing", async () => {
+    const { orchestrator, counts } = createCountingFake();
+    await runPlatformContainer({
+      runId: "run_alias_no_reasoning",
+      context: buildContext("run_alias_no_reasoning"),
+      plan: buildRunPlan({
+        llmConfig: {
+          providerId: "anthropic",
+          piProvider: "anthropic",
+          apiShape: "anthropic-messages",
+          baseUrl: "https://api.anthropic.com",
+          modelId: "claude-sonnet-4-6",
+          apiKey: "sk-real-secret",
+          label: "Appstrate Fast",
+          isSystemModel: true,
+          aliased: true,
+          aliasId: "appstrate-fast",
+          reasoning: false,
+          input: ["text", "image"],
+        },
+      }),
+      sinkCredentials: mintSinkCredentials({
+        runId: "run_alias_no_reasoning",
+        appUrl: "http://platform:3000",
+        ttlSeconds: 60,
+      }),
+      orchestrator,
+    });
+    const llm = counts.capturedSidecarSpec?.llm;
+    if (llm?.authMode !== "api_key") throw new Error(`expected api_key llm, got ${llm?.authMode}`);
+    expect(llm.modelSwap?.backing).toEqual({
+      providerId: "anthropic",
+      reasoning: false,
+      input: ["text", "image"],
+    });
+  });
+
   it("forces the sidecar for a model alias and wires the swap + alias MODEL_ID (api-key, no integrations)", async () => {
     const { orchestrator, counts } = createCountingFake();
 
