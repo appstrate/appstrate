@@ -2,7 +2,7 @@
 
 /**
  * A stand-in for the package routes `appstrate packages sync` reads,
- * driven by a table of skills rather than by per-test URL matching.
+ * driven by a table of skills and agents rather than by per-test URL matching.
  *
  * The artifacts are REAL `.afps` archives built with `zipArtifact` and hashed
  * with `computeIntegrity`, so the download path exercises the same
@@ -14,7 +14,9 @@
  * `skills-command.test.ts` need it and neither owns it.
  */
 
+import type { SchemaWrapper } from "@appstrate/core/form";
 import { computeIntegrity } from "@appstrate/core/integrity";
+import { withoutLockedFields } from "@appstrate/core/input-resolution";
 import { zipArtifact } from "@appstrate/core/zip";
 
 const encoder = new TextEncoder();
@@ -25,8 +27,8 @@ const MANIFEST_DESCRIPTION = "A skill.";
 /** Same reason: `Space` declares it, nothing in the sync reads it. */
 const SPACE_STAMP = { createdAt: "2026-01-01T00:00:00.000Z" };
 
-/** What a member's role grants here; `skills:read` is what the list route wants. */
-const MEMBER_PERMISSIONS = ["agents:read", "skills:read"];
+/** What a member's role grants here: the skill routes want `skills:read`, agents the other two. */
+const MEMBER_PERMISSIONS = ["agents:read", "agents:run", "skills:read"];
 
 /**
  * A row of `GET /api/spaces`. The listing reports what the caller may SEE, and
@@ -112,6 +114,33 @@ export interface SkillFixture {
   draft?: DraftFixture;
 }
 
+/**
+ * An agent as `GET /api/packages/agents` and its detail answer it. The detail
+ * carries the space's input layer (`values` + `locked_fields`) next to the
+ * schema, in one read, exactly like the launch form's own projection.
+ */
+export interface AgentFixture {
+  /** `@scope/name`. */
+  id: string;
+  display_name?: string;
+  description?: string;
+  /** Published versions, oldest first; the last one is `latest`. `[]` = never published. */
+  versions?: string[];
+  /** `source` on the list DTO — a system agent has no draft anybody may name. */
+  source?: "local" | "system";
+  /** Spaces where the agent is ACTIVE, which is what the list route answers. Defaults to all. */
+  activeIn?: string[];
+  /** The manifest's input wrapper. Defaults to an empty object schema. */
+  input?: SchemaWrapper;
+  /** The space's stored values — never to be written to disk (D20). */
+  values?: Record<string, unknown>;
+  locked_fields?: string[];
+  /** Working-copy state for `--source draft`; defaults to the published definition. */
+  draft?: { description?: string; notWritable?: boolean };
+  /** HTTP status the detail answers with instead of resolving — a transient failure. */
+  detailError?: number;
+}
+
 export interface SkillServer {
   /** Install the stub over `globalThis.fetch`. */
   install(): void;
@@ -123,6 +152,8 @@ export interface SkillServer {
   draftDownloads(): number;
   /** Highest number of requests the stub held open at once. */
   peakInFlight(): number;
+  /** Requests to the agent list and detail routes. */
+  agentReads(): number;
 }
 
 interface Prepared {
@@ -171,9 +202,11 @@ const json = (body: unknown, status = 200, headers: Record<string, string> = {})
 export function createSkillServer(
   fixtures: SkillFixture[],
   spaces: SpaceFixture[] = DEFAULT_SPACES,
+  agents: AgentFixture[] = [],
 ): SkillServer {
   const prepared = fixtures.map(prepare);
   const spaceById = new Map(spaces.map((space) => [space.id, space]));
+  let agentReads = 0;
   let downloads = 0;
   let indexReads = 0;
   let draftDownloads = 0;
@@ -197,11 +230,11 @@ export function createSkillServer(
   /**
    * The refusal a space-scoped route answers with when `X-Space-Id` names a
    * space this caller cannot use — `applySpacePermissions` for a non-member,
-   * `requirePermission("skills", "read")` for a member whose role is too thin.
-   * Returning it here is what makes a selection bug fail a test instead of
-   * quietly working against a stub that ignores the header.
+   * the route's permission guard for a member whose role is too thin (any one
+   * of `required` suffices). Returning it here is what makes a selection bug
+   * fail a test instead of quietly working against a stub that ignores the header.
    */
-  const spaceRefusal = (spaceId: string): Response | null => {
+  const spaceRefusal = (spaceId: string, required: string[]): Response | null => {
     const space = spaceById.get(spaceId);
     if (!space) return null;
     if ((space.access ?? "member") === "none") {
@@ -210,12 +243,16 @@ export function createSkillServer(
         403,
       );
     }
-    const permissions = space.permissions ?? MEMBER_PERMISSIONS;
-    if (!permissions.includes("skills:read")) {
-      return json({ code: "forbidden", message: "Insufficient permissions: skills:read" }, 403);
+    if (!required.some((permission) => grants(spaceId, permission))) {
+      return json(
+        { code: "forbidden", message: `Insufficient permissions: ${required.join(" or ")}` },
+        403,
+      );
     }
     return null;
   };
+  const grants = (spaceId: string, permission: string): boolean =>
+    (spaceById.get(spaceId)?.permissions ?? MEMBER_PERMISSIONS).includes(permission);
 
   const respond = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = new URL(typeof input === "string" ? input : input.toString());
@@ -223,9 +260,15 @@ export function createSkillServer(
     const spaceId = new Headers(init?.headers).get("X-Space-Id") ?? "";
     // `/api/spaces` is not space-scoped (`SPACE_SCOPED_PREFIXES`); every other
     // route the sync reads is, so it is refused exactly as the server would.
-    if (path !== "/api/spaces") {
-      const refusal = spaceRefusal(spaceId);
+    const required = routePermissions(path);
+    if (required) {
+      const refusal = spaceRefusal(spaceId, required);
       if (refusal) return refusal;
+    }
+
+    if (path.startsWith("/api/packages/agents")) {
+      agentReads += 1;
+      return agentRoute(agents, path, url, spaceId, grants(spaceId, "agents:read"));
     }
 
     // The sync selects its skill sources from the spaces this profile reaches,
@@ -409,7 +452,103 @@ export function createSkillServer(
     indexReads: () => indexReads,
     draftDownloads: () => draftDownloads,
     peakInFlight: () => peakInFlight,
+    agentReads: () => agentReads,
   };
+}
+
+/**
+ * What each route guards on in the space: the list wants `agents:read`, the
+ * agent detail either grant (`requireAgentRead`), every skill route
+ * `skills:read`. `null` for the one route that is not space-scoped.
+ */
+function routePermissions(path: string): string[] | null {
+  if (path === "/api/spaces") return null;
+  if (path === "/api/packages/agents") return ["agents:read"];
+  if (path.startsWith("/api/packages/agents/")) return ["agents:read", "agents:run"];
+  return ["skills:read"];
+}
+
+/**
+ * `GET /api/packages/agents` (the ACTIVE set of the space) and the agent
+ * detail. The detail NAMES its definition: `latest` resolves the dist-tag and
+ * answers 404 when nothing is published, `draft` is reserved to whoever may
+ * write the agent (never anyone for a system agent), and the stub refuses a
+ * read without a selector so a sync that forgets it fails here.
+ */
+function agentRoute(
+  agents: AgentFixture[],
+  path: string,
+  url: URL,
+  spaceId: string,
+  fullRead: boolean,
+): Response {
+  if (path === "/api/packages/agents") {
+    return json({
+      object: "list",
+      data: agents
+        .filter((agent) => !agent.activeIn || agent.activeIn.includes(spaceId))
+        .map((agent) => ({
+          id: agent.id,
+          name: agent.id.split("/")[1],
+          display_name: agent.display_name ?? agent.id,
+          description: agent.description ?? "",
+          source: agent.source ?? "local",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        })),
+      hasMore: false,
+    });
+  }
+  const detail = path.match(/^\/api\/packages\/agents\/(@[^/]+)\/([^/]+)$/);
+  const agent = detail && agents.find((a) => a.id === `${detail[1]}/${detail[2]}`);
+  if (!agent) return json({ code: "not_found", message: "Agent not found" }, 404);
+  if (agent.detailError) {
+    return json({ code: "internal_error", message: "detail blew up" }, agent.detailError);
+  }
+  const selector = url.searchParams.get("version");
+  const versions = agent.versions ?? ["1.0.0"];
+  const system = agent.source === "system";
+  let version: string | null;
+  let description = agent.description ?? "";
+  if (selector === "draft") {
+    if (system || agent.draft?.notWritable) {
+      return json(
+        {
+          code: "draft_not_writable",
+          detail: `Running the draft of '${agent.id}' requires write authority on it`,
+        },
+        403,
+      );
+    }
+    version = versions.at(-1) ?? null;
+    description = agent.draft?.description ?? description;
+  } else if (selector === "latest" || (selector !== null && versions.includes(selector))) {
+    // A system agent ships its definition with the platform: any selector resolves to it.
+    version = selector === "latest" ? (versions.at(-1) ?? null) : selector;
+    if (version === null && !system) {
+      return json({ code: "not_found", detail: `Version '${selector}' not found` }, 404);
+    }
+  } else {
+    return json({ code: "bad_request", message: `Unexpected version selector: ${selector}` }, 400);
+  }
+  const values = agent.values ?? {};
+  const lockedFields = agent.locked_fields ?? [];
+  return json({
+    id: agent.id,
+    display_name: agent.display_name ?? agent.id,
+    description,
+    source: agent.source ?? "local",
+    scope: detail![1],
+    version: version ?? "1.0.0",
+    definition: selector === "draft" ? "draft" : "published",
+    dependencies: { integrations: [] },
+    input: {
+      ...(agent.input ?? { schema: { type: "object", properties: {} } }),
+      // A summary read (`agents:run` alone) keeps the lock names, not the values behind them.
+      values: fullRead ? values : withoutLockedFields(values, lockedFields),
+      locked_fields: lockedFields,
+    },
+    active: !agent.activeIn || agent.activeIn.includes(spaceId),
+  });
 }
 
 function draftSkillMd(p: Prepared): string {

@@ -2,24 +2,27 @@
 
 /**
  * Server half of `appstrate packages sync`. No bulk endpoint exists, so it is one
- * list call, one resolution call per skill, and downloads only for what
+ * list call, one resolution call per package, and downloads only for what
  * changed; concurrency is capped because the package routes are rate limited.
+ * Agent commands are rendered from their detail read and download nothing.
  */
 
-import {
-  apiFetch,
-  apiFetchRaw,
-  apiFetchWithHeaders,
-  apiList,
-  ApiError,
-  problemFields,
-} from "../api.ts";
+import { apiFetchRaw, apiFetchWithHeaders, apiList, ApiError, problemFields } from "../api.ts";
 import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
 import { extractSkillMeta } from "@appstrate/core/validation";
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { draftRefusal, fetchPackageDefinition } from "../package-definition.ts";
-import { collisionSlug, SKILL_ENTRY, skillSlug } from "./materialize.ts";
+import {
+  AGENT_SLUG_PREFIX,
+  agentSlug,
+  collisionSlug,
+  materializeAgent,
+  SKILL_ENTRY,
+  skillSlug,
+  treeIntegrity,
+  type AgentLaunchView,
+} from "./materialize.ts";
 import {
   emptyTargetState,
   STATE_VERSION,
@@ -68,11 +71,28 @@ export interface ResolvedSkill {
   frontmatterName: string;
 }
 
-export interface PlannedSkill extends ResolvedSkill {
+interface SlugClaim {
   slug: string;
-  /** Set when a collision forced the `<scope>-<name>` fallback (D4). */
+  /** Set when a collision forced the `<scope>-<name>` fallback (D4, D23). */
   renamedFrom?: string;
 }
+
+interface PlannedSkill extends ResolvedSkill, SlugClaim {
+  kind: "skill";
+}
+
+/** An agent of the pinned space as a generated command (D18–D22). */
+interface PlannedAgent extends SlugClaim {
+  kind: "agent";
+  packageId: string;
+  version: string;
+  /** SRI of the rendered tree (D22): a template, lock or space change moves it. */
+  integrity: string;
+  /** Rendered here, because rendering needs the slug; nothing is downloaded. */
+  files: Record<string, Uint8Array>;
+}
+
+export type PlannedEntry = PlannedSkill | PlannedAgent;
 
 /**
  * Sorted by package id, which is what makes collision resolution reproducible
@@ -92,6 +112,56 @@ export async function listSyncableSkills(profileName: string, spaceId?: string):
     .filter((row) => row.source !== "system" && typeof row.id === "string" && row.id.length > 0)
     .map((row) => row.id)
     .sort();
+}
+
+interface AgentListRow {
+  id: string;
+  source?: string;
+}
+
+interface SyncableAgent {
+  packageId: string;
+  /** Shipped with the platform: no draft to name, so it always resolves published. */
+  system: boolean;
+}
+
+/**
+ * The ACTIVE agents of one space — the set `run_and_wait` accepts there (D19).
+ * System agents stay: unlike a system skill, they are launchable.
+ */
+export async function listSyncableAgents(
+  profileName: string,
+  spaceId: string,
+): Promise<SyncableAgent[]> {
+  const rows = await apiList<AgentListRow>(profileName, "/api/packages/agents", { spaceId });
+  return rows
+    .filter((row) => typeof row.id === "string" && row.id.length > 0)
+    .map((row) => ({ packageId: row.id, system: row.source === "system" }))
+    .sort((a, b) => (a.packageId < b.packageId ? -1 : a.packageId > b.packageId ? 1 : 0));
+}
+
+/**
+ * One package detail read, shared by both kinds: `null` on 404 (nothing to
+ * sync), and the author-only refusal when the request names the draft.
+ */
+async function readDetail<T>(
+  profileName: string,
+  path: string,
+  packageId: string,
+  type: "skill" | "agent",
+  spaceId?: string,
+): Promise<{ body: T; headers: Headers } | null> {
+  try {
+    return await apiFetchWithHeaders<T>(profileName, path, { spaceId });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      if (err.status === 404) return null;
+      if (problemFields(err.body).code === "draft_not_writable") {
+        throw draftRefusal(packageId, type, DRAFT_REMEDY);
+      }
+    }
+    throw err;
+  }
 }
 
 /** `null` means no published version — a note on stderr, not a failure. */
@@ -116,17 +186,15 @@ async function resolvePublished(
     integrity?: unknown;
     content?: unknown;
   }
-  let detail: VersionDetail;
-  try {
-    detail = await apiFetch<VersionDetail>(
-      profileName,
-      `/api/packages/skills/${encodePackageIdPath(packageId)}/versions/latest`,
-      { spaceId },
-    );
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return null;
-    throw err;
-  }
+  const read = await readDetail<VersionDetail>(
+    profileName,
+    `/api/packages/skills/${encodePackageIdPath(packageId)}/versions/latest`,
+    packageId,
+    "skill",
+    spaceId,
+  );
+  if (!read) return null;
+  const detail = read.body;
   if (typeof detail.version !== "string" || typeof detail.integrity !== "string") {
     throw new SkillSyncError(
       `Version detail for ${packageId} is missing version or integrity`,
@@ -150,29 +218,18 @@ async function resolveDraft(
   interface DraftDetail {
     content?: unknown;
   }
-  let detail: DraftDetail;
-  let detailEtag: string;
-  try {
-    const read = await apiFetchWithHeaders<DraftDetail>(
-      profileName,
-      `/api/packages/skills/${encodePackageIdPath(packageId)}?version=draft`,
-      { spaceId },
-    );
-    detail = read.body;
-    detailEtag = read.headers.get("etag") ?? "";
-  } catch (err) {
-    if (err instanceof ApiError) {
-      if (err.status === 404) return null;
-      // This request names `?version=draft` as well, so for a non-author it is
-      // the FIRST one refused — before `/files` below ever runs. Relaying the
-      // raw 403 here is what would lose the actionable refusal entirely.
-      if (problemFields(err.body).code === "draft_not_writable") {
-        throw draftRefusal(packageId, "skill", DRAFT_REMEDY);
-      }
-      throw err;
-    }
-    throw err;
-  }
+  // This request names `?version=draft` as well, so for a non-author it is
+  // the FIRST one refused — before `/files` below ever runs.
+  const read = await readDetail<DraftDetail>(
+    profileName,
+    `/api/packages/skills/${encodePackageIdPath(packageId)}?version=draft`,
+    packageId,
+    "skill",
+    spaceId,
+  );
+  if (!read) return null;
+  const detail = read.body;
+  const detailEtag = read.headers.get("etag") ?? "";
   // A draft has no immutable digest: the change token is the index ETag and
   // the draft's own ETag, the two values that DO move with its content.
   // BOTH requests name `?version=draft`, never leaving it to the route's
@@ -207,30 +264,110 @@ async function resolveDraft(
 }
 
 /**
- * Input order decides collisions, and callers pass a list sorted by package id,
- * so the assignment never depends on request timing.
+ * The agent's launch contract in the pinned space: its definition at the
+ * selected version plus the space's input layer, in one read. `latest` is the
+ * dist-tag the detail route resolves (exact → dist-tag → range), answering 404
+ * when nothing is published; the pinned version is whatever it resolved to.
+ */
+export async function resolveAgent(
+  profileName: string,
+  packageId: string,
+  source: SkillSource,
+  spaceId: string,
+): Promise<AgentLaunchView | null> {
+  interface AgentDetailBody {
+    display_name?: unknown;
+    description?: unknown;
+    version?: unknown;
+    input?: unknown;
+  }
+  const selector = source === "draft" ? "draft" : "latest";
+  const read = await readDetail<AgentDetailBody>(
+    profileName,
+    `/api/packages/agents/${encodePackageIdPath(packageId)}?version=${selector}`,
+    packageId,
+    "agent",
+    spaceId,
+  );
+  if (!read) return null;
+  const { body } = read;
+  const version = source === "draft" ? "draft" : body.version;
+  if (typeof version !== "string" || !isLaunchInput(body.input)) {
+    throw new SkillSyncError(
+      `Agent detail for ${packageId} is missing version or input`,
+      "The instance is running an incompatible API version.",
+    );
+  }
+  return {
+    packageId,
+    spaceId,
+    version,
+    displayName: typeof body.display_name === "string" ? body.display_name : packageId,
+    description: typeof body.description === "string" ? body.description : "",
+    input: body.input,
+  };
+}
+
+function isLaunchInput(value: unknown): value is AgentLaunchView["input"] {
+  if (typeof value !== "object" || value === null) return false;
+  const input = value as Record<string, unknown>;
+  return (
+    typeof input.values === "object" &&
+    input.values !== null &&
+    Array.isArray(input.locked_fields) &&
+    input.locked_fields.every((field) => typeof field === "string")
+  );
+}
+
+interface SlugAssignment {
+  planned: PlannedEntry[];
+  /** Agents whose command could not be rendered — handled like an unresolvable package. */
+  failed: { packageId: string; error: unknown }[];
+}
+
+/**
+ * Input order decides collisions, and callers pass lists sorted by package id,
+ * so the assignment never depends on request timing. Every skill is assigned
+ * before any agent (D23): an agent never renames a skill.
  */
 export function assignSlugs(
-  resolved: ResolvedSkill[],
+  skills: ResolvedSkill[],
+  agents: AgentLaunchView[] = [],
   reserved: ReadonlySet<string> = new Set(),
-): PlannedSkill[] {
+): SlugAssignment {
   // `reserved` = catalogued packages whose resolution failed: their directories
   // are on disk, so a transient 500 must not reassign `/appstrate:<slug>`.
   const taken = new Set<string>(reserved);
-  const planned: PlannedSkill[] = [];
-  for (const skill of resolved) {
-    const parsed = parseScopedName(skill.packageId);
-    const preferred = skillSlug(skill.frontmatterName, parsed?.name ?? skill.packageId);
-    if (!taken.has(preferred)) {
-      taken.add(preferred);
-      planned.push({ ...skill, slug: preferred });
-      continue;
+  const claim = (packageId: string, preferred: string, prefix?: string): SlugClaim => {
+    const slug = taken.has(preferred) ? collisionSlug(packageId, taken, prefix) : preferred;
+    taken.add(slug);
+    return slug === preferred ? { slug } : { slug, renamedFrom: preferred };
+  };
+  const nameOf = (packageId: string): string => parseScopedName(packageId)?.name ?? packageId;
+
+  const planned: PlannedEntry[] = skills.map((skill) => ({
+    ...skill,
+    kind: "skill" as const,
+    ...claim(skill.packageId, skillSlug(skill.frontmatterName, nameOf(skill.packageId))),
+  }));
+  const failed: SlugAssignment["failed"] = [];
+  for (const view of agents) {
+    try {
+      const naming = claim(view.packageId, agentSlug(nameOf(view.packageId)), AGENT_SLUG_PREFIX);
+      const files = materializeAgent(naming.slug, view);
+      planned.push({
+        kind: "agent",
+        packageId: view.packageId,
+        version: view.version,
+        integrity: treeIntegrity(files),
+        files,
+        ...naming,
+      });
+    } catch (error) {
+      failed.push({ packageId: view.packageId, error });
     }
-    const fallback = collisionSlug(skill.packageId, taken);
-    taken.add(fallback);
-    planned.push({ ...skill, slug: fallback, renamedFrom: preferred });
   }
-  return planned;
+  return { planned, failed };
 }
 
 /**
@@ -269,7 +406,7 @@ function frontmatterNameOf(content: unknown): string {
 }
 
 /** Slug assignment is global, so every plan indexes into the same map. */
-export type SkillsBySlug = ReadonlyMap<string, PlannedSkill>;
+export type EntriesBySlug = ReadonlyMap<string, PlannedEntry>;
 
 export interface TargetPlan {
   target: SyncTarget;
@@ -287,7 +424,7 @@ export interface TargetPlan {
 }
 
 export interface Catalogue {
-  bySlug: SkillsBySlug;
+  bySlug: EntriesBySlug;
   /** Listed but unresolvable — not the definite "not published". Decides deletion. */
   unresolved: Set<string>;
 }
@@ -323,6 +460,10 @@ export async function diffTarget(
     state.targets[target]?.root === targetRoot(target) && !sameContext(ledger.context, context);
   const stale = state.version !== STATE_VERSION || ledger.source !== source;
   const shared = target !== "claude-plugin";
+  // D18: only the plugin ships `.mcp.json`; an agent command anywhere else fails every run.
+  const wanted = new Map(
+    [...catalogue.bySlug].filter(([, entry]) => entry.kind === "skill" || !shared),
+  );
   const present = new Set<string>();
   for (const slug of Object.keys(ledger.managed)) {
     if (await isMaterialized(target, slug)) present.add(slug);
@@ -338,7 +479,7 @@ export async function diffTarget(
     contextChanged,
   };
 
-  for (const [slug, skill] of catalogue.bySlug) {
+  for (const [slug, entry] of wanted) {
     const managed = ledger.managed[slug];
     if (!managed) {
       // The shared roots hold the user's own skills, and the swap deletes what
@@ -351,8 +492,8 @@ export async function diffTarget(
     // matching entry and would read as up to date forever.
     const current =
       !stale &&
-      managed.integrity === skill.integrity &&
-      managed.packageId === skill.packageId &&
+      managed.integrity === entry.integrity &&
+      managed.packageId === entry.packageId &&
       present.has(slug);
     (current ? plan.keep : plan.write).push(slug);
   }
@@ -360,7 +501,7 @@ export async function diffTarget(
   // Deletion is decided against the CATALOGUE, never against what resolved: a
   // 500 on `versions/latest` is not evidence that a skill is gone.
   for (const slug of Object.keys(ledger.managed).sort()) {
-    if (catalogue.bySlug.has(slug)) continue;
+    if (wanted.has(slug)) continue;
     // The plugin is rebuilt by COPYING carried-over directories.
     const keepable = catalogue.unresolved.has(ledger.managed[slug]!.packageId) && present.has(slug);
     (keepable ? plan.keep : plan.removed).push(slug);

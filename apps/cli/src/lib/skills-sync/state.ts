@@ -23,7 +23,10 @@ export interface ManagedSkill {
   packageId: string;
   /** Resolved version label — semver for `published`, `"draft"` for `draft`. */
   version: string;
-  /** SRI digest, or for a draft its ETag folded with the files-index ETag. */
+  /**
+   * SRI digest — of the artifact, or of an agent command's generated tree —
+   * or for a draft skill its ETag folded with the files-index ETag.
+   */
   integrity: string;
 }
 

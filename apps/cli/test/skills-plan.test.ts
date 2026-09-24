@@ -2,7 +2,7 @@
 
 /**
  * `lib/skills-sync/plan.ts` — catalogue reading, version pinning, slug
- * assignment and the verified download.
+ * assignment (skills and agent commands) and the verified download.
  *
  * `globalThis.fetch` is stubbed with the shared skill server
  * (`helpers/skills-server.ts`) rather than injected: the CLI's whole auth
@@ -14,17 +14,20 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
   assignSlugs,
   fetchSkillFiles,
+  listSyncableAgents,
   listSyncableSkills,
+  resolveAgent,
   resolveSkill,
   type ResolvedSkill,
 } from "../src/lib/skills-sync/plan.ts";
+import { treeIntegrity, type AgentLaunchView } from "../src/lib/skills-sync/materialize.ts";
 import {
   installFakeKeyring,
   seedLoggedInProfile,
   useTempConfigHome,
   type FakeKeyringInstall,
 } from "./helpers/auth-fixture.ts";
-import { createSkillServer, skillMd } from "./helpers/skills-server.ts";
+import { createSkillServer, skillMd, type AgentFixture } from "./helpers/skills-server.ts";
 import { formatError } from "../src/lib/ui.ts";
 
 const configHome = useTempConfigHome("appstrate-cli-skills-plan-");
@@ -187,7 +190,7 @@ describe("resolveSkill — the draft is NAMED, never left to the route's default
 
 describe("assignSlugs", () => {
   it("gives the short slug to the first claimant and renames the rest", () => {
-    const planned = assignSlugs([
+    const { planned } = assignSlugs([
       resolved({ packageId: "@acme/pdf-tools", frontmatterName: "pdf-tools" }),
       resolved({ packageId: "@other/reports", frontmatterName: "pdf-tools" }),
     ]);
@@ -205,14 +208,14 @@ describe("assignSlugs", () => {
     const a = resolved({ packageId: "@acme/pdf-tools", frontmatterName: "pdf-tools" });
     const b = resolved({ packageId: "@other/reports", frontmatterName: "pdf-tools" });
 
-    expect(assignSlugs([b, a]).map((s) => s.slug)).toEqual(["pdf-tools", "acme-pdf-tools"]);
+    expect(assignSlugs([b, a]).planned.map((s) => s.slug)).toEqual(["pdf-tools", "acme-pdf-tools"]);
   });
 
   it("never hands two skills the same directory when the fallback itself collides", () => {
     // `@a/b` reduces to `acme-foo` through its FRONTMATTER, and both
     // `@acme/bar` and `@acme/foo` reduce to `acme-foo` through the
     // `<scope>-<name>` fallback. Three claimants, three directories.
-    const planned = assignSlugs([
+    const { planned } = assignSlugs([
       resolved({ packageId: "@a/b", frontmatterName: "acme-foo" }),
       resolved({ packageId: "@acme/bar", frontmatterName: "foo" }),
       resolved({ packageId: "@acme/foo", frontmatterName: "foo" }),
@@ -224,8 +227,153 @@ describe("assignSlugs", () => {
   });
 
   it("falls back to the package name segment when the frontmatter name is absent", () => {
-    const planned = assignSlugs([resolved({ packageId: "@acme/weekly-report" })]);
+    const { planned } = assignSlugs([resolved({ packageId: "@acme/weekly-report" })]);
     expect(planned[0]?.slug).toBe("weekly-report");
+  });
+});
+
+function view(packageId: string): AgentLaunchView {
+  return {
+    packageId,
+    // Platform-shaped: the command writes it, and refuses any other shape.
+    spaceId: "spc_00000000-0000-4000-8000-000000000001",
+    version: "1.0.0",
+    displayName: packageId,
+    description: "Does a thing.",
+    input: { schema: { type: "object", properties: {} }, values: {}, locked_fields: [] },
+  };
+}
+
+describe("assignSlugs — agent commands (D23)", () => {
+  it("prefixes an agent with run- and renders its tree, hashed as rendered", () => {
+    const { planned, failed } = assignSlugs([], [view("@acme/report")]);
+
+    expect(failed).toEqual([]);
+    const agent = planned[0]!;
+    expect(agent.slug).toBe("run-report");
+    expect(agent.kind).toBe("agent");
+    if (agent.kind !== "agent") throw new Error("expected an agent entry");
+    expect(Object.keys(agent.files).sort()).toEqual(["SKILL.md", "input.json"]);
+    expect(agent.integrity).toBe(treeIntegrity(agent.files));
+  });
+
+  it("assigns every skill before any agent, so an agent never renames a skill", () => {
+    // The agent sorts first by package id, and still loses `run-foo` to the skill.
+    const { planned } = assignSlugs(
+      [
+        resolved({ packageId: "@zed/foo", frontmatterName: "foo" }),
+        resolved({ packageId: "@zed/run-foo", frontmatterName: "run-foo" }),
+      ],
+      [view("@acme/foo")],
+    );
+
+    expect(planned.map((entry) => [entry.packageId, entry.slug, entry.renamedFrom])).toEqual([
+      ["@zed/foo", "foo", undefined],
+      ["@zed/run-foo", "run-foo", undefined],
+      ["@acme/foo", "run-acme-foo", "run-foo"],
+    ]);
+  });
+
+  it("keeps the run- prefix through the counter when the fallback collides too", () => {
+    const { planned } = assignSlugs(
+      [resolved({ packageId: "@zed/run-foo", frontmatterName: "run-foo" })],
+      [view("@acme/foo"), view("@other/acme-foo")],
+      new Set(["run-acme-foo"]),
+    );
+
+    expect(planned.map((entry) => entry.slug)).toEqual([
+      "run-foo",
+      "run-acme-foo-2",
+      "run-other-acme-foo",
+    ]);
+  });
+
+  it("honours a slug the ledger reserves for an unresolved package", () => {
+    const { planned } = assignSlugs([], [view("@acme/foo")], new Set(["run-foo"]));
+
+    expect(planned[0]?.slug).toBe("run-acme-foo");
+    expect(planned[0]?.renamedFrom).toBe("run-foo");
+  });
+});
+
+describe("listSyncableAgents", () => {
+  const agents: AgentFixture[] = [
+    { id: "@acme/zebra", activeIn: ["spc_2"] },
+    { id: "@appstrate/builtin", source: "system", activeIn: ["spc_2"] },
+    { id: "@acme/alpha", activeIn: ["spc_2"] },
+    { id: "@acme/elsewhere", activeIn: ["spc_1"] },
+  ];
+
+  it("lists the ACTIVE agents of the space it names, system ones included, sorted", async () => {
+    // The profile pins spc_1: only the header can bring spc_2's agents back.
+    createSkillServer([], undefined, agents).install();
+
+    expect(await listSyncableAgents("default", "spc_2")).toEqual([
+      { packageId: "@acme/alpha", system: false },
+      { packageId: "@acme/zebra", system: false },
+      { packageId: "@appstrate/builtin", system: true },
+    ]);
+  });
+});
+
+describe("resolveAgent", () => {
+  it("pins the latest published version and carries the space's input layer", async () => {
+    createSkillServer([], undefined, [
+      {
+        id: "@acme/report",
+        display_name: "Weekly report",
+        description: "Writes the report.",
+        versions: ["1.0.0", "1.2.0"],
+        input: { schema: { type: "object", properties: { topic: { type: "string" } } } },
+        values: { topic: "sales" },
+        locked_fields: ["topic"],
+      },
+    ]).install();
+
+    expect(await resolveAgent("default", "@acme/report", "published", "spc_1")).toEqual({
+      packageId: "@acme/report",
+      spaceId: "spc_1",
+      version: "1.2.0",
+      displayName: "Weekly report",
+      description: "Writes the report.",
+      input: {
+        schema: { type: "object", properties: { topic: { type: "string" } } },
+        values: { topic: "sales" },
+        locked_fields: ["topic"],
+      },
+    });
+  });
+
+  it("returns null — not an error — when the agent was never published", async () => {
+    createSkillServer([], undefined, [{ id: "@acme/report", versions: [] }]).install();
+
+    expect(await resolveAgent("default", "@acme/report", "published", "spc_1")).toBeNull();
+  });
+
+  it("names the draft and pins the command to it", async () => {
+    createSkillServer([], undefined, [
+      { id: "@acme/report", description: "Published.", draft: { description: "Working copy." } },
+    ]).install();
+
+    const agent = (await resolveAgent("default", "@acme/report", "draft", "spc_1"))!;
+    expect(agent.version).toBe("draft");
+    expect(agent.description).toBe("Working copy.");
+  });
+
+  it("says whose copy it is when the caller may not write the agent", async () => {
+    createSkillServer([], undefined, [
+      { id: "@acme/report", draft: { notWritable: true } },
+    ]).install();
+
+    const err = await resolveAgent("default", "@acme/report", "draft", "spc_1").then(
+      () => null,
+      (e: unknown) => e,
+    );
+    const rendered = formatError(err);
+    expect(rendered).toContain("@acme/report");
+    expect(rendered).toContain("author's working copy");
+    expect(rendered).toContain("agents:write");
+    expect(rendered).toContain("--source published");
   });
 });
 
