@@ -13,12 +13,11 @@
  * subscription wire format end-to-end.
  *
  * Wire format:
- *   - `anthropic-version` is forwarded (defaulted when absent). `anthropic-beta`
- *     keeps only the betas Pi's own client sends (`PI_BETAS`): a beta can switch
- *     on a feature billed outside the reported tokens, and an allowlist also
- *     closes the ones Anthropic has not shipped yet. {@link prepareRequest}
- *     refuses the billable body fields Pi never sends (`fallbacks`,
- *     server-executed tools, a `service_tier` other than `standard_only`).
+ *   - `anthropic-version` is forwarded (defaulted when absent); the
+ *     `anthropic-beta` allowlist is the shared `upstreamHeaders` guard.
+ *     {@link prepareRequest} refuses the billable body fields Pi never sends
+ *     (`fallbacks`, `inference_geo`, server-executed tools, a `service_tier`
+ *     other than `standard_only`, a `cache_control` TTL other than `5m`).
  *   - `cache_control` blocks in the request body MUST pass through
  *     unaltered — we only rewrite `body.model`, never touch `messages`,
  *     `system`, or `metadata`.
@@ -36,37 +35,17 @@ import {
   asRecord,
   extractUsageObject,
   parseSseDataFrame,
+  refuseLongCacheTtl,
   refuseUnmeteredFields,
   tokenCount,
   upstreamHeaders,
 } from "./helpers.ts";
-
-/**
- * pi-ai `getBetaFeatures` (`api/anthropic-messages.js`) for an API key under
- * `PLATFORM_MODEL_COMPAT` — never its fallback or OAuth betas.
- */
-const PI_BETAS: ReadonlySet<string> = new Set([
-  "fine-grained-tool-streaming-2025-05-14",
-  "interleaved-thinking-2025-05-14",
-  "mid-conversation-output-config-2026-07-01",
-  "thinking-binding-controls-2026-08-01",
-  "mid-conversation-tool-changes-2026-07-01",
-]);
 
 export const anthropicMessagesAdapter: LlmProxyAdapter = {
   apiShape: "anthropic-messages",
 
   buildUpstreamHeaders(incoming, apiKey) {
     const headers = upstreamHeaders(incoming, { "x-api-key": apiKey });
-
-    // Billing guard, applied to what the shared policy forwarded.
-    const betas = (headers.get("anthropic-beta") ?? "")
-      .split(",")
-      .map((beta) => beta.trim())
-      .filter((beta) => PI_BETAS.has(beta));
-    if (betas.length > 0) headers.set("anthropic-beta", betas.join(","));
-    else headers.delete("anthropic-beta");
-
     // Upstream answers 400 without it.
     if (!headers.has("anthropic-version")) headers.set("anthropic-version", "2023-06-01");
 
@@ -74,7 +53,8 @@ export const anthropicMessagesAdapter: LlmProxyAdapter = {
   },
 
   prepareRequest(body) {
-    refuseUnmeteredFields(body, ["fallbacks"]);
+    refuseUnmeteredFields(body, ["fallbacks", "inference_geo"]);
+    refuseLongCacheTtl(body);
     // `auto` may serve at priority-tier rates; Pi sends no tier (= standard).
     const tier = body["service_tier"];
     if (tier != null && tier !== "standard_only") {

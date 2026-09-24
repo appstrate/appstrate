@@ -35,10 +35,13 @@
  */
 
 import type { LlmProxyAdapter, UpstreamUsage } from "./types.ts";
+import { invalidRequest } from "../../lib/errors.ts";
 import {
   asRecord,
   extractUsageObject,
   parseSseDataFrame,
+  refuseLongCacheTtl,
+  refuseNonStandardServiceTier,
   refuseUnmeteredFields,
   tokenCount,
   upstreamHeaders,
@@ -113,11 +116,28 @@ export function createOpenAICompatibleAdapter(apiShape: string): LlmProxyAdapter
     buildUpstreamHeaders: bearerUpstreamHeaders,
 
     prepareRequest(body) {
-      // Gateway fallback lists (OpenRouter) bill whichever model answered.
-      refuseUnmeteredFields(body, ["models", "route"]);
+      // OpenRouter: fallback lists and `provider` routing bill whichever
+      // endpoint answered; `plugins` / `web_search_options` / `transforms` bill
+      // apart from the tokens. No platform-built Pi model emits any of them
+      // (`provider` needs `compat.openRouterRouting`); `store: false` is Pi's own.
+      refuseUnmeteredFields(body, [
+        "models",
+        "route",
+        "provider",
+        "plugins",
+        "web_search_options",
+        "transforms",
+        "store",
+      ]);
+      refuseNonStandardServiceTier(body);
+      refuseLongCacheTtl(body);
+      const stream = body["stream"];
+      if (stream != null && typeof stream !== "boolean") {
+        throw invalidRequest("`stream` must be a boolean", "stream");
+      }
       // Streaming usage is opt-in on this wire: without
       // `stream_options.include_usage` no usage frame is emitted at all.
-      if (body["stream"] !== true) return;
+      if (stream !== true) return;
       const current = body["stream_options"];
       body["stream_options"] =
         current && typeof current === "object" && !Array.isArray(current)

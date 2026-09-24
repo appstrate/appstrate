@@ -15,7 +15,6 @@
  * Adapter-specific behaviour stays in the adapter:
  *   - which usage fields to read (`prompt_tokens` vs `input_tokens`, …)
  *   - which auth header to inject (`Authorization` vs `x-api-key`)
- *   - header-level billing guards (`anthropic-beta`)
  *
  * The `parseSseDataFrame` helper filters out OpenAI's `[DONE]`
  * terminator. Anthropic never emits that terminator, so the filter is a
@@ -152,12 +151,38 @@ export function parseProxyRequest(rawBody: Uint8Array): ParsedProxyRequest {
 }
 
 /**
+ * pi-ai `getBetaFeatures` (`api/anthropic-messages.js`) for an API key under
+ * `PLATFORM_MODEL_COMPAT` — never its fallback or OAuth betas.
+ */
+const PI_BETAS: ReadonlySet<string> = new Set([
+  "fine-grained-tool-streaming-2025-05-14",
+  "interleaved-thinking-2025-05-14",
+  "mid-conversation-output-config-2026-07-01",
+  "thinking-binding-controls-2026-08-01",
+  "mid-conversation-tool-changes-2026-07-01",
+]);
+
+/**
  * Upstream request headers: the caller's, under the policy shared with the
  * sidecar (`@appstrate/connect/llm-request-headers`), plus this upstream's auth.
  * The body is re-serialised JSON, hence the forced `content-type`.
+ *
+ * Billing guard, on every wire (an anthropic-compatible gateway can sit behind
+ * any of them): `anthropic-beta` keeps only the betas Pi's own client sends —
+ * a beta can switch on a feature billed outside the reported tokens, and an
+ * allowlist also closes the ones not shipped yet. `x-anthropic-beta`, an alias
+ * some gateways honour, is dropped. It lives here and not in the shared
+ * policy: the sidecar's subscription passthrough needs Pi's OAuth betas.
  */
 export function upstreamHeaders(incoming: Headers, auth: Record<string, string>): Headers {
   const headers = forwardedLlmRequestHeaders(incoming);
+  headers.delete("x-anthropic-beta");
+  const betas = (headers.get("anthropic-beta") ?? "")
+    .split(",")
+    .map((beta) => beta.trim())
+    .filter((beta) => PI_BETAS.has(beta));
+  if (betas.length > 0) headers.set("anthropic-beta", betas.join(","));
+  else headers.delete("anthropic-beta");
   headers.set("content-type", "application/json");
   for (const [name, value] of Object.entries(auth)) headers.set(name, value);
   return headers;
@@ -224,4 +249,35 @@ export function refuseUnmeteredFields(
       throw invalidRequest(`\`${field}\` is not supported: its cost cannot be metered`, field);
     }
   }
+}
+
+/** OpenAI's tiers billed at the standard rate — the only one Pi's cost records carry. */
+const STANDARD_SERVICE_TIERS = new Set<unknown>(["auto", "default"]);
+
+/** Refuse an OpenAI `service_tier` (both wires) billed above the standard rate. */
+export function refuseNonStandardServiceTier(body: Record<string, unknown>): void {
+  const tier = body["service_tier"];
+  if (tier != null && !STANDARD_SERVICE_TIERS.has(tier)) {
+    throw invalidRequest("`service_tier` must be `auto` or `default`", "service_tier");
+  }
+}
+
+/** Nesting {@link refuseLongCacheTtl} walks; Anthropic's deepest holder is at 5. */
+const CACHE_CONTROL_MAX_DEPTH = 16;
+
+/**
+ * Refuse any `cache_control` whose `ttl` is set and not `"5m"`, wherever it
+ * sits in the body: a 1-hour write bills 2× input and the meter prices every
+ * cache write as a 5-minute one. Anthropic reads it natively, OpenRouter on
+ * the OpenAI wires; Pi sends none under `PLATFORM_MODEL_COMPAT`.
+ */
+export function refuseLongCacheTtl(body: Record<string, unknown>): void {
+  const walk = (value: unknown, depth: number): boolean => {
+    if (depth > CACHE_CONTROL_MAX_DEPTH || !value || typeof value !== "object") return false;
+    if (Array.isArray(value)) return value.some((item) => walk(item, depth + 1));
+    const ttl = asRecord((value as Record<string, unknown>)["cache_control"])?.["ttl"];
+    if (ttl !== undefined && ttl !== "5m") return true;
+    return Object.values(value).some((item) => walk(item, depth + 1));
+  };
+  if (walk(body, 0)) throw invalidRequest("`cache_control.ttl` must be `5m`", "cache_control");
 }

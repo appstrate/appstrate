@@ -125,15 +125,143 @@ const TERMINAL_FRAME_OUTPUT_MARGIN = 4 * 1024 * 1024;
 /**
  * Largest SSE frame {@link tapSseUsage} buffers whole. A terminal frame may
  * repeat the request (OpenAI Responses echoes instructions and tools) plus the
- * output, so the bound follows the request limit; above it the frame is
- * dropped, never guessed at, and the call is metered as unparsed.
+ * output, so the bound follows the request limit. It bounds memory, not
+ * metering: a larger frame — JSON `\uXXXX` escaping alone can triple the echo —
+ * streams through a {@link frameSkeleton} instead.
  */
 export function usageFrameBound(maxRequestBytes: number): number {
   return maxRequestBytes + TERMINAL_FRAME_OUTPUT_MARGIN;
 }
 
-/** Upstream error-body excerpt kept in server logs (chars). */
-export const UPSTREAM_ERROR_LOG_CHARS = 2048;
+/** Nesting a skeleton keeps: `{"response":{"usage":{"input_tokens_details":{…}}}}`. */
+const SKELETON_MAX_DEPTH = 4;
+/** Longest string (key or value) a skeleton keeps; a longer one becomes `""`. */
+const SKELETON_MAX_STRING = 256;
+/** Largest skeleton (chars); past it the frame yields no usage. */
+const SKELETON_MAX_CHARS = 1024 * 1024;
+const QUOTE_OR_BACKSLASH = /["\\]/g;
+
+interface FrameSkeleton {
+  push(text: string): void;
+  /** The skeleton as a JSON text, or null when the frame was not one whole object. */
+  finish(): string | null;
+}
+
+/**
+ * Stream an SSE frame's JSON payload into a bounded skeleton of the same shape:
+ * arrays and objects nested past {@link SKELETON_MAX_DEPTH} are emptied, long
+ * strings blanked, whitespace dropped. Every adapter's usage sits at a shallow,
+ * array-free path, so the adapter parses the skeleton exactly as it would the
+ * frame — and a `usage` key the caller planted in echoed content (a tool
+ * schema, a message) is emptied with its container, never mistaken for it.
+ */
+function frameSkeleton(): FrameSkeleton {
+  let out = "";
+  let depth = 0;
+  /** Depth of the container being emptied, 0 when none. */
+  let skipFrom = 0;
+  let started = false;
+  let closed = false;
+  let tooBig = false;
+  let inString = false;
+  let escaped = false;
+  let str = "";
+  let strTooLong = false;
+  const emit = (text: string): void => {
+    if (skipFrom !== 0 || tooBig) return;
+    out += text;
+    if (out.length > SKELETON_MAX_CHARS) tooBig = true;
+  };
+  const keep = (text: string): void => {
+    if (skipFrom !== 0 || strTooLong) return;
+    if (str.length + text.length > SKELETON_MAX_STRING) strTooLong = true;
+    else str += text;
+  };
+  return {
+    push(text) {
+      for (let i = 0; i < text.length && !closed; i++) {
+        if (inString) {
+          if (escaped) {
+            escaped = false;
+            keep(text[i]!);
+            continue;
+          }
+          QUOTE_OR_BACKSLASH.lastIndex = i;
+          const special = QUOTE_OR_BACKSLASH.exec(text)?.index ?? text.length;
+          keep(text.slice(i, special));
+          i = special;
+          if (i === text.length) break;
+          if (text[i] === "\\") {
+            escaped = true;
+            keep("\\");
+          } else {
+            inString = false;
+            emit(`"${strTooLong ? "" : str}"`);
+          }
+          continue;
+        }
+        const c = text[i]!;
+        if (!started) {
+          if (c !== "{") continue;
+          started = true;
+        }
+        if (c === '"') {
+          inString = true;
+          str = "";
+          strTooLong = false;
+        } else if (c === "{" || c === "[") {
+          depth++;
+          if (skipFrom === 0 && (c === "[" || depth > SKELETON_MAX_DEPTH)) {
+            emit(c === "[" ? "[]" : "{}");
+            skipFrom = depth;
+          } else emit(c);
+        } else if (c === "}" || c === "]") {
+          if (skipFrom === depth) skipFrom = 0;
+          else emit(c);
+          closed = --depth === 0;
+        } else if (c !== " " && c !== "\n" && c !== "\r" && c !== "\t") {
+          emit(c);
+        }
+      }
+    },
+    finish() {
+      return closed && !tooBig ? out : null;
+    },
+  };
+}
+
+/** Longest upstream error message (or raw excerpt) kept in server logs (chars). */
+export const UPSTREAM_ERROR_LOG_CHARS = 300;
+
+/**
+ * Log fields describing an upstream error body. A vendor 400 can echo prompt
+ * fragments, so only the error's `type` / `code` and a truncated `message` are
+ * kept — read from `error` (OpenAI, Anthropic) or the root (Mistral); a body
+ * with no readable message falls back to a truncated raw excerpt.
+ */
+function upstreamErrorLogFields(bodyText: string): Record<string, unknown> {
+  let root: Record<string, unknown> | null = null;
+  try {
+    root = asRecord(JSON.parse(bodyText));
+  } catch {
+    // not JSON — raw excerpt below
+  }
+  const err = asRecord(root?.["error"]) ?? root;
+  const message = err?.["message"];
+  if (typeof message !== "string")
+    return { bodySample: bodyText.slice(0, UPSTREAM_ERROR_LOG_CHARS) };
+  const fields: Record<string, unknown> = {
+    errorMessage: message.slice(0, UPSTREAM_ERROR_LOG_CHARS),
+  };
+  for (const [key, field] of [
+    ["type", "errorType"],
+    ["code", "errorCode"],
+  ] as const) {
+    const value = err?.[key];
+    if (typeof value === "string" || typeof value === "number") fields[field] = value;
+  }
+  return fields;
+}
 
 /**
  * Tap a teed SSE stream and extract usage WITHOUT retaining the full response
@@ -166,8 +294,8 @@ export async function tapSseUsage(
   let buffer = "";
   /** Where the next delimiter search starts: the buffer before it holds none. */
   let scanFrom = 0;
-  /** True while discarding a frame above `maxFrameChars`, up to its delimiter. */
-  let dropping = false;
+  /** The frame above `maxFrameChars` being streamed into a skeleton, up to its delimiter. */
+  let oversized: FrameSkeleton | null = null;
   const usageFrames: string[] = [];
   const considerFrame = (frame: string): void => {
     if (adapter.parseSseUsage([frame]) === null) return;
@@ -178,6 +306,10 @@ export async function tapSseUsage(
       usageFrames.splice(1, 1);
     }
     usageFrames.push(frame);
+  };
+  const considerOversized = (skeleton: FrameSkeleton): void => {
+    const json = skeleton.finish();
+    if (json !== null) considerFrame(`data: ${json}`);
   };
   try {
     for (;;) {
@@ -198,23 +330,33 @@ export async function tapSseUsage(
       // buffer until the next chunk — a frame may straddle chunks.
       let idx: number;
       while ((idx = buffer.indexOf("\n\n", scanFrom)) !== -1) {
-        if (!dropping) considerFrame(buffer.slice(0, idx));
-        dropping = false;
+        const frame = buffer.slice(0, idx);
+        if (oversized) {
+          oversized.push(frame);
+          considerOversized(oversized);
+          oversized = null;
+        } else considerFrame(frame);
         buffer = buffer.slice(idx + 2);
         scanFrom = 0;
       }
       scanFrom = Math.max(0, buffer.length - 1);
-      if (buffer.length > maxFrameChars) {
-        logger.warn("llm-proxy: SSE frame above the usage-frame bound — dropped", {
-          maxFrameChars,
-        });
+      if (oversized || buffer.length > maxFrameChars) {
+        if (!oversized) {
+          logger.warn("llm-proxy: SSE frame above the usage-frame bound — metering its skeleton", {
+            maxFrameChars,
+          });
+          oversized = frameSkeleton();
+        }
         // The last char may be the first half of the delimiter.
+        oversized.push(buffer.slice(0, -1));
         buffer = buffer.slice(-1);
         scanFrom = 0;
-        dropping = true;
       }
     }
-    if (!dropping && buffer.trim().length > 0) considerFrame(buffer);
+    if (oversized) {
+      oversized.push(buffer);
+      considerOversized(oversized);
+    } else if (buffer.trim().length > 0) considerFrame(buffer);
   } catch (err) {
     logger.warn("llm-proxy: stream tap read failed — usage not recorded", {
       error: getErrorMessage(err),
@@ -558,7 +700,7 @@ export async function forwardMeteredResponse(
       runId: ctx.runId,
       orgId: ctx.principal.orgId,
       presetId: ctx.presetId,
-      bodySample: errorBody.slice(0, UPSTREAM_ERROR_LOG_CHARS),
+      ...upstreamErrorLogFields(errorBody),
     };
     if (swap) {
       return syntheticAliasErrorResponse(
@@ -642,7 +784,7 @@ export async function forwardMeteredResponse(
           status: upstream.status,
           presetId: ctx.presetId,
           runId: ctx.runId,
-          bodySample: bodyText.slice(0, 200),
+          ...upstreamErrorLogFields(bodyText),
         },
       );
     }
@@ -669,7 +811,7 @@ export async function forwardMeteredResponse(
         status: upstream.status,
         presetId: ctx.presetId,
         runId: ctx.runId,
-        bodySample: bodyText.slice(0, UPSTREAM_ERROR_LOG_CHARS),
+        ...upstreamErrorLogFields(bodyText),
       },
     );
   }

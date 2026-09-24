@@ -100,6 +100,100 @@ describe("computeCostUsd", () => {
   });
 });
 
+// A terminal frame above the buffer bound is metered from a bounded skeleton
+// (arrays and deep objects emptied, long strings blanked), never dropped: a
+// caller who inflates the echo must not get the call for free.
+describe("tapSseUsage — terminal frame above the buffer bound", () => {
+  const big = "é\n".repeat(400_000);
+  const options = { maxFrameChars: 100_000 };
+  const chunked = (text: string, size = 65_536): string[] => {
+    const out: string[] = [];
+    for (let i = 0; i < text.length; i += size) out.push(text.slice(i, i + size));
+    return out;
+  };
+
+  it("chat completions: meters the usage of an oversized final frame", async () => {
+    const frame = `data: ${JSON.stringify({
+      id: "c",
+      choices: [{ index: 0, delta: { content: big }, finish_reason: "stop" }],
+      usage: {
+        prompt_tokens: 900,
+        completion_tokens: 70,
+        prompt_tokens_details: { cached_tokens: 100 },
+      },
+    })}\n\ndata: [DONE]\n\n`;
+    expect(frame.length).toBeGreaterThan(options.maxFrameChars * 5);
+    const usage = await tapSseUsage(streamFrom(chunked(frame)), openaiCompletionsAdapter, options);
+    expect(usage).toEqual({ inputTokens: 800, outputTokens: 70, cacheReadTokens: 100 });
+  });
+
+  it("anthropic: meters an oversized message_delta", async () => {
+    const frame = `event: message_delta\ndata: ${JSON.stringify({
+      type: "message_delta",
+      delta: { stop_reason: "end_turn", padding: big },
+      usage: { output_tokens: 42 },
+    })}\n\n`;
+    const usage = await tapSseUsage(streamFrom(chunked(frame)), anthropicMessagesAdapter, options);
+    expect(usage).toEqual({ inputTokens: 0, outputTokens: 42 });
+  });
+
+  it("ignores a `usage` key nested in echoed caller content or inside strings", async () => {
+    const decoy = { usage: { prompt_tokens: 1, completion_tokens: 1 } };
+    const frame = `data: ${JSON.stringify({
+      choices: [{ delta: { content: big, tool_calls: [decoy] } }],
+      usage: { prompt_tokens: 900, completion_tokens: 70 },
+      echo: { nested: { deeper: { deepest: decoy } } },
+      note: JSON.stringify(decoy) + big,
+    })}\n\n`;
+    const usage = await tapSseUsage(streamFrom(chunked(frame)), openaiCompletionsAdapter, options);
+    expect(usage).toEqual({ inputTokens: 900, outputTokens: 70 });
+  });
+
+  // The skeleton itself is bounded: past its cap the frame yields no usage and
+  // the call is metered as an unparsed (unpriced) row, never a crash.
+  it("meters a frame whose skeleton exceeds its cap as unparsed", async () => {
+    const wide = Object.fromEntries(
+      Array.from({ length: 120_000 }, (_, i) => [`k${String(i).padStart(6, "0")}`, 1]),
+    );
+    const frame = `data: ${JSON.stringify({
+      usage: { prompt_tokens: 900, completion_tokens: 70 },
+      echo: wide,
+    })}\n\n`;
+    expect(frame.length).toBeGreaterThan(1024 * 1024);
+    expect(await tapSseUsage(streamFrom(chunked(frame)), openaiCompletionsAdapter, options)).toBe(
+      null,
+    );
+
+    const { calls, recordUsage } = collectUsage();
+    const res = await forwardMeteredResponse(
+      new Response(streamFrom(chunked(frame)), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      }),
+      openaiCompletionsAdapter,
+      makeCtx(),
+      { recordUsage, maxFrameChars: options.maxFrameChars },
+    );
+    await readAll(res.body!);
+    for (let i = 0; i < 100 && calls.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
+    expect(calls.map((c) => c.usage)).toEqual([null]);
+  });
+
+  it("returns null for an oversized frame without usage, and meters a later one", async () => {
+    const over = `data: ${JSON.stringify({ choices: [{ delta: { content: big } }] })}\n\n`;
+    expect(
+      await tapSseUsage(streamFrom(chunked(over)), openaiCompletionsAdapter, options),
+    ).toBeNull();
+    const next = `data: {"usage":{"prompt_tokens":5,"completion_tokens":3}}\n\n`;
+    const usage = await tapSseUsage(
+      streamFrom([over.slice(0, -1), over.slice(-1) + next]),
+      openaiCompletionsAdapter,
+      options,
+    );
+    expect(usage).toEqual({ inputTokens: 5, outputTokens: 3 });
+  });
+});
+
 describe("tapSseUsage (anthropic-messages)", () => {
   it("reassembles a usage frame split across two chunks and merges start+delta", async () => {
     // The message_start frame straddles the chunk boundary; the second chunk
@@ -824,7 +918,51 @@ describe("forwardMeteredResponse — upstream error body is logged server-side",
       runId: "run_1",
       orgId: "o",
     });
-    expect(String(logs[0]![1]!.bodySample)).toContain("unknown variant developer");
+    expect(logs[0]![1]!.errorMessage).toBe("unknown variant developer");
+    expect(logs[0]![1]!.bodySample).toBeUndefined();
+  });
+
+  // A vendor 400 can echo the prompt: log the error's identity and a bounded
+  // message, never the rest of the body.
+  it("logs the parsed error type, code and a truncated message, not the body", async () => {
+    const message = `Invalid 'input[3]': ${"m".repeat(1_000)}`;
+    const body = JSON.stringify({
+      error: { type: "invalid_request_error", code: "invalid_value", message, param: "input" },
+      echo: "SECRET PROMPT FRAGMENT",
+    });
+    await forwardMeteredResponse(
+      new Response(body, { status: 400 }),
+      openaiCompletionsAdapter,
+      makeCtx(),
+      {},
+    );
+    const fields = upstreamErrorLogs()[0]![1]!;
+    expect(fields.errorType).toBe("invalid_request_error");
+    expect(fields.errorCode).toBe("invalid_value");
+    expect(fields.errorMessage).toBe(message.slice(0, UPSTREAM_ERROR_LOG_CHARS));
+    expect(JSON.stringify(fields)).not.toContain("SECRET PROMPT FRAGMENT");
+  });
+
+  it("reads Anthropic's and Mistral's error shapes", async () => {
+    for (const [body, expected] of [
+      [
+        { type: "error", error: { type: "overloaded_error", message: "Overloaded" } },
+        { errorType: "overloaded_error", errorMessage: "Overloaded" },
+      ],
+      [
+        { object: "error", type: "invalid_request_error", code: "3051", message: "bad" },
+        { errorType: "invalid_request_error", errorCode: "3051", errorMessage: "bad" },
+      ],
+    ] as const) {
+      warnSpy.mockClear();
+      await forwardMeteredResponse(
+        new Response(JSON.stringify(body), { status: 400 }),
+        anthropicMessagesAdapter,
+        makeCtx(),
+        {},
+      );
+      expect(upstreamErrorLogs()[0]![1]).toMatchObject(expected);
+    }
   });
 
   it("logs the excerpt once on an aliased model, which still never reaches the client", async () => {
@@ -846,10 +984,10 @@ describe("forwardMeteredResponse — upstream error body is logged server-side",
     expect(await res.text()).not.toContain("deepseek-SECRET");
     const logs = upstreamErrorLogs();
     expect(logs).toHaveLength(1);
-    expect(String(logs[0]![1]!.bodySample)).toContain("deepseek-SECRET refused");
+    expect(logs[0]![1]!.errorMessage).toBe("deepseek-SECRET refused");
   });
 
-  it("truncates the logged excerpt", async () => {
+  it("logs a truncated raw excerpt of a non-JSON body", async () => {
     const upstream = new Response("x".repeat(100_000), { status: 500 });
     const res = await forwardMeteredResponse(upstream, openaiCompletionsAdapter, makeCtx(), {});
     expect((await res.text()).length).toBe(100_000);

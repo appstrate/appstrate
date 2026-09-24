@@ -177,6 +177,24 @@ describe("openaiResponsesAdapter — usage", () => {
     expect(usage).toEqual(EXPECTED_USAGE);
   });
 
+  // A vendor reporting reasoning outside `output_tokens` still counts it in
+  // `total_tokens`: meter the larger of the two readings.
+  it("meters output as total − input when that exceeds output_tokens", () => {
+    const usage = openaiResponsesAdapter.parseJsonUsage({
+      usage: { input_tokens: 1_500, output_tokens: 320, total_tokens: 2_000 },
+    });
+    expect(usage).toEqual({ inputTokens: 1_500, outputTokens: 500 });
+  });
+
+  it("keeps output_tokens when total_tokens is consistent, smaller or absent", () => {
+    for (const total_tokens of [1_820, 1_000, undefined]) {
+      const usage = openaiResponsesAdapter.parseJsonUsage({
+        usage: { input_tokens: 1_500, output_tokens: 320, total_tokens },
+      });
+      expect(usage).toEqual({ inputTokens: 1_500, outputTokens: 320 });
+    }
+  });
+
   it("returns null when the body carries no usage", () => {
     expect(openaiResponsesAdapter.parseJsonUsage({ ...RESPONSE_SHELL, usage: null })).toBeNull();
     expect(
@@ -328,21 +346,55 @@ describe("openaiResponsesAdapter — terminal event above 1 MB", () => {
     expect(usage).toEqual(EXPECTED_USAGE);
   });
 
-  it("reads no usage from a frame above the bound, and still meters the next one", async () => {
-    const over = oversizedCompletedEvent({
-      ...RESPONSE_SHELL,
-      instructions: big,
-      usage: { input_tokens: 999_999, output_tokens: 999_999 },
-    });
+  // The bound caps memory, not metering: an echo inflated past it (non-ASCII
+  // input JSON-escapes to up to 3× its bytes) is still billed.
+  describe("above the buffer bound", () => {
     const options = { maxFrameChars: 1_000_000 };
-    expect(
-      await tapSseUsage(streamFrom(chunked(over)), openaiResponsesAdapter, options),
-    ).toBeNull();
-    // The dropped frame's delimiter straddles the chunk that crossed the bound.
-    const next = streamEvents("response.completed").slice(5).join("");
-    const chunks = [over.slice(0, -1), over.slice(-1) + next];
-    const usage = await tapSseUsage(streamFrom(chunks), openaiResponsesAdapter, options);
-    expect(usage).toEqual(EXPECTED_USAGE);
+    const escaped = "é".repeat(600_000);
+
+    it("meters usage placed after the echoed instructions, output and tools", async () => {
+      const over = oversizedCompletedEvent({
+        ...RESPONSE_SHELL,
+        status: "completed",
+        instructions: escaped,
+        output: [{ type: "message", content: [{ type: "output_text", text: big }] }],
+        tools: decoyTools,
+        usage: COMPLETED_USAGE,
+        user: null,
+        metadata: { k: "v" },
+      }).replaceAll("é", "\\u00e9");
+      expect(over.length).toBeGreaterThan(options.maxFrameChars * 3);
+      const usage = await tapSseUsage(streamFrom(chunked(over)), openaiResponsesAdapter, options);
+      expect(usage).toEqual(EXPECTED_USAGE);
+    });
+
+    it("reads the frame's own usage when a tool schema carrying `usage` follows it", async () => {
+      const over = oversizedCompletedEvent({
+        ...RESPONSE_SHELL,
+        instructions: big,
+        usage: COMPLETED_USAGE,
+        tools: decoyTools,
+        metadata: { note: `"usage":{"input_tokens":1,"output_tokens":1}` },
+      });
+      const usage = await tapSseUsage(streamFrom(chunked(over)), openaiResponsesAdapter, options);
+      expect(usage).toEqual(EXPECTED_USAGE);
+    });
+
+    it("meters the oversized frame, then lets a later terminal frame supersede it", async () => {
+      const over = oversizedCompletedEvent({
+        ...RESPONSE_SHELL,
+        instructions: big,
+        usage: { input_tokens: 999_999, output_tokens: 999_999 },
+      });
+      expect(await tapSseUsage(streamFrom(chunked(over)), openaiResponsesAdapter, options)).toEqual(
+        { inputTokens: 999_999, outputTokens: 999_999 },
+      );
+      // The oversized frame's delimiter straddles the chunk that crossed the bound.
+      const next = streamEvents("response.completed").slice(5).join("");
+      const chunks = [over.slice(0, -1), over.slice(-1) + next];
+      const usage = await tapSseUsage(streamFrom(chunks), openaiResponsesAdapter, options);
+      expect(usage).toEqual(EXPECTED_USAGE);
+    });
   });
 
   it("sizes the bound from the request limit plus a fixed output margin", () => {
@@ -446,6 +498,22 @@ describe("openaiResponsesAdapter — request guard", () => {
     expect(
       refusedParam({ tools: [{ type: "function", name: "f" }, { type: "code_interpreter" }] }),
     ).toBe("tools");
+  });
+
+  // A gateway serving Anthropic behind this wire may honour the field too.
+  it("refuses a non-5m cache_control TTL", () => {
+    expect(
+      refusedParam({
+        input: [
+          {
+            role: "user",
+            content: [
+              { type: "input_text", text: "t", cache_control: { type: "ephemeral", ttl: "1h" } },
+            ],
+          },
+        ],
+      }),
+    ).toBe("cache_control");
   });
 
   it("accepts the default tiers, unset optional fields, and client-executed tools", () => {

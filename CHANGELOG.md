@@ -169,27 +169,35 @@ precondition_failed` (it was `409 conflict`), and a body still sending
   `instance`/`request_id` are present.
 - **BREAKING (LLM proxy): raw callers can no longer request work the vendor
   bills but the proxy cannot meter** (#1549). Each refusal is a
-  `400 invalid_request` naming the field. `anthropic-messages` refuses
-  `fallbacks`, any tool whose `type` is not `custom` (the server-executed ones)
-  and a `service_tier` other than `standard_only`, and forwards only the
-  `anthropic-beta` values Pi itself emits, dropping the rest.
-  `openai-completions` (and `mistral-conversations`, which shares its adapter)
-  refuses OpenRouter's `models` and `route` fallback lists. The new
-  `openai-responses` shape applies the same rule from the start (see Added).
-  Requests built by Pi pass unchanged.
+  `400 invalid_request` naming the field. Every shape refuses a
+  `cache_control` whose `ttl` is not `5m` (a one-hour write bills 2× input) and
+  forwards only the `anthropic-beta` values Pi itself emits, dropping the rest
+  and `x-anthropic-beta`. `anthropic-messages` refuses `fallbacks`,
+  `inference_geo`, any tool whose `type` is not `custom` (the server-executed
+  ones) and a `service_tier` other than `standard_only`. `openai-completions`
+  (and `mistral-conversations`, which shares its adapter) refuses OpenRouter's
+  `models`, `route`, `provider`, `plugins`, `transforms` and
+  `web_search_options`, `store: true`, a non-standard `service_tier` and a
+  non-boolean `stream`. The new `openai-responses` shape applies the same rule
+  from the start (see Added). Requests built by Pi pass unchanged. A usage
+  frame larger than the buffer bound is metered from a bounded skeleton instead
+  of being recorded unpriced, and upstream error logs keep the error's type,
+  code and first 300 characters of its message only.
 - **BREAKING (LLM proxy): `/api/llm-proxy/*` forwards the caller's request
   headers upstream under the run sidecar's policy, replacing its per-wire
   allowlists.** Both proxies now share one rule
   (`@appstrate/connect/llm-request-headers`): every header goes through except
   transport headers, inbound credentials, platform headers (`x-appstrate-*`,
   `appstrate-*`, `X-Org-Id`, `X-Space-Id`, `X-Run-Id`) and client network
-  identity (`Forwarded`, `Via`, `X-Forwarded-*`, `X-Real-IP`,
-  Cloudflare edge headers). A raw caller's other headers (`user-agent`,
+  identity (`Forwarded`, `Via`, `X-Forwarded-*`, `X-Real-IP`, every `cf-*`
+  header, identity-aware-proxy tokens, request-rewriting overrides), and
+  `OpenAI-Organization` / `OpenAI-Project`, which would re-scope a stored key.
+  A raw caller's other headers (`user-agent`,
   `x-stainless-*`, vendor headers) now reach the vendor where they were
   dropped before. Provider-specific headers Pi sets are no longer lost, which
   fixes chat with an OpenCode model (`400 MissingSessionID`, the
-  `x-opencode-session` header). The billing guards are unchanged: the
-  `anthropic-beta` filter applies to the forwarded headers.
+  `x-opencode-session` header). The `anthropic-beta` filter applies to the
+  forwarded headers on every route.
 - **BREAKING (API): timestamps named `expiresAt` / `createdAt` are RFC 3339
   strings, and the universal ids and timestamps are spelled camelCase on the
   surfaces that still used snake_case.** The hosted-connect session

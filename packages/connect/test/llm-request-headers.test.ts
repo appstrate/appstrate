@@ -89,4 +89,49 @@ describe("forwardedLlmRequestHeaders", () => {
     // A cookie is never a provider credential slot.
     expect(out.get("cookie")).toBeNull();
   });
+
+  // Each row: a header a caller, an auth proxy or a CDN may set, which must
+  // never reach a vendor against a stored credential. Mixed case on purpose.
+  const HARDENED_DROPS: [string, string][] = [
+    // vendor account scoping
+    ["OpenAI-Organization", "org-caller"],
+    ["OpenAI-Project", "proj_caller"],
+    // every Cloudflare edge header, not only the known ones
+    ["CF-Connecting-IP", "10.0.0.1"],
+    ["cf-ew-via", "15"],
+    ["CF-Access-Jwt-Assertion", "eyJ"],
+    ["cf-aig-authorization", "Bearer caller-gateway-key"],
+    // auth-proxy identity
+    ["X-Amzn-Oidc-Data", "eyJ"],
+    ["x-amzn-oidc-identity", "user"],
+    ["X-MS-CLIENT-PRINCIPAL", "eyJ"],
+    ["x-ms-client-principal-name", "alice"],
+    ["X-Ms-Token-Aad-Access-Token", "eyJ"],
+    ["X-Goog-IAP-JWT-Assertion", "eyJ"],
+    ["x-goog-authenticated-user-email", "accounts.google.com:alice"],
+    ["X-Auth-Request-Email", "alice@example.test"],
+    // client network identity
+    ["X-Client-IP", "10.0.0.1"],
+    ["X-Original-Forwarded-For", "10.0.0.1"],
+    ["CDN-Loop", "cloudflare"],
+    // request rewriting
+    ["X-HTTP-Method-Override", "DELETE"],
+    ["X-HTTP-Method", "DELETE"],
+    ["X-Method-Override", "DELETE"],
+    ["X-Original-URL", "/v1/files"],
+    ["X-Rewrite-URL", "/v1/files"],
+  ];
+
+  for (const [name, value] of HARDENED_DROPS) {
+    it(`drops ${name}`, () => {
+      const out = forwardedLlmRequestHeaders({ [name]: value, "x-vendor-foo": "bar" });
+      expect([...out]).toEqual([["x-vendor-foo", "bar"]]);
+    });
+  }
+
+  // A prefix drop must not swallow a vendor header that merely starts alike.
+  it("keeps headers that only resemble a dropped prefix", () => {
+    const kept = { "x-goog-user-project": "p", "x-ms-useragent": "u", "cfg-id": "c" };
+    expect(Object.fromEntries(forwardedLlmRequestHeaders(kept))).toEqual(kept);
+  });
 });

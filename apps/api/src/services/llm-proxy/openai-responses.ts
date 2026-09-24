@@ -7,7 +7,8 @@
  * Request side is the Chat Completions adapter's bearer auth. There is no usage opt-in to force — this API always
  * reports usage. {@link prepareRequest} refuses what the vendor bills outside the
  * reported tokens (background jobs, chained, stored or prompt-template state,
- * non-default service tiers, server-executed tools) and forces `store: false`,
+ * non-default service tiers, server-executed tools, a `cache_control` TTL other
+ * than `5m`) and forces `store: false`,
  * so no response is kept upstream for later replay.
  *
  * Usage: a non-streaming reply carries it at the top level (`body.usage`); a
@@ -21,6 +22,11 @@
  *   cacheWrite = input_tokens_details.cache_write_tokens
  *   input      = max(0, input_tokens − cacheRead − cacheWrite)
  *   output     = output_tokens   (reasoning_tokens ⊂ output_tokens)
+ *
+ * One deliberate departure: when `total_tokens` is reported, output is
+ * `max(output_tokens, total_tokens − input_tokens)`, so a vendor counting
+ * reasoning outside `output_tokens` (suspected: xAI) is not under-metered.
+ * Identical to pi-ai whenever the three fields add up.
  */
 
 import type { LlmProxyAdapter, UpstreamUsage } from "./types.ts";
@@ -29,6 +35,8 @@ import {
   asRecord,
   extractUsageObject,
   parseSseDataFrame,
+  refuseLongCacheTtl,
+  refuseNonStandardServiceTier,
   refuseUnmeteredFields,
   tokenCount,
 } from "./helpers.ts";
@@ -36,8 +44,11 @@ import { bearerUpstreamHeaders, partitionOpenAIUsage } from "./openai.ts";
 
 function parseResponsesUsage(u: Record<string, unknown>): UpstreamUsage | null {
   const prompt = tokenCount(u["input_tokens"]);
-  const completion = tokenCount(u["output_tokens"]);
-  if (prompt === undefined && completion === undefined) return null;
+  const reported = tokenCount(u["output_tokens"]);
+  if (prompt === undefined && reported === undefined) return null;
+  const total = tokenCount(u["total_tokens"]);
+  const completion =
+    total === undefined ? reported : Math.max(reported ?? 0, total - (prompt ?? 0));
   const details = asRecord(u["input_tokens_details"]);
   return partitionOpenAIUsage({
     prompt,
@@ -48,8 +59,6 @@ function parseResponsesUsage(u: Record<string, unknown>): UpstreamUsage | null {
 }
 
 const UNMETERED_FIELDS = ["background", "previous_response_id", "conversation", "prompt"];
-/** Tiers billed at the standard rate — the only one Pi's cost records carry. */
-const STANDARD_SERVICE_TIERS = new Set<unknown>(["auto", "default"]);
 /** Tools the caller executes; every other type runs (and bills) server-side. */
 const CLIENT_TOOL_TYPES = new Set<unknown>(["function", "custom"]);
 
@@ -60,10 +69,8 @@ export const openaiResponsesAdapter: LlmProxyAdapter = {
 
   prepareRequest(body) {
     refuseUnmeteredFields(body, UNMETERED_FIELDS);
-    const tier = body["service_tier"];
-    if (tier != null && !STANDARD_SERVICE_TIERS.has(tier)) {
-      throw invalidRequest("`service_tier` must be `auto` or `default`", "service_tier");
-    }
+    refuseNonStandardServiceTier(body);
+    refuseLongCacheTtl(body);
     const tools = body["tools"];
     if (Array.isArray(tools) && tools.some((t) => !CLIENT_TOOL_TYPES.has(asRecord(t)?.["type"]))) {
       throw invalidRequest("Only `function` and `custom` tools are supported", "tools");

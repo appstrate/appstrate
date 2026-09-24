@@ -11,8 +11,15 @@
  *   - inbound credentials: each proxy sets its own upstream auth;
  *   - platform-internal: `x-appstrate-*`, `appstrate-*`, `x-org-id`,
  *     `x-space-id`, `x-run-id`;
+ *   - vendor account scoping: `openai-organization`, `openai-project` (a
+ *     stored credential decides whose account is billed, never the caller);
  *   - client network identity: `forwarded`, `via`, `x-forwarded-*`,
- *     `x-real-ip`, `true-client-ip`, Cloudflare's edge `cf-*` headers.
+ *     `x-real-ip`, `true-client-ip`, `x-client-ip`, `x-original-forwarded-for`,
+ *     `cdn-loop`, every Cloudflare `cf-*` header;
+ *   - identity asserted by an auth proxy in front of the caller (AWS ALB OIDC,
+ *     Azure App Service, Google IAP, oauth2-proxy);
+ *   - request rewriting honoured by some gateways (`x-http-method-override`,
+ *     `x-original-url`, …): the proxy decides the method and path.
  * Header-level billing guards (Anthropic's `anthropic-beta` filter) stay with
  * the caller and run on the result.
  */
@@ -35,15 +42,30 @@ const DROPPED = new Set([
   "via",
   "x-real-ip",
   "true-client-ip",
-  "cf-connecting-ip",
-  "cf-connecting-ipv6",
-  "cf-ipcountry",
-  "cf-ray",
-  "cf-visitor",
-  "cf-worker",
+  "x-client-ip",
+  "x-original-forwarded-for",
+  "cdn-loop",
+  "openai-organization",
+  "openai-project",
+  "x-http-method-override",
+  "x-http-method",
+  "x-method-override",
+  "x-original-url",
+  "x-rewrite-url",
 ]);
 
-const DROPPED_PREFIXES = ["x-appstrate-", "appstrate-", "x-forwarded-"];
+const DROPPED_PREFIXES = [
+  "x-appstrate-",
+  "appstrate-",
+  "x-forwarded-",
+  "cf-",
+  "x-amzn-oidc-",
+  "x-ms-client-principal",
+  "x-ms-token-",
+  "x-goog-iap-",
+  "x-goog-authenticated-user-",
+  "x-auth-request-",
+];
 
 /** A placeholder the caller's SDK put in its auth slot, and the real key it stands for. */
 export interface CredentialPlaceholder {

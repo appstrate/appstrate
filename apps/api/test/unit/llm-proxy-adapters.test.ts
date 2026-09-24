@@ -76,6 +76,24 @@ describe("upstream headers — shared forwarding policy", () => {
         adapter === anthropicMessagesAdapter ? "sk-upstream" : "Bearer sk-upstream",
       ]);
     });
+
+    // An anthropic-compatible gateway behind any wire honours the header too.
+    it(`${adapter.apiShape}: forwards only Pi's own betas, never x-anthropic-beta`, () => {
+      const headers = adapter.buildUpstreamHeaders(
+        new Headers({
+          "Anthropic-Beta": "context-1m-2025-08-07, interleaved-thinking-2025-05-14",
+          "X-Anthropic-Beta": "interleaved-thinking-2025-05-14",
+        }),
+        "sk-upstream",
+      );
+      expect(headers.get("anthropic-beta")).toBe("interleaved-thinking-2025-05-14");
+      expect(headers.get("x-anthropic-beta")).toBeNull();
+      const none = adapter.buildUpstreamHeaders(
+        new Headers({ "anthropic-beta": "mcp-client-2025-04-04" }),
+        "sk-upstream",
+      );
+      expect(none.get("anthropic-beta")).toBeNull();
+    });
   }
 });
 
@@ -328,6 +346,58 @@ describe("anthropicMessagesAdapter", () => {
     }
   });
 
+  // US-only inference is priced above the rates the proxy meters at.
+  it("refuses inference_geo", () => {
+    const base = { model: "p", max_tokens: 10, messages: [] };
+    expect(refusedParam({ ...base, inference_geo: "us" })).toBe("inference_geo");
+    expect(refusedParam({ ...base, inference_geo: null })).toBeUndefined();
+  });
+
+  // A 1-hour cache write bills 2× input; the meter prices every write as 5-minute.
+  describe("cache_control TTL", () => {
+    const hourly = { type: "ephemeral", ttl: "1h" };
+    const block = (cache_control: unknown) => ({ type: "text", text: "t", cache_control });
+    const tool = (cache_control: unknown) => ({
+      name: "f",
+      input_schema: { type: "object" },
+      cache_control,
+    });
+    const placements: [string, (cc: unknown) => Record<string, unknown>][] = [
+      ["top level", (cc) => ({ cache_control: cc })],
+      ["system block", (cc) => ({ system: [block(cc)] })],
+      ["message block", (cc) => ({ messages: [{ role: "user", content: [block(cc)] }] })],
+      [
+        "tool_result block",
+        (cc) => ({
+          messages: [
+            {
+              role: "user",
+              content: [{ type: "tool_result", tool_use_id: "t1", content: [block(cc)] }],
+            },
+          ],
+        }),
+      ],
+      ["tool", (cc) => ({ tools: [tool(cc)] })],
+    ];
+    const base = { model: "p", max_tokens: 10, messages: [] };
+
+    for (const [where, place] of placements) {
+      it(`refuses a non-5m TTL on a ${where}`, () => {
+        expect(refusedParam({ ...base, ...place(hourly) })).toBe("cache_control");
+        expect(refusedParam({ ...base, ...place({ type: "ephemeral", ttl: 3600 }) })).toBe(
+          "cache_control",
+        );
+      });
+
+      it(`accepts the default and the explicit 5m TTL on a ${where}`, () => {
+        expect(refusedParam({ ...base, ...place({ type: "ephemeral" }) })).toBeUndefined();
+        expect(
+          refusedParam({ ...base, ...place({ type: "ephemeral", ttl: "5m" }) }),
+        ).toBeUndefined();
+      });
+    }
+  });
+
   // What Pi puts on the wire for every Anthropic record, platform-built (as
   // chat and llm-proxy presets build it), with a tool and with thinking.
   it("lets a Pi-built request through unchanged", async () => {
@@ -535,7 +605,100 @@ describe("openaiCompletionsAdapter — request guard", () => {
     }
   });
 
+  function refusedParam(extra: Record<string, unknown>): string | undefined {
+    try {
+      guard(extra);
+    } catch (err) {
+      if (err instanceof ApiError) return err.param ?? "(none)";
+      throw err;
+    }
+    return undefined;
+  }
+
   it("accepts an ordinary chat-completions body", () => {
     expect(() => guard({ stream: true, tools: [{ type: "function" }] })).not.toThrow();
   });
+
+  // A string `"true"` streams at the vendor but skips the forced usage opt-in.
+  it("refuses a non-boolean stream", () => {
+    for (const stream of ["true", 1, {}]) expect(refusedParam({ stream })).toBe("stream");
+    for (const stream of [true, false, null, undefined]) {
+      expect(refusedParam({ stream })).toBeUndefined();
+    }
+  });
+
+  it("refuses a service_tier billed above the standard rate, like the responses wire", () => {
+    for (const service_tier of ["priority", "flex", "scale"]) {
+      expect(refusedParam({ service_tier })).toBe("service_tier");
+    }
+    for (const service_tier of ["auto", "default", null, undefined]) {
+      expect(refusedParam({ service_tier })).toBeUndefined();
+    }
+  });
+
+  // Not rewritten to `false`: a non-OpenAI vendor may reject the unknown field.
+  it("refuses store: true and leaves store otherwise untouched", () => {
+    expect(refusedParam({ store: true })).toBe("store");
+    const body: Record<string, unknown> = { model: "m", messages: [] };
+    openaiCompletionsAdapter.prepareRequest?.(body);
+    expect("store" in body).toBe(false);
+    expect(refusedParam({ store: false })).toBeUndefined();
+  });
+
+  it("refuses OpenRouter's separately billed extras", () => {
+    expect(refusedParam({ plugins: [{ id: "web" }] })).toBe("plugins");
+    expect(refusedParam({ web_search_options: { search_context_size: "high" } })).toBe(
+      "web_search_options",
+    );
+    expect(refusedParam({ transforms: ["middle-out"] })).toBe("transforms");
+  });
+
+  // pi-ai emits `provider` only from `compat.openRouterRouting`, which no
+  // platform-built model sets: a raw caller is the only source.
+  it("refuses OpenRouter provider routing", () => {
+    expect(refusedParam({ provider: { order: ["anthropic"], allow_fallbacks: false } })).toBe(
+      "provider",
+    );
+  });
+
+  // OpenRouter honours Anthropic-format cache_control on this wire too.
+  it("refuses a non-5m cache_control TTL anywhere in the body", () => {
+    const hourly = { type: "ephemeral", ttl: "1h" };
+    const part = (cache_control: unknown) => ({ type: "text", text: "t", cache_control });
+    for (const extra of [
+      { messages: [{ role: "system", content: [part(hourly)] }] },
+      { messages: [{ role: "user", content: [part(hourly)] }] },
+      { tools: [{ type: "function", function: { name: "f" }, cache_control: hourly }] },
+      { cache_control: hourly },
+    ]) {
+      expect(refusedParam(extra)).toBe("cache_control");
+    }
+    for (const cache_control of [{ type: "ephemeral" }, { type: "ephemeral", ttl: "5m" }]) {
+      expect(refusedParam({ messages: [{ role: "user", content: [part(cache_control)] }] })).toBe(
+        undefined,
+      );
+    }
+  });
+
+  // What Pi puts on the wire for every record of this wire, platform-built.
+  it("lets a Pi-built request through unchanged", async () => {
+    let checked = 0;
+    for (const piProvider of ["openai", "openrouter", "deepseek", "xai", "groq"]) {
+      for (const record of listPiModels(piProvider, "openai-completions").slice(0, 3)) {
+        const model = buildPiModel({
+          id: "preset",
+          registryModelId: record.id,
+          apiShape: "openai-completions",
+          piProvider,
+          baseUrl: "http://127.0.0.1",
+        });
+        const { body } = await captureRequest(model, record.reasoning ? "medium" : undefined);
+        const prepared = structuredClone(body);
+        openaiCompletionsAdapter.prepareRequest!(prepared);
+        expect(prepared).toEqual(body);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  }, 30_000);
 });
