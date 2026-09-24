@@ -5,9 +5,8 @@
  *
  * The `openai-completions` and `mistral-conversations` apiShapes speak
  * the same wire (snake_case `prompt_tokens` / `completion_tokens`, SSE
- * usage on the terminal frame). The only protocol-specific difference is
- * which inbound headers get forwarded — expressed here as `AdapterOptions`.
- * Adding a new OpenAI-compatible apiShape is a single call to
+ * usage on the terminal frame) and the same bearer auth. Adding a new
+ * OpenAI-compatible apiShape is a single call to
  * {@link createOpenAICompatibleAdapter}.
  *
  * Usage normalisation — PARITY WITH THE RUNNER. The same upstream reply is
@@ -39,18 +38,11 @@ import type { LlmProxyAdapter, UpstreamUsage } from "./types.ts";
 import {
   asRecord,
   extractUsageObject,
-  OPENCODE_SESSION_HEADER,
   parseSseDataFrame,
   refuseUnmeteredFields,
   tokenCount,
+  upstreamHeaders,
 } from "./helpers.ts";
-
-interface AdapterOptions {
-  /** Protocol family discriminator — must match the route's `apiShape`. */
-  apiShape: string;
-  /** Inbound header names (lowercase) the adapter forwards to upstream. */
-  forwardHeaders?: ReadonlySet<string>;
-}
 
 /**
  * Normalise an OpenAI-compatible `usage` object into the four DISJOINT cost
@@ -108,38 +100,17 @@ export function partitionOpenAIUsage(u: {
   return result;
 }
 
-/** Inbound headers forwarded upstream by both OpenAI wires. */
-export const OPENAI_FORWARD_HEADERS: ReadonlySet<string> = new Set([
-  "openai-organization",
-  "openai-beta",
-  OPENCODE_SESSION_HEADER,
-]);
-
-/** `Authorization: Bearer <upstream key>` plus the named inbound headers, nothing else. */
-export function bearerUpstreamHeaders(
-  incoming: Headers,
-  apiKey: string,
-  forwardHeaders: ReadonlySet<string>,
-): Record<string, string> {
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${apiKey}`,
-    "Content-Type": "application/json",
-  };
-  for (const [k, v] of incoming) {
-    if (forwardHeaders.has(k.toLowerCase())) headers[k] = v;
-  }
-  return headers;
+/** The forwarded caller headers plus `Authorization: Bearer <upstream key>`. */
+export function bearerUpstreamHeaders(incoming: Headers, apiKey: string): Headers {
+  return upstreamHeaders(incoming, { authorization: `Bearer ${apiKey}` });
 }
 
-export function createOpenAICompatibleAdapter(opts: AdapterOptions): LlmProxyAdapter {
-  const forwardHeaders = opts.forwardHeaders ?? new Set<string>();
-
+/** `apiShape` must match the route's. */
+export function createOpenAICompatibleAdapter(apiShape: string): LlmProxyAdapter {
   const adapter: LlmProxyAdapter = {
-    apiShape: opts.apiShape,
+    apiShape,
 
-    buildUpstreamHeaders(incoming, apiKey) {
-      return bearerUpstreamHeaders(incoming, apiKey, forwardHeaders);
-    },
+    buildUpstreamHeaders: bearerUpstreamHeaders,
 
     prepareRequest(body) {
       // Gateway fallback lists (OpenRouter) bill whichever model answered.
@@ -176,7 +147,4 @@ export function createOpenAICompatibleAdapter(opts: AdapterOptions): LlmProxyAda
   return adapter;
 }
 
-export const openaiCompletionsAdapter = createOpenAICompatibleAdapter({
-  apiShape: "openai-completions",
-  forwardHeaders: OPENAI_FORWARD_HEADERS,
-});
+export const openaiCompletionsAdapter = createOpenAICompatibleAdapter("openai-completions");

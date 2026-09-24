@@ -72,8 +72,8 @@ export interface UpstreamUsage {
 export interface LlmProxyAdapter {
   /** Protocol string — must match the route's apiShape and the resolved model's apiShape. */
   readonly apiShape: string;
-  /** Build the upstream request headers (auth + protocol-specific). */
-  buildUpstreamHeaders(incoming: Headers, apiKey: string): Record<string, string>;
+  /** Build the upstream request headers: the shared forwarding policy + auth + header guards. */
+  buildUpstreamHeaders(incoming: Headers, apiKey: string): Headers;
   /**
    * Make the outgoing body meterable, on every forwarded request and preset:
    * refuse (a 400 naming the field) what the vendor bills but the proxy cannot

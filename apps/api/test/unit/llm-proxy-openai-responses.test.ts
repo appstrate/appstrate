@@ -142,21 +142,20 @@ describe("openaiResponsesAdapter — request side", () => {
     expect(openaiResponsesAdapter.apiShape).toBe("openai-responses");
   });
 
-  it("injects the upstream key as a bearer and forwards only the allowlisted headers", () => {
+  it("injects the upstream key as a bearer and forwards the SDK's headers", () => {
     const headers = openaiResponsesAdapter.buildUpstreamHeaders(
       new Headers({
         authorization: "Bearer appstrate-caller-token",
         "openai-beta": "responses=v1",
-        "x-opencode-session": "ses_abc",
         "x-client-request-id": "sess_1",
       }),
       "sk-upstream",
     );
-    expect(headers).toEqual({
-      Authorization: "Bearer sk-upstream",
-      "Content-Type": "application/json",
+    expect(Object.fromEntries(headers)).toEqual({
+      authorization: "Bearer sk-upstream",
+      "content-type": "application/json",
       "openai-beta": "responses=v1",
-      "x-opencode-session": "ses_abc",
+      "x-client-request-id": "sess_1",
     });
   });
 

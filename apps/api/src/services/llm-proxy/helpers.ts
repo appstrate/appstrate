@@ -10,12 +10,12 @@
  * `body.model` rewrite, SSE frame extraction — are identical across
  * adapters. Centralising them here keeps each adapter focused on the
  * truly protocol-specific bits (which fields to read out of `usage`,
- * which headers to forward).
+ * which auth header to set).
  *
  * Adapter-specific behaviour stays in the adapter:
  *   - which usage fields to read (`prompt_tokens` vs `input_tokens`, …)
  *   - which auth header to inject (`Authorization` vs `x-api-key`)
- *   - which inbound headers to forward (`anthropic-beta`, `openai-beta`, …)
+ *   - header-level billing guards (`anthropic-beta`)
  *
  * The `parseSseDataFrame` helper filters out OpenAI's `[DONE]`
  * terminator. Anthropic never emits that terminator, so the filter is a
@@ -26,6 +26,7 @@
 import { parseSseFrames, parseSseJsonData } from "@appstrate/core/sse";
 import { getEnv } from "@appstrate/env";
 import { DEFAULT_LLM_STREAM_IDLE_TIMEOUT_MS } from "@appstrate/connect/proxy-primitives";
+import { forwardedLlmRequestHeaders } from "@appstrate/connect/llm-request-headers";
 import { invalidRequest } from "../../lib/errors.ts";
 
 /**
@@ -151,10 +152,16 @@ export function parseProxyRequest(rawBody: Uint8Array): ParsedProxyRequest {
 }
 
 /**
- * OpenCode (Zen + Go) routes by this per-conversation header and answers 400
- * without it; Pi's `opencode*` providers set it on every wire they speak.
+ * Upstream request headers: the caller's, under the policy shared with the
+ * sidecar (`@appstrate/connect/llm-request-headers`), plus this upstream's auth.
+ * The body is re-serialised JSON, hence the forced `content-type`.
  */
-export const OPENCODE_SESSION_HEADER = "x-opencode-session";
+export function upstreamHeaders(incoming: Headers, auth: Record<string, string>): Headers {
+  const headers = forwardedLlmRequestHeaders(incoming);
+  headers.set("content-type", "application/json");
+  for (const [name, value] of Object.entries(auth)) headers.set(name, value);
+  return headers;
+}
 
 /** Pull `body.usage` out of a parsed JSON response. Returns null if absent or malformed. */
 export function extractUsageObject(body: unknown): Record<string, unknown> | null {

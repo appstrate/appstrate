@@ -4,8 +4,7 @@
  * OpenAI Responses adapter (`POST /v1/responses`) — the wire of every provider
  * whose apiShape is `openai-responses` (`openai`, `xai`).
  *
- * Request side is the Chat Completions adapter's: bearer auth and the same
- * forwarded OpenAI headers. There is no usage opt-in to force — this API always
+ * Request side is the Chat Completions adapter's bearer auth. There is no usage opt-in to force — this API always
  * reports usage. {@link prepareRequest} refuses what the vendor bills outside the
  * reported tokens (background jobs, chained, stored or prompt-template state,
  * non-default service tiers, server-executed tools) and forces `store: false`,
@@ -33,7 +32,7 @@ import {
   refuseUnmeteredFields,
   tokenCount,
 } from "./helpers.ts";
-import { bearerUpstreamHeaders, OPENAI_FORWARD_HEADERS, partitionOpenAIUsage } from "./openai.ts";
+import { bearerUpstreamHeaders, partitionOpenAIUsage } from "./openai.ts";
 
 function parseResponsesUsage(u: Record<string, unknown>): UpstreamUsage | null {
   const prompt = tokenCount(u["input_tokens"]);
@@ -57,9 +56,7 @@ const CLIENT_TOOL_TYPES = new Set<unknown>(["function", "custom"]);
 export const openaiResponsesAdapter: LlmProxyAdapter = {
   apiShape: "openai-responses",
 
-  buildUpstreamHeaders(incoming, apiKey) {
-    return bearerUpstreamHeaders(incoming, apiKey, OPENAI_FORWARD_HEADERS);
-  },
+  buildUpstreamHeaders: bearerUpstreamHeaders,
 
   prepareRequest(body) {
     refuseUnmeteredFields(body, UNMETERED_FIELDS);

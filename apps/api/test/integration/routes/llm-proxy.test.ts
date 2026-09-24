@@ -171,7 +171,12 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
 
     const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
       method: "POST",
-      headers: authHeaders(h, { "x-opencode-session": "ses_abc" }),
+      headers: authHeaders(h, {
+        "x-opencode-session": "ses_abc",
+        "x-vendor-foo": "bar",
+        "X-Run-Id": "",
+        "X-Forwarded-For": "10.0.0.1",
+      }),
       body: JSON.stringify({
         model: h.presetId,
         messages: [{ role: "user", content: "hi" }],
@@ -188,7 +193,13 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
     expect(captured!.url).toBe("https://api.openai.test/v1/chat/completions");
     const forwardedHeaders = new Headers(captured!.init?.headers as Record<string, string>);
     expect(forwardedHeaders.get("authorization")).toBe("Bearer sk-upstream-42");
+    // The SDK's own headers ride through; the caller's credential, the
+    // platform's routing headers and its network identity do not.
     expect(forwardedHeaders.get("x-opencode-session")).toBe("ses_abc");
+    expect(forwardedHeaders.get("x-vendor-foo")).toBe("bar");
+    for (const name of ["x-org-id", "x-space-id", "x-run-id", "x-forwarded-for"]) {
+      expect(forwardedHeaders.get(name)).toBeNull();
+    }
     const forwardedBody = JSON.parse(new TextDecoder().decode(captured!.init?.body as Uint8Array));
     expect(forwardedBody.model).toBe("gpt-4o-2024-08-06");
     expect(forwardedBody.messages).toEqual([{ role: "user", content: "hi" }]);

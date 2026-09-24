@@ -13,9 +13,9 @@
  * subscription wire format end-to-end.
  *
  * Wire format:
- *   - `anthropic-version` is forwarded verbatim. `anthropic-beta` keeps only
- *     the betas Pi's own client sends (`PI_BETAS`): a beta can switch on a
- *     feature billed outside the reported tokens, and an allowlist also
+ *   - `anthropic-version` is forwarded (defaulted when absent). `anthropic-beta`
+ *     keeps only the betas Pi's own client sends (`PI_BETAS`): a beta can switch
+ *     on a feature billed outside the reported tokens, and an allowlist also
  *     closes the ones Anthropic has not shipped yet. {@link prepareRequest}
  *     refuses the billable body fields Pi never sends (`fallbacks`,
  *     server-executed tools, a `service_tier` other than `standard_only`).
@@ -35,10 +35,10 @@ import { invalidRequest } from "../../lib/errors.ts";
 import {
   asRecord,
   extractUsageObject,
-  OPENCODE_SESSION_HEADER,
   parseSseDataFrame,
   refuseUnmeteredFields,
   tokenCount,
+  upstreamHeaders,
 } from "./helpers.ts";
 
 /**
@@ -53,35 +53,22 @@ const PI_BETAS: ReadonlySet<string> = new Set([
   "mid-conversation-tool-changes-2026-07-01",
 ]);
 
-function readForwardedHeader(incoming: Headers, name: string): string | null {
-  for (const [k, v] of incoming) {
-    if (k.toLowerCase() === name) return v;
-  }
-  return null;
-}
-
 export const anthropicMessagesAdapter: LlmProxyAdapter = {
   apiShape: "anthropic-messages",
 
   buildUpstreamHeaders(incoming, apiKey) {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-    };
+    const headers = upstreamHeaders(incoming, { "x-api-key": apiKey });
 
-    const betas = (readForwardedHeader(incoming, "anthropic-beta") ?? "")
+    // Billing guard, applied to what the shared policy forwarded.
+    const betas = (headers.get("anthropic-beta") ?? "")
       .split(",")
       .map((beta) => beta.trim())
       .filter((beta) => PI_BETAS.has(beta));
-    if (betas.length > 0) headers["anthropic-beta"] = betas.join(",");
+    if (betas.length > 0) headers.set("anthropic-beta", betas.join(","));
+    else headers.delete("anthropic-beta");
 
-    // Default anthropic-version if the caller omitted one — upstream
-    // returns 400 without it.
-    const callerVersion = readForwardedHeader(incoming, "anthropic-version");
-    headers["anthropic-version"] = callerVersion ?? "2023-06-01";
-
-    const session = readForwardedHeader(incoming, OPENCODE_SESSION_HEADER);
-    if (session !== null) headers[OPENCODE_SESSION_HEADER] = session;
+    // Upstream answers 400 without it.
+    if (!headers.has("anthropic-version")) headers.set("anthropic-version", "2023-06-01");
 
     return headers;
   },

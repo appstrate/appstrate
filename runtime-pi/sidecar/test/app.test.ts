@@ -290,7 +290,7 @@ describe("ALL /llm/* — placeholder replacement", () => {
       headers: { "x-api-key": "sk-placeholder" },
     });
     const opts = fetchFn.mock.calls[0]![1]!;
-    const headers = opts.headers as Record<string, string>;
+    const headers = Object.fromEntries(new Headers(opts.headers));
     expect(headers["x-api-key"]).toBe("real-sk-ant-key");
   });
 
@@ -311,7 +311,7 @@ describe("ALL /llm/* — placeholder replacement", () => {
       headers: { Authorization: "Bearer sk-ant-oat01-placeholder" },
     });
     const opts = fetchFn.mock.calls[0]![1]!;
-    const headers = opts.headers as Record<string, string>;
+    const headers = Object.fromEntries(new Headers(opts.headers));
     expect(headers["authorization"]).toBe("Bearer sk-ant-oat01-real-token");
   });
 
@@ -331,10 +331,69 @@ describe("ALL /llm/* — placeholder replacement", () => {
       },
     });
     const opts = fetchFn.mock.calls[0]![1]!;
-    const headers = opts.headers as Record<string, string>;
+    const headers = Object.fromEntries(new Headers(opts.headers));
     expect(headers["x-api-key"]).toBe("real-sk-ant-key");
     expect(headers["content-type"]).toBe("application/json");
     expect(headers["x-custom"]).toBe("untouched");
+  });
+});
+
+// Same policy as the platform llm-proxy (`@appstrate/connect/llm-request-headers`).
+describe("ALL /llm/* — shared forwarding policy", () => {
+  const SENT = {
+    "Content-Type": "application/json",
+    "x-api-key": "sk-placeholder",
+    "x-opencode-session": "ses_abc",
+    "HTTP-Referer": "https://pi.dev",
+    "x-vendor-foo": "bar",
+    "User-Agent": "Anthropic/JS 0.60.0",
+    authorization: "Bearer someone-elses-key",
+    cookie: "session=abc",
+    "x-forwarded-for": "10.0.0.1",
+    "x-appstrate-pi-sdk": "0.86.1",
+    "x-run-id": "run_1",
+  };
+  const KEPT = ["content-type", "x-opencode-session", "http-referer", "x-vendor-foo", "user-agent"];
+  const DROPPED = ["cookie", "x-forwarded-for", "x-appstrate-pi-sdk", "x-run-id"];
+
+  async function forwardedBy(llm: LlmProxyConfig, oauthTokenCache?: unknown): Promise<Headers> {
+    let forwarded: Headers | undefined;
+    const fetchFn = mock(async (_url: string, init?: RequestInit) => {
+      forwarded = new Headers(init?.headers);
+      return new Response("{}", { status: 200 });
+    });
+    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+    deps.config.llm = llm;
+    if (oauthTokenCache) deps.oauthTokenCache = oauthTokenCache as typeof deps.oauthTokenCache;
+    await createTestApp(deps).request("/llm/v1/messages", {
+      method: "POST",
+      headers: SENT,
+      body: "{}",
+    });
+    return forwarded!;
+  }
+
+  it("api_key: forwards the SDK's headers, swaps only the placeholder credential", async () => {
+    const headers = await forwardedBy(LLM_CONFIG);
+    for (const name of KEPT) expect(headers.get(name)).not.toBeNull();
+    for (const name of DROPPED) expect(headers.get(name)).toBeNull();
+    expect(headers.get("x-api-key")).toBe("real-sk-ant-key");
+    expect(headers.get("authorization")).toBeNull();
+  });
+
+  it("oauth: forwards the SDK's headers under the real bearer", async () => {
+    const headers = await forwardedBy(
+      { authMode: "oauth", baseUrl: "https://api.anthropic.com", credentialId: "cred_1" },
+      {
+        getToken: async () => ({ accessToken: "oat-real" }),
+        invalidate: () => {},
+        forceRefresh: async () => ({ accessToken: "oat-real" }),
+      },
+    );
+    for (const name of KEPT) expect(headers.get(name)).not.toBeNull();
+    for (const name of DROPPED) expect(headers.get(name)).toBeNull();
+    expect(headers.get("authorization")).toBe("Bearer oat-real");
+    expect(headers.get("x-api-key")).toBeNull();
   });
 });
 

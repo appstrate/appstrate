@@ -177,6 +177,19 @@ precondition_failed` (it was `409 conflict`), and a body still sending
   refuses OpenRouter's `models` and `route` fallback lists. The new
   `openai-responses` shape applies the same rule from the start (see Added).
   Requests built by Pi pass unchanged.
+- **BREAKING (LLM proxy): `/api/llm-proxy/*` forwards the caller's request
+  headers upstream under the run sidecar's policy, replacing its per-wire
+  allowlists.** Both proxies now share one rule
+  (`@appstrate/connect/llm-request-headers`): every header goes through except
+  transport headers, inbound credentials, platform headers (`x-appstrate-*`,
+  `appstrate-*`, `X-Org-Id`, `X-Space-Id`, `X-Run-Id`) and client network
+  identity (`Forwarded`, `Via`, `X-Forwarded-*`, `X-Real-IP`,
+  Cloudflare edge headers). A raw caller's other headers (`user-agent`,
+  `x-stainless-*`, vendor headers) now reach the vendor where they were
+  dropped before. Provider-specific headers Pi sets are no longer lost, which
+  fixes chat with an OpenCode model (`400 MissingSessionID`, the
+  `x-opencode-session` header). The billing guards are unchanged: the
+  `anthropic-beta` filter applies to the forwarded headers.
 - **BREAKING (API): timestamps named `expiresAt` / `createdAt` are RFC 3339
   strings, and the universal ids and timestamps are spelled camelCase on the
   surfaces that still used snake_case.** The hosted-connect session
@@ -518,9 +531,6 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
 
 ### Fixed
 
-- **Chat with an OpenCode model no longer fails with `400 MissingSessionID`**:
-  the LLM proxy forwards Pi's `x-opencode-session` header upstream on the
-  OpenAI and Anthropic wires, as the run sidecar already did.
 - **A schedule whose stored generation settings its model no longer takes
   still fires** (#1549). Like a space's defaults, a refused temperature or
   reasoning level is dropped for that run, with a warning naming the schedule

@@ -354,7 +354,6 @@ export {
   substituteVars,
   findUnresolvedPlaceholders,
   HOP_BY_HOP_HEADERS,
-  filterHeaders,
   applyInjectedCredentialHeader,
   normalizeAuthSchemeTemplates,
   withIdleBound,

@@ -19,6 +19,7 @@ import { ApiError } from "../../src/lib/errors.ts";
 import { openaiCompletionsAdapter } from "../../src/services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../../src/services/llm-proxy/anthropic.ts";
 import { mistralConversationsAdapter } from "../../src/services/llm-proxy/mistral.ts";
+import { openaiResponsesAdapter } from "../../src/services/llm-proxy/openai-responses.ts";
 import { parseProxyRequest } from "../../src/services/llm-proxy/helpers.ts";
 
 function rewriteModel(rawBody: Uint8Array, upstreamModelId: string): Uint8Array {
@@ -27,6 +28,56 @@ function rewriteModel(rawBody: Uint8Array, upstreamModelId: string): Uint8Array 
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
+
+// One forwarding policy (`@appstrate/connect/llm-request-headers`) for every
+// wire: the SDK's own headers reach upstream, the caller's credentials, the
+// platform's routing headers and the client's network identity never do.
+describe("upstream headers — shared forwarding policy", () => {
+  const incoming = new Headers({
+    "x-opencode-session": "ses_abc",
+    "http-referer": "https://pi.dev",
+    "x-vendor-foo": "bar",
+    "content-type": "text/plain",
+    authorization: "Bearer appstrate-caller-token",
+    "x-api-key": "ask_caller",
+    cookie: "session=abc",
+    "x-forwarded-for": "10.0.0.1",
+    "x-appstrate-pi-sdk": "0.86.1",
+    "x-org-id": "org_1",
+    "x-run-id": "run_1",
+  });
+  const adapters = [
+    openaiCompletionsAdapter,
+    openaiResponsesAdapter,
+    anthropicMessagesAdapter,
+    mistralConversationsAdapter,
+  ];
+
+  for (const adapter of adapters) {
+    it(`${adapter.apiShape}: forwards provider headers, never credentials or platform headers`, () => {
+      const headers = adapter.buildUpstreamHeaders(incoming, "sk-upstream");
+      expect(headers.get("x-opencode-session")).toBe("ses_abc");
+      expect(headers.get("http-referer")).toBe("https://pi.dev");
+      expect(headers.get("x-vendor-foo")).toBe("bar");
+      // The proxy re-serialises the body as JSON.
+      expect(headers.get("content-type")).toBe("application/json");
+      for (const name of [
+        "cookie",
+        "x-forwarded-for",
+        "x-appstrate-pi-sdk",
+        "x-org-id",
+        "x-run-id",
+      ]) {
+        expect(headers.get(name)).toBeNull();
+      }
+      // The only credential upstream is the platform's own key.
+      const credentials = [headers.get("authorization"), headers.get("x-api-key")].filter(Boolean);
+      expect(credentials).toEqual([
+        adapter === anthropicMessagesAdapter ? "sk-upstream" : "Bearer sk-upstream",
+      ]);
+    });
+  }
+});
 
 describe("openaiCompletionsAdapter", () => {
   it("apiShape discriminator matches the /api/llm-proxy/openai-completions/ route", () => {
@@ -50,32 +101,13 @@ describe("openaiCompletionsAdapter", () => {
     expect(parsed.tools).toEqual(original.tools);
   });
 
-  it("injects Authorization: Bearer <apiKey>", () => {
+  it("injects Authorization: Bearer <apiKey> in place of the caller's", () => {
     const headers = openaiCompletionsAdapter.buildUpstreamHeaders(
-      new Headers({ "x-something": "ignored" }),
+      new Headers({ authorization: "Bearer appstrate-caller-token" }),
       "sk-upstream",
     );
-    expect(headers["Authorization"]).toBe("Bearer sk-upstream");
-    expect(headers["Content-Type"]).toBe("application/json");
-    // The incoming Authorization (the caller's Appstrate bearer) MUST
-    // NOT leak to the upstream — the platform mints a fresh one.
-    expect(headers["x-something"]).toBeUndefined();
-  });
-
-  it("forwards x-opencode-session verbatim, never the caller's authorization", () => {
-    const headers = openaiCompletionsAdapter.buildUpstreamHeaders(
-      new Headers({
-        authorization: "Bearer appstrate-caller-token",
-        "x-opencode-session": "ses_abc",
-        "x-something": "ignored",
-      }),
-      "sk-upstream",
-    );
-    expect(headers).toEqual({
-      Authorization: "Bearer sk-upstream",
-      "Content-Type": "application/json",
-      "x-opencode-session": "ses_abc",
-    });
+    expect(headers.get("authorization")).toBe("Bearer sk-upstream");
+    expect(headers.get("content-type")).toBe("application/json");
   });
 
   it("parses OpenAI-shape usage, subtracting cached tokens out of inputTokens", () => {
@@ -224,9 +256,9 @@ describe("anthropicMessagesAdapter", () => {
       new Headers({ accept: "application/json" }),
       "sk-anthropic",
     );
-    expect(headers["x-api-key"]).toBe("sk-anthropic");
-    expect(headers["anthropic-version"]).toBe("2023-06-01");
-    expect(headers["Content-Type"]).toBe("application/json");
+    expect(headers.get("x-api-key")).toBe("sk-anthropic");
+    expect(headers.get("anthropic-version")).toBe("2023-06-01");
+    expect(headers.get("content-type")).toBe("application/json");
   });
 
   it("forwards anthropic-version + anthropic-beta when caller supplies them", () => {
@@ -237,25 +269,8 @@ describe("anthropicMessagesAdapter", () => {
       }),
       "sk-anthropic",
     );
-    expect(headers["anthropic-version"]).toBe("2024-10-01");
-    expect(headers["anthropic-beta"]).toBe("interleaved-thinking-2025-05-14");
-  });
-
-  it("forwards x-opencode-session verbatim, never the caller's authorization", () => {
-    const headers = anthropicMessagesAdapter.buildUpstreamHeaders(
-      new Headers({
-        authorization: "Bearer appstrate-caller-token",
-        "x-opencode-session": "ses_abc",
-        "x-something": "ignored",
-      }),
-      "sk-anthropic",
-    );
-    expect(headers).toEqual({
-      "Content-Type": "application/json",
-      "x-api-key": "sk-anthropic",
-      "anthropic-version": "2023-06-01",
-      "x-opencode-session": "ses_abc",
-    });
+    expect(headers.get("anthropic-version")).toBe("2024-10-01");
+    expect(headers.get("anthropic-beta")).toBe("interleaved-thinking-2025-05-14");
   });
 
   // A beta can switch on a feature billed outside the reported tokens (server
@@ -268,12 +283,12 @@ describe("anthropicMessagesAdapter", () => {
       }),
       "sk-anthropic",
     );
-    expect(headers["anthropic-beta"]).toBe("fine-grained-tool-streaming-2025-05-14");
+    expect(headers.get("anthropic-beta")).toBe("fine-grained-tool-streaming-2025-05-14");
     const none = anthropicMessagesAdapter.buildUpstreamHeaders(
       new Headers({ "anthropic-beta": "context-1m-2025-08-07" }),
       "sk-anthropic",
     );
-    expect(none["anthropic-beta"]).toBeUndefined();
+    expect(none.get("anthropic-beta")).toBeNull();
   });
 
   function refusedParam(body: Record<string, unknown>): string | undefined {
@@ -334,7 +349,7 @@ describe("anthropicMessagesAdapter", () => {
         expect(prepared).toEqual(body);
         const beta = headers.get("anthropic-beta");
         const forwarded = anthropicMessagesAdapter.buildUpstreamHeaders(headers, "sk-anthropic");
-        expect(forwarded["anthropic-beta"] ?? null).toBe(beta);
+        expect(forwarded.get("anthropic-beta")).toBe(beta);
         for (const sent of beta?.split(",") ?? []) betasSent.add(sent);
       }
     }
@@ -353,12 +368,12 @@ describe("anthropicMessagesAdapter", () => {
       new Headers({ "anthropic-beta": "interleaved-thinking-2025-05-14" }),
       "sk-ant-api03-AbCd",
     );
-    expect(headers["x-api-key"]).toBe("sk-ant-api03-AbCd");
-    expect(headers["Authorization"]).toBeUndefined();
-    expect(headers["x-app"]).toBeUndefined();
-    expect(headers["user-agent"]).toBeUndefined();
+    expect(headers.get("x-api-key")).toBe("sk-ant-api03-AbCd");
+    expect(headers.get("authorization")).toBeNull();
+    expect(headers.get("x-app")).toBeNull();
+    expect(headers.get("user-agent")).toBeNull();
     // Caller's beta forwarded as-is, no OAuth markers.
-    expect(headers["anthropic-beta"]).toBe("interleaved-thinking-2025-05-14");
+    expect(headers.get("anthropic-beta")).toBe("interleaved-thinking-2025-05-14");
   });
 
   it("parses non-streaming JSON usage with cache tokens", () => {
@@ -445,23 +460,13 @@ describe("mistralConversationsAdapter", () => {
     expect(parsed.tools).toEqual(original.tools);
   });
 
-  it("injects Authorization: Bearer <apiKey> and forwards no extra headers", () => {
+  it("injects Authorization: Bearer <apiKey> in place of the caller's", () => {
     const headers = mistralConversationsAdapter.buildUpstreamHeaders(
-      new Headers({
-        "x-affinity": "session-123",
-        authorization: "Bearer caller-bearer-must-not-leak",
-      }),
+      new Headers({ authorization: "Bearer caller-bearer-must-not-leak" }),
       "mistral-upstream-key",
     );
-    expect(headers["Authorization"]).toBe("Bearer mistral-upstream-key");
-    expect(headers["Content-Type"]).toBe("application/json");
-    // No equivalent of openai-organization / anthropic-beta — nothing
-    // should be forwarded from the caller. The Mistral SDK's `x-affinity`
-    // sticky-session header is intentionally dropped.
-    expect(headers["x-affinity"]).toBeUndefined();
-    // The caller's Appstrate bearer (Authorization) must NOT replace
-    // the upstream key we just set.
-    expect(headers["Authorization"]).toBe("Bearer mistral-upstream-key");
+    expect(headers.get("authorization")).toBe("Bearer mistral-upstream-key");
+    expect(headers.get("content-type")).toBe("application/json");
   });
 
   it("parses non-streaming JSON usage with prompt/completion tokens", () => {
