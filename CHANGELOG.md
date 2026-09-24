@@ -59,10 +59,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   blocking the deploy, instead of falling back to the code default, which has
   no billing. Production already sets `MODULES` on its resource. See
   `deploy/README.md`.
-- **Bundle export, the file explorer, version download and fork answer
-  `422 version_artifact_unavailable` when a published version's archive is
-  missing from storage** (#1533). They answered 404 — fork `400` "no published
-  version" — which read as an unknown package or version.
+- **BREAKING (API): bundle export, the file explorer, version download and
+  fork answer `422 version_artifact_unavailable` when a published version's
+  archive is missing from storage** (#1533). They answered 404 — fork `400` "no
+  published version" — which read as an unknown package or version.
 
 ### Removed
 
@@ -131,14 +131,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   messages are written, and any other write refused for its own values
   (SQLSTATE class 22 or `23514`) is recorded as a `system`/`event_dropped` log
   row instead, so the stream moves on.
-- **A published version with a broken archive is refused, not half-served**
-  (#1533). `POST /api/runs/remote` answers `422 version_artifact_unavailable`,
-  not `400 empty_prompt`/`412 missing_integration_connection`; restore refuses
-  instead of writing an empty draft; `GET …/versions/{v}` refuses, not 200
-  `content: null`; `appstrate run` no longer says "package not found"; the
-  version page shows an error, not the live page. On runs, remote runs,
-  schedules, input-settings, package/version reads and restore, a storage outage
-  is now 5xx and a signature-policy refusal its coded 422, not that 422.
+- **BREAKING (API): a published version with a broken archive is refused,
+  not half-served** (#1533). `POST /api/runs/remote` answers `422
+version_artifact_unavailable`, not `400 empty_prompt`/`412
+missing_integration_connection`; restore refuses instead of writing an empty
+  draft; `GET …/versions/{v}` refuses, not 200 `content: null`; `appstrate run`
+  no longer says "package not found"; the version page shows an error. On runs,
+  schedules, input-settings, package/version reads and restore, a storage
+  outage is now 5xx and a signature-policy refusal its coded 422, not that 422.
 
 ## [1.0.0-beta.61] - 2026-09-23
 
