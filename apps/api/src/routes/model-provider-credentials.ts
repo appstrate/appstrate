@@ -52,35 +52,38 @@ export const createSchema = z
     /**
      * Optional. When omitted, the server derives the label from the provider's
      * `displayName`, prefixed with the endpoint host when the credential carries
-     * a `baseUrlOverride` (see {@link deriveCredentialLabel}). Either way it is
+     * a `base_url_override` (see {@link deriveCredentialLabel}). Either way it is
      * deduped against existing org credentials (suffixed ` (2)`, ` (3)`, … on
      * collision). See {@link dedupeCredentialLabel}.
      */
     label: z.string().min(1).optional(),
     providerId: z.string().min(1, "providerId is required"),
-    apiKey: z.string().min(1, "apiKey is required"),
+    api_key: z.string().min(1, "api_key is required"),
     /** Required only for providers with `baseUrlOverridable: true` (the custom-endpoint entries). */
-    baseUrlOverride: z.url({ error: "baseUrlOverride must be a valid URL" }).optional().nullable(),
+    base_url_override: z
+      .url({ error: "base_url_override must be a valid URL" })
+      .optional()
+      .nullable(),
   })
   .strict();
 
 /**
- * `apiShape` and `baseUrl` are intentionally absent — they are pinned by the
+ * The protocol and endpoint are intentionally absent — they are pinned by the
  * canonical `providerId` selected at create time and cannot be mutated.
  * To switch providers, delete the credential and re-create it.
  */
 export const updateSchema = z
   .object({
     label: z.string().min(1).optional(),
-    apiKey: z.string().min(1).optional(),
+    api_key: z.string().min(1).optional(),
   })
   .strict();
 
-/** Exactly one of `credential_id` or inline `provider_id` + `api_key`; the route enforces which. */
+/** Exactly one of `credential_id` or inline `providerId` + `api_key`; the route enforces which. */
 export const discoverSchema = z
   .object({
     credential_id: z.uuid().optional(),
-    provider_id: z.string().min(1).optional(),
+    providerId: z.string().min(1).optional(),
     api_key: z.string().min(1).optional(),
     base_url_override: z.url().optional(),
   })
@@ -118,14 +121,14 @@ async function resolveDiscoverTarget(
   body: z.infer<typeof discoverSchema>,
 ): Promise<DiscoverTarget> {
   const inline =
-    body.provider_id !== undefined ||
+    body.providerId !== undefined ||
     body.api_key !== undefined ||
     body.base_url_override !== undefined;
 
   if (body.credential_id !== undefined) {
     if (inline) {
       throw invalidRequest(
-        "Provide either credential_id or an inline provider_id + api_key, not both",
+        "Provide either credential_id or an inline providerId + api_key, not both",
         "credential_id",
       );
     }
@@ -147,17 +150,16 @@ async function resolveDiscoverTarget(
 
   if (!inline) {
     throw invalidRequest(
-      "Provide either credential_id or an inline provider_id + api_key",
+      "Provide either credential_id or an inline providerId + api_key",
       "credential_id",
     );
   }
-  if (body.provider_id === undefined)
-    throw invalidRequest("provider_id is required", "provider_id");
+  if (body.providerId === undefined) throw invalidRequest("providerId is required", "providerId");
   if (body.api_key === undefined) throw invalidRequest("api_key is required", "api_key");
 
-  const cfg = getModelProvider(body.provider_id);
-  if (!cfg) throw invalidRequest(`Unknown providerId: ${body.provider_id}`, "provider_id");
-  assertEnumerableProvider(cfg, "provider_id");
+  const cfg = getModelProvider(body.providerId);
+  if (!cfg) throw invalidRequest(`Unknown providerId: ${body.providerId}`, "providerId");
+  assertEnumerableProvider(cfg, "providerId");
   if (body.base_url_override !== undefined && !cfg.baseUrlOverridable) {
     throw invalidRequest(
       `Provider ${cfg.providerId} does not accept a base URL override`,
@@ -175,9 +177,9 @@ async function resolveDiscoverTarget(
 export const testInlineSchema = z
   .object({
     apiShape: z.string().min(1),
-    baseUrl: z.url(),
-    apiKey: z.string().optional(),
-    existingKeyId: z.string().optional(),
+    base_url: z.url(),
+    api_key: z.string().optional(),
+    existing_key_id: z.string().optional(),
   })
   .strict();
 
@@ -273,7 +275,7 @@ export function createModelProviderCredentialsRouter() {
     const orgId = c.get("orgId");
     const user = c.get("user");
     const data = await readJsonBody(c, createSchema);
-    const { providerId, apiKey, baseUrlOverride } = data;
+    const { providerId, api_key: apiKey, base_url_override: baseUrlOverride } = data;
 
     const cfg = getModelProvider(providerId);
     if (!cfg) {
@@ -331,18 +333,18 @@ export function createModelProviderCredentialsRouter() {
     async (c) => {
       const orgId = c.get("orgId");
       const data = await readJsonBody(c, testInlineSchema);
-      let { apiKey } = data;
-      if (!apiKey && data.existingKeyId) {
-        const existing = await loadInferenceCredentials(orgId, data.existingKeyId);
+      let apiKey = data.api_key;
+      if (!apiKey && data.existing_key_id) {
+        const existing = await loadInferenceCredentials(orgId, data.existing_key_id);
         if (existing) apiKey = existing.apiKey;
       }
       if (!apiKey) {
-        throw invalidRequest("API key is required");
+        throw invalidRequest("API key is required", "api_key");
       }
       try {
         const result = await testModelConfig({
           apiShape: data.apiShape,
-          baseUrl: data.baseUrl,
+          baseUrl: data.base_url,
           modelId: "_test",
           apiKey,
         });
@@ -513,8 +515,8 @@ export function createModelProviderCredentialsRouter() {
     }
     const data = await readJsonBody(c, updateSchema);
     try {
-      await updateModelProviderCredential(orgId, id, data);
-      const { apiKey: _apiKey, ...auditData } = data;
+      const { api_key: apiKey, ...auditData } = data;
+      await updateModelProviderCredential(orgId, id, { ...auditData, apiKey });
       await recordAuditFromContext(c, {
         action: "model_provider_credential.updated",
         resourceType: "model_provider_credential",

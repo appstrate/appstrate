@@ -2042,7 +2042,7 @@ export interface paths {
         put?: never;
         /**
          * Enumerate the models an endpoint serves
-         * @description Asks an endpoint for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the vendored pricing catalog otherwise; `source` says which described a given model. `label` always comes from the catalog. Unlike `POST /{id}/refresh-models` this works BEFORE a credential exists — the operator supplies `provider_id` + `api_key` inline — and it **persists no model state**: no credential is created, no `available_model_ids` is written (the probe itself is recorded in the audit trail, without the key). Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. A provider declaring a static model list (every subscription/OAuth provider) is refused — its token is never read or spent to enumerate models. A listing that declares a next page (Anthropic `has_more` / `last_id`, Google `nextPageToken`) is followed to its end, so a paginated endpoint is enumerated whole; `truncated` says when a page or model cap stopped the read instead; a page whose body streams past the size budget is refused as `bad_response`. Rate limited to 6 requests per minute.
+         * @description Asks an endpoint for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the vendored pricing catalog otherwise; `source` says which described a given model. `label` always comes from the catalog. Unlike `POST /{id}/refresh-models` this works BEFORE a credential exists — the operator supplies `providerId` + `api_key` inline — and it **persists no model state**: no credential is created, no `available_model_ids` is written (the probe itself is recorded in the audit trail, without the key). Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. A provider declaring a static model list (every subscription/OAuth provider) is refused — its token is never read or spent to enumerate models. A listing that declares a next page (Anthropic `has_more` / `last_id`, Google `nextPageToken`) is followed to its end, so a paginated endpoint is enumerated whole; `truncated` says when a page or model cap stopped the read instead; a page whose body streams past the size budget is refused as `bad_response`. Rate limited to 6 requests per minute.
          */
         post: operations["discoverModelProviderCredentialModels"];
         delete?: never;
@@ -2082,7 +2082,7 @@ export interface paths {
         put?: never;
         /**
          * Test model provider credential configuration inline
-         * @description Test a model provider credential configuration without saving it first. If editing an existing credential, pass existingKeyId to fall back to its stored API key when apiKey is omitted. Rate limited to 5 requests per minute.
+         * @description Test a model provider credential configuration without saving it first. If editing an existing credential, pass `existing_key_id` to fall back to its stored API key when `api_key` is omitted. Rate limited to 5 requests per minute.
          */
         post: operations["testModelProviderCredentialInline"];
         delete?: never;
@@ -2110,7 +2110,7 @@ export interface paths {
         head?: never;
         /**
          * Update a model provider credential
-         * @description Update a model provider credential's mutable fields. The `apiShape` and `baseUrl` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.
+         * @description Update a model provider credential's mutable fields. The `apiShape` and `base_url` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.
          */
         patch: operations["updateModelProviderCredential"];
         trace?: never;
@@ -2166,7 +2166,7 @@ export interface paths {
         put?: never;
         /**
          * Redeem a pairing token: post the OAuth credential bundle back to the platform
-         * @description Canonical pairing-redeem route used by `@appstrate/connect-helper`. Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / `providerId` and optional reconnect target are pinned at mint time, so a tampered helper cannot redirect the redeem to a different org, provider, or credential. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before creating or updating `model_provider_credentials`.
+         * @description Canonical pairing-redeem route used by `@appstrate/connect-helper`. Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / provider and optional reconnect target are pinned at mint time, so a tampered helper cannot redirect the redeem to a different org, provider, or credential. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before creating or updating `model_provider_credentials`.
          */
         post: operations["redeemOAuthModelProviderPairing"];
         delete?: never;
@@ -2186,7 +2186,7 @@ export interface paths {
         put?: never;
         /**
          * Mint a one-shot pairing token for the connect helper
-         * @description Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. Pass `credentialId` to reconnect that exact org credential in place; omit it to create a new connection. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Space-Id` — the resulting credential lives in `model_provider_credentials`, which has no space affinity).
+         * @description Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. Pass `credential_id` to reconnect that exact org credential in place; omit it to create a new connection. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Space-Id` — the resulting credential lives in `model_provider_credentials`, which has no space affinity).
          */
         post: operations["createOAuthModelProviderPairing"];
         delete?: never;
@@ -2314,7 +2314,7 @@ export interface paths {
         put?: never;
         /**
          * Test model configuration inline
-         * @description Test a model configuration without saving it first. If editing an existing model, pass existingModelId to fall back to its stored API key when apiKey is omitted. Rate limited to 5 requests per minute.
+         * @description Test a model configuration without saving it first. If editing an existing model, pass `existing_model_id` to fall back to its stored API key when `api_key` is omitted. Rate limited to 5 requests per minute.
          */
         post: operations["testModelInline"];
         delete?: never;
@@ -4858,7 +4858,7 @@ export interface paths {
         };
         /**
          * Fetch a fresh access token for an OAuth model provider connection
-         * @description Sidecar-only. Auth via Bearer run token. Returns the resolved access token plus the runtime config (apiShape, baseUrl, accountId, …). Refreshes the token proactively if it expires within 5 minutes.
+         * @description Sidecar-only. Auth via Bearer run token. Returns the resolved `access_token`, its `expiresAt` and, when the provider surfaced one, the `account_id`. Refreshes the token proactively if it expires within 5 minutes.
          */
         get: operations["getOAuthModelProviderToken"];
         put?: never;
@@ -5560,7 +5560,7 @@ export interface components {
             /** @description Protocol family. `null` for a built-in credential whose every model is managed (#727) — the binding is not exposed, so the endpoint doesn't reveal the provider. */
             apiShape: string | null;
             /** @description Endpoint base URL. `null` for a managed-only built-in credential (see apiShape). */
-            baseUrl: string | null;
+            base_url: string | null;
             /** @enum {string} */
             source: "built-in" | "custom";
             /** @enum {string} */
@@ -5620,11 +5620,11 @@ export interface components {
         };
         /** @description Resolved access token returned by `GET /internal/oauth-token/{id}` and `POST .../refresh`. Carries only the fields that change per refresh — provider invariants (baseUrl, …) live in the sidecar's boot-time `LlmProxyOauthConfig`. Wire-equivalent to the `OAuthTokenResponse` TS interface in `@appstrate/core/sidecar-types`. */
         OAuthTokenResponse: {
-            accessToken: string;
+            access_token: string;
             /** @description Epoch milliseconds. null when expiry is unknown. */
             expiresAt: number | null;
-            /** @description Abstract account/tenant identifier surfaced by the provider's `extractTokenIdentity` hook. The sidecar's identity layer (keyed by providerId from the boot config) decides which routing header to echo it as. */
-            accountId?: string;
+            /** @description Abstract account/tenant identifier surfaced by the provider's `extractTokenIdentity` hook. Omitted when the provider surfaced none. The sidecar's identity layer (keyed by providerId from the boot config) decides which routing header to echo it as. */
+            account_id?: string;
         };
         OrgDetail: {
             id?: string;
@@ -5681,9 +5681,9 @@ export interface components {
             /** @description The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. `null` for managed models — binding not exposed. */
             providerId: string | null;
             /** @description The provider's human display name resolved from the model-provider registry by `providerId` (e.g. `OpenCode Go`, `OpenAI`). The authoritative label for grouping/badging a model by provider — `apiShape` is ambiguous (OpenCode Go and OpenAI both use `openai-completions`), so do NOT derive a provider label from it. `null` for managed models (binding not exposed) and for rows whose `providerId` has no registry entry. */
-            providerName: string | null;
+            provider_name: string | null;
             /** @description Provider endpoint. `null` for managed models — binding not exposed. */
-            baseUrl: string | null;
+            base_url: string | null;
             /** @description Upstream model id. `null` for managed models — not exposed. */
             modelId: string | null;
             /** @description Generation controls supported by the backing model. Null for managed aliases whose binding is hidden. */
@@ -5696,9 +5696,9 @@ export interface components {
             is_default: boolean;
             /** @description True when the model's stored credential can no longer be used for inference — an OAuth credential flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment. */
             needs_reconnection: boolean;
-            /** @description Managed-model flag. When true, the binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is not exposed in this projection — these fields are `null`; render a managed badge. */
+            /** @description Managed-model flag. When true, the binding (`modelId`, `apiShape`, `base_url`, `credentialId`, capabilities/cost) is not exposed in this projection — these fields are `null`; render a managed badge. */
             aliased: boolean;
-            /** @description Display-icon key for the UI (a client provider-icon key, e.g. `anthropic`, `openai`). A deliberate public choice on the model — decoupled from the provider, so a managed model can show an icon without exposing its binding. `null` means resolve the icon from the (visible) `apiShape`/`baseUrl`, or fall back to a generic icon. */
+            /** @description Display-icon key for the UI (a client provider-icon key, e.g. `anthropic`, `openai`). A deliberate public choice on the model — decoupled from the provider, so a managed model can show an icon without exposing its binding. `null` means resolve the icon from the (visible) `apiShape`/`base_url`, or fall back to a generic icon. */
             iconUrl: string | null;
             /** @enum {string} */
             source: "built-in" | "custom";
@@ -13627,7 +13627,7 @@ export interface operations {
                      *           "id": "cm7stu901",
                      *           "label": "OpenAI Production",
                      *           "apiShape": "openai-completions",
-                     *           "baseUrl": "https://api.openai.com",
+                     *           "base_url": "https://api.openai.com",
                      *           "source": "custom",
                      *           "authMode": "api_key",
                      *           "created_by": "usr_cm3abc123",
@@ -13662,17 +13662,17 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Display name for the model provider credential. Optional — when omitted the server derives one from the provider's `displayName`, prefixed with the endpoint host (`localhost:11434 · OpenAI-compatible (custom)`) when `baseUrlOverride` is supplied to a `baseUrlOverridable` provider. Either way it is deduped against existing org credentials. */
+                    /** @description Display name for the model provider credential. Optional — when omitted the server derives one from the provider's `displayName`, prefixed with the endpoint host (`localhost:11434 · OpenAI-compatible (custom)`) when `base_url_override` is supplied to a `baseUrlOverridable` provider. Either way it is deduped against existing org credentials. */
                     label?: string;
                     /** @description Canonical registry providerId (`openai`, `anthropic`, `openai-compatible`, …). Discovered via `GET /api/model-provider-credentials/registry`. Only providers with `authMode: api_key` are accepted here; OAuth providers go through the pairing flow. */
                     providerId: string;
                     /** @description API key for authentication */
-                    apiKey: string;
+                    api_key: string;
                     /**
                      * Format: uri
                      * @description Optional override for self-hosted endpoints. Honored only by providers with `baseUrlOverridable: true` (e.g. `openai-compatible`); ignored otherwise.
                      */
-                    baseUrlOverride?: string | null;
+                    base_url_override?: string | null;
                 };
             };
         };
@@ -13729,7 +13729,7 @@ export interface operations {
                      */
                     credential_id?: string;
                     /** @description Canonical registry providerId (`openai-compatible`, `openai`, …). Discovered via `GET /api/model-provider-credentials/registry`. */
-                    provider_id?: string;
+                    providerId?: string;
                     /** @description API key for the endpoint. Used for this one request and never stored or echoed back. */
                     api_key?: string;
                     /**
@@ -13784,7 +13784,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Bad request — `validation_failed` when the body fails Zod validation, or `invalid_request` when both/neither form is supplied, `provider_id` is unknown or OAuth-only, or `base_url_override` is sent to a provider that does not accept one. */
+            /** @description Bad request — `validation_failed` when the body fails Zod validation, or `invalid_request` when both/neither form is supplied, `providerId` is unknown or OAuth-only, or `base_url_override` is sent to a provider that does not accept one. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13892,17 +13892,17 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Wire format / API shape */
+                    /** @description Wire format / API shape (a registry `apiShape` value) */
                     apiShape: string;
                     /**
                      * Format: uri
                      * @description Model provider API base URL
                      */
-                    baseUrl: string;
+                    base_url: string;
                     /** @description API key (required for new credentials) */
-                    apiKey?: string;
+                    api_key?: string;
                     /** @description Existing credential ID to fall back to for stored API key */
-                    existingKeyId?: string;
+                    existing_key_id?: string;
                 };
             };
         };
@@ -13984,7 +13984,7 @@ export interface operations {
             content: {
                 "application/json": {
                     label?: string;
-                    apiKey?: string;
+                    api_key?: string;
                 };
             };
         };
@@ -14098,12 +14098,12 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Must match the pairing's pinned providerId. Mismatched → 400; provider deregistered after mint → 404. */
+                    /** @description Must match the pairing's pinned provider id. Mismatched → 400; provider deregistered after mint → 404. */
                     providerId: string;
                     /** @description Display name for the credential. Optional — the platform derives one from the provider's `displayName` when omitted (`@appstrate/connect-helper` no longer invents one client-side). */
                     label?: string;
-                    accessToken: string;
-                    refreshToken: string;
+                    access_token: string;
+                    refresh_token: string;
                     /** @description Unix milliseconds since epoch — when the access token expires. */
                     expiresAt?: number | null;
                     /**
@@ -14112,12 +14112,12 @@ export interface operations {
                      */
                     email?: string;
                     /** @description Abstract account/tenant identifier — the well-known `accountId` slot from the provider's identity surface. When the CLI forwards it, the platform persists this value verbatim; otherwise the provider's `extractTokenIdentity` hook fills it in server-side. */
-                    accountId?: string;
+                    account_id?: string;
                 };
             };
         };
         responses: {
-            /** @description Credential created or reconnected in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, so the models the helper prints in its terminal summary have to travel back in this response. `availableModelIds` is therefore a projection of the credential's own servable set — byte-for-byte what `available_model_ids` reports for this `credentialId` on `GET /api/model-provider-credentials`, resolved through the same accessor, so the terminal and the dashboard can never disagree. For subscription providers (`codex`, `claude-code`) that set is derived from the provider definition ∩ the pricing catalog with no upstream call; for probe-validated providers a reconnect preserves the credential's empirically discovered list. The dashboard obtains the resulting credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list. */
+            /** @description Credential created or reconnected in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, so the models the helper prints in its terminal summary have to travel back in this response. `available_model_ids` is therefore a projection of the credential's own servable set — byte-for-byte what `available_model_ids` reports for this `credential_id` on `GET /api/model-provider-credentials`, resolved through the same accessor, so the terminal and the dashboard can never disagree. For subscription providers (`codex`, `claude-code`) that set is derived from the provider definition ∩ the pricing catalog with no upstream call; for probe-validated providers a reconnect preserves the credential's empirically discovered list. The dashboard obtains the resulting credential via `GET /pairing/{id}` polling (`credential_id`) + the credentials list. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -14125,11 +14125,11 @@ export interface operations {
                 content: {
                     "application/json": {
                         /** Format: uuid */
-                        credentialId: string;
+                        credential_id: string;
                         providerId: string;
                         /** Format: email */
                         email?: string;
-                        availableModelIds: string[];
+                        available_model_ids: string[];
                     };
                 };
             };
@@ -14166,7 +14166,7 @@ export interface operations {
                      * Format: uuid
                      * @description Existing OAuth credential to reconnect in place. It must belong to the current organization and match `providerId`; omit it when connecting a new account.
                      */
-                    credentialId?: string;
+                    credential_id?: string;
                 };
             };
         };
@@ -14228,14 +14228,14 @@ export interface operations {
                         /** @enum {string} */
                         status: "pending" | "consumed" | "expired";
                         /** Format: date-time */
-                        consumedAt: string | null;
+                        consumed_at: string | null;
                         /** Format: date-time */
                         expiresAt: string;
                         /**
                          * Format: uuid
                          * @description ID of the model_provider_credentials row created by the helper. Null while the pairing is still pending or expired without consumption.
                          */
-                        credentialId: string | null;
+                        credential_id: string | null;
                     };
                 };
             };
@@ -14300,9 +14300,9 @@ export interface operations {
                      *           "id": "gpt-4o",
                      *           "label": "GPT-4o",
                      *           "providerId": "openai",
-                     *           "providerName": "OpenAI",
+                     *           "provider_name": "OpenAI",
                      *           "apiShape": "openai-responses",
-                     *           "baseUrl": "https://api.openai.com/v1",
+                     *           "base_url": "https://api.openai.com/v1",
                      *           "modelId": "gpt-4o",
                      *           "generation": {
                      *             "temperature": "supported",
@@ -14375,7 +14375,7 @@ export interface operations {
                         cacheRead?: number;
                         cacheWrite?: number;
                     };
-                    /** @description Managed-model flag. When true, this model's binding (modelId, provider, baseUrl, capabilities/cost) is not exposed on user-facing surfaces and these fields are null; inference is routed by the platform. */
+                    /** @description Managed-model flag. When true, this model's binding (modelId, provider, base_url, capabilities/cost) is not exposed on user-facing surfaces and these fields are null; inference is routed by the platform. */
                     aliased?: boolean;
                 };
             };
@@ -14584,7 +14584,7 @@ export interface operations {
             content: {
                 "application/json": {
                     credentialId: string;
-                    modelIds: string[];
+                    model_ids: string[];
                 };
             };
         };
@@ -14600,7 +14600,7 @@ export interface operations {
                     "application/json": {
                         created: number;
                         ids: string[];
-                        promotedDefault: boolean;
+                        promoted_default: boolean;
                     };
                 };
             };
@@ -14627,10 +14627,10 @@ export interface operations {
                     credentialId: string;
                     /** @description Model identifier */
                     modelId: string;
-                    /** @description Override API key for the probe. Falls back to existingModelId's key, then the credential's stored key. */
-                    apiKey?: string;
+                    /** @description Override API key for the probe. Falls back to `existing_model_id`'s key, then the credential's stored key. */
+                    api_key?: string;
                     /** @description Existing model ID to fall back to for stored API key */
-                    existingModelId?: string;
+                    existing_model_id?: string;
                 };
             };
         };

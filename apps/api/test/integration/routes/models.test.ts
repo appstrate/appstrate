@@ -58,7 +58,7 @@ describe("Models API", () => {
       body: JSON.stringify({
         label: "Test Model Provider Key",
         providerId: "openai",
-        apiKey: "sk-test-key-123",
+        api_key: "sk-test-key-123",
       }),
     });
     expect(res.status).toBe(201);
@@ -116,7 +116,7 @@ describe("Models API", () => {
       expect(row.label).toBe("Appstrate Medium");
       expect(row.modelId).toBeNull();
       expect(row.apiShape).toBeNull();
-      expect(row.baseUrl).toBeNull();
+      expect(row.base_url).toBeNull();
       expect(row.credentialId).toBeNull();
       expect(row.contextWindow).toBeNull();
       expect(row.cost).toBeNull();
@@ -1035,8 +1035,8 @@ describe("Models API", () => {
       for (const field of [
         "apiShape",
         "providerId",
-        "providerName",
-        "baseUrl",
+        "provider_name",
+        "base_url",
         "modelId",
         "credentialId",
         "contextWindow",
@@ -1443,18 +1443,18 @@ describe("Models API", () => {
       const res = await app.request("/api/models/seed", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ credentialId, modelIds: ["test-model"] }),
+        body: JSON.stringify({ credentialId, model_ids: ["test-model"] }),
       });
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as {
         created: number;
         ids: string[];
-        promotedDefault: boolean;
+        promoted_default: boolean;
       };
       expect(body.created).toBe(1);
       expect(body.ids).toHaveLength(1);
-      expect(body.promotedDefault).toBe(true);
+      expect(body.promoted_default).toBe(true);
 
       const inserted = await db
         .select()
@@ -1478,28 +1478,46 @@ describe("Models API", () => {
       const first = await app.request("/api/models/seed", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ credentialId, modelIds: ["test-model"] }),
+        body: JSON.stringify({ credentialId, model_ids: ["test-model"] }),
       });
       expect(first.status).toBe(201);
 
       const second = await app.request("/api/models/seed", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ credentialId, modelIds: ["test-model"] }),
+        body: JSON.stringify({ credentialId, model_ids: ["test-model"] }),
       });
       expect(second.status).toBe(201);
-      const body = (await second.json()) as { created: number; promotedDefault: boolean };
+      const body = (await second.json()) as { created: number; promoted_default: boolean };
       expect(body.created).toBe(0);
-      expect(body.promotedDefault).toBe(false);
+      expect(body.promoted_default).toBe(false);
     });
 
-    it("rejects unknown modelIds with 400", async () => {
+    it("rejects the retired camelCase `modelIds` and answers in snake_case", async () => {
+      const credentialId = await seedTestOAuthCredential();
+      const post = (body: unknown) =>
+        app.request("/api/models/seed", {
+          method: "POST",
+          headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+          body: JSON.stringify(body),
+        });
+
+      expect((await post({ credentialId, modelIds: ["test-model"] })).status).toBe(400);
+
+      const res = await post({ credentialId, model_ids: ["test-model"] });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body.promoted_default).toBe(true);
+      expect(body).not.toHaveProperty("promotedDefault");
+    });
+
+    it("rejects unknown model_ids with 400", async () => {
       const credentialId = await seedTestOAuthCredential();
 
       const res = await app.request("/api/models/seed", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ credentialId, modelIds: ["does-not-exist"] }),
+        body: JSON.stringify({ credentialId, model_ids: ["does-not-exist"] }),
       });
 
       expect(res.status).toBe(400);
@@ -1511,7 +1529,7 @@ describe("Models API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           credentialId: "00000000-0000-0000-0000-000000000000",
-          modelIds: ["test-model"],
+          model_ids: ["test-model"],
         }),
       });
 
@@ -1540,13 +1558,13 @@ describe("Models API", () => {
       const res = await app.request("/api/models/seed", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ credentialId, modelIds: ["test-model"] }),
+        body: JSON.stringify({ credentialId, model_ids: ["test-model"] }),
       });
 
       expect(res.status).toBe(201);
-      const body = (await res.json()) as { created: number; promotedDefault: boolean };
+      const body = (await res.json()) as { created: number; promoted_default: boolean };
       expect(body.created).toBe(1);
-      expect(body.promotedDefault).toBe(false);
+      expect(body.promoted_default).toBe(false);
     });
   });
 
@@ -1576,7 +1594,7 @@ describe("Models API", () => {
       const res = await app.request("/api/models/test", {
         method: "POST",
         headers: await memberHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ credentialId: key.id, modelId: "gpt-4o", apiKey: "sk-test" }),
+        body: JSON.stringify({ credentialId: key.id, modelId: "gpt-4o", api_key: "sk-test" }),
       });
       expect(res.status).toBe(403);
     });
@@ -1600,6 +1618,22 @@ describe("Models API", () => {
       expect(res.status).toBe(403);
     });
 
+    it("POST /api/models/test → 400 for the retired camelCase key fields", async () => {
+      const key = await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        apiShape: "openai",
+        baseUrl: "https://api.openai.com",
+      });
+      for (const retired of [{ apiKey: "sk-test" }, { existingModelId: "mdl_x" }]) {
+        const res = await app.request("/api/models/test", {
+          method: "POST",
+          headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+          body: JSON.stringify({ credentialId: key.id, modelId: "gpt-4o", ...retired }),
+        });
+        expect(res.status).toBe(400);
+      }
+    });
+
     it("POST /api/models/test → not 403 for an owner (has models:write)", async () => {
       const key = await seedOrgModelProviderKey({
         orgId: ctx.orgId,
@@ -1609,7 +1643,7 @@ describe("Models API", () => {
       const res = await app.request("/api/models/test", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ credentialId: key.id, modelId: "gpt-4o", apiKey: "sk-test" }),
+        body: JSON.stringify({ credentialId: key.id, modelId: "gpt-4o", api_key: "sk-test" }),
       });
       // The owner passes the permission guard; the body may then succeed or
       // surface a provider error, but it is never an authorization failure.
@@ -1681,8 +1715,8 @@ describe("Models API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           providerId: "openai-compatible",
-          apiKey: "sk-test",
-          baseUrlOverride: "http://localhost:11434/v1",
+          api_key: "sk-test",
+          base_url_override: "http://localhost:11434/v1",
         }),
       });
       expect(credentialRes.status).toBe(201);
@@ -1705,7 +1739,8 @@ describe("Models API", () => {
       const created = (await createRes.json()) as any;
       // The credential's provider owns both — `org_models` stores neither.
       expect(created.apiShape).toBe("openai-completions");
-      expect(created.baseUrl).toBe("http://localhost:11434/v1");
+      expect(created.base_url).toBe("http://localhost:11434/v1");
+      expect(created).not.toHaveProperty("baseUrl");
       // No catalog backs this provider, so the typed capabilities are the
       // only source there is and must round-trip verbatim.
       expect(created.contextWindow).toBe(32768);
@@ -1728,8 +1763,8 @@ describe("Models API", () => {
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           providerId: "__custom__",
-          apiKey: "sk-test",
-          baseUrlOverride: "http://localhost:11434/v1",
+          api_key: "sk-test",
+          base_url_override: "http://localhost:11434/v1",
         }),
       });
       expect(res.status).toBe(400);

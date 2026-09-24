@@ -25,7 +25,7 @@ import { getOrgModelProviderCredential } from "../services/model-providers/crede
  * Body shape posted by `npx @appstrate/connect-helper <token>` after it
  * completes the loopback OAuth dance against the provider's authorization
  * server. The helper funnels the `OAuthCredentials` returned by `pi-ai`
- * into this contract; everything except `accessToken`/`refreshToken`/`label`
+ * into this contract; everything except `access_token`/`refresh_token`/`label`
  * is advisory and re-derived server-side when possible.
  *
  * The browser-OAuth `/initiate` + `/callback` pair this route replaces was
@@ -48,8 +48,8 @@ export const importBody = z
      * `@appstrate/connect-helper` no longer invents one client-side.
      */
     label: z.string().min(1).max(120).optional(),
-    accessToken: z.string().min(1, "accessToken is required"),
-    refreshToken: z.string().min(1, "refreshToken is required"),
+    access_token: z.string().min(1, "access_token is required"),
+    refresh_token: z.string().min(1, "refresh_token is required"),
     /** Unix ms timestamp; CLI converts pi-ai's `expires` field as-is. */
     expiresAt: z.number().int().positive().optional().nullable(),
     /**
@@ -60,14 +60,15 @@ export const importBody = z
     email: z.email().max(320).optional(),
     /**
      * Abstract account/tenant identifier — the well-known `accountId`
-     * slot from {@link ModelProviderIdentity}. When the CLI surfaces it
-     * from the OAuth response body we trust the body-level value (it's
-     * cheaper than re-decoding the token); otherwise the provider's
+     * slot from {@link ModelProviderIdentity}, spelled `account_id` on
+     * the wire. When the CLI surfaces it from the OAuth response body we
+     * trust the body-level value (it's cheaper than re-decoding the token);
+     * otherwise the provider's
      * `extractTokenIdentity` hook fills it in server-side. Constrained
      * to a reasonable length — provider-specific format validation
      * (e.g. "must be a UUID") belongs in the module's hook.
      */
-    accountId: z.string().min(1).max(120).optional(),
+    account_id: z.string().min(1).max(120).optional(),
   })
   .strict();
 
@@ -88,7 +89,7 @@ export const createPairingBody = z
       (id) => isOAuthModelProvider(id),
       "providerId must be a registered OAuth model provider",
     ),
-    credentialId: z.uuid().optional(),
+    credential_id: z.uuid().optional(),
   })
   .strict();
 
@@ -133,7 +134,13 @@ async function handlePairRedeem(c: Context<AppEnv>) {
   }
 
   const result = await importOAuthModelProviderConnection({
-    ...input,
+    providerId: input.providerId,
+    accessToken: input.access_token,
+    refreshToken: input.refresh_token,
+    label: input.label,
+    expiresAt: input.expiresAt,
+    email: input.email,
+    accountId: input.account_id,
     orgId: consumed.orgId,
     userId: consumed.userId,
     ...(consumed.reconnectCredentialId ? { credentialId: consumed.reconnectCredentialId } : {}),
@@ -161,12 +168,17 @@ async function handlePairRedeem(c: Context<AppEnv>) {
   // Deliberate operation-result shape (NOT the bare credential resource —
   // flow-completion exception to the strict rule, #657): the helper's bearer
   // is single-use and consumed by this request, so it cannot follow up with a
-  // GET. `availableModelIds` is a convenience projection of the credential's
+  // GET. `available_model_ids` is a convenience projection of the credential's
   // own servable set, resolved through the same accessor the credentials list
   // uses — the helper's terminal summary and the dashboard must not be able
   // to print two different lists for one connection. The dashboard gets the
   // created credential via GET /pairing/:id polling.
-  return c.json(result);
+  return c.json({
+    credential_id: result.credentialId,
+    providerId: result.providerId,
+    ...(result.email !== undefined ? { email: result.email } : {}),
+    available_model_ids: result.availableModelIds,
+  });
 }
 
 export function createModelProvidersOAuthRouter() {
@@ -207,8 +219,8 @@ export function createModelProvidersOAuthRouter() {
       const user = c.get("user");
       const input = await readJsonBody(c, createPairingBody, { allowEmpty: true });
 
-      if (input.credentialId) {
-        const credential = await getOrgModelProviderCredential(orgId, input.credentialId);
+      if (input.credential_id) {
+        const credential = await getOrgModelProviderCredential(orgId, input.credential_id);
         if (
           !credential ||
           credential.source !== "custom" ||
@@ -216,8 +228,8 @@ export function createModelProvidersOAuthRouter() {
           credential.providerId !== input.providerId
         ) {
           throw invalidRequest(
-            "credentialId must identify an OAuth credential for providerId in the current organization",
-            "credentialId",
+            "credential_id must identify an OAuth credential for providerId in the current organization",
+            "credential_id",
           );
         }
       }
@@ -227,7 +239,7 @@ export function createModelProvidersOAuthRouter() {
         userId: user.id,
         orgId,
         providerId: input.providerId,
-        ...(input.credentialId ? { reconnectCredentialId: input.credentialId } : {}),
+        ...(input.credential_id ? { reconnectCredentialId: input.credential_id } : {}),
         platformUrl,
         ttlSeconds: PAIRING_TTL_SECONDS,
       });
@@ -240,7 +252,7 @@ export function createModelProvidersOAuthRouter() {
         resourceId: id,
         after: {
           providerId: input.providerId,
-          reconnectCredentialId: input.credentialId ?? null,
+          reconnectCredentialId: input.credential_id ?? null,
           expiresAt: expiresAt.toISOString(),
           // No raw token in audit — leaks the bearer secret otherwise.
         },
@@ -278,9 +290,9 @@ export function createModelProvidersOAuthRouter() {
     return c.json({
       id: row.id,
       status,
-      consumedAt: row.consumedAt ? row.consumedAt.toISOString() : null,
+      consumed_at: row.consumedAt ? row.consumedAt.toISOString() : null,
       expiresAt: row.expiresAt.toISOString(),
-      credentialId: row.credentialId,
+      credential_id: row.credentialId,
     });
   });
 

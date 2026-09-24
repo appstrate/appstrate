@@ -1593,7 +1593,7 @@ export const schemas = {
       "id",
       "label",
       "apiShape",
-      "baseUrl",
+      "base_url",
       "source",
       "authMode",
       "created_by",
@@ -1608,7 +1608,7 @@ export const schemas = {
         description:
           "Protocol family. `null` for a built-in credential whose every model is managed (#727) — the binding is not exposed, so the endpoint doesn't reveal the provider.",
       },
-      baseUrl: {
+      base_url: {
         type: ["string", "null"],
         description:
           "Endpoint base URL. `null` for a managed-only built-in credential (see apiShape).",
@@ -1640,8 +1640,8 @@ export const schemas = {
       "label",
       "apiShape",
       "providerId",
-      "providerName",
-      "baseUrl",
+      "provider_name",
+      "base_url",
       "modelId",
       "generation",
       "enabled",
@@ -1668,12 +1668,12 @@ export const schemas = {
         description:
           "The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. `null` for managed models — binding not exposed.",
       },
-      providerName: {
+      provider_name: {
         type: ["string", "null"],
         description:
           "The provider's human display name resolved from the model-provider registry by `providerId` (e.g. `OpenCode Go`, `OpenAI`). The authoritative label for grouping/badging a model by provider — `apiShape` is ambiguous (OpenCode Go and OpenAI both use `openai-completions`), so do NOT derive a provider label from it. `null` for managed models (binding not exposed) and for rows whose `providerId` has no registry entry.",
       },
-      baseUrl: {
+      base_url: {
         type: ["string", "null"],
         description: "Provider endpoint. `null` for managed models — binding not exposed.",
       },
@@ -1703,12 +1703,12 @@ export const schemas = {
       aliased: {
         type: "boolean",
         description:
-          "Managed-model flag. When true, the binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is not exposed in this projection — these fields are `null`; render a managed badge.",
+          "Managed-model flag. When true, the binding (`modelId`, `apiShape`, `base_url`, `credentialId`, capabilities/cost) is not exposed in this projection — these fields are `null`; render a managed badge.",
       },
       iconUrl: {
         type: ["string", "null"],
         description:
-          "Display-icon key for the UI (a client provider-icon key, e.g. `anthropic`, `openai`). A deliberate public choice on the model — decoupled from the provider, so a managed model can show an icon without exposing its binding. `null` means resolve the icon from the (visible) `apiShape`/`baseUrl`, or fall back to a generic icon.",
+          "Display-icon key for the UI (a client provider-icon key, e.g. `anthropic`, `openai`). A deliberate public choice on the model — decoupled from the provider, so a managed model can show an icon without exposing its binding. `null` means resolve the icon from the (visible) `apiShape`/`base_url`, or fall back to a generic icon.",
       },
       source: { type: "string", enum: ["built-in", "custom"] },
       credentialId: {
@@ -1750,17 +1750,17 @@ export const schemas = {
     type: "object",
     description:
       "Resolved access token returned by `GET /internal/oauth-token/{id}` and `POST .../refresh`. Carries only the fields that change per refresh — provider invariants (baseUrl, …) live in the sidecar's boot-time `LlmProxyOauthConfig`. Wire-equivalent to the `OAuthTokenResponse` TS interface in `@appstrate/core/sidecar-types`.",
-    required: ["accessToken", "expiresAt"],
+    required: ["access_token", "expiresAt"],
     properties: {
-      accessToken: { type: "string" },
+      access_token: { type: "string" },
       expiresAt: {
         type: ["integer", "null"],
         description: "Epoch milliseconds. null when expiry is unknown.",
       },
-      accountId: {
+      account_id: {
         type: "string",
         description:
-          "Abstract account/tenant identifier surfaced by the provider's `extractTokenIdentity` hook. The sidecar's identity layer (keyed by providerId from the boot config) decides which routing header to echo it as.",
+          "Abstract account/tenant identifier surfaced by the provider's `extractTokenIdentity` hook. Omitted when the provider surfaced none. The sidecar's identity layer (keyed by providerId from the boot config) decides which routing header to echo it as.",
       },
     },
   },

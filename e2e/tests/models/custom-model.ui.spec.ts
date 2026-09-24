@@ -285,8 +285,8 @@ test.describe("Custom endpoint model — UI", () => {
     // test covers is the picker, not the key's creation.
     const seeded = await apiClient.post("/model-provider-credentials", {
       providerId: OPENAI_PROVIDER_ID,
-      apiKey: GOOD_KEY,
-      baseUrlOverride: baseUrl,
+      api_key: GOOD_KEY,
+      base_url_override: baseUrl,
     });
     expect(seeded.status()).toBe(201);
     const credential = (await seeded.json()) as { id: string; label: string };

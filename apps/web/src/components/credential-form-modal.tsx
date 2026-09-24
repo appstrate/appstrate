@@ -158,7 +158,7 @@ function CredentialFormBody({
     defaultValues: {
       label: credential?.label ?? "",
       apiKey: "",
-      baseUrlOverride: credential?.baseUrl ?? "",
+      baseUrlOverride: credential?.base_url ?? "",
     },
   });
 
@@ -169,7 +169,7 @@ function CredentialFormBody({
 
   const testMutation = useTestModelProviderCredentialInline();
   const [testResult, setTestResult] = useState<TestResult | null>(null);
-  // Inline-test endpoint still takes (apiShape, baseUrl) — these are
+  // Inline-test endpoint still takes (apiShape, base_url) — these are
   // computed from the chosen provider's registry entry (+ override).
   const testApiShape = selectedProvider?.apiShape ?? "";
   const testBaseUrl = needsBaseUrlOverride
@@ -188,9 +188,9 @@ function CredentialFormBody({
       {
         body: {
           apiShape: testApiShape,
-          baseUrl: testBaseUrl,
-          ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-          ...(credential ? { existingKeyId: credential.id } : {}),
+          base_url: testBaseUrl,
+          ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+          ...(credential ? { existing_key_id: credential.id } : {}),
         },
       },
       {

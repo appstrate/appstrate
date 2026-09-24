@@ -52,6 +52,20 @@ describe("POST /api/model-providers-oauth/pairing", () => {
     expect(res.status).toBe(401);
   });
 
+  it("keeps the carve-out name `providerId`: `provider_id` and `credentialId` are 400", async () => {
+    for (const body of [
+      { provider_id: "test-oauth" },
+      { providerId: "test-oauth", credentialId: "00000000-0000-4000-8000-000000000000" },
+    ]) {
+      const res = await app.request("/api/model-providers-oauth/pairing", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify(body),
+      });
+      expect(res.status).toBe(400);
+    }
+  });
+
   it("returns 400 when providerId fails the regex", async () => {
     const res = await app.request("/api/model-providers-oauth/pairing", {
       method: "POST",
@@ -96,9 +110,9 @@ describe("GET /api/model-providers-oauth/pairing/:id", () => {
       headers: authHeaders(ctx),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { status: string; consumedAt: string | null };
+    const body = (await res.json()) as { status: string; consumed_at: string | null };
     expect(body.status).toBe("pending");
-    expect(body.consumedAt).toBeNull();
+    expect(body.consumed_at).toBeNull();
   });
 
   it("returns 404 when the pairing belongs to a different org (no enumeration)", async () => {

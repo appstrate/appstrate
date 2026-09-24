@@ -932,8 +932,8 @@ export interface OrgModelInfo extends ModelMetadata {
    * (part of the stripped backing) and for any row whose `providerId` has no
    * registry entry (custom providers).
    */
-  providerName: string | null;
-  baseUrl: string | null;
+  provider_name: string | null;
+  base_url: string | null;
   modelId: string | null;
   enabled: boolean;
   is_default: boolean;
@@ -953,7 +953,7 @@ export interface OrgModelInfo extends ModelMetadata {
   /**
    * Model-alias flag (LLM-gateway alias pattern). When true, the `id` is a
    * public alias; user-facing surfaces strip the real binding (`modelId`,
-   * `apiShape`, `baseUrl`, `credentialId`, capabilities/cost). Clients render
+   * `apiShape`, `base_url`, `credentialId`, capabilities/cost). Clients render
    * an alias badge and never learn the backing model.
    */
   aliased: boolean;
@@ -963,7 +963,7 @@ export interface OrgModelInfo extends ModelMetadata {
    * provider. Set deliberately on an alias (`SYSTEM_PROVIDER_KEYS` model entry)
    * so an aliased model can show an icon without exposing its hidden binding;
    * `null` means the client falls back to resolving the icon from the real
-   * `apiShape`/`baseUrl` (non-aliased models) or shows a generic alias icon.
+   * `apiShape`/`base_url` (non-aliased models) or shows a generic alias icon.
    */
   iconUrl: string | null;
   source: "built-in" | "custom";
@@ -993,7 +993,7 @@ export interface ModelProviderCredentialInfo {
    * the binding themselves).
    */
   apiShape: ModelApiShape | null;
-  baseUrl: string | null;
+  base_url: string | null;
   source: "built-in" | "custom";
   /** Auth mode of the underlying credential (matches the registry vocabulary). */
   authMode: "api_key" | "oauth2";

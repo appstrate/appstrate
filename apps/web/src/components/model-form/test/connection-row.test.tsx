@@ -25,7 +25,7 @@ const CONNECTION: ModelProviderCredentialInfo = {
   id: "cred_1",
   label: "Claude Code",
   apiShape: "anthropic-messages",
-  baseUrl: "https://api.anthropic.com",
+  base_url: "https://api.anthropic.com",
   providerId: "claude-code",
   oauth_email: "dev@example.com",
   source: "custom",

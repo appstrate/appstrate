@@ -7,7 +7,7 @@ export const modelProvidersOAuthPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Mint a one-shot pairing token for the connect helper",
       description:
-        "Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. Pass `credentialId` to reconnect that exact org credential in place; omit it to create a new connection. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Space-Id` — the resulting credential lives in `model_provider_credentials`, which has no space affinity).",
+        "Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. Pass `credential_id` to reconnect that exact org credential in place; omit it to create a new connection. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Space-Id` — the resulting credential lives in `model_provider_credentials`, which has no space affinity).",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -23,7 +23,7 @@ export const modelProvidersOAuthPaths = {
                   description:
                     "Canonical provider id. Must resolve to an OAuth provider registered by a loaded module (discoverable via `GET /api/model-provider-credentials/registry`). Unknown/unregistered ids → 400 (validation error). The enum is intentionally open: OAuth providers ship as modules, so the platform spec stays model-agnostic.",
                 },
-                credentialId: {
+                credential_id: {
                   type: "string",
                   format: "uuid",
                   description:
@@ -105,19 +105,19 @@ export const modelProvidersOAuthPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["id", "status", "consumedAt", "expiresAt", "credentialId"],
+                required: ["id", "status", "consumed_at", "expiresAt", "credential_id"],
                 properties: {
                   id: { type: "string", pattern: "^pair_[A-Za-z0-9_-]+$" },
                   status: {
                     type: "string",
                     enum: ["pending", "consumed", "expired"],
                   },
-                  consumedAt: {
+                  consumed_at: {
                     type: ["string", "null"],
                     format: "date-time",
                   },
                   expiresAt: { type: "string", format: "date-time" },
-                  credentialId: {
+                  credential_id: {
                     type: ["string", "null"],
                     format: "uuid",
                     description:
@@ -163,21 +163,21 @@ export const modelProvidersOAuthPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Redeem a pairing token: post the OAuth credential bundle back to the platform",
       description:
-        "Canonical pairing-redeem route used by `@appstrate/connect-helper`. Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / `providerId` and optional reconnect target are pinned at mint time, so a tampered helper cannot redirect the redeem to a different org, provider, or credential. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before creating or updating `model_provider_credentials`.",
+        "Canonical pairing-redeem route used by `@appstrate/connect-helper`. Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / provider and optional reconnect target are pinned at mint time, so a tampered helper cannot redirect the redeem to a different org, provider, or credential. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before creating or updating `model_provider_credentials`.",
       requestBody: {
         required: true,
         content: {
           "application/json": {
             schema: {
               type: "object",
-              required: ["providerId", "accessToken", "refreshToken"],
+              required: ["providerId", "access_token", "refresh_token"],
               properties: {
                 providerId: {
                   type: "string",
                   minLength: 1,
                   pattern: "^[a-z0-9-]+$",
                   description:
-                    "Must match the pairing's pinned providerId. Mismatched → 400; provider deregistered after mint → 404.",
+                    "Must match the pairing's pinned provider id. Mismatched → 400; provider deregistered after mint → 404.",
                 },
                 label: {
                   type: "string",
@@ -186,8 +186,8 @@ export const modelProvidersOAuthPaths = {
                   description:
                     "Display name for the credential. Optional — the platform derives one from the provider's `displayName` when omitted (`@appstrate/connect-helper` no longer invents one client-side).",
                 },
-                accessToken: { type: "string", minLength: 1 },
-                refreshToken: { type: "string", minLength: 1 },
+                access_token: { type: "string", minLength: 1 },
+                refresh_token: { type: "string", minLength: 1 },
                 expiresAt: {
                   type: ["integer", "null"],
                   description: "Unix milliseconds since epoch — when the access token expires.",
@@ -199,7 +199,7 @@ export const modelProvidersOAuthPaths = {
                   description:
                     "Account email — either forwarded from the OAuth response body or re-derived server-side by the provider's `extractTokenIdentity` hook.",
                 },
-                accountId: {
+                account_id: {
                   type: "string",
                   minLength: 1,
                   maxLength: 120,
@@ -215,17 +215,17 @@ export const modelProvidersOAuthPaths = {
       responses: {
         "200": {
           description:
-            "Credential created or reconnected in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, so the models the helper prints in its terminal summary have to travel back in this response. `availableModelIds` is therefore a projection of the credential's own servable set — byte-for-byte what `available_model_ids` reports for this `credentialId` on `GET /api/model-provider-credentials`, resolved through the same accessor, so the terminal and the dashboard can never disagree. For subscription providers (`codex`, `claude-code`) that set is derived from the provider definition ∩ the pricing catalog with no upstream call; for probe-validated providers a reconnect preserves the credential's empirically discovered list. The dashboard obtains the resulting credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list.",
+            "Credential created or reconnected in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, so the models the helper prints in its terminal summary have to travel back in this response. `available_model_ids` is therefore a projection of the credential's own servable set — byte-for-byte what `available_model_ids` reports for this `credential_id` on `GET /api/model-provider-credentials`, resolved through the same accessor, so the terminal and the dashboard can never disagree. For subscription providers (`codex`, `claude-code`) that set is derived from the provider definition ∩ the pricing catalog with no upstream call; for probe-validated providers a reconnect preserves the credential's empirically discovered list. The dashboard obtains the resulting credential via `GET /pairing/{id}` polling (`credential_id`) + the credentials list.",
           content: {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["credentialId", "providerId", "availableModelIds"],
+                required: ["credential_id", "providerId", "available_model_ids"],
                 properties: {
-                  credentialId: { type: "string", format: "uuid" },
+                  credential_id: { type: "string", format: "uuid" },
                   providerId: { type: "string" },
                   email: { type: "string", format: "email" },
-                  availableModelIds: { type: "array", items: { type: "string" } },
+                  available_model_ids: { type: "array", items: { type: "string" } },
                 },
               },
             },

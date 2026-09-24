@@ -696,18 +696,20 @@ export interface LlmProxyOauthConfig {
  * (and `POST .../refresh`) endpoint. Carries only the fields that change per
  * refresh — provider invariants (baseUrl, providerId) live in
  * {@link LlmProxyOauthConfig}, which the sidecar already received at boot.
+ * Snake_case at the JSON boundary (RFC 6749 `access_token`); `expiresAt` is a
+ * universal-carve-out name. Both sides map it to their own camelCase TS type.
  */
 export interface OAuthTokenResponse {
-  accessToken: string;
+  access_token: string;
   /** Epoch milliseconds. `null` when expiry is unknown — sidecar treats this as "always refresh". */
   expiresAt: number | null;
   /**
    * Abstract account/tenant identifier surfaced by the integration's
    * `extractTokenIdentity` hook (used at connect time for required-claim
-   * validation). This generic OAuth `accountId` metadata is NOT forwarded as an
-   * upstream header by the platform.
+   * validation). Omitted — never `null` — when the provider surfaced none.
+   * Not forwarded as an upstream header by the platform.
    */
-  accountId?: string;
+  account_id?: string;
 }
 
 /**

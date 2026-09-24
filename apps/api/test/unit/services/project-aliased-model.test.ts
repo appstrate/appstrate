@@ -18,8 +18,8 @@ const base: OrgModelInfo = {
   label: "Appstrate Medium",
   apiShape: "openai-completions",
   providerId: "openai-compatible",
-  providerName: "OpenAI-compatible (custom)",
-  baseUrl: "https://api.deepseek.com/v1",
+  provider_name: "OpenAI-compatible (custom)",
+  base_url: "https://api.deepseek.com/v1",
   modelId: "deepseek-chat",
   generation: {
     temperature: "unsupported",
@@ -75,8 +75,8 @@ describe("projectAliasedModel", () => {
     // the dedicated case below; it must survive the projection.)
     expect(out.apiShape).toBeNull();
     expect(out.providerId).toBeNull();
-    expect(out.providerName).toBeNull();
-    expect(out.baseUrl).toBeNull();
+    expect(out.provider_name).toBeNull();
+    expect(out.base_url).toBeNull();
     expect(out.modelId).toBeNull();
     expect(out.credentialId).toBeNull();
     expect(out.input).toBeNull();
@@ -166,7 +166,7 @@ describe("projectAliasedModel", () => {
     const out = projectAliasedModel({ ...base, aliased: true, needs_reconnection: true });
     expect(out.needs_reconnection).toBe(true);
     expect(out.providerId).toBeNull(); // backing still hidden
-    expect(out.baseUrl).toBeNull();
+    expect(out.base_url).toBeNull();
   });
 
   it("preserves a declared iconUrl on an aliased model", () => {

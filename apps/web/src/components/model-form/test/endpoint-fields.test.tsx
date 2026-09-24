@@ -49,7 +49,7 @@ const LOCAL_KEY: ModelProviderCredentialInfo = {
   id: "cred_1",
   label: "Ollama local",
   apiShape: "openai-completions",
-  baseUrl: "http://localhost:11434/v1",
+  base_url: "http://localhost:11434/v1",
   source: "custom",
   authMode: "api_key",
   created_by: null,

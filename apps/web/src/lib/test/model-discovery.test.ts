@@ -41,7 +41,7 @@ describe("buildDiscoverBody — a key typed inline", () => {
         baseUrl: "  http://localhost:11434/v1  ",
       }),
     ).toEqual({
-      provider_id: "openai-compatible",
+      providerId: "openai-compatible",
       api_key: "sk-test",
       base_url_override: "http://localhost:11434/v1",
     });
@@ -57,6 +57,6 @@ describe("buildDiscoverBody — a key typed inline", () => {
         inlineApiKey: "sk-ant-test",
         baseUrl: "https://api.anthropic.com",
       }),
-    ).toEqual({ provider_id: "anthropic", api_key: "sk-ant-test" });
+    ).toEqual({ providerId: "anthropic", api_key: "sk-ant-test" });
   });
 });

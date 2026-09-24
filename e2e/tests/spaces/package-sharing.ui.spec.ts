@@ -68,7 +68,7 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
   // fails in the background, which is all the version assertions need.
   const credential = await apiClient.post("/model-provider-credentials", {
     providerId: "anthropic",
-    apiKey: "sk-ant-e2e",
+    api_key: "sk-ant-e2e",
   });
   expect(credential.status(), await credential.text()).toBe(201);
   const model = await apiClient.post("/models", {

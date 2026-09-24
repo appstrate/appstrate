@@ -256,8 +256,8 @@ async function createCustomCredential(ctx: TestContext, baseUrl: string): Promis
     body: JSON.stringify({
       label: "Custom endpoint",
       providerId: "openai-compatible",
-      baseUrlOverride: baseUrl,
-      apiKey: "good-key",
+      base_url_override: baseUrl,
+      api_key: "good-key",
     }),
   });
   expect(res.status).toBe(201);
@@ -284,7 +284,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
 
   it("enumerates an inline endpoint and prefills catalog metadata", async () => {
     const res = await discover(ctx, {
-      provider_id: "openai-compatible",
+      providerId: "openai-compatible",
       api_key: "good-key",
       base_url_override: GOOD_BASE_URL,
     });
@@ -328,7 +328,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
 
   it("reads the capability fields the listing publishes, per model", async () => {
     const res = await discover(ctx, {
-      provider_id: "openai-compatible",
+      providerId: "openai-compatible",
       api_key: "hints-key",
       base_url_override: GOOD_BASE_URL,
     });
@@ -355,7 +355,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
 
   it("adds a discovered model using only the endpoint's capabilities as overrides", async () => {
     const res = await discover(ctx, {
-      provider_id: "openai-compatible",
+      providerId: "openai-compatible",
       api_key: "mixed-hints-key",
       base_url_override: GOOD_BASE_URL,
     });
@@ -386,7 +386,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
 
   it("enumerates an anthropic-messages endpoint over the Anthropic listing shape", async () => {
     const res = await discover(ctx, {
-      provider_id: "anthropic-compatible",
+      providerId: "anthropic-compatible",
       api_key: "good-key",
       base_url_override: ANTHROPIC_BASE_URL,
     });
@@ -399,7 +399,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
 
   it("reports auth_failed with no models when the endpoint rejects the key", async () => {
     const res = await discover(ctx, {
-      provider_id: "openai-compatible",
+      providerId: "openai-compatible",
       api_key: "wrong-key",
       base_url_override: GOOD_BASE_URL,
     });
@@ -413,7 +413,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
 
   it("reports bad_response when the body carries no listing", async () => {
     const res = await discover(ctx, {
-      provider_id: "openai-compatible",
+      providerId: "openai-compatible",
       api_key: "good-key",
       base_url_override: BAD_BASE_URL,
     });
@@ -454,21 +454,21 @@ describe("POST /api/model-provider-credentials/discover", () => {
 
   it("refuses an OAuth provider — subscription tokens are never spent on enumeration", async () => {
     const res = await discover(ctx, {
-      provider_id: TEST_OAUTH_PROVIDER_ID,
+      providerId: TEST_OAUTH_PROVIDER_ID,
       api_key: "good-key",
     });
     expect(res.status).toBe(400);
   });
 
-  it("refuses an unknown provider_id", async () => {
-    const res = await discover(ctx, { provider_id: "not-a-provider", api_key: "good-key" });
+  it("refuses an unknown providerId", async () => {
+    const res = await discover(ctx, { providerId: "not-a-provider", api_key: "good-key" });
     expect(res.status).toBe(400);
   });
 
   it("refuses both forms at once", async () => {
     const res = await discover(ctx, {
       credential_id: "00000000-0000-0000-0000-000000000000",
-      provider_id: "openai-compatible",
+      providerId: "openai-compatible",
       api_key: "good-key",
     });
     expect(res.status).toBe(400);
@@ -481,7 +481,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
 
   it("refuses a base_url_override on a provider that pins its base URL", async () => {
     const res = await discover(ctx, {
-      provider_id: PINNED_URL_PROVIDER,
+      providerId: PINNED_URL_PROVIDER,
       api_key: "good-key",
       base_url_override: GOOD_BASE_URL,
     });
@@ -490,7 +490,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
 
   it("follows the listing cursor instead of returning a silently short first page", async () => {
     const res = await discover(ctx, {
-      provider_id: "anthropic-compatible",
+      providerId: "anthropic-compatible",
       api_key: "paged-key",
       base_url_override: ANTHROPIC_BASE_URL,
     });
@@ -509,7 +509,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
 
   it("follows the Google listing's nextPageToken", async () => {
     const res = await discover(ctx, {
-      provider_id: "google-ai",
+      providerId: "google-ai",
       api_key: "good-key",
       base_url_override: GEMINI_BASE_URL,
     });
@@ -524,7 +524,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
 
   it("reports truncated when a cursor that never ends hits the page cap", async () => {
     const res = await discover(ctx, {
-      provider_id: "openai-compatible",
+      providerId: "openai-compatible",
       api_key: "endless-key",
       base_url_override: GOOD_BASE_URL,
     });
@@ -541,7 +541,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
 
   it("refuses a listing whose body streams past the size budget", async () => {
     const res = await discover(ctx, {
-      provider_id: "openai-compatible",
+      providerId: "openai-compatible",
       api_key: "flood-key",
       base_url_override: GOOD_BASE_URL,
     });
@@ -557,7 +557,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
 
   it("refuses an api-key provider that declares a static model list", async () => {
     const res = await discover(ctx, {
-      provider_id: STATIC_LIST_PROVIDER,
+      providerId: STATIC_LIST_PROVIDER,
       api_key: "good-key",
       base_url_override: GOOD_BASE_URL,
     });
@@ -570,7 +570,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
 
   it("records the probe in the audit trail, without the key", async () => {
     const res = await discover(ctx, {
-      provider_id: "openai-compatible",
+      providerId: "openai-compatible",
       api_key: "good-key",
       base_url_override: GOOD_BASE_URL,
     });
@@ -606,7 +606,7 @@ describe("POST /api/model-provider-credentials/discover", () => {
     const res = await app.request("/api/model-provider-credentials/discover", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider_id: "openai-compatible", api_key: "good-key" }),
+      body: JSON.stringify({ providerId: "openai-compatible", api_key: "good-key" }),
     });
     expect(res.status).toBe(401);
   });

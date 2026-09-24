@@ -123,7 +123,7 @@ function ModelForm({
     defaultValues: {
       label: model?.label ?? "",
       apiShape: model?.apiShape ?? "",
-      baseUrl: model?.baseUrl ?? "",
+      baseUrl: model?.base_url ?? "",
       modelId: model?.modelId ?? "",
       credentialId: model?.credentialId ?? "",
       inlineApiKey: "",
@@ -301,7 +301,7 @@ function ModelForm({
       bindCredential(id);
       // The key carries the endpoint it was saved against; the form follows it there.
       const key = availableCredentials.find((k) => k.id === id);
-      if (key?.baseUrl) setValue("baseUrl", key.baseUrl);
+      if (key?.base_url) setValue("baseUrl", key.base_url);
       dropListing();
     },
     onClear: () => {

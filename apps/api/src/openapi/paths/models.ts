@@ -37,9 +37,9 @@ export const modelsPaths = {
                     id: "gpt-4o",
                     label: "GPT-4o",
                     providerId: "openai",
-                    providerName: "OpenAI",
+                    provider_name: "OpenAI",
                     apiShape: "openai-responses",
-                    baseUrl: "https://api.openai.com/v1",
+                    base_url: "https://api.openai.com/v1",
                     modelId: "gpt-4o",
                     generation: {
                       temperature: "supported",
@@ -124,7 +124,7 @@ export const modelsPaths = {
                 aliased: {
                   type: "boolean",
                   description:
-                    "Managed-model flag. When true, this model's binding (modelId, provider, baseUrl, capabilities/cost) is not exposed on user-facing surfaces and these fields are null; inference is routed by the platform.",
+                    "Managed-model flag. When true, this model's binding (modelId, provider, base_url, capabilities/cost) is not exposed on user-facing surfaces and these fields are null; inference is routed by the platform.",
                 },
               },
               additionalProperties: false,
@@ -225,10 +225,10 @@ export const modelsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["credentialId", "modelIds"],
+              required: ["credentialId", "model_ids"],
               properties: {
                 credentialId: { type: "string", minLength: 1 },
-                modelIds: {
+                model_ids: {
                   type: "array",
                   minItems: 1,
                   maxItems: 50,
@@ -249,11 +249,11 @@ export const modelsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["created", "ids", "promotedDefault"],
+                required: ["created", "ids", "promoted_default"],
                 properties: {
                   created: { type: "integer", minimum: 0 },
                   ids: { type: "array", items: { type: "string" } },
-                  promotedDefault: { type: "boolean" },
+                  promoted_default: { type: "boolean" },
                 },
               },
             },
@@ -397,7 +397,7 @@ export const modelsPaths = {
       tags: ["Models"],
       summary: "Test model configuration inline",
       description:
-        "Test a model configuration without saving it first. If editing an existing model, pass existingModelId to fall back to its stored API key when apiKey is omitted. Rate limited to 5 requests per minute.",
+        "Test a model configuration without saving it first. If editing an existing model, pass `existing_model_id` to fall back to its stored API key when `api_key` is omitted. Rate limited to 5 requests per minute.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -414,12 +414,12 @@ export const modelsPaths = {
                     "Provider credential ID. apiShape and baseUrl are resolved from the credential's providerId.",
                 },
                 modelId: { type: "string", minLength: 1, description: "Model identifier" },
-                apiKey: {
+                api_key: {
                   type: "string",
                   description:
-                    "Override API key for the probe. Falls back to existingModelId's key, then the credential's stored key.",
+                    "Override API key for the probe. Falls back to `existing_model_id`'s key, then the credential's stored key.",
                 },
-                existingModelId: {
+                existing_model_id: {
                   type: "string",
                   description: "Existing model ID to fall back to for stored API key",
                 },

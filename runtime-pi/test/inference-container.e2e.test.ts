@@ -144,7 +144,7 @@ describe.skipIf(!RUN)("runtime-pi + sidecar images carry one inference turn verb
         if (path.startsWith("/internal/oauth-token/")) {
           tokenReadAuthorization = req.headers.get("authorization") ?? undefined;
           return Response.json({
-            accessToken: REAL_ACCESS_TOKEN,
+            access_token: REAL_ACCESS_TOKEN,
             expiresAt: Date.now() + 3_600_000,
           });
         }

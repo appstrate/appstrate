@@ -213,7 +213,7 @@ function AliasIcon(props: SVGProps<SVGSVGElement>) {
  *     they show an icon without exposing the backing model).
  *  2. The provider the row is bound to — by `providerId`, so a model on an
  *     operator's own endpoint carries its wire format's icon; by the visible
- *     `apiShape`/`baseUrl` where the binding is hidden.
+ *     `apiShape`/`base_url` where the binding is hidden.
  *  3. A generic {@link AliasIcon} for aliases that declare no icon, so an
  *     aliased model is never icon-less.
  */
@@ -223,7 +223,7 @@ export function getModelIcon(
     iconUrl: string | null;
     providerId?: string | null;
     apiShape: string | null;
-    baseUrl: string | null;
+    base_url: string | null;
     aliased: boolean;
   },
   registry: readonly ProviderRegistryEntry[],

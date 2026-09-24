@@ -55,10 +55,10 @@ function bearerHeaders(token: string): Record<string, string> {
 const VALID_BODY = (providerId = "test-oauth") => ({
   providerId,
   label: "Test connection",
-  accessToken: "fake-access-token",
-  refreshToken: "fake-refresh-token",
+  access_token: "fake-access-token",
+  refresh_token: "fake-refresh-token",
   expiresAt: Date.now() + 3600_000,
-  accountId: "11111111-2222-4333-8444-555555555555",
+  account_id: "11111111-2222-4333-8444-555555555555",
 });
 
 describe("POST /api/model-providers-oauth/pair/redeem — pairing-bearer track", () => {
@@ -77,9 +77,9 @@ describe("POST /api/model-providers-oauth/pair/redeem — pairing-bearer track",
       body: JSON.stringify(VALID_BODY("test-oauth")),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { providerId: string; credentialId: string };
+    const body = (await res.json()) as { providerId: string; credential_id: string };
     expect(body.providerId).toBe("test-oauth");
-    expect(body.credentialId).toBeTruthy();
+    expect(body.credential_id).toBeTruthy();
   });
 
   it("flips the pairing's consumed_at on success (single-use)", async () => {
@@ -98,6 +98,42 @@ describe("POST /api/model-providers-oauth/pair/redeem — pairing-bearer track",
       .where(eq(modelProviderPairings.id, pairing.id))
       .limit(1);
     expect(row?.consumedAt).toBeInstanceOf(Date);
+  });
+
+  it("surfaces the redeemed credential on the pairing poll as snake_case", async () => {
+    const pairing = await mintPairing(ctx, "test-oauth");
+    const redeem = await app.request("/api/model-providers-oauth/pair/redeem", {
+      method: "POST",
+      headers: bearerHeaders(pairing.token),
+      body: JSON.stringify(VALID_BODY("test-oauth")),
+    });
+    const { credential_id } = (await redeem.json()) as { credential_id: string };
+
+    const res = await app.request(`/api/model-providers-oauth/pairing/${pairing.id}`, {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.status).toBe("consumed");
+    expect(typeof body.consumed_at).toBe("string");
+    expect(body.credential_id).toBe(credential_id);
+    expect(body).not.toHaveProperty("consumedAt");
+    expect(body).not.toHaveProperty("credentialId");
+  });
+
+  it("rejects the retired camelCase token fields with 400", async () => {
+    const pairing = await mintPairing(ctx, "test-oauth");
+    const res = await app.request("/api/model-providers-oauth/pair/redeem", {
+      method: "POST",
+      headers: bearerHeaders(pairing.token),
+      body: JSON.stringify({
+        providerId: "test-oauth",
+        accessToken: "fake-access-token",
+        refreshToken: "fake-refresh-token",
+        accountId: "11111111-2222-4333-8444-555555555555",
+      }),
+    });
+    expect(res.status).toBe(400);
   });
 
   it("rejects a replay of the same token with 410 Gone", async () => {

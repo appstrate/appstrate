@@ -8,6 +8,7 @@
  */
 
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
+import type { paths } from "../api/client";
 import type { ProviderRegistryEntry } from "../hooks/use-model-provider-credentials";
 import type { ModelPickRow } from "./model-source";
 import { catalogValues, sameSet, type CatalogModelValues } from "./row-overrides-catalog";
@@ -48,10 +49,16 @@ export interface ModelFormModelEntry extends ModelCapabilityOverrides {
   cost?: ModelCost;
 }
 
+/** The `POST /api/model-provider-credentials` body minted for a typed key, sent verbatim. */
+export type NewCredentialBody = Omit<
+  paths["/api/model-provider-credentials"]["post"]["requestBody"]["content"]["application/json"],
+  "label"
+>;
+
 /** The credential the model(s) run on: an existing one, or one to create first. */
 interface ModelFormCredentialBinding {
   credentialId: string;
-  newCredential?: { apiKey: string; providerId: string; baseUrlOverride?: string };
+  newCredential?: NewCredentialBody;
 }
 
 /**
@@ -168,10 +175,10 @@ function resolveCredentialBinding(input: {
     binding: {
       credentialId: "",
       newCredential: {
-        apiKey: inlineApiKey,
+        api_key: inlineApiKey,
         providerId: newCredentialProvider.providerId,
         ...(newCredentialProvider.baseUrlOverridable && baseUrl.trim()
-          ? { baseUrlOverride: baseUrl.trim() }
+          ? { base_url_override: baseUrl.trim() }
           : {}),
       },
     },
