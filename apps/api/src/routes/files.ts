@@ -32,7 +32,7 @@ import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor, actorFromIds } from "../lib/actor.ts";
 import { getSpaceScope } from "../lib/scope.ts";
-import { callerPermissions } from "../lib/permissions.ts";
+import { callerPermissions, ceilingAllows } from "../lib/permissions.ts";
 import { forbidden, notFound, payloadTooLarge, unauthorized } from "../lib/errors.ts";
 import { reprDigestSha256 } from "../lib/digest.ts";
 import { getPublicAppOrigin } from "../lib/public-url.ts";
@@ -70,10 +70,8 @@ import {
  */
 function fileLifecycleCeiling(c: Context<AppEnv>): { creatorCanManage: boolean } {
   // Ownership is not a role grant, so `permissions` cannot cap it — the
-  // credential's own scope ceiling does (RBAC spec §7.1). A cookie session
-  // carries no ceiling and keeps the right.
-  const ceiling = c.get("scopeCeiling");
-  return { creatorCanManage: ceiling === undefined || ceiling.has("files:delete") };
+  // credential's own scope ceiling does (RBAC spec §7.1).
+  return { creatorCanManage: ceilingAllows(c, "files:delete") };
 }
 
 export function createFilesRouter() {

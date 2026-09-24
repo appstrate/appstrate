@@ -42,6 +42,7 @@ function makeTools(permissions: string[], status = 200) {
     origin: "https://test.local",
     authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
     permissions: new Set(permissions),
+    ceiling: undefined,
     dispatch,
     observe: (e) => events.push(e),
     actor: { type: "user", id: "user_1" },

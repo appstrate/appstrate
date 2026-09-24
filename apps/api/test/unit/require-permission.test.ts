@@ -19,7 +19,9 @@
 import { describe, it, expect } from "bun:test";
 import type { Context, Next } from "hono";
 import {
+  requireAnyCeiling,
   requireAnyPermission,
+  requireCeiling,
   requirePermission,
 } from "../../src/middleware/require-permission.ts";
 import type { AppEnv } from "../../src/types/index.ts";
@@ -115,5 +117,83 @@ describe("requireAnyPermission", () => {
       // expected
     }
     expect(called).toBe(false);
+  });
+});
+
+describe("requireCeiling", () => {
+  const disconnect = requireCeiling("integrations", "disconnect");
+
+  /** A request carrying a credential ceiling and, separately, a role-derived set. */
+  function ceilingCtx(ceiling: string[] | undefined, permissions: string[] = []): Context<AppEnv> {
+    const values: Record<string, unknown> = {
+      scopeCeiling: ceiling && new Set(ceiling),
+      permissions: new Set(permissions),
+    };
+    return { get: (key: string) => values[key] } as unknown as Context<AppEnv>;
+  }
+
+  /** Whether the guard let the request through to `next()`. */
+  async function passes(c: Context<AppEnv>): Promise<boolean> {
+    let called = false;
+    await disconnect(c, async () => {
+      called = true;
+    });
+    return called;
+  }
+
+  it("passes a request with no ceiling, holding no permission at all", async () => {
+    // A cookie session: ownership authorizes it, no role grant is asked.
+    expect(await passes(ceilingCtx(undefined))).toBe(true);
+  });
+
+  it("passes a ceiling that includes the permission, whatever `permissions` holds", async () => {
+    expect(await passes(ceilingCtx(["integrations:disconnect"]))).toBe(true);
+  });
+
+  it("refuses a ceiling that omits it, even when `permissions` holds it", async () => {
+    const c = ceilingCtx(["integrations:read"], ["integrations:disconnect"]);
+    await expect(passes(c)).rejects.toThrow(
+      "Insufficient permissions: integrations:disconnect required",
+    );
+  });
+
+  it("refuses an EMPTY ceiling — empty is a cap, not its absence", async () => {
+    await expect(passes(ceilingCtx([]))).rejects.toThrow(/integrations:disconnect required/);
+  });
+});
+
+describe("requireAnyCeiling", () => {
+  const runsRead = requireAnyCeiling(["runs:read", "runs:read-all"]);
+
+  function withCeiling(ceiling: string[] | undefined): Context<AppEnv> {
+    const scopeCeiling = ceiling && new Set(ceiling);
+    return { get: (key: string) => (key === "scopeCeiling" ? scopeCeiling : undefined) } as never;
+  }
+
+  async function passes(c: Context<AppEnv>): Promise<boolean> {
+    let called = false;
+    await runsRead(c, async () => {
+      called = true;
+    });
+    return called;
+  }
+
+  it("passes a request with no ceiling", async () => {
+    expect(await passes(withCeiling(undefined))).toBe(true);
+  });
+
+  it("passes a ceiling holding any one alternative", async () => {
+    expect(await passes(withCeiling(["runs:read"]))).toBe(true);
+    expect(await passes(withCeiling(["runs:read-all"]))).toBe(true);
+  });
+
+  it("names the whole disjunction when the ceiling holds none", async () => {
+    await expect(passes(withCeiling(["agents:run"]))).rejects.toThrow(
+      "Insufficient permissions: runs:read|runs:read-all required",
+    );
+  });
+
+  it("refuses an empty alternative list at construction", () => {
+    expect(() => requireAnyCeiling([])).toThrow();
   });
 });

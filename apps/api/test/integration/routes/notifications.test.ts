@@ -10,7 +10,7 @@ import {
   createTestUser,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedAgent, seedRun, seedEndUser, seedSpace } from "../../helpers/seed.ts";
+import { seedAgent, seedApiKey, seedRun, seedEndUser, seedSpace } from "../../helpers/seed.ts";
 import {
   createRunNotifications,
   markNotificationReadByRun,
@@ -1127,6 +1127,62 @@ describe("Notifications API (per-recipient, issue #667)", () => {
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/runs");
       expect(res.status).toBe(401);
+    });
+  });
+
+  // ─── Credential ceiling ─────────────────────────────────────
+
+  describe("credential ceiling", () => {
+    // The feed is the caller's own, so no role grant is asked; a delegated
+    // credential is capped by the run read its entries are about.
+    async function keyHeaders(scopes: string[]): Promise<Record<string, string>> {
+      const key = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes,
+      });
+      return { Authorization: `Bearer ${key.rawKey}` };
+    }
+
+    it("read: a key without a run-read scope is refused", async () => {
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      const headers = await keyHeaders(["agents:run"]);
+      const res = await app.request("/api/notifications", { headers });
+      expect(res.status).toBe(403);
+    });
+
+    it("read: a key with runs:read lists the caller's notification", async () => {
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      expect(await listNotifications(await keyHeaders(["runs:read"]))).toHaveLength(1);
+    });
+
+    it("read: a cookie session, which carries no ceiling, lists it", async () => {
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      expect(await listNotifications(authHeaders(ctx))).toHaveLength(1);
+    });
+
+    async function markAll(headers: Record<string, string>): Promise<number> {
+      const res = await app.request("/api/notifications/read-all", { method: "PUT", headers });
+      return res.status;
+    }
+
+    it("write: a key without a run-read scope is refused and nothing is marked", async () => {
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      expect(await markAll(await keyHeaders(["agents:run"]))).toBe(403);
+      expect(await unreadCount(authHeaders(ctx))).toBe(1);
+    });
+
+    it("write: a key with runs:read-all marks the caller's notification read", async () => {
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      expect(await markAll(await keyHeaders(["runs:read-all"]))).toBe(200);
+      expect(await unreadCount(authHeaders(ctx))).toBe(0);
+    });
+
+    it("write: a cookie session, which carries no ceiling, marks it read", async () => {
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      expect(await markAll(authHeaders(ctx))).toBe(200);
+      expect(await unreadCount(authHeaders(ctx))).toBe(0);
     });
   });
 });

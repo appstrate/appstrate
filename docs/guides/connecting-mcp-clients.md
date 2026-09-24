@@ -176,7 +176,7 @@ operation index in the server instructions, `search_operations` (matches you
 cannot invoke come back under `denied` with their `required_permissions`, never
 mixed into `operations`) and
 `describe_operation` (`granted`, `required_permissions`,
-`target_space_permissions`). What your role makes impossible is
+`target_space_permissions`, `ceiling_permissions`). What your role makes impossible is
 **not shown** rather than shown and refused — but an operation your permission
 set alone cannot decide stays listed: either the loaded row decides it (a file
 ACL, a draft's home space), or a guard on it is enforced in the space the path
@@ -185,9 +185,14 @@ in advance; the route's own refusal names it.
 The two are separate fields: `required_permissions` carries the guards read in
 the space you are calling from — the only ones filtering tests — and
 `target_space_permissions` carries those enforced in the space the path names,
-shown so you can see them and never used to filter. `search_operations`'
-`denied[].required_permissions` and the `403` hint below carry the caller-space
-half alone. Enforcement itself never moves: `invoke_operation` always
+shown so you can see them and never used to filter. `ceiling_permissions`
+carries the scopes a delegated credential (API key, OAuth token) must include
+for an operation authorized by ownership rather than a role, such as deleting
+your own connection. A session is never filtered on them; a delegated credential
+whose scopes omit one sees the operation as not granted, and its
+`search_operations` `denied[]` entry and `403` answer name them as
+`ceiling_permissions`. Otherwise `denied[].required_permissions` and the `403`
+hint below carry the caller-space half alone. Enforcement itself never moves: `invoke_operation` always
 dispatches. A `403` attributable to a permission
 missing from your own space comes back with `required_permissions` and a hint to
 report it rather than retry; a refusal decided by the row, or by the space the

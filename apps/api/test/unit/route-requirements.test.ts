@@ -26,7 +26,9 @@ import { readHandlerMarker } from "../../src/middleware/handler-marker.ts";
 import { requirePackageInOrg } from "../../src/middleware/guards.ts";
 import {
   markSpaceRescope,
+  requireAnyCeiling,
   requireAnyPermission,
+  requireCeiling,
   requirePermission,
 } from "../../src/middleware/require-permission.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
@@ -155,7 +157,11 @@ describe("lookup — exact mounts", () => {
       "DELETE",
       "/api/packages/{scope}/{name}",
     );
-    expect(requirement).toEqual({ requirements: [], targetSpaceRequirements: [] });
+    expect(requirement).toEqual({
+      requirements: [],
+      targetSpaceRequirements: [],
+      ceilingRequirements: [],
+    });
   });
 
   it("serves an unguarded route with no requirement, rather than not at all", () => {
@@ -455,6 +461,76 @@ describe("lookup — space re-scope", () => {
   });
 });
 
+describe("lookup — credential ceiling guards", () => {
+  /**
+   * `requireCeiling` caps an ownership-authorized act by the credential's
+   * scopes. It is no role grant, so it must never land among the requirements
+   * a caller's `permissions` are filtered against.
+   */
+  it("records a ceiling guard apart from the requirements", () => {
+    const requirement = served(
+      tableOf((sub) =>
+        sub.delete("/me/things/:id", requireCeiling("integrations", "disconnect"), ok),
+      ),
+      "DELETE",
+      "/api/me/things/{id}",
+    );
+    expect(requirement).toEqual({
+      requirements: [],
+      targetSpaceRequirements: [],
+      ceilingRequirements: ["integrations:disconnect"],
+    });
+  });
+
+  it("keeps a permission guard and a ceiling guard on one route in their own fields", () => {
+    const requirement = served(
+      tableOf((sub) =>
+        sub.put(
+          "/me/pins",
+          requireCeiling("integrations", "connect"),
+          requirePermission("agents", "read"),
+          ok,
+        ),
+      ),
+      "PUT",
+      "/api/me/pins",
+    );
+    expect(requirement.requirements).toEqual(["agents:read"]);
+    expect(requirement.ceilingRequirements).toEqual(["integrations:connect"]);
+  });
+
+  it("keeps a ceiling guard mounted after a space re-scope a ceiling requirement", () => {
+    // The ceiling is set at authentication; no space moves it.
+    const requirement = served(
+      rootTableOf((app) => {
+        app.use("/api/x/:id/*", rescope());
+        app.get("/api/x/:id/pins", requireCeiling("integrations", "read"), ok);
+      }),
+      "GET",
+      "/api/x/{id}/pins",
+    );
+    expect(requirement.targetSpaceRequirements).toEqual([]);
+    expect(requirement.ceilingRequirements).toEqual(["integrations:read"]);
+  });
+
+  it("records a ceiling disjunction as ONE `a|b` entry", () => {
+    const requirement = served(
+      tableOf((sub) =>
+        sub.get("/notifications", requireAnyCeiling(["runs:read", "runs:read-all"]), ok),
+      ),
+      "GET",
+      "/api/notifications",
+    );
+    expect(requirement.ceilingRequirements).toEqual(["runs:read|runs:read-all"]);
+    expect(requirement.requirements).toEqual([]);
+  });
+
+  it("stamps no permission requirement on the guard itself", () => {
+    const guard = requireCeiling("integrations", "read");
+    expect(readHandlerMarker(guard, PERMISSION_REQUIREMENT_MARKER)).toBeUndefined();
+  });
+});
+
 describe("requireAnyPermission", () => {
   it("refuses an empty alternative list at construction", () => {
     // `some()` over nothing is false, so the guard would deny every caller
@@ -499,18 +575,27 @@ describe("isGranted", () => {
   const conjunction: RouteRequirement = {
     requirements: ["agents:write", "agents:run"],
     targetSpaceRequirements: [],
+    ceilingRequirements: [],
   };
   const disjunction: RouteRequirement = {
     requirements: ["runs:read|runs:read-all"],
     targetSpaceRequirements: [],
+    ceilingRequirements: [],
   };
   const unguarded: RouteRequirement = {
     requirements: [],
     targetSpaceRequirements: [],
+    ceilingRequirements: [],
   };
   const targetSpace: RouteRequirement = {
     requirements: [],
     targetSpaceRequirements: ["members:read"],
+    ceilingRequirements: [],
+  };
+  const ceilingOnly: RouteRequirement = {
+    requirements: [],
+    targetSpaceRequirements: [],
+    ceilingRequirements: ["integrations:disconnect"],
   };
 
   it("needs every entry — two guards mean both", () => {
@@ -534,5 +619,34 @@ describe("isGranted", () => {
     // the guard runs against the space the path names, so a caller holding
     // nothing here is still granted.
     expect(isGranted(targetSpace, new Set())).toBe(true);
+  });
+
+  it("ignores ceiling requirements for a session — they cap a credential, not a role", () => {
+    // A session holder with no role grant still acts on what it owns.
+    expect(isGranted(ceilingOnly, new Set())).toBe(true);
+  });
+
+  it("asks a delegated credential's scopes for each ceiling requirement", () => {
+    expect(isGranted(ceilingOnly, new Set(), new Set(["integrations:read"]))).toBe(false);
+    expect(isGranted(ceilingOnly, new Set(), new Set(["integrations:disconnect"]))).toBe(true);
+    // The role never stands in for the scope.
+    expect(isGranted(ceilingOnly, new Set(["integrations:disconnect"]), new Set())).toBe(false);
+  });
+
+  it("needs any alternative within one ceiling entry", () => {
+    const ceilingDisjunction: RouteRequirement = {
+      requirements: [],
+      targetSpaceRequirements: [],
+      ceilingRequirements: ["runs:read|runs:read-all"],
+    };
+    expect(isGranted(ceilingDisjunction, new Set(), new Set(["runs:read"]))).toBe(true);
+    expect(isGranted(ceilingDisjunction, new Set(), new Set(["runs:read-all"]))).toBe(true);
+    expect(isGranted(ceilingDisjunction, new Set(), new Set(["runs:cancel"]))).toBe(false);
+  });
+
+  it("judges an ordinary requirement against the permissions, not the ceiling", () => {
+    const scopes = new Set(["agents:write", "agents:run"]);
+    expect(isGranted(conjunction, new Set(), scopes)).toBe(false);
+    expect(isGranted(conjunction, scopes, new Set())).toBe(true);
   });
 });

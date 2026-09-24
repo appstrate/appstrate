@@ -115,6 +115,7 @@ function makeRunAndWait(opts: {
     // caller missing it. `agents:write` + `agents:run` make the default
     // descriptor the full one; the agent-only descriptor has its own block below.
     permissions: new Set(opts.permissions ?? [...LAUNCHES, ...COMPOSER]),
+    ceiling: undefined,
     dispatch,
     actor: { type: "user", id: "user_1" },
     scope: { orgId: "org_1", spaceId: "spc_1" },

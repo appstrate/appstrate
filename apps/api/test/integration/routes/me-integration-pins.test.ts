@@ -13,6 +13,8 @@
  *      drift back to camelCase is caught.
  *   3. End-user 401 on PUT + DELETE (impersonated callers can't pin); end-user
  *      GET returns an empty list rather than 401 so the picker renders cleanly.
+ *   4. A delegated credential is capped by its scope ceiling: the read needs
+ *      `integrations:read`, the writes `integrations:connect`.
  *
  * Service-layer behaviour (own vs other member's connection, sharedWithOrg
  * fallback, the 7-layer cascade resolution) lives in
@@ -298,6 +300,7 @@ describe("/api/me/integration-pins", () => {
         spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
         name: "pin-test-key-put",
+        scopes: ["integrations:connect"],
       });
       const connectionId = await seedConnectionFor(ctx.user.id);
 
@@ -331,6 +334,7 @@ describe("/api/me/integration-pins", () => {
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         name: "pin-test-key-del",
+        scopes: ["integrations:connect"],
       });
 
       const qs = new URLSearchParams({
@@ -360,6 +364,7 @@ describe("/api/me/integration-pins", () => {
         spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
         name: "pin-test-key-get",
+        scopes: ["integrations:read"],
       });
 
       const res = await app.request(
@@ -376,6 +381,109 @@ describe("/api/me/integration-pins", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as { data: unknown[] };
       expect(body.data).toEqual([]);
+    });
+  });
+
+  // ─── Credential ceiling ────────────────────────────────
+
+  describe("credential ceiling", () => {
+    const listPath = `/api/me/integration-pins?agent_package_id=${encodeURIComponent(AGENT)}`;
+    const deleteQuery = new URLSearchParams({
+      agent_package_id: AGENT,
+      integration_package_id: INTEGRATION,
+    });
+    const deletePath = `/api/me/integration-pins?${deleteQuery.toString()}`;
+
+    async function keyHeaders(scopes: string[]): Promise<Record<string, string>> {
+      const apiKey = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes,
+      });
+      return { Authorization: `Bearer ${apiKey.rawKey}`, "X-Space-Id": ctx.defaultSpaceId };
+    }
+
+    function putPin(headers: Record<string, string>, connectionId: string) {
+      return app.request("/api/me/integration-pins", {
+        method: "PUT",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent_package_id: AGENT,
+          integration_package_id: INTEGRATION,
+          connection_id: connectionId,
+        }),
+      });
+    }
+
+    /** The pins as the owner's own session sees them — the row, not the response. */
+    async function pinnedConnections(): Promise<string[]> {
+      const res = await app.request(listPath, { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Array<{ connection_id: string }> };
+      return body.data.map((pin) => pin.connection_id);
+    }
+
+    it("PUT: a key without integrations:connect is refused and pins nothing", async () => {
+      const connectionId = await seedConnectionFor(ctx.user.id);
+      const res = await putPin(await keyHeaders(["integrations:read"]), connectionId);
+      expect(res.status).toBe(403);
+      expect(await pinnedConnections()).toEqual([]);
+    });
+
+    it("PUT: a key with integrations:connect pins", async () => {
+      const connectionId = await seedConnectionFor(ctx.user.id);
+      const res = await putPin(await keyHeaders(["integrations:connect"]), connectionId);
+      expect(res.status).toBe(200);
+      expect(await pinnedConnections()).toEqual([connectionId]);
+    });
+
+    it("PUT: a cookie session, which carries no ceiling, pins", async () => {
+      const connectionId = await seedConnectionFor(ctx.user.id);
+      expect((await putPin(authHeaders(ctx), connectionId)).status).toBe(200);
+      expect(await pinnedConnections()).toEqual([connectionId]);
+    });
+
+    it("DELETE: a key without integrations:connect is refused and the pin survives", async () => {
+      const connectionId = await seedConnectionFor(ctx.user.id);
+      expect((await putPin(authHeaders(ctx), connectionId)).status).toBe(200);
+      const headers = await keyHeaders(["integrations:read", "integrations:disconnect"]);
+      const res = await app.request(deletePath, { method: "DELETE", headers });
+      expect(res.status).toBe(403);
+      expect(await pinnedConnections()).toEqual([connectionId]);
+    });
+
+    it("DELETE: a key with integrations:connect clears the pin", async () => {
+      const connectionId = await seedConnectionFor(ctx.user.id);
+      expect((await putPin(authHeaders(ctx), connectionId)).status).toBe(200);
+      const headers = await keyHeaders(["integrations:connect"]);
+      const res = await app.request(deletePath, { method: "DELETE", headers });
+      expect(res.status).toBe(204);
+      expect(await pinnedConnections()).toEqual([]);
+    });
+
+    it("DELETE: a cookie session, which carries no ceiling, clears the pin", async () => {
+      const connectionId = await seedConnectionFor(ctx.user.id);
+      expect((await putPin(authHeaders(ctx), connectionId)).status).toBe(200);
+      const res = await app.request(deletePath, { method: "DELETE", headers: authHeaders(ctx) });
+      expect(res.status).toBe(204);
+      expect(await pinnedConnections()).toEqual([]);
+    });
+
+    it("GET: a key without integrations:read is refused", async () => {
+      const connectionId = await seedConnectionFor(ctx.user.id);
+      expect((await putPin(authHeaders(ctx), connectionId)).status).toBe(200);
+      const headers = await keyHeaders(["integrations:connect"]);
+      expect((await app.request(listPath, { headers })).status).toBe(403);
+    });
+
+    it("GET: a key with integrations:read lists the pin", async () => {
+      const connectionId = await seedConnectionFor(ctx.user.id);
+      expect((await putPin(authHeaders(ctx), connectionId)).status).toBe(200);
+      const res = await app.request(listPath, { headers: await keyHeaders(["integrations:read"]) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Array<{ connection_id: string }> };
+      expect(body.data.map((pin) => pin.connection_id)).toEqual([connectionId]);
     });
   });
 });

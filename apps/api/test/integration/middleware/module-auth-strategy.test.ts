@@ -119,7 +119,8 @@ const stubStrategy: AuthStrategy = {
       principalKind: token === "admin" ? "end_user" : "delegate",
       spaceId: currentCtx.defaultSpaceId,
       // `spaces:write` is here so `POST /api/spaces` is refused by the KIND
-      // rather than by the ceiling, which would refuse it either way.
+      // rather than by the ceiling, which would refuse it either way;
+      // `integrations:read` so `/api/me/connections` is decided by the binding.
       permissions: [
         "runs:read",
         "runs:write",
@@ -127,6 +128,7 @@ const stubStrategy: AuthStrategy = {
         "agents:read",
         "end-users:read",
         "spaces:write",
+        "integrations:read",
       ],
       // Exercise the endUser pass-through when token is "admin"
       endUser:
