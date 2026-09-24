@@ -344,10 +344,6 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     category: "handler-guarded",
     reason: "requirePackageInOrg → assertPackageMutationAccess: agents:write in home space",
   },
-  updateAgentSkills: {
-    category: "handler-guarded",
-    reason: "requirePackageInOrg → assertPackageMutationAccess: agents:write in home space",
-  },
   updateIntegrationPackage: {
     category: "handler-guarded",
     reason: "requirePackageInOrg → assertPackageMutationAccess: integrations:write in home space",

@@ -1,16 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  ETAG_RESPONSE_HEADERS,
-  STD_RESPONSE_HEADERS,
-  REQUEST_ID_ONLY_HEADERS,
-} from "../headers.ts";
+import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { AGENT_INPUT_SETTINGS_PROPERTIES } from "../schemas.ts";
 
-/**
- * Agents paths — includes both agents.ts and user-agents.ts endpoints
- * since they share base paths (e.g. /api/agents/{scope}/{name}).
- */
+/** Agents paths. */
 export const agentsPaths = {
   "/api/agents": {
     get: {
@@ -593,70 +586,6 @@ export const agentsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-  },
-  "/api/agents/{scope}/{name}/skills": {
-    put: {
-      operationId: "updateAgentSkills",
-      tags: ["Agents"],
-      summary: "Update linked skills",
-      description: "Set the skill references for a user agent.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["skillIds"],
-              properties: {
-                skillIds: {
-                  type: "array",
-                  items: {
-                    type: "string",
-                    pattern: "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?/[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
-                  },
-                },
-              },
-              additionalProperties: false,
-            },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "Skills updated",
-          headers: ETAG_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                // The updated agent resource, bare (issue #657) — the new
-                // skill references appear in `dependencies.skills`.
-                $ref: "#/components/schemas/AgentDetail",
-                description:
-                  "The updated agent resource — same shape as the GET agent detail. The new skill references appear in `dependencies.skills`. No follow-up GET needed.",
-              },
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description: "Agent in use (one or more runs are running)",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
       },
     },
   },

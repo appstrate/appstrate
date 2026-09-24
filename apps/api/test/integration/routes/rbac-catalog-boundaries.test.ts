@@ -476,27 +476,32 @@ describe("shared package authority", () => {
   it("preserves unchanged dependency references for a write-only credential", async () => {
     await activateIn(privateId);
     const agentId = "@catalog/editable";
-    await seedPackage({
+    const manifest = {
+      name: agentId,
+      type: "agent",
+      version: "0.1.0",
+      schema_version: "0.1",
+      display_name: "Editable",
+      description: "An editable agent",
+      dependencies: { skills: { [ID]: "^0.1.0" } },
+    };
+    const agent = await seedPackage({
       id: agentId,
       orgId: ctx.orgId,
       homeSpaceId: ctx.defaultSpaceId,
       type: "agent",
-      draftManifest: {
-        name: agentId,
-        type: "agent",
-        version: "0.1.0",
-        schema_version: "0.1",
-        display_name: "Editable",
-        description: "An editable agent",
-        dependencies: { skills: { [ID]: "^0.1.0" } },
-      },
+      draftManifest: manifest,
       draftContent: "Prompt",
     });
     await seedSpacePackage(ctx.defaultSpaceId, agentId);
-    const response = await app.request(`/api/agents/${agentId}/skills`, {
-      method: "PUT",
-      headers: { ...(await keyHeaders(["agents:write"])), "Content-Type": "application/json" },
-      body: JSON.stringify({ skillIds: [ID] }),
+    const response = await app.request(`/api/packages/agents/${agentId}`, {
+      method: "PATCH",
+      headers: {
+        ...(await keyHeaders(["agents:write"])),
+        "Content-Type": "application/json",
+        ...ifMatch(agent.lockVersion),
+      },
+      body: JSON.stringify({ manifest: { ...manifest, description: "Edited" } }),
     });
     expect(response.status, await response.clone().text()).toBe(200);
   });

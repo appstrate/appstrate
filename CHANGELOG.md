@@ -244,6 +244,17 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   unchanged; an operation refused on the record it loads answers with its own
   problem+json reason (RBAC spec §13.10, §13.13), so clients learn it from the
   call.
+- **BREAKING (API): `PUT /api/agents/{scope}/{name}/skills`
+  (`updateAgentSkills`) is removed** (#1519). It wrote the draft's
+  `dependencies.skills` and was the one package-authoring body field spelled
+  camelCase (`skillIds`); nothing in the platform, CLI or web app called it.
+  Set skills by editing the draft manifest instead:
+  `PATCH /api/packages/agents/{scope}/{name}` with `If-Match` and a `manifest`
+  whose `dependencies.skills` maps each skill id to its range (`"^1.2.0"`). That
+  route runs the same access check on every newly referenced skill, and more:
+  it also covers `mcp_servers` and `integrations`. The removed route also
+  refused with `409 agent_in_use` while a run was in progress; the manifest
+  `PATCH` does not, as it never has for any other draft edit.
 
 ### Fixed
 
