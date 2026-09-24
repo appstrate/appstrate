@@ -299,6 +299,63 @@ describe("fetchBundleForRun — errors", () => {
     ).rejects.toMatchObject({ code: "version_not_found" });
   });
 
+  it("maps 422 `version_artifact_unavailable` to a storage-fault error naming the version", async () => {
+    // The version is published but its stored archive is unreadable: the
+    // user did nothing wrong, so the CLI must not say "check the spelling".
+    const fetchImpl = stubFetch({
+      status: 422,
+      statusText: "Unprocessable Content",
+      body: JSON.stringify({
+        type: "about:blank",
+        title: "Version Artifact Unavailable",
+        status: 422,
+        code: "version_artifact_unavailable",
+        detail: "The stored archive of version 1.2.3 is unreadable.",
+      }),
+    });
+    let caught: unknown;
+    try {
+      await fetchBundleForRun({
+        instance: "https://app.example.com",
+        bearerToken: "ask_test",
+        spaceId: "spc_1",
+        packageId: "@scope/agent",
+        spec: "1.2.3",
+        fetchImpl,
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(BundleFetchError);
+    const err = caught as BundleFetchError;
+    expect(err.code).toBe("version_artifact_unavailable");
+    expect(err.message).toContain("@scope/agent@1.2.3");
+    expect(err.message).toContain("unreadable");
+    expect(err.hint).toContain("republish");
+    expect(err.hint).toContain("appstrate run @scope/agent@draft --local");
+  });
+
+  it("keeps any other 422 on the generic bundle_fetch_failed path", async () => {
+    const fetchImpl = stubFetch({
+      status: 422,
+      statusText: "Unprocessable Content",
+      body: JSON.stringify({ status: 422, code: "invalid_spec", detail: "bad spec" }),
+    });
+    await expect(
+      fetchBundleForRun({
+        instance: "https://app.example.com",
+        bearerToken: "ask_test",
+        spaceId: "spc_1",
+        packageId: "@scope/agent",
+        spec: undefined,
+        fetchImpl,
+      }),
+    ).rejects.toMatchObject({
+      code: "bundle_fetch_failed",
+      message: expect.stringContaining("HTTP 422"),
+    });
+  });
+
   it("maps 5xx to bundle_fetch_failed", async () => {
     const fetchImpl = stubFetch({ status: 502, statusText: "Bad Gateway", body: "upstream" });
     await expect(

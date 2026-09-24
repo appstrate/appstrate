@@ -15,6 +15,9 @@
  *   - `no_published_version`  — 404 on an agent that exists but has never
  *                               been published.
  *   - `version_not_found`     — 404 with a payload mentioning version.
+ *   - `version_artifact_unavailable` — 422: the published version exists
+ *                               but its stored archive is missing, corrupt
+ *                               or lacks its required entry.
  *   - `integrity_mismatch`    — server omitted the integrity header,
  *                               or the downloaded bytes failed to verify.
  *   - `bundle_fetch_failed`   — anything else (network, 5xx, …).
@@ -32,6 +35,7 @@ export class BundleFetchError extends Error {
       | "package_not_active_in_space"
       | "no_published_version"
       | "version_not_found"
+      | "version_artifact_unavailable"
       | "integrity_mismatch"
       | "bundle_fetch_failed",
     message: string,
@@ -139,6 +143,16 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
   }
   if (!res.ok) {
     const detail = await safeText(res);
+    // A storage fault on the server, not a typo: the version is published but
+    // its archive cannot be read. Any other 422 keeps the generic path below.
+    if (res.status === 422 && parseProblemCode(detail) === "version_artifact_unavailable") {
+      const target = input.spec ? `${input.packageId}@${input.spec}` : input.packageId;
+      throw new BundleFetchError(
+        "version_artifact_unavailable",
+        `The published version of ${target} cannot be run: its stored archive is unreadable`,
+        `The package author must republish it or delete the broken version. If you own it, run the working copy meanwhile:\n  appstrate run ${input.packageId}@draft --local`,
+      );
+    }
     throw new BundleFetchError(
       "bundle_fetch_failed",
       `Failed to fetch ${input.packageId}: HTTP ${res.status} ${res.statusText}${
