@@ -42,6 +42,7 @@ import { zipArtifact, PACKAGE_ZIP_MAX_COMPRESSED_BYTES } from "@appstrate/core/z
 import { auditEvents, packages, packageDistTags, packageVersions } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import { db } from "../../helpers/db.ts";
+import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 
 const app = getTestApp();
 
@@ -3241,6 +3242,33 @@ describe("Packages API", () => {
         headers: authHeaders(ctx),
       });
       await expectProblem(res, 422, { code: "version_artifact_unavailable" });
+    });
+
+    it("GET version detail maps a corrupt archive to a coded 422 under a signature policy", async () => {
+      const id = "@pkgorg/detail-corrupt-signed";
+      const create = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ manifest: agentManifest(id), content: "v1 prompt" }),
+      });
+      expect(create.status).toBe(201);
+      await uploadPackageZip(id, "0.1.0", new TextEncoder().encode("not a zip archive"));
+
+      // Any policy but `off` parses the bytes in `downloadVersionZip`, so the
+      // failure is a bundle-layer throw, not the unzip `null` of the test above.
+      const saved = process.env.AFPS_SIGNATURE_POLICY;
+      process.env.AFPS_SIGNATURE_POLICY = "warn";
+      resetEnvCache();
+      try {
+        const res = await app.request(`/api/packages/agents/${id}/versions/0.1.0`, {
+          headers: authHeaders(ctx),
+        });
+        await expectProblem(res, 422, { code: "bundle_invalid" });
+      } finally {
+        if (saved === undefined) delete process.env.AFPS_SIGNATURE_POLICY;
+        else process.env.AFPS_SIGNATURE_POLICY = saved;
+        resetEnvCache();
+      }
     });
 
     it("bundle export, file explorer and download refuse a version whose archive is gone", async () => {

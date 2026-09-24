@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `requirePublishedArchive` — the one gate every consumer of a PUBLISHED
- * version's archive (run doors, version restore) goes through. A published
- * version whose ZIP is missing or unreadable, or whose archive lacks the
- * type's REQUIRED content entry, is refused with a 422
- * `version_artifact_unavailable` rather than degrading into an empty prompt or
- * an empty draft. An OPTIONAL entry (integration) or a type with no entry
- * (mcp-server) is not a refusal.
+ * `requirePublishedArchive` — the gate for readers that take a published
+ * version's files through `getVersionDetail` (run doors, version detail,
+ * restore, published package detail). A published version whose ZIP is
+ * missing or unreadable, or whose archive lacks the type's REQUIRED content
+ * entry, is refused with a 422 `version_artifact_unavailable` rather than
+ * degrading into an empty prompt or an empty draft. An OPTIONAL entry
+ * (integration) or a type with no entry (mcp-server) is not a refusal. Readers
+ * that download the ZIP themselves (bundle export, file explorer, download,
+ * fork) raise the same refusal through `versionArtifactUnavailable` instead.
  */
 
 import { describe, it, expect } from "bun:test";

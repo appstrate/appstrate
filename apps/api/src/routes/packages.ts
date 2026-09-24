@@ -1387,7 +1387,14 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     // GET version detail — so callers see the snapshot (manifest, integrity,
     // dist_tags, …) without a follow-up GET (issue #657). `id` (version row
     // id) and `version` are part of the resource.
-    const detail = await getVersionDetail(itemId, result.version);
+    // The version is committed: a failed read-back is a 500, never a 4xx on a successful write.
+    const detail = await getVersionDetail(itemId, result.version).catch((err: unknown) => {
+      logger.error("Created version read-back failed", {
+        packageId: itemId,
+        error: getErrorMessage(err),
+      });
+      return null;
+    });
     if (!detail) {
       logger.error("Created version could not be re-read", { packageId: itemId, orgId });
       throw internalError();

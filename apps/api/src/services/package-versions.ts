@@ -37,6 +37,7 @@ import { toISO } from "../lib/date-helpers.ts";
 import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
 import { withPackageDraftLock } from "./package-draft-lock.ts";
+import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 
 // ─────────────────────────────────────────────
 // Version creation
@@ -322,7 +323,7 @@ export interface VersionDetail {
  * Resolve a version query and return full version data including the files of its ZIP.
  * Returns null if the version cannot be resolved. `content` is null when the object is
  * absent or will not unzip — a reader that needs the bytes goes through
- * {@link requirePublishedArchive}. Storage and signature-policy errors propagate.
+ * {@link requirePublishedArchive}. Storage errors propagate; bundle-layer ones are coded.
  */
 export async function getVersionDetail(
   packageId: string,
@@ -348,8 +349,14 @@ export async function getVersionDetail(
 
   if (!row) return null;
 
-  // Only the bytes' own failure is a broken artifact: a storage outage is not a 422.
-  const zipBuffer = await downloadVersionZip(packageId, row.version);
+  // Only the bytes' own failure is a broken artifact: a storage outage propagates, and
+  // a refusal from the signature gate inside the download keeps its coded answer (#878).
+  let zipBuffer: Buffer | null;
+  try {
+    zipBuffer = await downloadVersionZip(packageId, row.version);
+  } catch (err) {
+    throw toBundleApiError(err) ?? err;
+  }
   let content: Record<string, Uint8Array> | null = null;
   if (zipBuffer) {
     try {
