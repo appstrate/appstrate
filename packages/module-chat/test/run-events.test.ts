@@ -132,23 +132,25 @@ describe("run-events helpers", () => {
     // A running run's resource carries extra fields (agent_scope, cost, …) that
     // the lifecycle subset drops. This is what seeds the badge on a mid-run
     // reload so it reads the live status, not the persisted "pending".
+    // Spelled as `runRowToWireDto` emits it: snake_case timestamps.
     const run = parseRunResource({
       id: "run_1",
-      status: "running",
+      status: "success",
       packageId: "@inline/run",
-      startedAt: "2026-06-30T00:00:00Z",
-      completedAt: null,
-      duration: null,
-      // Retired field a not-yet-deployed server may still send (#1177): dropped
-      // like any other extra, never a parse failure.
-      primary_document_id: "file_primary",
-      agentScope: "@inline",
+      started_at: "2026-06-30T00:00:00Z",
+      completed_at: "2026-06-30T00:00:42Z",
+      duration: 42_000,
+      agent_scope: "@inline",
       cost: 0,
     });
-    expect(run?.status).toBe("running");
-    expect(run?.packageId).toBe("@inline/run");
-    expect(run?.startedAt).toBe("2026-06-30T00:00:00Z");
-    expect(run).not.toHaveProperty("primary_document_id");
+    expect(run).toEqual({
+      id: "run_1",
+      status: "success",
+      packageId: "@inline/run",
+      startedAt: "2026-06-30T00:00:00Z",
+      completedAt: "2026-06-30T00:00:42Z",
+      duration: 42_000,
+    });
     // Malformed body (no status) → undefined, so the seed is skipped.
     expect(parseRunResource({ id: "run_1" })).toBeUndefined();
     expect(parseRunResource(null)).toBeUndefined();

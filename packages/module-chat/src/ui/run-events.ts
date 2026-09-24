@@ -14,8 +14,8 @@
  * The schemas here are deliberately a MINIMAL local subset of the canonical
  * `@appstrate/shared-types` realtime schemas: we only need a handful of
  * fields, so we redeclare them and stay decoupled from the API wire module.
- * Field names match the wire shape (post-camelize) exactly so a server
- * payload validates unchanged.
+ * Field names match each wire shape exactly so a server payload validates
+ * unchanged.
  */
 
 import { z } from "zod";
@@ -129,6 +129,24 @@ const runUpdateLiteSchema = z.object({
 type RunUpdateLite = z.infer<typeof runUpdateLiteSchema>;
 
 /**
+ * The same subset read from the `GET /api/runs/:id` resource, which spells the
+ * two timestamps snake_case (`RunWireDto.started_at`/`completed_at`) where the
+ * `run_update` frame says `startedAt`/`completedAt` — mapped onto the frame's
+ * names so both sources feed the panel one shape.
+ */
+const runResourceLiteSchema = runUpdateLiteSchema
+  .omit({ startedAt: true, completedAt: true })
+  .extend({
+    started_at: z.string().nullable().optional(),
+    completed_at: z.string().nullable().optional(),
+  })
+  .transform(({ started_at, completed_at, ...rest }): RunUpdateLite => ({
+    ...rest,
+    startedAt: started_at,
+    completedAt: completed_at,
+  }));
+
+/**
  * Pull the launched run id out of a tool-call result. The invoke-operation
  * envelope is `{ status, body }` (the run resource lives in `body`); the
  * bundled `run_and_wait` tool returns the run resource at the top level. Try
@@ -192,10 +210,9 @@ export function parseRunUpdateFrame(raw: string): RunUpdateLite | undefined {
  * "Lancement" for an already-running run until the first live frame arrives.
  */
 export function parseRunResource(body: unknown): RunUpdateLite | undefined {
-  // Same lifecycle subset as a `run_update` frame. Zod strips every other key,
-  // so a server still sending retired fields (`primary_document_id`) parses
-  // unchanged — they are ignored, never asserted away.
-  const parsed = runUpdateLiteSchema.safeParse(body);
+  // Zod strips every key outside the subset — extra resource fields are
+  // ignored, never asserted away.
+  const parsed = runResourceLiteSchema.safeParse(body);
   return parsed.success ? parsed.data : undefined;
 }
 

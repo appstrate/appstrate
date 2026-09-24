@@ -142,12 +142,18 @@ function recordSummary(over: Partial<RemoteRunRecord> = {}): RemoteRunRecord {
     packageId: "@system/hello-world",
     spaceId: "spc_1",
     orgId: "org_1",
+    input: null,
     result: { output: { ok: true } },
     error: null,
+    checkpoint: null,
     cost: 0.0123,
-    startedAt: "2026-04-29T10:00:00Z",
-    completedAt: "2026-04-29T10:00:42Z",
+    token_usage: null,
+    started_at: "2026-04-29T10:00:00Z",
+    completed_at: "2026-04-29T10:00:42Z",
     duration: 42_000,
+    version_label: null,
+    model_label: null,
+    model_source: null,
     ...over,
   };
 }
@@ -285,7 +291,7 @@ describe("runRemote — happy path", () => {
             status: 200,
             body: recordSummary({
               status: "success",
-              tokenUsage: { input_tokens: 100, output_tokens: 200 },
+              token_usage: { input_tokens: 100, output_tokens: 200 },
             }),
           },
         ],
@@ -542,7 +548,7 @@ describe("runRemote — happy path", () => {
           body: recordSummary({
             id: "run_5",
             status: "success",
-            tokenUsage: { input_tokens: 10, output_tokens: 20 },
+            token_usage: { input_tokens: 10, output_tokens: 20 },
             result: { output: { greeting: "hi" } },
           }),
         },
@@ -571,6 +577,8 @@ describe("runRemote — happy path", () => {
     const metric = lines.map((l) => JSON.parse(l)).find((e) => e.type === "appstrate.metric");
     expect(metric.usage).toEqual({ input_tokens: 10, output_tokens: 20 });
     expect(metric.cost).toBe(0.0123);
+    // Stamped with the run's own `completed_at`, not the CLI's clock.
+    expect(metric.timestamp).toBe(Date.parse("2026-04-29T10:00:42Z"));
     const finalized = lines.map((l) => JSON.parse(l)).find((e) => e.type === "appstrate.finalize");
     expect(finalized.result.output).toEqual({ greeting: "hi" });
   });

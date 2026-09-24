@@ -45,8 +45,8 @@
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { TerminalRunResult } from "@appstrate/afps-runtime/runner";
-import { TERMINAL_RUN_STATUSES, type TokenUsage } from "@appstrate/shared-types";
-import type { RunStatus, TerminalRunStatus } from "@appstrate/core/run-status";
+import { TERMINAL_RUN_STATUSES, type RunWireDto, type TokenUsage } from "@appstrate/shared-types";
+import type { TerminalRunStatus } from "@appstrate/core/run-status";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { createConsoleSink } from "./sink.ts";
 import type { Verbosity } from "./format.ts";
@@ -83,27 +83,30 @@ const MAX_CONSECUTIVE_RECORD_POLL_FAILURES = 20;
 // `run.ts` and the test suite, take them from `@appstrate/shared-types`
 // directly), so the re-export was a second name for the same type and is gone.
 
-/** Subset of the `runs` row returned by `GET /api/runs/:id`. */
-export interface RemoteRunRecord {
-  id: string;
-  status: RunStatus;
-  packageId: string;
-  spaceId: string;
-  orgId: string;
-  input?: unknown;
-  result?: unknown;
-  error?: string | null;
-  checkpoint?: unknown;
-  cost?: number | null;
-  /** snake-case to mirror the platform's `runs.tokenUsage` JSONB shape. */
-  tokenUsage?: TokenUsage | null;
-  startedAt?: string | null;
-  completedAt?: string | null;
-  duration?: number | null;
-  versionLabel?: string | null;
-  modelLabel?: string | null;
-  modelSource?: string | null;
-}
+/**
+ * Subset of the run returned by `GET /api/runs/:id`, derived from the server's
+ * wire DTO so a client/server spelling drift fails to compile.
+ */
+export type RemoteRunRecord = Pick<
+  RunWireDto,
+  | "id"
+  | "status"
+  | "packageId"
+  | "spaceId"
+  | "orgId"
+  | "input"
+  | "result"
+  | "error"
+  | "checkpoint"
+  | "cost"
+  | "token_usage"
+  | "started_at"
+  | "completed_at"
+  | "duration"
+  | "version_label"
+  | "model_label"
+  | "model_source"
+>;
 
 /** Subset of a `run_logs` row returned by `GET /api/runs/:id/logs`. */
 export interface RemoteRunLog {
@@ -498,7 +501,7 @@ export async function runRemote(
   // them. Without this synthesis the user would lose the `∑ tokens
   // in=… out=…  $cost` line at the end of every remote run — a visible
   // local↔remote divergence. We rebuild the equivalent event from the
-  // run record's `tokenUsage` + `cost` columns (snake_case JSONB) and
+  // run record's `token_usage` + `cost` fields and
   // dispatch it through the same sink.
   const metricEvent = buildMetricEvent(finalRecord);
   if (metricEvent) await consoleSink.handle(metricEvent);
@@ -823,7 +826,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 /**
  * Synthesize the trailing `appstrate.metric` event from the run record's
- * `tokenUsage` + `cost` columns. The platform absorbs the live
+ * `token_usage` + `cost` fields. The platform absorbs the live
  * `appstrate.metric` events at ingestion time (they update `runs.*`
  * directly without persisting a `run_logs` row), so the inverse mapping
  * above cannot recover them — without this synthesis the user would
@@ -835,12 +838,12 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * `$0.0000` line.
  */
 function buildMetricEvent(record: RemoteRunRecord): RunEvent | null {
-  const usage = record.tokenUsage ?? null;
+  const usage = (record.token_usage as TokenUsage | null) ?? null;
   const cost = record.cost ?? null;
   const hasUsage =
     usage != null && ((usage.input_tokens ?? 0) > 0 || (usage.output_tokens ?? 0) > 0);
   if (!hasUsage && cost == null) return null;
-  const completedAt = record.completedAt ? Date.parse(record.completedAt) : NaN;
+  const completedAt = record.completed_at ? Date.parse(record.completed_at) : NaN;
   return {
     type: "appstrate.metric",
     timestamp: Number.isFinite(completedAt) ? completedAt : Date.now(),
@@ -878,7 +881,7 @@ function buildRunResultPayload(
   }
   if (record.duration != null) result.durationMs = record.duration;
   if (record.cost != null) result.cost = record.cost;
-  const u = record.tokenUsage;
+  const u = record.token_usage as TokenUsage | null;
   result.usage = {
     input_tokens: u?.input_tokens ?? 0,
     output_tokens: u?.output_tokens ?? 0,

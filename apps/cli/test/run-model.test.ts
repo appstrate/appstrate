@@ -12,7 +12,6 @@ import {
   ModelResolutionError,
 } from "../src/commands/run/model.ts";
 import { parseModelSource } from "../src/commands/run.ts";
-import { ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY } from "@appstrate/core/oauth-bearer-swap";
 import type { ModelPreset } from "../src/lib/models.ts";
 
 /** Snapshot + wipe env vars touched by the resolver. */
@@ -188,8 +187,10 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
     return {
       label: overrides.id,
       enabled: true,
-      isDefault: true,
+      is_default: true,
+      needs_reconnection: false,
       source: "built-in",
+      providerId: null,
       contextWindow: null,
       maxTokens: null,
       reasoning: null,
@@ -203,12 +204,12 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
   const PRESET_ANTHROPIC = makePreset({
     id: "preset_anthropic",
     apiShape: "anthropic-messages",
-    isDefault: false,
+    is_default: false,
   });
   const PRESET_MISTRAL = makePreset({
     id: "preset_mistral",
     apiShape: "mistral-conversations",
-    isDefault: false,
+    is_default: false,
   });
 
   it("routes openai-completions through /api/llm-proxy/openai-completions/v1", async () => {
@@ -268,38 +269,7 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
     expect(model.provider).toBe("mistral");
   });
 
-  it("uses an OAuth-shaped placeholder for keyKind=oauth Anthropic presets", async () => {
-    // pi-ai detects OAuth via `apiKey.includes("sk-ant-oat")` and reshapes
-    // the body locally (system prompt + tool renaming) — that reshape only
-    // happens when the placeholder mirrors the prefix. The
-    // SDK then tries to set `Authorization: Bearer <oauth-placeholder>`,
-    // but `defaultHeaders` (= our `model.headers`) is applied AFTER the
-    // auth header in `buildHeaders`, so our `Authorization: Bearer
-    // ask_test_oauth` overrides it before the request leaves the process.
-    const { model, apiKey } = await resolvePresetModel({
-      profileName: "default",
-      modelId: "preset_anthropic_oauth",
-      instance: "https://app.example.com",
-      bearerToken: "ask_test_oauth",
-      orgId: "org_1",
-      presetsLoader: async () => [
-        makePreset({
-          id: "preset_anthropic_oauth",
-          apiShape: "anthropic-messages",
-          isDefault: false,
-          keyKind: "oauth",
-        }),
-      ],
-    });
-    expect(apiKey).toBe(ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY);
-    // The marker pi-ai actually keys the OAuth reshape on — asserted
-    // independently of the constant's exact value.
-    expect(apiKey).toContain("sk-ant-oat");
-    expect(model.headers?.["Authorization"]).toBe("Bearer ask_test_oauth");
-    expect(model.headers?.["X-Org-Id"]).toBe("org_1");
-  });
-
-  it("uses the non-OAuth placeholder for keyKind=api-key Anthropic presets", async () => {
+  it("never hands pi-ai an OAuth-shaped placeholder for an Anthropic preset", async () => {
     const { apiKey } = await resolvePresetModel({
       profileName: "default",
       modelId: "preset_anthropic_apikey",
@@ -310,15 +280,12 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
         makePreset({
           id: "preset_anthropic_apikey",
           apiShape: "anthropic-messages",
-          isDefault: false,
-          keyKind: "api-key",
+          is_default: false,
         }),
       ],
     });
-    // `keyKind: "api-key"` MUST NOT trigger pi-ai's OAuth branch —
-    // body reshaping with a non-OAuth upstream would be sent to the wrong
-    // shape (renamed tools, injected system prompt) and the upstream
-    // would reject it.
+    // The llm-proxy only serves API-key upstreams, so pi-ai's OAuth branch
+    // (body reshaping: renamed tools, injected system prompt) must not fire.
     expect(apiKey).not.toContain("sk-ant-oat");
   });
 
@@ -362,17 +329,6 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
     ).rejects.toThrow(/preset_dead_default.*can no longer be used/);
   });
 
-  it("treats an absent needs_reconnection as live (older instance)", async () => {
-    const { model } = await resolvePresetModel({
-      profileName: "default",
-      instance: "https://app.example.com",
-      bearerToken: "ask_test",
-      orgId: "org_1",
-      presetsLoader: async () => [PRESET_OPENAI],
-    });
-    expect(model.id).toBe("preset_openai");
-  });
-
   it("rejects unsupported protocols with an actionable hint", async () => {
     await expect(
       resolvePresetModel({
@@ -385,5 +341,41 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
         ],
       }),
     ).rejects.toThrow(/google-generative-ai/);
+  });
+
+  it("picks the org default from a GET /api/models body (snake_case `is_default`)", async () => {
+    // Raw wire rows, as `listOrgModels` serializes them — not built through
+    // `makePreset`, so a client/server spelling drift cannot hide here.
+    const body = JSON.parse(`{
+      "object": "list",
+      "data": [
+        { "id": "preset_other", "label": "Other", "apiShape": "openai-completions",
+          "providerId": "openai", "enabled": true, "is_default": false,
+          "needs_reconnection": false, "source": "built-in" },
+        { "id": "preset_default", "label": "Default", "apiShape": "openai-completions",
+          "providerId": "openai", "enabled": true, "is_default": true,
+          "needs_reconnection": false, "source": "built-in" }
+      ]
+    }`);
+    const { model } = await resolvePresetModel({
+      profileName: "default",
+      instance: "https://app.example.com",
+      bearerToken: "ask_test",
+      orgId: "org_1",
+      presetsLoader: async () => body.data,
+    });
+    expect(model.id).toBe("preset_default");
+  });
+
+  it("refuses an aliased preset, whose listing nulls its apiShape", async () => {
+    await expect(
+      resolvePresetModel({
+        profileName: "default",
+        instance: "https://app.example.com",
+        bearerToken: "ask_test",
+        orgId: "org_1",
+        presetsLoader: async () => [makePreset({ id: "preset_alias", apiShape: null })],
+      }),
+    ).rejects.toThrow(/preset_alias.*does not route/);
   });
 });
