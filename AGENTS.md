@@ -237,7 +237,7 @@ Authoritative reference: **`docs/CASING_CONVENTIONS.md`**. TL;DR:
 - **Wire JSON** (HTTP, AFPS manifests, OpenAPI, OAuth2 fields, SQL columns) → **snake_case**
 - **Drizzle TS schema fields** → **camelCase** TS / **snake_case** SQL alias (`userId: text("user_id")`)
 - **TS internal** (args, vars, React props, Zustand state) → **camelCase**
-- **Universal DB-convention fields** (`id`, `*Id`, `createdAt`, `updatedAt`, `expiresAt`, `runNumber`, …) → **camelCase EVERYWHERE** (Drizzle, wire, OpenAPI, frontend)
+- **Universal DB-convention fields** (the EXACT list in `docs/CASING_CONVENTIONS.md` 4b — `id`, `userId`, `runId`, `createdAt`, `expiresAt`, `runNumber`, …; a name, never a `*Id` pattern) → **camelCase EVERYWHERE** (Drizzle, wire, OpenAPI, frontend)
 - **Better Auth tables** → camelCase TS (HARD framework blocker)
 - **Module hooks, logger fields, CloudEvents, webhook deliveries, BullMQ jobs, audit-log `after` payloads** → camelCase
 

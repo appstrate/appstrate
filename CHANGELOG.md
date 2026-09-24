@@ -226,8 +226,9 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   `scripts/migration/`, in order: **1. `0023` BEFORE the deploy**, read-only —
   it must exit 0 (every integration draft and published version whose
   JSONPath the release refuses on read is fixed or superseded, see the
-  integrations entry above); `0021` inside the deploy window (old application
-  stopped, new one not started), `0022` right after the deploy.
+  integrations entry above); inside the deploy window (old application
+  stopped, new one not started), `0021`, `0024`, `0026` and `0027`; right
+  after the deploy, `0022`, `0025` and `0028`.
 - **BREAKING (operators): more env values fail boot instead of falling back.**
   A `CHAT_PI_MAX_CONCURRENCY` that is not a positive integer
   (`@appstrate/module-chat`), `MODEL_RETRY_ENABLED` / `MODEL_COMPACTION_ENABLED`
@@ -236,6 +237,91 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   `PLATFORM_API_URL` or `PORT`. The CLI's local `appstrate run` now refuses the
   same malformed `MODEL_RETRY_ENABLED` / `MODEL_COMPACTION_ENABLED` /
   `TOOL_RESULT_BYTE_LIMIT` values from the shell; it used to ignore them.
+- **BREAKING (API): model generation settings are snake_case** (#1545).
+  `reasoningLevel` is `reasoning_level` wherever generation settings travel:
+  the run's `generation` / `generation_override`, a schedule's
+  `generation_config_override`, `PATCH /api/agents/{scope}/{name}/model`, the
+  run-launch and chat bodies, and the space package, whose `generationConfig`
+  is now `generation_config`. Model capabilities (`OrgModel.generation`, the
+  provider registry's models) carry `reasoning.temperature_compatible` and
+  `reasoning.native_levels`. The old names are refused with a `400`. Stored
+  settings are rewritten by `scripts/migration/0024` (operators entry above).
+- **BREAKING (API, CLI): run-launch and chat bodies take `model_id` /
+  `proxy_id`** (#1545) — `POST /api/agents/{scope}/{name}/run`,
+  `POST /api/runs/inline` (and `/inline/validate`), the MCP `run_and_wait`
+  tool, and `POST /api/chat` (`model_id`). Their other fields were already
+  snake_case. The chat body is now strict, so an old `modelId` is a `400`
+  instead of a turn silently run on the default model. `modelId` / `proxyId`
+  stay camelCase on the standalone surfaces: `/api/agents/{scope}/{name}/model`
+  and `/proxy`, `/api/models*`, `PUT /api/proxies/default`, the space package
+  and `GET …/run-config`. A CLI published before this release gets a `400`
+  from `appstrate run <package>` whenever it sends a model or a proxy, and its
+  local runs ignore the space's reasoning level: release `cli@` with the API.
+- **BREAKING (API): the model-provider surfaces use one casing per object**
+  (#1545). Only the provider-registry names (`providerId`, `apiShape`,
+  `authMode`, `displayName`, `iconUrl`, …), the universal ids and timestamps,
+  and the `modelId` / `credentialId` of `/api/models*` stay camelCase; every
+  other field is snake_case. Credentials: `api_key` and `base_url_override` on
+  create and update (were `apiKey`, `baseUrlOverride`), `base_url`, `api_key`,
+  `existing_key_id` on the inline test, `base_url` on the credential;
+  `POST …/discover` takes `providerId` (was `provider_id`), like the other
+  bodies. Org models: `provider_name`, `base_url`; seed `model_ids` and
+  `promoted_default`; test `api_key`, `existing_model_id`. OAuth pairing:
+  `credential_id` and `consumed_at` on the pairing, and the redeem route
+  (`POST /api/model-providers-oauth/pair/redeem`) takes `access_token`,
+  `refresh_token`, `account_id` (RFC 6749 names) and returns `credential_id`
+  and `available_model_ids`. The old names are refused with a `400`.
+- **BREAKING (sidecar): `GET /internal/oauth-token/{credentialId}` (and
+  `/refresh`) returns `access_token` and `account_id`** (#1545). The sidecar
+  reads only those names, so the `SIDECAR_IMAGE` must be the one of this
+  release — an older sidecar fails every OAuth-model run on the new platform.
+  Stored credentials are unchanged.
+- **BREAKING (connect-helper): publish `@appstrate/connect-helper` right after
+  the API deploy** (#1545). Its companion release posts the snake_case redeem
+  body; the published helper sends `accessToken` / `refreshToken` and is
+  refused with a `400` by this API, and the new helper is refused by an older
+  one.
+- **BREAKING (API): OIDC management bodies and views are snake_case**
+  (#1545). Per-space SMTP config: `from_address`, `from_name`, `secure_mode`
+  (were `fromAddress`, `fromName`, `secureMode`), and the test send returns
+  `message_id`. Per-space social providers: `client_id`, `client_secret`. The
+  bootstrap redeem returns `bootstrap.org_slug`. The request schemas are
+  strict, so the old names are a `400`. No data moves: the values live in
+  columns.
+- **BREAKING (API): problem documents carry `request_id` and `retry_after`**
+  (#1545), like their other extension members, instead of `requestId` /
+  `retryAfter`. The `Request-Id` and `Retry-After` headers are unchanged.
+- **BREAKING (API): `runId` joins the universal ids, and notifications and
+  files follow** (#1545). `GET /api/notifications` returns `runId` on each
+  notification, `packageId` in a `package_shared` payload (was `package_id`),
+  and the list envelope (`object: "list"`, `hasMore`) instead of `has_more`.
+  The File DTO carries `runId`, and `GET /api/files` filters on `?runId=`
+  (was `?run_id=`); the MCP `list_files` output mirrors it. Stored
+  notification payloads are rewritten by `scripts/migration/0026`.
+- **BREAKING (API): platform-written keys in returned JSONB are snake_case**
+  (#1545). `spaces.settings.branding` is `logo_url`, `primary_color`,
+  `accent_color`, `support_email`, `from_name` (rewritten by
+  `scripts/migration/0027`; the OIDC branding reader is strict, so a space
+  still holding the camelCase keys renders the default branding). Run-log
+  data: the `integration_dropped` marker carries `integration_id` (rewritten
+  by `scripts/migration/0028`), the Firecracker console excerpt `exit_code`.
+  The runner's `file.published` event carries `fileId`; the runtime image must
+  be the one of this release for published files to be logged.
+- **BREAKING (integrations): identity claim keys are snake_case** (#1545).
+  Core validation refuses an `identity_claims` key or a
+  `connect.login.identity_outputs` entry that is not snake_case, and the
+  account key is read from `account_id` only: a manifest declaring
+  `accountId` no longer validates. The 37 system integrations that declared
+  camelCase keys (`accountId`, `avatarUrl`, `teamName`, …) get a patch
+  release (e.g. `@appstrate/gmail` 1.1.6, `@appstrate/github` 1.0.5).
+  `scripts/migration/0025` rewrites the stored `identity_claims` keys of
+  existing connections; their account keys do not change.
+- **BREAKING (audit): four more audit payloads use camelCase keys** (#1545):
+  `org.settings_updated`, `space.updated`, `oauth_client.updated` (signup
+  space assignments) and the bundle import (`fileId`). Rows written before
+  the upgrade are not rewritten. Module authors: `PlatformServices.audit.record`
+  types `before` / `after` as `AuditPayload`, so a snake_case top-level key
+  does not compile.
 
 ### Removed
 
@@ -326,6 +412,15 @@ version_artifact_unavailable`, not `400 empty_prompt` or
   error. On runs, schedules, input-settings, package/version reads and restore,
   a storage outage is now 5xx, not that 422; on the doors that run the version,
   a signature-policy refusal keeps its own coded 422.
+- **`appstrate run <package>` without `--model` uses the organization's
+  default model again, and `appstrate models list` marks it** (#1545). The CLI
+  read the model's `is_default` under a camelCase name, so every run without
+  `--model` failed with "No default preset". `models list` no longer crashes on
+  a model alias.
+- **`appstrate run --remote` reports the run's token usage and timings**
+  (#1545) instead of 0/0 tokens: the CLI read `token_usage`, `started_at` and
+  `completed_at` under camelCase names. The chat's run cards show the start
+  and end times for the same reason.
 
 ## [1.0.0-beta.61] - 2026-09-23
 

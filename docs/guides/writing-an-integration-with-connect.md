@@ -231,8 +231,9 @@ platform reads it to derive an **account key**, which is both the connection's
 display label and the value that distinguishes two accounts of the same
 provider. Resolution, in order:
 
-1. the `account_id` key of your `identity_claims` map (keys are snake_case —
-   a camelCase `accountId` is an ordinary claim, not the account key);
+1. the `account_id` key of your `identity_claims` map (keys are snake_case,
+   and a manifest declaring any other key — `accountId`, `avatarUrl` — fails
+   validation);
 2. a top-level `email`, `account_email` or `sub` in the payload;
 3. the literal `"default"`.
 

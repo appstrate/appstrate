@@ -437,7 +437,7 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
     }
   }
 
-  // (6) `default_tools` (AFPS §4.4) — the tool selection an agent inherits when
+  // (6) `default_tools` (Appstrate extension, not in the AFPS spec) — the tool selection an agent inherits when
   // it depends on this integration but omits `integrations_configuration.<id>`.
   //   - `"*"` requires `allow_undeclared_tools: true` (same gate as an agent's
   //     wildcard selection — a default cannot grant the passthrough surface the
@@ -847,7 +847,7 @@ export function getApiCallConfigs(manifest: IntegrationManifest): ApiCallConfig[
 }
 
 /**
- * Read the integration's declared `default_tools` (AFPS §4.4 — the tools an
+ * Read the integration's declared `default_tools` (Appstrate extension — the tools an
  * agent inherits when it depends on the integration but omits
  * `integrations_configuration.<id>` or omits its `tools`). This is a loose
  * field on the integration manifest (validated by {@link integrationManifestSchema}
