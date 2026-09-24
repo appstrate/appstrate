@@ -518,6 +518,9 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
 
 ### Fixed
 
+- **Chat with an OpenCode model no longer fails with `400 MissingSessionID`**:
+  the LLM proxy forwards Pi's `x-opencode-session` header upstream on the
+  OpenAI and Anthropic wires, as the run sidecar already did.
 - **A schedule whose stored generation settings its model no longer takes
   still fires** (#1549). Like a space's defaults, a refused temperature or
   reasoning level is dropped for that run, with a warning naming the schedule

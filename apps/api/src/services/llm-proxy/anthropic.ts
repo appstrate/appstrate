@@ -35,6 +35,7 @@ import { invalidRequest } from "../../lib/errors.ts";
 import {
   asRecord,
   extractUsageObject,
+  OPENCODE_SESSION_HEADER,
   parseSseDataFrame,
   refuseUnmeteredFields,
   tokenCount,
@@ -78,6 +79,9 @@ export const anthropicMessagesAdapter: LlmProxyAdapter = {
     // returns 400 without it.
     const callerVersion = readForwardedHeader(incoming, "anthropic-version");
     headers["anthropic-version"] = callerVersion ?? "2023-06-01";
+
+    const session = readForwardedHeader(incoming, OPENCODE_SESSION_HEADER);
+    if (session !== null) headers[OPENCODE_SESSION_HEADER] = session;
 
     return headers;
   },

@@ -62,6 +62,22 @@ describe("openaiCompletionsAdapter", () => {
     expect(headers["x-something"]).toBeUndefined();
   });
 
+  it("forwards x-opencode-session verbatim, never the caller's authorization", () => {
+    const headers = openaiCompletionsAdapter.buildUpstreamHeaders(
+      new Headers({
+        authorization: "Bearer appstrate-caller-token",
+        "x-opencode-session": "ses_abc",
+        "x-something": "ignored",
+      }),
+      "sk-upstream",
+    );
+    expect(headers).toEqual({
+      Authorization: "Bearer sk-upstream",
+      "Content-Type": "application/json",
+      "x-opencode-session": "ses_abc",
+    });
+  });
+
   it("parses OpenAI-shape usage, subtracting cached tokens out of inputTokens", () => {
     // OpenAI: `cached_tokens ⊂ prompt_tokens`, so inputTokens is the cache-MISS
     // remainder (120 − 32 = 88) — cost bills input and cacheRead disjointly.
@@ -223,6 +239,23 @@ describe("anthropicMessagesAdapter", () => {
     );
     expect(headers["anthropic-version"]).toBe("2024-10-01");
     expect(headers["anthropic-beta"]).toBe("interleaved-thinking-2025-05-14");
+  });
+
+  it("forwards x-opencode-session verbatim, never the caller's authorization", () => {
+    const headers = anthropicMessagesAdapter.buildUpstreamHeaders(
+      new Headers({
+        authorization: "Bearer appstrate-caller-token",
+        "x-opencode-session": "ses_abc",
+        "x-something": "ignored",
+      }),
+      "sk-anthropic",
+    );
+    expect(headers).toEqual({
+      "Content-Type": "application/json",
+      "x-api-key": "sk-anthropic",
+      "anthropic-version": "2023-06-01",
+      "x-opencode-session": "ses_abc",
+    });
   });
 
   // A beta can switch on a feature billed outside the reported tokens (server

@@ -150,6 +150,12 @@ export function parseProxyRequest(rawBody: Uint8Array): ParsedProxyRequest {
   };
 }
 
+/**
+ * OpenCode (Zen + Go) routes by this per-conversation header and answers 400
+ * without it; Pi's `opencode*` providers set it on every wire they speak.
+ */
+export const OPENCODE_SESSION_HEADER = "x-opencode-session";
+
 /** Pull `body.usage` out of a parsed JSON response. Returns null if absent or malformed. */
 export function extractUsageObject(body: unknown): Record<string, unknown> | null {
   if (!body || typeof body !== "object") return null;

@@ -39,6 +39,7 @@ import type { LlmProxyAdapter, UpstreamUsage } from "./types.ts";
 import {
   asRecord,
   extractUsageObject,
+  OPENCODE_SESSION_HEADER,
   parseSseDataFrame,
   refuseUnmeteredFields,
   tokenCount,
@@ -107,10 +108,11 @@ export function partitionOpenAIUsage(u: {
   return result;
 }
 
-/** Inbound OpenAI headers forwarded upstream by both OpenAI wires. */
+/** Inbound headers forwarded upstream by both OpenAI wires. */
 export const OPENAI_FORWARD_HEADERS: ReadonlySet<string> = new Set([
   "openai-organization",
   "openai-beta",
+  OPENCODE_SESSION_HEADER,
 ]);
 
 /** `Authorization: Bearer <upstream key>` plus the named inbound headers, nothing else. */
