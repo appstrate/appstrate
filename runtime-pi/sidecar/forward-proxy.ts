@@ -38,10 +38,7 @@ interface ForwardProxyDeps {
    * the trusted platform host keeps its name-based connect.
    */
   resolveHostFn?: HostResolver;
-  /**
-   * The agent's proxy only: integration runners share the per-run network and
-   * must not bypass their own egress allowlist through it (#1458).
-   */
+  /** Keeps integration runners from bypassing their own egress allowlist here (#1458). */
   isPeerAllowed: PeerCheck;
 }
 

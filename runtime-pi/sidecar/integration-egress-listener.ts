@@ -12,11 +12,8 @@
  * that opens its TLS. This listener is that way out:
  *
  *   - terminates the `CONNECT host:port` preamble,
- *   - applies the SSRF floor and the egress allowlist at CONNECT (internal /
- *     cloud-metadata / unauthorized targets are refused before any tunnel opens),
- *   - vets the tunnel's first bytes: a TLS ClientHello whose SNI names a host
- *     the allowlist does not grant is refused (a CDN front routes on SNI, so an
- *     allowed CONNECT target must not carry another tenant's name),
+ *   - applies the SSRF floor and the egress allowlist at CONNECT, then to the
+ *     ClientHello's SNI (a CDN front routes on SNI, not on the CONNECT target),
  *   - blind-relays raw TCP both directions (NO TLS termination, NO per-SNI
  *     cert mint, NO header injection).
  *
@@ -26,10 +23,7 @@
  * like the MITM listener (which 405s plain HTTP) — env-delivery runners
  * previously routed through MITM, so HTTPS-only egress is unchanged behaviour.
  *
- * Egress is a hard allowlist (#1458): only the owning runner may connect
- * (`isPeerAllowed`), and a CONNECT target is tunnelled only when the
- * connection's rendered `authorized_uris` grant its `host:port`
- * (`egressPolicy`). Everything else is refused (403 at CONNECT, a reset once tunnelled).
+ * Only the owning runner may connect (`isPeerAllowed`, #1458).
  */
 
 import { createServer as netCreateServer } from "node:net";
@@ -51,10 +45,7 @@ import { extractSni, type MitmListenerHandle } from "./integration-mitm-listener
 /** TLS plaintext record cap (RFC 8446 §5.1). */
 const MAX_TLS_RECORD = 16_384;
 
-/**
- * Collect the tunnel's first bytes: the whole first record when the stream
- * opens as TLS (0x16), else the first chunk. Arms the preamble timeout.
- */
+/** The tunnel's first bytes: the whole first record if TLS (0x16), else the first chunk. */
 function collectTunnelHead(socket: Socket, timeoutMs: number): Promise<Buffer> {
   socket.setTimeout(timeoutMs, () => socket.destroy());
   return new Promise((resolve, reject) => {
@@ -77,11 +68,8 @@ function collectTunnelHead(socket: Socket, timeoutMs: number): Promise<Buffer> {
   });
 }
 
-/**
- * The SNI of a first TLS record: the host, null for a ClientHello carrying
- * none, undefined when the record is not a self-contained ClientHello (a
- * fragmented one could hide its SNI in a later record — fail closed).
- */
+// SNI of the first record: null when absent, undefined when the record is not a
+// self-contained ClientHello (a fragmented one could hide its SNI — fail closed).
 function clientHelloSni(head: Buffer): string | null | undefined {
   const recordLen = head.readUInt16BE(3);
   if (recordLen > MAX_TLS_RECORD || recordLen < 4 || head[5] !== 0x01) return undefined;
@@ -95,7 +83,6 @@ export interface EgressListenerEvent {
   target: string;
   /** Populated for `tunnel-refused` (SSRF / allowlist / SNI / peer) and `tunnel-error`. */
   reason?: string;
-  /** Refused peer IP (`peer-not-allowed` only). */
   peer?: string;
 }
 
@@ -111,9 +98,7 @@ interface CreateEgressListenerOptions {
    * uses the system resolver). Only consulted for non-IP-literal targets.
    */
   resolveHostFn?: HostResolver;
-  /** The connection's egress allowlist: a CONNECT to a `host:port` it does not grant is refused. */
   egressPolicy: AuthorityPolicy;
-  /** Only the owning runner may tunnel through this listener. */
   isPeerAllowed: PeerCheck;
   /** Deadline for the tunnel's first bytes after the 200 (tests shorten it). */
   preambleTimeoutMs?: number;
@@ -186,21 +171,14 @@ export function createIntegrationEgressListener(
         const { host: targetHost, port } = parsed;
         const lowerHost = targetHost.toLowerCase();
 
-        // SSRF floor, literal layer — refuse IP-literal / known-internal
-        // targets before any DNS round-trip or tunnel.
+        // SSRF floor, literal layer — before any DNS round-trip.
         if (isBlockedHostFn(lowerHost)) return refuse(target, "ssrf");
 
         // Hard egress allowlist — before any DNS lookup of the name.
         if (!egressPolicy.allowsAuthority(lowerHost, port)) return refuse(target, "not-authorized");
 
-        // SSRF floor, DNS-rebind layer (resolve-and-pin): a DNS name whose
-        // A/AAAA record points inside (10.x, 169.254.169.254, …) passes the
-        // literal check above — resolve every record, refuse if ANY lands in
-        // a blocked range (fail closed on resolution failure), then connect
-        // to the PINNED resolved IP so the upstream connect can't re-resolve
-        // to a different answer. Pinning is safe here: this is a blind CONNECT
-        // tunnel — the sidecar never opens TLS, the client's own handshake
-        // carries SNI/Host for the original name.
+        // DNS-rebind layer: refuse if ANY record is internal, then dial the PINNED
+        // IP (safe: the client's own handshake carries SNI/Host for the name).
         const check = await resolveAndCheckHost(lowerHost, {
           resolve: resolveHostFn,
           isBlockedHostFn,
@@ -212,8 +190,7 @@ export function createIntegrationEgressListener(
             check.reason === "resolution-failed" ? "dns-resolution-failed" : "ssrf",
           );
         }
-        // The client sends its ClientHello only after the 200, so the upstream
-        // is dialed first but receives nothing until the first bytes are vetted.
+        // Upstream is dialed first but receives nothing until the head is vetted.
         const upstream = netConnectWithTimeout(port, check.pinnedAddress, () => {
           clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
           collectTunnelHead(clientSocket, preambleTimeoutMs)

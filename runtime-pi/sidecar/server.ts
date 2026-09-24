@@ -212,10 +212,8 @@ if (connectLoginJson) {
 
 const cookieJar = new Map<string, string[]>();
 
-// #1458 — the agent's proxy admits only non-runner peers (`null`): each runner
-// has its own policed listener, and a failed lookup (`undefined`) refuses.
-// Bound once the integration adapter is prepared; before that no runner
-// exists, and a `null` attribution means the backend cannot attribute peers.
+// #1458 — the agent's proxy refuses runner peers (they have their own policed
+// listener). Bound once the adapter is prepared; no runner exists before that.
 let peerAttribution: PeerAttribution | null = null;
 const proxy = createForwardProxy({
   config,

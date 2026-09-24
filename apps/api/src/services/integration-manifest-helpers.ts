@@ -224,11 +224,7 @@ export function renderCredentialTemplate(
   return renderCredentialTemplateCore(template, fields, { emptyAs: "null" });
 }
 
-/**
- * An auth's `authorized_uris` rendered for ONE connection's credential fields.
- * A templated entry whose field is missing or not a literal host/port is
- * dropped (never passed raw), so an empty result means deny-all.
- */
+/** An auth's `authorized_uris` rendered for one connection (see {@link renderAuthorizedUris}). */
 export function renderAuthAuthorizedUris(
   auth: Pick<AfpsManifestAuth, "authorized_uris">,
   fields: Readonly<Record<string, string>>,
@@ -236,10 +232,7 @@ export function renderAuthAuthorizedUris(
   return renderAuthorizedUris(auth.authorized_uris ?? [], fields);
 }
 
-/**
- * Egress policy for a local runner of `auth`, from its already-rendered
- * `authorizedUris`. `undefined` when the auth declares no outbound surface.
- */
+/** Local runner egress policy; `undefined` when the auth declares no outbound surface. */
 export function runnerEgressFor(
   auth: Pick<AfpsManifestAuth, "authorized_uris" | "allow_all_uris">,
   authorizedUris: readonly string[],
@@ -247,6 +240,19 @@ export function runnerEgressFor(
   const allowAllUris = auth.allow_all_uris === true;
   if ((auth.authorized_uris?.length ?? 0) === 0 && !allowAllUris) return undefined;
   return { authorizedUris: [...authorizedUris], allowAllUris };
+}
+
+/**
+ * A `connect` auth's allowlist and, for a local runner, its egress. Connect
+ * auths carry no templates (refused at import), so no fields are needed.
+ */
+export function connectLoginGrants(
+  auth: Pick<AfpsManifestAuth, "authorized_uris" | "allow_all_uris">,
+  sourceKind: ReturnType<typeof getIntegrationSourceKind>,
+): { authorizedUris: string[]; egress: IntegrationSpawnSpec["egress"] } {
+  const authorizedUris = renderAuthAuthorizedUris(auth, {});
+  const egress = sourceKind === "local" ? runnerEgressFor(auth, authorizedUris) : undefined;
+  return { authorizedUris, egress };
 }
 
 /**

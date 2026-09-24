@@ -40,7 +40,7 @@ function startTcpEcho(): Promise<{ port: number; received: Buffer[]; closed: Pro
   const closed = new Promise<void>((res) => (markClosed = res));
   return new Promise((resolve) => {
     const server = netCreateServer((socket) => {
-      socket.on("data", (chunk) => {
+      socket.on("data", (chunk: Buffer) => {
         received.push(chunk);
         socket.write(chunk);
       });

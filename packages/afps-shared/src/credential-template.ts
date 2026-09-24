@@ -61,10 +61,8 @@ export function credentialTemplateRefs(template: string): string[] {
 const AUTHORITY_VALUE = /^[A-Za-z0-9.-]+$/;
 
 /**
- * Render `authorized_uris` for one connection. A pattern with no placeholder passes unchanged.
- * A templated pattern is DROPPED when any referenced field is missing, empty, or not matching
- * {@link AUTHORITY_VALUE}, so a value can never introduce `*`, `/`, `:`, `@`, `?`, `#` or
- * whitespace. An empty result means deny-all.
+ * Render `authorized_uris` for one connection (#1458). A templated pattern is DROPPED when a
+ * referenced field fails {@link AUTHORITY_VALUE}, so a value can never widen the pattern.
  */
 export function renderAuthorizedUris(
   patterns: readonly string[],

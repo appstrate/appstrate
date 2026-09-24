@@ -1934,11 +1934,7 @@ function normalizeAuthorizedUriPattern(pattern: string): string | undefined {
   return normalized.split(double).join("**").split(single).join("*");
 }
 
-/**
- * Split a `scheme://` pattern into its normalised scheme, authority and path.
- * `authority: null` is the bare `scheme://**` catch-all; `undefined` means the
- * pattern has no `scheme://` prefix.
- */
+/** Normalised scheme/authority/path; `authority: null` = `scheme://**`, `undefined` = no scheme. */
 function splitAuthorizedUriPattern(
   rawPattern: string,
 ): { scheme: string; authority: string | null; rest: string } | undefined {
@@ -1976,9 +1972,7 @@ function splitAuthorizedUriPattern(
 function compileAuthorizedUriPattern(rawPattern: string): string {
   const parts = splitAuthorizedUriPattern(rawPattern);
   if (!parts) {
-    // No `scheme://authority` prefix — compile the whole pattern as a path
-    // (preserves the historical `**` → `.*` behavior for opaque targets).
-    // Nothing to normalise: there is no URL here to canonicalise.
+    // No `scheme://authority` prefix: compile the whole pattern as a path.
     return compileUriComponent(rawPattern, true);
   }
   if (parts.authority === null) return escapeUriLiteral(parts.scheme) + ".*";
@@ -1989,15 +1983,9 @@ function compileAuthorizedUriPattern(rawPattern: string): string {
   );
 }
 
-/**
- * Runner egress policy compiled from one connection's rendered
- * `authorized_uris` — the same grammar as {@link matchesAuthorizedUriSpec},
- * projected onto (host, port) for the TCP-level checks.
- */
+/** A connection's rendered `authorized_uris`, compiled for URL and (host, port) checks (#1458). */
 export interface EgressPolicy {
-  /** TCP-level check (CONNECT target, SNI, Host header): host + port only. */
   allowsAuthority(host: string, port: number): boolean;
-  /** Full-URL check (MITM, which sees the request): same grammar as matchesAuthorizedUriSpec. */
   allowsUrl(url: string): boolean;
 }
 
@@ -2010,12 +1998,10 @@ const EGRESS_DEFAULT_PORTS: Readonly<Record<string, number>> = {
   sftp: 22,
 };
 
-// Hostname / IPv4 literal only: anything else (IPv6, brackets, `@`, `?`, `#`)
-// could smuggle an allowlisted-looking suffix past a `[^/]*` wildcard.
+// Hostname / IPv4 only: `[`, `@`, `?`, `#` could smuggle an allowed suffix past `[^/]*`.
 const EGRESS_HOST_RE = /^[a-z0-9_.-]+$/;
 
-// A normalised authority names its port explicitly only with a trailing
-// `:<digits>` or a `:*` / `:**` wildcard port (WHATWG elides default ports).
+// WHATWG elides default ports, so only these suffixes name a port explicitly.
 const EGRESS_EXPLICIT_PORT_RE = /:(?:\d+|\*\*?)$/;
 
 export function compileEgressPolicy(input: {
@@ -2057,11 +2043,7 @@ export function compileEgressPolicy(input: {
         return false;
       }
       if (anyAuthority) return true;
-      // A pattern without an explicit port grants ONLY its scheme's default
-      // (WHATWG already elided `:443` from `https://h:443`, so both spellings
-      // compile to `h`), and its host wildcard is matched against the bare host
-      // so `[^/]*` cannot span a `:port`. A scheme with no default only
-      // matches explicit ports.
+      // No explicit port = scheme default only, on the bare host (`[^/]*` can't span `:port`).
       return authorityRules.some((r) =>
         r.explicitPort ? r.regex.test(`${h}:${port}`) : r.defaultPort === port && r.regex.test(h),
       );

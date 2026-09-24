@@ -53,8 +53,7 @@ import {
   getIntegrationSourceKind,
   getLocalServerRef,
   getAppstrateConnectMeta,
-  renderAuthAuthorizedUris,
-  runnerEgressFor,
+  connectLoginGrants,
   type AfpsManifestAuth,
 } from "../integration-manifest-helpers.ts";
 import {
@@ -256,10 +255,7 @@ export async function buildConnectLoginSpec(
 
   const connectMeta = getAppstrateConnectMeta(auth.connect);
   const reauthOn = connectMeta?.reauth_on;
-  // Templates are refused on connect auths at import; rendering against no
-  // fields keeps the static entries and fails closed on anything else.
-  const authorizedUris = renderAuthAuthorizedUris(auth, {});
-  const egress = runnerEgressFor(auth, authorizedUris);
+  const { authorizedUris, egress } = connectLoginGrants(auth, sourceKind);
 
   return {
     integrationId: execution.integrationId,

@@ -45,10 +45,6 @@
  *   Bun.serve is cheap (~one TCP listener + cert context) and lives
  *   for the rest of the integration's run.
  *
- * Only the owning runner may connect (`isPeerAllowed`, checked at accept),
- * and nothing leaves un-vetted: a SNI or a request URL the connection's
- * `egressPolicy` does not grant is refused, never forwarded (#1458).
- *
  * Scope discipline (what 1.2d does NOT do):
  *   - No HTTP-non-CONNECT proxying. MCP servers use HTTPS_PROXY and
  *     emit CONNECT; non-CONNECT is rejected with 405 to surface
@@ -68,6 +64,7 @@ import {
   readRequestBodyBounded,
   resolveAndCheckHost,
   OUTBOUND_TIMEOUT_MS,
+  type AuthorityPolicy,
   type HostResolver,
   type PeerCheck,
 } from "./helpers.ts";
@@ -172,7 +169,7 @@ interface CreateMitmListenerOptions {
   onEvent?: (event: MitmListenerEvent) => void;
   /** The connection's egress allowlist — SNI at TLS level, the full URL per request. */
   egressPolicy: EgressPolicy;
-  /** Only the owning runner may connect to this listener. */
+  /** Only the owning runner may connect (#1458). */
   isPeerAllowed: PeerCheck;
 }
 
@@ -284,7 +281,7 @@ export function createIntegrationMitmListener(
   // Outer TCP server: parse CONNECT, peek ClientHello for SNI, relay
   // to the per-SNI Bun.serve.
   const tcpServer = netCreateServer((rawSocket: Socket) => {
-    // Peer gate, started at accept; applied before the CONNECT is acted upon.
+    // Peer gate, started at accept.
     const admitted = peerAdmitted(rawSocket, options.isPeerAllowed);
     // `netCreateServer`'s handler is void-returning, so nothing in the runtime
     // observes this promise. `handleInboundConnection` awaits the SSRF/DNS
@@ -354,9 +351,8 @@ export function createIntegrationMitmListener(
 async function handleInboundConnection(
   rawSocket: Socket,
   deps: {
-    /** The peer verdict, started at accept. */
     admitted: Promise<boolean>;
-    egressPolicy: Pick<EgressPolicy, "allowsAuthority">;
+    egressPolicy: AuthorityPolicy;
     resolveTlsServer: (sniHost: string) => Promise<BunServerHandle>;
     emit: (event: MitmListenerEvent) => void;
     resolveHostFn?: HostResolver;
@@ -480,8 +476,7 @@ async function handleInboundConnection(
     rawSocket.destroy();
     return;
   }
-  // … then the egress allowlist (no cert is minted for a host the connection
-  // never authorized, and its name is never resolved) …
+  // … then the egress allowlist (no cert mint, no DNS for an unauthorized host) …
   if (!deps.egressPolicy.allowsAuthority(sniHost, 443)) {
     emit({ kind: "connect-rejected", reason: "not-authorized", host: sniHost });
     rawSocket.destroy();

@@ -416,9 +416,7 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
     },
 
     peerAttribution() {
-      // Runners share the sidecar's 127.0.0.1 and (in the Firecracker guest)
-      // have direct egress, so a peer IP names no runner: peer checks are
-      // allow-all here and only the listener's host policy applies (#1458).
+      // Runners share the sidecar's 127.0.0.1: a peer IP names no runner.
       return null;
     },
 

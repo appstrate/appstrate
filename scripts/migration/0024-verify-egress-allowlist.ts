@@ -2,38 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * 0024 — READ-ONLY pre-flight, run BEFORE deploying #1458 (per-connection
- * runner egress allowlist), with the platform's env loaded (it decrypts):
- *
+ * 0024 — READ-ONLY pre-flight BEFORE deploying #1458, env loaded (it decrypts):
  *   set -a && . ./.env && set +a && bun scripts/migration/0024-verify-egress-allowlist.ts
- *
- * Two things the release refuses that already sit in the database:
- *
- * 1. MANIFESTS. `integrationManifestSchema` now validates `{$credential.<field>}`
- *    placeholders in `authorized_uris` (the field must be declared and
- *    required; no template on an `oauth2` auth, one declaring `connect` or one
- *    exposing `api_call`), and it runs on every read of a stored manifest — so
- *    a draft or published version breaking the rule fails every connect and
- *    run. Fix a draft by editing it; publish a fixed version for a published one.
- *
- * 2. `@appstrate/ssh` CONNECTIONS. `@appstrate/ssh` 1.0.1 renders its egress
- *    from the connection (`ssh://{$credential.host}:{$credential.port}`); a
- *    bag without a `port`, or with a host the render refuses (an IPv6 literal),
- *    renders to nothing and its runs are denied all egress. The provisioner has
- *    always written `port`, so the expected count is 0; any hit is data to
- *    rewrite before the deploy, not something the runtime falls back on.
- *
- * Then, INFORMATIONAL (never affects the exit code), the blast radius:
- *
- * 3. Third-party `source.kind: "local"` integrations (every one outside
- *    `@appstrate/*`): per draft/published version, each auth's
- *    `authorized_uris` / `allow_all_uris` — from the deploy on, its runner
- *    reaches only that — and its connection count per auth.
- * 4. Agents whose `@appstrate/ssh` range admits 1.0.0 but not 1.0.1 (an exact
- *    pin): they keep 1.0.0's `ssh://**`, unbounded by the connection's host.
- *
- * Prints ids and patterns only, never a credential value. Exits 1 while
- * anything in 1 or 2 remains.
+ * Exits 1 on manifests whose templated `authorized_uris` the schema now refuses
+ * (fix the draft / publish a fixed version) or on `@appstrate/ssh` connections
+ * that render no egress (expected 0). Also lists, informationally, third-party
+ * local runners' grants and agents pinned to `@appstrate/ssh` 1.0.0 (`ssh://**`).
  */
 
 import { SQL } from "bun";
@@ -41,12 +15,10 @@ import { integrationManifestSchema } from "@appstrate/core/integration";
 import { renderAuthorizedUris } from "@appstrate/afps-shared/credential-template";
 import { decryptCredentialsToStringMap } from "@appstrate/connect";
 
-/** Every issue the #1458 rule raises starts with this. */
 const TEMPLATE_ISSUE_PREFIX = "authorized_uris entry ";
 /** `@appstrate/ssh` 1.0.1's `auths.primary.authorized_uris`. */
 const SSH_EGRESS = ["ssh://{$credential.host}:{$credential.port}"];
 
-/** The egress-relevant slice of one `auths.{key}` entry. */
 interface AuthGrant {
   authorized_uris?: string[];
   allow_all_uris?: boolean;
@@ -139,7 +111,6 @@ for (const row of localIntegrations) {
     process.stdout.write(`${row.id}@${row.version} auth ${key}: ${grant}, ${n} connection(s)\n`);
   }
 }
-// A range that admits 1.0.0 but not 1.0.1 resolves to 1.0.0 and its `ssh://**`.
 const sshExactPins = sshPins.filter(
   (r) => Bun.semver.satisfies("1.0.0", r.range) && !Bun.semver.satisfies("1.0.1", r.range),
 );

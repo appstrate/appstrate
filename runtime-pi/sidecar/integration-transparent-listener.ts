@@ -24,10 +24,8 @@
  *     header (the only place it exists — the wire target IP is ours);
  *   - apply the exact same SSRF floor as the CONNECT listener (literal
  *     layer + resolve-and-pin DNS-rebind layer, fail closed) and the same
- *     hard egress allowlist: the connecting runner is identified by its peer
- *     IP (`policyForPeer`), an unknown peer is refused, and a hostname its
- *     connection's `authorized_uris` do not grant is refused before any DNS
- *     lookup of it (#1458);
+ *     egress allowlist, that of the runner at the peer IP (`policyForPeer`,
+ *     an unknown peer is refused — #1458);
  *   - dial the upstream at the PINNED resolved address — never at the
  *     kernel-level original destination, which is always our own IP and,
  *     more importantly, is attacker-controlled ordering: the hostname the
@@ -79,10 +77,7 @@ interface CreateTransparentListenerOptions {
   isBlockedHostFn?: typeof isBlockedHost;
   /** Injectable DNS resolver for the rebind guard (tests stub it). */
   resolveHostFn?: HostResolver;
-  /**
-   * The egress policy of the runner at `remoteAddress` — null for a peer that
-   * is not a runner with an egress route, which is refused.
-   */
+  /** Egress policy of the runner at `remoteAddress`; `null` = refused. */
   policyForPeer: (remoteAddress: string) => Promise<AuthorityPolicy | null>;
 }
 
@@ -162,7 +157,7 @@ export function createTransparentEgressListener(
   const server = netCreateServer();
 
   server.on("connection", (clientSocket: Socket) => {
-    // Peer gate, started at accept; applied before any byte is acted upon.
+    // Peer gate, started at accept.
     const peer = peerAddress(clientSocket);
     const peerPolicy = peer ? options.policyForPeer(peer).catch(() => null) : Promise.resolve(null);
     // Upstream is dialed later, after the async SSRF/resolve phase. Track

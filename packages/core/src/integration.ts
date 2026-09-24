@@ -251,11 +251,9 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       }
     });
 
-    // (1g) A templated authorized_uris entry is rendered from the connection's
-    // own fields (#1458): each referenced field must be declared and required.
-    // Forbidden with `connect` (login flows) and api_call, whose literal hosts
-    // are pinned past the SSRF gate — a user-rendered host must never be a pin.
-    // Forbidden on oauth2: a refresh replaces the stored bundle with tokens only.
+    // (1g) Templated authorized_uris entries (#1458) reference declared, required
+    // fields. Forbidden with `connect` and api_call (their hosts are pinned past
+    // the SSRF gate) and on oauth2 (a refresh keeps only tokens in the bundle).
     const credentialFields = credentialsSchema as
       { properties?: Record<string, unknown>; required?: unknown } | undefined;
     const declaredFields = new Set(Object.keys(credentialFields?.properties ?? {}));

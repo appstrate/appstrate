@@ -68,7 +68,7 @@ export interface RuntimeEgressContext {
    * egress listener (no TLS termination → the runner needs no extra CA).
    */
   readonly caCertHostPath: string | null;
-  /** The runner's compiled egress policy — the one its listener enforces (#1458). */
+  /** The runner's compiled egress policy, enforced by its listener. */
   readonly policy: EgressPolicy;
 }
 
@@ -124,11 +124,7 @@ export interface IntegrationRuntimeAdapter {
   prepare(runId: string): Promise<RuntimeAdapterRunContext>;
   /** Spawn one integration MCP server. Returns the JSON-RPC transport. */
   spawn(options: SpawnIntegrationOptions): Promise<SpawnedIntegration>;
-  /**
-   * Runner attribution of listener peers, valid after `prepare()` (#1458).
-   * `null` when this backend cannot tell its runners apart — peer checks are
-   * then allow-all.
-   */
+  /** Runner attribution of listener peers, valid after `prepare()`; `null` = allow-all. */
   peerAttribution(): PeerAttribution | null;
   /** Tear down everything spawned through this adapter. Must be idempotent. */
   shutdown(): Promise<void>;

@@ -370,14 +370,9 @@ export {
 // drift between the preflight here and the per-hop checks there.
 export { matchesAuthorizedUri, stripUserInfoAndFragment } from "@appstrate/afps-runtime/resolvers";
 
-/**
- * Read timeout for an egress listener's pre-splice phase (ClientHello / HTTP
- * head / first tunnel bytes): a client that connects and stalls is torn down.
- * `relaySockets` re-arms its own idle timeout once the splice starts.
- */
+/** Read timeout for an egress listener's pre-splice phase; `relaySockets` re-arms its own after. */
 export const PREAMBLE_TIMEOUT_MS = 10_000;
 
-/** Peer gate (#1458): may the socket whose peer IP is `remoteAddress` use this listener? */
 export type PeerCheck = (remoteAddress: string) => Promise<boolean>;
 
 /** TCP-level half of the egress policy — all a blind tunnel can check. */

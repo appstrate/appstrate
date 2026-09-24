@@ -825,8 +825,7 @@ async function spawnAndConnectLocalIntegration(params: {
   //   - MITM listener   → caCertHostPath set (TLS terminate + inject).
   //   - plain CONNECT    → caCertHostPath null (blind tunnel), when `spec.egress` is set.
   //   - neither          → null: the runner has no egress route.
-  // Both listeners enforce the ONE policy compiled from `spec.egress` (absent =
-  // deny-all) and admit only this integration's own runner (#1458).
+  // Both enforce `spec.egress` (absent = deny-all) and admit only this runner (#1458).
   let egressCtx: RuntimeEgressContext | null = null;
   const policy = compileEgressPolicy(spec.egress ?? { authorizedUris: [], allowAllUris: false });
   const attribute = adapter.peerAttribution();
@@ -1224,7 +1223,7 @@ export async function bootIntegrations(
    * server is skipped — a spec that declares `apiCall` is logged + dropped.
    */
   apiCallDeps?: ApiCallToolDeps,
-  /** Called once the adapter is prepared, before any runner spawns (forward-proxy peer check). */
+  /** Called once the adapter is prepared, before any runner spawns. */
   onAdapterPrepared?: (adapter: IntegrationRuntimeAdapter) => void,
 ): Promise<BootIntegrationsResult> {
   const host = new McpHost({

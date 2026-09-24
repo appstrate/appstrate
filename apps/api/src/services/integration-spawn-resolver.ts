@@ -69,6 +69,7 @@ import {
   renderCredentialTemplate,
   renderAuthAuthorizedUris,
   runnerEgressFor,
+  connectLoginGrants,
   parseFileMode,
   isSafeDeliveryFilePath,
   DEFAULT_DELIVERY_FILE_MODE,
@@ -647,8 +648,7 @@ async function resolveOne(
     ...(deliveries.fileMounts && Object.keys(deliveries.fileMounts).length > 0
       ? { fileMounts: deliveries.fileMounts }
       : {}),
-    // #1458 — the local runner's egress allowlist, enforced by whichever
-    // listener the sidecar mounts for it. Dropped for remote HTTP (no runner).
+    // #1458 — the local runner's egress allowlist. Dropped for remote HTTP (no runner).
     ...(deliveries.egress && !isRemoteHttp ? { egress: deliveries.egress } : {}),
     // Opt-in shared workspace mount declared on the referenced
     // mcp-server. Only emitted for local sources — remote and
@@ -837,13 +837,10 @@ async function resolveDeliveries(
       value: "",
       allowServerOverride: false,
     };
-    // Templates are refused on connect auths at import; rendering against no
-    // fields keeps the static entries and fails closed on anything else.
-    const authorizedUris = renderAuthAuthorizedUris(auth, {});
-    const loginEgress =
-      getIntegrationSourceKind(manifest) === "local"
-        ? runnerEgressFor(auth, authorizedUris)
-        : undefined;
+    const { authorizedUris, egress: loginEgress } = connectLoginGrants(
+      auth,
+      getIntegrationSourceKind(manifest),
+    );
     const httpDeliveryAuths: NonNullable<IntegrationSpawnSpec["httpDeliveryAuths"]> = {
       [row.authKey]: {
         ...placeholderPlan,
@@ -1043,11 +1040,7 @@ async function resolveDeliveries(
     }
   }
 
-  // ─── egress policy for local runners (#543, #1458) ───
-  // A local runner has no direct egress: its only route out is the listener
-  // the sidecar mounts for it (MITM when `httpDeliveryAuths` is set, CONNECT
-  // otherwise), and that listener enforces THIS connection's rendered
-  // `authorized_uris`. mtls included — the CONNECT plane relays TLS blindly.
+  // Local runner egress (#1458) — mtls included: the CONNECT plane relays TLS blindly.
   const egress =
     getIntegrationSourceKind(manifest) === "local" && resolvedAtLeastOne
       ? runnerEgressFor(auth, renderedUris)

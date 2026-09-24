@@ -1,25 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Peer attribution on the per-run docker network (#1458): which runner
- * container, if any, a sidecar listener was reached from. The agent and every
- * runner share that network and nothing on it authenticates itself, so the
- * listeners key their peer checks on the source IP.
- *
- * IPs are read lazily from `docker network inspect`: a runner only gets its
- * endpoint when `docker start` runs, after it was registered. The member table
- * is cached and dropped on `register`. A miss re-reads it (once) only while a
- * registered runner has never been seen in a table: a runner that connects has
- * started, so the re-read shows it. Otherwise the peer is not a runner.
+ * Which runner, if any, a sidecar listener was reached from (#1458), keyed on
+ * source IP from `docker network inspect` (a runner has no IP until started):
+ * a miss re-reads once, only while a registered runner was never seen.
  */
 
 import { logger } from "./logger.ts";
 
-/**
- * Resolves to the integration id of the runner at `remoteAddress` (already
- * normalised by `peerAddress`), `null` for any other peer (the agent), and
- * `undefined` when the lookup failed. Callers refuse on `undefined`.
- */
+/** Runner's integration id; `null` = not a runner, `undefined` = lookup failed (refuse). */
 export type PeerAttribution = (remoteAddress: string) => Promise<string | null | undefined>;
 
 export interface RunnerPeers {
@@ -44,7 +33,6 @@ function parseMembers(stdout: string): Map<string, string> {
 
 export function createRunnerPeers(options: {
   network: string;
-  /** Raw stdout of `docker network inspect <network>`. */
   inspect: (network: string) => Promise<string>;
 }): RunnerPeers {
   const runners = new Map<string, string>();
@@ -61,7 +49,7 @@ export function createRunnerPeers(options: {
         return snapshot;
       })
       .catch((err: unknown) => {
-        // Not cached: the next lookup retries. Every peer check refuses meanwhile.
+        // Not cached: the next lookup retries.
         if (members === pending) members = null;
         logger.warn("runner peer lookup failed — refusing unattributable peers", {
           network: options.network,

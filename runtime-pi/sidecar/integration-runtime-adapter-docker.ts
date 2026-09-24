@@ -710,8 +710,6 @@ interface TransparentEgressInfra {
  * does whenever the run declares integrations). Any failure — inspect,
  * bind, older daemon — is logged and swallowed: degrading to the CONNECT
  * proxy contract removes a route and never widens one, so it is always safe.
- * The splicers serve only the runners `policyForPeer` attributes, under their
- * own egress policy (#1458).
  *
  * The splicers use the default DNS resolver for their resolve-and-pin
  * floor — deliberately NOT `bundleFetchOpts.resolveHostFn`, which is a
@@ -768,7 +766,6 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
   let runNetwork: string | null = null;
   let transparentEgress: TransparentEgressInfra | null = null;
   let peers: RunnerPeers | null = null;
-  /** Policy per integration id of the runners the transparent plane serves (plain CONNECT). */
   const transparentPolicies = new Map<string, EgressPolicy>();
 
   return {
@@ -1001,8 +998,7 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
     },
 
     peerAttribution() {
-      // No per-run network (dev / tests): runners are not on a bridge the
-      // listeners are routable from, and there is no member table to read.
+      // No per-run network (dev / tests): no member table to attribute from.
       return peers ? peers.integrationOf : null;
     },
 

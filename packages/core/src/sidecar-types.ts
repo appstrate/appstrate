@@ -205,9 +205,8 @@ export interface HttpDeliveryAuthSpec {
   /** When `false` (default), the MITM proxy strips any caller-supplied header of the same name. */
   allowServerOverride: boolean;
   /**
-   * URI patterns this auth is authorised for — glob-style strings from
-   * `manifest.auths.{key}.authorized_uris`, rendered for the connection's
-   * credential fields. The sidecar's planner uses these
+   * URI patterns this auth is authorised for — glob-style strings rendered per
+   * connection from `manifest.auths.{key}.authorized_uris`. The sidecar's planner uses these
    * to decide which auth (if any) applies to each upstream request.
    */
   authorizedUris: readonly string[];
@@ -412,18 +411,9 @@ export interface IntegrationSpawnSpec {
    */
   httpDeliveryAuths?: Record<string, HttpDeliveryAuthSpec>;
   /**
-   * Runner egress policy for local-source runners: this connection's rendered
-   * `authorized_uris` (each `{$credential.<field>}` placeholder substituted from
-   * the connection's fields; an entry that cannot be rendered is dropped) plus
-   * the auth's `allow_all_uris`. Absent = no egress route.
-   *
-   * A local runner sits on the per-run network with no direct egress; its only
-   * way out is a per-integration listener the sidecar mounts and hands it as
-   * `HTTPS_PROXY`. Every listener enforces this policy: the MITM listener
-   * (mounted when {@link httpDeliveryAuths} is non-empty — MITM-first) checks
-   * each decrypted request's URL; the CONNECT and transparent listeners check
-   * the target host + port and relay blindly (so mtls client-cert TLS works).
-   * An empty `authorizedUris` with `allowAllUris: false` means deny-all.
+   * Local runner egress policy (#1458), enforced by the one listener (MITM or
+   * CONNECT) the sidecar hands the runner as `HTTPS_PROXY`, its only way out.
+   * Absent = no egress route; empty with `allowAllUris: false` = deny-all.
    */
   egress?: { authorizedUris: string[]; allowAllUris: boolean };
   /**
