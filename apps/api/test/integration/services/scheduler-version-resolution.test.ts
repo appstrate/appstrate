@@ -3,8 +3,10 @@
 /**
  * A scheduled fire whose version resolution fails leaves a VISIBLE failed run,
  * whatever the failure is — not only a typed `ApiError`. A storage fault while
- * reading the published archive used to be logged and nothing else: the cron
- * has no caller to answer, so a log line is a silent skip to the operator.
+ * reading the published archive used to be swallowed into "no archive", so the
+ * fire failed blaming the version (`version_artifact_unavailable`) for what was
+ * an infrastructure fault. It now fails with a fixed message; the raw error
+ * goes to the logs only, never into a row the operator reads.
  *
  * Tier 0: `triggerScheduledRun` is called directly, like the sibling
  * activation-gate suite.

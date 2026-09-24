@@ -387,6 +387,7 @@ export async function readVersionArchive(
   try {
     return unzipPackageArchive(zipBuffer);
   } catch (err) {
+    if (err instanceof ApiError) throw err;
     logger.warn("Failed to extract ZIP for version detail", {
       packageId,
       version,
@@ -399,14 +400,14 @@ export async function readVersionArchive(
 /**
  * `422 version_artifact_unavailable`: a version that EXISTS but whose bytes cannot be
  * read — a broken artifact, never a missing version. The only place this refusal is
- * built, and logged here because a published artifact is immutable: its loss is data loss.
+ * built, so the one place it is logged for ops.
  */
 export function versionArtifactUnavailable(
   packageId: string,
   version: string,
   what = "archive",
 ): ApiError {
-  logger.error("Published version artifact unavailable", { packageId, version, what });
+  logger.warn("Published version artifact unavailable", { packageId, version, what });
   return new ApiError({
     status: 422,
     code: "version_artifact_unavailable",

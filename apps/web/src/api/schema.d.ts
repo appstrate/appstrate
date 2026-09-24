@@ -6528,7 +6528,7 @@ export interface components {
         };
     };
     responses: {
-        /** @description The selected published version's archive is missing, corrupt, or lacks the content entry its type requires (`prompt.md` for an agent, `SKILL.md` for a skill) — `version_artifact_unavailable`. Nothing is substituted for it, not even the working copy, and nothing is written. When `AFPS_SIGNATURE_POLICY` is not `off`, the signature gate answers first: a corrupt archive is `bundle_invalid` and an unsigned or untrusted one `bundle_signature_invalid`, both 422. */
+        /** @description The selected published version's archive is missing, corrupt, or lacks the content entry its type requires (`prompt.md` for an agent, `SKILL.md` for a skill) — `version_artifact_unavailable`. Nothing is substituted for it, not even the working copy, and nothing is written. When `AFPS_SIGNATURE_POLICY` is not `off`, the signature gate answers first: a corrupt archive is `bundle_invalid` and an unsigned or untrusted one `bundle_signature_invalid`, both 422. An archive past the decompression ceiling answers `422 package_archive_unreadable`. */
         VersionArtifactUnavailable: {
             headers: {
                 "Request-Id": components["headers"]["RequestId"];
@@ -7991,7 +7991,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), a published version is selected whose archive is missing, corrupt or without `prompt.md` (`version_artifact_unavailable`; the working copy is never substituted), or the versioned bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`) */
+            /** @description Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), a published version is selected whose archive is missing, corrupt or without `prompt.md` (`version_artifact_unavailable`; the working copy is never substituted) or expands past the decompression ceiling (`package_archive_unreadable`), or the versioned bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`) */
             422: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -20068,7 +20068,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), a dependency pin or `dependency_overrides` entry resolves to no published version (`dependency_unresolved`), or — `registry` source with `stage: "published"` (the default) only — the archive of the selected version is missing, corrupt or without `prompt.md` (`version_artifact_unavailable`); the working copy is never substituted. When `AFPS_SIGNATURE_POLICY` is not `off`, a corrupt archive answers `bundle_invalid` instead and an unsigned or untrusted one `bundle_signature_invalid` */
+            /** @description Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), a dependency pin or `dependency_overrides` entry resolves to no published version (`dependency_unresolved`), or — `registry` source with `stage: "published"` (the default) only — the archive of the selected version is missing, corrupt or without `prompt.md` (`version_artifact_unavailable`); the working copy is never substituted. When `AFPS_SIGNATURE_POLICY` is not `off`, a corrupt archive answers `bundle_invalid` instead and an unsigned or untrusted one `bundle_signature_invalid`. An archive past the decompression ceiling answers `package_archive_unreadable` */
             422: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];

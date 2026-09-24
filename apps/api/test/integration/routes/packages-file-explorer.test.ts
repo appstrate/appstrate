@@ -520,6 +520,23 @@ describe("package file explorer", () => {
     );
 
     it(
+      "refuses the same artifact on the version-detail route, naming the ceiling",
+      async () => {
+        await seedVersionExpandingTo(6, 9);
+
+        // Version detail reads through `getVersionDetail`, not the explorer's
+        // snapshot. The ceiling refusal must survive that path as itself, not be
+        // flattened into "no readable archive".
+        const res = await app.request(`/api/packages/agents/${id}/versions/1.0.0`, {
+          headers: authHeaders(ctx),
+        });
+        const problem = await expectProblem(res, 422, { code: "package_archive_unreadable" });
+        expect(problem.detail).toContain("50 MB");
+      },
+      CEILING_TEST_TIMEOUT_MS,
+    );
+
+    it(
       "refuses a draft artifact that expands past the ceiling, on both read routes",
       async () => {
         // Drafts use a different storage helper from published versions. Keep
