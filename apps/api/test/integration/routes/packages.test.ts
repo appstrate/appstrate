@@ -3209,6 +3209,23 @@ describe("Packages API", () => {
       expect(await draftOf()).toEqual(before);
     });
 
+    it("GET version detail refuses a version whose archive is gone", async () => {
+      const id = "@pkgorg/detail-unreadable";
+      const create = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ manifest: agentManifest(id), content: "v1 prompt" }),
+      });
+      expect(create.status).toBe(201);
+      await deleteVersionZip(id, "0.1.0");
+
+      // Previously 200 with `content: null`, indistinguishable from an empty version.
+      const res = await app.request(`/api/packages/agents/${id}/versions/0.1.0`, {
+        headers: authHeaders(ctx),
+      });
+      await expectProblem(res, 422, { code: "version_artifact_unavailable" });
+    });
+
     it("POST versions refuses a stale lock_version and cuts the draft it names", async () => {
       const headers = authHeaders(ctx, { "Content-Type": "application/json" });
       const create = await app.request("/api/packages/agents", {

@@ -43,7 +43,7 @@
 
 import { getPackage } from "./package-catalog.ts";
 import { agentExecutionBlock } from "../lib/package-access.ts";
-import { getVersionDetail, requirePublishedArchive } from "./package-versions.ts";
+import { getVersionDetail, requirePublishedPrompt } from "./package-versions.ts";
 import { resolveExportVersion } from "./bundle-assembly.ts";
 import { ApiError } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
@@ -237,7 +237,7 @@ export async function resolveRegistryAgent(
     });
   }
 
-  const { entry } = requirePublishedArchive("agent", packageId, detail);
+  const prompt = requirePublishedPrompt(packageId, detail);
 
   // Build the LoadedPackage from the published version's manifest + prompt
   // while preserving the package row's identity (id, source, updatedAt).
@@ -246,7 +246,7 @@ export async function resolveRegistryAgent(
   const agent: LoadedPackage = {
     id: pkg.id,
     manifest,
-    prompt: new TextDecoder().decode(entry),
+    prompt,
     source: pkg.source,
     ...(pkg.updatedAt ? { updatedAt: pkg.updatedAt } : {}),
   };

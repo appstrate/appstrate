@@ -152,11 +152,8 @@ describe("packages GET routes — read permission", () => {
       draftContent: SKILL_BODY,
     });
     await seedSpacePackage(ctx.defaultSpaceId, SKILL_ID);
-    await seedPackageVersion({
-      packageId: SKILL_ID,
-      version: "0.1.0",
-      manifest: { name: SKILL_ID, version: "0.1.0", type: "skill" },
-    });
+    // Real bytes: the version detail route refuses an unreadable archive (422).
+    await seedPublishedVersion(SKILL_ID, "0.1.0");
   });
 
   /** Key authenticated for the org + app, but WITHOUT `skills:read`. */

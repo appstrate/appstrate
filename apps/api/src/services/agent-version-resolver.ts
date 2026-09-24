@@ -51,7 +51,7 @@ import { ApiError, notFound } from "../lib/errors.ts";
 import {
   getLatestVersionInfo,
   getVersionDetail,
-  requirePublishedArchive,
+  requirePublishedPrompt,
 } from "./package-versions.ts";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 
@@ -97,8 +97,7 @@ function substituteVersion(
       ...agent,
       // Version manifest replaces the draft manifest entirely.
       manifest: detail.manifest as unknown as AgentManifest,
-      // `prompt.md` is required for an agent, so `entry` is present past the helper.
-      prompt: new TextDecoder().decode(requirePublishedArchive("agent", agent.id, detail).entry),
+      prompt: requirePublishedPrompt(agent.id, detail),
     },
     overrideVersionLabel: detail.version,
   };
@@ -107,7 +106,8 @@ function substituteVersion(
 /**
  * Resolve the `version` selector for a run trigger into the effective agent
  * definition. Throws `ApiError` (404) when an explicit selector cannot be
- * satisfied — never silently falls back to the draft.
+ * satisfied — never silently falls back to the draft — and 422
+ * `version_artifact_unavailable` when the selected version's archive is unreadable.
  */
 export async function resolveAgentRunVersion(
   agent: LoadedPackage,

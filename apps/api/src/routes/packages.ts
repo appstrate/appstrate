@@ -1260,16 +1260,10 @@ async function buildVersionDetailDto(
   const detail = await getVersionDetail(itemId, versionSpec);
   if (!detail) return null;
 
+  const { files } = requirePublishedArchive(rcfg.cfg.type, itemId, detail);
   const matchingTags = await getMatchingDistTags(itemId, detail.version);
-
-  // Extract primary content file from the ZIP
-  let content: string | null = null;
-  if (detail.content) {
-    const fileData = detail.content[rcfg.storageFileName];
-    if (fileData) {
-      content = new TextDecoder().decode(fileData);
-    }
-  }
+  const fileData = files[rcfg.storageFileName];
+  const content = fileData ? new TextDecoder().decode(fileData) : null;
 
   return {
     id: detail.id,

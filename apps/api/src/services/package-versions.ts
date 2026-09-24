@@ -397,6 +397,17 @@ export function requirePublishedArchive(
   return { files: detail.content, entry };
 }
 
+/**
+ * The decoded `prompt.md` of a published agent version — `prompt.md` is required, so
+ * {@link requirePublishedArchive} has already refused a version without one.
+ */
+export function requirePublishedPrompt(
+  packageId: string,
+  detail: { version: string; content: Record<string, Uint8Array> | null },
+): string {
+  return new TextDecoder().decode(requirePublishedArchive("agent", packageId, detail).entry);
+}
+
 /** Count the number of published versions for a package. */
 export async function getVersionCount(packageId: string): Promise<number> {
   const [row] = await db
