@@ -671,7 +671,24 @@ open-redirect chains MUST NOT cross the allowlist (§8.6).
 
 The runtime layer (sidecar MITM) enforces this on the wire, including across redirect
 hops (per-hop allowlist check, per-hop SSRF blocklist, hybrid credential-strip on
-cross-host hops).
+cross-host hops). For a `source.kind: "local"` integration run in Docker, the same list is also the
+runner's whole network egress: a destination it does not grant is refused, and an
+auth that declares neither `authorized_uris` nor `allow_all_uris` gives its runner no
+way out at all. Only patterns with a `scheme://` count for raw TCP traffic (a pattern
+without a port grants the scheme's default port).
+
+When the target depends on what the user enters (a self-hosted server), reference a
+connection field with `{$credential.<field>}`:
+
+```jsonc
+"authorized_uris": ["ssh://{$credential.host}:{$credential.port}"]
+```
+
+The field must be declared and listed in `credentials.schema.required`. Templates are
+refused on an `oauth2` auth, on an auth that declares `connect`, and on one exposing
+`api_call`. At run time a value
+containing anything but letters, digits, `.` and `-` drops the pattern, so a user can
+never widen it into a wildcard.
 
 ---
 
