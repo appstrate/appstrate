@@ -524,6 +524,33 @@ describe("Organizations API", () => {
       expect(settings.api_version).toBe(CURRENT_API_VERSION);
     });
 
+    it("audits the settings patch with camelCase keys, not the snake_case body (carve-out 4m)", async () => {
+      const ctx = await createTestContext();
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
+        method: "PATCH",
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          api_version: CURRENT_API_VERSION,
+          dashboard_sso_enabled: true,
+          restrict_package_copy: true,
+        }),
+      });
+      expect(res.status).toBe(200);
+
+      const [row] = await db
+        .select()
+        .from(auditEvents)
+        .where(
+          and(eq(auditEvents.orgId, ctx.orgId), eq(auditEvents.action, "org.settings_updated")),
+        );
+      expect(row!.after).toEqual({
+        apiVersion: CURRENT_API_VERSION,
+        dashboardSsoEnabled: true,
+        restrictPackageCopy: true,
+      });
+    });
+
     it("leaves the org fully usable after a rejected write (self-brick regression)", async () => {
       // The test that actually pins the fix: before the write-path guard, the
       // rejected value above would have been persisted and every subsequent

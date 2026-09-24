@@ -153,7 +153,7 @@ export function createProxiesRouter() {
         action: "proxy.updated",
         resourceType: "proxy",
         resourceId: proxyId,
-        after: data as unknown as Record<string, unknown>,
+        after: data,
       });
       // Return the bare updated resource — same shape as the GET list
       // serializer — so callers don't need a follow-up GET (#657).

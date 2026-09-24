@@ -328,7 +328,7 @@ export function createWebhooksRouter() {
       action: "webhook.updated",
       resourceType: "webhook",
       resourceId: c.req.param("id")!,
-      after: data as unknown as Record<string, unknown>,
+      after: data,
     });
     return c.json(result);
   });

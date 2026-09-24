@@ -15,6 +15,7 @@
  */
 
 import type { Context } from "hono";
+import type { AuditPayload } from "@appstrate/core/module";
 import { db } from "@appstrate/db/client";
 import { auditEvents } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
@@ -34,8 +35,8 @@ interface RecordAuditInput {
   action: string;
   resourceType: string;
   resourceId?: string | null;
-  before?: Record<string, unknown> | null;
-  after?: Record<string, unknown> | null;
+  before?: AuditPayload | null;
+  after?: AuditPayload | null;
   ip?: string | null;
   userAgent?: string | null;
   requestId?: string | null;

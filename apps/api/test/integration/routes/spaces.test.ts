@@ -140,6 +140,30 @@ describe("Spaces API", () => {
       expect(body.object).toBe("space");
       expect(body.name).toBe("Updated Name");
     });
+
+    it("audits the patch with camelCase keys, not the snake_case body (carve-out 4m)", async () => {
+      const space = await seedSpace({ orgId: ctx.orgId, name: "Audited" });
+      const res = await app.request(`/api/spaces/${space.id}`, {
+        method: "PATCH",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Audited Renamed",
+          default_role: "viewer",
+          settings: { allowedRedirectDomains: ["example.com"] },
+        }),
+      });
+      expect(res.status).toBe(200);
+
+      const [row] = await db
+        .select()
+        .from(auditEvents)
+        .where(and(eq(auditEvents.resourceId, space.id), eq(auditEvents.action, "space.updated")));
+      expect(row!.after).toEqual({
+        name: "Audited Renamed",
+        defaultRole: "viewer",
+        settings: { allowedRedirectDomains: ["example.com"] },
+      });
+    });
   });
 
   describe("DELETE /api/spaces/:id", () => {

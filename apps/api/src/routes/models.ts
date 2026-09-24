@@ -738,7 +738,7 @@ export function createModelsRouter() {
         action: "model.updated",
         resourceType: "model",
         resourceId: modelId,
-        after: data as unknown as Record<string, unknown>,
+        after: data,
       });
       // Return the bare updated resource (#657), projected for a model alias
       // (Threat A) — the same projection the list and effective-default paths

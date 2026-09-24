@@ -1401,6 +1401,13 @@ export interface LlmUsageLedgerRow {
   settled: boolean;
 }
 
+/**
+ * An audit `before` / `after` payload: camelCase keys (CASING_CONVENTIONS 4m), so a
+ * snake_case request body — or a `Record<string, unknown>` that could hide one — does
+ * not compile. Checks top-level keys only; values (a wire JSONB field) are opaque.
+ */
+export type AuditPayload = { [key: string]: unknown; [key: `${string}_${string}`]: never };
+
 export interface PlatformServices {
   /**
    * Structured JSON logger — the platform's OWN pino instance, so module output
@@ -1621,8 +1628,8 @@ export interface PlatformServices {
         action: string;
         resourceType: string;
         resourceId?: string | null;
-        before?: Record<string, unknown> | null;
-        after?: Record<string, unknown> | null;
+        before?: AuditPayload | null;
+        after?: AuditPayload | null;
       },
     ): Promise<void>;
   };

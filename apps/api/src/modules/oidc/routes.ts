@@ -29,7 +29,7 @@ import {
 import { pinnedSpaceScopeGuard } from "../../middleware/guards.ts";
 import { markSpaceRescope } from "../../middleware/require-permission.ts";
 import { conflict, notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
-import { spaceAssignmentSchema } from "../../lib/space-role-assignment.ts";
+import { auditSpaceAssignments, spaceAssignmentSchema } from "../../lib/space-role-assignment.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../../lib/list-response.ts";
 import { logger } from "../../lib/logger.ts";
@@ -628,7 +628,11 @@ export function createOidcRouter() {
           action: "oauth_client.updated",
           resourceType: "oauth_client",
           resourceId: clientId,
-          after: data,
+          after: {
+            ...data,
+            signupSpaceAssignments:
+              data.signupSpaceAssignments && auditSpaceAssignments(data.signupSpaceAssignments),
+          },
         });
         return c.json(updated);
       } catch (err) {

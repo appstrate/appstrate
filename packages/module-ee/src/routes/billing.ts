@@ -40,6 +40,7 @@ import {
 } from "../http-errors.ts";
 import { ApiError, invalidRequest } from "@appstrate/core/api-errors";
 import { readJsonBody } from "@appstrate/core/request-body";
+import type { AuditPayload } from "@appstrate/core/module";
 import {
   ORG_ROLES_WITH_FULL_ACCESS,
   requireModulePermission,
@@ -219,11 +220,7 @@ async function billingSnapshot(orgId: string) {
   };
 }
 
-function auditBilling(
-  c: Context<EeEnv>,
-  action: string,
-  after: Record<string, unknown>,
-): Promise<void> {
+function auditBilling(c: Context<EeEnv>, action: string, after: AuditPayload): Promise<void> {
   return getPlatformServices().audit.record(c, {
     action,
     resourceType: "billing_account",

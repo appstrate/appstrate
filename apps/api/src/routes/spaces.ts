@@ -521,7 +521,12 @@ export function createSpacesRouter() {
           action: "space.updated",
           resourceType: "space",
           resourceId: space.id,
-          after: data,
+          after: {
+            name: data.name,
+            settings: data.settings,
+            visibility: data.visibility,
+            defaultRole: default_role,
+          },
         });
         return c.json(spaceWireForCaller(c, space, c.get("spaceRole") ?? null));
       } catch (err) {

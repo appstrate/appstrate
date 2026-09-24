@@ -519,7 +519,7 @@ export function createModelProviderCredentialsRouter() {
         action: "model_provider_credential.updated",
         resourceType: "model_provider_credential",
         resourceId: id,
-        after: auditData as Record<string, unknown>,
+        after: auditData,
       });
       // Return the bare updated resource (non-secret
       // `ModelProviderCredentialInfo` projection, same as GET/list). The api
