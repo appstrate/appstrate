@@ -65,11 +65,16 @@ services:
   # proxying is unsupported, minio/minio#7857) and set S3_PUBLIC_ENDPOINT
   # on the appstrate service.
   minio:
-    # Pinned to a verified RELEASE tag and digest so `docker compose pull` doesn't
-    # drag in a silently-incompatible server binary. Bump in lockstep
-    # with `minio/mc` below when refreshing — the client's `mc ready`
-    # probe is the healthcheck and the two must agree on wire format.
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    # Chainguard's MinIO build (MinIO RELEASE.2026-09-22T19-25-18Z): MinIO's
+    # own repositories refuse anonymous pulls since 2026-09. Pinned by digest
+    # because Chainguard's free tier publishes only `latest`, which would let
+    # `docker compose pull` drag in a silently-incompatible server binary.
+    # Refresh: `docker pull cgr.dev/chainguard/minio:latest`, then
+    # `docker image inspect --format '{{index .RepoDigests 0}}'` on it.
+    image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
+    # Root, as the previous upstream image ran: existing `miniodata` volumes
+    # hold root-owned files the image's default uid (65532) cannot write.
+    user: "0:0"
     networks:
       - appstrate-data
     command: server /data
@@ -88,10 +93,10 @@ services:
 
   # ── MinIO bucket initialization ─────────────────────────────
   minio-init:
-    # Pinned alongside minio/minio so the client's `mc ready` probe and
-    # bucket creation can't diverge from the server binary on an
-    # unattended `docker compose pull`.
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    # The server image above, so `mc` can never diverge from the server
+    # binary; it ships `mc` and `/bin/sh`, which
+    # `cgr.dev/chainguard/minio-client` (no shell) does not.
+    image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
     networks:
       - appstrate-data
     restart: "no"

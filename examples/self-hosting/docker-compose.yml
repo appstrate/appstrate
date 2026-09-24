@@ -71,10 +71,16 @@ services:
   # proxying is unsupported, minio/minio#7857) and set S3_PUBLIC_ENDPOINT
   # on the appstrate service.
   minio:
-    # Pinned to a verified release (digest-locked) — matches the tier3
-    # `docker-compose.yml`. `:latest` would let `docker compose pull`
-    # silently swap the storage engine under running data.
-    image: quay.io/minio/minio:RELEASE.2025-03-12T18-04-18Z@sha256:46b3009bf7041eefbd90bd0d2b38c6ddc24d20a35d609551a1802c558c1c958f
+    # Chainguard's MinIO build (MinIO RELEASE.2026-09-22T19-25-18Z): MinIO's
+    # own repositories refuse anonymous pulls since 2026-09. Pinned by digest
+    # because Chainguard's free tier publishes only `latest`, which would let
+    # `docker compose pull` silently swap the storage engine under running
+    # data. Refresh: `docker pull cgr.dev/chainguard/minio:latest`, then
+    # `docker image inspect --format '{{index .RepoDigests 0}}'` on it.
+    image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
+    # Root, as the previous upstream image ran: existing `miniodata` volumes
+    # hold root-owned files the image's default uid (65532) cannot write.
+    user: "0:0"
     networks:
       - appstrate-data
     command: server /data
@@ -93,9 +99,9 @@ services:
 
   # ── MinIO bucket initialization ─────────────────────────────
   minio-init:
-    # Pinned to a verified release (digest-locked) — matches the tier3
-    # `docker-compose.yml`.
-    image: quay.io/minio/mc:RELEASE.2025-03-12T17-29-24Z@sha256:470f5546b596e16c7816b9c3fa7a78ce4076bb73c2c73f7faeec0c8043923123
+    # The server image above: it ships `mc` and `/bin/sh`, which
+    # `cgr.dev/chainguard/minio-client` (no shell) does not.
+    image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
     networks:
       - appstrate-data
     restart: "no"

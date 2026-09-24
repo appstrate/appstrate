@@ -378,6 +378,16 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
 
 ### Fixed
 
+- **MinIO images pull again in CI, development, self-hosting and
+  production.** MinIO's own repositories (`quay.io/minio/*`, Docker Hub
+  `minio/*`) now refuse anonymous pulls, which failed every compose file that
+  starts MinIO. They all use `cgr.dev/chainguard/minio` instead, pinned by
+  digest (MinIO `RELEASE.2026-09-22T19-25-18Z`); the bucket-init containers
+  reuse that image for `mc`. The image runs as uid 65532, so every MinIO server
+  with a persistent volume sets `user: "0:0"` — the privileges the previous
+  image had — so that volumes it created, holding root-owned files, stay
+  writable. Nothing to migrate.
+
 - **Google connections are ready again, and their agents launch** (#1131).
   Google's token endpoint echoes the requested OIDC `email` scope as
   `https://www.googleapis.com/auth/userinfo.email`, and no manifest declared the
