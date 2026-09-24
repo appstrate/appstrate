@@ -30,8 +30,14 @@ const PLUGIN_NAME = "appstrate";
 
 const MCP_SERVER_NAME = "appstrate";
 
-/** Claude Code names a plugin's MCP tools after both the plugin and the `.mcp.json` key. */
-export const RUN_AND_WAIT_TOOL = `mcp__plugin_${PLUGIN_NAME}_${MCP_SERVER_NAME}__run_and_wait`;
+/**
+ * Claude Code names a plugin's MCP tools after both the plugin and the `.mcp.json`
+ * key. Always the full name: the user may have other Appstrate servers exposing
+ * the same bare tool names.
+ */
+export function pluginTool(tool: string): string {
+  return `mcp__plugin_${PLUGIN_NAME}_${MCP_SERVER_NAME}__${tool}`;
+}
 
 const PLUGIN_MANIFEST = {
   name: PLUGIN_NAME,

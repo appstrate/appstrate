@@ -340,10 +340,10 @@ describe("packages sync — agents come from the pinned space only (D19)", () =>
     },
   ];
 
-  // The grant `run_and_wait` itself needs: launch AND read back (`canRunAgents`).
+  // The MCP server's own gate on `run_and_wait`: dispatch, launch AND read back.
   for (const [role, permissions] of [
-    ["a runner (no agents:read)", ["agents:run", "runs:read"]],
-    ["runs:read-all", ["agents:run", "runs:read-all"]],
+    ["a runner (no agents:read)", ["agents:run", "runs:read", "mcp:invoke"]],
+    ["runs:read-all", ["agents:run", "runs:read-all", "mcp:invoke"]],
   ] as const) {
     it(`installs agent commands for ${role}`, async () => {
       serve([REPORT], { spaces: withRole([...permissions]) });
@@ -357,8 +357,9 @@ describe("packages sync — agents come from the pinned space only (D19)", () =>
   }
 
   for (const [role, permissions] of [
-    ["no runs read", ["agents:read", "agents:run"]],
-    ["no agents:run", ["agents:read", "runs:read"]],
+    ["no runs read", ["agents:read", "agents:run", "mcp:invoke"]],
+    ["no agents:run", ["agents:read", "runs:read", "mcp:invoke"]],
+    ["no mcp:invoke", ["agents:run", "runs:read"]],
   ] as const) {
     it(`syncs no agent, with one note naming the space, for a role with ${role}`, async () => {
       const server = serve([REPORT], { spaces: withRole([...permissions]) });
@@ -369,6 +370,7 @@ describe("packages sync — agents come from the pinned space only (D19)", () =>
       expect(await readdir(pluginSkills())).toEqual(["pdf-tools"]);
       expect(occurrences(stderr(), "Agent commands not synced")).toBe(1);
       expect(stderr()).toContain('pinned space "Space One"');
+      expect(stderr()).toContain("needs agents:run, runs:read and mcp:invoke");
       expect(server.agentReads()).toBe(0);
     });
   }

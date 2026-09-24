@@ -331,23 +331,24 @@ export function assignSlugs(
   // `reserved` = catalogued packages whose resolution failed: their directories
   // are on disk, so a transient 500 must not reassign `/appstrate:<slug>`.
   const taken = new Set<string>(reserved);
-  const claim = (packageId: string, preferred: string, prefix?: string): SlugClaim => {
+  // Picked, then taken: an agent claims its name only once its command renders.
+  const pick = (packageId: string, preferred: string, prefix?: string): SlugClaim => {
     const slug = taken.has(preferred) ? collisionSlug(packageId, taken, prefix) : preferred;
-    taken.add(slug);
     return slug === preferred ? { slug } : { slug, renamedFrom: preferred };
   };
   const nameOf = (packageId: string): string => parseScopedName(packageId)?.name ?? packageId;
 
-  const planned: PlannedEntry[] = skills.map((skill) => ({
-    ...skill,
-    kind: "skill" as const,
-    ...claim(skill.packageId, skillSlug(skill.frontmatterName, nameOf(skill.packageId))),
-  }));
+  const planned: PlannedEntry[] = skills.map((skill) => {
+    const naming = pick(skill.packageId, skillSlug(skill.frontmatterName, nameOf(skill.packageId)));
+    taken.add(naming.slug);
+    return { ...skill, kind: "skill" as const, ...naming };
+  });
   const failed: SlugAssignment["failed"] = [];
   for (const view of agents) {
     try {
-      const naming = claim(view.packageId, agentSlug(nameOf(view.packageId)), AGENT_SLUG_PREFIX);
+      const naming = pick(view.packageId, agentSlug(nameOf(view.packageId)), AGENT_SLUG_PREFIX);
       const files = materializeAgent(naming.slug, view);
+      taken.add(naming.slug);
       planned.push({
         kind: "agent",
         packageId: view.packageId,

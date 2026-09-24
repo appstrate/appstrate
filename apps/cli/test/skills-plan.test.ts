@@ -295,6 +295,17 @@ describe("assignSlugs — agent commands (D23)", () => {
     expect(failed.map((f) => f.packageId)).toEqual(["@acme/foo"]);
   });
 
+  it("lets an agent that fails to render leave its name to the next claimant", () => {
+    const { planned } = assignSlugs(
+      [],
+      [{ ...view("@acme/foo"), version: "not-semver" }, view("@zed/foo")],
+    );
+
+    expect(planned.map((entry) => [entry.packageId, entry.slug])).toEqual([
+      ["@zed/foo", "run-foo"],
+    ]);
+  });
+
   it("honours a slug the ledger reserves for an unresolved package", () => {
     const { planned } = assignSlugs([], [view("@acme/foo")], new Set(["run-foo"]));
 

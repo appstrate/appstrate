@@ -26,7 +26,8 @@ import {
   treeIntegrity,
   type AgentLaunchView,
 } from "../src/lib/skills-sync/materialize.ts";
-import { RUN_AND_WAIT_TOOL } from "../src/lib/skills-sync/targets.ts";
+import { launchRunAndWait } from "@appstrate/core/run-and-wait-client";
+import { pluginTool } from "../src/lib/skills-sync/targets.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -434,7 +435,7 @@ describe("materializeAgent", () => {
 
   it("writes only generator text and validated identifiers into the body", () => {
     const { body } = renderAgent(agentView());
-    expect(body).toContain(RUN_AND_WAIT_TOOL);
+    expect(body).toContain(`\`${pluginTool("run_and_wait")}\``);
     expect(body).toContain(`\`${CONTRACT_REF}\``);
     const skeleton = /```json\n([\s\S]*?)\n\s*```/.exec(body);
     expect(JSON.parse(skeleton![1]!)).toEqual({
@@ -448,8 +449,8 @@ describe("materializeAgent", () => {
     expect(body).not.toContain("!`");
     expect(body).not.toContain(SPACE_ID);
     expect(body).toContain("Ask the user only for missing fields listed in `schema.required`");
-    expect(body).toContain("Any `404`");
-    expect(body).toContain("never relaunch");
+    expect(body).toContain("`no_published_version`");
+    expect(body).toContain("never launch again");
     expect(body).not.toContain("Weekly report");
     expect(body).not.toContain("Summarize the week.");
     expect(body).not.toContain("topic");
@@ -554,7 +555,11 @@ describe("materializeAgent", () => {
 
   it("includes the upload recipe only when an unlocked file field exists", () => {
     const withFile = renderAgent(fileSchemaView([])).body;
-    expect(withFile).toContain("`describe_operation` tool for `createUpload`");
+    for (const tool of ["run_and_wait", "invoke_operation", "describe_operation", "list_files"]) {
+      expect(withFile).toContain(`\`${pluginTool(tool)}\``);
+      // A bare name could resolve to another Appstrate server the user also connected.
+      expect(withFile).not.toContain(`\`${tool}\``);
+    }
     expect(withFile).toContain("--upload-file");
     expect(withFile).toContain("appfile://");
     expect(renderAgent(fileSchemaView(["doc"])).body).not.toContain("createUpload");
@@ -573,6 +578,27 @@ describe("materializeAgent", () => {
       },
     });
     expect(renderAgent(multiple).body).toContain("createUpload");
+  });
+
+  it("renders a run_and_wait call that core's launcher accepts", async () => {
+    const { body } = renderAgent(agentView());
+    const call = JSON.parse(/```json\n([\s\S]*?)\n\s*```/.exec(body)![1]!) as unknown;
+    const requested: string[] = [];
+    const fakeFetch = (async (url: string | URL | Request) => {
+      requested.push(String(url));
+      return Response.json({ id: "run_1", status: "pending" }, { status: 201 });
+    }) as typeof fetch;
+    // Core refuses any argument name its MCP descriptor does not declare, so a
+    // server-side rename fails here instead of in every installed command.
+    const launched = await launchRunAndWait(call, {
+      origin: "https://appstrate.test",
+      headers: {},
+      fetch: fakeFetch,
+    });
+    expect(launched.ok).toBe(true);
+    expect(requested).toEqual([
+      "https://appstrate.test/api/agents/@acme/weekly-report/run?version=1.2.0",
+    ]);
   });
 
   it("accepts the draft version", () => {

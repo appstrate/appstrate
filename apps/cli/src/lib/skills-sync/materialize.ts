@@ -20,7 +20,7 @@ import { isValidVersion } from "@appstrate/core/semver";
 import { isSafeArchivePath } from "@appstrate/core/zip";
 import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
 import { SIGNATURE_RECORD } from "../package-definition.ts";
-import { RUN_AND_WAIT_TOOL } from "./targets.ts";
+import { pluginTool } from "./targets.ts";
 
 /** Appstrate packaging, not skill content: both archives carry them, no skill directory does. */
 const DROPPED_ENTRIES: ReadonlySet<string> = new Set([PACKAGE_MANIFEST_FILE, SIGNATURE_RECORD]);
@@ -245,14 +245,20 @@ function canonicalize(value: unknown): unknown {
   return value;
 }
 
+const RUN_AND_WAIT = pluginTool("run_and_wait");
+const INVOKE_OPERATION = pluginTool("invoke_operation");
+const LIST_FILES = pluginTool("list_files");
+const DESCRIBE_OPERATION = pluginTool("describe_operation");
+
 const FILE_RECIPE = [
   "File fields (`format: uri` with a `contentMediaType`) take a URI, never `data:` content. " +
     "For each local file:",
-  "a. Call the Appstrate `describe_operation` tool for `createUpload` and follow its recipe.",
+  `a. Read only the request body shape of \`createUpload\` with \`${DESCRIBE_OPERATION}\`, ` +
+    `then call it through \`${INVOKE_OPERATION}\`. Ignore its \`runAgent\` and \`data:\` steps.`,
   "b. Upload with `curl --fail -X PUT --upload-file <path>`, sending exactly the returned " +
     "`headers` (one `-H` each) to the returned `url`.",
   "c. Pass the returned `upload://` `uri` as the field value.",
-  "An `appfile://` URI from an earlier run (the `list_files` tool) is passed as is.",
+  `An \`appfile://\` URI from an earlier run (\`${LIST_FILES}\`) is passed as is.`,
 ];
 
 function agentBody(view: AgentLaunchView, scope: string, name: string, files: boolean): string {
@@ -277,20 +283,24 @@ function agentBody(view: AgentLaunchView, scope: string, name: string, files: bo
       "Every value must satisfy `schema`.",
     ],
     ...(files ? [FILE_RECIPE] : []),
-    [`Call \`${RUN_AND_WAIT_TOOL}\` with:`, "", "```json", ...call.split("\n"), "```"],
+    [`Call \`${RUN_AND_WAIT}\` with:`, "", "```json", ...call.split("\n"), "```"],
     [
       "Handle the outcome:",
       "- A `connect_url` or a connection choice (`must_choose_connection`): follow the " +
         "Appstrate server's instructions.",
-      "- Any `404`: this command is out of date. Do not retry; tell the user to run " +
-        "`appstrate packages sync`.",
-      "- `400`: fix `input` with the user, then retry.",
-      "- `done: false`: the run is still going. Wait with the Appstrate `invoke_operation` tool, " +
+      "- A `404` with code `agent_not_found`, `agent_not_active_in_space` or " +
+        "`no_published_version`, or saying the pinned version is not found: this command is " +
+        "out of date. Tell the user to run `appstrate packages sync`; do not retry.",
+      "- Any other `404`, or a `400`: the input is wrong (e.g. an unreadable file URI). Fix " +
+        "`input` with the user, then retry.",
+      "- Any other error: report it and stop.",
+      `- \`done: false\`: the run is still going. Wait with \`${INVOKE_OPERATION}\` ` +
         '`{ "operation_id": "getRun", "path_params": { "id": "<returned id>" }, ' +
-        '"query": { "wait": true } }`, repeated until `status` is `success`, `failed`, ' +
-        "`timeout` or `cancelled`.",
-      "Call `run_and_wait` again only after a refusal before launch (a 4xx with no run `id`). " +
-        "Once a run `id` was returned, never relaunch: only wait on it with `getRun`.",
+        '"query": { "wait": true } }` until `status` is `success`, `failed`, `timeout` or ' +
+        `\`cancelled\`. Its files are not in that answer: list them with \`${LIST_FILES}\` ` +
+        '`{ "runId": "<returned id>" }`.',
+      `Call \`${RUN_AND_WAIT}\` again only for the retries above; once a run \`id\` exists, ` +
+        "never launch again. Use `getRun` only after `done: false`, never on a finished run.",
     ],
     ["Report the result to the user and list every file the run returned, with its URI."],
   ];

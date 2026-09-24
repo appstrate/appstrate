@@ -11,7 +11,7 @@
  */
 
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
-import { canRunAgents } from "@appstrate/core/permissions";
+import { agentCapabilities, reaches } from "@appstrate/core/permissions";
 import { resolveActiveProfile, syncSpaceIds, type Profile } from "../lib/config.ts";
 import { ApiError } from "../lib/api.ts";
 import { listSpaces, resolveSpaceRef, type Space } from "../lib/spaces.ts";
@@ -638,9 +638,9 @@ function suppliesSkills(space: Space): boolean {
 
 /** The grant the MCP server itself exposes `run_and_wait` on (D19). */
 function suppliesAgents(space: Space): boolean {
+  const has = (permission: string): boolean => space.permissions.includes(permission);
   return (
-    space.access === "member" &&
-    canRunAgents((permission) => space.permissions.includes(permission))
+    space.access === "member" && reaches(agentCapabilities(has, has("mcp:invoke")).runLevel, "run")
   );
 }
 
@@ -717,7 +717,7 @@ async function selectSources(
   if (!withAgents || pinned?.access !== "member") return { skillSpaces };
   if (suppliesAgents(pinned)) return { skillSpaces, agentSpace: pinned.id };
   report.note(
-    `Agent commands not synced: your role in pinned space "${pinned.name}" cannot launch agents and read their runs there.`,
+    `Agent commands not synced: your role in pinned space "${pinned.name}" cannot launch agents through the MCP server there (needs agents:run, runs:read and mcp:invoke).`,
   );
   return { skillSpaces };
 }

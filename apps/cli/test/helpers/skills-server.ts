@@ -27,8 +27,8 @@ const MANIFEST_DESCRIPTION = "A skill.";
 /** Same reason: `Space` declares it, nothing in the sync reads it. */
 const SPACE_STAMP = { createdAt: "2026-01-01T00:00:00.000Z" };
 
-/** What a member's role grants here: enough to read skills and to launch agents and read runs. */
-const MEMBER_PERMISSIONS = ["agents:read", "agents:run", "runs:read", "skills:read"];
+/** What a member's role grants here: enough to read skills and to run agents through MCP. */
+const MEMBER_PERMISSIONS = ["agents:read", "agents:run", "mcp:invoke", "runs:read", "skills:read"];
 
 /**
  * A row of `GET /api/spaces`. The listing reports what the caller may SEE, and
