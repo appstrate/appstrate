@@ -16,13 +16,18 @@
  * Each source directory must contain a manifest.json. All files in the
  * directory are bundled into the archive.
  *
+ * These sources are the reference manifests authors copy, so every one must
+ * declare the `schema_version` the platform writes (`AFPS_SCHEMA_VERSION`).
+ * Reading stays lenient on purpose — any 0.x loads — so this build is the
+ * only place that notices a spec bump leaving them behind.
+ *
  * Usage:
  *   bun run scripts/build-system-packages.ts           # build archives
  *   bun run scripts/build-system-packages.ts --check   # validate only (no write)
  */
 import { readdir, readFile, lstat, stat, writeFile, unlink } from "node:fs/promises";
 import { join, posix, relative, sep } from "node:path";
-import { validateManifest } from "@appstrate/core/validation";
+import { AFPS_SCHEMA_VERSION, validateManifest } from "@appstrate/core/validation";
 import { zipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
 
@@ -64,13 +69,29 @@ async function collectZipEntries(root: string): Promise<Record<string, Uint8Arra
   return entries;
 }
 
+/**
+ * Every source manifest whose `schema_version` is not `AFPS_SCHEMA_VERSION`,
+ * with what it declares (`undefined` when absent). Pure — takes parsed JSON,
+ * so it runs before `validateManifest` and on whatever shape the file holds.
+ */
+export function findSchemaVersionDrift(
+  manifests: Iterable<readonly [dirName: string, manifest: unknown]>,
+) {
+  const drift: { dirName: string; declared: unknown }[] = [];
+  for (const [dirName, manifest] of manifests) {
+    const declared = (manifest as { schema_version?: unknown } | null)?.schema_version;
+    if (declared !== AFPS_SCHEMA_VERSION) drift.push({ dirName, declared });
+  }
+  return drift;
+}
+
 const checkOnly = process.argv.includes("--check");
 const SOURCES_DIR = join(import.meta.dir, "system-packages");
 const OUTPUT_DIR = join(import.meta.dir, "../system-packages");
 
 async function main() {
   const entries = await readdir(SOURCES_DIR);
-  const dirs = entries.filter((e) => !e.startsWith(".") && e !== "node_modules");
+  const dirs = entries.filter((e) => !e.startsWith(".") && e !== "node_modules").sort();
   const existingAfps = await readdir(OUTPUT_DIR);
   let count = 0;
   const byType: Record<string, number> = {};
@@ -78,12 +99,38 @@ async function main() {
   // Compute the set of archive names that should exist, based on source
   // dirs. Used below to detect orphan `.afps` files (source removed but
   // archive left behind — they would otherwise be loaded at boot and
-  // resurface in the UI as "Intégré" packages).
+  // resurface in the UI as "Intégré" packages). Manifests are parsed here,
+  // once, so the schema_version guard below runs before anything is written.
   const expectedZips = new Set<string>();
+  const manifests = new Map<string, unknown>();
   for (const dirName of dirs) {
-    const dirStat = await stat(join(SOURCES_DIR, dirName));
-    if (dirStat.isDirectory()) expectedZips.add(`${dirName}.afps`);
+    const dirPath = join(SOURCES_DIR, dirName);
+    if (!(await stat(dirPath)).isDirectory()) continue;
+    expectedZips.add(`${dirName}.afps`);
+    manifests.set(dirName, JSON.parse(await readFile(join(dirPath, "manifest.json"), "utf-8")));
   }
+
+  // Both modes, before the orphan sweep: a failing build leaves system-packages/
+  // untouched. Every offender is listed so a spec bump names all of them at once.
+  const drift = findSchemaVersionDrift(manifests);
+  if (drift.length > 0) {
+    console.error(
+      `\nSCHEMA VERSION: ${drift.length} source manifest(s) in scripts/system-packages/ do not declare schema_version "${AFPS_SCHEMA_VERSION}" (AFPS_SCHEMA_VERSION):`,
+    );
+    for (const { dirName, declared } of drift) {
+      const found = declared === undefined ? "no schema_version" : JSON.stringify(declared);
+      console.error(`  - ${dirName}: ${found}, expected "${AFPS_SCHEMA_VERSION}"`);
+    }
+    console.error(
+      `\nSet schema_version to "${AFPS_SCHEMA_VERSION}" in each and, if that version is already\n` +
+        `released, bump its patch version (the \`version\` field AND the directory name),\n` +
+        `then run \`bun run build:system-packages\`. Released versions are immutable: changed\n` +
+        `content under the same version is refused at boot\n` +
+        `(apps/api/src/services/system-packages.ts).\n`,
+    );
+    process.exit(1);
+  }
+
   const orphans = existingAfps.filter((name) => name.endsWith(".afps") && !expectedZips.has(name));
   if (orphans.length > 0) {
     if (checkOnly) {
@@ -103,14 +150,9 @@ async function main() {
     }
   }
 
-  for (const dirName of dirs.sort()) {
+  for (const [dirName, parsed] of manifests) {
     const dirPath = join(SOURCES_DIR, dirName);
-    const dirStat = await stat(dirPath);
-    if (!dirStat.isDirectory()) continue;
 
-    // Read and validate manifest
-    const manifestRaw = await readFile(join(dirPath, "manifest.json"), "utf-8");
-    const parsed = JSON.parse(manifestRaw);
     const result = validateManifest(parsed);
     if (!result.valid) {
       console.error(`INVALID: ${dirName}/manifest.json — ${result.errors.join(", ")}`);
@@ -181,7 +223,9 @@ async function main() {
   );
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
