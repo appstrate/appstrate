@@ -34,7 +34,8 @@ import {
 import { anthropicThinkingBudgets } from "@appstrate/core/model-generation";
 import { MODEL_INPUT_MODALITIES, type ModelInputModality } from "@appstrate/core/module";
 import { PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "@appstrate/runner-pi/provider-map";
-import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
+import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
+import { buildPiModel } from "@appstrate/runner-pi/pi-model";
 import { logger } from "./logger.ts";
 import {
   syntheticAliasErrorBody,
@@ -297,35 +298,21 @@ export function buildBackingModel(deps: PiMessagesBackendDeps): Model<Api> {
     // carries no implicit precondition.
     throw new Error("pi-messages backend: modelSwap.backing is required to re-originate");
   }
-  return {
+  return buildPiModel({
     id: swap.real,
-    // Never surfaced: the projection drops `partial`, where pi-ai puts these.
-    name: swap.real,
-    api: swap.backingApiShape,
-    // Load-bearing: with `baseUrl` this is what pi-ai reads to pick the
-    // vendor's request shape — the derivation the container no longer performs.
-    provider: backing.providerId,
+    registryModelId: swap.real,
+    apiShape: swap.backingApiShape,
+    piProvider: backing.providerId,
     baseUrl: llm.baseUrl,
     reasoning: backing.reasoning,
-    ...(backing.reasoningLevelMap ? { thinkingLevelMap: backing.reasoningLevelMap } : {}),
-    compat: {
-      // The STRUCTURAL half of the cache-retention refusal — see
-      // {@link FORWARDED_OPTION_KEYS} for the request-body half, and
-      // `PLATFORM_MODEL_COMPAT` for the billing reason both close.
-      ...PLATFORM_MODEL_COMPAT,
-      // pi-ai gates its adaptive branch on `compat.forceAdaptiveThinking`, which
-      // it sources from metadata it has none of for a record rebuilt from the
-      // platform's catalog. Without the flag an adaptive backing gets the classic
-      // `thinking: {type:"enabled", budget_tokens}` shape and answers 400.
-      ...(swap.anthropicAdaptiveReasoning ? { forceAdaptiveThinking: true } : {}),
-    },
     input: narrowInputModalities(backing.input),
-    cost: { ...ZERO_MODEL_COST },
+    // Explicit, so the record's card never applies: the disclosure control above.
+    cost: ZERO_MODEL_COST,
     // The REAL limits: `maxTokens` is the upstream response cap, `contextWindow`
     // sizes pi-ai's clamp, and a zero window is pi-ai's "do not clamp" sentinel.
     contextWindow: limits.modelContextWindow ?? 0,
     maxTokens: limits.modelMaxTokens ?? PI_DEFAULT_MAX_TOKENS,
-  };
+  });
 }
 
 /**
@@ -345,7 +332,7 @@ function narrowInputModalities(input: ReadonlyArray<string>): ModelInputModality
  * `cacheRetention` is portable vocabulary too and is deliberately NOT here. The
  * body is the CONTAINER's, so the agent picks its value, and Anthropic long
  * retention bills cache-creation tokens at 2× the input rate — a bucket the
- * platform's authoritative `computeTokenCost` has no term for. Forwarding it
+ * platform's ledger price (one `cacheWrite` rate) has no term for. Forwarding it
  * would let an aliased run make its own ledger row cheaper than the call it
  * made. `apps/api/test/unit/runner-cost-parity.test.ts` pins that as the
  * precondition for dropping pi-ai's `cacheWrite1h` branch.

@@ -459,8 +459,8 @@ describe("TokenBudget — context-window guard (#464)", () => {
   });
 
   it("clamps an impossible reserveTokens ≥ contextWindowTokens instead of throwing", () => {
-    // A corrupt catalog/override (max_output_tokens == context_window — a
-    // known LiteLLM data bug for devstral, kimi-k2.5, …) must degrade
+    // A corrupt catalog/override (max_output_tokens == context_window, as
+    // catalogs have reported for devstral, kimi-k2.5, …) must degrade
     // gracefully, never crash the sidecar at boot. The shared clamp drops
     // the impossible cap and derives a reserve strictly below the window.
     const b = new TokenBudget({

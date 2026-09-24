@@ -32,15 +32,6 @@ describe("buildRuntimePiEnv", () => {
     expect(env.MODEL_REASONING_LEVEL).toBe("xhigh");
   });
 
-  it("forwards provider-native reasoning level mappings", () => {
-    const env = buildRuntimePiEnv({
-      model: { ...model, reasoningLevelMap: { xhigh: "max" } },
-      agentPrompt: "p",
-      ...sidecar,
-    });
-    expect(env.MODEL_REASONING_LEVEL_MAP).toBe('{"xhigh":"max"}');
-  });
-
   it("omits generation controls to preserve Pi/provider defaults", () => {
     const env = buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar });
     expect(env.MODEL_TEMPERATURE).toBeUndefined();
@@ -111,14 +102,14 @@ describe("buildRuntimePiEnv", () => {
   // sidecar's URL, one of the two inputs Pi derives a provider's request shape
   // from. With only the api shape left, the container emitted plain-OpenAI
   // bytes at every provider and DeepSeek answered 400 (`unknown variant
-  // 'developer'`). The real provider key travels instead.
-  it("names the backing provider so the container keeps Pi's provider detection", () => {
+  // 'developer'`). The Pi provider key travels instead.
+  it("names the backing's Pi provider so the container keeps Pi's provider detection", () => {
     const env = buildRuntimePiEnv({
       model: {
         api: "openai-completions",
         modelId: "deepseek-chat",
         baseUrl: "https://api.deepseek.com/v1",
-        providerId: "deepseek",
+        piProvider: "deepseek",
         apiKey: "sk-secret",
         apiKeyPlaceholder: "sk-placeholder",
       },

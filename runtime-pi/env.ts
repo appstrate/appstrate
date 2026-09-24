@@ -17,15 +17,13 @@
 
 import { getErrorMessage } from "@appstrate/core/errors";
 import { normalizeHttpUrl } from "@appstrate/core/url";
-import { derivePiProvider } from "@appstrate/runner-pi/provider-map";
 import { parsePiLoopEnv } from "@appstrate/runner-pi/loop-env";
-import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
+import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
+import { buildPiModel } from "@appstrate/runner-pi/pi-model";
 import type { Api, Model } from "./pi-sdk.ts";
 import { MODEL_API_SHAPES, SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
 import {
-  modelNativeReasoningLevelSchema,
   modelReasoningLevelSchema,
-  type ModelNativeReasoningLevel,
   type ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
 import {
@@ -48,16 +46,13 @@ interface RuntimeEnv {
   /** Bearer key for the upstream LLM (placeholder when proxied). */
   modelApiKey?: string;
   /** Whether the model emits reasoning tokens. */
-  modelReasoning: boolean;
+  modelReasoning?: boolean;
   /** Explicit generation controls; absent preserves Pi's historical defaults. */
   modelTemperature?: number;
   modelReasoningLevel?: ModelReasoningLevel;
-  modelReasoningLevelMap?: Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>>;
   /**
-   * Appstrate model-provider id of the real upstream (`MODEL_PROVIDER`). On a
-   * proxied run `MODEL_BASE_URL` points at the sidecar, so this is what lets
-   * Pi still recognise the provider and emit its request shape. Absent on an
-   * older platform — the api shape's generic key is the fallback.
+   * Pi provider key of the real upstream (`MODEL_PROVIDER`): selects Pi's registry
+   * record and names the provider behind the sidecar. Absent for an alias or gateway.
    */
   modelProvider?: string;
   /** Pi SDK input modalities. */
@@ -215,25 +210,6 @@ function parseModelInput(
   return out.length > 0 ? out : ["text"];
 }
 
-function parseReasoningLevelMap(
-  raw: string | undefined,
-  issues: string[],
-): Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>> | undefined {
-  if (!raw) return undefined;
-  const parsed = parseJsonRecord("MODEL_REASONING_LEVEL_MAP", raw, issues);
-  const out: Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>> = {};
-  for (const [key, value] of Object.entries(parsed)) {
-    const portable = modelReasoningLevelSchema.safeParse(key);
-    const native = modelNativeReasoningLevelSchema.safeParse(value);
-    if (!portable.success || !native.success) {
-      issues.push(`MODEL_REASONING_LEVEL_MAP: invalid mapping "${key}" → "${String(value)}"`);
-      continue;
-    }
-    out[portable.data] = native.data;
-  }
-  return out;
-}
-
 function parseModelCost(
   raw: string | undefined,
   issues: string[],
@@ -274,6 +250,7 @@ function parseModelCost(
     }
     return v;
   };
+  // `tiers` dropped: summed usage is priced at the base rate (RUN_COST.md).
   return {
     input: num("input"),
     output: num("output"),
@@ -411,7 +388,6 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
       `MODEL_REASONING_LEVEL: invalid value "${source.MODEL_REASONING_LEVEL}" (allowed: ${modelReasoningLevelSchema.options.join(", ")})`,
     );
   }
-  const modelReasoningLevelMap = parseReasoningLevelMap(source.MODEL_REASONING_LEVEL_MAP, issues);
   // Optional: a 0 fallback means "absent" (parsePositiveNumber only returns it
   // for a missing var, or after pushing an issue for a malformed one). We map
   // 0 → undefined so an absent budget leaves runner-side enforcement off.
@@ -442,12 +418,11 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     modelId: modelId!,
     modelBaseUrl: modelBaseUrl || undefined,
     modelApiKey: source.MODEL_API_KEY || undefined,
-    modelReasoning: source.MODEL_REASONING === "true",
+    ...(source.MODEL_REASONING ? { modelReasoning: source.MODEL_REASONING === "true" } : {}),
     ...(modelTemperature !== undefined ? { modelTemperature } : {}),
     ...(modelReasoningLevel?.success
       ? { modelReasoningLevel: modelReasoningLevel.data as ModelReasoningLevel }
       : {}),
-    ...(modelReasoningLevelMap ? { modelReasoningLevelMap } : {}),
     ...(source.MODEL_PROVIDER ? { modelProvider: source.MODEL_PROVIDER } : {}),
     modelInput,
     ...(modelCost !== undefined ? { modelCost } : {}),
@@ -467,30 +442,22 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
 }
 
 /**
- * Build the Pi SDK `Model` record the session is driven with; its `provider` +
- * `baseUrl` decide the vendor request shape pi-ai emits.
+ * Build the Pi SDK `Model` record the session is driven with: Pi's record for
+ * `MODEL_PROVIDER` + `MODEL_ID`, under the platform's resolved values.
  */
 export function buildPiModelFromEnv(env: RuntimeEnv): Model<Api> {
-  return {
+  return buildPiModel({
     id: env.modelId,
-    name: env.modelId,
-    api: env.modelApi as Api,
-    // Pi re-derives each provider's request shape from `provider` + `baseUrl`.
+    registryModelId: env.modelId,
+    apiShape: env.modelApi,
     // An aliased container is given no MODEL_PROVIDER and must derive none: the
     // api-shape fallback yields Appstrate's own key, naming no vendor.
-    provider: derivePiProvider(env.modelProvider, env.modelApi),
+    piProvider: env.modelProvider,
     baseUrl: env.modelBaseUrl ?? "",
     reasoning: env.modelReasoning,
-    ...(env.modelReasoningLevelMap ? { thinkingLevelMap: env.modelReasoningLevelMap } : {}),
-    // One rule, one constant — see `PLATFORM_MODEL_COMPAT` for why long
-    // cache retention is refused and why refusing the ENV alone is not enough.
-    compat: { ...PLATFORM_MODEL_COMPAT },
-    input: [...env.modelInput],
-    // `Model.cost` is REQUIRED by the Pi SDK on every settled turn, so an unpriced
-    // run still hands it zeros; the runner's `unpriced` flag stops the 0 escaping.
-    // One spelling of those zeros — see `ZERO_MODEL_COST` for the second, very
-    // different reason the sidecar hands the same literal to pi-ai.
-    cost: env.modelCost ?? { ...ZERO_MODEL_COST },
+    input: env.modelInput,
+    // Absent: the runner's `unpriced` flag keeps the record's card unreported.
+    cost: env.modelCost,
     contextWindow: env.modelContextWindow,
     maxTokens: env.modelMaxTokens,
     // Agent→sidecar auth for the `/llm/*` leg, and the only place it can ride:
@@ -505,7 +472,7 @@ export function buildPiModelFromEnv(env: RuntimeEnv): Model<Api> {
     // Carried on the model rather than read from `process.env` at request time,
     // so the bootloader can delete the variable once the run is wired.
     ...(env.sidecarAuthToken ? { headers: { [SIDECAR_AUTH_HEADER]: env.sidecarAuthToken } } : {}),
-  };
+  });
 }
 
 /** Sink variables captured into {@link RuntimeEnv.sink} and then scrubbed. */

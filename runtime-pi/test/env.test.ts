@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
-import { parseRuntimeEnv, RuntimeEnvError, scrubSinkEnv } from "../env.ts";
+import { buildPiModelFromEnv, parseRuntimeEnv, RuntimeEnvError, scrubSinkEnv } from "../env.ts";
 
 const VALID = {
   AGENT_RUN_ID: "run_test123",
@@ -31,10 +31,9 @@ describe("parseRuntimeEnv — happy path", () => {
     expect(env.modelCost).toBeUndefined();
     expect(env.modelContextWindow).toBe(128_000);
     expect(env.modelMaxTokens).toBe(16_384);
-    expect(env.modelReasoning).toBe(false);
+    expect(env.modelReasoning).toBeUndefined();
     expect(env.modelTemperature).toBeUndefined();
     expect(env.modelReasoningLevel).toBeUndefined();
-    expect(env.modelReasoningLevelMap).toBeUndefined();
     expect(env.agentInput).toEqual({});
     expect(env.sidecarUrl).toBeUndefined();
     expect(env.modelApiKey).toBeUndefined();
@@ -61,7 +60,6 @@ describe("parseRuntimeEnv — happy path", () => {
       MODEL_REASONING: "true",
       MODEL_TEMPERATURE: "0",
       MODEL_REASONING_LEVEL: "xhigh",
-      MODEL_REASONING_LEVEL_MAP: '{"xhigh":"max"}',
       MODEL_PROVIDER: "deepseek",
       MODEL_INPUT: '["text","image"]',
       MODEL_COST: '{"input":1.5,"output":2.5,"cacheRead":0.5,"cacheWrite":0.7}',
@@ -81,7 +79,6 @@ describe("parseRuntimeEnv — happy path", () => {
     // On a proxied run this is the only thing left for Pi to recognise the
     // provider by — MODEL_BASE_URL points at the sidecar.
     expect(env.modelProvider).toBe("deepseek");
-    expect(env.modelReasoningLevelMap).toEqual({ xhigh: "max" });
     expect(env.modelInput).toEqual(["text", "image"]);
     expect(env.modelCost).toEqual({ input: 1.5, output: 2.5, cacheRead: 0.5, cacheWrite: 0.7 });
     expect(env.modelContextWindow).toBe(200_000);
@@ -151,6 +148,23 @@ describe("parseRuntimeEnv — non-fatal warnings", () => {
     expect(env.warnings).toEqual([]);
   });
 
+  it("drops MODEL_COST price tiers, like the server's runner row (RUN_COST.md)", () => {
+    const base = { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 0 };
+    const tiers = [
+      { inputTokensAbove: 272000, input: 5, output: 22.5, cacheRead: 0.5, cacheWrite: 0 },
+    ];
+    const env = parseRuntimeEnv({
+      ...VALID,
+      MODEL_API: "openai-responses",
+      MODEL_PROVIDER: "openai",
+      // Pi's record of this model carries the same tier: the base rate still wins.
+      MODEL_ID: "gpt-5.5",
+      MODEL_COST: JSON.stringify({ ...base, tiers }),
+    });
+    expect(env.modelCost).toEqual(base);
+    expect(buildPiModelFromEnv(env).cost).toEqual(base);
+  });
+
   it("keeps a malformed MODEL_COST FATAL — a present-but-broken value is a contract violation", () => {
     expect(() => parseRuntimeEnv({ ...VALID, MODEL_COST: "{bad}" })).toThrow(RuntimeEnvError);
   });
@@ -164,9 +178,6 @@ describe("parseRuntimeEnv — fail-fast errors", () => {
     expect(() => parseRuntimeEnv({ ...VALID, MODEL_REASONING_LEVEL: "maximum" })).toThrow(
       /MODEL_REASONING_LEVEL/,
     );
-    expect(() =>
-      parseRuntimeEnv({ ...VALID, MODEL_REASONING_LEVEL_MAP: '{"xhigh":"maximum"}' }),
-    ).toThrow(/MODEL_REASONING_LEVEL_MAP/);
   });
 
   it("collects every missing required field in one shot", () => {

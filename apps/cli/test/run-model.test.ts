@@ -191,6 +191,8 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
       needs_reconnection: false,
       source: "built-in",
       providerId: null,
+      pi_provider: null,
+      modelId: null,
       contextWindow: null,
       maxTokens: null,
       reasoning: null,
@@ -327,6 +329,95 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
         ],
       }),
     ).rejects.toThrow(/preset_dead_default.*can no longer be used/);
+  });
+
+  it("takes the dialect from Pi's record for the preset's upstream model", async () => {
+    const { model } = await resolvePresetModel({
+      profileName: "default",
+      instance: "https://app.example.com",
+      bearerToken: "ask_test",
+      orgId: "org_1",
+      presetsLoader: async () => [
+        makePreset({
+          id: "preset_native",
+          apiShape: "openai-completions",
+          providerId: "opencode-go",
+          pi_provider: "opencode-go",
+          modelId: "deepseek-v4-flash",
+        }),
+      ],
+    });
+    expect(model).toMatchObject({
+      id: "preset_native",
+      provider: "opencode-go",
+      compat: { thinkingFormat: "deepseek" },
+    });
+  });
+
+  it("builds from the record the platform-sent `pi_provider` names, record limits included", async () => {
+    const { model } = await resolvePresetModel({
+      profileName: "default",
+      instance: "https://app.example.com",
+      bearerToken: "ask_test",
+      orgId: "org_1",
+      presetsLoader: async () => [
+        makePreset({
+          id: "preset_ds",
+          apiShape: "openai-completions",
+          pi_provider: "opencode-go",
+          modelId: "deepseek-v4-pro",
+        }),
+      ],
+    });
+    expect(model).toMatchObject({
+      id: "preset_ds",
+      provider: "opencode-go",
+      compat: { thinkingFormat: "deepseek" },
+      contextWindow: 1_000_000,
+      maxTokens: 384_000,
+    });
+  });
+
+  it("lets a platform-sent limit win over the record's", async () => {
+    const { model } = await resolvePresetModel({
+      profileName: "default",
+      instance: "https://app.example.com",
+      bearerToken: "ask_test",
+      orgId: "org_1",
+      presetsLoader: async () => [
+        makePreset({
+          id: "preset_capped",
+          apiShape: "openai-completions",
+          pi_provider: "opencode-go",
+          modelId: "deepseek-v4-pro",
+          contextWindow: 500_000,
+          maxTokens: 16_000,
+        }),
+      ],
+    });
+    expect(model).toMatchObject({ contextWindow: 500_000, maxTokens: 16_000 });
+  });
+
+  it("builds a preset with no `pi_provider` without a record: preset id on the wire, no invented limits", async () => {
+    const { model } = await resolvePresetModel({
+      profileName: "default",
+      instance: "https://app.example.com",
+      bearerToken: "ask_test",
+      orgId: "org_1",
+      presetsLoader: async () => [
+        makePreset({
+          id: "preset_gateway",
+          apiShape: "openai-completions",
+          providerId: "opencode-go",
+          modelId: "deepseek-v4-pro",
+        }),
+      ],
+    });
+    expect(model.id).toBe("preset_gateway");
+    expect(model.provider).toBe("openai");
+    expect(model.compat).not.toHaveProperty("thinkingFormat");
+    expect(model.contextWindow).toBeUndefined();
+    expect(model.maxTokens).toBeUndefined();
   });
 
   it("rejects unsupported protocols with an actionable hint", async () => {

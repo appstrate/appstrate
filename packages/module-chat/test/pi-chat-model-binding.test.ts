@@ -3,6 +3,8 @@
 import { describe, expect, it } from "bun:test";
 import type { SubscriptionChatModel } from "@appstrate/core/chat-contract";
 import type { ExtensionAPI } from "@appstrate/runner-pi";
+import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
+import { getPiModel } from "@appstrate/runner-pi/pi-model";
 import type { OrgModel } from "../src/llm.ts";
 import {
   createPiOAuthModelBinding,
@@ -20,6 +22,7 @@ function orgModel(overrides: Partial<OrgModel> = {}): OrgModel {
     modelId: "upstream-model-must-stay-behind-proxy",
     apiShape: "openai-completions",
     providerId: "openai",
+    pi_provider: "openai",
     label: "Chat model",
     enabled: true,
     input: ["text"],
@@ -29,6 +32,15 @@ function orgModel(overrides: Partial<OrgModel> = {}): OrgModel {
     cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.25 },
     ...overrides,
   };
+}
+
+/** The proxy binding of `model`, under the Pi key the platform listed for it. */
+function proxyBinding(model: OrgModel, piProvider: string | null) {
+  return createPiProxyModelBinding({
+    model: { ...model, pi_provider: piProvider },
+    origin: ORIGIN,
+    mintBearer: () => "loopback",
+  });
 }
 
 function oauthModel(overrides: Partial<SubscriptionChatModel> = {}): SubscriptionChatModel {
@@ -61,16 +73,49 @@ describe("Pi chat model binding", () => {
   // a DeepSeek-backed preset went out with `role: "developer"` — a 400 there,
   // surfaced as "Le modèle a refusé la demande". The real provider key keeps
   // Pi's detection alive.
-  it("keeps the backing provider key on the proxied model", () => {
-    const binding = createPiProxyModelBinding({
-      model: orgModel({ providerId: "deepseek", modelId: "deepseek-chat" }),
-      origin: ORIGIN,
-      mintBearer: () => "loopback",
-    });
+  it("keeps the backing's Pi provider key on the proxied model", () => {
+    const binding = proxyBinding(
+      orgModel({ providerId: "moonshot", modelId: "kimi-k2.6" }),
+      "moonshotai",
+    );
 
-    expect(binding?.provider).toBe("deepseek");
-    expect(binding?.model.provider).toBe("deepseek");
+    expect(binding?.provider).toBe("moonshotai");
+    expect(binding?.model.provider).toBe("moonshotai");
     expect(binding?.model.baseUrl).toBe(`${ORIGIN}/api/llm-proxy/openai-completions/v1`);
+  });
+
+  // OpenCode Go is unknown to Pi's provider-level detection: the dialect comes
+  // from Pi's record for the upstream model, never the wire id.
+  it("takes the upstream model's dialect from Pi's registry, under the preset id", () => {
+    const bind = (reasoning: boolean | null) =>
+      proxyBinding(
+        orgModel({ providerId: "opencode-go", modelId: "deepseek-v4-flash", reasoning }),
+        "opencode-go",
+      )!.model;
+
+    expect(bind(null)).toMatchObject({
+      id: "preset_chat",
+      provider: "opencode-go",
+      reasoning: true,
+      compat: { thinkingFormat: "deepseek", supportsDeveloperRole: false },
+    });
+    expect(JSON.stringify(bind(null))).not.toContain("deepseek-v4-flash");
+    // An explicit platform value (org override, catalog) beats the record.
+    expect(bind(false).reasoning).toBe(false);
+  });
+
+  // A gateway names no Pi provider: the api shape's generic key, no record.
+  it("binds a gateway model to the api shape's generic key", () => {
+    const binding = proxyBinding(
+      orgModel({
+        providerId: "anthropic-compatible",
+        apiShape: "anthropic-messages",
+        modelId: "claude-fable-5",
+      }),
+      null,
+    );
+    expect(binding?.provider).toBe("anthropic");
+    expect(binding?.model.compat).toEqual({ ...PLATFORM_MODEL_COMPAT });
   });
 
   it("maps every API-key family to its native Pi serializer through llm-proxy", () => {
@@ -81,11 +126,8 @@ describe("Pi chat model binding", () => {
     ] as const;
 
     for (const [apiShape, baseUrl, provider] of cases) {
-      const binding = createPiProxyModelBinding({
-        model: orgModel({ apiShape }),
-        origin: ORIGIN,
-        mintBearer: () => "loopback",
-      });
+      // A provider's api shape comes from its own definition.
+      const binding = proxyBinding(orgModel({ apiShape, providerId: provider }), provider);
       expect(binding).toMatchObject({
         authMode: "proxy",
         provider,
@@ -99,13 +141,14 @@ describe("Pi chat model binding", () => {
   });
 
   it("adapts Anthropic and Codex subscriptions to the same binding contract", () => {
-    const anthropic = createPiOAuthModelBinding(oauthModel());
+    const anthropic = createPiOAuthModelBinding(oauthModel(), "anthropic");
     const codex = createPiOAuthModelBinding(
       oauthModel({
         modelId: "gpt-5.3-codex",
         apiShape: "openai-codex-responses",
         baseUrl: "https://chatgpt.com/backend-api",
       }),
+      "openai-codex",
     );
 
     expect(anthropic).toMatchObject({
@@ -126,6 +169,34 @@ describe("Pi chat model binding", () => {
     expect(JSON.stringify(codex.model)).not.toContain(codex.runtimeApiKey);
   });
 
+  // claude-code resolves to Pi's `anthropic` records: the record's dialect
+  // applies, the platform's refusals last (no fallbacks, no long retention).
+  it("gives a claude-code subscription the anthropic record's compat", () => {
+    const record = getPiModel("anthropic", "claude-fable-5", "anthropic-messages")!;
+    expect(record.compat).toHaveProperty("allowedFallbackModels");
+    const model = createPiOAuthModelBinding(
+      oauthModel({ modelId: "claude-fable-5" }),
+      "anthropic",
+    ).model;
+    expect(model.compat).toEqual({ ...record.compat, ...PLATFORM_MODEL_COMPAT });
+    expect(model.compat).toMatchObject({ forceAdaptiveThinking: true, allowedFallbackModels: [] });
+    expect(model.thinkingLevelMap).toEqual(record.thinkingLevelMap);
+  });
+
+  it("gives a codex subscription the openai-codex record's compat", () => {
+    const record = getPiModel("openai-codex", "gpt-5.5", "openai-codex-responses")!;
+    const model = createPiOAuthModelBinding(
+      oauthModel({
+        modelId: "gpt-5.5",
+        apiShape: "openai-codex-responses",
+        baseUrl: "https://chatgpt.com/backend-api",
+      }),
+      "openai-codex",
+    ).model;
+    expect(model.provider).toBe("openai-codex");
+    expect(model.compat).toEqual({ ...record.compat, ...PLATFORM_MODEL_COMPAT });
+  });
+
   it("resolves auth mode before the engine branch", () => {
     const proxy = resolvePiChatModelBinding({
       model: orgModel(),
@@ -134,7 +205,7 @@ describe("Pi chat model binding", () => {
       mintBearer: () => "loopback",
     });
     const oauth = resolvePiChatModelBinding({
-      model: orgModel({ apiShape: "anthropic-messages" }),
+      model: orgModel({ apiShape: "anthropic-messages", pi_provider: "anthropic" }),
       subscription: { subscription: true, model: oauthModel() },
       origin: ORIGIN,
       mintBearer: () => "unused",
@@ -195,7 +266,7 @@ describe("Pi chat model binding", () => {
       mintBearer: () => "loopback",
     });
     const oauth = resolvePiChatModelBinding({
-      model: orgModel({ apiShape: "anthropic-messages" }),
+      model: orgModel({ apiShape: "anthropic-messages", pi_provider: "anthropic" }),
       subscription: { subscription: true, model: oauthModel() },
       origin: ORIGIN,
       mintBearer: () => "unused",

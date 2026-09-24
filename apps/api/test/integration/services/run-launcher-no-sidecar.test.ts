@@ -127,6 +127,7 @@ function buildRunPlan(overrides: Partial<AppstrateRunPlan> = {}): AppstrateRunPl
     runToken: "test-run-token",
     llmConfig: {
       providerId: "anthropic",
+      piProvider: "anthropic",
       apiShape: "anthropic-messages",
       baseUrl: "https://api.anthropic.com",
       modelId: "claude-3-5-sonnet-latest",
@@ -193,6 +194,69 @@ describe("run-launcher — sidecar skip decision", () => {
     expect(env.MODEL_API_KEY).toBe("sk-test-secret");
   });
 
+  // The sidecar looks Pi's record up by the backing's Pi provider key — here
+  // one that differs from the Appstrate id (`moonshot`).
+  it("hands the sidecar the backing's Pi provider key", async () => {
+    const { orchestrator, counts } = createCountingFake();
+    await runPlatformContainer({
+      runId: "run_alias_provider",
+      context: buildContext("run_alias_provider"),
+      plan: buildRunPlan({
+        llmConfig: {
+          providerId: "moonshot",
+          piProvider: "moonshotai",
+          apiShape: "openai-completions",
+          baseUrl: "https://api.moonshot.ai/v1",
+          modelId: "kimi-k2.6",
+          apiKey: "sk-real-secret",
+          label: "Appstrate Kimi",
+          isSystemModel: true,
+          aliased: true,
+          aliasId: "appstrate-kimi",
+        },
+      }),
+      sinkCredentials: mintSinkCredentials({
+        runId: "run_alias_provider",
+        appUrl: "http://platform:3000",
+        ttlSeconds: 60,
+      }),
+      orchestrator,
+    });
+    const llm = counts.capturedSidecarSpec?.llm;
+    if (llm?.authMode !== "api_key") throw new Error(`expected api_key llm, got ${llm?.authMode}`);
+    expect(llm.modelSwap?.backing?.providerId).toBe("moonshotai");
+  });
+
+  it("hands a non-aliased container the Pi provider key, not the Appstrate id", async () => {
+    const { orchestrator, counts } = createCountingFake();
+    await runPlatformContainer({
+      runId: "run_pi_key",
+      context: buildContext("run_pi_key"),
+      plan: buildRunPlan({
+        proxyUrl: "http://proxy.test:8080",
+        llmConfig: {
+          providerId: "moonshot",
+          piProvider: "moonshotai",
+          apiShape: "openai-completions",
+          baseUrl: "https://api.moonshot.ai/v1",
+          modelId: "kimi-k2.6",
+          apiKey: "sk-real-secret",
+          label: "Kimi",
+          isSystemModel: false,
+          aliased: false,
+          aliasId: "kimi-k2.6",
+        },
+      }),
+      sinkCredentials: mintSinkCredentials({
+        runId: "run_pi_key",
+        appUrl: "http://platform:3000",
+        ttlSeconds: 60,
+      }),
+      orchestrator,
+    });
+    expect(counts.capturedAgentEnv?.MODEL_PROVIDER).toBe("moonshotai");
+  });
+
   it("forces the sidecar for a model alias and wires the swap + alias MODEL_ID (api-key, no integrations)", async () => {
     const { orchestrator, counts } = createCountingFake();
 
@@ -204,6 +268,7 @@ describe("run-launcher — sidecar skip decision", () => {
       plan: buildRunPlan({
         llmConfig: {
           providerId: "deepseek",
+          piProvider: "deepseek",
           apiShape: "openai-completions",
           baseUrl: "https://api.deepseek.com/v1",
           modelId: "deepseek-chat", // the hidden backing
@@ -236,7 +301,8 @@ describe("run-launcher — sidecar skip decision", () => {
       // and re-originates against the backing, which needs the backing catalog.
       clientApiShape: "pi-messages",
       backingApiShape: "openai-completions",
-      backing: { providerId: "deepseek", reasoning: false, input: ["text"] },
+      // No `reasoning`: unknown stays unset so Pi's record decides.
+      backing: { providerId: "deepseek", input: ["text"] },
     });
 
     // The container is handed the ALIAS as MODEL_ID; the real backing id and
@@ -257,6 +323,7 @@ describe("run-launcher — sidecar skip decision", () => {
       plan: buildRunPlan({
         llmConfig: {
           providerId: "deepseek",
+          piProvider: "deepseek",
           apiShape: "openai-completions",
           baseUrl: "https://api.deepseek.com/v1",
           modelId: "deepseek-chat",
@@ -312,6 +379,7 @@ describe("run-launcher — sidecar skip decision", () => {
       plan: buildRunPlan({
         llmConfig: {
           providerId: "deepseek",
+          piProvider: "deepseek",
           apiShape: "openai-completions",
           baseUrl: "https://api.deepseek.com/v1",
           modelId: "deepseek-chat",
@@ -342,7 +410,9 @@ describe("run-launcher — sidecar skip decision", () => {
     );
   });
 
-  it("keeps adaptive Anthropic reasoning private and restores it in the sidecar", async () => {
+  // Pi's record of the backing carries its dialect (adaptive thinking, native
+  // levels): the descriptor names only the Pi key, the container nothing.
+  it("hands the sidecar no dialect of its own for an adaptive Anthropic backing", async () => {
     const { orchestrator, counts } = createCountingFake();
 
     await runPlatformContainer({
@@ -352,6 +422,7 @@ describe("run-launcher — sidecar skip decision", () => {
         generationConfig: { reasoning_level: "max" },
         llmConfig: {
           providerId: "anthropic",
+          piProvider: "anthropic",
           apiShape: "anthropic-messages",
           baseUrl: "https://api.anthropic.com",
           modelId: "claude-sonnet-4-6",
@@ -361,16 +432,6 @@ describe("run-launcher — sidecar skip decision", () => {
           aliased: true,
           aliasId: "appstrate-adaptive",
           reasoning: true,
-          generation: {
-            temperature: "supported",
-            reasoning: {
-              supported: "supported",
-              temperature_compatible: "unsupported",
-              adaptive: true,
-              levels: { max: "supported" },
-              native_levels: { max: "max" },
-            },
-          },
         },
       }),
       sinkCredentials: mintSinkCredentials({
@@ -388,21 +449,13 @@ describe("run-launcher — sidecar skip decision", () => {
       real: "claude-sonnet-4-6",
       clientApiShape: "pi-messages",
       backingApiShape: "anthropic-messages",
-      backing: {
-        providerId: "anthropic",
-        reasoning: true,
-        // The vendor's native effort vocabulary — no longer emitted into the
-        // container, applied by the sidecar when it re-originates.
-        reasoningLevelMap: { max: "max" },
-        input: ["text"],
-      },
-      anthropicAdaptiveReasoning: { effort: "max" },
+      backing: { providerId: "anthropic", reasoning: true, input: ["text"] },
     });
 
     const env = counts.capturedAgentEnv ?? {};
     expect(env.MODEL_ID).toBe("appstrate-adaptive");
+    expect(env).not.toHaveProperty("MODEL_PROVIDER");
     expect(JSON.stringify(env)).not.toContain("claude-sonnet-4-6");
-    expect(env).not.toHaveProperty("MODEL_REASONING_ADAPTIVE");
   });
 
   it("creates the sidecar when the plan declares at least one integration", async () => {
@@ -475,6 +528,7 @@ describe("run-launcher — sidecar skip decision", () => {
       plan: buildRunPlan({
         llmConfig: {
           providerId: "openai",
+          piProvider: "openai",
           apiShape: "openai-completions",
           baseUrl: "https://api.openai.com",
           modelId: "gpt-4o",

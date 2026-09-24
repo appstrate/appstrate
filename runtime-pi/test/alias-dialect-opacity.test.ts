@@ -7,8 +7,8 @@
  * The requirement: an org member who ACTIVELY looks must not be able to
  * identify the backing vendor from any Appstrate surface. They control the
  * agent code, so the observable is the RAW BYTES on the wire, and pi-ai
- * re-derives every vendor quirk per request from `model.provider` +
- * `model.baseUrl` — `developer` vs `system` roles, `max_completion_tokens` vs
+ * shapes every request from `model.provider`, `model.baseUrl` and Pi's registry
+ * record — `developer` vs `system` roles, `max_completion_tokens` vs
  * `max_tokens`, each vendor's thinking dialect.
  *
  * BEHAVIORAL on purpose: it captures the real payload through pi-ai's own
@@ -31,13 +31,12 @@ import type { Api, Model } from "../pi-sdk.ts";
 
 /** A platform backing an alias could be bound to. */
 interface Backing {
-  providerId: string;
+  piProvider: string;
   apiShape: ModelApiShape;
   modelId: string;
   baseUrl: string;
   contextWindow: number;
   maxTokens: number;
-  reasoningLevelMap: Record<string, string>;
 }
 
 /**
@@ -48,49 +47,44 @@ interface Backing {
  */
 const BACKINGS: Backing[] = [
   {
-    providerId: "deepseek",
+    piProvider: "deepseek",
     apiShape: "openai-completions",
     modelId: "deepseek-chat",
     baseUrl: "https://api.deepseek.com/v1",
     contextWindow: 131_072,
     maxTokens: 8_192,
-    reasoningLevelMap: { high: "high" },
   },
   {
-    providerId: "zai",
+    piProvider: "zai",
     apiShape: "openai-completions",
     modelId: "glm-5",
     baseUrl: "https://api.z.ai/api/paas/v4",
     contextWindow: 200_000,
     maxTokens: 32_768,
-    reasoningLevelMap: { high: "xhigh" },
   },
   {
-    providerId: "openai",
+    piProvider: "openai",
     apiShape: "openai-responses",
     modelId: "gpt-5",
     baseUrl: "https://api.openai.com/v1",
     contextWindow: 400_000,
     maxTokens: 128_000,
-    reasoningLevelMap: { high: "high", medium: "medium" },
   },
   {
-    providerId: "anthropic",
+    piProvider: "anthropic",
     apiShape: "anthropic-messages",
     modelId: "claude-sonnet-4-6",
     baseUrl: "https://api.anthropic.com",
     contextWindow: 200_000,
     maxTokens: 64_000,
-    reasoningLevelMap: { high: "high", max: "max" },
   },
   {
-    providerId: "mistral",
+    piProvider: "mistral",
     apiShape: "mistral-conversations",
     modelId: "mistral-large-latest",
     baseUrl: "https://api.mistral.ai",
     contextWindow: 128_000,
     maxTokens: 8_192,
-    reasoningLevelMap: { high: "high" },
   },
 ];
 
@@ -122,14 +116,13 @@ function containerModelFor(
       api: backing.apiShape,
       modelId: aliased ? ALIAS_ID : backing.modelId,
       baseUrl: backing.baseUrl,
-      providerId: backing.providerId,
+      piProvider: backing.piProvider,
       apiKey: "sk-real-key",
       apiKeyPlaceholder: "sk-placeholder",
       input: ["text"],
       contextWindow: backing.contextWindow,
       maxTokens: backing.maxTokens,
       reasoning: true,
-      reasoningLevelMap: backing.reasoningLevelMap,
       cost: { input: 0.28, output: 0.42 },
       aliased,
     },
@@ -172,14 +165,12 @@ describe("aliased container env", () => {
       const { env } = containerModelFor(backing, true);
       expect(env.MODEL_API).toBe("pi-messages");
       expect(env.MODEL_ID).toBe(ALIAS_ID);
-      // The variables that would name the vendor outright, or spell out its
-      // native effort vocabulary or its rate card.
+      // The variables that would name the vendor outright, or its rate card.
       expect(env).not.toHaveProperty("MODEL_PROVIDER");
-      expect(env).not.toHaveProperty("MODEL_REASONING_LEVEL_MAP");
       expect(env).not.toHaveProperty("MODEL_COST");
       // Nothing anywhere in the environment spells the backing out.
       const serialized = JSON.stringify(env);
-      expect(serialized).not.toContain(backing.providerId);
+      expect(serialized).not.toContain(backing.piProvider);
       expect(serialized).not.toContain(backing.modelId);
       expect(serialized).not.toContain(new URL(backing.baseUrl).hostname);
     }
@@ -197,18 +188,18 @@ describe("aliased container env", () => {
 
 describe("aliased container wire shape", () => {
   it("is byte-identical across every backing vendor", async () => {
-    const payloads: Array<{ providerId: string; payload: Record<string, unknown> }> = [];
+    const payloads: Array<{ piProvider: string; payload: Record<string, unknown> }> = [];
     for (const backing of BACKINGS) {
       const { model } = containerModelFor(backing, true);
-      payloads.push({ providerId: backing.providerId, payload: await payloadFor(model) });
+      payloads.push({ piProvider: backing.piProvider, payload: await payloadFor(model) });
     }
 
     // Compare every backing against the first. Reported with the provider id
     // attached so a failure names WHICH vendor started varying.
     const [reference, ...rest] = payloads;
     for (const other of rest) {
-      expect({ providerId: other.providerId, payload: other.payload }).toEqual({
-        providerId: other.providerId,
+      expect({ piProvider: other.piProvider, payload: other.payload }).toEqual({
+        piProvider: other.piProvider,
         payload: reference!.payload,
       });
     }
@@ -244,8 +235,8 @@ describe("aliased container wire shape", () => {
     for (const key of Object.keys(options)) expect(PI_MESSAGES_OPTIONS).toContain(key);
 
     // And the one portable knob that did travel carries the PORTABLE level,
-    // not the backing's native mapping of it (`{high: "xhigh"}` for z.ai,
-    // `{high: "high"}` for DeepSeek — that table stayed server-side).
+    // not the backing's native mapping of it — that lives in Pi's record of
+    // the backing, read sidecar-side only.
     expect(options["reasoning"]).toBe("high");
   });
 
@@ -256,7 +247,7 @@ describe("aliased container wire shape", () => {
     // (`developer` role, `max_completion_tokens`).
     const deepseek = await payloadFor(containerModelFor(BACKINGS[0]!, false).model);
     const openaiCompatible = await payloadFor(
-      containerModelFor({ ...BACKINGS[0]!, providerId: "openai" }, false).model,
+      containerModelFor({ ...BACKINGS[0]!, piProvider: "openai" }, false).model,
     );
     expect(deepseek).not.toEqual(openaiCompatible);
   });

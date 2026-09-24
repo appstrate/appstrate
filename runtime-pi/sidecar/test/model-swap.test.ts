@@ -67,16 +67,14 @@ describe("parseModelSwapEnv", () => {
     expect(parseModelSwapEnv(JSON.stringify(wellFormed))).toEqual(wellFormed);
   });
 
-  it("keeps the optional adaptive-reasoning correction", () => {
-    const adaptive = {
-      alias: "appstrate-adaptive",
-      real: "claude-sonnet-4-6",
-      clientApiShape: "pi-messages" as const,
-      backingApiShape: "anthropic-messages" as const,
-      backing: { providerId: "anthropic", reasoning: true, input: ["text"] },
-      anthropicAdaptiveReasoning: { effort: "max" as const },
+  it("accepts a gateway backing, which names no Pi provider", () => {
+    const gateway = {
+      ...wellFormed,
+      backing: { providerId: null, reasoning: false, input: ["text"] },
     };
-    expect(parseModelSwapEnv(JSON.stringify(adaptive))).toEqual(adaptive);
+    expect(parseModelSwapEnv(JSON.stringify(gateway))).toEqual(gateway);
+    const blank = { ...wellFormed, backing: { ...gateway.backing, providerId: " " } };
+    expect(() => parseModelSwapEnv(JSON.stringify(blank))).toThrow(/backing\.providerId/);
   });
 
   it("keeps a re-origination descriptor whole", () => {
@@ -91,7 +89,6 @@ describe("parseModelSwapEnv", () => {
       backing: {
         providerId: "deepseek",
         reasoning: true,
-        reasoningLevelMap: { high: "high" as const },
         input: ["text"],
       },
     };
@@ -163,9 +160,18 @@ describe("parseModelSwapEnv", () => {
     ).toThrow(/"backing.providerId"/);
     expect(() =>
       parseModelSwapEnv(
-        JSON.stringify({ ...base, backing: { providerId: "deepseek", input: ["text"] } }),
+        JSON.stringify({
+          ...base,
+          backing: { providerId: "deepseek", reasoning: "yes", input: ["text"] },
+        }),
       ),
     ).toThrow(/"backing.reasoning"/);
+    // Absent = unknown: the sidecar's builder lets Pi's record decide.
+    expect(
+      parseModelSwapEnv(
+        JSON.stringify({ ...base, backing: { providerId: "deepseek", input: ["text"] } }),
+      ).backing,
+    ).not.toHaveProperty("reasoning");
     expect(() =>
       parseModelSwapEnv(
         JSON.stringify({ ...base, backing: { providerId: "deepseek", reasoning: false } }),

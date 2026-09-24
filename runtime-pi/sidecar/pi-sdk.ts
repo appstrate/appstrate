@@ -7,8 +7,7 @@
  * `runtime-pi/sidecar/*.ts`. It carries pi-ai to terminate an aliased run's
  * `pi-messages` and re-originate against the real backing, so vendor quirks stay
  * derived by pi-ai rather than mirrored here (`MODEL_ALIASES.md`). `./api/*`
- * subpaths, not the root or `/compat`: those pull pi-ai's generated provider
- * catalog, hundreds of KB never read here (`SUPPLY_CHAIN.md`).
+ * subpaths; the model registry comes via runner-pi's `pi-model`.
  */
 
 import { streamSimple as anthropicMessages } from "@earendil-works/pi-ai/api/anthropic-messages";

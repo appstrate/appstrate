@@ -48,10 +48,11 @@ mechanism that closed the first half is the next three sections.
 
 ## The canonical dialect
 
-pi-ai re-derives every vendor quirk **per request** from `model.provider` +
-`model.baseUrl` (`getCompat` / `detectCompat`). A container handed the real
-provider id therefore emits that vendor's own request shape and reads its own
-response frames back — `reasoning_content` vs `reasoning`,
+pi-ai derives every vendor quirk **per request** from `model.compat` — which
+the platform fills from Pi's registry record for the real model — else from
+`model.provider` + `model.baseUrl` (`getCompat` / `detectCompat`). A container
+handed the real provider id therefore emits that vendor's own request shape and
+reads its own response frames back — `reasoning_content` vs `reasoning`,
 `prompt_cache_hit_tokens` vs `prompt_tokens_details.cached_tokens`, and fields
 pi-ai never even reads (`system_fingerprint` appears nowhere in it) that still
 cross the wire. Renaming identifying fields would be a **blacklist over a set
@@ -85,13 +86,14 @@ The **sidecar** is the `pi-messages` backend. An aliased run's inference call is
 the same `/llm/*` handler the surface allowlist already guards, reusing its
 placeholder→real-key swap and SSRF check — deserialises `{model, context,
 options}`, rebuilds the REAL backing's pi-ai `Model` record from the private
-swap descriptor, calls pi-ai's own `streamSimple`, and projects the resulting
+swap descriptor and Pi's registry record for it (`backing.providerId` is the
+Pi provider key, `null` for a gateway), calls pi-ai's own `streamSimple`, and projects the resulting
 `AssistantMessageEvent`s down to `PiMessagesEvent`s. Everything else in that
 handler (header swap, body forward, response passthrough) serves non-aliased
-runs only. **No quirk table is mirrored anywhere**: `detectCompat` and every
-per-vendor serializer keep running inside pi-ai, one process to the left of the
-container. The projection is a whitelist (each outbound event built field by
-field, never a spread) because pi-ai's `partial` carries `api`, `provider` and
+runs only. **No quirk table is mirrored anywhere**: Pi's registry, `detectCompat`
+and every per-vendor serializer keep running inside pi-ai, one process to the
+left of the container. The projection is a whitelist (each outbound event built
+field by field, never a spread) because pi-ai's `partial` carries `api`, `provider` and
 the real model id on every single event, and because a spread would ship the
 next pi-ai version's new field to the container silently.
 
@@ -153,8 +155,17 @@ the alias never reaches upstream. Two layers hide the backing from users:
    context window, provider-native generation mappings, and every other
    identifying catalog field from user-facing reads. It keeps only the
    normalized portable generation support vector required for safe UI controls;
-   unknown support is projected as unsupported. This vector can narrow the set
-   of possible backing models, an accepted limitation of making aliases
+   unknown support is projected as unsupported. Reasoning levels are NOT the
+   backing's (its set fingerprints the family — DeepSeek V4 takes
+   `off/low/high/max`): a reasoning alias always offers Pi's default set
+   `off, minimal, low, medium, high`, and that is what every surface validates
+   against (`/api/models`, the loopback listing, `resolveModel`). The run
+   clamps the chosen level to the backing's nearest with Pi's
+   `clampThinkingLevel` (`clampToBackingLevel`, applied to the plan only — the
+   run row keeps the requested level) because the container never learns the
+   backing; the chat's Pi session clamps against the backing record it is
+   given. The temperature/reasoning support bits still narrow the set of
+   possible backing models, an accepted limitation of making aliases
    configurable without revealing their exact binding. The operator
    create/update responses keep the full shape.
 2. **Inference-path handling** (`@appstrate/core/model-swap`) — different on the
@@ -167,13 +178,11 @@ the alias never reaches upstream. Two layers hide the backing from users:
      rewrites `model` alias→real on the request and real→alias on every
      response branch, including the cached body.
 
-For an adaptive Anthropic backing, an agent-side Pi session cannot infer the
-transport from the public alias id, so the run launcher records the fact on the
-sidecar's private swap descriptor (`anthropicAdaptiveReasoning`). The sidecar
-sets pi-ai's `compat.forceAdaptiveThinking` on the rebuilt Model and pi-ai emits
-the adaptive shape itself, resolving the effort from the backing's own
-`thinkingLevelMap`. Neither the backing id nor the adaptive flag enters the
-agent container.
+For an adaptive Anthropic backing, the sidecar's rebuilt Model takes
+`compat.forceAdaptiveThinking` and the effort mapping (`thinkingLevelMap`) from
+Pi's registry record for the real id; the agent-side session, which sees only
+the public alias id, needs neither. Neither the backing id nor its dialect
+enters the agent container.
 
 The usage ledger (`llm_usage`) keeps the real id privately in `real_model` for
 billing/audit; the module-facing service accessor (`listLlmUsage`, exposed as
@@ -324,17 +333,6 @@ the create/update API and `SYSTEM_PROVIDER_KEYS` are the two paths. Aliased
 custom rows can be deleted in the UI but not edited (the projected binding can't
 round-trip — edit via the API or env).
 
-### 3. Hide the backing from the featured-models picker
-
-The weekly `scripts/refresh-pricing-catalog.ts` regenerates the featured list.
-Aliased **system-key** backings are excluded automatically. For **DB-row**
-alias backings, add the real id to `FEATURED_MODELS_EXCLUDE` (comma-separated)
-so the offline generator drops it:
-
-```sh
-FEATURED_MODELS_EXCLUDE="deepseek-chat,some-other-backing"
-```
-
 ## Deployment ordering
 
 The platform and the runtime images (`appstrate-pi`, the sidecar) implement two
@@ -467,17 +465,17 @@ are the kind of leak worth fixing precisely because they are cheap to fix.
 
 Ordered by how cheap the attack is. The first item needs no prompt at all.
 
-1. **The `apiShape` route-family oracle — structural, pre-prompt, ~3 requests.**
+1. **The `apiShape` route-family oracle — structural, pre-prompt, ~4 requests.**
    The gateway mounts one route per protocol family from `LLM_PROXY_ROUTES`
    (`packages/runner-pi/src/llm-proxy-routes.ts:63`) — `openai-completions`,
-   `anthropic-messages`, `mistral-conversations`. `resolvePresetForOrg`
-   (`apps/api/src/services/llm-proxy/core.ts:358`) rejects a preset whose real
+   `openai-responses`, `anthropic-messages`, `mistral-conversations`.
+   `resolvePresetForOrg` (`apps/api/src/services/llm-proxy/core.ts`) rejects a preset whose real
    `apiShape` is not the route's, so posting the same alias id to each route in
    turn answers "wrong family" (400) on all but one. The 400's _message_ is
    masked for an alias — `LlmProxyModelApiMismatchError` deliberately omits
    `actual` — but masking the message does not mask the **signal**: 400-versus-
-   proceed is itself the answer, and three families are separated in at most
-   three requests (two, then inference by elimination). The repo's own
+   proceed is itself the answer, and four families are separated in at most
+   four requests (three, then inference by elimination). The repo's own
    `apps/api/test/integration/routes/llm-proxy.test.ts` asserts both halves of
    that oracle, one test apart, while believing it closed.
    `projectAliasedModel` nulling `apiShape` on the DTO does not touch it. **The
@@ -596,7 +594,7 @@ Two options, both real, neither free.
 
 **Option 1 — refuse aliases on the vendor-shaped gateway routes.**
 `resolvePresetForOrg` gains an alias check before the `apiShape` comparison and
-rejects any aliased preset with a single neutral error, identically on all three
+rejects any aliased preset with a single neutral error, identically on all four
 routes. Files: `apps/api/src/services/llm-proxy/core.ts` (the check),
 `apps/api/src/openapi/paths/llm-proxy.ts` (document the refusal),
 `apps/api/test/integration/routes/llm-proxy.test.ts` (the existing masking test
@@ -611,7 +609,7 @@ becomes a refusal test).
 
 **Option 2 — serve one closed client dialect on the gateway.** Mount a single
 alias route speaking `pi-messages` — the vendor-neutral dialect the sidecar
-already terminates and re-originates — and refuse aliases on the three
+already terminates and re-originates — and refuse aliases on the four
 vendor-shaped routes. Files: `apps/api/src/routes/llm-proxy.ts` (mount),
 a new gateway-side `pi-messages` backend mirroring
 `runtime-pi/sidecar/pi-messages-backend.ts`, plus the same three files as
@@ -660,9 +658,8 @@ Everything an aliased run's container is handed, and nothing else:
 | success response body                       | `text_delta`, `done`                | closed pi-messages union — no vendor vocabulary |
 | signature fields on that body               | `redacted: true`                    | opaque values, but not every backing emits them |
 
-`MODEL_PROVIDER`, `MODEL_REASONING_LEVEL_MAP` and `MODEL_COST` are **not**
-emitted for an alias. The provider key and the native effort table name the
-vendor outright; a published `{"input":0.28,"output":0.42}` is one catalog
+`MODEL_PROVIDER` and `MODEL_COST` are **not** emitted for an alias. The
+provider key names the vendor outright; a published `{"input":0.28,"output":0.42}` is one catalog
 lookup from a vendor name. The container reports **no cost** in return, not a
 fabricated `0` — the ledger reads a null reported cost as "nothing to compare"
 and prices the row itself from `runs.model_cost` × the reported token counts, so

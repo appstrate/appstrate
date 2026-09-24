@@ -15,7 +15,13 @@ import { describe, expect, it } from "bun:test";
 import { pickModel, type OrgModel } from "../src/llm.ts";
 
 function model(id: string, over: Partial<OrgModel> = {}): OrgModel {
-  return { id, modelId: `upstream-${id}`, apiShape: "openai-completions", ...over };
+  return {
+    id,
+    modelId: `upstream-${id}`,
+    apiShape: "openai-completions",
+    pi_provider: null,
+    ...over,
+  };
 }
 
 describe("pickModel liveness", () => {

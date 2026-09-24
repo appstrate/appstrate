@@ -10,7 +10,6 @@
  */
 
 import type { IntegrationManifest } from "./integration.ts";
-import type { ModelNativeReasoningLevel, ModelReasoningLevel } from "./model-generation.ts";
 
 /**
  * Manifest `auths.{key}.delivery.http` block — the header-render config the
@@ -590,8 +589,6 @@ export type ModelApiShape = (typeof MODEL_API_SHAPES)[number];
  * Matching is by exact value at the known JSON locations (top-level `model`,
  * and `message.model` for Anthropic `message_start`), never a blind string
  * replace — so a model id mentioned inside generated content is never clobbered.
- * For an adaptive Anthropic backing, the private descriptor can also restore
- * the adaptive `thinking` shape that Pi cannot infer from the public alias.
  */
 export interface ModelSwap {
   /** Public alias id the agent sends (its `MODEL_ID`). */
@@ -615,15 +612,6 @@ export interface ModelSwap {
    * exactly when `clientApiShape !== backingApiShape`; enforced at sidecar boot.
    */
   backing?: ModelSwapBacking;
-  /**
-   * Request-scoped Anthropic transport correction for an adaptive backing.
-   * Pi cannot infer adaptive support from a hidden alias id, so the sidecar
-   * restores the catalogued request shape without exposing this fact to the
-   * agent container.
-   */
-  anthropicAdaptiveReasoning?: {
-    effort: Exclude<ModelNativeReasoningLevel, "none">;
-  };
 }
 
 /**
@@ -632,14 +620,13 @@ export interface ModelSwap {
  */
 export interface ModelSwapBacking {
   /**
-   * pi provider key of the real vendor. Drives pi-ai's per-vendor request
-   * shaping, which on an aliased run happens here, not in the container.
+   * Pi provider key of the real vendor, or `null` for a gateway Pi keeps no
+   * record of. Selects the Pi registry record — dialect, thinking levels —
+   * the sidecar re-originates with; the container never sees it.
    */
-  providerId: string;
-  /** Whether the backing supports extended thinking at all. */
-  reasoning: boolean;
-  /** Native thinking-level mapping; the container receives only the portable level. */
-  reasoningLevelMap?: Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>>;
+  providerId: string | null;
+  /** Whether the backing supports extended thinking; absent = unknown, Pi's record decides. */
+  reasoning?: boolean;
   /** Input modalities the backing accepts — pi-ai gates image content on them. */
   input: ReadonlyArray<string>;
 }

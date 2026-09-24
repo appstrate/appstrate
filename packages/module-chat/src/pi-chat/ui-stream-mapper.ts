@@ -58,8 +58,8 @@ interface OpenBlock {
  *
  * Deliberately carries NO dollar figure. Metering is the ledger writer's job:
  * the engine hands the platform seam the raw token counts + the model's catalog
- * rates and lets it apply the shared `computeTokenCost` formula, so the chat,
- * proxy, and runner producers can't drift (see `ChatUsageRecord.cost` in
+ * rates and lets it apply the shared ledger price (Pi's `calculateCost`), so the
+ * chat, proxy, and runner producers can't drift (see `ChatUsageRecord.cost` in
  * `@appstrate/core/chat-contract` and `engine.ts`'s `recordUsage` call).
  * `usage.cost` still carries pi-ai's own per-bucket figures verbatim — they are
  * informational and are never billed.

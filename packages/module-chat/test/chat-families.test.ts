@@ -45,7 +45,7 @@ const ORIGIN = "http://127.0.0.1:3000";
 const ALL_API_SHAPES = Object.keys(PROVIDER_BY_API);
 
 function model(apiShape: string): OrgModel {
-  return { id: "preset_1", modelId: "upstream-model", apiShape };
+  return { id: "preset_1", modelId: "upstream-model", apiShape, pi_provider: null };
 }
 
 function bind(apiShape: string) {

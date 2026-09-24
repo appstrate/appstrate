@@ -64,10 +64,10 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 #                                             pino-compatible line (import-free)
 #   - @earendil-works/pi-ai (npm, via     re-originates an aliased run's call against
 #     the `pi-sdk.ts` barrel)             the real backing, so pi-ai keeps deriving
-#                                         every vendor quirk itself. Only the five
+#                                         every vendor quirk itself: the five
 #                                         `./api/*` subpaths an alias can be backed
-#                                         by — the package root would pull its whole
-#                                         provider catalog.
+#                                         by, plus its registry (`./providers/all`,
+#                                         via `@appstrate/runner-pi/pi-model`).
 #   - @appstrate/runner-pi/runtime-tools      canonical run_history / recall_memory
 #                                             descriptors (name + description +
 #                                             parameter JSON Schema), imported by
