@@ -90,13 +90,6 @@ function warnOnSdkDrift(request: Request): void {
 }
 
 /**
- * Default response cap when the platform resolved none. pi-ai falls back to
- * `model.maxTokens` when the caller sends no cap, so it has to be real; 16384
- * is pi's own default for a definition that declares none.
- */
-const PI_DEFAULT_MAX_TOKENS = 16_384;
-
-/**
  * The zeros of {@link ZERO_MODEL_COST} in `Usage.cost` shape (which adds the
  * `total` roll-up). Here they are load-bearing opacity, not filler — see
  * {@link buildBackingModel} and the constant's own docblock.
@@ -309,9 +302,9 @@ export function buildBackingModel(deps: PiMessagesBackendDeps): Model<Api> {
     // Explicit, so the record's card never applies: the disclosure control above.
     cost: ZERO_MODEL_COST,
     // The REAL limits: `maxTokens` is the upstream response cap, `contextWindow`
-    // sizes pi-ai's clamp, and a zero window is pi-ai's "do not clamp" sentinel.
-    contextWindow: limits.modelContextWindow ?? 0,
-    maxTokens: limits.modelMaxTokens ?? PI_DEFAULT_MAX_TOKENS,
+    // sizes pi-ai's clamp; absent, `buildPiModel` sizes them as for the container.
+    contextWindow: limits.modelContextWindow,
+    maxTokens: limits.modelMaxTokens,
   });
 }
 

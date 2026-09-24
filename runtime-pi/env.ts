@@ -63,10 +63,10 @@ interface RuntimeEnv {
    * names the vendor). Absent means the run reports no cost, never a fake 0.
    */
   modelCost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
-  /** Pi SDK context window in tokens. */
-  modelContextWindow: number;
-  /** Pi SDK max completion tokens. */
-  modelMaxTokens: number;
+  /** Pi SDK context window in tokens; absent → `buildPiModel` sizes it. */
+  modelContextWindow?: number;
+  /** Pi SDK max completion tokens; absent → `buildPiModel` sizes it. */
+  modelMaxTokens?: number;
   /** Full enriched system prompt. */
   agentPrompt: string;
   /** Optional user input — JSON-decoded, defaults to `{}` on absent or malformed. */
@@ -129,9 +129,6 @@ interface RuntimeEnv {
    */
   warnings: string[];
 }
-
-const DEFAULT_CONTEXT_WINDOW = 128_000;
-const DEFAULT_MAX_TOKENS = 16_384;
 
 // Fixed timings, deliberately NOT operator knobs. Both were parsed from
 // `APPSTRATE_HEARTBEAT_INTERVAL_MS` / `APPSTRATE_MCP_CONNECT_DEADLINE_MS` and
@@ -357,18 +354,14 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
 
   const modelInput = parseModelInput(source.MODEL_INPUT, issues);
   const modelCost = parseModelCost(source.MODEL_COST, issues, warnings);
+  // Same 0-means-absent convention as AGENT_TIMEOUT_SECONDS below.
   const modelContextWindow = parsePositiveInt(
     "MODEL_CONTEXT_WINDOW",
     source.MODEL_CONTEXT_WINDOW,
-    DEFAULT_CONTEXT_WINDOW,
+    0,
     issues,
   );
-  const modelMaxTokens = parsePositiveInt(
-    "MODEL_MAX_TOKENS",
-    source.MODEL_MAX_TOKENS,
-    DEFAULT_MAX_TOKENS,
-    issues,
-  );
+  const modelMaxTokens = parsePositiveInt("MODEL_MAX_TOKENS", source.MODEL_MAX_TOKENS, 0, issues);
   const modelTemperature =
     source.MODEL_TEMPERATURE === undefined ? undefined : Number(source.MODEL_TEMPERATURE);
   if (
@@ -431,8 +424,8 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     ...(source.MODEL_PROVIDER ? { modelProvider: source.MODEL_PROVIDER } : {}),
     modelInput,
     ...(modelCost !== undefined ? { modelCost } : {}),
-    modelContextWindow,
-    modelMaxTokens,
+    ...(modelContextWindow > 0 ? { modelContextWindow } : {}),
+    ...(modelMaxTokens > 0 ? { modelMaxTokens } : {}),
     agentPrompt: agentPrompt!,
     agentInput,
     sink: { url: sinkUrl!, finalizeUrl: sinkFinalizeUrl!, secret: sinkSecret! },

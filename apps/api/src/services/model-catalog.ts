@@ -26,6 +26,7 @@ import {
   isPiProvider,
   listPiModels,
   piReasoningLevels,
+  usableRecordMaxTokens,
 } from "@appstrate/runner-pi/pi-model";
 import { hasLiveModelSearch } from "./model-search.ts";
 
@@ -81,8 +82,7 @@ export function toCatalogEntry(record: Model<Api>): CatalogModelEntry {
   return {
     label: record.name,
     contextWindow: record.contextWindow,
-    // A cap equal to the window leaves no room for the prompt.
-    maxTokens: record.maxTokens < record.contextWindow ? record.maxTokens : null,
+    maxTokens: usableRecordMaxTokens(record),
     capabilities: [...record.input, ...(record.reasoning ? ["reasoning"] : [])],
     generation: generationOf(record),
     cost: costOf(record),

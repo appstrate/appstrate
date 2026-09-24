@@ -11,6 +11,7 @@ import {
   resolvePresetModel,
   ModelResolutionError,
 } from "../src/commands/run/model.ts";
+import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from "@appstrate/runner-pi/pi-model";
 import { parseModelSource } from "../src/commands/run.ts";
 import type { ModelPreset } from "../src/lib/models.ts";
 
@@ -398,7 +399,7 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
     expect(model).toMatchObject({ contextWindow: 500_000, maxTokens: 16_000 });
   });
 
-  it("builds a preset with no `pi_provider` without a record: preset id on the wire, no invented limits", async () => {
+  it("builds a preset with no `pi_provider` without a record: preset id on the wire, the default limits", async () => {
     const { model } = await resolvePresetModel({
       profileName: "default",
       instance: "https://app.example.com",
@@ -416,8 +417,8 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
     expect(model.id).toBe("preset_gateway");
     expect(model.provider).toBe("openai");
     expect(model.compat).not.toHaveProperty("thinkingFormat");
-    expect(model.contextWindow).toBeUndefined();
-    expect(model.maxTokens).toBeUndefined();
+    expect(model.contextWindow).toBe(DEFAULT_CONTEXT_WINDOW);
+    expect(model.maxTokens).toBe(DEFAULT_MAX_TOKENS);
   });
 
   it("rejects unsupported protocols with an actionable hint", async () => {

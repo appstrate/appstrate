@@ -11,15 +11,18 @@
  * `PLATFORM_MODEL_COMPAT` wins over the record's compat, and both sides use
  * the wire id (a preset id through llm-proxy), so quirks Pi keys on
  * `model.id` are out of scope.
+ *
+ * The run container takes the same resolved values through its env round-trip
+ * and must land on the same token limits as the in-process build (chat, CLI).
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { ModelProviderDefinition } from "@appstrate/core/module";
 import claudeCodeModule from "@appstrate/module-claude-code";
 import codexModule from "@appstrate/module-codex";
-import { llmProxyBaseUrl, type Api, type Model } from "@appstrate/runner-pi";
+import { buildRuntimePiEnv, llmProxyBaseUrl, type Api, type Model } from "@appstrate/runner-pi";
 import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
-import { buildPiModel, type PiModelSpec } from "@appstrate/runner-pi/pi-model";
+import { buildPiModel, DEFAULT_MAX_TOKENS, type PiModelSpec } from "@appstrate/runner-pi/pi-model";
 import coreProvidersModule from "../../src/modules/core-providers/index.ts";
 import { listCatalogModels, piProviderOf } from "../../src/services/model-catalog.ts";
 import { resolveCatalogDefaults } from "../../src/services/org-models.ts";
@@ -29,6 +32,7 @@ import {
 } from "../../src/services/model-providers/registry.ts";
 import { seedTestModelProviders } from "../helpers/model-providers.ts";
 import { capturePayload, nativeModel } from "../../../../packages/runner-pi/test/pi-payload.ts";
+import { buildPiModelFromEnv, parseRuntimeEnv } from "../../../../runtime-pi/env.ts";
 
 const ORIGIN = "https://appstrate.test";
 const PRESET_ID = "0c6d1f0e-2b1a-4c8e-9d3f-5a7b8c9d0e1f";
@@ -56,6 +60,36 @@ function platformSpec(def: ModelProviderDefinition, modelId: string): PiModelSpe
   };
 }
 
+/** The run container's model: the resolved values through `buildRuntimePiEnv` and back. */
+function containerModel(def: ModelProviderDefinition, modelId: string): Model<Api> {
+  const defaults = resolveCatalogDefaults(def.providerId, modelId);
+  const env = buildRuntimePiEnv({
+    model: {
+      api: def.apiShape,
+      modelId,
+      baseUrl: "https://vendor.example/v1",
+      piProvider: piProviderOf(def),
+      apiKey: "sk-test",
+      input: defaults.input,
+      contextWindow: defaults.contextWindow,
+      maxTokens: defaults.maxTokens,
+      reasoning: defaults.reasoning,
+      cost: defaults.cost,
+    },
+    agentPrompt: "sys",
+    runId: "run_parity",
+    noSidecar: true,
+    sink: {
+      url: `${ORIGIN}/api/runs/run_parity/events`,
+      finalizeUrl: `${ORIGIN}/api/runs/run_parity/events/finalize`,
+      secret: "abcdefghijklmnopqrstuvwxyz0123456789",
+    },
+  });
+  return buildPiModelFromEnv(parseRuntimeEnv(env));
+}
+
+const limitsOf = ({ contextWindow, maxTokens }: Model<Api>) => ({ contextWindow, maxTokens });
+
 /** Pi's own record under the wire id, with the platform's refusals on top. */
 function nativeReference(def: ModelProviderDefinition, spec: PiModelSpec): Model<Api> {
   const record = nativeModel(piProviderOf(def)!, spec.registryModelId!)!;
@@ -66,6 +100,10 @@ function nativeReference(def: ModelProviderDefinition, spec: PiModelSpec): Model
 async function expectParity(def: ModelProviderDefinition, modelId: string) {
   const spec = platformSpec(def, modelId);
   const proxied = buildPiModel(spec);
+  expect({ modelId, ...limitsOf(containerModel(def, modelId)) }).toEqual({
+    modelId,
+    ...limitsOf(proxied),
+  });
   const native = nativeReference(def, spec);
   for (const reasoning of REASONING) {
     expect({ modelId, reasoning, payload: await capturePayload(proxied, reasoning) }).toEqual({
@@ -99,6 +137,16 @@ describe("proxied Pi model payload parity", () => {
       for (const modelId of modelIds) it(modelId, () => expectParity(def, modelId));
     });
   }
+
+  // pi-ai 0.86.1 records a cap equal to the window: no room left for the prompt.
+  it("mistral-medium-2604: a record cap filling the window resolves to the default on every path", () => {
+    const def = providers.find((p) => p.providerId === "mistral")!;
+    const record = nativeModel("mistral", "mistral-medium-2604")!;
+    expect(record.maxTokens).toBe(record.contextWindow);
+    const expected = { contextWindow: record.contextWindow, maxTokens: DEFAULT_MAX_TOKENS };
+    expect(limitsOf(buildPiModel(platformSpec(def, record.id)))).toEqual(expected);
+    expect(limitsOf(containerModel(def, record.id))).toEqual(expected);
+  });
 
   // A custom gateway serving a Claude id borrows the `anthropic` key but is not
   // Anthropic: the record's adaptive thinking would be the wrong dialect.

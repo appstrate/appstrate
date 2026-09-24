@@ -39,6 +39,20 @@ export interface PiModelSpec {
   headers?: Record<string, string>;
 }
 
+/**
+ * Limits for a model nothing else sizes. Never left undefined: pi-ai clamps
+ * `maxTokens` against the window, and NaN goes out as `"max_tokens": null`.
+ */
+export const DEFAULT_CONTEXT_WINDOW = 128_000;
+export const DEFAULT_MAX_TOKENS = 16_384;
+
+/** A record's output cap, or null when it fills the window: no room left for the prompt. */
+export function usableRecordMaxTokens(
+  record: Pick<Model<Api>, "contextWindow" | "maxTokens">,
+): number | null {
+  return record.maxTokens < record.contextWindow ? record.maxTokens : null;
+}
+
 const PI_PROVIDERS: ReadonlySet<string> = new Set(getBuiltinProviders());
 
 export function isPiProvider(key: string): boolean {
@@ -123,8 +137,9 @@ export function buildPiModel(spec: PiModelSpec): Model<Api> {
       ? { ...ZERO_MODEL_COST, ...spec.cost }
       : (record?.cost ?? { ...ZERO_MODEL_COST }),
     compat: { ...record?.compat, ...PLATFORM_MODEL_COMPAT },
-    contextWindow: spec.contextWindow ?? record?.contextWindow,
-    maxTokens: spec.maxTokens ?? record?.maxTokens,
+    contextWindow: spec.contextWindow ?? record?.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+    maxTokens:
+      spec.maxTokens ?? (record ? usableRecordMaxTokens(record) : null) ?? DEFAULT_MAX_TOKENS,
     ...(spec.headers ? { headers: spec.headers } : {}),
   } as Model<Api>;
 }

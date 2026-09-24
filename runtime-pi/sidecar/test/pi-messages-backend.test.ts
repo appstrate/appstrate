@@ -25,6 +25,7 @@ import type { LlmProxyApiKeyConfig, ModelSwap } from "../helpers.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
 import { PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "@appstrate/runner-pi/provider-map";
 import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
+import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from "@appstrate/runner-pi/pi-model";
 import {
   _resetSdkDriftWarningForTesting,
   buildBackingModel,
@@ -306,13 +307,13 @@ describe("buildBackingModel", () => {
     expect(model.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   });
 
-  it("falls back to pi's own defaults when the platform resolved no limits", () => {
-    const deps = depsFor(BACKINGS[0]!);
-    const model = buildBackingModel({ ...deps, limits: {} });
-    // 0 is pi-ai's "do not clamp" sentinel.
-    expect(model.contextWindow).toBe(0);
-    // pi's own default for a model definition declaring no maxTokens.
-    expect(model.maxTokens).toBe(16_384);
+  it("falls back to the platform defaults when neither the platform nor Pi sizes the model", () => {
+    const backing = { ...BACKINGS[0]!, modelId: "not-a-pi-model" };
+    const model = buildBackingModel({ ...depsFor(backing), limits: {} });
+    expect(model).toMatchObject({
+      contextWindow: DEFAULT_CONTEXT_WINDOW,
+      maxTokens: DEFAULT_MAX_TOKENS,
+    });
   });
 
   // The record's own `forceAdaptiveThinking` + `thinkingLevelMap` shape the

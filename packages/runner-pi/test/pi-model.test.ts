@@ -4,11 +4,14 @@ import { describe, expect, it } from "bun:test";
 import {
   buildPiModel,
   clampPiReasoningLevel,
+  DEFAULT_CONTEXT_WINDOW,
+  DEFAULT_MAX_TOKENS,
   findPiModelsById,
   getPiModel,
   isPiProvider,
   listPiModels,
   piTokenCostUsd,
+  usableRecordMaxTokens,
 } from "../src/pi-model.ts";
 import { deriveProviderFromApi } from "../src/provider-map.ts";
 import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "../src/model-compat.ts";
@@ -125,7 +128,48 @@ describe("buildPiModel", () => {
       input: ["text"],
       cost: { ...ZERO_MODEL_COST },
       compat: { ...PLATFORM_MODEL_COMPAT },
+      contextWindow: DEFAULT_CONTEXT_WINDOW,
+      maxTokens: DEFAULT_MAX_TOKENS,
     } as never);
+  });
+
+  // pi-ai clamps `maxTokens` against the window: an undefined one is NaN on the wire.
+  it("gives a model with no record and no limits the platform defaults", () => {
+    const model = buildPiModel({
+      id: "gw-model",
+      apiShape: "openai-completions",
+      piProvider: null,
+      baseUrl: "https://gateway.example",
+      contextWindow: 32_000,
+    });
+    expect(model).toMatchObject({ contextWindow: 32_000, maxTokens: DEFAULT_MAX_TOKENS });
+  });
+
+  it("does not take a record's output cap that fills its whole window", () => {
+    const record = getPiModel("mistral", "mistral-medium-2604", "mistral-conversations")!;
+    expect(record.maxTokens).toBe(record.contextWindow);
+    const spec = {
+      id: "preset_mistral",
+      registryModelId: record.id,
+      apiShape: "mistral-conversations",
+      piProvider: "mistral",
+      baseUrl: "https://api.mistral.ai",
+    };
+    expect(buildPiModel(spec)).toMatchObject({
+      contextWindow: record.contextWindow,
+      maxTokens: DEFAULT_MAX_TOKENS,
+    });
+    // An explicit org value still wins, whatever it is.
+    expect(buildPiModel({ ...spec, maxTokens: record.contextWindow }).maxTokens).toBe(
+      record.contextWindow,
+    );
+  });
+});
+
+describe("usableRecordMaxTokens", () => {
+  it("keeps a cap below the window and refuses one that fills it", () => {
+    expect(usableRecordMaxTokens({ contextWindow: 200_000, maxTokens: 64_000 })).toBe(64_000);
+    expect(usableRecordMaxTokens({ contextWindow: 128_000, maxTokens: 128_000 })).toBeNull();
   });
 });
 

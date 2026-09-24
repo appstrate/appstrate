@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
+import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from "@appstrate/runner-pi/pi-model";
 import { buildPiModelFromEnv, parseRuntimeEnv, RuntimeEnvError, scrubSinkEnv } from "../env.ts";
 
 const VALID = {
@@ -29,8 +30,13 @@ describe("parseRuntimeEnv — happy path", () => {
     // Absent, not zero — the run reports no cost of its own (see the warnings
     // block below), and the platform prices its ledger row server-side.
     expect(env.modelCost).toBeUndefined();
-    expect(env.modelContextWindow).toBe(128_000);
-    expect(env.modelMaxTokens).toBe(16_384);
+    // Absent: `buildPiModel` sizes them (see the model built below).
+    expect(env.modelContextWindow).toBeUndefined();
+    expect(env.modelMaxTokens).toBeUndefined();
+    expect(buildPiModelFromEnv(env)).toMatchObject({
+      contextWindow: DEFAULT_CONTEXT_WINDOW,
+      maxTokens: DEFAULT_MAX_TOKENS,
+    });
     expect(env.modelReasoning).toBeUndefined();
     expect(env.modelTemperature).toBeUndefined();
     expect(env.modelReasoningLevel).toBeUndefined();
