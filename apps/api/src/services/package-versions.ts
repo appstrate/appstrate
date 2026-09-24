@@ -320,8 +320,9 @@ export interface VersionDetail {
 
 /**
  * Resolve a version query and return full version data including the files of its ZIP.
- * Returns null if the version cannot be resolved. `content` is null when the archive
- * cannot be read — a reader that needs the bytes goes through {@link requirePublishedArchive}.
+ * Returns null if the version cannot be resolved. `content` is null when the object is
+ * absent or will not unzip — a reader that needs the bytes goes through
+ * {@link requirePublishedArchive}. Storage and signature-policy errors propagate.
  */
 export async function getVersionDetail(
   packageId: string,
@@ -347,16 +348,19 @@ export async function getVersionDetail(
 
   if (!row) return null;
 
+  // Only the bytes' own failure is a broken artifact: a storage outage is not a 422.
+  const zipBuffer = await downloadVersionZip(packageId, row.version);
   let content: Record<string, Uint8Array> | null = null;
-  try {
-    const zipBuffer = await downloadVersionZip(packageId, row.version);
-    if (zipBuffer) content = unzipPackageArchive(zipBuffer);
-  } catch (err) {
-    logger.warn("Failed to extract ZIP for version detail", {
-      packageId,
-      version: row.version,
-      error: getErrorMessage(err),
-    });
+  if (zipBuffer) {
+    try {
+      content = unzipPackageArchive(zipBuffer);
+    } catch (err) {
+      logger.warn("Failed to extract ZIP for version detail", {
+        packageId,
+        version: row.version,
+        error: getErrorMessage(err),
+      });
+    }
   }
 
   return {
@@ -374,13 +378,15 @@ export async function getVersionDetail(
 
 /**
  * `422 version_artifact_unavailable`: a version that EXISTS but whose bytes cannot be
- * read — a broken artifact, never a missing version. The only place this refusal is built.
+ * read — a broken artifact, never a missing version. The only place this refusal is
+ * built, and logged here because a published artifact is immutable: its loss is data loss.
  */
 export function versionArtifactUnavailable(
   packageId: string,
   version: string,
   what = "archive",
 ): ApiError {
+  logger.error("Published version artifact unavailable", { packageId, version, what });
   return new ApiError({
     status: 422,
     code: "version_artifact_unavailable",
@@ -390,15 +396,14 @@ export function versionArtifactUnavailable(
 }
 
 /**
- * The archive of a published version, or {@link versionArtifactUnavailable} — for an
- * archive that could not be read, and for one missing its type's REQUIRED content entry
- * (`PACKAGE_CONTENT_ENTRY`). `entry` is that entry's bytes, `undefined` when the type has
- * none or its optional one is absent.
+ * The archive of a published version, or {@link versionArtifactUnavailable} when it is
+ * unreadable or lacks its type's REQUIRED content entry (`PACKAGE_CONTENT_ENTRY`).
+ * `entry` is that entry's bytes; `undefined` when the type has none or the optional one is absent.
  */
 export function requirePublishedArchive(
   type: PackageType,
   packageId: string,
-  detail: { version: string; content: Record<string, Uint8Array> | null },
+  detail: Pick<VersionDetail, "version" | "content">,
 ): { files: Record<string, Uint8Array>; entry: Uint8Array | undefined } {
   if (detail.content === null) throw versionArtifactUnavailable(packageId, detail.version);
   const spec = PACKAGE_CONTENT_ENTRY[type];
@@ -410,12 +415,12 @@ export function requirePublishedArchive(
 }
 
 /**
- * The decoded `prompt.md` of a published agent version — `prompt.md` is required, so
- * {@link requirePublishedArchive} has already refused a version without one.
+ * The decoded `prompt.md` of a published agent version, via {@link requirePublishedArchive},
+ * which refuses a version without one (`prompt.md` is required for an agent).
  */
 export function requirePublishedPrompt(
   packageId: string,
-  detail: { version: string; content: Record<string, Uint8Array> | null },
+  detail: Pick<VersionDetail, "version" | "content">,
 ): string {
   return new TextDecoder().decode(requirePublishedArchive("agent", packageId, detail).entry);
 }

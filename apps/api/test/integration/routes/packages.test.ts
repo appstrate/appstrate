@@ -3226,7 +3226,24 @@ describe("Packages API", () => {
       await expectProblem(res, 422, { code: "version_artifact_unavailable" });
     });
 
-    it("every published-bytes read door refuses a version whose archive is gone", async () => {
+    it("GET version detail refuses a version whose archive does not unzip", async () => {
+      const id = "@pkgorg/detail-corrupt";
+      const create = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ manifest: agentManifest(id), content: "v1 prompt" }),
+      });
+      expect(create.status).toBe(201);
+      // The object exists, so this is the unzip half of the unreadable case.
+      await uploadPackageZip(id, "0.1.0", new TextEncoder().encode("not a zip archive"));
+
+      const res = await app.request(`/api/packages/agents/${id}/versions/0.1.0`, {
+        headers: authHeaders(ctx),
+      });
+      await expectProblem(res, 422, { code: "version_artifact_unavailable" });
+    });
+
+    it("bundle export, file explorer and download refuse a version whose archive is gone", async () => {
       const id = "@pkgorg/doors-unreadable";
       const create = await app.request("/api/packages/agents", {
         method: "POST",

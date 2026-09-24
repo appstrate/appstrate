@@ -8,7 +8,7 @@ import { REQUEST_ID_ONLY_HEADERS } from "./headers.ts";
 export const responses = {
   VersionArtifactUnavailable: {
     description:
-      "The selected published version's archive is unreadable, or lacks the content entry its type requires (`prompt.md` for an agent, `SKILL.md` for a skill) — `version_artifact_unavailable`. Nothing is substituted for it, not even the working copy, and nothing is written.",
+      "The selected published version's archive is missing, corrupt, or lacks the content entry its type requires (`prompt.md` for an agent, `SKILL.md` for a skill) — `version_artifact_unavailable`. Nothing is substituted for it, not even the working copy, and nothing is written.",
     headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },

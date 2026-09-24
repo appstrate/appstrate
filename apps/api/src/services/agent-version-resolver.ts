@@ -52,6 +52,7 @@ import {
   getLatestVersionInfo,
   getVersionDetail,
   requirePublishedPrompt,
+  type VersionDetail,
 } from "./package-versions.ts";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 
@@ -86,11 +87,7 @@ interface ResolvedRunAgent {
  */
 function substituteVersion(
   agent: LoadedPackage,
-  detail: {
-    version: string;
-    manifest: Record<string, unknown>;
-    content: Record<string, Uint8Array> | null;
-  },
+  detail: Pick<VersionDetail, "version" | "manifest" | "content">,
 ): ResolvedRunAgent {
   return {
     agent: {

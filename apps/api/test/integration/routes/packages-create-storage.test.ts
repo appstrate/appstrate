@@ -10,6 +10,7 @@ import { zipArtifact } from "@appstrate/core/zip";
 import { getTestApp } from "../../helpers/app.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { truncateAll } from "../../helpers/db.ts";
+import { expectProblem } from "../../helpers/assertions.ts";
 import { apiIntegrationManifest, mcpServerManifest } from "../../helpers/integration-manifests.ts";
 import { downloadPackageFiles } from "../../../src/services/package-items/storage.ts";
 import { CONFIG_BY_TYPE } from "../../../src/services/package-items/config.ts";
@@ -32,6 +33,7 @@ describe("package creation storage consistency", () => {
   let objects: Map<string, Uint8Array>;
   let beforePut: (key: string) => Promise<void>;
   let failDraft: boolean;
+  let failVersionGet: boolean;
   let savedEnv: Record<string, string | undefined>;
 
   beforeEach(async () => {
@@ -40,6 +42,7 @@ describe("package creation storage consistency", () => {
     objects = new Map();
     beforePut = async () => {};
     failDraft = false;
+    failVersionGet = false;
     // A controlled S3 peer exercises the real storage adapter and route writer.
     server = Bun.serve({
       hostname: "127.0.0.1",
@@ -58,6 +61,8 @@ describe("package creation storage consistency", () => {
           objects.delete(key);
           return new Response(null, { status: 204 });
         }
+        if (failVersionGet && key.includes("agent-packages/") && key.endsWith(".afps"))
+          return new Response("<Error><Code>AccessDenied</Code></Error>", { status: 403 });
         const bytes = objects.get(key);
         return bytes
           ? new Response(bytes)
@@ -325,4 +330,17 @@ describe("package creation storage consistency", () => {
       }
     },
   );
+
+  it("answers a storage fault on a published archive as 500, never as an unavailable artifact", async () => {
+    expect((await create("agent")).status).toBe(201);
+    const path = "/api/packages/agents/@create-storage/agent/versions/1.0.0";
+    // Control: the same read succeeds while storage answers.
+    expect((await app.request(path, { headers: authHeaders(ctx) })).status).toBe(200);
+
+    // A denied GET is not an absent object: calling it `422 version_artifact_unavailable`
+    // would tell the caller the published bytes are gone when storage merely failed.
+    failVersionGet = true;
+    const res = await app.request(path, { headers: authHeaders(ctx) });
+    await expectProblem(res, 500, { code: "internal_error" });
+  });
 });

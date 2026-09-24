@@ -375,9 +375,9 @@ export async function resolvePackageFileValidator(
  * package bytes for the explorer, and the only emitter of the
  * `"Package file snapshot read"` log line.
  *
- * @throws 404 when a version's artifact is missing from storage. A missing
- *   DRAFT artifact is not an error — a freshly created package has no ZIP yet
- *   and must still list its DB-backed files.
+ * @throws 422 `version_artifact_unavailable` when a version's artifact is
+ *   missing from storage. A missing DRAFT artifact is not an error — a freshly
+ *   created package has no ZIP yet and must still list its DB-backed files.
  */
 export async function readPackageSnapshot(
   pkg: PackageFileSource,
