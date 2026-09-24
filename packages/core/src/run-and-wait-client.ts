@@ -204,9 +204,10 @@ function materializeInlineManifest(manifest: Record<string, unknown>): {
  * model reads a normal success and reports work it did on an input the run
  * never had. That failure mode has no other place to be caught.
  *
- * Kept in step with the descriptor's `inputSchema.properties` by
- * `run-and-wait-argument-parity.test.ts`, which reads both and compares them —
- * a name added to one side and not the other is a silent drop again.
+ * Must match the MCP descriptor's `inputSchema.properties` (apps/api
+ * `modules/mcp/tools.ts`). The MCP module refuses any argument its schema does
+ * not declare, so a name on only one side is refused on one path, never
+ * dropped.
  */
 const RUN_AND_WAIT_ARGUMENT_NAMES: ReadonlySet<string> = new Set([
   "kind",

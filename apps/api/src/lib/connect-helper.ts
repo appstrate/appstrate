@@ -4,8 +4,9 @@
  * The `@appstrate/connect-helper` range this platform speaks, as `npx` resolves
  * it. Each `0.x` minor of the helper is a wire contract with the platform (the
  * pair/redeem body and response): bump this with the platform release that
- * changes that wire, and publish the helper minor alongside it. Never `@latest`
- * — that hands every deployed platform whichever helper was published last.
+ * changes that wire, and publish the helper minor (dist-tag `next`) before
+ * deploying it. Never `@latest` — that hands every deployed platform whichever
+ * helper the `latest` tag points at.
  *
  * `0.3.x` is the `^0.3` range spelled without `^` / `~`, which cmd.exe and
  * zsh's EXTENDED_GLOB would otherwise read as an escape or a glob operator.

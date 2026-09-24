@@ -326,13 +326,14 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   `npx @appstrate/connect-helper@0.3.x <token>`, instead of `@latest`**
   (#1545). Helper 0.3.0 posts the snake_case redeem body: this API refuses the
   0.2.x body (`accessToken` / `refreshToken`) with a `400`, and an older API
-  refuses 0.3.0's. Publish helper 0.3.0 right after this deploy — until then
-  the pinned command finds no version to run. Every self-hosted platform
-  released before this one emits `@latest`, so once 0.3.0 is the npm `latest`
-  its pairings fail with a `400` until it is upgraded to this release: upgrade
-  those platforms before or with the helper release; no order keeps both
-  working. A pairing redeemed by a mismatched helper is consumed before its
-  body is rejected: mint a new one. The range lives in one constant,
+  refuses 0.3.0's. **Publish connect-helper 0.3.0 (npm dist-tag `next`)
+  BEFORE deploying this release** — until then the pinned command finds no
+  version to run. A range resolves against every published version whatever
+  its dist-tag, while `latest` stays on 0.2.2: platforms released before this
+  one still emit `@latest`, keep getting 0.2.2 and keep working. Move `latest`
+  to 0.3.x only once no supported platform emits `@latest`. A pairing redeemed
+  by a mismatched helper is consumed before its body is rejected: mint a new
+  one. The range lives in one constant,
   `CONNECT_HELPER_PACKAGE` (`apps/api/src/lib/connect-helper.ts`), bumped with
   each helper minor that changes the wire.
 - **BREAKING (API): OIDC management bodies and views are snake_case**

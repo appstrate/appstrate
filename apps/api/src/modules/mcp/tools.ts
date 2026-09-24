@@ -877,10 +877,9 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 
 /**
  * `run_and_wait` arguments that exist only for `kind:"inline"`. Declared only
- * to a caller whose surface `composes`. The launch allowlist
- * (`RUN_AND_WAIT_ARGUMENT_NAMES`) still knows them either way: an agent-only
- * caller that sends `kind:"inline"` anyway reaches the route and takes its 403,
- * the one refusal that owns the rule.
+ * to a caller whose surface `composes`; another caller sending one gets the
+ * undeclared-argument refusal (`refuseUndeclaredArguments`), and the route's
+ * 403 still owns the rule behind it.
  */
 const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
   manifest: {
@@ -1011,9 +1010,6 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       idempotentHint: false,
       openWorldHint: true,
     },
-    // Not `additionalProperties: false`: `launchRunAndWait`, shared with the
-    // chat, refuses an undeclared argument itself, as a tool error listing the
-    // accepted names.
     inputSchema: {
       type: "object",
       properties: {
@@ -1067,6 +1063,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
         },
       },
       required: ["kind"],
+      additionalProperties: false,
     },
   };
 
@@ -1558,18 +1555,11 @@ export function deriveMcpSurface(
 }
 
 /**
- * Build the per-request tool set. Handlers close over the caller's auth
- * context.
- *
- * No aliases for retired tool names: a stale client gets `-32602 Unknown tool`
- * and re-lists, where an alias would be a permanent second dispatch path.
- */
-/**
  * The SDK does not validate `tools/call` arguments against `inputSchema`, so an
  * argument a tool does not read is dropped in silence — a misspelled filter
  * widens a listing, a misspelled field is simply not applied. A tool declaring
  * `additionalProperties: false` therefore gets its undeclared top-level keys
- * refused here, as -32602, before its handler runs.
+ * refused here, as -32602 naming the accepted ones, before its handler runs.
  */
 function refuseUndeclaredArguments(tool: AppstrateToolDefinition): AppstrateToolDefinition {
   const schema = tool.descriptor.inputSchema;
@@ -1580,13 +1570,25 @@ function refuseUndeclaredArguments(tool: AppstrateToolDefinition): AppstrateTool
     handler: async (args, extra) => {
       const unknown = Object.keys(args).filter((k) => !declared.has(k));
       if (unknown.length > 0) {
-        throw new McpError(ErrorCode.InvalidParams, `Unknown argument(s): ${unknown.join(", ")}.`);
+        const accepted =
+          declared.size > 0 ? `Accepted: ${[...declared].join(", ")}.` : "No arguments.";
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          `Unknown argument(s): ${unknown.join(", ")}. ${accepted}`,
+        );
       }
       return tool.handler(args, extra);
     },
   };
 }
 
+/**
+ * Build the per-request tool set. Handlers close over the caller's auth
+ * context.
+ *
+ * No aliases for retired tool names: a stale client gets `-32602 Unknown tool`
+ * and re-lists, where an alias would be a permanent second dispatch path.
+ */
 export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition[] {
   return [
     buildSearchTool(ctx, surface.invokes),

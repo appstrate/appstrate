@@ -1129,10 +1129,8 @@ describe("undeclared tool arguments", () => {
     const closed = [...byName.values()].filter(
       (t) => t.descriptor.inputSchema.additionalProperties === false,
     );
-    // run_and_wait refuses undeclared arguments in `launchRunAndWait` instead.
-    expect(closed.map((t) => t.descriptor.name).sort()).toEqual(
-      [...byName.keys()].filter((n) => n !== "run_and_wait").sort(),
-    );
+    expect(closed.map((t) => t.descriptor.name).sort()).toEqual([...byName.keys()].sort());
+    expect(byName.has("run_and_wait")).toBe(true);
     for (const tool of closed) {
       const call = tool.handler({ stray_key: 1 }, noExtra);
       await expect(call).rejects.toBeInstanceOf(McpError);
