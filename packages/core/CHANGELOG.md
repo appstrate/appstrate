@@ -75,6 +75,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as for a core route; the entry names `action`, `resourceType` and optionally
   `resourceId`, `before` and `after`. Best-effort: never rejects.
 
+### Fixed
+
+- **A presigned PUT's `sha256` is verified by the store** (`@appstrate/core/storage-s3`).
+  `createUploadUrl` let the presigner hoist `x-amz-checksum-sha256` into the
+  query string, where S3/MinIO do not check it: a body with a different digest
+  was accepted. The checksum is now a signed header (the descriptor already
+  returned it for the client to echo), so a mismatch is rejected server-side —
+  and MinIO releases that refuse unsigned `x-amz-*` headers accept the upload.
+
 ### Changed
 
 - **`run_and_wait` inline manifest defaults** (`@appstrate/core/run-and-wait-client`):

@@ -36,6 +36,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING (operators): MinIO runs from `cgr.dev/chainguard/minio`, as uid
+  65532 — an existing MinIO volume must be re-owned before the upgrade.**
+  MinIO's own registries (`quay.io/minio/*`, Docker Hub `minio/*`) now refuse
+  anonymous pulls, which failed every compose file that starts MinIO: CI,
+  development tier 3, the self-hosting examples and the production deploy. They
+  all pull Chainguard's build instead, pinned by digest (MinIO
+  `RELEASE.2026-09-22T19-25-18Z`); the bucket-init containers reuse it for `mc`.
+  It runs as uid 65532, and a volume the previous image wrote holds root-owned
+  files: started on one, MinIO crash-loops with
+  `FATAL Unable to initialize backend: Unable to write to the backend`. A fresh
+  install needs nothing.
+  **Operators**, once per existing MinIO volume — production `<uuid>_miniodata`,
+  self-hosting `<project>_miniodata`, development `appstrate-dev_miniodata` —
+  run the commands in `deploy/README.md` (production) or
+  `examples/self-hosting/README.md`, "Data Persistence" (self-hosting and
+  development), which carry the pinned image:
+  1. Stop the stack (production: stop the application in Coolify).
+  2. **Snapshot the volume. This is a forward-only MinIO upgrade**: production
+     moves from `quay.io/minio/minio:latest` — whichever release the host last
+     pulled — to `RELEASE.2026-09-22T19-25-18Z`, nothing guarantees an older
+     MinIO reopens a backend a newer one has written, and the previous image
+     can no longer be pulled anonymously.
+  3. Re-own it: `chown -R 65532:65532` on the volume, as root.
+  4. Deploy. `appstrate-minio` reports healthy and serves the objects already
+     stored; skipping step 3 fails loudly with the error above, not silently.
 - **BREAKING (integrations): a local integration runner can reach only what its
   connection's `authorized_uris` grant** (#1458). Every sidecar listener
   enforces it: the CONNECT listener by `host:port` and by the TLS SNI inside

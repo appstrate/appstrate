@@ -52,6 +52,16 @@ Facts worth writing down, because each one is easy to break:
 
 - **Coolify regenerates `.env` from the resource's own environment configuration on every deploy.** A value written into the file on the server is gone at the next one. Edit the variables in Coolify, never the file.
 
+- **`<uuid>_miniodata` must be owned by `65532:65532`.** `appstrate-minio` runs as that uid, and on root-owned files — a volume written by an image that ran as root, or restored as root — it crash-loops with `FATAL Unable to initialize backend: Unable to write to the backend` and the deploy never turns healthy. The compose has no override for it; re-own the volume. On the server: stop the application in Coolify, snapshot the volume, re-own it, deploy.
+
+  ```sh
+  docker volume create <uuid>_miniodata_backup
+  docker run --rm -v <uuid>_miniodata:/from:ro -v <uuid>_miniodata_backup:/to \
+    --user 0 --entrypoint cp cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 -a /from/. /to/
+  docker run --rm -v <uuid>_miniodata:/data --user 0 --entrypoint chown \
+    cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 -R 65532:65532 /data
+  ```
+
 - **`watch_paths` is set to this directory.** Without it, a push anywhere in the monorepo would redeploy production — and a deploy is not free: it re-pulls every image and restarts the whole stack. If you change `docker_compose_location`, change `watch_paths` in the same edit.
 
 ## Rollback
