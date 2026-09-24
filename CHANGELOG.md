@@ -44,20 +44,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   all pull Chainguard's build instead, pinned by digest (MinIO
   `RELEASE.2026-09-22T19-25-18Z`); the bucket-init containers reuse it for `mc`.
   It runs as uid 65532, and a volume the previous image wrote holds root-owned
-  files: started on one, MinIO crash-loops with `FATAL Unable to initialize
-backend: Unable to write to the backend`. A fresh install needs nothing.
-  **Operators**, once per existing MinIO volume — production `<uuid>_miniodata`
-  (`deploy/README.md`), self-hosting `<project>_miniodata`
-  (`examples/self-hosting/README.md`, "Data Persistence"), development
-  `appstrate-dev_miniodata`:
+  files: started on one, MinIO crash-loops with
+  `FATAL Unable to initialize backend: Unable to write to the backend`. A fresh
+  install needs nothing.
+  **Operators**, once per existing MinIO volume — production `<uuid>_miniodata`,
+  self-hosting `<project>_miniodata`, development `appstrate-dev_miniodata` —
+  run the commands in `deploy/README.md` (production) or
+  `examples/self-hosting/README.md`, "Data Persistence" (self-hosting and
+  development), which carry the pinned image:
   1. Stop the stack (production: stop the application in Coolify).
   2. **Snapshot the volume. This is a forward-only MinIO upgrade**: production
      moves from `quay.io/minio/minio:latest` — whichever release the host last
-     pulled — to `RELEASE.2026-09-22T19-25-18Z`, and nothing guarantees an
-     older MinIO reopens a backend a newer one has written — and the previous
-     image can no longer be pulled anonymously.
-     `docker volume create <volume>_backup && docker run --rm -v <volume>:/from:ro -v <volume>_backup:/to --user 0 --entrypoint cp cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 -a /from/. /to/`
-  3. `docker run --rm -v <volume>:/data --user 0 --entrypoint chown cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 -R 65532:65532 /data`
+     pulled — to `RELEASE.2026-09-22T19-25-18Z`, nothing guarantees an older
+     MinIO reopens a backend a newer one has written, and the previous image
+     can no longer be pulled anonymously.
+  3. Re-own it: `chown -R 65532:65532` on the volume, as root.
   4. Deploy. `appstrate-minio` reports healthy and serves the objects already
      stored; skipping step 3 fails loudly with the error above, not silently.
 - **BREAKING (integrations): a local integration runner can reach only what its

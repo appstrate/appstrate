@@ -401,8 +401,10 @@ root-owned files — a volume written by an image that ran as root, or restored
 as root — MinIO crash-loops with `FATAL Unable to initialize backend: Unable
 to write to the backend`. Re-own the volume once, with the stack stopped
 (`appstrate stop`); its full name is `<project>_miniodata`, listed by
-`docker volume ls --filter name=miniodata`. Snapshot it first if its data
-matters:
+`docker volume ls --filter name=miniodata`. Snapshot it first: this is a
+forward-only MinIO upgrade — the pinned 2026 release is newer than the 2025
+one the upstream image last carried — and the previous image can no longer be
+pulled, so the snapshot is the only way back:
 
 ```bash
 docker volume create <project>_miniodata_backup

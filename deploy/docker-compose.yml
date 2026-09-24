@@ -89,7 +89,6 @@ services:
   # Pinned with the root docker-compose.yml's `appstrate-minio` (refresh
   # recipe there); the init container reuses it for `mc` and `/bin/sh`. Runs
   # as uid 65532: `miniodata` must be owned by it (deploy/README.md).
-  # postgres and redis are official and stay.
   appstrate-minio:
     image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
     command: server /data --console-address ":9001"
