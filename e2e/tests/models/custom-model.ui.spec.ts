@@ -44,7 +44,7 @@ const ANTHROPIC_TYPE = "Anthropic-compatible (custom)";
 const OPENAI_PROVIDER_ID = "openai-compatible";
 
 /**
- * What the default path serves. `gpt-4o` is described by the vendored catalog
+ * What the default path serves. `gpt-4o` is described by Pi's model registry
  * and `qwen3:8b` by the listing itself (`context_length`) — between them every
  * row provenance the list can show.
  */

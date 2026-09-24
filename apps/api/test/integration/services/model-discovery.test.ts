@@ -19,22 +19,31 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedOrgModelProviderKey, seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { registerModelProvider } from "../../../src/services/model-providers/registry.ts";
-import { registerCatalog } from "../../../src/services/pricing-catalog.ts";
 import {
   discoverAvailableModels,
   type ModelDiscoveryDeps,
 } from "../../../src/services/model-providers/model-discovery.ts";
 import { getOrgModelProviderCredential } from "../../../src/services/model-providers/credentials.ts";
+import { listPiModels } from "@appstrate/runner-pi/pi-model";
 import type { ListServedModelsResult } from "../../../src/services/model-providers/model-listing.ts";
 
 const PROVIDER_ID = "test-listing-discovery";
 const OFFLINE_PROVIDER_ID = "test-offline-discovery";
+const PUBLIC_LISTING_PROVIDER_ID = "test-public-listing-discovery";
+/** Pi's OpenCode Go records back all three synthetic providers. */
+const CATALOG = "opencode-go";
+const M_FEATURED = "kimi-k2.6";
+const M_EXTRA = "glm-5.2";
+/** Every provider offers Pi's OpenCode Go records; a verified list keeps their order. */
+const OFFER = listPiModels(CATALOG, "openai-completions").map((m) => m.id);
+const BOTH = OFFER.filter((id) => id === M_FEATURED || id === M_EXTRA);
 
 /**
  * Synthetic provider declaring `modelDiscovery: { mode: "static" }` — exercises
  * the no-network discovery path (subscription providers codex/claude-code).
- * Reuses the same catalog as the listing provider. Candidate "m-uncatalogued"
- * is intentionally absent from the catalog to pin the ∩-catalog filter.
+ * Reuses the same catalog as the listing provider: it serves the whole offer.
+ * Every provider speaks openai-completions, the shape the catalog records
+ * these ids on.
  */
 function registerOfflineDiscoveryProvider(): void {
   registerModelProvider({
@@ -42,7 +51,7 @@ function registerOfflineDiscoveryProvider(): void {
     displayName: "Test Offline Discovery",
     iconUrl: "anthropic",
     description: "Synthetic offline-validation provider.",
-    apiShape: "anthropic-messages",
+    apiShape: "openai-completions",
     defaultBaseUrl: "https://offline.example.test",
     baseUrlOverridable: false,
     authMode: "oauth2",
@@ -54,45 +63,42 @@ function registerOfflineDiscoveryProvider(): void {
       scopes: ["openid"],
       pkce: "S256",
     },
-    catalogProviderId: "test-discovery-catalog",
-    featuredModels: ["m-featured"],
-    modelDiscoveryCandidates: ["m-featured", "m-extra", "m-uncatalogued"],
+    catalogProviderId: CATALOG,
+    featuredModels: [M_FEATURED],
     modelDiscovery: { mode: "static" },
   });
 }
 
 function registerDiscoveryProvider(): void {
-  // Catalog first — registerModelProvider validates featured ids against it.
-  registerCatalog("test-discovery-catalog", {
-    "m-featured": {
-      label: "Featured",
-      contextWindow: 8192,
-      maxTokens: 1024,
-      capabilities: ["text"],
-      cost: { input: 0, output: 0 },
-    },
-    "m-extra": {
-      label: "Extra",
-      contextWindow: 8192,
-      maxTokens: 1024,
-      capabilities: ["text"],
-      cost: { input: 0, output: 0 },
-    },
-  });
   registerModelProvider({
     providerId: PROVIDER_ID,
     displayName: "Test Listing Discovery",
     iconUrl: "openai",
     description: "Synthetic provider exercising model discovery.",
-    apiShape: "openai-responses",
+    apiShape: "openai-completions",
     defaultBaseUrl: "https://discovery.example.test/v1",
     baseUrlOverridable: false,
     // API-key: the listing path is the only one an oauth2 provider may not
     // take — `registerModelProvider` refuses one that is not `mode: "static"`.
     authMode: "api_key",
-    catalogProviderId: "test-discovery-catalog",
-    featuredModels: ["m-featured"],
-    modelDiscoveryCandidates: ["m-featured", "m-extra", "m-gone"],
+    catalogProviderId: CATALOG,
+    featuredModels: [M_FEATURED],
+  });
+}
+
+/** Synthetic provider whose `GET /models` answers any key (`publicModelListing`). */
+function registerPublicListingProvider(): void {
+  registerModelProvider({
+    providerId: PUBLIC_LISTING_PROVIDER_ID,
+    displayName: "Test Public Listing Discovery",
+    iconUrl: "openai",
+    apiShape: "openai-completions",
+    defaultBaseUrl: "https://public-listing.example.test/v1",
+    baseUrlOverridable: true,
+    authMode: "api_key",
+    catalogProviderId: CATALOG,
+    featuredModels: [M_FEATURED],
+    publicModelListing: true,
   });
 }
 
@@ -171,6 +177,7 @@ describe("discoverAvailableModels", () => {
   beforeAll(() => {
     registerDiscoveryProvider();
     registerOfflineDiscoveryProvider();
+    registerPublicListingProvider();
   });
   afterAll(() => {
     seedTestModelProviders();
@@ -185,24 +192,26 @@ describe("discoverAvailableModels", () => {
     try {
       registerDiscoveryProvider();
       registerOfflineDiscoveryProvider();
+      registerPublicListingProvider();
     } catch {
       // already registered in this process — fine.
     }
   });
 
-  it("persists the candidates the provider lists, in candidate order", async () => {
+  it("persists the offered models the provider lists, in offer order", async () => {
     const cred = await seedOrgModelProviderKey({ orgId: ctx.org.id, providerId: PROVIDER_ID });
-    // Response order is deliberately the reverse of the declaration order, and
-    // carries an id the provider declares no candidate for.
-    const { deps, calls } = scriptedListing([served("m-unrelated", "m-extra", "m-featured")]);
+    // Response order is deliberately not the offer's, and the listing carries
+    // an id outside the offer.
+    const { deps, calls } = scriptedListing([served("m-unrelated", M_FEATURED, M_EXTRA)]);
 
     const result = await discoverAvailableModels(ctx.org.id, cred.id, deps);
 
     expect(result.outcome).toBe("ok");
-    // One listing request for the whole candidate list.
+    // One listing request for the whole offer.
     expect(calls()).toBe(1);
+    expect(result.candidateCount).toBe(OFFER.length);
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
-    expect(info?.available_model_ids).toEqual(["m-featured", "m-extra"]);
+    expect(info?.available_model_ids).toEqual(BOTH);
   });
 
   it("aborts without persisting on AUTH_FAILED (an auth outage must not wipe a good list)", async () => {
@@ -227,13 +236,44 @@ describe("discoverAvailableModels", () => {
     expect(row?.ids).toBeNull();
   });
 
+  it("publicModelListing provider: a key the inference probe rejects persists nothing", async () => {
+    // Real `listServedModels` against loopback (allowlisted by the test
+    // preload): the listing answers 200, only the chat endpoint authenticates.
+    const requests: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      fetch: (req) => {
+        const path = new URL(req.url).pathname;
+        requests.push(`${req.method} ${path}`);
+        return path.endsWith("/models")
+          ? Response.json({ data: [{ id: M_FEATURED }] })
+          : Response.json({ error: { type: "AuthError" } }, { status: 401 });
+      },
+    });
+    try {
+      const cred = await seedOrgModelProviderKey({
+        orgId: ctx.org.id,
+        providerId: PUBLIC_LISTING_PROVIDER_ID,
+        baseUrl: `http://127.0.0.1:${server.port}/v1`,
+      });
+
+      const result = await discoverAvailableModels(ctx.org.id, cred.id);
+
+      expect(result.outcome).toBe("auth_failed");
+      expect(requests).toEqual(["GET /v1/models", "POST /v1/chat/completions"]);
+      const [row] = await db
+        .select({ ids: modelProviderCredentials.availableModelIds })
+        .from(modelProviderCredentials)
+        .where(eq(modelProviderCredentials.id, cred.id));
+      expect(row?.ids).toBeNull();
+    } finally {
+      await server.stop(true);
+    }
+  });
+
   it("keeps the previous list when the provider is unreachable", async () => {
     const cred = await seedOrgModelProviderKey({ orgId: ctx.org.id, providerId: PROVIDER_ID });
-    await discoverAvailableModels(
-      ctx.org.id,
-      cred.id,
-      scriptedListing([served("m-featured")]).deps,
-    );
+    await discoverAvailableModels(ctx.org.id, cred.id, scriptedListing([served(M_FEATURED)]).deps);
 
     const result = await discoverAvailableModels(
       ctx.org.id,
@@ -243,16 +283,12 @@ describe("discoverAvailableModels", () => {
 
     expect(result.outcome).toBe("nothing_verified");
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
-    expect(info?.available_model_ids).toEqual(["m-featured"]);
+    expect(info?.available_model_ids).toEqual([M_FEATURED]);
   });
 
   it("keeps the previous list when no candidate appears in the listing", async () => {
     const cred = await seedOrgModelProviderKey({ orgId: ctx.org.id, providerId: PROVIDER_ID });
-    await discoverAvailableModels(
-      ctx.org.id,
-      cred.id,
-      scriptedListing([served("m-featured")]).deps,
-    );
+    await discoverAvailableModels(ctx.org.id, cred.id, scriptedListing([served(M_FEATURED)]).deps);
 
     const result = await discoverAvailableModels(
       ctx.org.id,
@@ -262,7 +298,7 @@ describe("discoverAvailableModels", () => {
 
     expect(result.outcome).toBe("nothing_verified");
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
-    expect(info?.available_model_ids).toEqual(["m-featured"]);
+    expect(info?.available_model_ids).toEqual([M_FEATURED]);
   });
 
   it("keeps the previous list when a cap cut the listing short", async () => {
@@ -270,18 +306,18 @@ describe("discoverAvailableModels", () => {
     await discoverAvailableModels(
       ctx.org.id,
       cred.id,
-      scriptedListing([served("m-featured", "m-extra")]).deps,
+      scriptedListing([served(M_FEATURED, M_EXTRA)]).deps,
     );
 
     const result = await discoverAvailableModels(
       ctx.org.id,
       cred.id,
-      scriptedListing([servedTruncated("m-featured")]).deps,
+      scriptedListing([servedTruncated(M_FEATURED)]).deps,
     );
 
     expect(result.outcome).toBe("nothing_verified");
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
-    expect(info?.available_model_ids).toEqual(["m-featured", "m-extra"]);
+    expect(info?.available_model_ids).toEqual(BOTH);
   });
 
   it("drops a candidate the provider stopped serving when the listing is complete", async () => {
@@ -289,39 +325,35 @@ describe("discoverAvailableModels", () => {
     await discoverAvailableModels(
       ctx.org.id,
       cred.id,
-      scriptedListing([served("m-featured", "m-extra")]).deps,
+      scriptedListing([served(M_FEATURED, M_EXTRA)]).deps,
     );
 
     const result = await discoverAvailableModels(
       ctx.org.id,
       cred.id,
-      scriptedListing([served("m-featured")]).deps,
+      scriptedListing([served(M_FEATURED)]).deps,
     );
 
     expect(result.outcome).toBe("ok");
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
-    expect(info?.available_model_ids).toEqual(["m-featured"]);
+    expect(info?.available_model_ids).toEqual([M_FEATURED]);
   });
 
   it("retries a 429 once and persists when the retry succeeds", async () => {
     const cred = await seedOrgModelProviderKey({ orgId: ctx.org.id, providerId: PROVIDER_ID });
-    const { deps, calls } = scriptedListing([RATE_LIMITED, served("m-featured")]);
+    const { deps, calls } = scriptedListing([RATE_LIMITED, served(M_FEATURED)]);
 
     const result = await discoverAvailableModels(ctx.org.id, cred.id, deps);
 
     expect(result.outcome).toBe("ok");
     expect(calls()).toBe(2);
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
-    expect(info?.available_model_ids).toEqual(["m-featured"]);
+    expect(info?.available_model_ids).toEqual([M_FEATURED]);
   });
 
   it("keeps the previous list when the retry is rate limited too", async () => {
     const cred = await seedOrgModelProviderKey({ orgId: ctx.org.id, providerId: PROVIDER_ID });
-    await discoverAvailableModels(
-      ctx.org.id,
-      cred.id,
-      scriptedListing([served("m-featured")]).deps,
-    );
+    await discoverAvailableModels(ctx.org.id, cred.id, scriptedListing([served(M_FEATURED)]).deps);
     const { deps, calls } = scriptedListing([RATE_LIMITED]);
 
     const result = await discoverAvailableModels(ctx.org.id, cred.id, deps);
@@ -330,7 +362,7 @@ describe("discoverAvailableModels", () => {
     // One retry, not a loop.
     expect(calls()).toBe(2);
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
-    expect(info?.available_model_ids).toEqual(["m-featured"]);
+    expect(info?.available_model_ids).toEqual([M_FEATURED]);
   });
 
   it("returns credential_not_found for an unknown id", async () => {
@@ -344,7 +376,7 @@ describe("discoverAvailableModels", () => {
 
   // --- Offline providers (subscription: codex, claude-code) ---
 
-  it("offline provider: resolves static candidates (∩ catalog) with NO listing call", async () => {
+  it("offline provider: serves its whole offer with NO listing call", async () => {
     const cred = await seedOrgModelProviderOAuth({
       orgId: ctx.org.id,
       providerId: OFFLINE_PROVIDER_ID,
@@ -357,15 +389,13 @@ describe("discoverAvailableModels", () => {
 
     expect(calls()).toBe(0);
     expect(result.outcome).toBe("ok");
-    // Every declared candidate is counted (including the uncatalogued one) —
-    // the same meaning the listing path gives the number — without a single
-    // upstream request.
-    expect(result.candidateCount).toBe(3);
-    // Derived on read, not written: "m-uncatalogued" is filtered out (not in
-    // the catalog); the rest come back in declaration order. That nothing was
-    // written is pinned by the raw-column assertion in the next test.
+    // The offer is counted — the same meaning the listing path gives the
+    // number — without a single upstream request.
+    expect(result.candidateCount).toBe(OFFER.length);
+    // Derived on read, not written — pinned by the raw-column assertion in
+    // the next test.
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
-    expect(info?.available_model_ids).toEqual(["m-featured", "m-extra"]);
+    expect(info?.available_model_ids).toEqual(OFFER);
   });
 
   it("offline provider: leaves the row untouched and overrides a stale persisted array", async () => {
@@ -386,7 +416,7 @@ describe("discoverAvailableModels", () => {
 
     expect(result.outcome).toBe("ok");
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
-    expect(info?.available_model_ids).toEqual(["m-featured", "m-extra"]);
+    expect(info?.available_model_ids).toEqual(OFFER);
     // The column itself is still the stale value — discovery wrote nothing.
     const [row] = await db
       .select({ ids: modelProviderCredentials.availableModelIds })

@@ -93,6 +93,7 @@ describe("resolveProviderEntry", () => {
     baseUrlOverridable: providerId.endsWith("-compatible"),
     authMode: "api_key",
     featured: false,
+    live_model_search: false,
     models: [],
   });
   const registry = [

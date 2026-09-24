@@ -527,6 +527,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         modelId,
         generationConfig: params.generationConfig,
         generationConfigOverride: params.generationConfigOverride,
+        scheduleId: params.scheduleId,
         proxyId,
         overrideVersionLabel,
         dependencyOverrides: params.dependencyOverrides ?? null,

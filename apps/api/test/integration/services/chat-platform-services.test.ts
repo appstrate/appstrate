@@ -22,7 +22,7 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
 import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
-import { createOrgModel } from "../../../src/services/org-models.ts";
+import { createOrgModel, listOrgModels } from "../../../src/services/org-models.ts";
 import { recordChatUsage, resolveChatModel } from "../../../src/services/chat-platform-services.ts";
 
 // `resolveChatModel` reads the system model registry; the HTTP harness initializes it at boot.
@@ -83,25 +83,9 @@ describe("resolveChatModel", () => {
     if (resolution.subscription && "model" in resolution) {
       expect(resolution.model.modelId).toBe("test-model");
       expect(resolution.model.accessToken).toBe("test-access");
-    } else {
-      throw new Error(`expected a model resolution, got ${JSON.stringify(resolution)}`);
-    }
-  });
-
-  it("carries provider-native reasoning levels into the Pi chat binding", async () => {
-    const credentialId = await seedOauthCredential();
-    const presetId = await createOrgModel(
-      ctx.orgId,
-      "Subscribed Reasoning",
-      "test-reasoning-model",
-      ctx.user.id,
-      credentialId,
-    );
-
-    const resolution = await resolveChatModel(ctx.orgId, presetId);
-    expect(resolution.subscription).toBe(true);
-    if (resolution.subscription && "model" in resolution) {
-      expect(resolution.model.reasoningLevelMap).toEqual({ xhigh: "max" });
+      // The binding reads the row's Pi key from the listing, not its Appstrate id.
+      const row = (await listOrgModels(ctx.orgId)).find((m) => m.id === presetId);
+      expect(row?.pi_provider).toBe("openai");
     } else {
       throw new Error(`expected a model resolution, got ${JSON.stringify(resolution)}`);
     }
@@ -187,5 +171,31 @@ describe("recordChatUsage — pricing provenance", () => {
 
     const row = await storedRow(sessionId);
     expect(row!.pricingStatus).toBe("partial");
+  });
+
+  it("prices a turn at the BASE rate: its usage is summed over requests, so no price tier applies", async () => {
+    const sessionId = await seedSession("chs_pricing_tiered");
+    await recordChatUsage(
+      record({
+        chatSessionId: sessionId,
+        modelId: "gpt-5.5",
+        apiShape: "openai-codex-responses",
+        inputTokens: 400_000,
+        outputTokens: 20_000,
+        // Pi's `openai-codex/gpt-5.5` rate card, copied by hand.
+        cost: {
+          input: 5,
+          output: 30,
+          cacheRead: 0.5,
+          cacheWrite: 0,
+          tiers: [
+            { inputTokensAbove: 272_000, input: 10, output: 45, cacheRead: 1, cacheWrite: 0 },
+          ],
+        },
+      }),
+    );
+
+    // 0.4M×5 + 0.02M×30 = 2 + 0.6 — never the tier's 4 + 0.9.
+    expect((await storedRow(sessionId))!.costUsd).toBeCloseTo(2.6, 9);
   });
 });

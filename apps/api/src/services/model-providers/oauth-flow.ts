@@ -156,9 +156,9 @@ export async function importOAuthModelProviderConnection(
   //
   // Still no discovery probe here, and the accessor's answer splits by
   // provider kind:
-  //   - `modelDiscovery: { mode: "static" }` — derived from (definition ∩
-  //     catalog), zero upstream calls. Already final at import time, and it
-  //     tracks the catalog afterwards instead of freezing. Nothing is
+  //   - `modelDiscovery: { mode: "static" }` — the provider's offer in Pi's
+  //     registry, zero upstream calls. Already final at import time, and it
+  //     tracks the registry afterwards instead of freezing. Nothing is
   //     persisted for these (Phase 2), so the null column below is not a gap.
   //     Both OAuth providers registered today (claude-code, codex) are of
   //     this kind — the pairing flow exists for subscription sign-ins, which

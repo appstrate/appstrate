@@ -25,7 +25,7 @@ import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
 import { mergeSystemAndDb, scopedWhere } from "../../lib/db-helpers.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { getModelProvider } from "./registry.ts";
-import { resolveCatalogBackedCandidates } from "./model-selection.ts";
+import { listCatalogModels } from "../model-catalog.ts";
 import type { ModelApiShape, OAuthTokenResponse } from "@appstrate/core/sidecar-types";
 import type { ModelProviderDefinition, ModelProviderIdentity } from "@appstrate/core/module";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
@@ -692,7 +692,7 @@ export async function deleteModelProviderCredential(orgId: string, id: string): 
  * `mode: "static"` providers, persisted for probe providers.
  *
  * `mode: "static"` (subscription: codex, claude-code) — DERIVED, the row is
- * ignored. The answer is a pure function of (provider definition, vendored
+ * ignored. The answer is a pure function of (provider definition,
  * catalog): the platform issues ZERO probes for these providers
  * (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`), so every credential of
  * such a provider necessarily resolves to the SAME list — verified in
@@ -701,7 +701,7 @@ export async function deleteModelProviderCredential(orgId: string, id: string): 
  * it did hold was a snapshot taken at discovery time and never refreshed,
  * which is precisely how users kept being offered a two-generations-old model
  * list long after the provider definition had been corrected. Resolving on
- * read makes the weekly catalog refresh the correction mechanism.
+ * read makes a catalog (Pi registry) bump the correction mechanism.
  *
  * Every other provider — PERSISTED verbatim. There the column is genuinely
  * per-credential: the probe answers against the account's own plan, so two
@@ -715,7 +715,7 @@ export function resolveCredentialModelIds(
   persisted: string[] | null,
 ): string[] {
   const def = getModelProvider(providerId);
-  if (def?.modelDiscovery?.mode === "static") return resolveCatalogBackedCandidates(def);
+  if (def?.modelDiscovery?.mode === "static") return listCatalogModels(def).map((m) => m.id);
   return persisted ?? [];
 }
 

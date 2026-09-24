@@ -11,6 +11,7 @@ function model(over: Partial<OrgModelInfo>): OrgModelInfo {
     apiShape: "anthropic-messages",
     providerId: "anthropic",
     provider_name: "Anthropic",
+    pi_provider: "anthropic",
     base_url: "https://api.anthropic.com",
     modelId: "claude-sonnet-4",
     enabled: true,

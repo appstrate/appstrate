@@ -22,7 +22,7 @@ function model(overrides: Partial<ModelPricingFields> = {}): ModelPricingFields 
 describe("isModelUnpriced", () => {
   it("a custom model with no rates → flagged", () => {
     // The self-hoster case: an openai-compatible/custom model misses the
-    // vendored catalog, so `cost` resolves to null and every run records $0.
+    // model catalog, so `cost` resolves to null and every run records $0.
     expect(isModelUnpriced(model())).toBe(true);
   });
 

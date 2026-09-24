@@ -60,7 +60,7 @@ describe("core-providers module", () => {
     expect(byId.get("google-ai")?.apiShape).toBe("google-generative-ai");
     expect(byId.get("groq")?.apiShape).toBe("openai-completions");
     expect(byId.get("cerebras")?.apiShape).toBe("openai-completions");
-    expect(byId.get("xai")?.apiShape).toBe("openai-completions");
+    expect(byId.get("xai")?.apiShape).toBe("openai-responses");
     expect(byId.get("openrouter")?.apiShape).toBe("openai-completions");
   });
 

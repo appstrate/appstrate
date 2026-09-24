@@ -18,10 +18,11 @@ import { isPlainObject } from "@appstrate/core/safe-json";
 import { fileUri, PUBLISHED_FILE_LOG_EVENT } from "@appstrate/core/file-uri";
 import type { Db } from "@appstrate/db/client";
 import { modelCostSchema, type ModelCost } from "@appstrate/core/module";
-import { computeTokenCost, type TokenPricingStatus } from "@appstrate/afps-runtime/runner";
+import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 import { type CredentialSource } from "../llm-usage-ledger.ts";
 import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
 import { resolvePricingStatus } from "../pricing-provenance.ts";
+import { aggregatedCostUsd } from "../token-cost.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { appendRunLog, updateRun } from "../state/runs.ts";
 import { logger } from "../../lib/logger.ts";
@@ -271,10 +272,11 @@ interface RunnerCostVerdict {
  *
  * The `cost` on an `appstrate.metric` event is produced inside the agent
  * container and is advisory: the platform holds both factors itself — the
- * kickoff snapshot `runs.model_cost` and the reported counts — and multiplies
- * them with `computeTokenCost`, the same formula the LLM-proxy meter uses. That
- * also lets `MODEL_COST` be withheld from a container running an aliased model
- * without changing what the run is billed.
+ * kickoff snapshot `runs.model_cost` and the reported counts — and prices
+ * them with Pi's `calculateCost`, as the LLM-proxy meter does. Summed counters
+ * are priced at the base rate (RUN_COST.md). That also lets
+ * `MODEL_COST` be withheld from a container running an aliased model without
+ * changing what the run is billed.
  *
  * A run that dies without terminal usage (watchdog kill, crash, timeout,
  * cancel) is priced from the cumulative snapshot finalize preserved
@@ -287,7 +289,7 @@ interface RunnerCostVerdict {
  * short-circuits both: `null` status (the platform makes no claim — that run's
  * inference is accounted elsewhere) and the pass-through cost. `model_cost` is
  * JSONB, so both halves read it narrowed: an unvalidated `{}` would classify as
- * fully priced and make `computeTokenCost` write `NaN`.
+ * fully priced and price it as `NaN`.
  */
 function resolveRunnerCost(
   orgId: string,
@@ -306,7 +308,7 @@ function resolveRunnerCost(
   const rates = parsedCost.success ? parsedCost.data : null;
   const usage = row.usage ?? {};
   return {
-    costUsd: computeTokenCost(usage, rates),
+    costUsd: aggregatedCostUsd(usage, rates),
     pricingStatus: resolvePricingStatus({
       orgId,
       // The run's model label is not in the sink context, so the warn line is

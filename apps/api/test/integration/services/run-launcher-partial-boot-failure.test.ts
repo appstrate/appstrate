@@ -154,6 +154,7 @@ function buildRunPlan(): AppstrateRunPlan {
     runToken: "test-run-token",
     llmConfig: {
       providerId: "anthropic",
+      piProvider: "anthropic",
       apiShape: "anthropic-messages",
       baseUrl: "https://api.anthropic.com",
       modelId: "claude-3-5-sonnet-latest",

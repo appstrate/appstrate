@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 2 of #437 — verifies the catalog acts as fallback for
- * `loadModel()` when `org_models.cost` (the per-org override) is null,
- * and that an explicit override still wins over the catalog.
+ * Verifies the catalog (Pi's registry) acts as fallback for `loadModel()`
+ * when `org_models.cost` (the per-org override) is null, and that an
+ * explicit override still wins over the catalog.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -12,7 +12,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedOrgModel, seedOrgModelProviderKey } from "../../helpers/seed.ts";
 
-describe("loadModel — vendored pricing catalog fallback (#437 phase 2)", () => {
+describe("loadModel — catalog fallback", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -70,7 +70,7 @@ describe("loadModel — vendored pricing catalog fallback (#437 phase 2)", () =>
   });
 
   it("returns null cost when neither override nor catalog has an entry", async () => {
-    // Custom fine-tune / model id that won't be in the vendored snapshot.
+    // Custom fine-tune / model id the catalog does not know.
     const cred = await seedOrgModelProviderKey({
       orgId: ctx.orgId,
       label: "OpenAI",
@@ -93,8 +93,7 @@ describe("loadModel — vendored pricing catalog fallback (#437 phase 2)", () =>
 
   it("fills contextWindow / maxTokens / input / reasoning from catalog when the org row stores null", async () => {
     // Same rationale as the cost fallback: storing nulls on `org_models`
-    // means the weekly `refresh-pricing-catalog.ts` bump propagates to
-    // existing rows. `buildDbResolvedModel` resolves all five fields via
+    // means a Pi registry bump propagates to existing rows. `buildDbResolvedModel` resolves all five fields via
     // the same `resolveCatalogDefaults` path.
     const cred = await seedOrgModelProviderKey({
       orgId: ctx.orgId,
@@ -118,6 +117,21 @@ describe("loadModel — vendored pricing catalog fallback (#437 phase 2)", () =>
     expect(resolved!.contextWindow).toBeGreaterThan(0);
     expect(resolved!.input).toContain("text");
     expect(resolved!.reasoning === false || resolved!.reasoning === null).toBe(true);
+  });
+
+  it("resolves the Pi provider key once, null for a gateway", async () => {
+    const piProviderOf = async (providerId: string, modelId: string) => {
+      const cred = await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        providerId,
+        apiShape: "openai-completions",
+        apiKey: "sk-test",
+      });
+      const model = await seedOrgModel({ orgId: ctx.orgId, credentialId: cred.id, modelId });
+      return (await loadModel(ctx.orgId, model.id))!.piProvider;
+    };
+    expect(await piProviderOf("moonshot", "kimi-k2.6")).toBe("moonshotai");
+    expect(await piProviderOf("openai-compatible", "my-model")).toBeNull();
   });
 
   // Regression for #544: `org_models.id` is a uuid column. A non-UUID id (e.g.

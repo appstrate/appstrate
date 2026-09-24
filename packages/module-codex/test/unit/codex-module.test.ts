@@ -15,9 +15,8 @@ describe("codex module", () => {
     expect(codex.apiShape).toBe("openai-codex-responses");
     expect(codex.defaultBaseUrl).toBe("https://chatgpt.com/backend-api");
     // Pi emits the Codex request shape natively; Appstrate only swaps the
-    // server-side bearer and declares stricter transport capabilities.
+    // server-side bearer.
     expect(codex.oauthWireFormat).toBeUndefined();
-    expect(codex.generationOverride).toEqual({ temperature: "unsupported" });
   });
 
   it("OAuth metadata points at the openai authorization server", () => {
@@ -27,11 +26,6 @@ describe("codex module", () => {
     expect(codex?.oauth?.tokenUrl).toBe("https://auth.openai.com/oauth/token");
     expect(codex?.oauth?.refreshUrl).toBe("https://auth.openai.com/oauth/token");
     expect(codex?.oauth?.pkce).toBe("S256");
-  });
-
-  it("exposes a non-empty featured catalog", () => {
-    const codex = codexModule.modelProviders?.()[0];
-    expect(codex?.featuredModels).toEqual(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
   });
 });
 

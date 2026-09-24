@@ -877,10 +877,8 @@ export interface OrgProxyInfo {
  * (system-registry entry), and {@link OrgModelInfo} (wire shape).
  *
  * Capability surface uses the queryable split (`input` + `reasoning`) rather
- * than the flat `capabilities: string[]` array stored in the vendored JSON
- * files. The catalog loader projects from `capabilities` into these two fields
- * via `resolveCatalogDefaults()` in `org-models.ts` — the JSON files
- * themselves are not modified.
+ * than the catalog's flat `capabilities: string[]`, projected by
+ * `resolveCatalogDefaults()` in `org-models.ts`.
  */
 export interface ModelMetadata {
   label?: string;
@@ -924,6 +922,12 @@ export interface OrgModelInfo extends ModelMetadata {
    * registry entry (custom providers).
    */
   provider_name: string | null;
+  /**
+   * Pi builtin provider key of {@link providerId}'s models (e.g. `moonshotai`
+   * for `moonshot`) — what a client builds the Pi model record from. `null`
+   * for a gateway and for model aliases (part of the stripped backing).
+   */
+  pi_provider: string | null;
   base_url: string | null;
   modelId: string | null;
   enabled: boolean;
@@ -995,10 +999,9 @@ export interface ModelProviderCredentialInfo {
   /** True when the credential is dead (an OAuth `invalid_grant`, or undecryptable). */
   needs_reconnection?: boolean;
   /**
-   * Model ids empirically verified against this credential by the
-   * discovery probe — the server-side authorization record gating model
-   * seeding. Per-credential because availability depends on the account's
-   * plan. NULL/absent = never probed.
+   * Offered model ids this credential serves: what its listing reported, or
+   * the whole offer for a static-discovery provider. Informational — it gates
+   * nothing. NULL/absent = never listed.
    */
   available_model_ids?: string[] | null;
   created_by: string | null;
@@ -1026,30 +1029,27 @@ export interface ProviderRegistryEntry {
   authMode: "api_key" | "oauth2";
   /** Surface in the picker's "Featured" group. Module-supplied metadata. */
   featured: boolean;
+  /** Models are searched live on the provider and any id is accepted, not only `models`. */
+  live_model_search: boolean;
   models: ProviderRegistryModelEntry[];
 }
 
 /**
- * Single curated-catalog entry — used both runtime-side (vendored LiteLLM
- * pricing files in `apps/api/src/data/pricing/*.json` consumed by
- * `pricing-catalog.ts`) and wire-side (the registry endpoint splices `id`
- * back in and tags `featured` per provider).
- *
- * `label` and `cost` are non-nullable: the vendoring script drops entries
- * without usable pricing, and labels are title-cased from the id at
- * vendoring time.
+ * Single catalog entry — derived from Pi's pinned model registry
+ * (`apps/api/src/services/model-catalog.ts`) and served verbatim by the
+ * registry endpoint, which splices `id` back in and tags `featured`.
  */
 export interface CatalogModelEntry {
-  /** Human-readable label, derived from the id at vendoring time. */
+  /** Human-readable label — the registry record's name. */
   label: string;
   contextWindow: number;
   /** Provider-defined ceiling for the response. Null when unpublished. */
   maxTokens: number | null;
   capabilities: readonly string[];
-  /** Normalized generation controls derived from the pinned LiteLLM snapshot. */
-  generation?: ModelGenerationCapabilities;
-  /** Per-1M-token pricing in USD. */
-  cost: ModelCost;
+  /** Normalized generation controls derived from the registry record. */
+  generation: ModelGenerationCapabilities;
+  /** Per-1M-token pricing in USD; null when the registry prices the model at zero (unpriced). */
+  cost: ModelCost | null;
 }
 
 /**

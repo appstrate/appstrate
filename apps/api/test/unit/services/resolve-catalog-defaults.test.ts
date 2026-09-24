@@ -2,16 +2,17 @@
 
 /**
  * Unit tests for `resolveCatalogDefaults` — the `(providerId, modelId)` →
- * vendored-pricing-catalog lookup that feeds {@link resolveModelMetadata}.
- * Pins the `catalogProviderId` alias path (codex → openai, claude-code →
- * anthropic) and catalog-miss semantics (returns `{}`, never throws).
+ * catalog lookup that feeds {@link resolveModelMetadata}. Pins the offer
+ * lookup (`catalogProviderId ?? providerId` on the provider's `apiShape`),
+ * unpriced models and catalog-miss semantics (returns `{}`, never throws).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { resolveCatalogDefaults } from "../../../src/services/org-models.ts";
+import { lookupCatalogModel } from "../../../src/services/model-catalog.ts";
 import {
+  getModelProvider,
   registerModelProvider,
-  resetModelProviders,
 } from "../../../src/services/model-providers/registry.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import {
@@ -19,31 +20,42 @@ import {
   resolveModelGenerationSettings,
 } from "@appstrate/core/model-generation";
 
-// `gpt-4o` ships in the vendored snapshot at $2.5 / $10 per M, 128k
-// context. Asserting the canonical numbers fails loudly if a catalog
-// regenerate drops the entry — better here than in production.
-const GPT_4O = { contextWindow: 128_000, costInput: 2.5, costOutput: 10 };
-
 describe("resolveCatalogDefaults", () => {
   beforeAll(() => seedTestModelProviders());
   afterAll(() => seedTestModelProviders());
 
-  it("returns catalog entry for known (provider, model)", () => {
+  it("returns the catalog entry for a known (provider, model)", () => {
+    const entry = lookupCatalogModel(getModelProvider("openai")!, "gpt-4o")!;
     const out = resolveCatalogDefaults("openai", "gpt-4o");
-    expect(out.contextWindow).toBe(GPT_4O.contextWindow);
-    expect(out.cost?.input).toBeCloseTo(GPT_4O.costInput, 4);
-    expect(out.cost?.output).toBeCloseTo(GPT_4O.costOutput, 4);
+    expect(out).toMatchObject({
+      label: entry.label,
+      input: ["text", "image"],
+      contextWindow: entry.contextWindow,
+      maxTokens: entry.maxTokens,
+      reasoning: false,
+      cost: entry.cost!,
+    });
   });
 
-  it("returns {} on unknown model id (custom fine-tune)", () => {
+  it("returns {} on a model outside the offer (custom fine-tune)", () => {
     expect(resolveCatalogDefaults("openai", "ft:gpt-4o:my-org:custom:xyz")).toEqual({});
   });
 
-  it("returns {} on unmapped provider", () => {
+  it("returns {} on an unregistered provider", () => {
     expect(resolveCatalogDefaults("unmapped-provider-id", "gpt-4o")).toEqual({});
   });
 
-  describe("catalogProviderId alias (codex → openai, claude-code → anthropic)", () => {
+  it("returns {} through a gateway, whatever id it serves", () => {
+    expect(resolveCatalogDefaults("openai-compatible", "gpt-4o")).toEqual({});
+  });
+
+  it("carries no cost for a model the catalog leaves unpriced", () => {
+    const out = resolveCatalogDefaults("google-ai", "gemma-4-31b-it");
+    expect(out.contextWindow).toBeGreaterThan(0);
+    expect(out).not.toHaveProperty("cost");
+  });
+
+  describe("catalogProviderId names the Pi provider", () => {
     const ALIAS_ID = "test-openai-wrapper-445";
 
     beforeAll(() => {
@@ -55,79 +67,30 @@ describe("resolveCatalogDefaults", () => {
         catalogProviderId: "openai",
         defaultBaseUrl: "https://api.openai.test/v1",
         baseUrlOverridable: false,
-        apiShape: "openai-completions",
+        apiShape: "openai-responses",
         featuredModels: [],
       });
     });
-    afterAll(() => {
-      resetModelProviders();
-      seedTestModelProviders();
+    afterAll(() => seedTestModelProviders());
+
+    it("resolves the wrapper's model through the named Pi provider", () => {
+      expect(resolveCatalogDefaults(ALIAS_ID, "gpt-4o")).toEqual(
+        resolveCatalogDefaults("openai", "gpt-4o"),
+      );
     });
 
-    it("resolves catalog via catalogProviderId — wrapper's own id has no catalog file", () => {
-      const out = resolveCatalogDefaults(ALIAS_ID, "gpt-4o");
-      expect(out.contextWindow).toBe(GPT_4O.contextWindow);
-      expect(out.cost?.input).toBeCloseTo(GPT_4O.costInput, 4);
+    it("resolves the core providers whose key differs from Pi's", () => {
+      expect(resolveCatalogDefaults("moonshot", "kimi-k3").label).toBeString();
+      expect(resolveCatalogDefaults("google-ai", "gemini-3.8-flash").label).toBeString();
     });
   });
 
-  describe("provider generation overrides", () => {
-    it("keeps the OpenAI API capability while rejecting temperature on Codex", () => {
-      // An id the vendored catalog marks `temperature: "supported"` on the
-      // OpenAI API, so the `unsupported` below can only come from the Codex
-      // override. The 5.6 family no longer qualifies: the 2026-09-07 LiteLLM
-      // refresh (#1277) marks it unsupported on the API too.
-      const openai = resolveCatalogDefaults("openai", "gpt-5.4");
-      const codex = resolveCatalogDefaults("codex", "gpt-5.4");
-
-      expect(openai.generation?.temperature).toBe("supported");
-      expect(codex.generation?.temperature).toBe("unsupported");
-      expect(() =>
-        resolveModelGenerationSettings({
-          capabilities: codex.generation,
-          override: { temperature: 0.4 },
-        }),
-      ).toThrow(ModelGenerationError);
-    });
-
-    it("exposes LiteLLM's complete Luna reasoning contract through Codex", () => {
-      const codex = resolveCatalogDefaults("codex", "gpt-5.6-luna");
-
-      expect(codex.generation?.reasoning.levels).toEqual({
-        off: "supported",
-        minimal: "unsupported",
-        low: "supported",
-        medium: "supported",
-        high: "supported",
-        xhigh: "supported",
-        max: "supported",
-      });
-      expect(
-        resolveModelGenerationSettings({
-          capabilities: codex.generation,
-          override: { reasoning_level: "low" },
-        }),
-      ).toEqual({ reasoning_level: "low" });
-      expect(
-        resolveModelGenerationSettings({
-          capabilities: codex.generation,
-          override: { reasoning_level: "max" },
-        }),
-      ).toEqual({ reasoning_level: "max" });
-    });
-
-    it("keeps provider transport restrictions on a catalog miss", () => {
-      expect(resolveCatalogDefaults("codex", "future-codex-model").generation).toMatchObject({
-        temperature: "unsupported",
-      });
-    });
-
+  describe("generation capabilities", () => {
     it("rejects temperature combined with reasoning on Anthropic Pi transports", () => {
       for (const providerId of ["anthropic", "claude-code"]) {
-        const defaults = resolveCatalogDefaults(providerId, "claude-3-7-sonnet-20250219");
+        const defaults = resolveCatalogDefaults(providerId, "claude-sonnet-4-5");
 
         expect(defaults.generation?.reasoning.temperature_compatible).toBe("unsupported");
-        expect(defaults.generation?.reasoning.native_levels?.minimal).toBe("low");
         expect(() =>
           resolveModelGenerationSettings({
             capabilities: defaults.generation,

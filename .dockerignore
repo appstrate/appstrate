@@ -68,7 +68,7 @@ eslint.config.mjs
 .gitattributes
 
 # Local runtime + scratch state. Root-anchored (see the `**/` note above), so
-# these never shadow vendored source dirs like apps/api/src/data/.
+# these never shadow a source directory of the same name.
 data/
 storage/
 local-test-packages/

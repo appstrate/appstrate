@@ -31,13 +31,9 @@
  * entry is `validateCredential`, an OFFLINE check (no network) that confirms
  * the bearer is well-formed and unexpired — its presence is what makes
  * credential validation offline. Model discovery neither probes nor persists:
- * `modelDiscovery: { mode: "static" }` makes the served set a pure function of
- * (definition, vendored catalog), so the platform resolves
- * `modelDiscoveryCandidates` (∩ catalog) on every read instead of copying it
- * onto the credential row, where it could only go stale. Real per-model
- * availability is validated at the first agent run (on the Pi engine). Both
- * model lists are declared as catalog selectors, so they track the vendored
- * anthropic catalog instead of rotting as hand-curated snapshots. See
+ * `modelDiscovery: { mode: "static" }` makes the served set the provider's
+ * offer (Pi's `anthropic` records), resolved on every read. Real per-model
+ * availability is validated at the first agent run (on the Pi engine). See
  * `docs/architecture/SUBSCRIPTION_COMPLIANCE.md`.
  */
 
@@ -49,7 +45,6 @@ import type {
   ModelProviderHooks,
 } from "@appstrate/core/module";
 import { validateOfflineExpiry } from "@appstrate/core/module";
-import { ANTHROPIC_GENERATION_CAPABILITIES_OVERRIDE } from "@appstrate/core/model-generation";
 import { ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY } from "@appstrate/core/oauth-bearer-swap";
 
 const claudeCodeHooks: ModelProviderHooks = {
@@ -129,54 +124,10 @@ const claudeCodeProvider: ModelProviderDefinition = {
     ],
     pkce: "S256",
   },
-  // Claude Code (Claude Pro/Max/Team subscription) authenticates against
-  // the Anthropic catalog — metadata flows through anthropic.json.
+  // A model the plan does not serve (Pro/Max/Team differ) fails at first run.
   catalogProviderId: "anthropic",
-  // Keep LiteLLM's portable support facts, then apply Anthropic wire-level
-  // constraints shared with the API-key provider.
-  generationOverride: ANTHROPIC_GENERATION_CAPABILITIES_OVERRIDE,
-  // Both lists are DERIVED from the vendored anthropic catalog rather than
-  // hand-enumerated. The Claude subscription serves Anthropic's current
-  // generation — it has no published, machine-readable model list, and
-  // `docs/architecture/SUBSCRIPTION_COMPLIANCE.md` forbids ANY platform-side
-  // API call to enumerate it. A hand-curated snapshot therefore had no
-  // correction mechanism and silently fell a full generation behind the
-  // catalog. Deriving means the weekly `refresh-pricing-catalog.ts` bump
-  // carries new generations through on its own.
-  //
-  // The residual risk is over-listing, deliberately accepted: a catalog model
-  // this account's plan does not serve (Pro vs Max vs Team differ on
-  // Opus/Fable access) fails loudly at the first run instead of being
-  // silently missing for months. Under-listing is the failure mode that has
-  // no feedback loop, so the derivation errs the other way.
-  //
-  // Featured: exactly one current model per family — what the picker's
-  // Featured section and the `org_models` auto-seed want, and what
-  // `generations: 1` over the four families already yields. No cap on top of
-  // it: an earlier `limit: 3` silently truncated the round-robin's fourth
-  // slot, which made `claude-fable` a family that could never surface a single
-  // model no matter what Anthropic shipped.
-  featuredModels: {
-    catalogFamilies: ["claude-opus", "claude-sonnet", "claude-haiku", "claude-fable"],
-    generations: 1,
-  },
-  // OFFLINE validation: the platform issues ZERO Anthropic API calls to test a
-  // credential or discover models. The connection test runs the
-  // `validateCredential` hook below (a non-empty/unexpired bearer check) — its
-  // mere presence is what tells the platform to validate offline. Static
-  // discovery resolves these candidates (∩ catalog) at read time and probes
-  // nothing. Real availability is checked at the first agent run (on the
-  // Pi engine).
-  // Three generations per family, not one: plans lag the current release, so a
-  // subscription still served by the previous Opus/Sonnet must keep it
-  // selectable. What THIS account actually serves is discovered by the user at
-  // first run, not by the platform.
-  modelDiscoveryCandidates: {
-    catalogFamilies: ["claude-opus", "claude-sonnet", "claude-haiku", "claude-fable"],
-    generations: 3,
-  },
-  // Static discovery: resolve the candidates above (∩ catalog) on read, never
-  // probe and never persist.
+  // One current model per family, bumped with Pi.
+  featuredModels: ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5", "claude-fable-5-1"],
   modelDiscovery: { mode: "static" },
   // Anthropic OAuth tokens are not JWTs — no JWT identity decoding. There is no
   // fingerprint forging: both `claude-code` agent runs and the interactive chat

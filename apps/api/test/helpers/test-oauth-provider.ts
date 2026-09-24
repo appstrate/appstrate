@@ -19,9 +19,10 @@
 
 import type { ModelProviderDefinition } from "@appstrate/core/module";
 import { registerModelProvider } from "../../src/services/model-providers/registry.ts";
-import { registerCatalog } from "../../src/services/pricing-catalog.ts";
 
 export const TEST_OAUTH_PROVIDER_ID = "test-oauth";
+/** A model `test-oauth` offers and features. */
+export const TEST_OAUTH_MODEL_ID = "gpt-5.5";
 
 const testOAuthProvider: ModelProviderDefinition = {
   providerId: TEST_OAUTH_PROVIDER_ID,
@@ -40,9 +41,9 @@ const testOAuthProvider: ModelProviderDefinition = {
     scopes: ["openid", "profile"],
     pkce: "S256",
   },
-  // Synthetic provider — no catalog, so featured stays empty. The OAuth
-  // identity/refresh tests under this fixture don't exercise the picker.
-  featuredModels: [],
+  // Offers Pi's OpenAI records, so the seed route has a real catalog to gate on.
+  catalogProviderId: "openai",
+  featuredModels: [TEST_OAUTH_MODEL_ID],
   // Required of every oauth2 provider: the platform never enumerates a
   // subscription token's models.
   modelDiscovery: { mode: "static" },
@@ -133,40 +134,10 @@ let apiKeyRegistered = false;
  * Idempotent — safe to call from `beforeEach` / `beforeAll`. The runtime
  * registry de-dupes by providerId, but the second call would throw "duplicate
  * registration" if we called the underlying `registerModelProvider` twice.
- *
- * Also registers a synthetic catalog under `test-oauth` containing one
- * model id (`test-model`) so the `/api/models/seed` route — which
- * validates every requested id against the resolved catalog — accepts
- * the standard test fixture.
  */
 export function registerTestOAuthProvider(): void {
   if (registered) return;
   registerModelProvider(testOAuthProvider);
-  registerCatalog("test-oauth", {
-    "test-model": {
-      label: "Test Model",
-      contextWindow: 8192,
-      maxTokens: 4096,
-      capabilities: ["text"],
-      cost: { input: 0, output: 0 },
-    },
-    "test-reasoning-model": {
-      label: "Test Reasoning Model",
-      contextWindow: 8192,
-      maxTokens: 4096,
-      capabilities: ["text", "reasoning"],
-      generation: {
-        temperature: "unsupported",
-        reasoning: {
-          supported: "supported",
-          adaptive: true,
-          levels: { xhigh: "supported" },
-          native_levels: { xhigh: "max" },
-        },
-      },
-      cost: { input: 0, output: 0 },
-    },
-  });
   registered = true;
 }
 

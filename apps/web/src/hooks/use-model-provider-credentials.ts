@@ -30,6 +30,7 @@ export type ProviderRegistryEntry = RawProviderRegistryEntry &
       | "baseUrlOverridable"
       | "authMode"
       | "featured"
+      | "live_model_search"
       | "models"
     >
   >;
@@ -96,19 +97,6 @@ export function useDeleteModelProviderCredential() {
 
 export function useTestModelProviderCredential() {
   return $api.useMutation("post", "/api/model-provider-credentials/{id}/test");
-}
-
-/**
- * Model discovery — reports which models the credential's account/plan serves,
- * from the provider's own listing intersected with its candidates (or, for a
- * static provider, derived with no request at all), and persists them
- * server-side (the seed gate reads the persisted list). The model form reads
- * the fresh ids straight off the mutation response to populate its dropdown,
- * so nothing cached needs invalidating: the credentials list surfaces no
- * discovery-derived field and the registry is a pure, org-independent catalog.
- */
-export function useRefreshCredentialModels() {
-  return $api.useMutation("post", "/api/model-provider-credentials/{id}/refresh-models");
 }
 
 /** Wire shape of `POST /api/model-provider-credentials/discover`'s 200 body. */

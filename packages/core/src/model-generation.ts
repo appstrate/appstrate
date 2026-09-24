@@ -3,7 +3,7 @@
 
 import { z } from "zod";
 
-/** Portable reasoning vocabulary exposed by LiteLLM and accepted by Appstrate. */
+/** Portable reasoning vocabulary: Pi's `ModelThinkingLevel`, accepted by Appstrate. */
 export const MODEL_REASONING_LEVELS = [
   "off",
   "minimal",
@@ -57,18 +57,6 @@ export function mapModelReasoningLevels<T>(
   >;
 }
 
-export const modelNativeReasoningLevelSchema = z.enum([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-]);
-
-export type ModelNativeReasoningLevel = z.infer<typeof modelNativeReasoningLevelSchema>;
-
 /**
  * Persisted/requested generation settings. Null and omission both mean
  * "inherit"; zero is a meaningful temperature and must never be collapsed.
@@ -96,9 +84,6 @@ export const modelGenerationCapabilitiesSchema = z
         levels: z
           .partialRecord(modelReasoningLevelSchema, modelCapabilitySupportSchema)
           .default({}),
-        native_levels: z
-          .partialRecord(modelReasoningLevelSchema, modelNativeReasoningLevelSchema)
-          .optional(),
       })
       .default({ supported: "unknown", adaptive: null, levels: {} }),
   })
@@ -106,62 +91,10 @@ export const modelGenerationCapabilitiesSchema = z
 
 export type ModelGenerationCapabilities = z.infer<typeof modelGenerationCapabilitiesSchema>;
 
-/** Provider-wide facts that are stricter than a reused vendor catalog. */
-export interface ModelGenerationCapabilitiesOverride {
-  temperature?: ModelCapabilitySupport;
-  reasoning?: {
-    supported?: ModelCapabilitySupport;
-    temperature_compatible?: ModelCapabilitySupport;
-    adaptive?: boolean | null;
-    levels?: Partial<Record<ModelReasoningLevel, ModelCapabilitySupport>>;
-    native_levels?: Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>>;
-  };
-}
-
-/** Shared Anthropic wire constraints for API-key and Claude Code transports. */
-export const ANTHROPIC_GENERATION_CAPABILITIES_OVERRIDE = {
-  reasoning: {
-    temperature_compatible: "unsupported",
-    native_levels: { minimal: "low" },
-  },
-} satisfies ModelGenerationCapabilitiesOverride;
-
 export const UNKNOWN_MODEL_GENERATION_CAPABILITIES: ModelGenerationCapabilities = {
   temperature: "unknown",
   reasoning: { supported: "unknown", adaptive: null, levels: {} },
 };
-
-/** Merge a provider adapter's stricter transport facts over catalog metadata. */
-export function applyModelGenerationCapabilitiesOverride(
-  capabilities: ModelGenerationCapabilities,
-  override?: ModelGenerationCapabilitiesOverride | null,
-): ModelGenerationCapabilities {
-  if (!override) return capabilities;
-  const nativeLevels = {
-    ...capabilities.reasoning.native_levels,
-    ...override.reasoning?.native_levels,
-  };
-  const temperatureCompatible =
-    override.reasoning?.temperature_compatible ?? capabilities.reasoning.temperature_compatible;
-  return {
-    temperature: override.temperature ?? capabilities.temperature,
-    reasoning: {
-      supported: override.reasoning?.supported ?? capabilities.reasoning.supported,
-      ...(temperatureCompatible !== undefined
-        ? { temperature_compatible: temperatureCompatible }
-        : {}),
-      adaptive:
-        override.reasoning?.adaptive !== undefined
-          ? override.reasoning.adaptive
-          : capabilities.reasoning.adaptive,
-      levels: {
-        ...capabilities.reasoning.levels,
-        ...override.reasoning?.levels,
-      },
-      ...(Object.keys(nativeLevels).length > 0 ? { native_levels: nativeLevels } : {}),
-    },
-  };
-}
 
 /** Remove persisted/UI settings explicitly rejected by the selected model. */
 export function reconcileModelGenerationSettings(
@@ -287,13 +220,4 @@ export function resolveModelGenerationSettings({
     ...(temperature !== undefined ? { temperature } : {}),
     ...(reasoningLevel !== undefined ? { reasoning_level: reasoningLevel } : {}),
   };
-}
-
-/** Translate Appstrate's portable effort to the provider's catalogued value. */
-export function toNativeModelReasoningLevel(
-  level: ModelReasoningLevel,
-  capabilities?: ModelGenerationCapabilities | null,
-): ModelNativeReasoningLevel {
-  if (level === "off") return capabilities?.reasoning.native_levels?.off ?? "none";
-  return capabilities?.reasoning.native_levels?.[level] ?? level;
 }

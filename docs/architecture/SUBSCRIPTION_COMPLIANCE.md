@@ -127,15 +127,16 @@ are now **offline**:
 
 - **Model discovery** (`POST /api/model-provider-credentials/:id/refresh-models`):
   for a `modelDiscovery: { mode: "static" }` provider the platform probes no
-  candidate **and writes nothing**. The served set is the provider's
-  `modelDiscoveryCandidates` (∩ catalog), resolved on every read by
-  `resolveCredentialModelIds`
+  model **and writes nothing**. The served set is the provider's offer — the
+  records of its Pi provider (`openai-codex`, `anthropic`) in Pi's pinned model
+  registry, which ships with the SDK and is read locally — resolved on every
+  read by `resolveCredentialModelIds`
   (`apps/api/src/services/model-providers/credentials.ts`); the endpoint is a
   truthful no-op that reports the current list
   (`apps/api/src/services/model-providers/model-discovery.ts` →
   `discoverAvailableModels`, static branch). Not persisting is the point:
   with no upstream listing the answer is a pure function of (provider definition,
-  vendored catalog) and therefore identical for every credential of the
+  Pi registry) and therefore identical for every credential of the
   provider, so a stored copy would hold no per-credential information and
   could only fall behind — which is how connections kept offering a model list
   two generations old. `available_model_ids` is written by the listing path only.
@@ -145,7 +146,9 @@ are now **offline**:
 The `validateCredential` hook + `credentialValidation` flag are provider-agnostic
 core contracts (`packages/core/src/module.ts`): the platform asks "does this
 provider validate offline?" by data, never by hardcoding `codex` / `claude-code`.
-API-key providers leave the flag unset and keep the empirical `/models` probe.
+API-key providers leave the flag unset and keep the empirical `/models` probe,
+except a `publicModelListing` provider (its listing ignores the key), which is
+checked with one minimal chat completion instead.
 
 This keeps §1.1's "zero platform-side subscription API calls" claim literally
 true for the test/discovery paths, not just the run path. The earlier hand-built

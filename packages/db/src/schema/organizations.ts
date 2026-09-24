@@ -302,17 +302,15 @@ export const modelProviderCredentials = pgTable(
     // did refresh last fail" is ever needed, build the reader first — a column
     // with no reader is not telemetry, it is write amplification.
     /**
-     * Model ids empirically verified against this credential — filled by
-     * the model-discovery probe (post-OAuth-import + manual refresh). The
-     * server-side authorization record gating model seeding
-     * (`routes/models.ts`). Per-credential because availability depends on
-     * the account's plan (e.g. Claude Pro vs Max), not the provider.
-     * NULL = never probed.
+     * The offered model ids this credential's `GET /models` listing reported,
+     * written by model discovery (manual refresh) and surfaced on the
+     * credential DTO; it gates nothing. Per-credential because availability
+     * depends on the account's plan, not the provider. NULL = never listed.
      *
-     * PROBE PROVIDERS ONLY. Credentials of a `modelDiscovery: { mode:
+     * LISTING PROVIDERS ONLY. Credentials of a `modelDiscovery: { mode:
      * "static" }` provider (subscription sign-ins: claude-code, codex) are
-     * never probed, so their served set is a pure function of (provider
-     * definition, pricing catalog) — identical for every credential of the
+     * never listed, so their served set is a pure function of (provider
+     * definition, Pi model registry) — identical for every credential of the
      * provider. It is derived on read by `resolveCredentialModelIds`
      * (apps/api, services/model-providers/credentials.ts) and this column is
      * neither written nor read for them; migration 0030 nulled the historical

@@ -14,7 +14,9 @@
  */
 
 import { MODEL_INPUT_MODALITIES, type ModelInputModality } from "@appstrate/core/module";
-import { fetchModelListing } from "../org-models.ts";
+import type { TestResult } from "@appstrate/shared-types";
+import { fetchModelListing, statusFailure, validateKeyByInference } from "../org-models.ts";
+import { getModelProvider } from "./registry.ts";
 import { logger } from "../../lib/logger.ts";
 
 /** Upper bound on models taken from a listing, across all of its pages. */
@@ -217,17 +219,33 @@ export function parseServedModels(apiShape: string, body: unknown): ParsedServed
   return { models, capped };
 }
 
-interface ListingConfig {
+export interface ListingConfig {
   apiShape: string;
   baseUrl: string;
   apiKey: string;
-  providerId?: string;
+  providerId: string;
 }
 
+type ListingFailure = Extract<ListServedModelsResult, { ok: false }>;
+
 /** One page of a listing: its parsed body, or the verdict that stopped it. */
-type ListingPageResult =
-  | { ok: true; body: unknown; status: number }
-  | { ok: false; error: ListServedModelsError; status?: number; message: string };
+type ListingPageResult = { ok: true; body: unknown; status: number } | ListingFailure;
+
+/**
+ * A failed provider request as a listing verdict. Before any response, a
+ * refused URL keeps its verdict (fixed by `EGRESS_ALLOW_INTERNAL_HOSTS`, not by
+ * retrying) and anything else is "the provider did not answer".
+ */
+function toListingFailure(reply: TestResult): ListingFailure {
+  const message = reply.message ?? "Provider request failed";
+  if (reply.status === undefined) {
+    const error = reply.error === "BLOCKED_URL" ? "BLOCKED_URL" : "UNREACHABLE";
+    return { ok: false, error, message };
+  }
+  const error =
+    reply.error === "AUTH_FAILED" || reply.error === "RATE_LIMITED" ? reply.error : "HTTP_ERROR";
+  return { ok: false, error, status: reply.status, message };
+}
 
 /** One guarded `GET <baseUrl>/models`, mapped from transport/HTTP failure to verdict. */
 async function fetchListingPage(
@@ -235,36 +253,10 @@ async function fetchListingPage(
   pageQuery?: PageQuery,
 ): Promise<ListingPageResult> {
   const listing = await fetchModelListing(config, pageQuery);
-  if (!listing.ok) {
-    // A refused URL keeps its verdict (fixed by `EGRESS_ALLOW_INTERNAL_HOSTS`,
-    // not by retrying); anything else is "the provider did not answer".
-    return {
-      ok: false,
-      error: listing.error === "BLOCKED_URL" ? "BLOCKED_URL" : "UNREACHABLE",
-      message: listing.message ?? "Model listing request failed",
-    };
-  }
+  if (!listing.ok) return toListingFailure(listing);
 
   const { res } = listing;
-  if (!res.ok) {
-    if (res.status === 401 || res.status === 403) {
-      return {
-        ok: false,
-        error: "AUTH_FAILED",
-        status: res.status,
-        message: "Authentication failed",
-      };
-    }
-    if (res.status === 429) {
-      return { ok: false, error: "RATE_LIMITED", status: res.status, message: "Rate limited" };
-    }
-    return {
-      ok: false,
-      error: "HTTP_ERROR",
-      status: res.status,
-      message: `Provider returned ${res.status}`,
-    };
-  }
+  if (!res.ok) return toListingFailure(statusFailure(res.status, listing.latency));
 
   const parsed = await readBoundedJson(res);
   if (!parsed.ok) {
@@ -313,8 +305,27 @@ async function readBoundedJson(
 /**
  * List the models a credential's provider serves, following the listing's own
  * cursor across pages. Response order, deduped on id across pages (first wins).
+ * A `publicModelListing` provider's key is then checked by inference.
  */
 export async function listServedModels(config: ListingConfig): Promise<ListServedModelsResult> {
+  const listing = await readServedModels(config);
+  const def = getModelProvider(config.providerId);
+  if (!listing.ok || !def?.publicModelListing) return listing;
+  const verdict = await validateKeyByInference(
+    def,
+    config,
+    listing.models.map((m) => m.id),
+  );
+  return verdict.ok ? listing : toListingFailure(verdict);
+}
+
+/** The ids a provider's listing serves, or `null` when it could not be read. */
+export async function listedModelIds(config: ListingConfig): Promise<string[] | null> {
+  const listing = await readServedModels(config);
+  return listing.ok ? listing.models.map((m) => m.id) : null;
+}
+
+async function readServedModels(config: ListingConfig): Promise<ListServedModelsResult> {
   const models: ServedModel[] = [];
   const seen = new Set<string>();
   let pageQuery: PageQuery | undefined;

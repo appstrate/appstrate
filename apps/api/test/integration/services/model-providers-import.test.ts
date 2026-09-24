@@ -37,7 +37,10 @@ import { modelProviderCredentials } from "@appstrate/db/schema";
 import { importOAuthModelProviderConnection } from "../../../src/services/model-providers/oauth-flow.ts";
 import { type OAuthBlob } from "../../../src/services/model-providers/credentials.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
-import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
+import { listCatalogModels } from "../../../src/services/model-catalog.ts";
+import { getModelProvider } from "../../../src/services/model-providers/registry.ts";
+import { TEST_OAUTH_MODEL_ID, TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
+import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 
 describe("importOAuthModelProviderConnection", () => {
   let userId: string;
@@ -45,6 +48,7 @@ describe("importOAuthModelProviderConnection", () => {
 
   beforeEach(async () => {
     await truncateAll();
+    seedTestModelProviders();
     const user = await createTestUser();
     userId = user.id;
     const { org } = await createTestOrg(userId, { slug: "testorg" });
@@ -65,13 +69,13 @@ describe("importOAuthModelProviderConnection", () => {
 
     expect(result.providerId).toBe(TEST_OAUTH_PROVIDER_ID);
     expect(result.credentialId).toMatch(/^[0-9a-f-]{36}$/);
-    // `test-oauth` is probe-validated, and nothing has been probed yet — the
-    // honest answer is "nothing discovered", not the provider's featured
-    // subset. It is also what a GET of this credential reports until the
-    // model form runs discovery. (The static/subscription half of the
-    // contract, plus the equality with the GET surface, is exercised at the
-    // route level in `routes/model-providers-oauth-pair-redeem.test.ts`.)
-    expect(result.availableModelIds).toEqual([]);
+    // `test-oauth` is a static-discovery (subscription) provider: its served
+    // set is its whole Pi offer, resolved on read — never a probe result. (The
+    // equality with the GET surface is exercised at the route level in
+    // `routes/model-providers-oauth-pair-redeem.test.ts`.)
+    const offer = listCatalogModels(getModelProvider(TEST_OAUTH_PROVIDER_ID)!).map((m) => m.id);
+    expect(offer).toContain(TEST_OAUTH_MODEL_ID);
+    expect(result.availableModelIds).toEqual(offer);
 
     const [row] = await db
       .select()

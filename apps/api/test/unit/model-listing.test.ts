@@ -249,6 +249,7 @@ describe("listServedModels", () => {
       apiShape: "openai-responses",
       baseUrl: "http://169.254.169.254/v1",
       apiKey: "k",
+      providerId: "openai",
     });
 
     expect(result.ok).toBe(false);
@@ -265,6 +266,7 @@ describe("listServedModels", () => {
         apiShape: "openai-responses",
         baseUrl: `http://127.0.0.1:${server.port}/v1`,
         apiKey: "k",
+        providerId: "openai",
       });
     } finally {
       await server.stop(true);

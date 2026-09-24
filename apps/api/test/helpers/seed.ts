@@ -505,9 +505,9 @@ interface ModelProviderCredentialSeed {
  * honored — pointing any provider at a mock endpoint is trivial.
  */
 function defaultProviderId(apiShape: string | undefined, baseUrl: string | undefined): string {
-  // baseUrl host wins over apiShape when both are supplied — pricing-catalog
-  // tests pin against the canonical provider (`openai` for gpt-4o cost
-  // lookup) regardless of which wire format the harness happens to use.
+  // baseUrl host wins over apiShape when both are supplied — catalog tests
+  // pin against the canonical provider (`openai` for gpt-4o cost lookup)
+  // regardless of which wire format the harness happens to use.
   if (baseUrl && /openai\.com/i.test(baseUrl)) return "openai";
   if (baseUrl && /anthropic\.com/i.test(baseUrl)) return "anthropic";
   if (baseUrl && /mistral\.ai/i.test(baseUrl)) return "mistral";

@@ -272,12 +272,25 @@ export const schemas = {
       },
     },
   },
+  ModelCostTier: {
+    type: "object",
+    required: ["inputTokensAbove", "input", "output", "cacheRead", "cacheWrite"],
+    description:
+      "A request-wide price tier (USD per 1M tokens). When a request's input — input + cache-read + cache-write tokens — exceeds `inputTokensAbove`, the highest such tier prices the whole request.",
+    properties: {
+      inputTokensAbove: { type: "number" },
+      input: { type: "number" },
+      output: { type: "number" },
+      cacheRead: { type: "number" },
+      cacheWrite: { type: "number" },
+    },
+  },
   ModelGenerationCapabilities: {
     type: "object",
     additionalProperties: false,
     required: ["temperature", "reasoning"],
     description:
-      "Normalized support facts from Appstrate's pinned LiteLLM catalog snapshot, refined by stricter provider transport declarations. `unknown` keeps temperature forward-compatible, while reasoning levels are selectable only when explicitly supported; it remains distinct from an explicit upstream refusal.",
+      "Normalized support facts derived from the model's record in Appstrate's pinned model registry, refined by stricter provider transport declarations. `unknown` keeps temperature forward-compatible, while reasoning levels are selectable only when explicitly supported; it remains distinct from an explicit upstream refusal.",
     properties: {
       temperature: { type: "string", enum: ["supported", "unsupported", "unknown"] },
       reasoning: {
@@ -298,18 +311,6 @@ export const schemas = {
             additionalProperties: {
               type: "string",
               enum: ["supported", "unsupported", "unknown"],
-            },
-            propertyNames: {
-              enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
-            },
-          },
-          native_levels: {
-            type: "object",
-            description:
-              "Optional provider-native values for portable levels (for example off to none).",
-            additionalProperties: {
-              type: "string",
-              enum: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
             },
             propertyNames: {
               enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
@@ -1626,7 +1627,7 @@ export const schemas = {
         type: ["array", "null"],
         items: { type: "string" },
         description:
-          "Model ids this credential is authorized to seed — the server-side authorization record gating model seeding. For API-key providers these are the discovery candidates present in the provider's `GET <base_url>/models` listing, persisted by model discovery (POST /:id/refresh-models); nothing is inference-probed. Empty when discovery never ran, and per-credential because the listing depends on the account's plan. For `offline`-validation providers (subscription: codex, claude-code) nothing is ever persisted: the list is derived on every read from the provider definition and the pricing catalog, so a catalog refresh carries a new model generation through without any write.",
+          "Model ids of the provider's offer this credential serves. For API-key providers, the offered ids its `GET <base_url>/models` listing reported, persisted by model discovery (POST /:id/refresh-models); models are not inference-probed (a provider whose listing is unauthenticated has its key checked by one minimal chat completion first, and a rejected key persists nothing). Empty when discovery never ran, and per-credential because the listing depends on the account's plan. For static-discovery providers (subscription: codex, claude-code) nothing is ever persisted: the list is the provider's whole offer (Pi's model registry), derived on every read. Informational: it does not restrict which models can be created on the credential.",
       },
       created_by: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
@@ -1641,6 +1642,7 @@ export const schemas = {
       "apiShape",
       "providerId",
       "provider_name",
+      "pi_provider",
       "base_url",
       "modelId",
       "generation",
@@ -1672,6 +1674,11 @@ export const schemas = {
         type: ["string", "null"],
         description:
           "The provider's human display name resolved from the model-provider registry by `providerId` (e.g. `OpenCode Go`, `OpenAI`). The authoritative label for grouping/badging a model by provider — `apiShape` is ambiguous (OpenCode Go and OpenAI both use `openai-completions`), so do NOT derive a provider label from it. `null` for managed models (binding not exposed) and for rows whose `providerId` has no registry entry.",
+      },
+      pi_provider: {
+        type: ["string", "null"],
+        description:
+          "Key of the Pi model-registry provider that describes this model (e.g. `moonshotai` for `moonshot`): a client builds its model record (limits, request dialect) from `pi_provider` + `modelId`. `null` for a gateway (`openai-compatible`, `anthropic-compatible`), which has no registry record, and for managed models — binding not exposed.",
       },
       base_url: {
         type: ["string", "null"],
@@ -1724,6 +1731,7 @@ export const schemas = {
           output: { type: "number" },
           cacheRead: { type: "number" },
           cacheWrite: { type: "number" },
+          tiers: { type: "array", items: { $ref: "#/components/schemas/ModelCostTier" } },
         },
       },
       created_by: { type: ["string", "null"] },

@@ -6,15 +6,14 @@
  *
  *   - `{ mode: "static" }` (subscription providers): ZERO API calls, nothing
  *     written (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`). The served set
- *     is a pure function of (definition, catalog), resolved on read by
- *     `resolveCredentialModelIds`; discovery reports the current list.
- *   - listing (API-key providers): `GET <baseUrl>/models` (`listServedModels`) —
- *     a listing that declares a next page is followed to its end, under a page
- *     cap, a model cap and a per-page byte budget — intersected with the discovery candidates and
- *     persisted as `available_model_ids` — the seed gate's authorization
- *     record, read only through `resolveCredentialModelIds`. AUTH_FAILED never
- *     persists; RATE_LIMITED is retried once; any other failure, a truncated
- *     listing, or an empty intersection, leaves the previous list standing.
+ *     is the provider's offer, resolved on read by `resolveCredentialModelIds`;
+ *     discovery reports the current list.
+ *   - listing (API-key providers): `GET <baseUrl>/models` (`listServedModels`,
+ *     every page) intersected with the provider's offer and persisted as
+ *     `available_model_ids` — the served set the credential DTO reports, read
+ *     through `resolveCredentialModelIds`. AUTH_FAILED never persists;
+ *     RATE_LIMITED is retried once; any other failure, a truncated listing, or
+ *     an empty intersection, leaves the previous list standing.
  */
 
 import { eq, and } from "drizzle-orm";
@@ -22,30 +21,27 @@ import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import { loadInferenceCredentials } from "./credentials.ts";
 import { getModelProvider } from "./registry.ts";
-import { resolveCatalogBackedCandidates, resolveDiscoveryCandidates } from "./model-selection.ts";
-import { listServedModels, type ListServedModelsResult } from "./model-listing.ts";
+import { listCatalogModels } from "../model-catalog.ts";
+import {
+  listServedModels,
+  type ListingConfig,
+  type ListServedModelsResult,
+} from "./model-listing.ts";
 import { logger } from "../../lib/logger.ts";
 
 /** Pause before the single 429 retry. */
 const RATE_LIMIT_RETRY_DELAY_MS = 2_000;
-/** Hard cap — a runaway candidate list must not become an unbounded row. */
-const MAX_CANDIDATES = 24;
 
 /** The verified ids are not echoed: the caller re-reads them through the credential DTO. */
 interface ModelDiscoveryResult {
   outcome: "ok" | "auth_failed" | "nothing_verified" | "no_candidates" | "credential_not_found";
-  /** Candidates declared after dedupe and cap, on both paths. Not a request count, not a served count. */
+  /** The provider's offer size, on both paths. Not a request count, not a served count. */
   candidateCount: number;
 }
 
 export interface ModelDiscoveryDeps {
   /** List what a credential serves — defaults to {@link listServedModels}. */
-  listModels: (config: {
-    apiShape: string;
-    baseUrl: string;
-    apiKey: string;
-    providerId?: string;
-  }) => Promise<ListServedModelsResult>;
+  listModels: (config: ListingConfig) => Promise<ListServedModelsResult>;
   /** Sleep — injectable so unit tests don't wait. */
   sleep: (ms: number) => Promise<void>;
 }
@@ -80,16 +76,15 @@ export async function discoverAvailableModels(
     return { outcome: "credential_not_found", candidateCount: 0 };
   }
   const def = getModelProvider(creds.providerId);
+  const candidates = def ? listCatalogModels(def).map((m) => m.id) : [];
 
   if (def?.modelDiscovery?.mode === "static") {
-    const served = resolveCatalogBackedCandidates(def);
     return {
-      outcome: served.length > 0 ? "ok" : "no_candidates",
-      candidateCount: resolveDiscoveryCandidates(def).slice(0, MAX_CANDIDATES).length,
+      outcome: candidates.length > 0 ? "ok" : "no_candidates",
+      candidateCount: candidates.length,
     };
   }
 
-  const candidates = (def ? resolveDiscoveryCandidates(def) : []).slice(0, MAX_CANDIDATES);
   if (candidates.length === 0) {
     return { outcome: "no_candidates", candidateCount: 0 };
   }
@@ -131,7 +126,7 @@ export async function discoverAvailableModels(
     return { outcome: "nothing_verified", candidateCount: candidates.length };
   }
 
-  // Declaration order: the candidate list is the provider's own ranking.
+  // Offer order (Pi's), not the listing's.
   const served = new Set(listing.models.map((m) => m.id));
   const verified = candidates.filter((id) => served.has(id));
 

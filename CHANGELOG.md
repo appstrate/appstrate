@@ -28,6 +28,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   to carry `email`/`sub`. Nine shipped integrations are in that state today:
   dropbox, dynamics365, hubspot, linear, mailchimp, monday, notion,
   quickbooks-online, youtube.
+- **`GET /api/models` names each model's Pi registry provider, `pi_provider`**
+  (#1549) — always present: the key of the provider in Pi's model registry that
+  describes the model (`moonshotai` for `moonshot`, `openai-codex` for `codex`).
+  A client builds the model's record (limits, request dialect) from
+  `pi_provider` + `modelId`. `null` for a gateway (`openai-compatible`,
+  `anthropic-compatible`) and for a managed alias, whose binding stays hidden.
+- **The provider registry says which providers are searched live,
+  `live_model_search`** (#1549) — `true` for OpenRouter alone: its models are
+  searched on `GET /api/models/openrouter` and any id it serves is accepted,
+  where every other named provider takes only the ids of its `models`.
+- **`/api/llm-proxy/openai-responses/v1/responses`** (#1549) — the LLM proxy
+  routes the OpenAI Responses API (`openai`, `xai`), metered like the other
+  shapes. It forces `store: false` and refuses with a `400` naming the field
+  what it cannot meter: `background`, `previous_response_id`, `conversation`,
+  `prompt`, a `service_tier` other than `auto`/`default`, and any tool the
+  vendor executes (only `function` and `custom` tools pass).
 - **`@appstrate/gmail` 1.1.4 and `@appstrate/gmail-mcp` 2.3.3 declare
   `issuer: https://accounts.google.com`**, like the other Google integrations.
   Their explicit endpoints still win; the issuer lets the conformance monitor
@@ -151,6 +167,16 @@ precondition_failed` (it was `409 conflict`), and a body still sending
 - **BREAKING (API): chat's capacity refusal (`429 chat_capacity`) is a standard
   problem document**: it carries `retry_after` as every problem does, and
   `instance`/`request_id` are present.
+- **BREAKING (LLM proxy): raw callers can no longer request work the vendor
+  bills but the proxy cannot meter** (#1549). Each refusal is a
+  `400 invalid_request` naming the field. `anthropic-messages` refuses
+  `fallbacks`, any tool whose `type` is not `custom` (the server-executed ones)
+  and a `service_tier` other than `standard_only`, and forwards only the
+  `anthropic-beta` values Pi itself emits, dropping the rest.
+  `openai-completions` (and `mistral-conversations`, which shares its adapter)
+  refuses OpenRouter's `models` and `route` fallback lists. The new
+  `openai-responses` shape applies the same rule from the start (see Added).
+  Requests built by Pi pass unchanged.
 - **BREAKING (API): timestamps named `expiresAt` / `createdAt` are RFC 3339
   strings, and the universal ids and timestamps are spelled camelCase on the
   surfaces that still used snake_case.** The hosted-connect session
@@ -281,7 +307,16 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   whose draft or `latest` version declares a camelCase identity claim key is
   fixed, see the identity-claims entry below); inside the deploy window (old
   application stopped, new one not started), `0021`, `0025`, `0027` and
-  `0028`; right after the deploy, `0022` and `0026`. `0025`–`0028` are
+  `0028`, then `0030` (#1549: deletes the org models Pi's registry does not
+  offer into a backup file, repoints an org default naming one to a surviving
+  model of the same credential or clears it, clears the other references; `.ts`,
+  dry run by default, `--apply` to commit). Before the deploy, with the platform
+  env loaded, the new `bun run verify:system-models` must exit 0 — the image
+  refuses to boot on a `SYSTEM_PROVIDER_KEYS` model outside Pi's offer, and
+  `0030 --apply` refuses to run; on production change `deepseek-v4-flash` →
+  `deepseek-flash`, keeping the entry's `id`. It is a pre-deploy step of every
+  release from now on: any Pi bump can move the offer.
+  Right after the deploy, `0022` and `0026`. `0025`–`0028` are
   one-way against the image: snapshot the database before the window, and roll
   forward (the previous build reads the new spellings as unknown — agent
   launches answer 500).
@@ -299,14 +334,61 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
   `generation_config_override`, `PATCH /api/agents/{scope}/{name}/model`, the
   run-launch and chat bodies, and the space package, whose `generationConfig`
   is now `generation_config`. Model capabilities (`OrgModel.generation`, the
-  provider registry's models) carry `reasoning.temperature_compatible` and
-  `reasoning.native_levels`. The old names are refused with a `400`. Stored
+  provider registry's models) carry `reasoning.temperature_compatible`. The
+  old names are refused with a `400`. Stored
   settings are rewritten by `scripts/migration/0025` (operators entry above).
   The chat's saved generation preference (`localStorage`
   `appstrate.chat.generation`, `{ reasoningLevel }`) no longer parses and
   resets once to the defaults. A CLI published before this release runs
   `appstrate run <package>` locally without the space's reasoning level:
   release `cli@` with the API.
+- **BREAKING (API): Pi's model registry is the model catalog** (#1549). The
+  provider registry's `models`, the featured models, an org model's default
+  label, limits, capabilities and generation controls, and the price the
+  platform bills all come from the model registry pinned with the Pi SDK
+  (`@earendil-works/pi-ai`), read locally. A named provider offers exactly the
+  records of its Pi provider served over its `apiShape`: creating or rebinding
+  an org model (`POST`, `PATCH /api/models`) and the seed refuse any other id
+  with a `400` on `modelId`, and model discovery keeps only offered ids. The gateways (`openai-compatible`, `anthropic-compatible`) and
+  OpenRouter's live search still take any id, and an OpenRouter model keeps the
+  price read from OpenRouter. A model `cost` may carry `tiers` (a rate set that
+  prices the whole request above an input-token threshold — OpenAI's
+  long-context rates): the LLM proxy prices each request with them, while a
+  run's aggregated usage and a subscription chat turn are priced at the base
+  rate. xAI is served over `openai-responses`, which `/api/llm-proxy/*` now
+  routes. Registry and org models no longer carry
+  `generation.reasoning.native_levels`. Existing `org_models` outside the offer
+  are removed by `scripts/migration/0030` (operators entry above).
+- **BREAKING (API): `POST /api/model-provider-credentials/test` takes no
+  `apiShape`** (#1549): the provider — or the stored credential named by
+  `credentialId` — decides what is tested, so the field is refused with a `400`
+  like any unknown field, and `providerId` is required.
+- **BREAKING (API): `POST /api/models/test` lends a stored key only to its own
+  credential** (#1549). A built-in credential or model answers `403`; an
+  `existing_model_id` bound to another credential than `credentialId` answers
+  `400` (`param: existing_model_id`), and one that does not exist `404` (it was
+  ignored).
+- **BREAKING (API): a managed alias offers the same reasoning levels whatever
+  model backs it** (#1549): `off`, `minimal`, `low`, `medium`, `high` in its
+  `generation.reasoning.levels`, validated as such on every surface (runs,
+  schedules, space and agent settings, chat); `xhigh` and `max` are refused. A
+  run sends the backing model's nearest supported level (Pi's
+  `clampThinkingLevel`, the chat's Pi session likewise) — the run's
+  `generation` keeps the level chosen. A non-aliased model is unchanged.
+- **BREAKING (API): xAI is served over the OpenAI Responses API** (#1549): the
+  `xai` provider's `apiShape` is `openai-responses` (was `openai-completions`),
+  the only shape Pi records its Grok models on. A client calling the LLM proxy
+  for an xAI model uses `/api/llm-proxy/openai-responses/v1/responses`.
+- **BREAKING (operators): a `SYSTEM_PROVIDER_KEYS` model outside its provider's
+  offer fails boot** (#1549), naming the entry and the model — except on a
+  gateway or OpenRouter, which take any id. On production, change
+  `deepseek-v4-flash` to `deepseek-flash` before starting the new image (see the
+  script order above).
+- **`appstrate run` with a model preset takes the limits of the model's Pi
+  record** (#1549): the context window and max output of the model the
+  platform names through `pi_provider`, unless the org model overrides them.
+  A preset no longer falls back to a 200k context window and 8192 output
+  tokens.
 - **BREAKING (chat): `POST /api/chat` refuses unknown body fields** (#1545)
   with a `400` instead of dropping them, so a misspelled field no longer runs
   the turn on the default model in silence.
@@ -411,6 +493,10 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
 
 ### Removed
 
+- **BREAKING (operators): `FEATURED_MODELS_EXCLUDE` is removed** (#1549), with
+  the LiteLLM pricing pipeline and the models.dev featured list it filtered:
+  each provider pins its featured model ids, and an `.env` still setting the
+  variable has it ignored.
 - **BREAKING (MCP): `describe_operation` no longer returns `conditional`**
   (#1528). `granted`, `required_permissions` and `target_space_permissions` are
   unchanged; an operation refused on the record it loads answers with its own
@@ -432,6 +518,10 @@ missing_integration_connection` item carries `connect_url`, `expiresAt` and
 
 ### Fixed
 
+- **A schedule whose stored generation settings its model no longer takes
+  still fires** (#1549). Like a space's defaults, a refused temperature or
+  reasoning level is dropped for that run, with a warning naming the schedule
+  and the setting, instead of failing every fire until the schedule is edited.
 - **Google connections are ready again, and their agents launch** (#1131).
   Google's token endpoint echoes the requested OIDC `email` scope as
   `https://www.googleapis.com/auth/userinfo.email`, and no manifest declared the

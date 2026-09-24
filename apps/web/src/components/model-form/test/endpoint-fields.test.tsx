@@ -42,6 +42,7 @@ const OPENAI_COMPATIBLE: ProviderRegistryEntry = {
   baseUrlOverridable: true,
   authMode: "api_key",
   featured: false,
+  live_model_search: false,
   models: [],
 };
 

@@ -15,7 +15,7 @@ import type { Actor } from "../lib/actor.ts";
 import { buildAgentPackage } from "./package-storage.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
-import { resolveModel } from "./org-models.ts";
+import { clampToBackingLevel, resolveModel } from "./org-models.ts";
 import { extractManifestOutputSchema } from "../lib/manifest-utils.ts";
 import { resolveIntegrationSpawns, type DroppedIntegration } from "./integration-spawn-resolver.ts";
 import { appendRunLog } from "./state/runs.ts";
@@ -95,6 +95,8 @@ export async function buildRunContext(params: {
   generationConfig?: ModelGenerationSettings | null;
   /** Invocation layer; null/omitted fields inherit the agent defaults. */
   generationConfigOverride?: ModelGenerationSettings | null;
+  /** Set for a scheduled fire: its stored override is reconciled, not refused. */
+  scheduleId?: string;
   proxyId?: string | null;
   overrideVersionLabel?: string;
   /**
@@ -234,14 +236,29 @@ export async function buildRunContext(params: {
   // `org_models.cost` override) — which is exactly the run whose `$0.00` would
   // otherwise read as "free".
   const modelCost = modelResult.cost ?? null;
-  const generationDefaults = reconcileModelGenerationSettings(
-    params.generationConfig ?? spaceSettings?.generationConfig ?? {},
-    modelResult.generation,
-  );
+  // Stored layers (space defaults, a schedule's override) drop what the model
+  // refuses — a Pi bump must not break them; only a request's override is refused.
+  const storedDefaults = params.generationConfig ?? spaceSettings?.generationConfig ?? {};
+  const storedLayers = params.scheduleId
+    ? { ...storedDefaults, ...withoutInherited(params.generationConfigOverride) }
+    : storedDefaults;
+  const generationDefaults = reconcileModelGenerationSettings(storedLayers, modelResult.generation);
+  if (params.scheduleId) {
+    const dropped = Object.keys(storedLayers).filter((key) => !(key in generationDefaults));
+    if (dropped.length > 0) {
+      logger.warn(
+        "Stored generation settings refused by the model, dropped for this scheduled run",
+        {
+          scheduleId: params.scheduleId,
+          dropped,
+        },
+      );
+    }
+  }
   const generationConfig = resolveModelGenerationSettings({
     capabilities: modelResult.generation,
     defaults: generationDefaults,
-    override: params.generationConfigOverride,
+    override: params.scheduleId ? null : params.generationConfigOverride,
   });
 
   // Step 3: resolve the persisted version display fields.
@@ -310,7 +327,7 @@ export async function buildRunContext(params: {
     outputSchema: extractManifestOutputSchema(agent.manifest),
     ...(runtimeTools && runtimeTools.length > 0 ? { runtimeTools } : {}),
     llmConfig: modelResult,
-    generationConfig,
+    generationConfig: clampToBackingLevel(modelResult, generationConfig),
     runToken: signRunToken(runId),
     proxyUrl,
     // The manifest reaching here is already ceiling-clamped by
@@ -334,6 +351,13 @@ export async function buildRunContext(params: {
     generationConfig,
     droppedIntegrations,
   };
+}
+
+/** A settings layer without its inheriting (null) fields. */
+function withoutInherited(settings: ModelGenerationSettings | null | undefined) {
+  return Object.fromEntries(
+    Object.entries(settings ?? {}).filter(([, value]) => value != null),
+  ) as ModelGenerationSettings;
 }
 
 /**

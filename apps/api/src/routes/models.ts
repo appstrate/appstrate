@@ -26,12 +26,14 @@ import {
   type CatalogDefaults,
 } from "../services/org-models.ts";
 import { getModelProvider, isOAuthModelProvider } from "../services/model-providers/registry.ts";
-import { resolveFeaturedModels } from "../services/model-providers/model-selection.ts";
 import { checkAliasInvariants, type AliasInvariantViolation } from "@appstrate/core/model-swap";
-import { listCatalogModels } from "../services/pricing-catalog.ts";
+import {
+  listCatalogModels,
+  lookupCatalogModel,
+  restrictsToOffer,
+} from "../services/model-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import {
-  getOrgModelProviderCredential,
   loadInferenceCredentials,
   loadCredentialRow,
 } from "../services/model-providers/credentials.ts";
@@ -46,6 +48,7 @@ import {
 } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { recordAuditFromContext } from "../services/audit.ts";
+import { searchOpenRouterModels } from "../services/model-search.ts";
 
 export const createModelSchema = z
   .object({
@@ -67,8 +70,8 @@ export const createModelSchema = z
     credentialId: z.uuid({ message: "credentialId must be a valid UUID" }),
     /**
      * Catalog-derivable overrides. Omit (or send null on update) to let the
-     * read path fall back to the live catalog — keeps existing rows in sync
-     * with the weekly `refresh-pricing-catalog.ts` bump.
+     * read path fall back to the catalog — keeps existing rows in sync with
+     * a Pi registry bump.
      */
     input: z.array(modelInputModalitySchema).optional(),
     contextWindow: z.number().int().positive().optional(),
@@ -210,6 +213,14 @@ function throwOnTokenBudgetViolation(
   }
 }
 
+/** A named provider binds only the ids of its offer — see `restrictsToOffer`. */
+function throwOnModelOutsideOffer(providerId: string, modelId: string): void {
+  const def = getModelProvider(providerId);
+  if (def && restrictsToOffer(def) && !lookupCatalogModel(def, modelId)) {
+    throw invalidRequest(`Model ${modelId} is not offered by provider ${providerId}`, "modelId");
+  }
+}
+
 export function createModelsRouter() {
   const router = new Hono<AppEnv>();
 
@@ -273,6 +284,7 @@ export function createModelsRouter() {
           "credentialId",
         );
       }
+      throwOnModelOutsideOffer(creds.providerId, modelId);
       // Model-alias guards (issue #727, Threat A) — shared invariant rule:
       if (aliased) {
         throwOnAliasViolation(
@@ -358,36 +370,14 @@ export function createModelsRouter() {
       throw notFound(`Provider ${creds.providerId} not registered`);
     }
 
-    // The vendored pricing catalog is the single source of truth for
-    // per-model metadata. The picker surfaces ids from this catalog
-    // (filtered by `featuredModels` when `catalogProviderId` is set), so
-    // we accept any id that lives in the resolved catalog.
-    const catalogKey = registry.catalogProviderId ?? creds.providerId;
-    const catalogById = new Map(listCatalogModels(catalogKey).map((m) => [m.id, m]));
-    // Foreign-catalog (subscription OAuth) gate: a model is seedable when
-    // it's in the featured list OR in the credential's servable set
-    // (`available_model_ids`) — the candidates the provider's `GET /models`
-    // listing confirmed for API-key providers (the listing knows the
-    // account's plan, the featured list doesn't), derived from the catalog
-    // for static providers. Reading it off the credential DTO is what keeps
-    // the gate from consulting a stale persisted copy.
-    const credentialInfo = registry.catalogProviderId
-      ? await getOrgModelProviderCredential(orgId, data.credentialId)
-      : undefined;
-    const allowedSet = new Set([
-      ...resolveFeaturedModels(registry),
-      ...(credentialInfo?.available_model_ids ?? []),
-    ]);
+    // Only ids of the provider's catalog offer are seedable — for a
+    // static-discovery provider that is exactly the credential's served set.
+    const catalogById = new Map(listCatalogModels(registry).map((m) => [m.id, m]));
     const models: Array<CatalogModelEntry & { id: string }> = [];
     for (const modelId of data.model_ids) {
       const cat = catalogById.get(modelId);
       if (!cat) {
-        throw invalidRequest(`Model ${modelId} is not in the ${catalogKey} catalog`);
-      }
-      if (registry.catalogProviderId && !allowedSet.has(modelId)) {
-        throw invalidRequest(
-          `Model ${modelId} is not featured or verified for provider ${creds.providerId}`,
-        );
+        throw invalidRequest(`Model ${modelId} is not offered by provider ${creds.providerId}`);
       }
       models.push(cat);
     }
@@ -453,101 +443,9 @@ export function createModelsRouter() {
   });
 
   // GET /api/models/openrouter — search OpenRouter models (proxy)
-  router.get("/openrouter", rateLimit(10), requirePermission("models", "read"), async (c) => {
-    const q = c.req.query("q") || "";
-
-    try {
-      const res = await fetch("https://openrouter.ai/api/v1/models", {
-        signal: AbortSignal.timeout(10_000),
-      });
-
-      if (!res.ok) {
-        throw new ApiError({
-          status: 502,
-          code: "provider_error",
-          title: "Provider Error",
-          detail: `OpenRouter returned ${res.status}`,
-        });
-      }
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const json: any = await res.json();
-      const rawModels = json?.data;
-
-      if (!Array.isArray(rawModels)) {
-        return c.json(listResponse<unknown>([]));
-      }
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let models = rawModels.map((m: any) => {
-        // OpenRouter pricing is per-token; convert to $/M tokens for ModelCost
-        const pricing = m.pricing;
-        const promptPerToken = parseFloat(pricing?.prompt);
-        const completionPerToken = parseFloat(pricing?.completion);
-        const cacheReadPerToken = parseFloat(pricing?.input_cache_read);
-        const hasValidPricing = !isNaN(promptPerToken) && !isNaN(completionPerToken);
-
-        return {
-          id: String(m.id ?? ""),
-          name: String(m.name || m.id || ""),
-          contextWindow: typeof m.context_length === "number" ? m.context_length : null,
-          maxTokens:
-            typeof m.top_provider?.max_completion_tokens === "number"
-              ? m.top_provider.max_completion_tokens
-              : null,
-          input: m.architecture?.input_modalities?.includes?.("image")
-            ? ["text", "image"]
-            : ["text"],
-          reasoning: false,
-          // A rate OpenRouter does not report is left ABSENT, never `0`: a
-          // stored `0` is a positive claim that the vendor bills nothing, and
-          // `classifyTokenPricing` reads it as a real price — so a model with
-          // unknown cache-read rates would classify `priced` while its cached
-          // tokens (already carved out of the `input` bucket) are billed in no
-          // bucket at all. `cacheWrite` is never reported by this endpoint.
-          cost: hasValidPricing
-            ? {
-                input: promptPerToken * 1_000_000,
-                output: completionPerToken * 1_000_000,
-                ...(isNaN(cacheReadPerToken) ? {} : { cacheRead: cacheReadPerToken * 1_000_000 }),
-              }
-            : null,
-        };
-      });
-
-      // Filter by search query
-      if (q.trim()) {
-        const lower = q.toLowerCase();
-        models = models.filter(
-          (m) => m.id.toLowerCase().includes(lower) || m.name.toLowerCase().includes(lower),
-        );
-      }
-
-      // Limit results
-      models = models.slice(0, 50);
-
-      return c.json(listResponse(models));
-    } catch (err) {
-      if (err instanceof ApiError) throw err;
-      if (err instanceof DOMException && err.name === "TimeoutError") {
-        throw new ApiError({
-          status: 504,
-          code: "timeout",
-          title: "Gateway Timeout",
-          detail: "OpenRouter request timed out",
-        });
-      }
-      logger.error("OpenRouter model search failed", {
-        error: getErrorMessage(err),
-      });
-      throw new ApiError({
-        status: 502,
-        code: "network_error",
-        title: "Bad Gateway",
-        detail: "Failed to fetch OpenRouter models",
-      });
-    }
-  });
+  router.get("/openrouter", rateLimit(10), requirePermission("models", "read"), async (c) =>
+    c.json(listResponse(await searchOpenRouterModels(c.req.query("q") || ""))),
+  );
 
   // POST /api/models/test — test model config inline (before saving)
   // MUST be registered before /:id/test
@@ -558,6 +456,12 @@ export function createModelsRouter() {
     // Resolve the provider via the credential's providerId — the registry
     // owns apiShape and the default baseUrl. The user-supplied `api_key` (if
     // any) overrides the stored credential for "verify before save" flows.
+    // A stored key only ever reaches its own credential's base URL: built-in
+    // credentials and models are refused, and `existing_model_id` must be
+    // bound to `credentialId`.
+    if (getSystemModelProviderCredentials().has(data.credentialId)) {
+      throw systemEntityForbidden("model provider credential", data.credentialId, "test");
+    }
     const creds = await loadInferenceCredentials(orgId, data.credentialId);
     if (!creds) {
       throw notFound("Credential not found");
@@ -565,8 +469,18 @@ export function createModelsRouter() {
 
     let apiKey = data.api_key;
     if (!apiKey && data.existing_model_id) {
+      if (isSystemModel(data.existing_model_id)) {
+        throw systemEntityForbidden("model", data.existing_model_id, "test");
+      }
       const existing = await loadModel(orgId, data.existing_model_id);
-      if (existing) apiKey = existing.apiKey;
+      if (!existing) throw notFound("Model not found");
+      if (existing.credentialId !== data.credentialId) {
+        throw invalidRequest(
+          "existing_model_id must be bound to credentialId",
+          "existing_model_id",
+        );
+      }
+      apiKey = existing.apiKey;
     }
     if (!apiKey) {
       apiKey = creds.apiKey;
@@ -705,25 +619,19 @@ export function createModelsRouter() {
       );
     }
 
-    // Token-budget invariant on the EFFECTIVE post-update state. The Zod
-    // refine only sees the payload: a lone `maxTokens` can exceed the stored
-    // (or catalog) contextWindow, a lone `contextWindow` can dip below the
-    // stored maxTokens, and a `modelId`/`credentialId` change swaps the
-    // catalog defaults under a kept override. Gated on the budget-relevant
-    // fields so a legacy-invalid row can still be disabled or relabelled.
-    if (
-      data.maxTokens !== undefined ||
-      data.contextWindow !== undefined ||
-      data.modelId !== undefined ||
-      data.credentialId !== undefined
-    ) {
+    // The offer and token-budget checks run on the EFFECTIVE post-update
+    // state, gated on the fields they read so a row that fails them can still
+    // be disabled or relabelled. The Zod refine only sees the payload: a lone
+    // `maxTokens` can exceed the stored (or catalog) contextWindow, and a
+    // binding change swaps the catalog defaults under a kept override.
+    const rebinds = data.modelId !== undefined || data.credentialId !== undefined;
+    if (rebinds || data.maxTokens !== undefined || data.contextWindow !== undefined) {
       const effectiveModelId = data.modelId ?? current.modelId;
-      // Metadata-only provider resolution — no decrypt, no reachability
-      // probe: the catalog lookup must work even when the row's credential
-      // is dead. A gone credential/provider yields no catalog defaults and
-      // the check runs on the stored overrides alone.
+      // Metadata-only (no decrypt): works even when the row's credential is
+      // dead. A gone credential/provider yields no catalog defaults.
       const providerId =
         newCreds?.providerId ?? (await loadCredentialRow(current.credentialId, orgId))?.providerId;
+      if (rebinds && providerId) throwOnModelOutsideOffer(providerId, effectiveModelId);
       const catalogDefaults: CatalogDefaults = providerId
         ? resolveCatalogDefaults(providerId, effectiveModelId)
         : {};
