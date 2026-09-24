@@ -27,8 +27,8 @@ const MANIFEST_DESCRIPTION = "A skill.";
 /** Same reason: `Space` declares it, nothing in the sync reads it. */
 const SPACE_STAMP = { createdAt: "2026-01-01T00:00:00.000Z" };
 
-/** What a member's role grants here: the skill routes want `skills:read`, agents the other two. */
-const MEMBER_PERMISSIONS = ["agents:read", "agents:run", "skills:read"];
+/** What a member's role grants here: enough to read skills and to launch agents and read runs. */
+const MEMBER_PERMISSIONS = ["agents:read", "agents:run", "runs:read", "skills:read"];
 
 /**
  * A row of `GET /api/spaces`. The listing reports what the caller may SEE, and
@@ -115,7 +115,7 @@ export interface SkillFixture {
 }
 
 /**
- * An agent as `GET /api/packages/agents` and its detail answer it. The detail
+ * An agent as `GET /api/agents` and its detail answer it. The detail
  * carries the space's input layer (`values` + `locked_fields`) next to the
  * schema, in one read, exactly like the launch form's own projection.
  */
@@ -266,7 +266,7 @@ export function createSkillServer(
       if (refusal) return refusal;
     }
 
-    if (path.startsWith("/api/packages/agents")) {
+    if (path === "/api/agents" || path.startsWith("/api/packages/agents/")) {
       agentReads += 1;
       return agentRoute(agents, path, url, spaceId, grants(spaceId, "agents:read"));
     }
@@ -457,19 +457,20 @@ export function createSkillServer(
 }
 
 /**
- * What each route guards on in the space: the list wants `agents:read`, the
- * agent detail either grant (`requireAgentRead`), every skill route
- * `skills:read`. `null` for the one route that is not space-scoped.
+ * What each route guards on in the space: the agent list and detail take
+ * either grant (`requireAgentRead`), every skill route `skills:read`. `null`
+ * for the one route that is not space-scoped.
  */
 function routePermissions(path: string): string[] | null {
   if (path === "/api/spaces") return null;
-  if (path === "/api/packages/agents") return ["agents:read"];
-  if (path.startsWith("/api/packages/agents/")) return ["agents:read", "agents:run"];
+  if (path === "/api/agents" || path.startsWith("/api/packages/agents/")) {
+    return ["agents:read", "agents:run"];
+  }
   return ["skills:read"];
 }
 
 /**
- * `GET /api/packages/agents` (the ACTIVE set of the space) and the agent
+ * `GET /api/agents` (the ACTIVE, launchable set of the space) and the agent
  * detail. The detail NAMES its definition: `latest` resolves the dist-tag and
  * answers 404 when nothing is published, `draft` is reserved to whoever may
  * write the agent (never anyone for a system agent), and the stub refuses a
@@ -482,7 +483,7 @@ function agentRoute(
   spaceId: string,
   fullRead: boolean,
 ): Response {
-  if (path === "/api/packages/agents") {
+  if (path === "/api/agents") {
     return json({
       object: "list",
       data: agents

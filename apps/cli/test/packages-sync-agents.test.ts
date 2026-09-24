@@ -239,7 +239,7 @@ describe("packages sync — agent commands in the plugin", () => {
     // The listing is the catalogue: a 500 there says nothing about which agents left.
     const serveRest = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
-      new URL(String(input)).pathname === "/api/packages/agents"
+      new URL(String(input)).pathname === "/api/agents"
         ? Response.json({ message: "Unavailable" }, { status: 500 })
         : serveRest(input, init)) as typeof fetch;
     const { io, stdout } = createMemoryIO();
@@ -264,6 +264,41 @@ describe("packages sync — agent commands in the plugin", () => {
     expect(stderr()).toContain("Skipped @acme/report");
     expect(await readText(commandFile("run-report"))).toBe(before);
     expect(await ledgerVersion("run-report")).toBe("1.0.0");
+  });
+
+  it("removes an installed command that can no longer be rendered, and says why", async () => {
+    serve([REPORT]);
+    await packagesSyncCommand({}, createMemoryIO().io);
+
+    // Deterministic, unlike a 500: keeping the old command would keep it forever.
+    serve([{ ...REPORT, versions: ["1.0.0", "not-a-version"] }]);
+    const { io, stdout, stderr } = createMemoryIO();
+    await packagesSyncCommand({ printPath: true }, io);
+
+    expect(stdout()).toBe(`${pluginRoot()}\n`);
+    expect(stderr()).toContain("Skipped @acme/report");
+    expect(await readdir(pluginSkills())).toEqual(["pdf-tools"]);
+    expect(await ledgerVersion("run-report")).toBeUndefined();
+  });
+
+  it("switches a shared target's context although an agent command is unresolved", async () => {
+    serve([REPORT]);
+    await packagesSyncCommand({ target: ["claude-plugin", "codex"] }, createMemoryIO().io);
+    // The plugin moves to the new login alone; codex still holds the old one.
+    await seedLoggedInProfile("default", { orgId: "org_1", spaceId: PINNED, userId: "u_2" });
+    await packagesSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
+
+    serve([{ ...REPORT, detailError: 500 }]);
+    const { io, stdout } = createMemoryIO();
+    await packagesSyncCommand({ target: ["claude-plugin", "codex"], printPath: true }, io);
+
+    expect(stdout()).toBe(`${pluginRoot()}\n`);
+    const state = JSON.parse(await readText(getStatePath())) as {
+      targets: Record<string, { context: { userId: string } }>;
+    };
+    expect(state.targets.codex?.context.userId).toBe("u_2");
+    expect(await readdir(join(home, ".agents", "skills"))).toEqual(["pdf-tools"]);
+    expect(await exists(commandFile("run-report"))).toBe(true);
   });
 });
 
@@ -296,25 +331,44 @@ describe("packages sync — agents come from the pinned space only (D19)", () =>
     expect((await readdir(pluginSkills())).sort()).toEqual(["pdf-tools", "run-report"]);
   });
 
-  for (const missing of ["agents:run", "agents:read"]) {
-    it(`syncs no agent, with one note, when the pinned space's role lacks ${missing}`, async () => {
-      const server = serve([REPORT], {
-        spaces: [
-          {
-            id: PINNED,
-            name: "Space One",
-            isDefault: true,
-            permissions: ["agents:read", "agents:run", "skills:read"].filter((p) => p !== missing),
-          },
-        ],
-      });
+  const withRole = (permissions: string[]): SpaceFixture[] => [
+    {
+      id: PINNED,
+      name: "Space One",
+      isDefault: true,
+      permissions: [...permissions, "skills:read"],
+    },
+  ];
+
+  // The grant `run_and_wait` itself needs: launch AND read back (`canRunAgents`).
+  for (const [role, permissions] of [
+    ["a runner (no agents:read)", ["agents:run", "runs:read"]],
+    ["runs:read-all", ["agents:run", "runs:read-all"]],
+  ] as const) {
+    it(`installs agent commands for ${role}`, async () => {
+      serve([REPORT], { spaces: withRole([...permissions]) });
+      const { io, stderr } = createMemoryIO();
+
+      await packagesSyncCommand({ printPath: true }, io);
+
+      expect((await readdir(pluginSkills())).sort()).toEqual(["pdf-tools", "run-report"]);
+      expect(stderr()).not.toContain("Agent commands not synced");
+    });
+  }
+
+  for (const [role, permissions] of [
+    ["no runs read", ["agents:read", "agents:run"]],
+    ["no agents:run", ["agents:read", "runs:read"]],
+  ] as const) {
+    it(`syncs no agent, with one note naming the space, for a role with ${role}`, async () => {
+      const server = serve([REPORT], { spaces: withRole([...permissions]) });
       const { io, stderr } = createMemoryIO();
 
       await packagesSyncCommand({ printPath: true }, io);
 
       expect(await readdir(pluginSkills())).toEqual(["pdf-tools"]);
       expect(occurrences(stderr(), "Agent commands not synced")).toBe(1);
-      expect(stderr()).toContain(`pinned space "${PINNED}"`);
+      expect(stderr()).toContain('pinned space "Space One"');
       expect(server.agentReads()).toBe(0);
     });
   }
@@ -355,6 +409,15 @@ describe("packages sync — agents under --source draft", () => {
     expect(stderr()).toContain("Skipped @acme/report");
     expect(stderr()).toContain("author's working copy");
     expect(await exists(join(pluginSkills(), "run-report"))).toBe(false);
+  });
+
+  it("words a skipped system agent by the selector it was read with", async () => {
+    serve([{ id: "@appstrate/assistant", source: "system", detailError: 404 }]);
+    const { io, stderr } = createMemoryIO();
+
+    await packagesSyncCommand({ source: "draft", printPath: true }, io);
+
+    expect(stderr()).toContain("Skipped @appstrate/assistant: no published version available.");
   });
 });
 

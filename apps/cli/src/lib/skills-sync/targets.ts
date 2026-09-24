@@ -28,10 +28,9 @@ const STAGING_DIR = ".appstrate-staging";
 
 const PLUGIN_NAME = "appstrate";
 
-/** The `.mcp.json` key: Claude Code scopes the plugin's tools under it. */
-export const MCP_SERVER_NAME = "appstrate";
+const MCP_SERVER_NAME = "appstrate";
 
-/** What a generated agent command calls, as Claude Code names the plugin's MCP tool. */
+/** Claude Code names a plugin's MCP tools after both the plugin and the `.mcp.json` key. */
 export const RUN_AND_WAIT_TOOL = `mcp__plugin_${PLUGIN_NAME}_${MCP_SERVER_NAME}__run_and_wait`;
 
 const PLUGIN_MANIFEST = {

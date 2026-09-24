@@ -238,7 +238,7 @@ function view(packageId: string): AgentLaunchView {
     // Platform-shaped: the command writes it, and refuses any other shape.
     spaceId: "spc_00000000-0000-4000-8000-000000000001",
     version: "1.0.0",
-    displayName: packageId,
+    title: packageId,
     description: "Does a thing.",
     input: { schema: { type: "object", properties: {} }, values: {}, locked_fields: [] },
   };
@@ -288,6 +288,13 @@ describe("assignSlugs — agent commands (D23)", () => {
     ]);
   });
 
+  it("reports an agent whose command cannot be rendered instead of planning it", () => {
+    const { planned, failed } = assignSlugs([], [{ ...view("@acme/foo"), version: "not-semver" }]);
+
+    expect(planned).toEqual([]);
+    expect(failed.map((f) => f.packageId)).toEqual(["@acme/foo"]);
+  });
+
   it("honours a slug the ledger reserves for an unresolved package", () => {
     const { planned } = assignSlugs([], [view("@acme/foo")], new Set(["run-foo"]));
 
@@ -334,7 +341,7 @@ describe("resolveAgent", () => {
       packageId: "@acme/report",
       spaceId: "spc_1",
       version: "1.2.0",
-      displayName: "Weekly report",
+      title: "Weekly report",
       description: "Writes the report.",
       input: {
         schema: { type: "object", properties: { topic: { type: "string" } } },
@@ -342,6 +349,13 @@ describe("resolveAgent", () => {
         locked_fields: ["topic"],
       },
     });
+  });
+
+  it("titles an agent with no display name by its package id", async () => {
+    createSkillServer([], undefined, [{ id: "@acme/report", display_name: " " }]).install();
+
+    const agent = (await resolveAgent("default", "@acme/report", "published", "spc_1"))!;
+    expect(agent.title).toBe("@acme/report");
   });
 
   it("returns null — not an error — when the agent was never published", async () => {

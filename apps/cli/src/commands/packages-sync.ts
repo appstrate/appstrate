@@ -11,6 +11,7 @@
  */
 
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
+import { canRunAgents } from "@appstrate/core/permissions";
 import { resolveActiveProfile, syncSpaceIds, type Profile } from "../lib/config.ts";
 import { ApiError } from "../lib/api.ts";
 import { listSpaces, resolveSpaceRef, type Space } from "../lib/spaces.ts";
@@ -33,6 +34,7 @@ import {
   ownedLedger,
   resolveAgent,
   resolveSkill,
+  targetCarries,
   type Catalogue,
   type EntriesBySlug,
   type PlannedEntry,
@@ -146,8 +148,8 @@ export async function packagesSyncCommand(
 
         const context = syncContext(profileName, profile!);
         // The pin is checked here although it is NOT part of the context: it is
-        // what `fixedFiles` and the agent commands were computed from at the start
-        // of the run, so a swap after it moved would commit the previous space.
+        // what `fixedFiles` was computed from at the start of the run, so a swap
+        // after it moved would commit a `.mcp.json` naming the previous space.
         // The next run rewrites that file without treating anything as a switch.
         const validate = async (): Promise<void> => {
           const current = await resolveActiveProfile(opts.profile);
@@ -179,7 +181,14 @@ export async function packagesSyncCommand(
         const plans = await Promise.all(
           targets.map((target) => diffTarget(target, catalogue, state, source, context)),
         );
-        if (plans.some((plan) => plan.contextChanged) && catalogue.unresolved.size > 0) {
+        const unresolvedKinds = [...catalogue.unresolved.values()];
+        if (
+          plans.some(
+            (plan) =>
+              plan.contextChanged &&
+              unresolvedKinds.some((kind) => targetCarries(plan.target, kind)),
+          )
+        ) {
           throw new Error(
             "Could not resolve the new context completely; previous installation preserved.",
           );
@@ -303,42 +312,50 @@ async function resolveAll(
   // One queue for both kinds, so the cap holds across them. `null` = nothing to sync.
   type Resolved =
     { kind: "skill"; value: ResolvedSkill } | { kind: "agent"; value: AgentLaunchView } | null;
-  const jobs: { packageId: string; resolve: () => Promise<Resolved> }[] = [
-    ...[...origins.keys()].sort().map((packageId) => ({
-      packageId,
-      resolve: async (): Promise<Resolved> => {
-        const value = await resolveSkill(profileName, packageId, source, origins.get(packageId));
-        return value && { kind: "skill", value };
-      },
-    })),
+  interface Job {
+    packageId: string;
+    kind: PlannedEntry["kind"];
+    source: SkillSource;
+  }
+  const jobs: Job[] = [
+    ...[...origins.keys()]
+      .sort()
+      .map((packageId) => ({ packageId, kind: "skill" as const, source })),
+    // A system agent has no draft: `?version=draft` is refused to everyone.
     ...agents.map(({ packageId, system }) => ({
       packageId,
-      resolve: async (): Promise<Resolved> => {
-        // A system agent has no draft to name: `?version=draft` is refused to everyone.
-        const selected = system ? "published" : source;
-        const value = await resolveAgent(profileName, packageId, selected, agentSpace!);
-        return value && { kind: "agent", value };
-      },
+      kind: "agent" as const,
+      source: system ? ("published" as const) : source,
     })),
   ];
+  const resolve = async (job: Job): Promise<Resolved> => {
+    if (job.kind === "skill") {
+      const origin = origins.get(job.packageId);
+      const value = await resolveSkill(profileName, job.packageId, job.source, origin);
+      return value && { kind: "skill", value };
+    }
+    const value = await resolveAgent(profileName, job.packageId, job.source, agentSpace!);
+    return value && { kind: "agent", value };
+  };
   const resolutions = await mapWithConcurrency(jobs, MAX_CONCURRENCY, async (job) => {
     try {
-      return { packageId: job.packageId, resolved: await job.resolve() };
+      return { job, resolved: await resolve(job) };
     } catch (err) {
-      return { packageId: job.packageId, error: err };
+      return { job, error: err };
     }
   });
 
   const skills: ResolvedSkill[] = [];
   const views: AgentLaunchView[] = [];
-  const unresolved = new Set<string>();
+  const unresolved: Catalogue["unresolved"] = new Map();
   for (const entry of resolutions) {
+    const { packageId, kind } = entry.job;
     if ("error" in entry) {
-      unresolved.add(entry.packageId);
-      report.skill(`Skipped ${entry.packageId}: ${formatError(entry.error)}`);
+      unresolved.set(packageId, kind);
+      report.skill(`Skipped ${packageId}: ${formatError(entry.error)}`);
     } else if (!entry.resolved) {
-      const what = source === "draft" ? "draft" : "published version";
-      report.note(`Skipped ${entry.packageId}: no ${what} available.`);
+      const what = entry.job.source === "draft" ? "draft" : "published version";
+      report.note(`Skipped ${packageId}: no ${what} available.`);
     } else if (entry.resolved.kind === "skill") {
       skills.push(entry.resolved.value);
     } else {
@@ -359,8 +376,8 @@ async function resolveAll(
   }
 
   const { planned, failed } = assignSlugs(skills, views, reserved);
+  // Not `unresolved`: the next run fails the same way, so an installed copy goes.
   for (const { packageId, error } of failed) {
-    unresolved.add(packageId);
     report.skill(`Skipped ${packageId}: ${formatError(error)}`);
   }
   const bySlug = new Map<string, PlannedEntry>();
@@ -456,7 +473,7 @@ async function executePlans(
   return pluginOk;
 }
 
-/** Download + materialize (agent commands come rendered), reporting each failure and dropping it. */
+/** Download + materialize (agents come rendered), reporting each failure and dropping it. */
 async function fetchTrees(
   profileName: string,
   source: SkillSource,
@@ -488,10 +505,8 @@ async function fetchTrees(
     // them as authored; saying so is how the author learns why tools skip them.
     const violation = checkSkillMarkdown(decoder.decode(result.tree.files[SKILL_ENTRY]!));
     if (violation) {
-      // D18: an agent command exists only in the plugin.
-      const loaders = result.entry.kind === "agent" ? "Claude Code" : "Claude Code and Codex";
       report.note(
-        `Note: ${result.entry.packageId} does not pass the skill frontmatter rule (${violation.message}); ${loaders} may not load it — republish it from Appstrate.`,
+        `Note: ${result.entry.packageId} does not pass the skill frontmatter rule (${violation.message}); Claude Code and Codex may not load it — republish it from Appstrate.`,
       );
     }
   }
@@ -621,14 +636,11 @@ function suppliesSkills(space: Space): boolean {
   return space.access === "member" && space.permissions.includes(SKILLS_READ);
 }
 
-/** Listing an agent needs the first, launching it the second (D19). */
-const AGENT_PERMISSIONS = ["agents:read", "agents:run"] as const;
-
-/** Can the pinned space supply agent commands to this profile? */
+/** The grant the MCP server itself exposes `run_and_wait` on (D19). */
 function suppliesAgents(space: Space): boolean {
   return (
     space.access === "member" &&
-    AGENT_PERMISSIONS.every((permission) => space.permissions.includes(permission))
+    canRunAgents((permission) => space.permissions.includes(permission))
   );
 }
 
@@ -668,14 +680,10 @@ async function reachableSpaces(
 
 interface SyncSources {
   skillSpaces: string[];
-  /** The pinned space, when it supplies agent commands this run. */
   agentSpace?: string;
 }
 
-/**
- * Skill sources, then the agent source: the pinned space alone (D19), whatever
- * `--space` and `syncSpaces` select, and only when the plugin is a target.
- */
+/** Agents come from the pinned space alone (D19), whatever selects the skill sources. */
 async function selectSources(
   profileName: string,
   profile: Profile,
@@ -691,8 +699,8 @@ async function selectSources(
       throw new Error(
         "Cannot select spaces: this organization no longer grants this profile access to them. Run: appstrate org switch",
       );
-    // Otherwise the revocation stands on its own: no space supplies anything
-    // any more, so the ordinary removal plan takes every entry off the disk.
+    // Otherwise the revocation stands on its own: no space supplies skills any
+    // more, so the ordinary removal plan takes every one of them off the disk.
     return { skillSpaces: [] };
   }
   // Skill sources no longer depend on the pin, so a pin that died would sync
@@ -709,7 +717,7 @@ async function selectSources(
   if (!withAgents || pinned?.access !== "member") return { skillSpaces };
   if (suppliesAgents(pinned)) return { skillSpaces, agentSpace: pinned.id };
   report.note(
-    `Agent commands not synced: your role in pinned space "${pinned.id}" does not grant both ${AGENT_PERMISSIONS.join(" and ")}.`,
+    `Agent commands not synced: your role in pinned space "${pinned.name}" cannot launch agents and read their runs there.`,
   );
   return { skillSpaces };
 }

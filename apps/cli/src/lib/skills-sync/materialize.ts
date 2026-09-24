@@ -166,16 +166,13 @@ export function normalizeSkillMd(content: string, slug: string): string {
 // ─── Agent launch commands ───────────────────────────────────────────────────
 //
 // Claude Code preprocesses a SKILL.md body (`$ARGUMENTS`, `$N`, `${VAR}`, and
-// injected shell commands), so the body holds generator text plus identifiers
-// validated below. Org-authored text lives in the sidecar or in JSON-quoted
+// injected shell commands), so the body holds generator text plus the package
+// id and version validated below. Org-authored text lives in the sidecar or in JSON-quoted
 // frontmatter scalars, never in the body.
 
 export const AGENT_CONTRACT_ENTRY = "input.json";
 
 const CONTRACT_PATH = `\${CLAUDE_SKILL_DIR}/${AGENT_CONTRACT_ENTRY}`;
-
-/** Mirrors `SPACE_ID_RE` (`packages/db/src/ids.ts`), which the CLI does not depend on. */
-const SPACE_ID_RE = /^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** semver's alphabet, without the whitespace and `v`/`=` prefixes `semver.valid` tolerates. */
 const VERSION_CHARS_RE = /^[0-9][0-9A-Za-z.+-]*$/;
@@ -189,10 +186,12 @@ const IDENTIFIER_HINT =
 export interface AgentLaunchView {
   /** `@scope/name`. */
   packageId: string;
+  /** Frontmatter only: the MCP session is already bound to it by `X-Space-Id`. */
   spaceId: string;
   /** Semver, or `draft`. */
   version: string;
-  displayName: string;
+  /** The human name of the command, already resolved. */
+  title: string;
   description: string;
   /** The agent detail's `input`: the schema wrapper plus the space's stored values and locks. */
   input: Partial<SchemaWrapper> & AgentInputSettings;
@@ -203,12 +202,6 @@ function launchTarget(view: AgentLaunchView): { scope: string; name: string } {
   if (!parsed) {
     throw new SkillMaterializeError(
       `Refusing agent id ${JSON.stringify(view.packageId)}: not an @scope/name package id`,
-      IDENTIFIER_HINT,
-    );
-  }
-  if (!SPACE_ID_RE.test(view.spaceId)) {
-    throw new SkillMaterializeError(
-      `Refusing space id ${JSON.stringify(view.spaceId)} for ${view.packageId}`,
       IDENTIFIER_HINT,
     );
   }
@@ -253,17 +246,13 @@ function canonicalize(value: unknown): unknown {
 }
 
 const FILE_RECIPE = [
-  "File fields (`format: uri` with a `contentMediaType`; an array of them takes several files) " +
-    "take a URI, never file content: no `data:` URIs. Honour `file_constraints` when present. " +
+  "File fields (`format: uri` with a `contentMediaType`) take a URI, never `data:` content. " +
     "For each local file:",
-  'a. Call the Appstrate `invoke_operation` tool with `{ "operation_id": "createUpload", ' +
-    '"body": { "name": "<file name>", "size": <exact size in bytes>, "mime": "<MIME type>" } }`.',
-  "b. PUT the raw bytes to the returned `url` with exactly the returned `headers`: " +
-    '`curl --fail -X PUT --upload-file <path> -H "<header>: <value>" "<url>"`, ' +
-    "one `-H` per returned header.",
-  "c. Use the returned `uri` (`upload://…`) as the field value.",
-  "A file an earlier run produced is an `appfile://` URI (the `list_files` tool lists them): " +
-    "pass it as is.",
+  "a. Call the Appstrate `describe_operation` tool for `createUpload` and follow its recipe.",
+  "b. Upload with `curl --fail -X PUT --upload-file <path>`, sending exactly the returned " +
+    "`headers` (one `-H` each) to the returned `url`.",
+  "c. Pass the returned `upload://` `uri` as the field value.",
+  "An `appfile://` URI from an earlier run (the `list_files` tool) is passed as is.",
 ];
 
 function agentBody(view: AgentLaunchView, scope: string, name: string, files: boolean): string {
@@ -280,8 +269,8 @@ function agentBody(view: AgentLaunchView, scope: string, name: string, files: bo
     ],
     [
       "Build `input` from the user's request (end of this file, possibly empty):",
-      "- `fields.prompted`: take each value from the request and ask the user for any that is " +
-        "missing. Never invent a value.",
+      "- `fields.prompted`: take each value from the request. Ask the user only for missing " +
+        "fields listed in `schema.required`; omit the other missing ones. Never invent a value.",
       "- `fields.prefilled`: the space already sets them. Send one only when the user " +
         "explicitly asks to override it.",
       "- `fields.locked`: never send them; the launch refuses them.",
@@ -291,16 +280,17 @@ function agentBody(view: AgentLaunchView, scope: string, name: string, files: bo
     [`Call \`${RUN_AND_WAIT_TOOL}\` with:`, "", "```json", ...call.split("\n"), "```"],
     [
       "Handle the outcome:",
-      "- A `connect_url`, or `409 must_choose_connection`: follow the Appstrate server's " +
-        "instructions: give the user the link, or ask which of the `candidate_connections` to " +
-        "use and retry the same call with it in `connection_overrides`.",
-      "- `404` `agent_not_active_in_space`, `agent_not_found` or `no_published_version`: this " +
-        "command is out of date. Do not retry; tell the user to run `appstrate packages sync`.",
-      "- `400` (invalid or locked input): fix `input` with the user, then retry.",
+      "- A `connect_url` or a connection choice (`must_choose_connection`): follow the " +
+        "Appstrate server's instructions.",
+      "- Any `404`: this command is out of date. Do not retry; tell the user to run " +
+        "`appstrate packages sync`.",
+      "- `400`: fix `input` with the user, then retry.",
       "- `done: false`: the run is still going. Wait with the Appstrate `invoke_operation` tool, " +
         '`{ "operation_id": "getRun", "path_params": { "id": "<returned id>" }, ' +
         '"query": { "wait": true } }`, repeated until `status` is `success`, `failed`, ' +
         "`timeout` or `cancelled`.",
+      "Call `run_and_wait` again only after a refusal before launch (a 4xx with no run `id`). " +
+        "Once a run `id` was returned, never relaunch: only wait on it with `getRun`.",
     ],
     ["Report the result to the user and list every file the run returned, with its URI."],
   ];
@@ -310,8 +300,8 @@ function agentBody(view: AgentLaunchView, scope: string, name: string, files: bo
   return [
     `# Run the Appstrate agent \`${view.packageId}\``,
     "",
-    `Launch Appstrate agent \`${view.packageId}\` version \`${view.version}\` in space ` +
-      `\`${view.spaceId}\`. Each launch is a metered run.`,
+    `Launch Appstrate agent \`${view.packageId}\` version \`${view.version}\`. ` +
+      "Each launch is a metered run.",
     "",
     ...numbered,
     "",
@@ -341,10 +331,9 @@ export function materializeAgent(slug: string, view: AgentLaunchView): Record<st
     isFileField(schema.properties[key]!),
   );
 
-  const title = view.displayName.trim() || view.packageId;
   const summary = view.description.trim();
   const description = truncateCodePoints(
-    `Run the Appstrate agent "${title}"${summary ? `: ${summary}` : ""}`,
+    `Run the Appstrate agent "${view.title}"${summary ? `: ${summary}` : ""}`,
     SKILL_DESCRIPTION_MAX_LENGTH,
   );
   const required = new Set(schema.required ?? []);
@@ -358,7 +347,6 @@ export function materializeAgent(slug: string, view: AgentLaunchView): Record<st
     `description: ${yamlString(description)}`,
     ...(argumentHint ? [`argument-hint: ${yamlString(argumentHint)}`] : []),
     "disable-model-invocation: true",
-    `allowed-tools: Read(${CONTRACT_PATH})`,
     "metadata:",
     `  appstrate-package: ${yamlString(view.packageId)}`,
     `  appstrate-space: ${yamlString(view.spaceId)}`,

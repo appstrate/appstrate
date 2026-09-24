@@ -56,7 +56,7 @@ class SkillSyncError extends Error {
  */
 const DRAFT_REMEDY = "Sync the published artifact with `--source published`.";
 
-interface SkillListRow {
+interface PackageListRow {
   id: string;
   source?: string;
 }
@@ -81,69 +81,59 @@ interface PlannedSkill extends ResolvedSkill, SlugClaim {
   kind: "skill";
 }
 
-/** An agent of the pinned space as a generated command (D18–D22). */
 interface PlannedAgent extends SlugClaim {
   kind: "agent";
   packageId: string;
   version: string;
   /** SRI of the rendered tree (D22): a template, lock or space change moves it. */
   integrity: string;
-  /** Rendered here, because rendering needs the slug; nothing is downloaded. */
   files: Record<string, Uint8Array>;
 }
 
 export type PlannedEntry = PlannedSkill | PlannedAgent;
 
-/**
- * Sorted by package id, which is what makes collision resolution reproducible
- * rather than server-order dependent. System packages are the platform's.
- *
- * The index listing IS the ACTIVE set, not merely the placed one. Activation is
- * what a space OFFERS — a skill switched off there is one somebody decided the
- * space would not use, and writing it into the local Claude Code checkout anyway
- * would hand the switch no meaning outside the dashboard. A skill switched back
- * on reappears on the next sync, because the sync reads this list every time.
- */
-export async function listSyncableSkills(profileName: string, spaceId?: string): Promise<string[]> {
-  const rows = await apiList<SkillListRow>(profileName, "/api/packages/skills", {
-    spaceId,
-  });
-  return rows
-    .filter((row) => row.source !== "system" && typeof row.id === "string" && row.id.length > 0)
-    .map((row) => row.id)
-    .sort();
-}
-
-interface AgentListRow {
-  id: string;
-  source?: string;
-}
-
-interface SyncableAgent {
+interface ListedPackage {
   packageId: string;
-  /** Shipped with the platform: no draft to name, so it always resolves published. */
   system: boolean;
 }
 
 /**
- * The ACTIVE agents of one space — the set `run_and_wait` accepts there (D19).
- * System agents stay: unlike a system skill, they are launchable.
+ * Sorted by package id, which is what makes collision resolution reproducible
+ * rather than server-order dependent.
+ *
+ * Both listings ARE the ACTIVE set, not merely the placed one. Activation is
+ * what a space OFFERS — a package switched off there is one somebody decided the
+ * space would not use, and writing it into the local Claude Code checkout anyway
+ * would hand the switch no meaning outside the dashboard. A package switched back
+ * on reappears on the next sync, because the sync reads this list every time.
  */
-export async function listSyncableAgents(
+async function listActive(
   profileName: string,
-  spaceId: string,
-): Promise<SyncableAgent[]> {
-  const rows = await apiList<AgentListRow>(profileName, "/api/packages/agents", { spaceId });
+  path: string,
+  spaceId?: string,
+): Promise<ListedPackage[]> {
+  const rows = await apiList<PackageListRow>(profileName, path, { spaceId });
   return rows
     .filter((row) => typeof row.id === "string" && row.id.length > 0)
     .map((row) => ({ packageId: row.id, system: row.source === "system" }))
     .sort((a, b) => (a.packageId < b.packageId ? -1 : a.packageId > b.packageId ? 1 : 0));
 }
 
+/** System skills are the platform's, not the organization's. */
+export async function listSyncableSkills(profileName: string, spaceId?: string): Promise<string[]> {
+  const listed = await listActive(profileName, "/api/packages/skills", spaceId);
+  return listed.filter((row) => !row.system).map((row) => row.packageId);
+}
+
 /**
- * One package detail read, shared by both kinds: `null` on 404 (nothing to
- * sync), and the author-only refusal when the request names the draft.
+ * `GET /api/agents` answers `agents:run` alone: it is the launchable set the
+ * MCP session of that space accepts (D19). System agents stay: they launch.
  */
+export function listSyncableAgents(profileName: string, spaceId: string): Promise<ListedPackage[]> {
+  return listActive(profileName, "/api/agents", spaceId);
+}
+
+/** Both kinds: `null` on 404, the author-only refusal when the draft is named. */
 async function readDetail<T>(
   profileName: string,
   path: string,
@@ -302,7 +292,10 @@ export async function resolveAgent(
     packageId,
     spaceId,
     version,
-    displayName: typeof body.display_name === "string" ? body.display_name : packageId,
+    title:
+      typeof body.display_name === "string" && body.display_name.trim()
+        ? body.display_name
+        : packageId,
     description: typeof body.description === "string" ? body.description : "",
     input: body.input,
   };
@@ -321,7 +314,7 @@ function isLaunchInput(value: unknown): value is AgentLaunchView["input"] {
 
 interface SlugAssignment {
   planned: PlannedEntry[];
-  /** Agents whose command could not be rendered — handled like an unresolvable package. */
+  /** Agents whose command cannot be rendered: deterministic, so never kept as unresolved. */
   failed: { packageId: string; error: unknown }[];
 }
 
@@ -423,10 +416,15 @@ export interface TargetPlan {
   contextChanged: boolean;
 }
 
+/** D18: only the plugin ships `.mcp.json`; an agent command anywhere else fails every run. */
+export function targetCarries(target: SyncTarget, kind: PlannedEntry["kind"]): boolean {
+  return kind === "skill" || target === "claude-plugin";
+}
+
 export interface Catalogue {
   bySlug: EntriesBySlug;
-  /** Listed but unresolvable — not the definite "not published". Decides deletion. */
-  unresolved: Set<string>;
+  /** Listed but unresolvable (id → kind), unlike "not published". Decides deletion. */
+  unresolved: Map<string, PlannedEntry["kind"]>;
 }
 
 /**
@@ -460,9 +458,8 @@ export async function diffTarget(
     state.targets[target]?.root === targetRoot(target) && !sameContext(ledger.context, context);
   const stale = state.version !== STATE_VERSION || ledger.source !== source;
   const shared = target !== "claude-plugin";
-  // D18: only the plugin ships `.mcp.json`; an agent command anywhere else fails every run.
   const wanted = new Map(
-    [...catalogue.bySlug].filter(([, entry]) => entry.kind === "skill" || !shared),
+    [...catalogue.bySlug].filter(([, entry]) => targetCarries(target, entry.kind)),
   );
   const present = new Set<string>();
   for (const slug of Object.keys(ledger.managed)) {
