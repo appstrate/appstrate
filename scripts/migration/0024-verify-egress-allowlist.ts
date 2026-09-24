@@ -7,17 +7,21 @@
  * Exits 1 on manifests whose templated `authorized_uris` the schema now refuses
  * (fix the draft / publish a fixed version) or on `@appstrate/ssh` connections
  * that render no egress (expected 0). Also lists, informationally, third-party
- * local runners' grants and agents pinned to `@appstrate/ssh` 1.0.0 (`ssh://**`).
+ * local runners' grants and mcp-server runtime (flagging `uv`, which resolves its
+ * dependencies at startup through that egress) and agents pinned to
+ * `@appstrate/ssh` 1.0.0 (`ssh://**`).
  */
 
 import { SQL } from "bun";
 import { integrationManifestSchema } from "@appstrate/core/integration";
+import { effectiveMcpServerType, type McpServerManifest } from "@appstrate/core/mcp-server-meta";
 import { renderAuthorizedUris } from "@appstrate/afps-shared/credential-template";
 import { decryptCredentialsToStringMap } from "@appstrate/connect";
 
 const TEMPLATE_ISSUE_PREFIX = "authorized_uris entry ";
 /** `@appstrate/ssh` 1.0.1's `auths.primary.authorized_uris`. */
 const SSH_EGRESS = ["ssh://{$credential.host}:{$credential.port}"];
+const UV_NOTE = " — resolves deps at startup: declare the index in authorized_uris or vendor them";
 
 interface AuthGrant {
   authorized_uris?: string[];
@@ -30,8 +34,8 @@ if (!url) {
   process.exit(2);
 }
 const sql = new SQL(url, { max: 1 });
-const { manifests, sshConnections, localIntegrations, connectionCounts, sshPins } = await sql.begin(
-  async (tx: SQL) => {
+const { manifests, sshConnections, localIntegrations, mcpServers, connectionCounts, sshPins } =
+  await sql.begin(async (tx: SQL) => {
     await tx`SET TRANSACTION READ ONLY`;
     const manifests: { id: string; version: string; manifest: string | null }[] = await tx`
       SELECT p.id, 'draft' AS version, p.draft_manifest::text AS manifest
@@ -45,8 +49,14 @@ const { manifests, sshConnections, localIntegrations, connectionCounts, sshPins 
       SELECT id, credentials_encrypted FROM integration_connections
        WHERE integration_package_id = '@appstrate/ssh' AND auth_key = 'primary'
        ORDER BY id`;
-    const localIntegrations: { id: string; version: string; auths: string | null }[] = await tx`
-      SELECT id, version, (m -> 'auths')::text AS auths FROM (
+    const localIntegrations: {
+      id: string;
+      version: string;
+      server: string | null;
+      auths: string | null;
+    }[] = await tx`
+      SELECT id, version, m -> 'source' -> 'server' ->> 'name' AS server,
+             (m -> 'auths')::text AS auths FROM (
         SELECT p.id, 'draft', p.draft_manifest
           FROM packages p WHERE p.type = 'integration'
         UNION ALL
@@ -56,6 +66,14 @@ const { manifests, sshConnections, localIntegrations, connectionCounts, sshPins 
       ) r(id, version, m)
        WHERE m -> 'source' ->> 'kind' = 'local' AND id NOT LIKE '@appstrate/%'
        ORDER BY 1, 2`;
+    // The runtime an unpinned spawn gets: the `latest` dist-tag, else the draft.
+    const mcpServers: { id: string; version: string; manifest: string | null }[] = await tx`
+      SELECT p.id, coalesce(v.version, 'draft') AS version,
+             coalesce(v.manifest, p.draft_manifest)::text AS manifest
+        FROM packages p
+        LEFT JOIN package_dist_tags t ON t.package_id = p.id AND t.tag = 'latest'
+        LEFT JOIN package_versions v ON v.id = t.version_id
+       WHERE p.type = 'mcp-server'`;
     const connectionCounts: { id: string; auth_key: string; n: number }[] = await tx`
       SELECT integration_package_id AS id, auth_key, count(*)::int AS n
         FROM integration_connections
@@ -72,9 +90,8 @@ const { manifests, sshConnections, localIntegrations, connectionCounts, sshPins 
       ) r(id, version, range)
        WHERE range IS NOT NULL
        ORDER BY 1, 2`;
-    return { manifests, sshConnections, localIntegrations, connectionCounts, sshPins };
-  },
-);
+    return { manifests, sshConnections, localIntegrations, mcpServers, connectionCounts, sshPins };
+  });
 await sql.close();
 
 let manifestIssues = 0;
@@ -101,7 +118,20 @@ for (const row of sshConnections) {
 
 process.stdout.write("\n-- informational: third-party local runners, bound by these lists --\n");
 const connectionsOf = new Map(connectionCounts.map((c) => [`${c.id} ${c.auth_key}`, c.n]));
+const typeOf = new Map(
+  mcpServers.map((s) => {
+    const manifest = JSON.parse(s.manifest ?? "null") as McpServerManifest | null;
+    const type = (manifest && effectiveMcpServerType(manifest)) ?? "undeclared";
+    return [s.id, { type, at: `${s.id}@${s.version}` }];
+  }),
+);
+let uvRunners = 0;
 for (const row of localIntegrations) {
+  const server = row.server ? typeOf.get(row.server) : undefined;
+  const runtime = server ? `${server.type} (${server.at})` : `unknown (${row.server} not found)`;
+  const uv = server?.type === "uv";
+  if (uv) uvRunners += 1;
+  process.stdout.write(`${row.id}@${row.version} runtime ${runtime}${uv ? UV_NOTE : ""}\n`);
   const auths = (JSON.parse(row.auths ?? "null") ?? {}) as Record<string, AuthGrant>;
   for (const [key, auth] of Object.entries(auths)) {
     const grant = auth.allow_all_uris
@@ -123,6 +153,6 @@ for (const row of sshExactPins) {
 process.stdout.write(
   `\n${manifests.length} manifest(s) scanned, ${manifestIssues} template issue(s)\n` +
     `${sshConnections.length} @appstrate/ssh connection(s) scanned, ${deniedConnections} denied all egress\n` +
-    `${localIntegrations.length} third-party local integration version(s), ${sshExactPins.length} agent version(s) pinned to @appstrate/ssh 1.0.0 (informational)\n`,
+    `${localIntegrations.length} third-party local integration version(s) (${uvRunners} on uv), ${sshExactPins.length} agent version(s) pinned to @appstrate/ssh 1.0.0 (informational)\n`,
 );
 process.exit(manifestIssues + deniedConnections > 0 ? 1 : 0);

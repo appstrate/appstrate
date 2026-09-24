@@ -679,6 +679,12 @@ without a port grants only the scheme's default port (443 for https/wss, 80 for
 http/ws, 22 for ssh/sftp, none for any other scheme), and a bare `scheme://**` grants
 any host on any port.
 
+A `uv` server builds its venv at startup (`uv run` fetches the dependencies from the
+package index) through that same egress, and the platform makes no exception for it:
+either list the index in `authorized_uris` (`https://pypi.org/**` and
+`https://files.pythonhosted.org/**`, or your private index), or vendor the
+dependencies in the bundle.
+
 When the target depends on what the user enters (a self-hosted server), reference a
 connection field with `{$credential.<field>}`:
 

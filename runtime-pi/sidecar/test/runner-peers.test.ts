@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { createRunnerPeers, policyForRunnerPeer } from "../runner-peers.ts";
+import {
+  admitsAgentProxyPeer,
+  createRunnerPeers,
+  policyForRunnerPeer,
+  type PeerAttribution,
+} from "../runner-peers.ts";
 
 /** `docker network inspect` stdout for a network with these `name → ip` members. */
 function inspectOutput(members: Record<string, string>): string {
@@ -149,5 +154,28 @@ describe("policyForRunnerPeer", () => {
     expect(await policyFor("172.18.0.4")).toBeNull();
     expect(await policyFor("172.18.0.2")).toBeNull();
     expect(await policyFor("10.9.9.9")).toBeNull();
+  });
+});
+
+describe("admitsAgentProxyPeer", () => {
+  const attributing =
+    (result: string | null | undefined): PeerAttribution =>
+    async () =>
+      result;
+
+  it("admits anyone before an attribution is bound (no runner exists yet)", async () => {
+    expect(await admitsAgentProxyPeer(null, "172.18.0.3")).toBe(true);
+  });
+
+  it("refuses a runner peer", async () => {
+    expect(await admitsAgentProxyPeer(attributing("@tractr/a"), "172.18.0.3")).toBe(false);
+  });
+
+  it("admits a peer that is not a runner", async () => {
+    expect(await admitsAgentProxyPeer(attributing(null), "172.18.0.2")).toBe(true);
+  });
+
+  it("refuses when the lookup failed", async () => {
+    expect(await admitsAgentProxyPeer(attributing(undefined), "172.18.0.2")).toBe(false);
   });
 });

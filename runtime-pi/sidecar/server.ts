@@ -19,7 +19,7 @@ import { buildRuntimeToolDefs } from "@appstrate/core/runtime-tool-defs";
 import { RuntimeEventJournal, journalRuntimeToolDefs } from "./runtime-event-journal.ts";
 import { scrubSecretMaterial } from "./redact.ts";
 import { parseSidecarEnv, type SidecarEnv } from "./env.ts";
-import type { PeerAttribution } from "./runner-peers.ts";
+import { admitsAgentProxyPeer, type PeerAttribution } from "./runner-peers.ts";
 
 /** Parse the agent-selected runtime tools forwarded as `RUNTIME_TOOLS_JSON`. */
 function readRuntimeToolsFromEnv(): string[] {
@@ -218,7 +218,7 @@ let peerAttribution: PeerAttribution | null = null;
 const proxy = createForwardProxy({
   config,
   listenPort: env.port + 1,
-  isPeerAllowed: async (ip) => peerAttribution === null || (await peerAttribution(ip)) === null,
+  isPeerAllowed: (ip) => admitsAgentProxyPeer(peerAttribution, ip),
 });
 // One cache per sidecar process — a sidecar serves a single run, so
 // cross-run pollution is impossible.

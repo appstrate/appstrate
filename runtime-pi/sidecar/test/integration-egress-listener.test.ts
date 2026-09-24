@@ -55,6 +55,34 @@ function startTcpEcho(): Promise<{ port: number; received: Buffer[]; closed: Pro
   });
 }
 
+/** A server-speaks-first upstream (SMTP-style): banner on accept, records what it receives. */
+function startBannerServer(
+  banner: string,
+): Promise<{ port: number; received: () => string; gotData: Promise<void> }> {
+  let received = "";
+  let markGot!: () => void;
+  const gotData = new Promise<void>((res) => (markGot = res));
+  return new Promise((resolve) => {
+    const server = netCreateServer((socket) => {
+      socket.write(banner);
+      socket.on("data", (chunk: Buffer) => {
+        received += chunk.toString();
+        markGot();
+      });
+      socket.on("error", () => socket.destroy());
+    });
+    tcpServers.push(server);
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      resolve({
+        port: typeof addr === "object" && addr ? addr.port : 0,
+        received: () => received,
+        gotData,
+      });
+    });
+  });
+}
+
 const u16 = (n: number) => Buffer.from([n >> 8, n & 0xff]);
 
 /** A minimal ClientHello record, with a `server_name` extension when `sni` is given. */
@@ -520,7 +548,7 @@ describe("integration-egress-listener (#543)", () => {
       expect(res.echoed.toString()).toBe("SSH-2.0-OpenSSH_9.6\r\nkey-exchange");
     });
 
-    it("closes a tunnel whose client stays silent after the 200", async () => {
+    it("closes a tunnel silent on both sides after the 200, with a preamble-timeout event", async () => {
       const echo = await startTcpEcho();
       const { handle, events } = await tlsListener(echo.port, { preambleTimeoutMs: 100 });
 
@@ -529,7 +557,40 @@ describe("integration-egress-listener (#543)", () => {
       await echo.closed;
       expect(res.statusCode).toBe(200);
       expect(echo.received).toEqual([]);
+      expect(events).toContainEqual({ kind: "tunnel-refused", target, reason: "preamble-timeout" });
       expect(events.some((e) => e.kind === "tunnel-opened")).toBe(false);
+    });
+
+    it("relays a server-first banner before the client speaks, past the preamble deadline", async () => {
+      const banner = "220 smtp.example ESMTP\r\n";
+      const upstream = await startBannerServer(banner);
+      const { handle, events } = await tlsListener(upstream.port, { preambleTimeoutMs: 100 });
+      const target = `allowed.example.com:${upstream.port}`;
+
+      const seen = await new Promise<string>((resolve, reject) => {
+        const socket = netConnect(handle.address().port, "127.0.0.1", () => {
+          socket.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`);
+        });
+        let buf = "";
+        socket.on("data", (chunk: Buffer) => {
+          buf += chunk.toString("latin1");
+          const body = buf.split("\r\n\r\n").slice(1).join("\r\n\r\n");
+          if (body !== banner) return;
+          // Reply well after the preamble deadline: the banner must have disarmed it.
+          setTimeout(() => socket.write("EHLO runner\r\n"), 300);
+          void upstream.gotData.then(() => {
+            socket.destroy();
+            resolve(body);
+          });
+        });
+        socket.on("error", reject);
+        setTimeout(() => reject(new Error("banner timeout")), 5000);
+      });
+
+      expect(seen).toBe(banner);
+      expect(upstream.received()).toBe("EHLO runner\r\n");
+      expect(events.some((e) => e.kind === "tunnel-opened")).toBe(true);
+      expect(events.some((e) => e.reason === "preamble-timeout")).toBe(false);
     });
   });
 });

@@ -39,15 +39,18 @@ import {
   type HostResolver,
   type PeerCheck,
 } from "./helpers.ts";
-import { parseConnectTarget, netConnectWithTimeout, relaySockets } from "./connect-tunnel.ts";
+import {
+  parseConnectTarget,
+  netConnectWithTimeout,
+  TUNNEL_IDLE_TIMEOUT_MS,
+} from "./connect-tunnel.ts";
 import { extractSni, type MitmListenerHandle } from "./integration-mitm-listener.ts";
 
 /** TLS plaintext record cap (RFC 8446 §5.1). */
 const MAX_TLS_RECORD = 16_384;
 
 /** The tunnel's first bytes: the whole first record if TLS (0x16), else the first chunk. */
-function collectTunnelHead(socket: Socket, timeoutMs: number): Promise<Buffer> {
-  socket.setTimeout(timeoutMs, () => socket.destroy());
+function collectTunnelHead(socket: Socket): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     let buf = Buffer.alloc(0);
     const onClose = () => reject(new Error("socket closed before tunnel bytes"));
@@ -60,7 +63,7 @@ function collectTunnelHead(socket: Socket, timeoutMs: number): Promise<Buffer> {
       }
       socket.off("data", onData);
       socket.off("close", onClose);
-      socket.pause(); // buffer until relaySockets' pipe() resumes
+      socket.pause(); // buffer until pipe() resumes
       resolve(buf);
     };
     socket.on("data", onData);
@@ -81,7 +84,7 @@ export interface EgressListenerEvent {
   kind: "tunnel-opened" | "tunnel-refused" | "tunnel-error";
   /** `host:port` target of the CONNECT, or of the refused SNI (never a path / query). */
   target: string;
-  /** Populated for `tunnel-refused` (SSRF / allowlist / SNI / peer) and `tunnel-error`. */
+  /** Populated for `tunnel-refused` (SSRF / allowlist / SNI / peer / preamble timeout) and `tunnel-error`. */
   reason?: string;
   peer?: string;
 }
@@ -100,7 +103,7 @@ interface CreateEgressListenerOptions {
   resolveHostFn?: HostResolver;
   egressPolicy: AuthorityPolicy;
   isPeerAllowed: PeerCheck;
-  /** Deadline for the tunnel's first bytes after the 200 (tests shorten it). */
+  /** Deadline for the client's first bytes while upstream is silent too (tests shorten it). */
   preambleTimeoutMs?: number;
 }
 
@@ -190,11 +193,25 @@ export function createIntegrationEgressListener(
             check.reason === "resolution-failed" ? "dns-resolution-failed" : "ssrf",
           );
         }
-        // Upstream is dialed first but receives nothing until the head is vetted.
+        // Upstream receives nothing until the client's head is vetted; its own
+        // bytes flow at once (server-first banners: SMTP, IMAP, MySQL…).
         const upstream = netConnectWithTimeout(port, check.pinnedAddress, () => {
           clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-          collectTunnelHead(clientSocket, preambleTimeoutMs)
+          upstream.pipe(clientSocket);
+          for (const s of [clientSocket, upstream]) {
+            s.setTimeout(TUNNEL_IDLE_TIMEOUT_MS, () => s.destroy());
+          }
+          // Only a tunnel silent on BOTH sides dies at the preamble deadline.
+          const preamble = setTimeout(() => {
+            emit({ kind: "tunnel-refused", target, reason: "preamble-timeout" });
+            clientSocket.destroy();
+          }, preambleTimeoutMs);
+          const endPreamble = () => clearTimeout(preamble);
+          upstream.once("data", endPreamble);
+          clientSocket.once("close", endPreamble);
+          collectTunnelHead(clientSocket)
             .then((head) => {
+              endPreamble();
               const sni = head[0] === 0x16 ? clientHelloSni(head) : null;
               if (sni === undefined || (sni !== null && !egressPolicy.allowsAuthority(sni, port))) {
                 const reason = sni === undefined ? "malformed-client-hello" : "not-authorized";
@@ -204,7 +221,7 @@ export function createIntegrationEgressListener(
               }
               upstream.write(head); // replay the vetted bytes before splicing
               emit({ kind: "tunnel-opened", target });
-              relaySockets(clientSocket, upstream);
+              clientSocket.pipe(upstream);
             })
             .catch(() => clientSocket.destroy());
         });
@@ -212,6 +229,7 @@ export function createIntegrationEgressListener(
           emit({ kind: "tunnel-error", target, reason: err.message });
           clientSocket.destroy();
         });
+        upstream.once("close", () => clientSocket.destroy());
         clientSocket.on("error", () => upstream.destroy());
         clientSocket.once("close", () => upstream.destroy());
       })();

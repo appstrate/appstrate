@@ -82,6 +82,14 @@ export function createRunnerPeers(options: {
   };
 }
 
+/** Agent forward-proxy peer rule: refuses runners (they have their own listener) and failed lookups. */
+export async function admitsAgentProxyPeer(
+  attribute: PeerAttribution | null,
+  remoteAddress: string,
+): Promise<boolean> {
+  return attribute === null || (await attribute(remoteAddress)) === null;
+}
+
 /** Transparent-plane peer check: the policy of the runner at a peer IP, `null` for anyone else. */
 export function policyForRunnerPeer<P>(
   peers: RunnerPeers,

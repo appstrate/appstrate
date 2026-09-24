@@ -370,7 +370,7 @@ export {
 // drift between the preflight here and the per-hop checks there.
 export { matchesAuthorizedUri, stripUserInfoAndFragment } from "@appstrate/afps-runtime/resolvers";
 
-/** Read timeout for an egress listener's pre-splice phase; `relaySockets` re-arms its own after. */
+/** Deadline for an egress listener's pre-splice phase; the relay's idle timeout governs after. */
 export const PREAMBLE_TIMEOUT_MS = 10_000;
 
 export type PeerCheck = (remoteAddress: string) => Promise<boolean>;
