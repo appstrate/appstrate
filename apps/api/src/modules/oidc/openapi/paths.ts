@@ -727,21 +727,21 @@ export const oidcPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["host", "port", "username", "pass", "fromAddress"],
+              required: ["host", "port", "username", "pass", "from_address"],
               properties: {
                 host: { type: "string", minLength: 1, maxLength: 253 },
                 port: { type: "integer", minimum: 1, maximum: 65535 },
                 username: { type: "string", minLength: 1, maxLength: 320 },
                 pass: { type: "string", writeOnly: true, minLength: 1, maxLength: 1024 },
-                fromAddress: { type: "string", format: "email" },
-                fromName: {
+                from_address: { type: "string", format: "email" },
+                from_name: {
                   type: "string",
                   maxLength: 200,
                   pattern: '^[^"\\r\\n]*$',
                   description:
                     "Rejects quotes and CRLF to prevent email-header injection at send time.",
                 },
-                secureMode: { type: "string", enum: ["auto", "tls", "starttls", "none"] },
+                secure_mode: { type: "string", enum: ["auto", "tls", "starttls", "none"] },
               },
               additionalProperties: false,
             },
@@ -812,10 +812,10 @@ export const oidcPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["ok", "messageId"],
+                required: ["ok", "message_id"],
                 properties: {
                   ok: { type: "boolean" },
-                  messageId: { type: "string" },
+                  message_id: { type: "string" },
                 },
               },
             },
@@ -878,7 +878,7 @@ export const oidcPaths = {
       ],
       summary: "Upsert per-space social auth provider configuration",
       description:
-        "Creates or replaces the OAuth App credentials for a given provider on this space. The `clientSecret` field is encrypted at rest and never returned in any response. " +
+        "Creates or replaces the OAuth App credentials for a given provider on this space. The `client_secret` field is encrypted at rest and never returned in any response. " +
         SPACE_SETTINGS_GATE_NOTE,
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
       requestBody: {
@@ -887,10 +887,10 @@ export const oidcPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["clientId", "clientSecret"],
+              required: ["client_id", "client_secret"],
               properties: {
-                clientId: { type: "string", minLength: 1, maxLength: 512 },
-                clientSecret: {
+                client_id: { type: "string", minLength: 1, maxLength: 512 },
+                client_secret: {
                   type: "string",
                   writeOnly: true,
                   minLength: 1,

@@ -17,9 +17,9 @@ export interface SmtpConfigView {
   host: string;
   port: number;
   username: string;
-  fromAddress: string;
-  fromName: string | null;
-  secureMode: "auto" | "tls" | "starttls" | "none";
+  from_address: string;
+  from_name: string | null;
+  secure_mode: "auto" | "tls" | "starttls" | "none";
   createdAt: string;
   updatedAt: string;
 }
@@ -27,7 +27,7 @@ export interface SmtpConfigView {
 export interface SocialProviderView {
   spaceId: string;
   provider: SocialProviderId;
-  clientId: string;
+  client_id: string;
   scopes: string[] | null;
   createdAt: string;
   updatedAt: string;

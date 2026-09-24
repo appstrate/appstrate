@@ -387,7 +387,7 @@ Making that a real ceiling — minting instance tokens with the consented scope 
 
 For `level=space` OIDC clients, Google/GitHub sign-in routes through the **tenant's** OAuth App — not the platform's. The tenant controls branding on the consent screen, requested scopes, and audit/revocation; the platform's env `GOOGLE_CLIENT_*` / `GITHUB_CLIENT_*` never touch a space-level flow. When a tenant hasn't configured credentials for a provider, that provider's button is hidden on the tenant's login/register pages (no fallback).
 
-**Storage**: `space_social_providers` keyed on `(space_id, provider)` with `clientId` + AES-256-GCM-encrypted `clientSecret` + optional `scopes[]`. ON DELETE CASCADE with `spaces`.
+**Storage**: `space_social_providers` keyed on `(space_id, provider)` with `client_id` + AES-256-GCM-encrypted `client_secret_encrypted` + optional `scopes[]`. ON DELETE CASCADE with `spaces`.
 
 **Runtime wiring**:
 
@@ -400,7 +400,7 @@ For `level=space` OIDC clients, Google/GitHub sign-in routes through the **tenan
 
 1. Register a Google OAuth App at <https://console.cloud.google.com/apis/credentials> (or a GitHub OAuth App at <https://github.com/settings/developers>).
 2. Set the authorized redirect URI to `{APP_URL}/api/auth/callback/google` (or `.../github`). This URL is shared across all tenants — each tenant's OAuth App must register it.
-3. `PUT /api/spaces/{spaceId}/social-providers/{google|github}` with `{ "clientId": "…", "clientSecret": "…", "scopes": ["openid","email","profile"] }` (scopes optional).
+3. `PUT /api/spaces/{spaceId}/social-providers/{google|github}` with `{ "client_id": "…", "client_secret": "…", "scopes": ["openid","email","profile"] }` (scopes optional).
 4. The provider's button appears on the next login-page render (resolver cache: ≤60s).
 
 **Testing**: `services/social.ts` exposes `_setSocialSpy` (`:79`) so E2E tests can assert which per-space row a given request resolved against — mirrors `_setSmtpSpy` in `services/smtp.ts` (`:72`). Both throw unless `NODE_ENV === "test"`.

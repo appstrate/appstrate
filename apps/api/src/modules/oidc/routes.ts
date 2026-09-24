@@ -203,15 +203,15 @@ export const smtpConfigUpsertSchema = z
     port: z.number().int().min(1).max(65535),
     username: z.string().min(1).max(320),
     pass: z.string().min(1).max(1024),
-    fromAddress: z.email(),
+    from_address: z.email(),
     // Reject CRLF/quotes to prevent email header injection — value is
     // concatenated into `"${fromName}" <${fromAddress}>` at send time.
-    fromName: z
+    from_name: z
       .string()
       .max(200)
-      .regex(/^[^"\r\n]*$/, "fromName must not contain quotes or line breaks")
+      .regex(/^[^"\r\n]*$/, "from_name must not contain quotes or line breaks")
       .optional(),
-    secureMode: z.enum(["auto", "tls", "starttls", "none"]).optional(),
+    secure_mode: z.enum(["auto", "tls", "starttls", "none"]).optional(),
   })
   .strict();
 
@@ -225,8 +225,8 @@ const socialProviderIdSchema = z.enum(SOCIAL_PROVIDER_IDS);
 
 export const socialProviderUpsertSchema = z
   .object({
-    clientId: z.string().min(1).max(512),
-    clientSecret: z.string().min(1).max(2048),
+    client_id: z.string().min(1).max(512),
+    client_secret: z.string().min(1).max(2048),
     scopes: z.array(z.string().min(1).max(128)).max(32).optional(),
   })
   .strict();
@@ -767,13 +767,21 @@ export function createOidcRouter() {
       if (hostCheck.blocked && hostCheck.reason === "blocked-resolved") {
         throw invalidRequest("host resolves to a private/internal network", "host");
       }
-      const saved = await upsertSmtpConfig(spaceId, data);
+      const saved = await upsertSmtpConfig(spaceId, {
+        host: data.host,
+        port: data.port,
+        username: data.username,
+        pass: data.pass,
+        fromAddress: data.from_address,
+        fromName: data.from_name,
+        secureMode: data.secure_mode,
+      });
       // `pass` and `username` stay out of the trail.
       await recordAuditFromContext(c, {
         action: "space.smtp_config.set",
         resourceType: "smtp_config",
         resourceId: spaceId,
-        after: { host: data.host, port: data.port, fromAddress: data.fromAddress },
+        after: { host: data.host, port: data.port, fromAddress: data.from_address },
       });
       return c.json(saved);
     },
@@ -805,7 +813,7 @@ export function createOidcRouter() {
       const data = await readJsonBody(c, smtpConfigTestSchema);
       try {
         const result = await sendTestEmail(spaceId, data.to);
-        return c.json({ ok: true, messageId: result.messageId });
+        return c.json({ ok: true, message_id: result.messageId });
       } catch (err) {
         const message = getErrorMessage(err);
         // Surface the SMTP server's response verbatim — DKIM/SPF/auth
@@ -855,12 +863,16 @@ export function createOidcRouter() {
       const spaceId = c.req.param("id")!;
       const provider = parseProvider(c.req.param("provider")!);
       const data = await readJsonBody(c, socialProviderUpsertSchema);
-      const saved = await upsertSocialProvider(spaceId, provider, data);
+      const saved = await upsertSocialProvider(spaceId, provider, {
+        clientId: data.client_id,
+        clientSecret: data.client_secret,
+        scopes: data.scopes,
+      });
       await recordAuditFromContext(c, {
         action: "space.social_provider.set",
         resourceType: "social_provider",
         resourceId: provider,
-        after: { clientId: data.clientId, scopes: data.scopes ?? null },
+        after: { clientId: data.client_id, scopes: data.scopes ?? null },
       });
       return c.json(saved);
     },

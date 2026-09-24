@@ -68,11 +68,11 @@ describe("unknown request-body fields are refused, not stripped", () => {
         body: JSON.stringify(body),
       });
 
-    await expectUnknownField(await put({ generation_config: { temperature: 0.4 } }));
+    await expectUnknownField(await put({ generationConfig: { temperature: 0.4 } }));
     // `enabled` is not a field of this body either: activation has its own pair
     // of doors, and a retired name must fail rather than be dropped in silence.
     await expectUnknownField(await put({ enabled: false }));
-    expect((await put({ generationConfig: null })).status).toBe(200);
+    expect((await put({ generation_config: null })).status).toBe(200);
   });
 
   it("proxies — POST /api/proxies", async () => {
@@ -134,9 +134,10 @@ describe("unknown request-body fields are refused, not stripped", () => {
       port: 587,
       username: "u",
       pass: "p",
-      fromAddress: "noreply@tenant.example",
+      from_address: "noreply@tenant.example",
     };
     await expectUnknownField(await put({ ...base, tls: true }));
+    await expectUnknownField(await put({ ...base, fromName: "Tenant" }));
     expect((await put(base)).status).toBe(200);
   });
 
