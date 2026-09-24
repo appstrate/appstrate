@@ -83,6 +83,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `resourceId`, `before` and `after`, typed **`AuditPayload`**: a snake_case
   top-level key (a raw request body) is a compile error. Best-effort: never rejects.
 
+### Fixed
+
+- **A presigned PUT's `sha256` is verified by the store** (`@appstrate/core/storage-s3`).
+  `createUploadUrl` let the presigner hoist `x-amz-checksum-sha256` into the
+  query string, where S3/MinIO do not check it: a body with a different digest
+  was accepted. The checksum is now a signed header (the descriptor already
+  returned it for the client to echo), so a mismatch is rejected server-side —
+  and MinIO releases that refuse unsigned `x-amz-*` headers accept the upload.
+
 ### Changed
 
 - **BREAKING: model generation settings are snake_case** (`@appstrate/core/model-generation`,
