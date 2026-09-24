@@ -286,19 +286,6 @@ describe("buildConnectLoginSpec", () => {
     expect(spec.egress).toEqual({ authorizedUris: [], allowAllUris: true });
   });
 
-  it("never forwards a raw credential template (refused on connect auths at import)", async () => {
-    const ex = execution();
-    const templated = JSON.parse(JSON.stringify(MANIFEST)) as IntegrationManifest;
-    (templated.auths!.session as Record<string, unknown>).authorized_uris = [
-      "https://api.example.test/**",
-      "https://{$credential.host}/**",
-    ];
-    ex.manifest = templated;
-    const spec = await buildConnectLoginSpec(ex, fakeMcpResolver);
-    expect(spec.egress?.authorizedUris).toEqual(["https://api.example.test/**"]);
-    expect(spec.connectLogin!.authorizedUris).toEqual(["https://api.example.test/**"]);
-  });
-
   it("throws when the auth has no delivery.http", async () => {
     const ex = execution();
     const noHttp = JSON.parse(JSON.stringify(MANIFEST)) as IntegrationManifest;

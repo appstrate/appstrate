@@ -57,8 +57,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   enforced on the process/Firecracker backend, where runners egress directly.
   **Operators**: run `scripts/migration/0024-verify-egress-allowlist.ts` before
   the deploy (expected 0; it also lists, for review, the third-party local
-  runners the lists now bind, with their runtime, `uv` flagged); tag
-  `afps-shared@0.9.1` at merge.
+  runners the lists now bind); tag `afps-shared@0.9.1` at merge.
 - **BREAKING (API keys): keys use a checksummed `apst_` format, and every
   existing `ask_` key stops authenticating.** A key is now `apst_` + 30 base62
   characters + a 6-character base62 CRC32 of those 30, so a secret scanner can

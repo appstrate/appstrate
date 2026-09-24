@@ -18,6 +18,7 @@ import {
   type TransparentListenerHandle,
 } from "../integration-transparent-listener.ts";
 import type { EgressListenerEvent } from "../integration-egress-listener.ts";
+import { buildClientHello } from "./helpers/tls-client-hello.ts";
 
 const openListeners: TransparentListenerHandle[] = [];
 const openServers: Server[] = [];
@@ -71,50 +72,6 @@ async function makeListener(
   openListeners.push(listener);
   await listener.ready;
   return listener;
-}
-
-/**
- * Hand-build a minimal TLS 1.2/1.3-shaped ClientHello record carrying the
- * given SNI (RFC 8446 §4.1.2 + RFC 6066 §3). Pass `sni: null` for a hello
- * without the server_name extension.
- */
-function buildClientHello(sni: string | null): Buffer {
-  const extensions: Buffer[] = [];
-  if (sni !== null) {
-    const host = Buffer.from(sni, "utf-8");
-    const serverName = Buffer.alloc(5);
-    serverName.writeUInt16BE(host.length + 3, 0); // server_name_list length
-    serverName.writeUInt8(0, 2); // name_type host_name
-    serverName.writeUInt16BE(host.length, 3);
-    const extData = Buffer.concat([serverName, host]);
-    const extHeader = Buffer.alloc(4);
-    extHeader.writeUInt16BE(0x0000, 0); // extension_type server_name
-    extHeader.writeUInt16BE(extData.length, 2);
-    extensions.push(Buffer.concat([extHeader, extData]));
-  }
-  const extBlock = Buffer.concat(extensions);
-  const body = Buffer.concat([
-    Buffer.from([0x03, 0x03]), // legacy_version
-    Buffer.alloc(32), // random
-    Buffer.from([0x00]), // session_id length
-    Buffer.from([0x00, 0x02, 0x13, 0x01]), // one cipher suite
-    Buffer.from([0x01, 0x00]), // one compression method (null)
-    (() => {
-      const b = Buffer.alloc(2);
-      b.writeUInt16BE(extBlock.length, 0);
-      return b;
-    })(),
-    extBlock,
-  ]);
-  const handshake = Buffer.concat([
-    Buffer.from([0x01, (body.length >> 16) & 0xff, (body.length >> 8) & 0xff, body.length & 0xff]),
-    body,
-  ]);
-  const record = Buffer.alloc(5);
-  record.writeUInt8(0x16, 0);
-  record.writeUInt16BE(0x0301, 1);
-  record.writeUInt16BE(handshake.length, 3);
-  return Buffer.concat([record, handshake]);
 }
 
 /** Connect, write chunks, collect echoed bytes until `expected` total or close. */

@@ -779,24 +779,18 @@ remains. Fix a draft by editing it; publish a fixed version for a published one.
 ## Detail — Runner egress allowlist (script `0024`)
 
 **Not a runbook, and it writes nothing.** #1458 renders a local runner's egress
-from its connection's `authorized_uris`, and the manifest schema now validates
-`{$credential.<field>}` placeholders there, also on every READ of a stored
-manifest. `0024` prints the drafts and published versions that rule refuses, and
-the `@appstrate/ssh` connections whose bag renders no egress under 1.0.1 (ids
-only, never a value). The second count is expected to be 0 — the provisioner
-has always written `port`, and no other door creates that connection — so a
-hit means a rewrite is owed before the deploy. Run it BEFORE the deploy.
+from its connection's `authorized_uris`, and `@appstrate/ssh` 1.0.1 now grants
+`ssh://{$credential.host}:{$credential.port}`. `0024` prints the `@appstrate/ssh`
+connections whose bag renders no egress (ids only, never a value) and exits
+non-zero on any. Expected 0 — the provisioner has always written `port`, and no
+other door creates that connection — so a hit means a rewrite is owed before the
+deploy. Run it BEFORE the deploy.
 
 It then prints, informational only (no effect on the exit code), the blast
 radius to review: every `source.kind: "local"` integration outside
 `@appstrate/*`, per draft/published version, with each auth's
-`authorized_uris` / `allow_all_uris` (all its runner will reach), its
-connection count, and the runtime of the mcp-server its `source.server.name`
-names (read from that server's `latest` published version, else its draft).
-A `uv` runtime is flagged: `uv run` fetches the dependencies from the package
-index at startup, through the same egress, so the integration must declare the
-index or the bundle must vendor them. Last, every agent whose `@appstrate/ssh`
-range admits 1.0.0 but not 1.0.1 — an exact pin that keeps 1.0.0's `ssh://**`.
+`authorized_uris` / `allow_all_uris` (all its runner will reach) and its
+connection count.
 
 ## Log
 
@@ -824,4 +818,4 @@ range admits 1.0.0 but not 1.0.1 — an exact pin that keeps 1.0.0's `ssh://**`.
 | 0021 | not applied         | `space_id` → `spaceId` inside `org_invitations.space_assignments` and `oauth_clients.signup_space_assignments` — **run inside the deploy window**                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | unmeasured — prints before/after counts, aborts if any row still carries `space_id`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | 0022 | not applied         | unrevoked `api_keys` whose `key_prefix` starts with `ask_` (the retired format) → `revoked_at` = now() — **run once after deploying the release carrying the `apst_` format**                                                                                                                                                                                                                                                                                                                                                                                                                                             | unmeasured — prints before/after counts, aborts if any `ask_` key is left unrevoked                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | 0023 | not applied         | READ-ONLY pre-flight: integration drafts and published versions whose JSONPaths (`identity_claims`, `connect.login` `jsonpath` selectors and criteria) the strict subset refuses on read — **run BEFORE deploying; exits non-zero until every one is fixed**                                                                                                                                                                                                                                                                                                                                                              |
-| 0024 | not applied         | READ-ONLY pre-flight for #1458: integration drafts and published versions whose templated `authorized_uris` the schema now refuses on read, and `@appstrate/ssh` connections rendering no egress under 1.0.1 (expected 0); informational blast radius (third-party local integrations' lists + connection counts + mcp-server runtime, `uv` flagged; agents pinned to `@appstrate/ssh` 1.0.0) — **run BEFORE deploying, with the platform env loaded; exits non-zero until every one is fixed**                                                                                                                           |
+| 0024 | not applied         | READ-ONLY pre-flight for #1458: `@appstrate/ssh` connections rendering no egress under 1.0.1 (expected 0); informational blast radius (third-party local integrations' `authorized_uris` / `allow_all_uris` + connection counts) — **run BEFORE deploying, with the platform env loaded; exits non-zero until every one is fixed**                                                                                                                                                                                                                                                                                        |

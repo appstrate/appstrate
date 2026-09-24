@@ -25,6 +25,8 @@ import {
   mcpServerManifest,
   envDelivery,
   filesDelivery,
+  httpHeaderDelivery,
+  connectToolBlock,
 } from "../../helpers/integration-manifests.ts";
 
 const INTEG = "@orga/session-integ";
@@ -77,6 +79,7 @@ async function resolveWith(
   ctx: TestContext,
   manifest: IntegrationManifest,
   outputs: Record<string, string>,
+  inputs?: Record<string, string>,
 ): Promise<IntegrationSpawnSpec> {
   await seedPackage({
     id: INTEG,
@@ -107,7 +110,7 @@ async function resolveWith(
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     endUserId: null,
-    credentialsEncrypted: encryptCredentialEnvelope({ outputs }),
+    credentialsEncrypted: encryptCredentialEnvelope({ outputs, inputs }),
     identityClaims: {},
     scopesGranted: [],
     needsReconnection: false,
@@ -193,6 +196,26 @@ describe("resolveIntegrationSpawns — runner egress policy (#543, #1458)", () =
     expect(spec.fileMounts).toBeDefined();
     expect(spec.egress).toEqual({
       authorizedUris: ["https://mtls.example.com/**"],
+      allowAllUris: false,
+    });
+  });
+
+  it("connect.tool run-start: the login runner gets egress over the static list", async () => {
+    const spec = await resolveWith(
+      ctx,
+      integManifest({
+        type: "custom",
+        authorizedUris: ["https://saas.example.com/**"],
+        credentialFields: ["user", "password"],
+        delivery: httpHeaderDelivery({ name: "Cookie", field: "SID" }),
+        connect: connectToolBlock({ tool: "login", runAt: "run-start", persistLoginSecret: true }),
+      }),
+      {},
+      { user: "u", password: "pw" },
+    );
+    expect(spec.connectLogin?.authorizedUris).toEqual(["https://saas.example.com/**"]);
+    expect(spec.egress).toEqual({
+      authorizedUris: ["https://saas.example.com/**"],
       allowAllUris: false,
     });
   });

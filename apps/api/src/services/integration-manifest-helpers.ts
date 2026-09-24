@@ -243,19 +243,6 @@ export function runnerEgressFor(
 }
 
 /**
- * A `connect` auth's allowlist and, for a local runner, its egress. Connect
- * auths carry no templates (refused at import), so no fields are needed.
- */
-export function connectLoginGrants(
-  auth: Pick<AfpsManifestAuth, "authorized_uris" | "allow_all_uris">,
-  sourceKind: ReturnType<typeof getIntegrationSourceKind>,
-): { authorizedUris: string[]; egress: IntegrationSpawnSpec["egress"] } {
-  const authorizedUris = renderAuthAuthorizedUris(auth, {});
-  const egress = sourceKind === "local" ? runnerEgressFor(auth, authorizedUris) : undefined;
-  return { authorizedUris, egress };
-}
-
-/**
  * Default file mode for `delivery.files` entries (AFPS §7.6: `"0400"`).
  * Read-only by owner — the strictest sane default for credential material.
  */

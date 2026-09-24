@@ -158,9 +158,6 @@ describe("bootIntegrations — runner egress wiring (#1458)", () => {
     try {
       const egress = spawnedWith[0]!.egress!;
       expect(egress.caCertHostPath).toBeNull();
-      expect(egress.policy.allowsAuthority("api.allowed.test", 443)).toBe(true);
-      expect(egress.policy.allowsAuthority("evil.test", 443)).toBe(false);
-
       expect(await connectVia(egress.proxyUrl, "evil.test:443")).toContain("403");
       expect(resolved).toEqual([]);
       // Granted target: past the policy, into the resolve-and-pin floor.

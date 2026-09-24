@@ -53,7 +53,7 @@ import {
   getIntegrationSourceKind,
   getLocalServerRef,
   getAppstrateConnectMeta,
-  connectLoginGrants,
+  runnerEgressFor,
   type AfpsManifestAuth,
 } from "../integration-manifest-helpers.ts";
 import {
@@ -255,7 +255,8 @@ export async function buildConnectLoginSpec(
 
   const connectMeta = getAppstrateConnectMeta(auth.connect);
   const reauthOn = connectMeta?.reauth_on;
-  const { authorizedUris, egress } = connectLoginGrants(auth, sourceKind);
+  const authorizedUris = auth.authorized_uris ?? [];
+  const egress = runnerEgressFor(auth, authorizedUris);
 
   return {
     integrationId: execution.integrationId,

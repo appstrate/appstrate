@@ -13,7 +13,6 @@ import {
   renderCredentialTemplate,
   renderAuthAuthorizedUris,
   runnerEgressFor,
-  connectLoginGrants,
   getIntegrationSourceKind,
   getLocalServerRef,
   getRemoteSource,
@@ -225,20 +224,5 @@ describe("runnerEgressFor", () => {
       authorizedUris: [],
       allowAllUris: true,
     });
-  });
-});
-
-describe("connectLoginGrants", () => {
-  const auth = { authorized_uris: ["https://login.example/**"] };
-
-  it("gives a local runner egress over the static list", () => {
-    expect(connectLoginGrants(auth, "local")).toEqual({
-      authorizedUris: ["https://login.example/**"],
-      egress: { authorizedUris: ["https://login.example/**"], allowAllUris: false },
-    });
-  });
-
-  it("gives a non-local source no egress", () => {
-    expect(connectLoginGrants(auth, "remote").egress).toBeUndefined();
   });
 });

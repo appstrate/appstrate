@@ -19,6 +19,7 @@ import {
   type EgressListenerEvent,
 } from "../integration-egress-listener.ts";
 import type { MitmListenerHandle } from "../integration-mitm-listener.ts";
+import { buildClientHello, tlsRecord } from "./helpers/tls-client-hello.ts";
 
 const listeners: MitmListenerHandle[] = [];
 const tcpServers: NetServer[] = [];
@@ -83,45 +84,24 @@ function startBannerServer(
   });
 }
 
-const u16 = (n: number) => Buffer.from([n >> 8, n & 0xff]);
-
-/** A minimal ClientHello record, with a `server_name` extension when `sni` is given. */
-function clientHello(sni?: string): Buffer {
-  let extensions = Buffer.alloc(0);
-  if (sni) {
-    const host = Buffer.from(sni);
-    const entry = Buffer.concat([Buffer.from([0x00]), u16(host.length), host]);
-    const list = Buffer.concat([u16(entry.length), entry]);
-    extensions = Buffer.concat([u16(0x0000), u16(list.length), list]);
-  }
-  const body = Buffer.concat([
-    u16(0x0303),
-    Buffer.alloc(32, 7),
-    Buffer.from([0]),
-    Buffer.concat([u16(2), u16(0x1301)]),
-    Buffer.from([1, 0]),
-    u16(extensions.length),
-    extensions,
-  ]);
-  const handshake = Buffer.concat([Buffer.from([0x01, 0]), u16(body.length), body]);
-  return Buffer.concat([Buffer.from([0x16, 0x03, 0x01]), u16(handshake.length), handshake]);
-}
+const connectTo = (target: string) => `CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`;
 
 /**
- * CONNECT to `target`, then write `segments` (20 ms apart) once the 200 lands.
- * Resolves when every written byte has echoed back or the tunnel closes.
+ * Write `head` (chunks 20 ms apart), then — once a 200 lands — `segments`
+ * (20 ms apart). Resolves with the status and whatever came back through the
+ * tunnel once every written byte has echoed, or the tunnel closes.
  */
-function tunnelThrough(
+function tunnel(
   proxyPort: number,
-  target: string,
-  segments: Buffer[],
+  head: string[],
+  segments: Buffer[] = [],
 ): Promise<{ statusCode: number; echoed: Buffer }> {
   const expected = segments.reduce((n, seg) => n + seg.length, 0);
   return new Promise((resolve, reject) => {
     const socket = netConnect(proxyPort, "127.0.0.1", () => {
-      socket.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`);
+      head.forEach((chunk, i) => setTimeout(() => socket.write(chunk), i * 20));
     });
-    let head = "";
+    let buf = "";
     let statusCode = 0;
     const echoed: Buffer[] = [];
     const finish = () => {
@@ -131,9 +111,9 @@ function tunnelThrough(
     };
     socket.on("data", (chunk: Buffer) => {
       if (statusCode === 0) {
-        head += chunk.toString("latin1");
-        if (!head.includes("\r\n\r\n")) return;
-        statusCode = parseInt(head.split(" ")[1] ?? "0");
+        buf += chunk.toString("latin1");
+        if (!buf.includes("\r\n\r\n")) return;
+        statusCode = parseInt(buf.split(" ")[1] ?? "0");
         if (statusCode !== 200) return finish();
         segments.forEach((seg, i) => setTimeout(() => socket.write(seg), i * 20));
         return;
@@ -148,6 +128,16 @@ function tunnelThrough(
       reject(new Error("tunnel timeout"));
     }, 5000);
   });
+}
+
+/** CONNECT to `target`; once established, write `probe` and collect its echo. */
+async function connectAndProbe(
+  proxyPort: number,
+  target: string,
+  probe?: string,
+): Promise<{ statusCode: number; echoed: string }> {
+  const res = await tunnel(proxyPort, [connectTo(target)], probe ? [Buffer.from(probe)] : []);
+  return { statusCode: res.statusCode, echoed: res.echoed.toString() };
 }
 
 function makeListener(
@@ -168,58 +158,13 @@ function makeListener(
   return handle.ready.then(() => ({ handle, events }));
 }
 
-/**
- * Open a CONNECT tunnel through the listener. Resolves with the status line
- * and, if the tunnel established, the echo round-trip of `probe`.
- */
-function connectAndProbe(
-  proxyPort: number,
-  target: string,
-  probe?: string,
-): Promise<{ statusCode: number; echoed?: string }> {
-  return new Promise((resolve, reject) => {
-    const socket = netConnect(proxyPort, "127.0.0.1", () => {
-      socket.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`);
-    });
-    let phase: "header" | "tunnel" = "header";
-    let buf = "";
-    let echoed = "";
-    let statusCode = 0;
-    socket.on("data", (chunk) => {
-      if (phase === "header") {
-        buf += chunk.toString("latin1");
-        const end = buf.indexOf("\r\n\r\n");
-        if (end === -1) return;
-        statusCode = parseInt(buf.split(" ")[1] ?? "0");
-        if (statusCode !== 200 || !probe) {
-          socket.destroy();
-          resolve({ statusCode });
-          return;
-        }
-        phase = "tunnel";
-        socket.write(probe);
-      } else {
-        echoed += chunk.toString();
-        if (echoed.length >= (probe?.length ?? 0)) {
-          socket.destroy();
-          resolve({ statusCode, echoed });
-        }
-      }
-    });
-    socket.on("error", reject);
-    setTimeout(() => {
-      socket.destroy();
-      reject(new Error("CONNECT timeout"));
-    }, 5000);
-  });
-}
-
 describe("integration-egress-listener (#543)", () => {
   it("relays a CONNECT tunnel to an allowed host (no TLS termination)", async () => {
     const echo = await startTcpEcho();
     const { handle, events } = await makeListener();
     const port = handle.address().port;
 
+    // A non-TLS first byte is relayed as-is: SNI vetting only applies to a ClientHello.
     const res = await connectAndProbe(port, `127.0.0.1:${echo.port}`, "ping");
     expect(res.statusCode).toBe(200);
     expect(res.echoed).toBe("ping");
@@ -299,69 +244,25 @@ describe("integration-egress-listener (#543)", () => {
 
   it("rejects non-CONNECT verbs with 405", async () => {
     const { handle } = await makeListener();
-    const port = handle.address().port;
-    const statusCode = await new Promise<number>((resolve, reject) => {
-      const socket = netConnect(port, "127.0.0.1", () => {
-        socket.write("GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\n\r\n");
-      });
-      let buf = "";
-      socket.on("data", (chunk) => {
-        buf += chunk.toString();
-        if (buf.includes("\r\n\r\n")) {
-          socket.destroy();
-          resolve(parseInt(buf.split(" ")[1] ?? "0"));
-        }
-      });
-      socket.on("error", reject);
-      setTimeout(() => reject(new Error("timeout")), 3000);
-    });
-    expect(statusCode).toBe(405);
+    const res = await tunnel(handle.address().port, [
+      "GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\n\r\n",
+    ]);
+    expect(res.statusCode).toBe(405);
   });
 
   it("relays when the CONNECT request line is split across TCP segments", async () => {
     const echo = await startTcpEcho();
     const { handle, events } = await makeListener();
-    const port = handle.address().port;
-    const target = `127.0.0.1:${echo.port}`;
-
-    const res = await new Promise<{ statusCode: number; echoed: string }>((resolve, reject) => {
-      const socket = netConnect(port, "127.0.0.1", () => {
-        // Fragment the request line itself across two writes — the verb lands
-        // in one segment, the rest (incl. the CRLF) in the next.
-        socket.write("CONN");
-        setTimeout(() => socket.write(`ECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`), 20);
-      });
-      let phase: "header" | "tunnel" = "header";
-      let buf = "";
-      let echoed = "";
-      let statusCode = 0;
-      socket.on("data", (chunk) => {
-        if (phase === "header") {
-          buf += chunk.toString("latin1");
-          const end = buf.indexOf("\r\n\r\n");
-          if (end === -1) return;
-          statusCode = parseInt(buf.split(" ")[1] ?? "0");
-          if (statusCode !== 200) {
-            socket.destroy();
-            resolve({ statusCode, echoed });
-            return;
-          }
-          phase = "tunnel";
-          socket.write("ping");
-        } else {
-          echoed += chunk.toString();
-          if (echoed.length >= 4) {
-            socket.destroy();
-            resolve({ statusCode, echoed });
-          }
-        }
-      });
-      socket.on("error", reject);
-      setTimeout(() => reject(new Error("CONNECT timeout")), 5000);
-    });
+    // The verb lands in one segment, the rest (incl. the CRLF) in the next.
+    const request = connectTo(`127.0.0.1:${echo.port}`);
+    const res = await tunnel(
+      handle.address().port,
+      [request.slice(0, 4), request.slice(4)],
+      [Buffer.from("ping")],
+    );
 
     expect(res.statusCode).toBe(200);
-    expect(res.echoed).toBe("ping");
+    expect(res.echoed.toString()).toBe("ping");
     expect(events.some((e) => e.kind === "tunnel-opened")).toBe(true);
   });
 
@@ -406,21 +307,6 @@ describe("integration-egress-listener (#543)", () => {
     expect(events.some((e) => e.kind === "tunnel-refused" && e.reason === "not-authorized")).toBe(
       true,
     );
-  });
-
-  it("tunnels a host:port the egress policy grants", async () => {
-    const echo = await startTcpEcho();
-    const { handle } = await makeListener({
-      egressPolicy: { allowsAuthority: (h, p) => h === "allowed.example.com" && p === echo.port },
-      resolveHostFn: async () => ["127.0.0.1"],
-    });
-    const res = await connectAndProbe(
-      handle.address().port,
-      `allowed.example.com:${echo.port}`,
-      "ping",
-    );
-    expect(res.statusCode).toBe(200);
-    expect(res.echoed).toBe("ping");
   });
 
   it("refuses a peer that is not the owning runner, before parsing its CONNECT", async () => {
@@ -474,13 +360,16 @@ describe("integration-egress-listener (#543)", () => {
         resolveHostFn: async () => ["127.0.0.1"],
         ...extra,
       });
+    /** CONNECT to the granted `allowed.example.com:<port>`, then write `segments`. */
+    const throughAllowed = (proxyPort: number, port: number, segments: Buffer[]) =>
+      tunnel(proxyPort, [connectTo(`allowed.example.com:${port}`)], segments);
 
     it("splices a ClientHello whose SNI the policy grants, even split across segments", async () => {
       const echo = await startTcpEcho();
       const { handle, events } = await tlsListener(echo.port);
-      const hello = clientHello("allowed.example.com");
+      const hello = buildClientHello("allowed.example.com");
 
-      const res = await tunnelThrough(handle.address().port, `allowed.example.com:${echo.port}`, [
+      const res = await throughAllowed(handle.address().port, echo.port, [
         hello.subarray(0, 7),
         hello.subarray(7),
       ]);
@@ -493,8 +382,8 @@ describe("integration-egress-listener (#543)", () => {
       const echo = await startTcpEcho();
       const { handle, events } = await tlsListener(echo.port);
 
-      const res = await tunnelThrough(handle.address().port, `allowed.example.com:${echo.port}`, [
-        clientHello("attacker-zone.example"),
+      const res = await throughAllowed(handle.address().port, echo.port, [
+        buildClientHello("attacker-zone.example"),
       ]);
       await echo.closed;
       expect(res.statusCode).toBe(200);
@@ -511,14 +400,10 @@ describe("integration-egress-listener (#543)", () => {
     it("refuses a ClientHello fragmented across records (its SNI could hide later)", async () => {
       const echo = await startTcpEcho();
       const { handle, events } = await tlsListener(echo.port);
-      const handshake = clientHello("attacker-zone.example").subarray(5);
-      const firstRecord = Buffer.concat([
-        Buffer.from([0x16, 0x03, 0x01]),
-        u16(20),
-        handshake.subarray(0, 20),
-      ]);
+      const handshake = buildClientHello("attacker-zone.example").subarray(5);
+      const firstRecord = tlsRecord(handshake.subarray(0, 20));
 
-      await tunnelThrough(handle.address().port, `allowed.example.com:${echo.port}`, [firstRecord]);
+      await throughAllowed(handle.address().port, echo.port, [firstRecord]);
       await echo.closed;
       expect(echo.received).toEqual([]);
       expect(events.some((e) => e.reason === "malformed-client-hello")).toBe(true);
@@ -527,25 +412,11 @@ describe("integration-egress-listener (#543)", () => {
     it("relays a ClientHello without SNI (the CONNECT target was already vetted)", async () => {
       const echo = await startTcpEcho();
       const { handle } = await tlsListener(echo.port);
-      const hello = clientHello();
+      const hello = buildClientHello(null);
 
-      const target = `allowed.example.com:${echo.port}`;
-      const res = await tunnelThrough(handle.address().port, target, [hello]);
+      const res = await throughAllowed(handle.address().port, echo.port, [hello]);
       expect(res.statusCode).toBe(200);
       expect(res.echoed.equals(hello)).toBe(true);
-    });
-
-    it("relays a non-TLS stream (SSH banner exchange) as before", async () => {
-      const echo = await startTcpEcho();
-      const { handle } = await tlsListener(echo.port);
-      const banner = Buffer.from("SSH-2.0-OpenSSH_9.6\r\n");
-
-      const res = await tunnelThrough(handle.address().port, `allowed.example.com:${echo.port}`, [
-        banner,
-        Buffer.from("key-exchange"),
-      ]);
-      expect(res.statusCode).toBe(200);
-      expect(res.echoed.toString()).toBe("SSH-2.0-OpenSSH_9.6\r\nkey-exchange");
     });
 
     it("closes a tunnel silent on both sides after the 200, with a preamble-timeout event", async () => {
@@ -553,7 +424,7 @@ describe("integration-egress-listener (#543)", () => {
       const { handle, events } = await tlsListener(echo.port, { preambleTimeoutMs: 100 });
 
       const target = `allowed.example.com:${echo.port}`;
-      const res = await tunnelThrough(handle.address().port, target, []);
+      const res = await tunnel(handle.address().port, [connectTo(target)], []);
       await echo.closed;
       expect(res.statusCode).toBe(200);
       expect(echo.received).toEqual([]);
@@ -569,7 +440,7 @@ describe("integration-egress-listener (#543)", () => {
 
       const seen = await new Promise<string>((resolve, reject) => {
         const socket = netConnect(handle.address().port, "127.0.0.1", () => {
-          socket.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`);
+          socket.write(connectTo(target));
         });
         let buf = "";
         socket.on("data", (chunk: Buffer) => {

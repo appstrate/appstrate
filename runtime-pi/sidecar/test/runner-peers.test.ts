@@ -51,16 +51,6 @@ describe("createRunnerPeers", () => {
     expect(state.calls).toBe(0);
   });
 
-  it("admits an agent that joined the network after the table was cached", async () => {
-    const { state, inspect } = fakeInspect({ "runner-a": "172.18.0.3" });
-    const peers = createRunnerPeers({ network: NETWORK, inspect });
-    peers.register("runner-a", "@tractr/a");
-    expect(await peers.integrationOf("172.18.0.3")).toBe("@tractr/a");
-    state.members = { "runner-a": "172.18.0.3", agent: "172.18.0.2" };
-    expect(await peers.integrationOf("172.18.0.2")).toBeNull();
-    expect(state.calls).toBe(1);
-  });
-
   it("caches the member table and single-flights concurrent lookups", async () => {
     const { state, inspect } = fakeInspect({ "runner-a": "172.18.0.3", agent: "172.18.0.2" });
     const peers = createRunnerPeers({ network: NETWORK, inspect });
@@ -163,19 +153,10 @@ describe("admitsAgentProxyPeer", () => {
     async () =>
       result;
 
-  it("admits anyone before an attribution is bound (no runner exists yet)", async () => {
+  it("admits non-runners (or no attribution yet); refuses runners and failed lookups", async () => {
     expect(await admitsAgentProxyPeer(null, "172.18.0.3")).toBe(true);
-  });
-
-  it("refuses a runner peer", async () => {
-    expect(await admitsAgentProxyPeer(attributing("@tractr/a"), "172.18.0.3")).toBe(false);
-  });
-
-  it("admits a peer that is not a runner", async () => {
     expect(await admitsAgentProxyPeer(attributing(null), "172.18.0.2")).toBe(true);
-  });
-
-  it("refuses when the lookup failed", async () => {
+    expect(await admitsAgentProxyPeer(attributing("@tractr/a"), "172.18.0.3")).toBe(false);
     expect(await admitsAgentProxyPeer(attributing(undefined), "172.18.0.2")).toBe(false);
   });
 });

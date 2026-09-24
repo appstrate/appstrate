@@ -69,7 +69,6 @@ import {
   renderCredentialTemplate,
   renderAuthAuthorizedUris,
   runnerEgressFor,
-  connectLoginGrants,
   parseFileMode,
   isSafeDeliveryFilePath,
   DEFAULT_DELIVERY_FILE_MODE,
@@ -837,10 +836,11 @@ async function resolveDeliveries(
       value: "",
       allowServerOverride: false,
     };
-    const { authorizedUris, egress: loginEgress } = connectLoginGrants(
-      auth,
-      getIntegrationSourceKind(manifest),
-    );
+    const authorizedUris = auth.authorized_uris ?? [];
+    const loginEgress =
+      getIntegrationSourceKind(manifest) === "local"
+        ? runnerEgressFor(auth, authorizedUris)
+        : undefined;
     const httpDeliveryAuths: NonNullable<IntegrationSpawnSpec["httpDeliveryAuths"]> = {
       [row.authKey]: {
         ...placeholderPlan,
