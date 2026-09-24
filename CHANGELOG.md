@@ -127,13 +127,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   messages are written, and any other write refused for its own values
   (SQLSTATE class 22 or `23514`) is recorded as a `system`/`event_dropped` log
   row instead, so the stream moves on.
-- **A remote run of a broken published version names the storage fault**
-  (#1533). `POST /api/runs/remote` (`registry`, `stage: "published"`) answers
-  `422 version_artifact_unavailable` when the version's prompt archive is
-  missing, corrupt or has no `prompt.md`, as the run route does — instead of a
-  later error that misplaced the fault (`400 empty_prompt`, blaming the author,
-  or `412 missing_integration_connection`, hiding it). Now documented on
-  `runAgent`, `createRemoteRun`, both schedule writes and input-settings.
+- **A remote run of a broken published version names the storage fault, and
+  restoring one no longer empties the draft** (#1533). One check now decides
+  "unreadable archive" — missing, corrupt, or without its type's required entry
+  (`prompt.md`, `SKILL.md`) — for runs, remote runs, schedule writes,
+  input-settings, package reads and version restore, all answering
+  `422 version_artifact_unavailable`. `POST /api/runs/remote` used to fail
+  later on a misplaced fault (`400 empty_prompt`, or
+  `412 missing_integration_connection`); restore wrote an empty draft and
+  answered 200.
 
 ## [1.0.0-beta.61] - 2026-09-23
 

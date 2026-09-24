@@ -281,7 +281,7 @@ const canonicalRunsPaths = {
         },
         "422": {
           description:
-            "Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), a published version is selected whose prompt archive is unreadable (`version_artifact_unavailable`; the working copy is never substituted), or the versioned bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
+            "Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), a published version is selected whose archive is unreadable or has no `prompt.md` (`version_artifact_unavailable`; the working copy is never substituted), or the versioned bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
@@ -1325,7 +1325,7 @@ const canonicalRunsPaths = {
         },
         "422": {
           description:
-            'Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), a dependency pin or `dependency_overrides` entry resolves to no published version (`dependency_unresolved`), or — `registry` source with `stage: "published"` (the default) only — the selected version has no readable prompt archive (`version_artifact_unavailable`); the working copy is never substituted',
+            'Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), a dependency pin or `dependency_overrides` entry resolves to no published version (`dependency_unresolved`), or — `registry` source with `stage: "published"` (the default) only — the archive of the selected version is unreadable or has no `prompt.md` (`version_artifact_unavailable`); the working copy is never substituted',
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {

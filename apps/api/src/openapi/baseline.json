@@ -1966,7 +1966,7 @@
             }
           },
           "422": {
-            "description": "Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), a published version is selected whose prompt archive is unreadable (`version_artifact_unavailable`; the working copy is never substituted), or the versioned bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
+            "description": "Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), a published version is selected whose archive is unreadable or has no `prompt.md` (`version_artifact_unavailable`; the working copy is never substituted), or the versioned bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -3310,7 +3310,7 @@
             }
           },
           "422": {
-            "description": "Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), a dependency pin or `dependency_overrides` entry resolves to no published version (`dependency_unresolved`), or — `registry` source with `stage: \"published\"` (the default) only — the selected version has no readable prompt archive (`version_artifact_unavailable`); the working copy is never substituted",
+            "description": "Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), a dependency pin or `dependency_overrides` entry resolves to no published version (`dependency_unresolved`), or — `registry` source with `stage: \"published\"` (the default) only — the archive of the selected version is unreadable or has no `prompt.md` (`version_artifact_unavailable`); the working copy is never substituted",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -15237,6 +15237,9 @@
                 }
               }
             }
+          },
+          "422": {
+            "$ref": "#/components/responses/VersionArtifactUnavailable"
           }
         }
       }
@@ -16209,6 +16212,9 @@
                 }
               }
             }
+          },
+          "422": {
+            "$ref": "#/components/responses/VersionArtifactUnavailable"
           }
         }
       }
@@ -17220,6 +17226,9 @@
                 }
               }
             }
+          },
+          "422": {
+            "$ref": "#/components/responses/VersionArtifactUnavailable"
           }
         }
       }
@@ -17946,6 +17955,9 @@
                 }
               }
             }
+          },
+          "422": {
+            "$ref": "#/components/responses/VersionArtifactUnavailable"
           }
         }
       }
@@ -26905,7 +26917,7 @@
     },
     "responses": {
       "VersionArtifactUnavailable": {
-        "description": "The selected published agent has no readable prompt archive (`version_artifact_unavailable`). The working copy is never substituted.",
+        "description": "The selected published version's archive is unreadable, or lacks the content entry its type requires (`prompt.md` for an agent, `SKILL.md` for a skill) — `version_artifact_unavailable`. Nothing is substituted for it, not even the working copy, and nothing is written.",
         "headers": {
           "Request-Id": {
             "$ref": "#/components/headers/RequestId"

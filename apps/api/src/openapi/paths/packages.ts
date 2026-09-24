@@ -38,7 +38,7 @@ const PACKAGE_DETAIL_VERSION_PARAM = {
  * it: the `403` gains `draft_not_writable`, the `404` covers a version spec
  * that resolves to nothing, and the `422` a published archive that cannot be
  * read — either at all, or without the entry the type REQUIRES — the same
- * answer the run path gives for a published agent with no readable prompt.
+ * answer every run door and version restore give for that archive.
  */
 const PACKAGE_DETAIL_DEFINITION_RESPONSES = {
   "403": {
@@ -1093,6 +1093,7 @@ export const packagesPaths = {
             },
           },
         },
+        "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
       },
     },
   },
@@ -1684,6 +1685,7 @@ export const packagesPaths = {
             },
           },
         },
+        "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
       },
     },
   },
@@ -2367,6 +2369,7 @@ export const packagesPaths = {
             },
           },
         },
+        "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
       },
     },
   },
@@ -2813,6 +2816,7 @@ export const packagesPaths = {
             },
           },
         },
+        "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
       },
     },
   },
