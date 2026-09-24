@@ -30,7 +30,7 @@ import {
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { scopesNotCovered } from "@appstrate/core/integration";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
-import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
+import { renderAuthAuthorizedUris, type AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import { getEnv } from "@appstrate/env";
 
 import { logger } from "../lib/logger.ts";
@@ -460,7 +460,8 @@ export async function resolveLiveIntegrationCredentials(
     authKey,
     authType: authDef.type,
     fields: Object.freeze({ ...fields }),
-    authorizedUris: Object.freeze([...(authDef.authorized_uris ?? [])]),
+    // Rendered from the post-refresh fields.
+    authorizedUris: Object.freeze(renderAuthAuthorizedUris(authDef, fields)),
     // AFPS §7.3 (RFC 8707) names this field `resource`.
     ...(authDef.resource !== undefined ? { resource: authDef.resource } : {}),
     ...(connection.expiresAt ? { expiresAt: connection.expiresAt.toISOString() } : {}),

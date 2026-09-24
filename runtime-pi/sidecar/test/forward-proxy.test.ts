@@ -107,6 +107,8 @@ function makeProxy(
     listenHost: "127.0.0.1",
     // Allow 127.0.0.1 by default for testing (otherwise echo server is blocked)
     isBlockedHostFn: () => false,
+    // The test client is the agent; the peer-gate describe overrides this.
+    isPeerAllowed: async () => true,
     ...overrides,
   });
   servers.push(result);
@@ -292,6 +294,42 @@ describe("HTTP forwarding", () => {
     // Target a port that's not listening
     const res = await httpViaProxy(port, "http://127.0.0.1:1/nothing");
     expect(res.status).toBe(502);
+  });
+});
+
+// --- Peer gate (#1458) ---
+
+describe("peer gate", () => {
+  /** A proxy that refuses every peer, in front of an echo server counting its connections. */
+  async function refusingProxy() {
+    const echo = await startEchoServer();
+    let upstreamConnections = 0;
+    echo.server.on("connection", () => upstreamConnections++);
+    const peers: string[] = [];
+    const proxy = makeProxy({
+      isPeerAllowed: async (ip) => {
+        peers.push(ip);
+        return false;
+      },
+    });
+    await proxy.ready;
+    return { echo, port: proxy.address().port, peers, upstream: () => upstreamConnections };
+  }
+
+  it("refuses a plain HTTP request from a runner peer before any upstream work", async () => {
+    const { echo, port, peers, upstream } = await refusingProxy();
+    const res = await httpViaProxy(port, `http://127.0.0.1:${echo.port}/x`);
+    expect(res.status).toBe(403);
+    expect(peers).toEqual(["127.0.0.1"]);
+    expect(upstream()).toBe(0);
+  });
+
+  it("refuses a CONNECT from a runner peer before any upstream work", async () => {
+    const { echo, port, peers, upstream } = await refusingProxy();
+    const res = await connectViaProxy(port, `127.0.0.1:${echo.port}`);
+    expect(res.statusCode).toBe(403);
+    expect(peers).toEqual(["127.0.0.1"]);
+    expect(upstream()).toBe(0);
   });
 });
 

@@ -22,9 +22,12 @@
  */
 
 import type { IntegrationManifest } from "@appstrate/core/integration";
-import type { ManifestDeliveryHttp } from "@appstrate/core/sidecar-types";
+import type { IntegrationSpawnSpec, ManifestDeliveryHttp } from "@appstrate/core/sidecar-types";
 import type { TokenEndpointAuthMethod } from "@appstrate/connect";
-import { renderCredentialTemplate as renderCredentialTemplateCore } from "@appstrate/afps-shared/credential-template";
+import {
+  renderAuthorizedUris,
+  renderCredentialTemplate as renderCredentialTemplateCore,
+} from "@appstrate/afps-shared/credential-template";
 
 /**
  * AFPS `delivery.http` block (snake_case). The sidecar's canonical
@@ -219,6 +222,24 @@ export function renderCredentialTemplate(
   fields: Readonly<Record<string, string>>,
 ): string | null {
   return renderCredentialTemplateCore(template, fields, { emptyAs: "null" });
+}
+
+/** An auth's `authorized_uris` rendered for one connection (see {@link renderAuthorizedUris}). */
+export function renderAuthAuthorizedUris(
+  auth: Pick<AfpsManifestAuth, "authorized_uris">,
+  fields: Readonly<Record<string, string>>,
+): string[] {
+  return renderAuthorizedUris(auth.authorized_uris ?? [], fields);
+}
+
+/** Local runner egress policy; `undefined` when the auth declares no outbound surface. */
+export function runnerEgressFor(
+  auth: Pick<AfpsManifestAuth, "authorized_uris" | "allow_all_uris">,
+  authorizedUris: readonly string[],
+): IntegrationSpawnSpec["egress"] {
+  const allowAllUris = auth.allow_all_uris === true;
+  if ((auth.authorized_uris?.length ?? 0) === 0 && !allowAllUris) return undefined;
+  return { authorizedUris: [...authorizedUris], allowAllUris };
 }
 
 /**

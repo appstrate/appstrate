@@ -379,6 +379,132 @@ describe("integrationManifestSchema — authorized_uris", () => {
   });
 });
 
+describe("integrationManifestSchema — templated authorized_uris", () => {
+  function sshLike(auth: Record<string, unknown> = {}, extra: Record<string, unknown> = {}) {
+    return baseManifest({
+      source: { kind: "local", server: { name: "@appstrate/ssh-mcp", version: "^1.0.0" } },
+      auths: {
+        primary: {
+          type: "custom",
+          authorized_uris: ["ssh://{$credential.host}:{$credential.port}"],
+          credentials: {
+            schema: {
+              type: "object",
+              required: ["host", "port"],
+              properties: { host: { type: "string" }, port: { type: "string" } },
+            },
+          },
+          delivery: { env: { SSH_HOST: { value: "{$credential.host}" } } },
+          ...auth,
+        },
+      },
+      ...extra,
+    });
+  }
+
+  function entryIssues(raw: Record<string, unknown>): string[] {
+    const r = integrationManifestSchema.safeParse(raw);
+    if (r.success) return [];
+    return r.error.issues
+      .filter((i) => i.path.join(".") === "auths.primary.authorized_uris.0")
+      .map((i) => i.message);
+  }
+
+  it("accepts fields that are declared and required", () => {
+    expect(integrationManifestSchema.safeParse(sshLike()).success).toBe(true);
+  });
+
+  it("rejects an undeclared field", () => {
+    const issues = entryIssues(
+      sshLike({ authorized_uris: ["ssh://{$credential.hostname}:{$credential.port}"] }),
+    );
+    expect(issues).toEqual([expect.stringContaining("'hostname', which is not a credentials")]);
+  });
+
+  it("rejects a declared field that is not required", () => {
+    const issues = entryIssues(
+      sshLike({
+        credentials: {
+          schema: {
+            type: "object",
+            required: ["host"],
+            properties: { host: { type: "string" }, port: { type: "string" } },
+          },
+        },
+      }),
+    );
+    expect(issues).toEqual([expect.stringContaining("'port', which is not listed")]);
+  });
+
+  it("rejects a template on an auth declaring connect", () => {
+    const issues = entryIssues(
+      sshLike({
+        connect: {
+          login: {
+            request: { method: "POST", url: "https://api.example.com/login" },
+            success_criteria: [{ condition: "$statusCode == 200" }],
+            outputs: { host: "$response.body#/host" },
+          },
+        },
+      }),
+    );
+    expect(issues).toEqual([expect.stringContaining("forbidden on an auth declaring connect")]);
+  });
+
+  it("rejects a template on an oauth2 auth", () => {
+    const m = baseManifest();
+    const auths = m.auths as Record<string, Record<string, unknown>>;
+    auths.oauth!.authorized_uris = ["https://{$credential.tenant}.example.com/**"];
+    const messages = (integrationManifestSchema.safeParse(m).error?.issues ?? [])
+      .filter((i) => i.path.join(".") === "auths.oauth.authorized_uris.0")
+      .map((i) => i.message);
+    expect(messages).toContainEqual(expect.stringContaining("forbidden on an oauth2 auth"));
+  });
+
+  it("rejects a template on an auth exposing api_call", () => {
+    const issues = entryIssues(
+      sshLike({}, { _meta: { "dev.appstrate/api": { auths: { primary: {} } } } }),
+    );
+    expect(issues).toEqual([expect.stringContaining("forbidden on an auth exposing api_call")]);
+  });
+
+  it("rejects a placeholder in the path", () => {
+    const issues = entryIssues(
+      sshLike({ authorized_uris: ["https://api.example.com/tenants/{$credential.host}/**"] }),
+    );
+    expect(issues).toEqual([expect.stringContaining("only allowed in the host and port")]);
+  });
+
+  it("rejects a placeholder in the query", () => {
+    const issues = entryIssues(
+      sshLike({ authorized_uris: ["https://api.example.com?t={$credential.host}"] }),
+    );
+    expect(issues).toEqual([expect.stringContaining("only allowed in the host and port")]);
+  });
+
+  it("rejects a templated entry without a scheme:// prefix", () => {
+    const issues = entryIssues(
+      sshLike({ authorized_uris: ["{$credential.host}:{$credential.port}"] }),
+    );
+    expect(issues).toEqual([expect.stringContaining("without a scheme:// prefix")]);
+  });
+
+  it("accepts placeholders in the host with a static path", () => {
+    const m = sshLike({
+      authorized_uris: ["https://{$credential.host}:{$credential.port}/api/**"],
+    });
+    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+
+  it("leaves untemplated entries unaffected on an api_call auth", () => {
+    const m = sshLike(
+      { authorized_uris: ["https://api.example.com/**"] },
+      { _meta: { "dev.appstrate/api": { auths: { primary: {} } } } },
+    );
+    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+});
+
 // ─────────────────────────────────────────────
 // credentials.schema $ref guard (§7.5 / §8.7 SSRF)
 // ─────────────────────────────────────────────

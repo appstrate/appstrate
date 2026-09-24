@@ -457,6 +457,42 @@ describe("resolveLiveIntegrationCredentials", () => {
     });
   }
 
+  it("renders templated authorized_uris from the connection's fields (#1458)", async () => {
+    await db
+      .update(packages)
+      .set({
+        draftManifest: localIntegrationManifest({
+          name: INTEGRATION_ID,
+          serverName: "@official/gmail-server",
+          auths: {
+            primary: {
+              type: "api_key",
+              authorizedUris: ["https://{$credential.host}/**", "https://static.example/**"],
+              credentialFields: ["api_key", "host"],
+              requiredCredentialFields: ["api_key", "host"],
+            },
+          },
+        }) as unknown as Record<string, unknown>,
+      })
+      .where(eq(packages.id, INTEGRATION_ID));
+    await db.insert(integrationConnections).values({
+      integrationId: INTEGRATION_ID,
+      authKey: "primary",
+      accountId: "acct-1",
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      credentialsEncrypted: encryptCredentialEnvelope({
+        outputs: { api_key: "k", host: "tenant.example.com" },
+      }),
+    });
+
+    const result = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {});
+    expect(result.auths[0]!.authorizedUris).toEqual([
+      "https://tenant.example.com/**",
+      "https://static.example/**",
+    ]);
+  });
+
   it("a reconnect resets the rejection streak of an unrefreshable auth", async () => {
     await db
       .update(packages)

@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/ssh",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "SSH",
@@ -18,14 +18,14 @@
   "auths": {
     "primary": {
       "type": "custom",
-      "authorized_uris": ["ssh://**"],
+      "authorized_uris": ["ssh://{$credential.host}:{$credential.port}"],
       "identity_claims": {
         "account_id": "$.host"
       },
       "credentials": {
         "schema": {
           "type": "object",
-          "required": ["private_key", "host", "user", "host_key"],
+          "required": ["private_key", "host", "port", "user", "host_key"],
           "properties": {
             "private_key": {
               "type": "string",
@@ -36,8 +36,8 @@
             "host": {
               "type": "string",
               "title": "Hôte",
-              "description": "Nom DNS ou adresse IP publique du serveur. Une adresse privée est refusée : l'egress du runner ne la laisse pas passer.",
-              "pattern": "^[A-Za-z0-9]([A-Za-z0-9.:-]{0,253}[A-Za-z0-9])?$"
+              "description": "Nom DNS ou adresse IPv4 publique du serveur (IPv6 non prise en charge). Une adresse privée est refusée : l'egress du runner ne la laisse pas passer. Le runner ne peut joindre que cet hôte, sur ce port.",
+              "pattern": "^[A-Za-z0-9]([A-Za-z0-9.-]{0,253}[A-Za-z0-9])?$"
             },
             "port": {
               "type": "string",
@@ -88,9 +88,6 @@
       "_meta": {
         "dev.appstrate/auth": {
           "required": true
-        },
-        "dev.appstrate/provisioning": {
-          "kind": "ssh_keypair"
         }
       }
     }

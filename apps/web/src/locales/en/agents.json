@@ -371,7 +371,7 @@
   "integrationEditor.auths.apiCall": "Expose api_call tool",
   "integrationEditor.auths.apiCallDesc": "Gives the agent a generic api_call tool that injects this auth's credentials into HTTP calls. Independent of the MCP source.",
   "integrationEditor.auths.authorizedUris": "Authorized URIs",
-  "integrationEditor.auths.authorizedUrisDesc": "Allowed patterns (* / ** accepted). Enter or comma to add.",
+  "integrationEditor.auths.authorizedUrisDesc": "Allowed patterns (* / ** accepted; {$credential.host} inserts a required connection field, host or port). Enter or comma to add.",
   "integrationEditor.auths.delivery": "Injection (HTTP header)",
   "integrationEditor.auths.headerName": "Header name",
   "integrationEditor.auths.headerPrefix": "Prefix",
