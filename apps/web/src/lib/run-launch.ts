@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
+import type { RunWithOptionsSubmit } from "../components/run-with-options-modal";
 
 /** One run launch, as the launch surfaces build it — `useRunAgent` maps it onto the wire. */
 export interface RunLaunch {
@@ -47,4 +48,34 @@ export interface RunLaunch {
  */
 export function retryLaunch(launch: RunLaunch, picks: Record<string, string>): RunLaunch {
   return { ...launch, connectionOverrides: { ...launch.connectionOverrides, ...picks } };
+}
+
+/**
+ * The launch "Lancer avec options…" sends. An option rides only when set — an
+ * empty input or dependency map and an unset override are left out, so the
+ * server applies what plain "Lancer" gets. `version` is always an explicit pick
+ * (the modal seeds it with that same default). Overrides are already wire
+ * values (a proxy pick of "none" means no proxy) and pass through as-is.
+ */
+export function launchFromOptions({
+  input,
+  version,
+  overrides,
+  dependencyOverrides,
+}: RunWithOptionsSubmit): RunLaunch {
+  const {
+    model_id_override: modelId,
+    generation_config_override: generation,
+    proxy_id_override: proxyId,
+    connection_overrides: connectionOverrides,
+  } = overrides;
+  return {
+    ...(Object.keys(input).length > 0 ? { input } : {}),
+    version,
+    ...(modelId ? { modelId } : {}),
+    ...(generation ? { generation } : {}),
+    ...(proxyId ? { proxyId } : {}),
+    ...(connectionOverrides ? { connectionOverrides } : {}),
+    ...(Object.keys(dependencyOverrides).length > 0 ? { dependencyOverrides } : {}),
+  };
 }

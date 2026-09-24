@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The retry of a run launch refused with `409 missing_integration_connection`.
- * The recovery modal only adds connection picks; dropping anything else from
- * the launch changes the run — or gets it refused, as the input did (#1539).
+ * The launches the SPA builds before `useRunAgent` puts them on the wire.
+ *
+ * The retry of a launch refused with `409 missing_integration_connection` only
+ * adds connection picks; dropping anything else changes the run — or gets it
+ * refused, as the input did (#1539). "Lancer avec options…" sends an option
+ * only when set, so an untouched modal launches what plain "Lancer" does.
  */
 
 import { describe, it, expect } from "bun:test";
-import { retryLaunch } from "../run-launch.ts";
+import { launchFromOptions, retryLaunch } from "../run-launch.ts";
 
 describe("retryLaunch", () => {
   it("replays the input typed in the run modal", () => {
@@ -46,5 +49,52 @@ describe("retryLaunch", () => {
         { "@acme/crm": "conn_new" },
       ).connectionOverrides,
     ).toEqual({ "@acme/crm": "conn_new", "@acme/mail": "conn_mail" });
+  });
+});
+
+describe("launchFromOptions", () => {
+  const untouched = { input: {}, version: "draft", overrides: {}, dependencyOverrides: {} };
+
+  it("sends only the version when nothing was set, like plain Lancer", () => {
+    expect(launchFromOptions(untouched)).toEqual({ version: "draft" });
+  });
+
+  it("maps every set option onto its launch field", () => {
+    expect(
+      launchFromOptions({
+        input: { prompt: "bonjour" },
+        version: "1.0.0",
+        overrides: {
+          model_id_override: "model_1",
+          generation_config_override: { temperature: 0.2 },
+          proxy_id_override: "proxy_1",
+          connection_overrides: { "@acme/crm": "conn_1" },
+        },
+        dependencyOverrides: { "@acme/skill": "draft" },
+      }),
+    ).toEqual({
+      input: { prompt: "bonjour" },
+      version: "1.0.0",
+      modelId: "model_1",
+      generation: { temperature: 0.2 },
+      proxyId: "proxy_1",
+      connectionOverrides: { "@acme/crm": "conn_1" },
+      dependencyOverrides: { "@acme/skill": "draft" },
+    });
+  });
+
+  it('passes the "none" proxy pick through: it is the wire value for no proxy', () => {
+    expect(
+      launchFromOptions({ ...untouched, overrides: { proxy_id_override: "none" } }).proxyId,
+    ).toBe("none");
+  });
+
+  it("leaves out empty overrides instead of sending blanks", () => {
+    expect(
+      launchFromOptions({
+        ...untouched,
+        overrides: { model_id_override: "", proxy_id_override: "" },
+      }),
+    ).toEqual({ version: "draft" });
   });
 });
